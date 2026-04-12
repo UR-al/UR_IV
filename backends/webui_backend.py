@@ -106,7 +106,7 @@ class WebUIBackend(AbstractBackend):
         return {}
 
     def get_loras(self) -> list:
-        """WebUI LoRA 목록 반환"""
+        """WebUI LoRA 목록 반환 (트리거 워드 포함)"""
         try:
             r = requests.get(
                 f'{self.api_url}/sdapi/v1/loras',
@@ -115,14 +115,47 @@ class WebUIBackend(AbstractBackend):
             r.raise_for_status()
             data = r.json()
             if isinstance(data, list):
-                return [
-                    {
+                result = []
+                for item in data:
+                    lora = {
                         'name': item.get('name', ''),
                         'alias': item.get('alias', item.get('name', '')),
                         'path': item.get('path', ''),
+                        'trigger_words': [],
                     }
-                    for item in data
-                ]
+                    metadata = item.get('metadata', {})
+                    if metadata:
+                        # Method 1: activation text (CivitAI / user-defined)
+                        act_text = (metadata.get('activation text', '')
+                                    or metadata.get('ss_activation_text', ''))
+                        if act_text:
+                            lora['trigger_words'] = [
+                                t.strip() for t in act_text.split(',') if t.strip()
+                            ][:8]
+                        # Method 2: ss_tag_frequency (trained tags — fallback)
+                        if not lora['trigger_words']:
+                            tag_freq = metadata.get('ss_tag_frequency', {})
+                            if isinstance(tag_freq, str):
+                                try:
+                                    import json as _json
+                                    tag_freq = _json.loads(tag_freq)
+                                except Exception:
+                                    tag_freq = {}
+                            if isinstance(tag_freq, dict):
+                                all_tags = {}
+                                for ds_tags in tag_freq.values():
+                                    if isinstance(ds_tags, dict):
+                                        all_tags.update(ds_tags)
+                                if all_tags:
+                                    sorted_tags = sorted(
+                                        all_tags.items(),
+                                        key=lambda x: x[1], reverse=True
+                                    )
+                                    lora['trigger_words'] = [
+                                        t[0] for t in sorted_tags[:5]
+                                    ]
+                    result.append(lora)
+                return result
         except Exception:
             pass
         return []
@@ -250,7 +283,9 @@ class WebUIBackend(AbstractBackend):
             denoise=settings.get('ad_denoise', 0.25),
             prompt=settings.get('ad_prompt', ''),
         )
-        empty_slots = [_build_empty_adetailer_slot() for _ in range(5)]
+        # EXIF negative prompt 지원
+        if settings.get('ad_negative'):
+            ad_slot['ad_negative_prompt'] = settings['ad_negative']
 
         payload = {
             "init_images": [image_b64],
@@ -259,15 +294,15 @@ class WebUIBackend(AbstractBackend):
             "height": -1,
             "resize_mode": 0,
             "prompt": settings.get('ad_prompt', ''),
-            "negative_prompt": "",
-            "sampler_name": "DPM++ 2M",
+            "negative_prompt": settings.get('ad_negative', ''),
+            "sampler_name": "DPM++ 2M Karras",
             "steps": 20,
             "cfg_scale": 7,
             "send_images": True,
             "save_images": False,
             "alwayson_scripts": {
                 "ADetailer": {
-                    "args": [True, False, ad_slot] + empty_slots
+                    "args": [True, False, ad_slot]
                 }
             }
         }

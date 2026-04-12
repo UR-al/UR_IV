@@ -22,6 +22,7 @@ class VueBridge(QObject):
     searchStatus = pyqtSignal(str)         # status message
 
     loraInserted = pyqtSignal(str)       # JSON {name, weight}
+    loraStackLoaded = pyqtSignal(str)    # JSON [{name, weight, enabled, triggerWords}]
     yoloModelUpdated = pyqtSignal(str)   # model label text
     condRulesLoaded = pyqtSignal(str)    # JSON {positive, negative}
     batchFilesSelected = pyqtSignal(str) # JSON [paths]
@@ -32,6 +33,11 @@ class VueBridge(QObject):
     queueItemAdded = pyqtSignal(str)     # JSON {prompt, ...}
     queueCompleted = pyqtSignal(str)     # JSON {total}
     showNotification = pyqtSignal(str, str)  # (type: success|error|info, message)
+    adetailerResult = pyqtSignal(str)       # JSON {before, after, output_path} or {error}
+    adetailerProgress = pyqtSignal(int, int) # (current, total)
+    eventSearchProgress = pyqtSignal(int, int) # (current, total)
+    automationStatus = pyqtSignal(str)        # JSON {running, count, waiting}
+    eventImportResults = pyqtSignal(str)      # JSON event list
 
     # 위젯 값/속성 동기화 (Python → Vue)
     widgetValueChanged = pyqtSignal(str, str)       # (widget_id, value)
@@ -391,7 +397,7 @@ class VueBridge(QObject):
                 try:
                     font_family = params.get('fontFamily', 'Arial')
                     font = ImageFont.truetype(font_family, font_size)
-                except:
+                except Exception:
                     font = ImageFont.load_default()
                 alpha_val = int(opacity * 255)
                 color = (255, 255, 255, alpha_val)
@@ -495,7 +501,7 @@ class VueBridge(QObject):
             if os.path.exists(cfg):
                 with open(cfg, 'r') as f:
                     return f.read().strip()
-        except: pass
+        except Exception: pass
         from config import OUTPUT_DIR
         return OUTPUT_DIR
 
@@ -681,10 +687,15 @@ class VueBridge(QObject):
     def ollamaEnhance(self, tags: str, mode: str, extra_json: str):
         """Ollama로 태그 강화 (비동기)"""
         try:
+            # 이전 worker가 실행 중이면 정리
+            if hasattr(self, '_ollama_worker') and self._ollama_worker and self._ollama_worker.isRunning():
+                self._ollama_worker.disconnect()
+                self._ollama_worker.quit()
+                self._ollama_worker.wait(1000)
             extra = json.loads(extra_json) if extra_json else {}
             from workers.ollama_worker import OllamaWorker
             url = extra.get('url', 'http://localhost:11434')
-            model = extra.get('model', 'llama3')
+            model = extra.get('model', 'gemma3:4b')
             extra_prompt = extra.get('prompt', '')
             self._ollama_worker = OllamaWorker(url, model, tags, mode, extra_prompt, self)
             self._ollama_worker.finished.connect(lambda r: self.ollamaResult.emit(r))
@@ -693,15 +704,36 @@ class VueBridge(QObject):
         except Exception as e:
             self.ollamaResult.emit(json.dumps({'error': str(e)}))
 
-    @pyqtSlot(result=str)
-    def ollamaListModels(self) -> str:
+    @pyqtSlot(str, result=str)
+    def ollamaListModels(self, base_url: str = '') -> str:
         """Ollama 모델 목록 반환"""
         try:
             from core.ollama_client import OllamaClient
-            client = OllamaClient()
+            url = base_url.strip() if base_url.strip() else 'http://localhost:11434'
+            client = OllamaClient(base_url=url)
             return json.dumps(client.list_models())
         except Exception:
             return json.dumps([])
+
+    @pyqtSlot(result=str)
+    def getRandomResolutions(self) -> str:
+        """랜덤 해상도 목록 반환"""
+        try:
+            gen = self.parent()
+            if gen and hasattr(gen, 'random_resolutions'):
+                return json.dumps(gen.random_resolutions)
+        except Exception:
+            pass
+        return json.dumps([])
+
+    @pyqtSlot(result=str)
+    def getGenStats(self) -> str:
+        """생성 통계 요약 반환"""
+        try:
+            from core.gen_stats import get_gen_stats
+            return json.dumps(get_gen_stats().get_summary())
+        except Exception:
+            return json.dumps({'total': 0})
 
     @pyqtSlot(result=str)
     def getWildcardTree(self) -> str:
@@ -745,7 +777,7 @@ class VueBridge(QObject):
             if os.path.exists(fp):
                 with open(fp, 'r', encoding='utf-8') as f:
                     return f.read()
-        except: pass
+        except Exception: pass
         return '{}'
 
     @pyqtSlot(str, str, result=str)
@@ -801,7 +833,7 @@ class VueBridge(QObject):
                         if not line or line.startswith('#'): continue
                         lines.append(line)
                     return ', '.join(lines)
-        except: pass
+        except Exception: pass
         return ''
 
     @pyqtSlot(str, result=str)
@@ -836,15 +868,15 @@ class VueBridge(QObject):
                                 if col:
                                     for v in df[col].dropna():
                                         self._all_tags_set.add(str(v).strip().lower())
-                            except: pass
-                except: pass
+                            except Exception: pass
+                except Exception: pass
                 # TagClassifier의 tag_to_category
                 try:
                     from core.tag_classifier import TagClassifier
                     if not hasattr(self, '_tag_classifier'):
                         self._tag_classifier = TagClassifier()
                     self._all_tags_set.update(self._tag_classifier.tag_to_category.keys())
-                except: pass
+                except Exception: pass
                 # character/copyright/artist 사전도 추가
                 try:
                     from core.tag_classifier import TagClassifier
@@ -854,7 +886,7 @@ class VueBridge(QObject):
                     if hasattr(tc, 'characters'): self._all_tags_set.update(t.lower() for t in tc.characters)
                     if hasattr(tc, 'copyrights'): self._all_tags_set.update(t.lower() for t in tc.copyrights)
                     if hasattr(tc, 'artists'): self._all_tags_set.update(t.lower() for t in tc.artists)
-                except: pass
+                except Exception: pass
                 print(f"[Exclude] Tag DB loaded: {len(self._all_tags_set)} tags")
 
             # 규칙 매칭
@@ -1134,27 +1166,31 @@ class VueBridge(QObject):
             if os.path.exists(fp):
                 with open(fp, 'r', encoding='utf-8') as f:
                     return f.read()
-        except: pass
+        except Exception: pass
         return '{}'
 
     @pyqtSlot(result=str)
     def getADetailerModels(self) -> str:
-        """A1111 WebUI에서 ADetailer 모델 목록 반환"""
+        """A1111 WebUI에서 ADetailer 모델 목록 반환 + proxy items 업데이트"""
+        models = ["face_yolov8n.pt", "hand_yolov8n.pt", "person_yolov8n-seg.pt",
+                   "mediapipe_face_full", "mediapipe_face_short"]
         try:
             from backends import get_backend
             backend = get_backend()
             if backend:
                 import requests
-                # ADetailer API endpoint
                 r = requests.get(f"{backend.api_url}/adetailer/v1/ad_model", timeout=5)
                 if r.status_code == 200:
                     data = r.json()
                     models = data if isinstance(data, list) else data.get('ad_model', [])
-                    return json.dumps(models)
         except Exception:
             pass
-        # fallback: 기본 모델명
-        return json.dumps(["face_yolov8n.pt", "hand_yolov8n.pt", "person_yolov8n-seg.pt", "mediapipe_face_full", "mediapipe_face_short"])
+        # ComboBoxProxy items 업데이트 (설정 저장/로드 정합성)
+        for wid in ('_ad_s1_model', '_ad_s2_model'):
+            proxy = self._proxies.get(wid)
+            if proxy and hasattr(proxy, 'addItems'):
+                proxy.addItems(models)
+        return json.dumps(models)
 
     @pyqtSlot(result=str)
     def getYoloModelLabel(self) -> str:
@@ -1247,10 +1283,10 @@ class VueBridge(QObject):
 
     @pyqtSlot(str, result=str)
     def getImageExif(self, filepath: str) -> str:
-        """이미지의 EXIF 반환"""
+        """이미지의 EXIF 반환 (구조화된 파라미터 포함)"""
         try:
             from PIL import Image
-            import os
+            import os, re
             img = Image.open(filepath)
             info = {}
             raw = img.info.get('parameters', img.info.get('prompt', ''))
@@ -1264,9 +1300,65 @@ class VueBridge(QObject):
                 if len(parts) > 1:
                     sub = parts[1].split('\nSteps: ')
                     info['negative'] = sub[0].strip()
-            return json.dumps(info)
+                    if len(sub) > 1:
+                        params_raw = 'Steps: ' + sub[1].strip()
+                        info['params_line'] = params_raw
+                        # 구조화된 파라미터 파싱
+                        info['params'] = self._parse_params_line(params_raw)
+            return json.dumps(info, ensure_ascii=False)
         except Exception as e:
             return json.dumps({'error': str(e), 'path': filepath})
+
+    def _parse_params_line(self, params_line: str) -> dict:
+        """SD Parameter 라인을 구조화된 딕셔너리로 파싱"""
+        import re
+        result = {'generation': '', 'model': '', 'hires': '', 'extensions': '', 'other': ''}
+        # 개별 파라미터 파싱 (Key: Value 형식)
+        params = {}
+        for m in re.finditer(r'([A-Za-z][A-Za-z0-9_ ]*?):\s*([^,]+?)(?:,\s*|$)', params_line):
+            params[m.group(1).strip()] = m.group(2).strip()
+
+        # Line 1: Steps + Sampler + Scheduler
+        gen_parts = []
+        for k in ['Steps', 'Sampler', 'Schedule type']:
+            if k in params:
+                gen_parts.append(f"{k}: {params.pop(k)}")
+        result['generation'] = ', '.join(gen_parts)
+
+        # Line 2: CFG, Seed, Size
+        core_parts = []
+        for k in ['CFG scale', 'Seed', 'Size']:
+            if k in params:
+                core_parts.append(f"{k}: {params.pop(k)}")
+        result['core'] = ', '.join(core_parts)
+
+        # Line 3: Model
+        model_parts = []
+        for k in ['Model', 'Model hash', 'VAE', 'Clip skip']:
+            if k in params:
+                model_parts.append(f"{k}: {params.pop(k)}")
+        result['model'] = ', '.join(model_parts)
+
+        # Line 4: Hires
+        hires_parts = []
+        for k in list(params.keys()):
+            if k.lower().startswith('hires') or k.lower().startswith('hr ') or 'Denoising strength' == k:
+                hires_parts.append(f"{k}: {params.pop(k)}")
+        result['hires'] = ', '.join(hires_parts)
+
+        # Line 5: Extensions (ADetailer, NegPiP 등)
+        ext_parts = []
+        for k in list(params.keys()):
+            kl = k.lower()
+            if any(x in kl for x in ['adetailer', 'negpip', 'controlnet', 'ad_', 'tiled']):
+                ext_parts.append(f"{k}: {params.pop(k)}")
+        result['extensions'] = ', '.join(ext_parts)
+
+        # 나머지
+        other_parts = [f"{k}: {v}" for k, v in params.items()]
+        result['other'] = ', '.join(other_parts)
+
+        return result
 
     @pyqtSlot(str, result=str)
     def getPngInfo(self, filepath: str) -> str:

@@ -10,6 +10,12 @@ _logger = get_logger('prompts')
 
 class PromptHandlingMixin:
     """프롬프트 처리를 담당하는 Mixin 클래스"""
+
+    def _is_character_feature_tag(self, tag: str) -> bool:
+        """캐릭터 특징 태그인지 확인"""
+        if not hasattr(self, 'tag_classifier'):
+            return False
+        return self.tag_classifier.classify_tag(tag) == 'character_trait'
     
     def update_total_prompt_display(self):
         """최종 프롬프트 디스플레이 업데이트"""
@@ -183,6 +189,13 @@ class PromptHandlingMixin:
         # 캐릭터 제거
         if self.chk_remove_character.isChecked():
             character_list = []
+
+        # 캐릭터 특징 제거
+        if (hasattr(self, 'chk_remove_character_features') and
+                self.chk_remove_character_features.isChecked()):
+            before = len(general_list)
+            general_list = [t for t in general_list if not self._is_character_feature_tag(t)]
+            _logger.debug(f"캐릭터 특징 제거: {before} → {len(general_list)}")
         
         # ★★★ 디버그: 토글 상태 및 태그 개수 ★★★
         _logger.debug(f"=== 토글 상태 ===")
@@ -319,7 +332,9 @@ class PromptHandlingMixin:
 
         # 9. 캐릭터 특징 자동 추가
         if (hasattr(self, 'chk_auto_char_features') and
-                self.chk_auto_char_features.isChecked() and character_list):
+                self.chk_auto_char_features.isChecked() and character_list and
+                not (hasattr(self, 'chk_remove_character_features') and
+                     self.chk_remove_character_features.isChecked())):
             self._auto_insert_character_features(character_list)
 
         # 10. 조건부 프롬프트 1차 적용 (와일드카드 해석 전)
@@ -548,14 +563,19 @@ class PromptHandlingMixin:
         self._apply_condition_result(result)
 
     def apply_random_prompt(self):
-        """랜덤 프롬프트 적용"""
+        """랜덤 프롬프트 적용 (rating 필터 반영)"""
         if not self.shuffled_prompt_deck:
             if self.filtered_results:
                 QMessageBox.information(
-                    self, "Notice", 
+                    self, "Notice",
                     "All prompts used once. Reshuffling deck."
                 )
-                self.shuffled_prompt_deck = self.filtered_results.copy()
+                # rating 필터 적용
+                rating_filter = getattr(self, '_rating_filter', {'g', 's', 'q', 'e'})
+                self.shuffled_prompt_deck = [
+                    r for r in self.filtered_results
+                    if r.get('rating', 'g') in rating_filter
+                ]
                 random.shuffle(self.shuffled_prompt_deck)
             else:
                 QMessageBox.warning(
@@ -634,7 +654,18 @@ class PromptHandlingMixin:
             copyright_list = escape_tags(copyright_tags)
 
         character_list = escape_tags(character_tags)
+        if self.chk_remove_character.isChecked():
+            character_list = []
         general_list = escape_tags(general_tags_str)
+        if (hasattr(self, 'chk_remove_character_features') and
+                self.chk_remove_character_features.isChecked()):
+            general_list = [t for t in general_list if not self._is_character_feature_tag(t)]
+        if self.chk_remove_meta.isChecked():
+            general_list = [t for t in general_list if not self.tag_classifier.is_meta_tag(t)]
+        if self.chk_remove_censorship.isChecked():
+            general_list = [t for t in general_list if not self.tag_classifier.is_censorship_tag(t)]
+        if self.chk_remove_text.isChecked():
+            general_list = [t for t in general_list if not self.tag_classifier.is_text_tag(t)]
 
         person_count_tags = {
             "1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", 

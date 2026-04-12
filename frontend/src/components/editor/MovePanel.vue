@@ -10,10 +10,7 @@
 
     <!-- Fill Color -->
     <div class="small-header">구멍 채우기 색</div>
-    <select v-model="fillColor" class="select-input">
-      <option value="black">검은색</option>
-      <option value="white">흰색</option>
-    </select>
+    <CustomSelect v-model="fillColor" :options="['black', 'white']" placeholder="색상" />
 
     <!-- Rotation / Scale Sliders -->
     <div class="slider-group">
@@ -96,6 +93,7 @@
 
 <script setup>
 import { ref, watch } from 'vue'
+import CustomSelect from '../CustomSelect.vue'
 
 const emit = defineEmits([
   'start-move',

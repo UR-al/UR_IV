@@ -263,6 +263,13 @@ class LoraManagerDialog(QDialog):
         self.paste_input.clear()
         self.close()
 
+    def _get_trigger_words(self, name: str) -> list:
+        """캐시에서 LoRA 트리거 워드 조회"""
+        for lora in self._all_loras:
+            if lora.get('name') == name:
+                return lora.get('trigger_words', [])
+        return []
+
     def _on_insert(self):
         item = self.lora_list.currentItem()
         if not item:
@@ -270,5 +277,10 @@ class LoraManagerDialog(QDialog):
         name = item.data(Qt.ItemDataRole.UserRole)
         weight = self.weight_slider.value() / 100.0
         lora_text = f"<lora:{name}:{weight:.2f}>"
+        # 트리거 워드 정보를 JSON으로 추가 전달
+        import json
+        trigger_words = self._get_trigger_words(name)
+        if trigger_words:
+            lora_text += f"||TRIGGER:{json.dumps(trigger_words)}"
         self.lora_inserted.emit(lora_text)
         self.close()

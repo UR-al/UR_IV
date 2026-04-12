@@ -27,8 +27,12 @@ def _load() -> dict:
 def _save(data: dict):
     global _cache
     _cache = data
-    with open(_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[CharPreset] 저장 실패: {e}")
+        raise
 
 
 def _normalize(name: str) -> str:

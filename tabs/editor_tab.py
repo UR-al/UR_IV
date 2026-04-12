@@ -1113,6 +1113,11 @@ class MosaicEditor(QWidget):
         self.move_panel.btn_send_inpaint.setEnabled(False)
         self.move_panel.update_status("🎨 인페인트 생성 중...")
 
+        # 이전 워커 정리
+        if hasattr(self, '_inpaint_worker') and self._inpaint_worker and self._inpaint_worker.isRunning():
+            self._inpaint_worker.disconnect()
+            self._inpaint_worker.quit()
+            self._inpaint_worker.wait(2000)
         self._inpaint_worker = Img2ImgFlowWorker(model_name, payload)
         self._inpaint_worker.finished.connect(self._on_inpaint_finished)
         self._inpaint_worker.start()

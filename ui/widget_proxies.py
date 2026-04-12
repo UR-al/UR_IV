@@ -170,7 +170,11 @@ class ComboBoxProxy(_ProxyBase):
     def addItems(self, items: list):
         self._items = list(items)
         self._bridge.pushWidgetProperty(self._id, "items", self._items)
-        if self._items and self._index < 0:
+        # fallback text가 새 items에 있으면 index 복원
+        fb = getattr(self, '_fallback_text', '')
+        if fb and fb in self._items:
+            self._index = self._items.index(fb)
+        elif self._items and self._index < 0:
             self._index = 0
 
     def addItem(self, item: str):
@@ -213,7 +217,12 @@ class ComboBoxProxy(_ProxyBase):
 
     def setText(self, value: str):
         """호환성: settings에서 .setText() 호출 시"""
-        self.setCurrentText(value)
+        if value in self._items:
+            self.setCurrentText(value)
+        else:
+            # items 로드 전이면 fallback에 저장 + Vue로 push
+            self._fallback_text = value
+            self._bridge.pushWidgetValue(self._id, value)
 
     def setEnabled(self, enabled: bool):
         self._enabled = enabled

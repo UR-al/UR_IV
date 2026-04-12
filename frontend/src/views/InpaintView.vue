@@ -65,8 +65,8 @@
 
         <div class="glass-card">
           <label>Mask Settings</label>
-          <select v-model="maskContent"><option v-for="(mc, i) in maskContents" :key="i" :value="i">{{ mc }}</option></select>
-          <select v-model="inpaintArea" class="mt-6"><option v-for="(ia, i) in inpaintAreas" :key="i" :value="i">{{ ia }}</option></select>
+          <CustomSelect v-model="maskContentLabel" :options="maskContents" placeholder="Mask Content" />
+          <CustomSelect v-model="inpaintAreaLabel" :options="inpaintAreas" placeholder="Inpaint Area" class="mt-6" />
         </div>
       </div>
 
@@ -107,6 +107,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
 import { getBackend, onBackendEvent } from '../bridge.js'
+import CustomSelect from '../components/CustomSelect.vue'
 
 // ── State ──
 const isDragging = ref(false)
@@ -126,6 +127,14 @@ const magneticLasso = ref(false)
 let edgeMapData = null, edgeMapW = 0, edgeMapH = 0
 const maskContents = ['FILL', 'ORIGINAL', 'LATENT NOISE', 'LATENT NOTHING']
 const inpaintAreas = ['WHOLE IMAGE', 'ONLY MASKED']
+const maskContentLabel = computed({
+  get: () => maskContents[maskContent.value] || maskContents[0],
+  set: v => { maskContent.value = maskContents.indexOf(v) }
+})
+const inpaintAreaLabel = computed({
+  get: () => inpaintAreas[inpaintArea.value] || inpaintAreas[0],
+  set: v => { inpaintArea.value = inpaintAreas.indexOf(v) }
+})
 const tools = [
   { id: 'box', icon: '⬚', label: 'RECT' },
   { id: 'lasso', icon: '➰', label: 'LASSO' },

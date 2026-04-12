@@ -221,6 +221,7 @@ class ActionsMixin:
             self.show_status(
                 f"🔄 자동 생성 중... ({self.auto_gen_count}장 완료)"
             )
+            self._emit_auto_status()
         else:
             self.show_status(f"⚠️ 생성 실패: {result}")
         
@@ -255,13 +256,16 @@ class ActionsMixin:
             QMessageBox.warning(self, "오류", "올바른 숫자를 입력해주세요.")
     
     def _update_resolution_list(self):
-        """해상도 리스트 업데이트"""
+        """해상도 리스트 업데이트 (Vue SPA에서는 프록시이므로 스킵)"""
+        from PyQt6.QtWidgets import QListWidget, QListWidgetItem
+        # LWProxy인 경우 (Vue 모드) — PyQt UI 업데이트 불필요
+        if not isinstance(self.resolution_list_widget, QListWidget):
+            return
         self.resolution_list_widget.clear()
         for i, (w, h, desc) in enumerate(self.random_resolutions):
             from widgets.common_widgets import ResolutionItemWidget
             item_widget = ResolutionItemWidget(w, h, desc, i)
             item_widget.delete_requested.connect(self.delete_resolution_item)
-            
             item = QListWidgetItem(self.resolution_list_widget)
             item.setSizeHint(item_widget.sizeHint())
             self.resolution_list_widget.addItem(item)
@@ -335,9 +339,10 @@ class ActionsMixin:
         self.is_automating = True
         self.auto_gen_count = 0
         self.auto_current_repeat = 1
-        
+
         settings = self.automation_widget.get_settings()
         self.auto_settings = settings
+        self._emit_auto_status()
         
         # 시간 제한 모드면 시작 시간 기록
         if settings['termination_mode'] == 'timer':
@@ -398,6 +403,7 @@ class ActionsMixin:
         
         # 대기 후 생성
         delay_ms = int(settings['delay'] * 1000)
+        self._emit_auto_status(waiting=(delay_ms > 0))
         QTimer.singleShot(delay_ms, self._automation_generate)
 
 
@@ -416,9 +422,20 @@ class ActionsMixin:
             self._run_automation_cycle()
             
 
+    def _emit_auto_status(self, waiting=False):
+        """Vue에 자동화 상태 전송"""
+        if hasattr(self, 'vue_bridge'):
+            import json
+            self.vue_bridge.automationStatus.emit(json.dumps({
+                'running': self.is_automating,
+                'count': getattr(self, 'auto_gen_count', 0),
+                'waiting': waiting,
+            }))
+
     def _stop_automation(self, message=None):
         """자동화 중지"""
         self.is_automating = False
+        self._emit_auto_status()
         
         # 버튼 상태 복구 (자동화 모드는 유지)
         if self.btn_auto_toggle.isChecked():

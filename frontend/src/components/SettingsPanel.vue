@@ -10,42 +10,25 @@
     </label>
 
     <label class="s-label">특징 모드</label>
-    <select class="s-select"
-      :value="get('combo_char_feature_mode')"
-      @change="set('combo_char_feature_mode', $event.target.value)"
-    >
-      <option value="0">핵심만</option>
-      <option value="1">핵심+의상</option>
-    </select>
+    <CustomSelect :modelValue="featureModeLabel" @update:modelValue="v => set('combo_char_feature_mode', v === '핵심+의상' ? '1' : '0')"
+      :options="['핵심만', '핵심+의상']" placeholder="모드" />
 
     <button class="s-btn" @click="action('open_character_preset')">특징 프리셋</button>
 
     <!-- 모델 -->
     <label class="s-label">모델</label>
-    <select class="s-select"
-      :value="get('model_combo')"
-      @change="set('model_combo', $event.target.value)"
-    >
-      <option v-for="(item, i) in getItems('model_combo')" :key="i" :value="String(i)">{{ item }}</option>
-    </select>
+    <CustomSelect :modelValue="get('model_combo')" @update:modelValue="v => set('model_combo', v)"
+      :options="getItems('model_combo')" placeholder="모델 선택..." />
 
     <!-- 샘플러 -->
     <label class="s-label">샘플러</label>
-    <select class="s-select"
-      :value="get('sampler_combo')"
-      @change="set('sampler_combo', $event.target.value)"
-    >
-      <option v-for="(item, i) in getItems('sampler_combo')" :key="i" :value="String(i)">{{ item }}</option>
-    </select>
+    <CustomSelect :modelValue="get('sampler_combo')" @update:modelValue="v => set('sampler_combo', v)"
+      :options="getItems('sampler_combo')" placeholder="샘플러..." />
 
     <!-- 스케줄러 -->
     <label class="s-label">스케줄러</label>
-    <select class="s-select"
-      :value="get('scheduler_combo')"
-      @change="set('scheduler_combo', $event.target.value)"
-    >
-      <option v-for="(item, i) in getItems('scheduler_combo')" :key="i" :value="String(i)">{{ item }}</option>
-    </select>
+    <CustomSelect :modelValue="get('scheduler_combo')" @update:modelValue="v => set('scheduler_combo', v)"
+      :options="getItems('scheduler_combo')" placeholder="스케줄러..." />
 
     <!-- Steps -->
     <label class="s-label">Steps</label>
@@ -144,7 +127,9 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { state, getValue, setValue, requestAction, getProperty } from '../stores/widgetStore.js'
+import CustomSelect from './CustomSelect.vue'
 
 const resPresets = [
   { label: '512 × 512', w: 512, h: 512 },
@@ -164,6 +149,7 @@ const removeOptions = [
   { id: 'chk_remove_text', label: '텍스트 제거' },
 ]
 
+const featureModeLabel = computed(() => get('combo_char_feature_mode') === '1' ? '핵심+의상' : '핵심만')
 function get(id) { return state.values[id] ?? '' }
 function set(id, value) { setValue(id, value) }
 function action(name) { requestAction(name) }

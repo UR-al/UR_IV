@@ -114,18 +114,25 @@ class EventDataLoader:
         if dfs:
             self.df = pd.concat(dfs, ignore_index=True)
             print(f"✅ 총 {len(self.df)}개 로드 (원본 {total_before}개 중)")
-            self._build_parent_child_index()
+            self._build_parent_child_index(
+                progress_callback=lambda msg: progress_callback(0, 0, msg) if progress_callback else None
+            )
 
         return self.df
 
-    def _build_parent_child_index(self):
+    def _build_parent_child_index(self, progress_callback=None):
         """Parent-Child 인덱스 구축 (고속 버전)"""
         if self.df is None:
             return
 
+        if progress_callback:
+            progress_callback('Children 필터링...')
+
         # Parent가 있는 이미지들 (Children)
         self.children_df = self.df[self.df['parent_id'].notna()].copy()
-        print(f"✅ Children: {len(self.children_df)}개")
+
+        if progress_callback:
+            progress_callback(f'Children: {len(self.children_df)}개 발견')
 
         # Parent ID 목록
         parent_ids = self.children_df['parent_id'].dropna().unique()
@@ -133,13 +140,19 @@ class EventDataLoader:
         # Parents (Children을 가진 이미지들) - set으로 빠른 lookup
         parent_id_set = set(parent_ids.astype(int))
         self.parents_df = self.df[self.df['id'].isin(parent_id_set)].copy()
-        print(f"✅ Parents: {len(self.parents_df)}개")
+
+        if progress_callback:
+            progress_callback(f'Parents: {len(self.parents_df)}개 발견')
 
         # ★ Parent -> Children 매핑 생성 (groupby로 고속화)
+        if progress_callback:
+            progress_callback('Parent-Child 매핑 구축...')
         grouped = self.children_df.groupby('parent_id')['id'].apply(list)
         self.parent_child_map = {int(k): v for k, v in grouped.items()}
 
         # ★ Parents에 미리 태그 세트를 캐싱 (유사도 검색 고속화)
+        if progress_callback:
+            progress_callback('태그 인덱스 캐싱...')
         if 'tag_string_general' in self.parents_df.columns:
             self.parents_df['_tag_set'] = self.parents_df['tag_string_general'].apply(
                 lambda x: set(
@@ -148,7 +161,8 @@ class EventDataLoader:
                 ) if pd.notna(x) else set()
             )
 
-        print(f"✅ Parent-Child 매핑: {len(self.parent_child_map)}개 그룹")
+        if progress_callback:
+            progress_callback(f'완료: {len(self.parent_child_map)}개 그룹')
 
     # ──────────────────────────────────────────────────────
     #  A. 유사도 기반 프롬프트 검색 (신규)
@@ -225,6 +239,7 @@ class EventDataLoader:
         min_score: int = 0,
         require_variant_set: bool = False,
         limit: int = 100,
+        progress_callback=None,
     ) -> list:
         """
         ★ 프롬프트 기반 유사도 검색 (핵심 개선)
@@ -243,8 +258,11 @@ class EventDataLoader:
         child_inc_set = self._parse_tags(child_include)
         child_exc_set = self._parse_tags(child_exclude)
 
-        if not query_tags:
+        if not query_tags and not prompt.strip():
             return []
+        # query_tags가 비어있어도 고급 문법이면 사전 필터로 처리
+        if not query_tags and prompt.strip():
+            query_tags = {prompt.strip().lower().replace('_', ' ')}
 
         filtered = self.parents_df.copy()
 
@@ -260,23 +278,38 @@ class EventDataLoader:
         if min_score > 0 and 'score' in filtered.columns:
             filtered = filtered[filtered['score'] >= min_score]
 
-        # 제외 태그 사전 필터 (빠른 필터링)
-        if exclude_set:
-            for tag in exclude_set:
-                tag_u = tag.replace(' ', '_')
-                tag_s = tag.replace('_', ' ')
-                mask = ~(
-                    filtered['tag_string_general'].str.lower().str.contains(tag_u, na=False) |
-                    filtered['tag_string_general'].str.lower().str.contains(tag_s, na=False)
-                )
-                filtered = filtered[mask]
+        # 통합 태그 매처로 사전 필터링
+        try:
+            from core.tag_matcher import filter_dataframe
+            # 프롬프트 사전 필터 (고급 문법: [], |, *, _ 지원)
+            if prompt.strip():
+                inc_mask = filter_dataframe(filtered, 'tag_string_general', prompt)
+                filtered = filtered[inc_mask]
+            # 제외 태그 필터
+            if exclude_tags.strip():
+                exc_mask = filter_dataframe(filtered, 'tag_string_general', exclude_tags)
+                filtered = filtered[~exc_mask]
+        except Exception:
+            # 폴백: 기존 방식
+            if exclude_set:
+                for tag in exclude_set:
+                    tag_u = tag.replace(' ', '_')
+                    tag_s = tag.replace('_', ' ')
+                    mask = ~(
+                        filtered['tag_string_general'].str.lower().str.contains(tag_u, na=False) |
+                        filtered['tag_string_general'].str.lower().str.contains(tag_s, na=False)
+                    )
+                    filtered = filtered[mask]
 
-        print(f"🔍 사전 필터링 후 Parent 후보: {len(filtered)}개")
+        total_candidates = len(filtered)
+        print(f"🔍 사전 필터링 후 Parent 후보: {total_candidates}개")
 
         # ★ 유사도 계산
         scored_results = []
 
-        for _, parent in filtered.iterrows():
+        for row_idx, (_, parent) in enumerate(filtered.iterrows()):
+            if progress_callback and row_idx % 50 == 0:
+                progress_callback(row_idx, total_candidates)
             parent_id = int(parent['id'])
             if parent_id not in self.parent_child_map:
                 continue

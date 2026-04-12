@@ -5,66 +5,57 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from backends import get_backend
 
 
-def _build_empty_adetailer_slot() -> dict:
-    """빈 ADetailer 슬롯"""
+def _build_adetailer_slot(model: str, confidence: float = 0.3, denoise: float = 0.4, prompt: str = '') -> dict:
+    """ADetailer 슬롯 딕셔너리 (공식 REST API 스펙)"""
     return {
-        "ad_cfg_scale": 7,
-        "ad_checkpoint": "Use same checkpoint",
-        "ad_clip_skip": 1,
-        "ad_confidence": 0.3,
-        "ad_controlnet_guidance_end": 1,
-        "ad_controlnet_guidance_start": 0,
-        "ad_controlnet_model": "None",
-        "ad_controlnet_module": "None",
-        "ad_controlnet_weight": 1,
-        "ad_denoising_strength": 0.4,
-        "ad_dilate_erode": 4,
-        "ad_inpaint_height": 512,
-        "ad_inpaint_only_masked": True,
-        "ad_inpaint_only_masked_padding": 32,
-        "ad_inpaint_width": 512,
-        "ad_mask_blur": 4,
+        "ad_model": model,
+        "ad_model_classes": "",
+        "ad_tab_enable": True,
+        "ad_prompt": prompt,
+        "ad_negative_prompt": "",
+        "ad_confidence": confidence,
         "ad_mask_filter_method": "Area",
         "ad_mask_k": 0,
-        "ad_mask_max_ratio": 1,
-        "ad_mask_merge_invert": "None",
-        "ad_mask_min_ratio": 0,
-        "ad_model": "None",
-        "ad_model_classes": "",
-        "ad_negative_prompt": "",
-        "ad_noise_multiplier": 1,
-        "ad_prompt": "",
-        "ad_restore_face": False,
-        "ad_sampler": "DPM++ 2M",
-        "ad_scheduler": "Use same scheduler",
-        "ad_steps": 28,
-        "ad_tab_enable": False,
-        "ad_use_cfg_scale": False,
-        "ad_use_checkpoint": False,
-        "ad_use_clip_skip": False,
-        "ad_use_inpaint_width_height": False,
-        "ad_use_noise_multiplier": False,
-        "ad_use_sampler": False,
-        "ad_use_steps": False,
-        "ad_use_vae": False,
-        "ad_vae": "Use same VAE",
+        "ad_mask_min_ratio": 0.0,
+        "ad_mask_max_ratio": 1.0,
+        "ad_dilate_erode": 4,
         "ad_x_offset": 0,
         "ad_y_offset": 0,
-        "is_api": []
+        "ad_mask_merge_invert": "None",
+        "ad_mask_blur": 4,
+        "ad_denoising_strength": denoise,
+        "ad_inpaint_only_masked": True,
+        "ad_inpaint_only_masked_padding": 32,
+        "ad_use_inpaint_width_height": False,
+        "ad_inpaint_width": 512,
+        "ad_inpaint_height": 512,
+        "ad_use_steps": False,
+        "ad_steps": 28,
+        "ad_use_cfg_scale": False,
+        "ad_cfg_scale": 7.0,
+        "ad_use_checkpoint": False,
+        "ad_checkpoint": None,
+        "ad_use_vae": False,
+        "ad_vae": None,
+        "ad_use_sampler": False,
+        "ad_sampler": "DPM++ 2M Karras",
+        "ad_scheduler": "Use same scheduler",
+        "ad_use_noise_multiplier": False,
+        "ad_noise_multiplier": 1.0,
+        "ad_use_clip_skip": False,
+        "ad_clip_skip": 1,
+        "ad_restore_face": False,
+        "ad_controlnet_model": "None",
+        "ad_controlnet_module": "None",
+        "ad_controlnet_weight": 1.0,
+        "ad_controlnet_guidance_start": 0.0,
+        "ad_controlnet_guidance_end": 1.0,
     }
 
 
-def _build_adetailer_slot(model: str, confidence: float, denoise: float, prompt: str) -> dict:
-    """ADetailer 슬롯 딕셔너리 생성"""
-    slot = _build_empty_adetailer_slot()
-    slot.update({
-        "ad_model": model,
-        "ad_confidence": confidence,
-        "ad_denoising_strength": denoise,
-        "ad_prompt": prompt,
-        "ad_tab_enable": True,
-    })
-    return slot
+def _build_empty_adetailer_slot() -> dict:
+    """빈 ADetailer 슬롯 (하위 호환)"""
+    return _build_adetailer_slot(model="None")
 
 
 def _image_to_base64(image_path: str) -> str:

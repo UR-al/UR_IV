@@ -40,6 +40,7 @@ class GenerationMixin:
     
     def start_generation(self):
         """이미지 생성 시작"""
+        self._gen_start_time = time.time()
         # 상태 표시 업데이트
         self.setWindowTitle("AI Studio - Pro [생성 중...]")        
         self.btn_generate.setText("⏳ 생성 중...")
@@ -70,10 +71,8 @@ class GenerationMixin:
             self.width_input.setText(str(width))
             self.height_input.setText(str(height))
         else:
-            width, height = (
-                int(self.width_input.text()), 
-                int(self.height_input.text())
-            )
+            width = int(self.width_input.text() or '1024')
+            height = int(self.height_input.text() or '1024')
         
         combined_neg_prompt = self.neg_prompt_text.toPlainText().strip()
 
@@ -101,9 +100,9 @@ class GenerationMixin:
             "negative_prompt": combined_neg_prompt,
             "sampler_name": self.sampler_combo.currentText(), 
             "scheduler": self.scheduler_combo.currentText(),
-            "steps": int(self.steps_input.text()), 
-            "cfg_scale": float(self.cfg_input.text()),
-            "seed": int(self.seed_input.text()), 
+            "steps": int(self.steps_input.text() or '28'),
+            "cfg_scale": float(self.cfg_input.text() or '7'),
+            "seed": int(self.seed_input.text() or '-1'), 
             "width": width, 
             "height": height,
             "send_images": True,
@@ -113,15 +112,18 @@ class GenerationMixin:
 
         # Hires.fix
         if self.hires_options_group.isChecked():
+            hr_scale = float(self.hires_scale_input.text() or '2.0')
+            if hr_scale <= 0:
+                hr_scale = 2.0
             hr_payload = {
                 "enable_hr": True,
                 "hr_upscaler": self.upscaler_combo.currentText(),
-                "hr_second_pass_steps": int(self.hires_steps_input.text()),
-                "denoising_strength": float(self.hires_denoising_input.text()),
-                "hr_scale": float(self.hires_scale_input.text()),
+                "hr_second_pass_steps": int(self.hires_steps_input.text() or '0'),
+                "denoising_strength": float(self.hires_denoising_input.text() or '0.5'),
+                "hr_scale": hr_scale,
                 "hr_additional_modules": [],
             }
-            hr_cfg = float(self.hires_cfg_input.text())
+            hr_cfg = float(self.hires_cfg_input.text() or '0')
             if hr_cfg > 0:
                 hr_payload["hr_cfg"] = hr_cfg
 
@@ -154,23 +156,16 @@ class GenerationMixin:
         if hasattr(self, 'negpip_group') and self.negpip_group.isChecked():
             payload["alwayson_scripts"]["NegPiP"] = {"args": [True]}
 
-        # ADetailer
+        # ADetailer (REST API: https://github.com/Bing-su/adetailer/wiki/REST-API)
         if self.adetailer_group.isChecked():
             adetailer_args = [True, False]
-            
+
             if self.ad_slot1_group.isChecked():
-                adetailer_args.append(self._build_adetailer_slot(self.s1_widgets, True))
-            else:
-                adetailer_args.append(self._build_empty_adetailer_slot())
-            
+                adetailer_args.append(self._build_adetailer_slot(self.s1_widgets))
+
             if self.ad_slot2_group.isChecked():
-                adetailer_args.append(self._build_adetailer_slot(self.s2_widgets, True))
-            else:
-                adetailer_args.append(self._build_empty_adetailer_slot())
-            
-            for _ in range(4):
-                adetailer_args.append(self._build_empty_adetailer_slot())
-            
+                adetailer_args.append(self._build_adetailer_slot(self.s2_widgets))
+
             payload["alwayson_scripts"]["ADetailer"] = {"args": adetailer_args}
             
             _logger.info("ADetailer 적용됨")
@@ -179,6 +174,7 @@ class GenerationMixin:
         _logger.debug(f"프롬프트: {payload['prompt'][:100]}...")
         
         selected_model = self.model_combo.currentText()
+        self._cleanup_gen_worker()
         self.gen_worker = GenerationFlowWorker(selected_model, payload)
         self.gen_worker.finished.connect(self.on_generation_finished)
         self.gen_worker.progress.connect(self._on_generation_progress)
@@ -190,6 +186,19 @@ class GenerationMixin:
         self.gen_progress_bar.show()
 
         self.gen_worker.start()
+
+    def _cleanup_gen_worker(self):
+        """이전 생성 워커가 실행 중이면 정리"""
+        if hasattr(self, 'gen_worker') and self.gen_worker is not None:
+            try:
+                if self.gen_worker.isRunning():
+                    self.gen_worker.disconnect()
+                    self.gen_worker.quit()
+                    self.gen_worker.wait(2000)
+                    _logger.info("이전 생성 워커 정리 완료")
+            except Exception:
+                pass
+            self.gen_worker = None
 
     def _on_generation_progress(self, step: int, total: int, preview):
         """생성 진행률 업데이트"""
@@ -259,6 +268,21 @@ class GenerationMixin:
             except Exception:
                 pass
 
+            # 생성 통계 기록
+            try:
+                from core.gen_stats import get_gen_stats
+                duration = round(time.time() - getattr(self, '_gen_start_time', time.time()), 1)
+                get_gen_stats().record({
+                    'success': True,
+                    'duration_sec': duration,
+                    'model': self.model_combo.currentText() if hasattr(self, 'model_combo') else '',
+                    'seed': gen_info.get('seed', 0) if isinstance(gen_info, dict) else 0,
+                    'width': int(self.width_input.text()) if hasattr(self, 'width_input') else 0,
+                    'height': int(self.height_input.text()) if hasattr(self, 'height_input') else 0,
+                })
+            except Exception:
+                pass
+
             # 비활성 창이면 알림 (단일 생성, 비자동화)
             if not self.is_automating and not self.isActiveWindow():
                 self._notify_generation_done()
@@ -271,6 +295,17 @@ class GenerationMixin:
                 )
         else:
             error_msg = f"[E020] 생성 실패: {result}"
+            # 실패 통계 기록
+            try:
+                from core.gen_stats import get_gen_stats
+                duration = round(time.time() - getattr(self, '_gen_start_time', time.time()), 1)
+                get_gen_stats().record({
+                    'success': False,
+                    'duration_sec': duration,
+                    'model': self.model_combo.currentText() if hasattr(self, 'model_combo') else '',
+                })
+            except Exception:
+                pass
             self.viewer_label.setText(f"❌ {error_msg}")
             self.show_status(error_msg, 5000)
             print(f"\n[E020] Generation Failed: {result}")
@@ -362,23 +397,16 @@ class GenerationMixin:
         if hasattr(self, 'negpip_group') and self.negpip_group.isChecked():
             payload["alwayson_scripts"]["NegPiP"] = {"args": [True]}
         
-        # ADetailer 적용
+        # ADetailer (REST API 스펙 준수)
         if self.adetailer_group.isChecked():
             adetailer_args = [True, False]
-            
+
             if self.ad_slot1_group.isChecked():
-                adetailer_args.append(self._build_adetailer_slot(self.s1_widgets, True))
-            else:
-                adetailer_args.append(self._build_empty_adetailer_slot())
-            
+                adetailer_args.append(self._build_adetailer_slot(self.s1_widgets))
+
             if self.ad_slot2_group.isChecked():
-                adetailer_args.append(self._build_adetailer_slot(self.s2_widgets, True))
-            else:
-                adetailer_args.append(self._build_empty_adetailer_slot())
-            
-            for _ in range(4):
-                adetailer_args.append(self._build_empty_adetailer_slot())
-            
+                adetailer_args.append(self._build_adetailer_slot(self.s2_widgets))
+
             payload["alwayson_scripts"]["ADetailer"] = {"args": adetailer_args}
         
         selected_model = self.model_combo.currentText()
@@ -388,6 +416,7 @@ class GenerationMixin:
         self.btn_generate.setEnabled(False)
         self.viewer_label.setText("EXIF 설정으로 생성 중...")
         
+        self._cleanup_gen_worker()
         self.gen_worker = GenerationFlowWorker(selected_model, payload)
         self.gen_worker.finished.connect(self.on_generation_finished)
         self.gen_worker.progress.connect(self._on_generation_progress)
@@ -399,53 +428,111 @@ class GenerationMixin:
 
         self.gen_worker.start()
 
-    def _build_adetailer_slot(self, widgets, is_enabled=True):
-        """ADetailer 슬롯 딕셔너리 생성"""
-        return {
-            "ad_cfg_scale": float(widgets['cfg'].text()) if widgets['use_cfg_check'].isChecked() else 7,
-            "ad_checkpoint": widgets['checkpoint_combo'].currentText() if widgets['use_checkpoint_check'].isChecked() else "Use same checkpoint",
-            "ad_clip_skip": 1,
-            "ad_confidence": float(widgets['confidence'].text()),
-            "ad_controlnet_guidance_end": 1,
-            "ad_controlnet_guidance_start": 0,
-            "ad_controlnet_model": "None",
-            "ad_controlnet_module": "None",
-            "ad_controlnet_weight": 1,
-            "ad_denoising_strength": float(widgets['denoise'].text()),
-            "ad_dilate_erode": 4,
-            "ad_inpaint_height": int(widgets['inpaint_height'].text()) if widgets['use_inpaint_size_check'].isChecked() else 512,
-            "ad_inpaint_only_masked": True,
-            "ad_inpaint_only_masked_padding": int(widgets['padding'].text()),
-            "ad_inpaint_width": int(widgets['inpaint_width'].text()) if widgets['use_inpaint_size_check'].isChecked() else 512,
-            "ad_mask_blur": int(widgets['mask_blur'].text()),
+    def _build_adetailer_slot(self, widgets):
+        """ADetailer 슬롯 딕셔너리 생성 (공식 REST API 스펙 준수)
+
+        widgets dict에서 proxy를 통해 읽되,
+        proxy 값이 비어있으면 bridge._proxies에서 직접 읽기를 시도한다.
+        """
+        # --- 값 읽기 헬퍼 ---
+        def _txt(w, fallback=''):
+            """proxy.text() + fallback_text + 최종 fallback"""
+            v = w.text() if hasattr(w, 'text') else ''
+            if not v and hasattr(w, '_fallback_text'):
+                v = w._fallback_text
+            if not v and hasattr(w, 'currentText'):
+                v = w.currentText()
+            return v or fallback
+
+        def _float(w, fallback):
+            try:
+                v = _txt(w)
+                return float(v) if v else fallback
+            except (ValueError, TypeError):
+                return fallback
+
+        def _int(w, fallback):
+            try:
+                v = _txt(w)
+                return int(float(v)) if v else fallback
+            except (ValueError, TypeError):
+                return fallback
+
+        model_name = _txt(widgets['model'], 'face_yolov8n.pt')
+        if model_name == 'None' or not model_name.strip():
+            model_name = 'face_yolov8n.pt'
+
+        confidence = _float(widgets['confidence'], 0.3)
+        denoise = _float(widgets['denoise'], 0.4)
+        mask_blur = _int(widgets['mask_blur'], 4)
+        padding = _int(widgets['padding'], 32)
+        prompt = widgets['prompt'].toPlainText() if hasattr(widgets['prompt'], 'toPlainText') else ''
+
+        _logger.debug(f"AD Slot: model={model_name}, confidence={confidence}, "
+                      f"denoise={denoise}, mask_blur={mask_blur}, prompt='{prompt[:30]}'")
+
+        neg_prompt = widgets['neg_prompt'].toPlainText() if hasattr(widgets['neg_prompt'], 'toPlainText') else ''
+        dilate_erode = _int(widgets.get('dilate_erode', type('', (), {'text': lambda s: '4'})()), 4) if 'dilate_erode' in widgets else 4
+        mask_merge = _txt(widgets.get('mask_merge_invert', type('', (), {'text': lambda s: 'None', 'currentText': lambda s: 'None'})()), 'None') if 'mask_merge_invert' in widgets else 'None'
+
+        slot = {
+            "ad_model": model_name,
+            "ad_model_classes": "",
+            "ad_tab_enable": True,
+            "ad_prompt": prompt,
+            "ad_negative_prompt": neg_prompt,
+            "ad_confidence": confidence,
             "ad_mask_filter_method": "Area",
             "ad_mask_k": 0,
-            "ad_mask_max_ratio": 1,
-            "ad_mask_merge_invert": "None",
-            "ad_mask_min_ratio": 0,
-            "ad_model": widgets['model'].text() if is_enabled else "None",
-            "ad_model_classes": "",
-            "ad_negative_prompt": "",
-            "ad_noise_multiplier": 1,
-            "ad_prompt": widgets['prompt'].toPlainText(),
-            "ad_restore_face": False,
-            "ad_sampler": widgets['sampler_combo'].currentText() if widgets['use_sampler_check'].isChecked() else "Use same sampler",
-            "ad_scheduler": widgets['scheduler_combo'].currentText() if widgets['use_sampler_check'].isChecked() else "Use same scheduler",
-            "ad_steps": int(widgets['steps'].text()) if widgets['use_steps_check'].isChecked() else 28,
-            "ad_tab_enable": is_enabled,
-            "ad_use_cfg_scale": widgets['use_cfg_check'].isChecked(),
-            "ad_use_checkpoint": widgets['use_checkpoint_check'].isChecked(),
-            "ad_use_clip_skip": False,
-            "ad_use_inpaint_width_height": widgets['use_inpaint_size_check'].isChecked(),
-            "ad_use_noise_multiplier": False,
-            "ad_use_sampler": widgets['use_sampler_check'].isChecked(),
-            "ad_use_steps": widgets['use_steps_check'].isChecked(),
-            "ad_use_vae": widgets['use_vae_check'].isChecked(),
-            "ad_vae": widgets['vae_combo'].currentText() if widgets['use_vae_check'].isChecked() else "Use same VAE",
+            "ad_mask_min_ratio": 0.0,
+            "ad_mask_max_ratio": 1.0,
+            "ad_dilate_erode": dilate_erode,
             "ad_x_offset": 0,
             "ad_y_offset": 0,
-            "is_api": []
+            "ad_mask_merge_invert": mask_merge,
+            "ad_mask_blur": mask_blur,
+            "ad_denoising_strength": denoise,
+            "ad_inpaint_only_masked": True,
+            "ad_inpaint_only_masked_padding": padding,
+            "ad_use_inpaint_width_height": widgets['use_inpaint_size_check'].isChecked(),
+            "ad_inpaint_width": _int(widgets['inpaint_width'], 512),
+            "ad_inpaint_height": _int(widgets['inpaint_height'], 512),
+            "ad_use_steps": widgets['use_steps_check'].isChecked(),
+            "ad_steps": _int(widgets['steps'], 28),
+            "ad_use_cfg_scale": widgets['use_cfg_check'].isChecked(),
+            "ad_cfg_scale": _float(widgets['cfg'], 7.0),
+            "ad_use_checkpoint": widgets['use_checkpoint_check'].isChecked(),
+            "ad_checkpoint": None,
+            "ad_use_vae": widgets['use_vae_check'].isChecked(),
+            "ad_vae": None,
+            "ad_use_sampler": widgets['use_sampler_check'].isChecked(),
+            "ad_sampler": "DPM++ 2M Karras",
+            "ad_scheduler": "Use same scheduler",
+            "ad_use_noise_multiplier": False,
+            "ad_noise_multiplier": 1.0,
+            "ad_use_clip_skip": False,
+            "ad_clip_skip": 1,
+            "ad_restore_face": False,
+            "ad_controlnet_model": "None",
+            "ad_controlnet_module": "None",
+            "ad_controlnet_weight": 1.0,
+            "ad_controlnet_guidance_start": 0.0,
+            "ad_controlnet_guidance_end": 1.0,
         }
+        # use_* 가 켜져있을 때만 값을 오버라이드
+        if widgets['use_checkpoint_check'].isChecked():
+            ckpt = _txt(widgets['checkpoint_combo'])
+            if ckpt:
+                slot["ad_checkpoint"] = ckpt
+        if widgets['use_vae_check'].isChecked():
+            vae = _txt(widgets['vae_combo'])
+            if vae:
+                slot["ad_vae"] = vae
+        if widgets['use_sampler_check'].isChecked():
+            slot["ad_sampler"] = _txt(widgets['sampler_combo'], "DPM++ 2M Karras")
+            slot["ad_scheduler"] = _txt(widgets['scheduler_combo'], "Use same scheduler")
+
+        return slot
     
     def _notify_generation_done(self):
         """생성 완료 알림 (비활성 창일 때)"""

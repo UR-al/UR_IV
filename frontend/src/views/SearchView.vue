@@ -34,7 +34,7 @@
         </div>
 
         <!-- Exclude (접이식) -->
-        <details class="form-section exclude-section">
+        <details class="form-section exclude-section" open>
           <summary class="exclude-toggle">Exclude Tags ▾</summary>
           <div class="form-row">
             <div class="form-field"><label class="danger">Character</label><input v-model="fields[1].exclude" placeholder="제외..." @keydown.enter="search" /></div>
@@ -53,7 +53,7 @@
           <div class="io-row">
             <button class="io-btn" @click="importResults">📤 IMPORT .parquet</button>
           </div>
-          <button class="go-btn" @click="search" :disabled="searching">🚀 RUN ENGINE</button>
+          <button class="go-btn" @click="search" :disabled="searching">🚀 RUN SEARCH</button>
         </div>
       </div>
 
@@ -108,10 +108,10 @@
             @click="restoreBranch(fi)">{{ fh.label }} ({{ fh.count }})</button>
         </template>
         <button class="bar-btn" @click="resetDeepSearch" v-if="isFiltered">✕ RESET</button>
-        <select class="sort-sel" @change="sortResults($event.target.value)">
-          <option value="">정렬</option><option value="char">Character</option><option value="copy">Copyright</option>
-          <option value="artist">Artist</option><option value="rating">Rating</option>
-        </select>
+        <button class="bar-btn filter-btn" :class="{ active: hasActiveFilters }" @click="showFilterManager = true">
+          🔽 FILTER{{ hasActiveFilters ? ` (${activeFilterCount})` : '' }}
+        </button>
+        <button v-if="hasActiveFilters" class="bar-btn" @click="clearAllFilters">✕ 필터 해제</button>
         <span class="bar-count">{{ filteredResults.length }} / {{ results.length }}</span>
       </div>
 
@@ -161,23 +161,75 @@
           <span class="lh tags">Tags</span><span class="lh act"></span>
         </div>
         <div class="list-scroll">
-          <div v-for="(r, i) in pagedResults" :key="i" class="list-row"
-            :class="{ active: previewIdx === listPage * listPageSize + i }"
-            @click="previewIdx = listPage * listPageSize + i; viewMode = 'single'">
-            <span class="lr idx">{{ listPage * listPageSize + i + 1 }}</span>
+          <div v-for="(r, i) in filteredResults" :key="i" class="list-row"
+            :class="{ active: previewIdx === i }"
+            @click="previewIdx = i; viewMode = 'single'">
+            <span class="lr idx">{{ i + 1 }}</span>
             <span class="lr char">{{ r.character || '-' }}</span>
             <span class="lr copy">{{ r.copyright || '-' }}</span>
             <span class="lr artist">{{ r.artist || '-' }}</span>
             <span class="lr tags">{{ (r.general || '').substring(0, 80) }}</span>
-            <span class="lr act"><button class="use-btn" @click.stop="previewIdx = listPage * listPageSize + i; applyResult()">USE</button></span>
+            <span class="lr act"><button class="use-btn" @click.stop="previewIdx = i; applyResult()">USE</button></span>
           </div>
         </div>
-        <div class="list-pager">
-          <button class="bar-btn" @click="listPage--" :disabled="listPage <= 0">◀</button>
-          <span class="pager-info">{{ listPage + 1 }} / {{ totalListPages }}</span>
-          <button class="bar-btn" @click="listPage++" :disabled="listPage >= totalListPages - 1">▶</button>
-        </div>
       </div>
+      <!-- Filter Manager Modal -->
+      <transition name="fade">
+        <div v-if="showFilterManager" class="fm-overlay" @click.self="showFilterManager = false">
+          <div class="fm-modal">
+            <div class="fm-header">
+              <h3>FILTER MANAGER</h3>
+              <button class="close-btn" @click="showFilterManager = false">✕</button>
+            </div>
+            <div class="fm-body">
+              <!-- Rating -->
+              <div class="fm-section">
+                <div class="fm-label">RATING</div>
+                <div class="fm-chips">
+                  <button v-for="r in filterOptions.ratings" :key="r" class="fm-chip"
+                    :class="{ active: activeFilters.ratings.has(r) }"
+                    @click="toggleFilter('ratings', r)">{{ r.toUpperCase() }}</button>
+                </div>
+              </div>
+              <!-- Character -->
+              <div class="fm-section" v-if="filterOptions.characters.length">
+                <div class="fm-label">CHARACTER ({{ filterOptions.characters.length }})</div>
+                <input class="fm-search" v-model="fmCharSearch" placeholder="검색..." />
+                <div class="fm-chip-scroll">
+                  <button v-for="c in filteredFmChars" :key="c" class="fm-chip"
+                    :class="{ active: activeFilters.characters.has(c) }"
+                    @click="toggleFilter('characters', c)">{{ c }}</button>
+                </div>
+              </div>
+              <!-- Copyright -->
+              <div class="fm-section" v-if="filterOptions.copyrights.length">
+                <div class="fm-label">COPYRIGHT ({{ filterOptions.copyrights.length }})</div>
+                <input class="fm-search" v-model="fmCopySearch" placeholder="검색..." />
+                <div class="fm-chip-scroll">
+                  <button v-for="c in filteredFmCopyrights" :key="c" class="fm-chip"
+                    :class="{ active: activeFilters.copyrights.has(c) }"
+                    @click="toggleFilter('copyrights', c)">{{ c }}</button>
+                </div>
+              </div>
+              <!-- Artist -->
+              <div class="fm-section" v-if="filterOptions.artists.length">
+                <div class="fm-label">ARTIST ({{ filterOptions.artists.length }})</div>
+                <input class="fm-search" v-model="fmArtistSearch" placeholder="검색..." />
+                <div class="fm-chip-scroll">
+                  <button v-for="a in filteredFmArtists" :key="a" class="fm-chip"
+                    :class="{ active: activeFilters.artists.has(a) }"
+                    @click="toggleFilter('artists', a)">{{ a }}</button>
+                </div>
+              </div>
+            </div>
+            <div class="fm-footer">
+              <span class="fm-count">{{ filteredByManager.length }} / {{ results.length }} 결과</span>
+              <button class="fm-apply" @click="applyFilterManager">APPLY FILTER</button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
       <!-- 조건부 프롬프트 (항상 표시) -->
       <div class="cond-section" v-if="results.length > 0 || condPositive.length > 0 || condNegative.length > 0">
         <details class="cond-card">
@@ -230,6 +282,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import CustomSelect from '../components/CustomSelect.vue'
 
 const ratings = reactive([
   { key: 'g', label: 'GEN', checked: true },
@@ -260,14 +313,21 @@ const filterHistory = ref([])
 // 조건부 프롬프트
 const condPositive = reactive([])
 const condNegative = reactive([])
-const listPage = ref(0)
-const listPageSize = 50
 let progressTimer = null
 
 const currentResult = computed(() => filteredResults.value[previewIdx.value] || null)
 const currentTags = computed(() => (currentResult.value?.general || '').split(',').map(t => t.trim()).filter(Boolean).map(t => t.replace(/_/g, ' ')))
-const totalListPages = computed(() => Math.max(1, Math.ceil(filteredResults.value.length / listPageSize)))
-const pagedResults = computed(() => filteredResults.value.slice(listPage.value * listPageSize, (listPage.value + 1) * listPageSize))
+
+function persistSearchFields() {
+  const payload = {
+    fields: fields.map(f => ({ include: f.include, exclude: f.exclude })),
+    ratings: ratings.map(r => ({ key: r.key, checked: r.checked })),
+  }
+  try {
+    window.localStorage.setItem('lastSearchFields', JSON.stringify(payload))
+  } catch {}
+  requestAction('save_ui_prefs', { searchState: payload })
+}
 
 async function search() {
   searching.value = true; statusText.value = 'EXPLORING...'
@@ -305,6 +365,15 @@ function restoreAndRandom() {
 }
 
 onMounted(() => {
+  // 이전 검색 입력 필드 복원
+  try {
+    const sf = window.localStorage.getItem('lastSearchFields')
+    if (sf) {
+      const d = JSON.parse(sf)
+      if (d.fields) d.fields.forEach((f, i) => { if (fields[i]) { fields[i].include = f.include || ''; fields[i].exclude = f.exclude || '' } })
+      if (d.ratings) d.ratings.forEach(r => { const found = ratings.find(rt => rt.key === r.key); if (found) found.checked = r.checked })
+    }
+  } catch {}
   // 이전 검색 결과 복원
   try {
     const saved = window.localStorage.getItem('lastSearchResults')
@@ -326,12 +395,34 @@ onMounted(() => {
         statusText.value = `${data.length} MATCHES`
         // 자동 저장 (재시작 시 복원용)
         try { window.localStorage.setItem('lastSearchResults', JSON.stringify(data.slice(0, 500))) } catch {}
+        persistSearchFields()
       } else statusText.value = 'FAILED'
     } catch { statusText.value = 'PARSE ERROR' }
     searching.value = false; searchProgress.value = 100
     if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
   })
   onBackendEvent('searchStatus', (msg) => { statusText.value = msg.toUpperCase() })
+  onBackendEvent('uiPrefsLoaded', (json) => {
+    try {
+      const prefs = JSON.parse(json)
+      const state = prefs.searchState
+      if (!state) return
+      if (Array.isArray(state.fields)) {
+        state.fields.forEach((f, i) => {
+          if (fields[i]) {
+            fields[i].include = f.include || ''
+            fields[i].exclude = f.exclude || ''
+          }
+        })
+      }
+      if (Array.isArray(state.ratings)) {
+        state.ratings.forEach(r => {
+          const found = ratings.find(rt => rt.key === r.key)
+          if (found) found.checked = !!r.checked
+        })
+      }
+    } catch {}
+  })
 
   // 조건부 프롬프트 로드
   onBackendEvent('condRulesLoaded', (json) => {
@@ -342,6 +433,9 @@ onMounted(() => {
     } catch {}
   })
 })
+
+watch(fields, persistSearchFields, { deep: true })
+watch(ratings, persistSearchFields, { deep: true })
 
 function applyDeepSearch() {
   const inc = deepInclude.value.toLowerCase().trim()
@@ -357,20 +451,20 @@ function applyDeepSearch() {
     if (exc) { for (const t of exc.split(',')) { if (t.trim() && all.includes(t.trim())) return false } }
     return true
   })
-  previewIdx.value = 0; listPage.value = 0; isFiltered.value = true
+  previewIdx.value = 0; isFiltered.value = true
   deepInclude.value = ''; deepExclude.value = ''
   statusText.value = `DEEP: ${filteredResults.value.length} / ${results.value.length}`
 }
 function restoreBranch(idx) {
   filteredResults.value = [...filterHistory.value[idx].data]
   filterHistory.value = filterHistory.value.slice(0, idx)
-  previewIdx.value = 0; listPage.value = 0
+  previewIdx.value = 0
   isFiltered.value = filterHistory.value.length > 0
   statusText.value = `BRANCH: ${filteredResults.value.length}`
 }
 function resetDeepSearch() {
   deepInclude.value = ''; deepExclude.value = ''
-  filteredResults.value = results.value; previewIdx.value = 0; listPage.value = 0
+  clearAllFilters()
   isFiltered.value = false; filterHistory.value = []
   statusText.value = `${results.value.length} MATCHES`
 }
@@ -424,11 +518,107 @@ async function classifyCurrentTags() {
 watch(previewIdx, () => { classifyCurrentTags() })
 watch(() => filteredResults.value.length, () => { if (filteredResults.value.length > 0) classifyCurrentTags() })
 
-function sortResults(by) {
-  if (!by) return
-  const key = { char: 'character', copy: 'copyright', artist: 'artist', rating: 'rating' }[by]
-  if (key) filteredResults.value.sort((a, b) => (a[key]||'').localeCompare(b[key]||''))
+// ── Filter Manager ──
+const showFilterManager = ref(false)
+const fmCharSearch = ref('')
+const fmCopySearch = ref('')
+const fmArtistSearch = ref('')
+const activeFilters = reactive({
+  ratings: new Set(),
+  characters: new Set(),
+  copyrights: new Set(),
+  artists: new Set(),
+})
+
+function _splitDanbooruTags(raw) {
+  const text = String(raw || '').trim()
+  if (!text) return []
+  if (text.includes(',')) return text.split(',').map(v => v.trim().replace(/_/g, ' ')).filter(Boolean)
+  const tags = []; let current = ''; let depth = 0
+  for (const ch of text) {
+    if (ch === '(') { depth++; current += ch }
+    else if (ch === ')') { depth--; current += ch }
+    else if (ch === ' ' && depth === 0) { if (current.trim()) tags.push(current.trim().replace(/_/g, ' ')); current = '' }
+    else { current += ch }
+  }
+  if (current.trim()) tags.push(current.trim().replace(/_/g, ' '))
+  return tags
+}
+
+// 검색 결과에서 필터 옵션 추출
+const filterOptions = computed(() => {
+  const chars = new Set(), copys = new Set(), arts = new Set(), rats = new Set()
+  for (const row of results.value) {
+    if (row.rating) rats.add(row.rating)
+    for (const c of _splitDanbooruTags(row.character)) chars.add(c)
+    for (const c of _splitDanbooruTags(row.copyright)) copys.add(c)
+    for (const a of _splitDanbooruTags(row.artist)) arts.add(a)
+  }
+  return {
+    ratings: [...rats].sort(),
+    characters: [...chars].sort(),
+    copyrights: [...copys].sort(),
+    artists: [...arts].sort(),
+  }
+})
+
+const filteredFmChars = computed(() => {
+  const q = fmCharSearch.value.toLowerCase()
+  return q ? filterOptions.value.characters.filter(c => c.toLowerCase().includes(q)) : filterOptions.value.characters
+})
+const filteredFmCopyrights = computed(() => {
+  const q = fmCopySearch.value.toLowerCase()
+  return q ? filterOptions.value.copyrights.filter(c => c.toLowerCase().includes(q)) : filterOptions.value.copyrights
+})
+const filteredFmArtists = computed(() => {
+  const q = fmArtistSearch.value.toLowerCase()
+  return q ? filterOptions.value.artists.filter(a => a.toLowerCase().includes(q)) : filterOptions.value.artists
+})
+
+function toggleFilter(category, value) {
+  const s = activeFilters[category]
+  if (s.has(value)) s.delete(value)
+  else s.add(value)
+}
+
+const hasActiveFilters = computed(() =>
+  activeFilters.ratings.size + activeFilters.characters.size + activeFilters.copyrights.size + activeFilters.artists.size > 0
+)
+const activeFilterCount = computed(() =>
+  activeFilters.ratings.size + activeFilters.characters.size + activeFilters.copyrights.size + activeFilters.artists.size
+)
+
+// 필터 적용 미리보기
+const filteredByManager = computed(() => {
+  let next = results.value
+  if (activeFilters.ratings.size) next = next.filter(r => activeFilters.ratings.has(r.rating))
+  if (activeFilters.characters.size) next = next.filter(r => _splitDanbooruTags(r.character).some(c => activeFilters.characters.has(c)))
+  if (activeFilters.copyrights.size) next = next.filter(r => _splitDanbooruTags(r.copyright).some(c => activeFilters.copyrights.has(c)))
+  if (activeFilters.artists.size) next = next.filter(r => _splitDanbooruTags(r.artist).some(a => activeFilters.artists.has(a)))
+  return next
+})
+
+function applyFilterManager() {
+  filteredResults.value = [...filteredByManager.value]
   previewIdx.value = 0
+  showFilterManager.value = false
+  requestAction('update_prompt_deck', { results: filteredResults.value })
+  requestAction('show_toast', { type: 'success', msg: `필터 적용: ${filteredResults.value.length}건` })
+}
+
+function clearAllFilters() {
+  activeFilters.ratings.clear()
+  activeFilters.characters.clear()
+  activeFilters.copyrights.clear()
+  activeFilters.artists.clear()
+  filteredResults.value = [...results.value]
+  previewIdx.value = 0
+  requestAction('update_prompt_deck', { results: results.value })
+  requestAction('show_toast', { type: 'info', msg: '필터 해제됨' })
+}
+
+function clearSortFilter() {
+  clearAllFilters()
 }
 
 function prevResult() { if (previewIdx.value > 0) previewIdx.value-- }
@@ -460,7 +650,7 @@ function saveCondRules() {
   })
 }
 
-function exportResults() { requestAction('export_search_results', { count: results.value.length }) }
+function exportResults() { requestAction('export_search_results', { count: filteredResults.value.length, data: filteredResults.value }) }
 function importResults() { requestAction('import_search_results') }
 </script>
 
@@ -530,7 +720,29 @@ function importResults() { requestAction('import_search_results') }
 .bar-idx { font-family: monospace; font-size: 11px; color: var(--text-secondary); }
 .bar-idx b { color: var(--accent); font-size: 14px; }
 .bar-count { font-size: 9px; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; }
-.sort-sel { padding: 3px 6px; font-size: 9px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); width: 80px; }
+.filter-btn.active { color: var(--accent); border-color: var(--accent-dim); }
+
+/* Filter Manager Modal */
+.fm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+.fm-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; width: 560px; max-height: 80vh; display: flex; flex-direction: column; }
+.fm-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.fm-header h3 { font-size: 13px; font-weight: 900; letter-spacing: 2px; color: var(--text-primary); }
+.fm-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+.fm-section { display: flex; flex-direction: column; gap: 6px; }
+.fm-label { font-size: 10px; font-weight: 900; color: var(--text-muted); letter-spacing: 1.5px; }
+.fm-search { padding: 6px 10px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); }
+.fm-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.fm-chip-scroll { display: flex; flex-wrap: wrap; gap: 4px; max-height: 120px; overflow-y: auto; }
+.fm-chip {
+  padding: 4px 10px; background: var(--bg-button); border: 1px solid var(--border);
+  border-radius: var(--radius-pill); color: var(--text-muted); font-size: 10px; font-weight: 700;
+  cursor: pointer; transition: var(--transition); white-space: nowrap;
+}
+.fm-chip:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.fm-chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.fm-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-top: 1px solid var(--border); }
+.fm-count { font-size: 11px; color: var(--text-muted); font-family: monospace; }
+.fm-apply { padding: 8px 24px; background: var(--accent); border: none; border-radius: var(--radius-pill); color: #000; font-weight: 800; font-size: 11px; cursor: pointer; letter-spacing: 1px; }
 .bar-btn.parquet { background: rgba(96,165,250,0.1); border-color: rgba(96,165,250,0.3); color: #60a5fa; }
 
 /* Deep bar */
@@ -616,8 +828,8 @@ function importResults() { requestAction('import_search_results') }
 label.danger { color: #f87171; }
 
 /* 조건부 프롬프트 */
-.cond-section { padding: 12px 16px; border-top: 1px solid var(--border); flex-shrink: 0; display: flex; gap: 12px; }
-.cond-card { flex: 1; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.cond-section { padding: 12px 16px; border-top: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+.cond-card { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
 .cond-card.neg { border-color: rgba(248,113,113,0.15); }
 .cond-title { font-size: 10px; font-weight: 900; letter-spacing: 1px; cursor: pointer; list-style: none; }
 .cond-title::-webkit-details-marker { display: none; }
@@ -630,11 +842,11 @@ label.danger { color: #f87171; }
 .cond-row2 { margin-top: 3px; }
 .cond-check input { accent-color: var(--accent); }
 .cond-kw { font-size: 9px; font-weight: 900; color: var(--accent); }
-.cond-input { width: 100px; padding: 3px 6px; font-size: 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); }
+.cond-input { flex: 1; min-width: 80px; padding: 4px 8px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); }
 .cond-input.neg { border-color: rgba(248,113,113,0.2); }
 .cond-sel { padding: 3px 4px; font-size: 9px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); }
 .cond-sel.sm { width: 55px; }
 .cond-rm { background: none; border: none; color: #f87171; cursor: pointer; font-size: 12px; padding: 0 2px; }
-.cond-save-btn { width: 100%; padding: 7px; background: var(--accent); border: none; border-radius: 6px; color: #000; font-size: 10px; font-weight: 800; cursor: pointer; margin-top: 8px; }
+.cond-save-btn { width: 100%; padding: 8px; background: var(--accent); border: none; border-radius: 8px; color: #000; font-size: 10px; font-weight: 800; cursor: pointer; }
 .cond-add { width: 100%; padding: 5px; background: var(--bg-button); border: 1px dashed var(--border); border-radius: 4px; color: var(--text-muted); font-size: 9px; font-weight: 700; cursor: pointer; margin-top: 4px; }
 </style>

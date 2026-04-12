@@ -126,7 +126,18 @@
               <label class="danger">NEGATIVE</label>
               <div class="code-box">{{ exifData.negative }}</div>
             </div>
-            <div v-if="sidebarParams" class="meta-block mt-12">
+            <div v-if="exifData.params" class="meta-block mt-12">
+              <label>PARAMETERS</label>
+              <div class="params-grid">
+                <div class="param-line" v-if="exifData.params.generation"><span class="pl">GEN</span><span>{{ exifData.params.generation }}</span></div>
+                <div class="param-line" v-if="exifData.params.core"><span class="pl">CORE</span><span>{{ exifData.params.core }}</span></div>
+                <div class="param-line" v-if="exifData.params.model"><span class="pl">MODEL</span><span>{{ exifData.params.model }}</span></div>
+                <div class="param-line" v-if="exifData.params.hires"><span class="pl">HIRES</span><span>{{ exifData.params.hires }}</span></div>
+                <div class="param-line" v-if="exifData.params.extensions"><span class="pl">EXT</span><span>{{ exifData.params.extensions }}</span></div>
+                <div class="param-line" v-if="exifData.params.other"><span class="pl">ETC</span><span>{{ exifData.params.other }}</span></div>
+              </div>
+            </div>
+            <div v-else-if="sidebarParams" class="meta-block mt-12">
               <label>PARAMETERS</label>
               <div class="code-box params">{{ sidebarParams }}</div>
             </div>
@@ -152,6 +163,7 @@
         <div class="ctx-item" @click="ctx('send_to_editor')">✏️ SEND TO EDITOR</div>
         <div class="ctx-item" @click="sendToCompare('before')">🔍 COMPARE (BEFORE)</div>
         <div class="ctx-item" @click="sendToCompare('after')">🔍 COMPARE (AFTER)</div>
+        <div class="ctx-item" @click="ctxAdetailer">🎯 ADETAILER</div>
         <div class="ctx-separator"></div>
         <div class="ctx-item delete" @click="ctx('delete_image')">🗑️ DELETE FOREVER</div>
       </div>
@@ -378,6 +390,7 @@ function ctx(actionName) {
 }
 const quickAction = (name, path) => requestAction(name, { path })
 const sendToCompare = (slot) => { requestAction('send_to_compare', { path: ctxMenu.value.path, slot }); ctxMenu.value.show = false }
+const ctxAdetailer = () => { requestAction('run_adetailer_single', { path: ctxMenu.value.path, settings: { ad_model: 'face_yolov8n.pt', ad_confidence: 0.3, ad_denoise: 0.4 } }); ctxMenu.value.show = false }
 const sendExifToT2I = () => { if (exifData.value) requestAction('gallery_send_exif_to_t2i', { exif: exifData.value.raw || '', path: exifData.value.path }) }
 const action = (name, payload = {}) => requestAction(name, payload)
 const hideMenu = () => ctxMenu.value.show = false
@@ -465,6 +478,11 @@ onUnmounted(() => document.removeEventListener('click', hideMenu))
 
 .meta-block label { font-size: 10px; font-weight: 900; color: var(--accent); margin-bottom: 8px; }
 .code-box { background: var(--bg-input); padding: 12px; border-radius: 8px; font-family: 'Consolas', monospace; font-size: 11px; line-height: 1.6; color: var(--text-secondary); word-break: break-all; }
+
+.params-grid { background: var(--bg-input); border-radius: 8px; padding: 8px 12px; }
+.param-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 11px; color: var(--text-secondary); border-bottom: 1px solid rgba(255,255,255,0.03); font-family: 'Consolas', monospace; }
+.param-line:last-child { border-bottom: none; }
+.pl { font-size: 9px; font-weight: 900; color: var(--accent); letter-spacing: 1px; min-width: 45px; flex-shrink: 0; }
 
 .exif-footer { padding: 20px; background: var(--bg-card); border-top: 1px solid var(--border); }
 .main-apply-btn { width: 100%; height: 46px; background: var(--accent); border: none; border-radius: var(--radius-pill); color: #000; font-weight: 900; font-size: 12px; letter-spacing: 1px; cursor: pointer; }

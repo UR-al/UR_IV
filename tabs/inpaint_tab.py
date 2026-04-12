@@ -604,6 +604,11 @@ class InpaintTab(QWidget):
         self.btn_generate.setEnabled(False)
         self.result_label.setText("🎨 인페인트 생성 중...")
 
+        # 이전 워커 정리
+        if hasattr(self, 'gen_worker') and self.gen_worker and self.gen_worker.isRunning():
+            self.gen_worker.disconnect()
+            self.gen_worker.quit()
+            self.gen_worker.wait(2000)
         self.gen_worker = Img2ImgFlowWorker(model_name, payload)
         self.gen_worker.finished.connect(self._on_generation_finished)
         self.gen_worker.start()

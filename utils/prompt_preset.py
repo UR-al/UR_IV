@@ -21,8 +21,9 @@ def _save_all(presets: dict[str, dict]):
     try:
         with open(_PRESET_FILE, 'w', encoding='utf-8') as f:
             json.dump(presets, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[Preset] 저장 실패: {e}")
+        raise  # 호출자에게 전파하여 사용자에게 알림 가능
 
 
 def save_preset(name: str, data: dict):

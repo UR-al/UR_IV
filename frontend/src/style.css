@@ -109,7 +109,7 @@ input:focus, textarea:focus, select:focus {
 label:has(input[type="checkbox"]) {
   display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;
 }
-input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; margin: 0; }
+input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; margin: 0; width: auto; }
 
 /* select 전역 스타일 — 다크 테마 통일 */
 select {

@@ -72,49 +72,9 @@ class PandasSearchWorker(QThread):
 
     @staticmethod
     def _parse_condition(df, col, query_text):
-        """고급 검색 구문 파싱 ([A|B], [A,B] 지원)"""
-        mask = pd.Series(True, index=df.index)
-        
-        # 대괄호 밖의 쉼표로 분리
-        parts = re.split(r',\s*(?![^\[]*\])', query_text)
-        
-        for part in parts:
-            part = part.strip()
-            if not part: 
-                continue
-            
-            current_condition_mask = None
-            
-            if part.startswith('[') and part.endswith(']'):
-                content = part[1:-1]
-                
-                if '|' in content:  # OR 조건
-                    or_tags = [t.strip() for t in content.split('|') if t.strip()]
-                    or_mask = pd.Series(False, index=df.index)
-                    for tag in or_tags:
-                        or_mask |= df[col].str.contains(tag, case=False, na=False, regex=False)
-                    current_condition_mask = or_mask
-                    
-                elif ',' in content:  # AND 조건
-                    and_tags = [t.strip() for t in content.split(',') if t.strip()]
-                    and_mask = pd.Series(True, index=df.index)
-                    for tag in and_tags:
-                        and_mask &= df[col].str.contains(tag, case=False, na=False, regex=False)
-                    current_condition_mask = and_mask
-                
-                else:  # 단일 태그
-                    current_condition_mask = df[col].str.contains(
-                        content.strip(), case=False, na=False, regex=False
-                    )
-            else:  # 일반 태그
-                current_condition_mask = df[col].str.contains(
-                    part, case=False, na=False, regex=False
-                )
-            
-            if current_condition_mask is not None:
-                mask &= current_condition_mask
-                
-        return mask
+        """통합 태그 매칭 엔진 — 와일드카드 + 그룹 + OR/AND 지원"""
+        from core.tag_matcher import filter_dataframe
+        return filter_dataframe(df, col, query_text)
 
     def _load_data(self):
         """선택된 등급의 Parquet 파일 로드"""

@@ -228,7 +228,7 @@ class ComfyUIBackend(AbstractBackend):
             names = lora_input.get('lora_name', [[]])[0]
             if isinstance(names, list):
                 return [
-                    {'name': n, 'alias': n, 'path': ''}
+                    {'name': n, 'alias': n, 'path': '', 'trigger_words': []}
                     for n in names
                 ]
         except Exception as e:

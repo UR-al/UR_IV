@@ -8,5 +8,88 @@
   "ad_s1_enabled": true,
   "ad_s2_enabled": false,
   "negpip_enabled": true,
-  "galleryShowMetadata": true
+  "galleryShowMetadata": true,
+  "loraStack": [
+    {
+      "name": "cknb02_stabilizer_v0.304a_fp16",
+      "weight": 30,
+      "enabled": true,
+      "triggerWords": []
+    },
+    {
+      "name": "v0.1_enast-Chenkin-RF-V02-000007",
+      "weight": 100,
+      "enabled": true,
+      "triggerWords": []
+    },
+    {
+      "name": "tj89_ChenkinNoobRF_V3-000018",
+      "weight": 40,
+      "enabled": true,
+      "triggerWords": []
+    },
+    {
+      "name": "Doodlefishhh-Chenkin-RF-V03-000002",
+      "weight": 50,
+      "enabled": true,
+      "triggerWords": []
+    }
+  ],
+  "tabOrder": [
+    "T2I",
+    "I2I",
+    "Inpaint",
+    "Search",
+    "Event Gen",
+    "Batch / Upscale",
+    "Gallery",
+    "XYZ Plot",
+    "PNG Info",
+    "Favorites",
+    "Settings"
+  ],
+  "searchState": {
+    "fields": [
+      {
+        "include": "",
+        "exclude": ""
+      },
+      {
+        "include": "",
+        "exclude": ""
+      },
+      {
+        "include": "",
+        "exclude": ""
+      },
+      {
+        "include": "",
+        "exclude": ""
+      }
+    ],
+    "ratings": [
+      {
+        "key": "g",
+        "checked": true
+      },
+      {
+        "key": "s",
+        "checked": false
+      },
+      {
+        "key": "q",
+        "checked": false
+      },
+      {
+        "key": "e",
+        "checked": false
+      }
+    ]
+  },
+  "ratingFilter": [
+    true,
+    true,
+    true,
+    true
+  ]
 }

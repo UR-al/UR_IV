@@ -12,9 +12,7 @@
       />
 
       <div class="font-color-row">
-        <select v-model="fontFamily" class="font-select">
-          <option v-for="font in fonts" :key="font" :value="font">{{ font }}</option>
-        </select>
+        <CustomSelect v-model="fontFamily" :options="fonts" placeholder="Font" class="font-select" />
         <button
           class="color-btn"
           :style="{ backgroundColor: textColor }"
@@ -130,6 +128,7 @@
 
 <script setup>
 import { ref, watch } from 'vue'
+import CustomSelect from '../CustomSelect.vue'
 
 const emit = defineEmits([
   'apply-text',

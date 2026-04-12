@@ -29,13 +29,28 @@ SYSTEM_PROMPTS = {
         "Keep the same general concept but vary the details. "
         "Output ONLY comma-separated tags. No explanations, no numbering, no markdown."
     ),
+    'negative': (
+        "You are a Danbooru tag expert for Stable Diffusion negative prompts. "
+        "The user will give you POSITIVE prompt tags. Generate appropriate NEGATIVE tags "
+        "to prevent artifacts and unwanted elements for this specific scene. "
+        "Rules: "
+        "- If '1girl' or 'solo', add 'multiple girls, multiple boys, crowd, group' "
+        "- If character has specific hair/eye color, add wrong colors to negative "
+        "- Always include: worst quality, low quality, bad anatomy, bad hands, "
+        "missing fingers, extra digits, fewer digits, blurry, watermark, signature "
+        "- For NSFW-free prompts, add 'nsfw, nude' "
+        "- For outdoor scenes, add 'indoor, room' and vice versa "
+        "- Tailor negatives specifically to the content described "
+        "- Output 15-30 negative tags "
+        "Output ONLY comma-separated tags. No explanations, no numbering, no markdown."
+    ),
 }
 
 
 class OllamaClient:
     """Ollama REST API 래퍼"""
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "llama3"):
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = "gemma3:4b"):
         self.base_url = base_url.rstrip('/')
         self.model = model
         self.timeout = 60
@@ -64,9 +79,21 @@ class OllamaClient:
             r.raise_for_status()
             data = r.json()
             response = data.get('response', '').strip()
-            # 혹시 마크다운이나 번호가 섞여있으면 정리
+            # 마크다운, 번호, 코드블록, 사고과정(<think>) 정리
+            import re
+            # <think>...</think> 블록 제거 (qwen3 등 thinking 모드)
+            response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+            # 코드블록 제거
+            response = re.sub(r'```[^`]*```', '', response, flags=re.DOTALL).strip()
+            # 번호 매기기 제거 (1. tag, 2. tag)
+            response = re.sub(r'^\d+[\.\)]\s*', '', response, flags=re.MULTILINE)
+            # 줄바꿈 → 콤마
             lines = response.replace('\n', ', ').split(',')
-            clean = [t.strip().strip('-').strip('*').strip() for t in lines if t.strip()]
+            clean = [t.strip().strip('-').strip('*').strip('"').strip("'").strip()
+                     for t in lines if t.strip()]
+            # 빈 결과 검증
+            if not clean:
+                raise RuntimeError("AI가 유효한 태그를 반환하지 않았습니다")
             return ', '.join(clean)
         except requests.ConnectionError:
             raise ConnectionError("Ollama 서버에 연결할 수 없습니다. Ollama가 실행 중인지 확인하세요.")

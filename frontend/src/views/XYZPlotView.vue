@@ -4,10 +4,7 @@
       <h3>XYZ Plot</h3>
       <div v-for="(axis, ai) in axes" :key="ai" class="axis-config">
         <label class="axis-label">{{ axis.name }} 축</label>
-        <select v-model="axis.type" class="s-select">
-          <option value="">None</option>
-          <option v-for="opt in axisOptions" :key="opt" :value="opt">{{ opt }}</option>
-        </select>
+        <CustomSelect v-model="axis.type" :options="['', ...axisOptions]" placeholder="None" />
         <input v-if="axis.type" class="s-input" v-model="axis.values"
           :placeholder="axis.type === 'Prompt S/R' ? 'search, replace1, replace2' : '값1, 값2, 값3 또는 20-40:5'"
         />
@@ -36,6 +33,7 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
+import CustomSelect from '../components/CustomSelect.vue'
 
 const axisOptions = ['Prompt S/R', 'Negative S/R', 'Steps', 'CFG Scale', 'Sampler', 'Scheduler', 'Seed', 'Width', 'Height', 'Denoising']
 

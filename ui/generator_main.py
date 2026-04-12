@@ -8,9 +8,19 @@ import json
 import os
 import shutil
 import subprocess
+from urllib.parse import unquote
 
 from PyQt6.QtWidgets import QMessageBox, QLineEdit, QTextEdit, QApplication, QHBoxLayout, QWidget, QFileDialog, QMenu
 from PyQt6.QtCore import QTimer, QEvent, Qt, pyqtSlot
+
+
+def _clean_path(path: str) -> str:
+    """file:/// 프리픽스 제거 + OS 경로 정규화"""
+    if not path:
+        return ''
+    clean_path = unquote(str(path)).replace('file:///', '').replace('file://', '')
+    clean_path = clean_path.replace('/', os.sep)
+    return clean_path
 
 from ui.generator_base import GeneratorBase
 from ui.generator_ui_setup import UISetupMixin
@@ -146,7 +156,7 @@ class GeneratorMainUI(
                 path = payload.get('path', '')
                 if not path: return
                 # file:/// 제거 + 경로 정규화
-                clean_path = path.replace('file:///', '')
+                clean_path = _clean_path(path)
                 if clean_path.startswith('/') and ':' in clean_path[1:3]:
                     clean_path = clean_path[1:]  # /C:/... → C:/...
                 clean_path = os.path.normpath(clean_path)
@@ -167,6 +177,9 @@ class GeneratorMainUI(
                     self.vue_bridge.tabChanged.emit('editor')
                     QTimer.singleShot(100, lambda p=fwd_path: self.vue_bridge.editorImageLoaded.emit(p))
                 self.show_status("Asset Transfer Successful.")
+                tab_names = {'send_to_i2i': 'I2I', 'send_to_inpaint': 'Inpaint', 'send_to_editor': 'Editor'}
+                if hasattr(self, 'vue_bridge'):
+                    self.vue_bridge.showNotification.emit('success', f'{tab_names.get(action, "")}로 전송됨')
 
             # 4. 에디터 정밀 조작 (먹통 해결)
             elif action == 'editor_open_file':
@@ -177,7 +190,7 @@ class GeneratorMainUI(
             elif action == 'editor_save':
                 path = payload.get('path', '')
                 if path:
-                    src = os.path.normpath(path.replace('file:///', ''))
+                    src = _clean_path(path)
                     dst, _ = QFileDialog.getSaveFileName(self, "Export Edited Image", "", "PNG (*.png);;JPEG (*.jpg)")
                     if dst:
                         shutil.copy2(src, dst)
@@ -230,7 +243,7 @@ class GeneratorMainUI(
             elif action == 'context_menu':
                 path = payload.get('path', '')
                 if not path: return
-                clean_path = os.path.normpath(path.replace('file:///', ''))
+                clean_path = _clean_path(path)
                 if not os.path.exists(clean_path): return
                 
                 menu = QMenu(self)
@@ -244,7 +257,8 @@ class GeneratorMainUI(
                 act_copy = menu.addAction("📋 COPY TO CLIPBOARD")
                 act_del = menu.addAction("🗑️ DELETE TO TRASH")
                 
-                chosen = menu.exec(QApplication.desktop().cursor().pos())
+                from PyQt6.QtGui import QCursor
+                chosen = menu.exec(QCursor.pos())
                 if chosen == act_i2i: self._handle_vue_action('send_to_i2i', {'path': clean_path})
                 elif chosen == act_inpaint: self._handle_vue_action('send_to_inpaint', {'path': clean_path})
                 elif chosen == act_editor: self._handle_vue_action('send_to_editor', {'path': clean_path})
@@ -283,6 +297,51 @@ class GeneratorMainUI(
                 if hasattr(self, 'vue_bridge'):
                     self.vue_bridge.showNotification.emit('success', '설정이 저장되었습니다')
             elif action == 'swap_resolution': self._swap_resolution()
+            elif action == 'set_random_resolutions':
+                lst = payload.get('list', [])
+                self.random_resolutions = [(int(r[0]), int(r[1]), str(r[2])) for r in lst if len(r) >= 3]
+            elif action == 'set_rating_filter':
+                self._rating_filter = set(payload.get('ratings', ['g', 's', 'q', 'e']))
+                # 현재 deck을 rating 필터로 재필터링
+                if hasattr(self, 'filtered_results') and self.filtered_results:
+                    self.shuffled_prompt_deck = [
+                        r for r in self.filtered_results
+                        if r.get('rating', 'g') in self._rating_filter
+                    ]
+                    import random as _rnd
+                    _rnd.shuffle(self.shuffled_prompt_deck)
+            elif action == 'update_prompt_deck':
+                # Vue에서 필터링된 결과로 덱 업데이트
+                deck = payload.get('results', [])
+                if deck:
+                    import random as _rnd
+                    rating_filter = getattr(self, '_rating_filter', {'g', 's', 'q', 'e'})
+                    self.filtered_results = deck
+                    self.shuffled_prompt_deck = [
+                        r for r in deck if r.get('rating', 'g') in rating_filter
+                    ]
+                    _rnd.shuffle(self.shuffled_prompt_deck)
+            elif action == 'run_adetailer_single':
+                self._run_adetailer_single(payload)
+            elif action == 'run_adetailer_batch':
+                self._run_adetailer_batch(payload)
+            elif action == 'open_ad_files':
+                paths, _ = QFileDialog.getOpenFileNames(self, "ADetailer 이미지 선택", "",
+                    "Images (*.png *.jpg *.jpeg *.webp);;All Files (*)")
+                if paths:
+                    self.vue_bridge.batchFilesSelected.emit(
+                        json.dumps([p.replace('\\', '/') for p in paths]))
+            elif action == 'open_ad_folder':
+                folder = QFileDialog.getExistingDirectory(self, "ADetailer 폴더 선택")
+                if folder:
+                    import glob
+                    imgs = []
+                    for ext in ('*.png', '*.jpg', '*.jpeg', '*.webp'):
+                        imgs.extend(glob.glob(os.path.join(folder, ext)))
+                    if imgs:
+                        self.vue_bridge.batchFilesSelected.emit(
+                            json.dumps([p.replace('\\', '/') for p in sorted(imgs)]))
+                        self.vue_bridge.showNotification.emit('info', f'{len(imgs)}개 이미지 발견')
             elif action == 'shuffle': self._shuffle_main_prompt()
             elif action == 'ab_test': self._open_ab_test()
             elif action == 'random_prompt': self.apply_random_prompt()
@@ -356,12 +415,14 @@ class GeneratorMainUI(
             elif action == 'add_favorite':
                 path = payload.get('path', '')
                 if path:
-                    clean = os.path.normpath(path.replace('file:///', ''))
+                    clean = _clean_path(path)
                     self._load_favorites_from_file()
                     if clean not in self.favorites_list:
                         self.favorites_list.append(clean)
                         self._save_favorites_to_file()
                     self.show_status("Added to favorites.")
+                    if hasattr(self, 'vue_bridge'):
+                        self.vue_bridge.showNotification.emit('success', '즐겨찾기에 추가됨')
 
             # artist lock
             elif action == 'set_artist_locked':
@@ -373,10 +434,12 @@ class GeneratorMainUI(
             elif action == 'delete_image':
                 path = payload.get('path', '')
                 if path:
-                    clean_path = os.path.normpath(path.replace('file:///', ''))
+                    clean_path = _clean_path(path)
                     from core.image_utils import move_to_trash
                     move_to_trash(clean_path)
                     self.show_status("Moved to trash.")
+                    if hasattr(self, 'vue_bridge'):
+                        self.vue_bridge.showNotification.emit('info', '휴지통으로 이동됨')
 
             # 10. 프리셋
             elif action == 'save_preset_by_name':
@@ -485,22 +548,27 @@ class GeneratorMainUI(
 
             # 15. Search parquet 저장/불러오기
             elif action == 'export_search_results':
-                # 현재 filtered_results를 parquet로 저장
+                # Vue에서 필터링된 결과를 직접 받아서 저장
                 path, _ = QFileDialog.getSaveFileName(self, "검색 결과 저장", "", "Parquet Files (*.parquet)")
                 if path:
                     try:
                         import pandas as pd
-                        if hasattr(self, 'search_tab') and hasattr(self.search_tab, 'preview_results') and self.search_tab.preview_results:
-                            df = pd.DataFrame(self.search_tab.preview_results)
-                        elif hasattr(self, '_last_search_results'):
-                            df = pd.DataFrame(self._last_search_results)
+                        data = payload.get('data')
+                        if data and isinstance(data, list):
+                            df = pd.DataFrame(data)
+                        elif hasattr(self, 'filtered_results') and self.filtered_results:
+                            df = pd.DataFrame(self.filtered_results)
                         else:
                             self.show_status("Export: no results")
                             return
                         df.to_parquet(path)
                         self.show_status(f"Exported {len(df)} results")
+                        if hasattr(self, 'vue_bridge'):
+                            self.vue_bridge.showNotification.emit('success', f'{len(df)}건 내보내기 완료')
                     except Exception as e:
                         self.show_status(f"Export failed: {e}")
+                        if hasattr(self, 'vue_bridge'):
+                            self.vue_bridge.showNotification.emit('error', f'내보내기 실패: {e}')
 
             elif action == 'import_search_results':
                 path, _ = QFileDialog.getOpenFileName(self, "검색 결과 불러오기", "", "Parquet Files (*.parquet)")
@@ -529,50 +597,33 @@ class GeneratorMainUI(
                     except Exception as e:
                         self.show_status(f"Import failed: {e}")
 
-            # 16. 자동화 토글
+            # 16. 자동화 설정/토글
+            elif action == 'set_automation_settings':
+                self._vue_automation_settings = {
+                    'mode': str(payload.get('mode', 'count')),
+                    'limit': payload.get('limit', 10),
+                    'repeat': payload.get('repeat', 1),
+                    'delay': payload.get('delay', 1.0),
+                    'allowDupes': bool(payload.get('allowDupes', False)),
+                }
+
             elif action == 'toggle_automation':
                 checked = payload.get('checked', False)
-                self.toggle_automation_ui(checked)
+                if hasattr(self, 'btn_auto_toggle'):
+                    self.btn_auto_toggle.setChecked(bool(checked))
+                else:
+                    self.toggle_automation_ui(bool(checked))
+            elif action == 'stop_automation':
+                if self.is_automating:
+                    self._stop_automation("사용자가 자동화를 중지했습니다.")
 
             # ═══════ 이벤트 생성 (EventGen) ═══════
             elif action == 'search_events':
-                if hasattr(self, 'event_gen_tab'):
-                    query = payload.get('prompt', payload.get('query', ''))
-                    exclude = payload.get('exclude_tags', payload.get('exclude', ''))
-                    # 검색 실행
-                    if hasattr(self.event_gen_tab, 'prompt_input'):
-                        if hasattr(self.event_gen_tab.prompt_input, 'setPlainText'):
-                            self.event_gen_tab.prompt_input.setPlainText(query)
-                        else:
-                            self.event_gen_tab.prompt_input.setText(query)
-                    if hasattr(self.event_gen_tab, 'exclude_input'):
-                        if hasattr(self.event_gen_tab.exclude_input, 'setPlainText'):
-                            self.event_gen_tab.exclude_input.setPlainText(exclude)
-                        else:
-                            self.event_gen_tab.exclude_input.setText(exclude)
-                    # 검색 시작
-                    if hasattr(self.event_gen_tab, '_search'):
-                        # 결과 시그널 연결 (1회용)
-                        def _on_results(results, count):
-                            try:
-                                out = []
-                                if hasattr(results, 'iterrows'):
-                                    for _, row in results.iterrows():
-                                        out.append({
-                                            'parent_tags': str(row.get('tag_string_general', '')),
-                                            'character': str(row.get('tag_string_character', '')),
-                                            'copyright': str(row.get('tag_string_copyright', '')),
-                                            'children_count': int(row.get('children_count', 0)) if 'children_count' in row.index else 0,
-                                        })
-                                elif isinstance(results, list):
-                                    out = results
-                                self.vue_bridge.eventSearchResults.emit(json.dumps(out))
-                            except Exception as e:
-                                self.vue_bridge.eventSearchResults.emit(json.dumps({'error': str(e)}))
-                        if hasattr(self.event_gen_tab, '_search_worker_done'):
-                            pass  # 기존 연결 사용
-                        self.event_gen_tab._search()
-                    self.show_status("Event search started.")
+                self._start_event_search(payload)
+            elif action == 'export_event_results':
+                self._export_event_results(payload)
+            elif action == 'import_event_results':
+                self._import_event_results()
 
             elif action == 'select_event':
                 idx = payload.get('index', 0)
@@ -635,7 +686,7 @@ class GeneratorMainUI(
             elif action == 'copy_to_clipboard':
                 path = payload.get('path', '')
                 if path:
-                    clean = os.path.normpath(path.replace('file:///', ''))
+                    clean = _clean_path(path)
                     from PyQt6.QtGui import QPixmap
                     pix = QPixmap(clean)
                     if not pix.isNull():
@@ -705,7 +756,7 @@ class GeneratorMainUI(
             elif action == 'remove_favorite':
                 path = payload.get('path', '')
                 if path:
-                    clean = os.path.normpath(path.replace('file:///', ''))
+                    clean = _clean_path(path)
                     self._load_favorites_from_file()
                     if clean in self.favorites_list:
                         self.favorites_list.remove(clean)
@@ -774,11 +825,17 @@ class GeneratorMainUI(
                 if path:
                     self.vue_bridge.compareImageLoaded.emit(json.dumps({'slot': slot, 'path': path.replace('\\', '/')}))
 
+            elif action == 'open_url':
+                url = payload.get('url', '')
+                if url:
+                    import webbrowser
+                    webbrowser.open(url)
+
             elif action == 'send_to_compare':
                 path = payload.get('path', '')
                 slot = payload.get('slot', 'after')
                 if path:
-                    clean = path.replace('file:///', '').replace('\\', '/')
+                    clean = _clean_path(path).replace('\\', '/')
                     if clean.startswith('/') and ':' in clean[1:3]: clean = clean[1:]
                     self.vue_bridge.tabChanged.emit('png')
                     QTimer.singleShot(100, lambda: self.vue_bridge.compareImageLoaded.emit(json.dumps({'slot': slot, 'path': clean})))
@@ -789,13 +846,19 @@ class GeneratorMainUI(
                 try:
                     prefs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'ui_prefs.json')
                     os.makedirs(os.path.dirname(prefs_path), exist_ok=True)
+                    prefs = {}
+                    if os.path.exists(prefs_path):
+                        with open(prefs_path, 'r', encoding='utf-8') as f:
+                            loaded = json.load(f)
+                            if isinstance(loaded, dict):
+                                prefs = loaded
+                    prefs.update(payload)
                     with open(prefs_path, 'w', encoding='utf-8') as f:
-                        json.dump(payload, f, ensure_ascii=False, indent=2)
-                    # 저장 후 즉시 Vue로 재전송
-                    if hasattr(self, 'vue_bridge'):
-                        self.vue_bridge.uiPrefsLoaded.emit(json.dumps(payload))
-                except Exception:
-                    pass
+                        json.dump(prefs, f, ensure_ascii=False, indent=2)
+                    # 재전송 하지 않음 — uiPrefsLoaded는 앱 시작 시에만 emit
+                    # 재전송하면 watch → save → emit → watch 무한 루프 발생
+                except Exception as e:
+                    self.vue_bridge.showNotification.emit('error', f'UI 설정 저장 실패: {e}')
 
             # ═══════ 글로벌 가중치 저장 ═══════
             elif action == 'save_global_weights':
@@ -813,6 +876,13 @@ class GeneratorMainUI(
             elif action == 'set_lora_text':
                 lora_text = payload.get('lora_text', '')
                 self._vue_lora_text = lora_text
+
+            elif action == 'set_lora_stack':
+                entries = payload.get('entries', [])
+                self._vue_lora_entries = entries if isinstance(entries, list) else []
+                # Python lora_active_panel도 동기화
+                if hasattr(self, 'lora_active_panel') and hasattr(self.lora_active_panel, 'set_entries'):
+                    self.lora_active_panel.set_entries(self._vue_lora_entries)
 
             # ═══════ 조건부 프롬프트 저장 ═══════
             elif action == 'save_cond_rules':
@@ -1001,6 +1071,12 @@ class GeneratorMainUI(
                 self.model_combo.setCurrentText(str(settings['model']))
             if 'sampler' in settings and settings['sampler']:
                 self.sampler_combo.setCurrentText(str(settings['sampler']))
+            if 'active_loras' in settings:
+                self._vue_lora_entries = settings.get('active_loras', [])
+                if hasattr(self, 'lora_active_panel'):
+                    self.lora_active_panel.set_entries(self._vue_lora_entries)
+                if hasattr(self, 'vue_bridge'):
+                    self.vue_bridge.loraStackLoaded.emit(json.dumps(self._vue_lora_entries, ensure_ascii=False))
             if hasattr(self, 'vue_bridge'):
                 self.vue_bridge.endBatchUpdate()
             self.update_total_prompt_display()
@@ -1172,7 +1248,8 @@ class GeneratorMainUI(
                         self.vue_bridge.vramUpdated.emit(json.dumps({
                             'used': round(used, 1), 'total': round(total, 1), 'pct': pct
                         }))
-        except: pass
+        except Exception:
+            pass  # VRAM 모니터링은 비핵심 — GPU 미탑재 환경에서 실패 가능
 
     def closeEvent(self, event):
         from PyQt6.QtWidgets import QMessageBox as _QMB
@@ -1195,7 +1272,142 @@ class GeneratorMainUI(
         else:
             event.ignore()
 
+    # ── 이벤트 검색 (비동기) ──
+
+    def _start_event_search(self, payload):
+        """이벤트 검색을 비동기 워커로 실행 (진행도 포함)"""
+        loader = getattr(self.event_gen_tab, 'event_loader', None) if hasattr(self, 'event_gen_tab') else None
+
+        if loader is None:
+            # 데이터 자동 로드 후 검색
+            self._pending_event_payload = payload
+            self._auto_load_event_data(payload.get('ratings', ['g']))
+            return
+
+        self._run_event_search_worker(loader, payload)
+
+    def _auto_load_event_data(self, ratings):
+        """이벤트 데이터 자동 로드 (Vue 진행도 표시)"""
+        from tabs.event_gen_tab import EventDataLoadWorker
+        from config import EVENT_PARQUET_DIR
+
+        self.vue_bridge.searchStatus.emit('데이터 로딩 중...')
+
+        self._event_load_worker = EventDataLoadWorker(EVENT_PARQUET_DIR, ratings)
+        self._event_load_worker.progress.connect(
+            lambda msg: self.vue_bridge.searchStatus.emit(msg))
+        self._event_load_worker.finished.connect(self._on_event_data_loaded)
+        self._event_load_worker.start()
+
+    def _on_event_data_loaded(self, result):
+        """데이터 로드 완료 → 검색 시작"""
+        if isinstance(result, str):
+            self.vue_bridge.eventSearchResults.emit(json.dumps({'error': result}))
+            return
+
+        if hasattr(self, 'event_gen_tab'):
+            self.event_gen_tab.event_loader = result
+
+        payload = getattr(self, '_pending_event_payload', {})
+        if payload:
+            self._run_event_search_worker(result, payload)
+            self._pending_event_payload = {}
+
+    def _export_event_results(self, payload):
+        """이벤트 검색 결과를 .parquet로 내보내기"""
+        events = payload.get('events', [])
+        if not events:
+            self.vue_bridge.showNotification.emit('error', '내보낼 이벤트가 없습니다')
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "이벤트 내보내기", "event_results.parquet", "Parquet (*.parquet);;JSON (*.json)")
+        if not path:
+            return
+        try:
+            import pandas as pd
+            if path.endswith('.parquet'):
+                df = pd.DataFrame(events)
+                # steps 컬럼은 JSON 문자열로 저장
+                if 'steps' in df.columns:
+                    df['steps'] = df['steps'].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else x)
+                df.to_parquet(path, index=False)
+            else:
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(events, f, ensure_ascii=False, indent=2)
+            self.vue_bridge.showNotification.emit('success', f'이벤트 {len(events)}건 내보내기 완료')
+        except Exception as e:
+            self.vue_bridge.showNotification.emit('error', f'내보내기 실패: {e}')
+
+    def _import_event_results(self):
+        """이벤트 결과 .parquet/.json 불러오기"""
+        path, _ = QFileDialog.getOpenFileName(self, "이벤트 불러오기", "", "Parquet/JSON (*.parquet *.json)")
+        if not path:
+            return
+        try:
+            import pandas as pd
+            if path.endswith('.parquet'):
+                df = pd.read_parquet(path)
+                events = df.to_dict('records')
+                # steps 컬럼 JSON 파싱
+                for ev in events:
+                    if 'steps' in ev and isinstance(ev['steps'], str):
+                        try:
+                            ev['steps'] = json.loads(ev['steps'])
+                        except Exception:
+                            pass
+            else:
+                with open(path, 'r', encoding='utf-8') as f:
+                    events = json.load(f)
+            self.vue_bridge.eventImportResults.emit(json.dumps(events, ensure_ascii=False))
+        except Exception as e:
+            self.vue_bridge.showNotification.emit('error', f'불러오기 실패: {e}')
+
+    def _run_event_search_worker(self, loader, payload):
+        """검색 워커 실행"""
+        from workers.event_search_worker import EventSearchWorker
+        self._event_search_worker = EventSearchWorker(loader, payload, self)
+        self._event_search_worker.progress.connect(
+            lambda cur, total: self.vue_bridge.eventSearchProgress.emit(cur, total))
+        self._event_search_worker.finished.connect(
+            lambda r: self.vue_bridge.eventSearchResults.emit(r))
+        self._event_search_worker.start()
+        self.show_status("이벤트 검색 시작...")
+
+    # ── ADetailer 단독 실행 ──
+
+    def _run_adetailer_single(self, payload):
+        """단일 이미지에 ADetailer 적용"""
+        from workers.adetailer_worker import ADetailerSingleWorker
+        path = payload.get('path', '')
+        settings = payload.get('settings', {})
+        if not path:
+            self.vue_bridge.showNotification.emit('error', '이미지 경로가 없습니다')
+            return
+        self._ad_worker = ADetailerSingleWorker(path, settings, self)
+        self._ad_worker.finished.connect(lambda r: self.vue_bridge.adetailerResult.emit(r))
+        self._ad_worker.start()
+        self.vue_bridge.showNotification.emit('info', 'ADetailer 처리 중...')
+
+    def _run_adetailer_batch(self, payload):
+        """배치 이미지에 ADetailer 적용"""
+        from workers.adetailer_worker import ADetailerBatchWorker
+        paths = payload.get('paths', [])
+        settings = payload.get('settings', {})
+        if not paths:
+            self.vue_bridge.showNotification.emit('error', '이미지가 없습니다')
+            return
+        self._ad_batch_worker = ADetailerBatchWorker(paths, settings, self)
+        self._ad_batch_worker.progress.connect(
+            lambda cur, tot: self.vue_bridge.adetailerProgress.emit(cur, tot))
+        self._ad_batch_worker.single_done.connect(
+            lambda r: self.vue_bridge.adetailerResult.emit(r))
+        self._ad_batch_worker.all_done.connect(
+            lambda: self.vue_bridge.showNotification.emit('success', f'ADetailer 배치 완료 ({len(paths)}장)'))
+        self._ad_batch_worker.start()
+        self.vue_bridge.showNotification.emit('info', f'ADetailer 배치 시작 ({len(paths)}장)')
+
     def _quit_app(self):
-        try: self.save_settings()
-        except: pass
+        try:
+            self.save_settings()
+        except Exception as e:
+            print(f"[Warning] 종료 시 설정 저장 실패: {e}")
         os._exit(0)

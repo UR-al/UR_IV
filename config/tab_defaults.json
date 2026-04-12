@@ -1,6 +1,6 @@
 {
   "steps": 28,
-  "cfg": 5,
+  "cfg": 5.0,
   "width": 832,
   "height": 1216,
   "seed": "-1",

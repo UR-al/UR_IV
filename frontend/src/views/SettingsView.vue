@@ -132,10 +132,10 @@
               <div class="def-field"><span>Seed</span><input type="text" v-model="defaults.seed" /></div>
               <div class="def-field"><span>Denoising (I2I)</span><input type="number" v-model.number="defaults.denoising" step="0.05" /></div>
               <div class="def-field"><span>Sampler</span>
-                <select v-model="defaults.sampler"><option value="">Auto</option><option v-for="s in samplerList" :key="s" :value="s">{{ s }}</option></select>
+                <CustomSelect v-model="defaults.sampler" :options="['', ...samplerList]" placeholder="Auto" />
               </div>
               <div class="def-field"><span>Scheduler</span>
-                <select v-model="defaults.scheduler"><option value="">Auto</option><option v-for="s in schedulerList" :key="s" :value="s">{{ s }}</option></select>
+                <CustomSelect v-model="defaults.scheduler" :options="['', ...schedulerList]" placeholder="Auto" />
               </div>
             </div>
             <button class="btn-pill mt-12" @click="syncFromT2I">SYNC FROM T2I</button>
@@ -155,10 +155,7 @@
             <label>SEARCH 기본값</label>
             <div class="defaults-grid">
               <div class="def-field"><span>Default Rating</span>
-                <select v-model="defaults.defaultRating">
-                  <option value="g">General</option><option value="s">Sensitive</option>
-                  <option value="q">Questionable</option><option value="e">Explicit</option>
-                </select>
+                <CustomSelect v-model="defaults.defaultRating" :options="['g', 's', 'q', 'e']" placeholder="Rating" />
               </div>
             </div>
           </div>
@@ -184,11 +181,12 @@
             <div class="input-stack">
               <div class="input-unit">
                 <span class="unit-label">SERVER URL</span>
-                <input v-model="ollamaUrl" placeholder="http://localhost:11434" />
+                <input v-model="ollamaUrl" @change="saveOllamaSettings" placeholder="http://localhost:11434" />
               </div>
               <div class="input-unit mt-12">
                 <span class="unit-label">MODEL</span>
-                <input v-model="ollamaModel" placeholder="llama3, mistral, etc." />
+                <CustomSelect v-if="ollamaModels.length" v-model="ollamaModel" :options="ollamaModels" placeholder="모델 선택..." @update:modelValue="saveOllamaSettings" />
+                <input v-else v-model="ollamaModel" @change="saveOllamaSettings" placeholder="llama3.1, gemma3 등" />
               </div>
             </div>
             <div class="btn-row-2 mt-16">
@@ -196,8 +194,41 @@
               <button class="btn-pill" @click="loadOllamaModels">REFRESH MODELS</button>
             </div>
             <div class="info-row mt-12" v-if="ollamaModels.length">
-              <span class="desc">AVAILABLE MODELS</span>
-              <span class="val-badge">{{ ollamaModels.join(', ') }}</span>
+              <span class="desc">AVAILABLE MODELS ({{ ollamaModels.length }})</span>
+              <span class="val-badge">{{ ollamaModel }}</span>
+            </div>
+          </div>
+          <div class="glass-card mt-16">
+            <label>RECOMMENDED MODELS</label>
+            <div class="recommend-grid">
+              <div class="rec-item best">
+                <span class="rec-name">gemma3:4b</span>
+                <span class="rec-desc">가장 추천 — 빠르고 태그 품질 우수, VRAM 3GB</span>
+              </div>
+              <div class="rec-item">
+                <span class="rec-name">llama3.1:8b</span>
+                <span class="rec-desc">범용 고품질, 영어 태그 강점, VRAM 5GB</span>
+              </div>
+              <div class="rec-item">
+                <span class="rec-name">mistral:7b</span>
+                <span class="rec-desc">빠른 응답, 창의적 태그 변형에 강함, VRAM 5GB</span>
+              </div>
+              <div class="rec-item">
+                <span class="rec-name">phi4-mini:3.8b</span>
+                <span class="rec-desc">초경량, VRAM 부족 시 대안, VRAM 2.5GB</span>
+              </div>
+              <div class="rec-item">
+                <span class="rec-name">qwen3:8b</span>
+                <span class="rec-desc">다국어+태그 강점, thinking 모드, VRAM 5GB</span>
+              </div>
+              <div class="rec-item">
+                <span class="rec-name">gemma3:12b</span>
+                <span class="rec-desc">최고 품질, 여유 VRAM 시 추천, VRAM 8GB</span>
+              </div>
+            </div>
+            <div class="rec-note mt-12">
+              SD 이미지 생성과 동시 사용 시 VRAM을 공유하므로 4b 이하 경량 모델 권장.<br/>
+              <code>ollama pull gemma3:4b</code> 로 설치
             </div>
           </div>
           <div class="glass-card mt-16">
@@ -217,6 +248,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { requestAction, useWidgetStore } from '../stores/widgetStore.js'
+import CustomSelect from '../components/CustomSelect.vue'
 
 const subTabs = [
   { id: 'general', label: 'GENERAL', icon: '⚙️' },
@@ -259,6 +291,13 @@ onMounted(async () => {
       if (typeof prefs.cleanSpaces === 'boolean') cleanSpaces.value = prefs.cleanSpaces
       if (typeof prefs.cleanUnderscore === 'boolean') cleanUnderscore.value = prefs.cleanUnderscore
       if (typeof prefs.galleryShowMetadata === 'boolean') { galleryMetadata.value = prefs.galleryShowMetadata; window.localStorage.setItem('galleryShowMetadata', String(prefs.galleryShowMetadata)) }
+      if (Array.isArray(prefs.tabOrder) && prefs.tabOrder.length > 0) {
+        tabOrder.value = [...prefs.tabOrder]
+        window.localStorage.setItem('tabOrder', JSON.stringify(prefs.tabOrder))
+      }
+      // Ollama 설정 복원
+      if (prefs.ollamaUrl) { ollamaUrl.value = prefs.ollamaUrl; window.localStorage.setItem('ollamaUrl', prefs.ollamaUrl) }
+      if (prefs.ollamaModel) { ollamaModel.value = prefs.ollamaModel; window.localStorage.setItem('ollamaModel', prefs.ollamaModel) }
     } catch {}
   })
 })
@@ -268,22 +307,37 @@ function setBlockMode() {
 }
 
 const defaultOrder = ['T2I','I2I','Inpaint','Event Gen','Search','Batch / Upscale','Gallery','XYZ Plot','PNG Info','Favorites','Settings']
-const tabOrder = ref([...defaultOrder])
+function _loadTabOrder() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem('tabOrder') || '[]')
+    if (saved.length > 0) return saved
+  } catch {}
+  return [...defaultOrder]
+}
+const tabOrder = ref(_loadTabOrder())
 let dragIdx = -1
 
 function dragStart(i) { dragIdx = i }
+function persistTabOrder() {
+  window.localStorage.setItem('tabOrder', JSON.stringify(tabOrder.value))
+  requestAction('save_ui_prefs', { tabOrder: tabOrder.value })
+  requestAction('set_tab_order', { order: tabOrder.value })
+}
 function dragDrop(i) {
   if (dragIdx < 0) return
   const item = tabOrder.value.splice(dragIdx, 1)[0]
   tabOrder.value.splice(i, 0, item)
   dragIdx = -1
+  persistTabOrder()
 }
 const applyTabOrder = () => {
-  window.localStorage.setItem('tabOrder', JSON.stringify(tabOrder.value))
-  requestAction('set_tab_order', { order: tabOrder.value })
+  persistTabOrder()
   requestAction('show_toast', { type: 'success', msg: '탭 순서가 적용되었습니다' })
 }
-const resetTabOrder = () => tabOrder.value = [...defaultOrder]
+const resetTabOrder = () => {
+  tabOrder.value = [...defaultOrder]
+  persistTabOrder()
+}
 const act = (name) => {
   // SAVE GLOBAL 시 localStorage 설정도 함께 저장
   if (name === 'save_settings') {
@@ -300,6 +354,10 @@ const act = (name) => {
       ad_s2_enabled: stWidgets.ad_slot2_group === 'true',
       negpip_enabled: stWidgets.negpip_group === 'true',
       galleryShowMetadata: galleryMetadata.value,
+      tabOrder: tabOrder.value,
+      // Ollama
+      ollamaUrl: ollamaUrl.value,
+      ollamaModel: ollamaModel.value,
     })
   }
   requestAction(name)
@@ -340,22 +398,32 @@ async function syncFromT2I() {
 }
 
 // Ollama
-const ollamaUrl = ref('http://localhost:11434')
-const ollamaModel = ref('llama3')
+const ollamaUrl = ref(window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434')
+const ollamaModel = ref(window.localStorage.getItem('ollamaModel') || 'gemma3:4b')
 const ollamaModels = ref([])
+
+function saveOllamaSettings() {
+  window.localStorage.setItem('ollamaUrl', ollamaUrl.value)
+  window.localStorage.setItem('ollamaModel', ollamaModel.value)
+}
 
 async function testOllama() {
   const { getBackend } = await import('../bridge.js')
   const backend = await getBackend()
   if (backend.ollamaListModels) {
-    backend.ollamaListModels((json) => {
+    backend.ollamaListModels(ollamaUrl.value, (json) => {
       try {
         const models = JSON.parse(json)
         ollamaModels.value = models
         if (models.length > 0) {
           requestAction('show_toast', { type: 'success', msg: `Ollama 연결 성공! ${models.length}개 모델 발견` })
+          // 현재 선택 모델이 목록에 없으면 첫번째로 설정
+          if (!models.includes(ollamaModel.value)) {
+            ollamaModel.value = models[0]
+            saveOllamaSettings()
+          }
         } else {
-          requestAction('show_toast', { type: 'info', msg: 'Ollama 연결됨 — 모델 없음' })
+          requestAction('show_toast', { type: 'info', msg: 'Ollama 연결됨 — 설치된 모델 없음' })
         }
       } catch {
         requestAction('show_toast', { type: 'error', msg: 'Ollama 연결 실패' })
@@ -438,4 +506,22 @@ kbd { background: var(--bg-button); color: var(--accent); padding: 4px 10px; bor
 .def-field span { font-size: 10px; font-weight: 700; color: var(--text-muted); }
 .sync-badge { background: #4ade80; color: #000; padding: 1px 6px; border-radius: 4px; font-size: 8px; font-weight: 900; margin-left: 8px; }
 .def-field input, .def-field select { padding: 8px 10px; font-size: 12px; }
+
+/* Ollama */
+.model-select { width: 100%; padding: 10px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-base); color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.model-select:focus { border-color: var(--accent); outline: none; }
+
+.recommend-grid { display: flex; flex-direction: column; gap: 8px; }
+.rec-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius-base); transition: var(--transition);
+}
+.rec-item:hover { border-color: #444; }
+.rec-item.best { border-color: var(--accent-dim); background: rgba(250, 204, 21, 0.03); }
+.rec-name { font-size: 13px; font-weight: 800; color: var(--text-primary); min-width: 120px; font-family: 'Consolas', monospace; }
+.rec-item.best .rec-name { color: var(--accent); }
+.rec-desc { font-size: 11px; color: var(--text-muted); text-align: right; }
+.rec-note { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+.rec-note code { background: var(--bg-button); padding: 2px 8px; border-radius: 4px; font-size: 11px; color: var(--accent); }
 </style>

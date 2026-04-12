@@ -49,6 +49,9 @@ class SettingsMixin:
         model_val = self.model_combo.currentText() or self._get_existing_setting("model")
         sampler_val = self.sampler_combo.currentText() or self._get_existing_setting("sampler")
         scheduler_val = self.scheduler_combo.currentText() or self._get_existing_setting("scheduler")
+        active_loras = getattr(self, '_vue_lora_entries', None)
+        if not isinstance(active_loras, list):
+            active_loras = self.lora_active_panel.get_entries() if hasattr(self, 'lora_active_panel') else []
 
         settings = {
             "char_count": self.char_count_input.text(),
@@ -74,7 +77,7 @@ class SettingsMixin:
             "random_res_enabled": self.random_res_check.isChecked(),
             "random_resolutions": self.random_resolutions,
             "res_presets": self._res_presets if hasattr(self, '_res_presets') else [],
-            "active_loras": self.lora_active_panel.get_entries() if hasattr(self, 'lora_active_panel') else [],
+            "active_loras": active_loras,
 
             "hires_enabled": self.hires_options_group.isChecked(),
             "hires_upscaler": self.upscaler_combo.currentText() or self._get_existing_setting("hires_upscaler"),
@@ -214,6 +217,9 @@ class SettingsMixin:
             # LoRA 활성 목록 복원
             if hasattr(self, 'lora_active_panel') and "active_loras" in settings:
                 self.lora_active_panel.set_entries(settings["active_loras"])
+            self._vue_lora_entries = settings.get("active_loras", [])
+            if hasattr(self, 'vue_bridge'):
+                self.vue_bridge.loraStackLoaded.emit(json.dumps(self._vue_lora_entries, ensure_ascii=False))
 
             # 랜덤 해상도
             self.random_res_check.setChecked(settings.get("random_res_enabled", False))

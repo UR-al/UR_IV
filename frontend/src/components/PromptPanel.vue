@@ -18,7 +18,10 @@
         <div v-for="c in promptConflicts" :key="c.group" class="conflict-item">⚠ {{ c.group }}: {{ c.tags.join(', ') }}</div>
       </div>
       <details class="neg-section">
-        <summary class="danger-label neg-toggle">NEGATIVE ▾</summary>
+        <summary class="danger-label neg-toggle">
+          NEGATIVE ▾
+          <button class="ai-btn neg-ai" @click.prevent.stop="runSmartNegative()" :disabled="ollamaLoading" title="AI 네거티브 자동 생성">🤖</button>
+        </summary>
         <TagBlockField v-if="tagBlockMode" v-model="widgets.neg_prompt_text" :color-fn="() => 'neg'" class="neg" placeholder="네거티브 추가..." />
         <textarea v-else ref="negRef" v-model="widgets.neg_prompt_text" class="neg-prompt auto-grow" placeholder="Negative prompt..." @input="autoGrow($event.target)"></textarea>
       </details>
@@ -421,11 +424,52 @@ const ollamaLoading = ref(false)
 const ollamaMode = ref('expand')
 const showNlInput = ref(false)
 const nlPrompt = ref('')
+let ollamaTimer = null
 async function runOllama() {
+  const tags = widgets.main_prompt_text || ''
+  if (!tags.trim() && ollamaMode.value !== 'nl2tags') {
+    requestAction('show_toast', { type: 'info', msg: '프롬프트를 먼저 입력하세요' })
+    return
+  }
+  if (ollamaMode.value === 'nl2tags' && !nlPrompt.value.trim()) {
+    requestAction('show_toast', { type: 'info', msg: '자연어 설명을 입력하세요' })
+    return
+  }
   ollamaLoading.value = true
+  // 60초 타임아웃 안전장치
+  clearTimeout(ollamaTimer)
+  ollamaTimer = setTimeout(() => {
+    if (ollamaLoading.value) {
+      ollamaLoading.value = false
+      requestAction('show_toast', { type: 'error', msg: 'AI 응답 시간 초과 (60초) — Ollama 서버 상태를 확인하세요' })
+    }
+  }, 65000)
   const backend = await getBackend()
-  if (!backend.ollamaEnhance) { ollamaLoading.value = false; return }
-  backend.ollamaEnhance(widgets.main_prompt_text || '', ollamaMode.value, JSON.stringify({ prompt: nlPrompt.value }))
+  if (!backend.ollamaEnhance) { ollamaLoading.value = false; clearTimeout(ollamaTimer); return }
+  const url = window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
+  const model = window.localStorage.getItem('ollamaModel') || 'gemma3:4b'
+  backend.ollamaEnhance(tags, ollamaMode.value, JSON.stringify({ prompt: nlPrompt.value, url, model }))
+}
+
+async function runSmartNegative() {
+  const positivePrompt = widgets.total_prompt_display || widgets.main_prompt_text || ''
+  if (!positivePrompt.trim()) {
+    requestAction('show_toast', { type: 'info', msg: '포지티브 프롬프트를 먼저 입력하세요' })
+    return
+  }
+  ollamaLoading.value = true
+  clearTimeout(ollamaTimer)
+  ollamaTimer = setTimeout(() => {
+    if (ollamaLoading.value) {
+      ollamaLoading.value = false
+      requestAction('show_toast', { type: 'error', msg: 'AI 응답 시간 초과' })
+    }
+  }, 65000)
+  const backend = await getBackend()
+  if (!backend.ollamaEnhance) { ollamaLoading.value = false; clearTimeout(ollamaTimer); return }
+  const url = window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
+  const model = window.localStorage.getItem('ollamaModel') || 'gemma3:4b'
+  backend.ollamaEnhance(positivePrompt, 'negative', JSON.stringify({ url, model }))
 }
 
 // 자동완성
@@ -485,7 +529,29 @@ onMounted(() => {
   })
   onBackendEvent('ollamaResult', (json) => {
     ollamaLoading.value = false
-    try { const d = JSON.parse(json); if (d.error) { alert('AI Error: ' + d.error); return }; if (d.tags) { widgets.main_prompt_text = d.tags; showNlInput.value = false; nlPrompt.value = '' } } catch {}
+    clearTimeout(ollamaTimer)
+    try {
+      const d = JSON.parse(json)
+      if (d.error) {
+        const msg = d.error.includes('연결') ? 'Ollama 서버에 연결할 수 없습니다' :
+                    d.error.includes('시간') || d.error.includes('Timeout') ? 'AI 응답 시간 초과' :
+                    `AI 오류: ${d.error}`
+        requestAction('show_toast', { type: 'error', msg })
+        return
+      }
+      if (d.tags) {
+        if (d.mode === 'negative') {
+          const existing = (widgets.neg_prompt_text || '').trim()
+          widgets.neg_prompt_text = existing ? existing.replace(/,?\s*$/, '') + ', ' + d.tags : d.tags
+          requestAction('show_toast', { type: 'success', msg: 'AI 네거티브 생성 완료' })
+        } else {
+          widgets.main_prompt_text = d.tags
+          showNlInput.value = false
+          nlPrompt.value = ''
+          requestAction('show_toast', { type: 'success', msg: `AI ${d.mode === 'nl2tags' ? '변환' : d.mode === 'suggest' ? '추천' : '확장'} 완료` })
+        }
+      }
+    } catch {}
   })
 })
 
@@ -511,8 +577,10 @@ summary::-webkit-details-marker { display: none; }
 .lock-btn.locked { opacity: 1; }
 .total-prompt { min-height: 60px; font-family: 'Consolas', monospace; font-size: 12px; line-height: 1.5; color: var(--accent); border-color: var(--accent-dim); }
 .neg-section { margin-top: 8px; }
-.neg-toggle { cursor: pointer; list-style: none; }
+.neg-toggle { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; }
 .neg-toggle::-webkit-details-marker { display: none; }
+.neg-ai { font-size: 12px !important; padding: 2px 6px !important; opacity: 0.6; }
+.neg-ai:hover { opacity: 1; }
 .danger-label { color: #f87171; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
 .neg-prompt { min-height: 30px; color: #f87171; border-color: rgba(248,113,113,0.2); }
 .auto-grow { resize: none; overflow: hidden; min-height: 32px; }

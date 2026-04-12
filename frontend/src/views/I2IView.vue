@@ -33,12 +33,7 @@
           </div>
 
           <label class="mt-12">Resize Mode</label>
-          <select v-model="resizeMode">
-            <option value="0">JUST RESIZE</option>
-            <option value="1">CROP AND RESIZE</option>
-            <option value="2">RESIZE AND FILL</option>
-            <option value="3">LATENT RESIZE</option>
-          </select>
+          <CustomSelect v-model="resizeModeLabel" :options="resizeModeOptions" placeholder="Resize Mode" />
 
           <div class="grid-2 mt-12">
             <div class="input-unit">
@@ -98,9 +93,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
 import { getBackend, onBackendEvent } from '../bridge.js'
+import CustomSelect from '../components/CustomSelect.vue'
 
 const isDragging = ref(false)
 const imageSrc = ref('')
@@ -110,6 +106,11 @@ const prompt = ref('')
 const negPrompt = ref('')
 const denoising = ref(0.75)
 const resizeMode = ref('0')
+const resizeModeOptions = ['JUST RESIZE', 'CROP AND RESIZE', 'RESIZE AND FILL', 'LATENT RESIZE']
+const resizeModeLabel = computed({
+  get: () => resizeModeOptions[parseInt(resizeMode.value)] || resizeModeOptions[0],
+  set: v => { resizeMode.value = String(resizeModeOptions.indexOf(v)) }
+})
 const width = ref('1024')
 const height = ref('1024')
 const steps = ref(20)

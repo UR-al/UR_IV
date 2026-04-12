@@ -55,7 +55,18 @@
                 <label>RAW</label>
                 <pre>{{ viewerData.raw }}</pre>
               </div>
-              <div v-if="viewerParams" class="vi-section">
+              <div v-if="viewerData.params" class="vi-section">
+                <label>PARAMETERS</label>
+                <div class="params-grid">
+                  <div class="param-line" v-if="viewerData.params.generation"><span class="pl">GEN</span><span>{{ viewerData.params.generation }}</span></div>
+                  <div class="param-line" v-if="viewerData.params.core"><span class="pl">CORE</span><span>{{ viewerData.params.core }}</span></div>
+                  <div class="param-line" v-if="viewerData.params.model"><span class="pl">MODEL</span><span>{{ viewerData.params.model }}</span></div>
+                  <div class="param-line" v-if="viewerData.params.hires"><span class="pl">HIRES</span><span>{{ viewerData.params.hires }}</span></div>
+                  <div class="param-line" v-if="viewerData.params.extensions"><span class="pl">EXT</span><span>{{ viewerData.params.extensions }}</span></div>
+                  <div class="param-line" v-if="viewerData.params.other"><span class="pl">ETC</span><span>{{ viewerData.params.other }}</span></div>
+                </div>
+              </div>
+              <div v-else-if="viewerParams" class="vi-section">
                 <label>PARAMETERS</label>
                 <pre>{{ viewerParams }}</pre>
               </div>
@@ -208,6 +219,11 @@ onUnmounted(() => document.removeEventListener('click', hideMenu))
 .vi-section label { color: #E2B340; font-size: 10px; font-weight: 700; display: block; margin-bottom: 4px; }
 .vi-section label.neg { color: #f87171; }
 .vi-section pre { color: #B0B0B0; font-size: 11px; white-space: pre-wrap; word-break: break-all; background: #111; padding: 8px; border-radius: 4px; margin: 0; max-height: 200px; overflow-y: auto; }
+
+.params-grid { background: #111; border-radius: 4px; padding: 6px 8px; }
+.param-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 11px; color: #B0B0B0; border-bottom: 1px solid #1a1a1a; font-family: 'Consolas', monospace; }
+.param-line:last-child { border-bottom: none; }
+.pl { font-size: 9px; font-weight: 900; color: #E2B340; letter-spacing: 1px; min-width: 45px; flex-shrink: 0; }
 .vi-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
 .vi-btn { padding: 6px 12px; background: #181818; border: none; border-radius: 4px; color: #787878; font-size: 11px; cursor: pointer; }
 .vi-btn:hover { background: #222; color: #E8E8E8; }

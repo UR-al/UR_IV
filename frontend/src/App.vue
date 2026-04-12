@@ -18,6 +18,7 @@
               <button class="tool-btn" @click="showWeightManager = true">WEIGHT</button>
               <button class="tool-btn" @click="showWcManager = true">WILDCARD</button>
               <button class="tool-btn" @click="action('ab_test')">A/B TEST</button>
+              <button class="tool-btn" @click="showStatsModal = true; loadGenStats()">STATS</button>
             </div>
           </div>
 
@@ -34,10 +35,7 @@
             <div class="auto-row">
               <label>{{ autoSettings.mode === 'count' ? '횟수' : '시간(분)' }}</label>
               <input type="number" v-model.number="autoSettings.limit" min="1" class="auto-input" />
-              <select v-model="autoSettings.mode" class="auto-select">
-                <option value="count">횟수</option>
-                <option value="timer">시간</option>
-              </select>
+              <CustomSelect v-model="autoSettings.mode" :options="['count', 'timer']" placeholder="모드" class="auto-select" />
             </div>
             <div class="auto-row">
               <label>반복</label>
@@ -47,9 +45,19 @@
             </div>
             <label class="auto-check"><input type="checkbox" v-model="autoSettings.allowDupes" /><span>중복 허용</span></label>
           </div>
-          <button class="btn-generate" @click="doGenerate" :disabled="isGenerating">
-            {{ isGenerating ? 'GENERATING...' : autoMode ? 'START AUTOMATION' : 'GENERATE IMAGE' }}
-          </button>
+          <!-- 자동화 상태 표시 -->
+          <div class="auto-status" v-if="isAutomating">
+            <div class="auto-status-bar">
+              <span class="auto-pulse"></span>
+              <span>자동화 진행 중 — {{ autoGenCount }}장 완료</span>
+            </div>
+            <div class="auto-status-sub" v-if="autoWaiting">대기 중... ({{ autoSettings.delay }}초)</div>
+          </div>
+          <div class="generate-row">
+            <button class="btn-generate" :class="{ automating: isAutomating }" @click="doGenerate" :disabled="isGenerating && !isAutomating">
+              {{ isAutomating ? '⏹ STOP AUTOMATION' : isGenerating ? 'GENERATING...' : autoMode ? '▶ START AUTOMATION' : 'GENERATE IMAGE' }}
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -79,8 +87,25 @@
                   <button class="ext-mini-btn" @click="action('swap_resolution')">↔</button>
                 </div>
                 <div class="ext-res-opts">
-                  <label class="ext-check-row"><input type="checkbox" v-model="randomResEnabled" /><span>랜덤 해상도</span></label>
-                  <label class="ext-check-row"><input type="checkbox" v-model="autoResEnabled" /><span>자동 해상도 (Parquet)</span></label>
+                  <label class="ext-check-sm"><input type="checkbox" v-model="randomResEnabled" /><span>랜덤</span></label>
+                  <label class="ext-check-sm"><input type="checkbox" v-model="autoResEnabled" /><span>자동(Parquet)</span></label>
+                </div>
+                <!-- 랜덤 해상도 편집기 -->
+                <div v-if="randomResEnabled" class="rand-res-editor">
+                  <div class="rand-res-list">
+                    <div v-for="(r, i) in randomResList" :key="i" class="rand-res-item">
+                      <span class="rand-res-val">{{ r[0] }}×{{ r[1] }}</span>
+                      <span class="rand-res-desc">{{ r[2] }}</span>
+                      <button class="rand-res-del" @click="removeRandomRes(i)">✕</button>
+                    </div>
+                    <div v-if="!randomResList.length" class="rand-res-empty">해상도를 추가하세요</div>
+                  </div>
+                  <div class="rand-res-add">
+                    <input type="number" v-model.number="newResW" placeholder="W" class="rand-res-input" />
+                    <span>×</span>
+                    <input type="number" v-model.number="newResH" placeholder="H" class="rand-res-input" />
+                    <button class="rand-res-btn" @click="addRandomRes">+</button>
+                  </div>
                 </div>
               </div>
               <div class="ext-row">
@@ -111,8 +136,28 @@
                 <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets.hires_denoising_input" step="0.05" /></div>
               </div>
               <div class="ext-row">
-                <div class="ext-field"><label>Scale</label><input type="number" v-model="storeWidgets.hires_scale_input" step="0.1" /></div>
+                <div class="ext-field"><label>Scale</label><input type="number" v-model="storeWidgets.hires_scale_input" step="0.1" min="1" /></div>
                 <div class="ext-field"><label>CFG (0=off)</label><input type="number" v-model="storeWidgets.hires_cfg_input" step="0.5" /></div>
+              </div>
+            </details>
+
+            <details class="ext-card" open>
+              <summary class="ext-title">PROMPT FILTERS</summary>
+              <!-- Rating 토글 -->
+              <div class="ext-sub-title">RATING FILTER</div>
+              <div class="rating-toggle-row">
+                <button v-for="r in ratingFilters" :key="r.key" class="rating-toggle"
+                  :class="{ active: r.on }" @click="r.on = !r.on; saveRatingFilter()">{{ r.label }}</button>
+              </div>
+              <div class="ext-toggle-grid">
+                <label class="ext-check-row"><input type="checkbox" v-model="removeCharacter" /><span>캐릭터 제거</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="removeCharacterFeatures" /><span>캐릭터 특징 제거</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="removeCopyright" /><span>작품 제거</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="removeArtist" /><span>작가 제거</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="removeMeta" /><span>메타 제거</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="removeCensorship" /><span>검열 제거</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="removeText" /><span>텍스트 제거</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="autoCharFeatures" /><span>특징 자동 추가</span></label>
               </div>
             </details>
 
@@ -127,11 +172,43 @@
                 <CustomSelect v-model="storeWidgets._ad_s1_model" :options="adModelItems" placeholder="AD Model..." /></div>
               <div class="ext-field"><label>Prompt</label>
                 <input type="text" v-model="storeWidgets._ad_s1_prompt" placeholder="ADetailer prompt..." /></div>
+              <div class="ext-field"><label>Negative Prompt</label>
+                <input type="text" v-model="storeWidgets._ad_s1_neg" placeholder="AD negative..." /></div>
               <div class="ext-row">
-                <div class="ext-field"><label>Confidence</label><input type="number" v-model="storeWidgets._ad_s1_confidence" step="0.05" /></div>
-                <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets._ad_s1_denoise" step="0.05" /></div>
-                <div class="ext-field"><label>Mask Blur</label><input type="number" v-model="storeWidgets._ad_s1_mask_blur" /></div>
+                <div class="ext-field"><label>Confidence</label><input type="number" v-model="storeWidgets._ad_s1_confidence" step="0.05" min="0" max="1" /></div>
+                <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets._ad_s1_denoise" step="0.05" min="0" max="1" /></div>
               </div>
+              <div class="ext-row">
+                <div class="ext-field"><label>Mask Blur</label><input type="number" v-model="storeWidgets._ad_s1_mask_blur" min="0" /></div>
+                <div class="ext-field"><label>Padding</label><input type="number" v-model="storeWidgets._ad_s1_padding" min="0" /></div>
+                <div class="ext-field"><label>Dilate/Erode</label><input type="number" v-model="storeWidgets._ad_s1_dilate_erode" /></div>
+              </div>
+              <div class="ext-field"><label>Mask Merge</label>
+                <CustomSelect v-model="storeWidgets._ad_s1_mask_merge" :options="['None', 'Merge', 'Merge and Invert']" placeholder="None" /></div>
+              <!-- Separate settings -->
+              <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s1_use_inp_size" true-value="true" false-value="false" /><span>별도 Inpaint 크기</span></label>
+              <div class="ext-row" v-if="storeWidgets._ad_s1_use_inp_size === 'true'">
+                <div class="ext-field"><label>Width</label><input type="number" v-model="storeWidgets._ad_s1_inp_w" /></div>
+                <div class="ext-field"><label>Height</label><input type="number" v-model="storeWidgets._ad_s1_inp_h" /></div>
+              </div>
+              <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s1_use_steps" true-value="true" false-value="false" /><span>별도 Steps</span></label>
+              <div class="ext-row" v-if="storeWidgets._ad_s1_use_steps === 'true'">
+                <div class="ext-field"><label>Steps</label><input type="number" v-model="storeWidgets._ad_s1_steps" min="1" /></div>
+              </div>
+              <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s1_use_cfg" true-value="true" false-value="false" /><span>별도 CFG</span></label>
+              <div class="ext-row" v-if="storeWidgets._ad_s1_use_cfg === 'true'">
+                <div class="ext-field"><label>CFG</label><input type="number" v-model="storeWidgets._ad_s1_cfg" step="0.5" /></div>
+              </div>
+              <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s1_use_sampler" true-value="true" false-value="false" /><span>별도 Sampler</span></label>
+              <div class="ext-row" v-if="storeWidgets._ad_s1_use_sampler === 'true'">
+                <div class="ext-field"><label>Sampler</label>
+                  <CustomSelect v-model="storeWidgets._ad_s1_sampler" :options="samplerItems" placeholder="Sampler" /></div>
+                <div class="ext-field"><label>Scheduler</label>
+                  <CustomSelect v-model="storeWidgets._ad_s1_scheduler" :options="schedulerItems" placeholder="Scheduler" /></div>
+              </div>
+              <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s1_use_ckpt" true-value="true" false-value="false" /><span>별도 Checkpoint</span></label>
+              <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s1_use_vae" true-value="true" false-value="false" /><span>별도 VAE</span></label>
+
               <!-- Slot 2 -->
               <details class="ext-sub">
                 <summary>Slot 2</summary>
@@ -140,10 +217,41 @@
                   <CustomSelect v-model="storeWidgets._ad_s2_model" :options="adModelItems" placeholder="AD Model..." /></div>
                 <div class="ext-field"><label>Prompt</label>
                   <input type="text" v-model="storeWidgets._ad_s2_prompt" placeholder="Slot 2 prompt..." /></div>
+                <div class="ext-field"><label>Negative Prompt</label>
+                  <input type="text" v-model="storeWidgets._ad_s2_neg" placeholder="AD negative..." /></div>
                 <div class="ext-row">
-                  <div class="ext-field"><label>Confidence</label><input type="number" v-model="storeWidgets._ad_s2_confidence" step="0.05" /></div>
-                  <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets._ad_s2_denoise" step="0.05" /></div>
+                  <div class="ext-field"><label>Confidence</label><input type="number" v-model="storeWidgets._ad_s2_confidence" step="0.05" min="0" max="1" /></div>
+                  <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets._ad_s2_denoise" step="0.05" min="0" max="1" /></div>
                 </div>
+                <div class="ext-row">
+                  <div class="ext-field"><label>Mask Blur</label><input type="number" v-model="storeWidgets._ad_s2_mask_blur" min="0" /></div>
+                  <div class="ext-field"><label>Padding</label><input type="number" v-model="storeWidgets._ad_s2_padding" min="0" /></div>
+                  <div class="ext-field"><label>Dilate/Erode</label><input type="number" v-model="storeWidgets._ad_s2_dilate_erode" /></div>
+                </div>
+                <div class="ext-field"><label>Mask Merge</label>
+                  <CustomSelect v-model="storeWidgets._ad_s2_mask_merge" :options="['None', 'Merge', 'Merge and Invert']" placeholder="None" /></div>
+                <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s2_use_inp_size" true-value="true" false-value="false" /><span>별도 Inpaint 크기</span></label>
+                <div class="ext-row" v-if="storeWidgets._ad_s2_use_inp_size === 'true'">
+                  <div class="ext-field"><label>Width</label><input type="number" v-model="storeWidgets._ad_s2_inp_w" /></div>
+                  <div class="ext-field"><label>Height</label><input type="number" v-model="storeWidgets._ad_s2_inp_h" /></div>
+                </div>
+                <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s2_use_steps" true-value="true" false-value="false" /><span>별도 Steps</span></label>
+                <div class="ext-row" v-if="storeWidgets._ad_s2_use_steps === 'true'">
+                  <div class="ext-field"><label>Steps</label><input type="number" v-model="storeWidgets._ad_s2_steps" min="1" /></div>
+                </div>
+                <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s2_use_cfg" true-value="true" false-value="false" /><span>별도 CFG</span></label>
+                <div class="ext-row" v-if="storeWidgets._ad_s2_use_cfg === 'true'">
+                  <div class="ext-field"><label>CFG</label><input type="number" v-model="storeWidgets._ad_s2_cfg" step="0.5" /></div>
+                </div>
+                <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s2_use_sampler" true-value="true" false-value="false" /><span>별도 Sampler</span></label>
+                <div class="ext-row" v-if="storeWidgets._ad_s2_use_sampler === 'true'">
+                  <div class="ext-field"><label>Sampler</label>
+                    <CustomSelect v-model="storeWidgets._ad_s2_sampler" :options="samplerItems" placeholder="Sampler" /></div>
+                  <div class="ext-field"><label>Scheduler</label>
+                    <CustomSelect v-model="storeWidgets._ad_s2_scheduler" :options="schedulerItems" placeholder="Scheduler" /></div>
+                </div>
+                <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s2_use_ckpt" true-value="true" false-value="false" /><span>별도 Checkpoint</span></label>
+                <label class="ext-check-row"><input type="checkbox" v-model="storeWidgets._ad_s2_use_vae" true-value="true" false-value="false" /><span>별도 VAE</span></label>
               </details>
             </details>
 
@@ -171,7 +279,13 @@
               </div>
               <div v-for="(lora, i) in loraStack" :key="i" class="lora-block">
                 <label class="lora-check"><input type="checkbox" v-model="lora.enabled" /></label>
-                <div class="lora-name">{{ lora.name }}</div>
+                <div class="lora-info-col">
+                  <div class="lora-name">{{ lora.name }}</div>
+                  <div class="lora-triggers" v-if="lora.triggerWords && lora.triggerWords.length">
+                    <button v-for="tw in lora.triggerWords" :key="tw" class="trigger-chip"
+                      @click="insertTriggerWord(tw)" :title="'클릭하여 프롬프트에 삽입'">{{ tw }}</button>
+                  </div>
+                </div>
                 <input type="range" min="-100" max="200" v-model.number="lora.weight" class="lora-slider" />
                 <span class="lora-weight">{{ (lora.weight / 100).toFixed(2) }}</span>
                 <button class="lora-remove" @click="loraStack.splice(i, 1)">✕</button>
@@ -204,7 +318,16 @@
               {{ tab.label }}
             </button>
           </div>
-          <div class="exif-content">{{ exifContent }}</div>
+          <div class="exif-content" v-if="activeExifTab !== 'params'">{{ exifContent }}</div>
+          <div class="exif-params" v-else-if="currentExif.params">
+            <div class="param-line" v-if="currentExif.params.generation"><span class="pl">GEN</span>{{ currentExif.params.generation }}</div>
+            <div class="param-line" v-if="currentExif.params.core"><span class="pl">CORE</span>{{ currentExif.params.core }}</div>
+            <div class="param-line" v-if="currentExif.params.model"><span class="pl">MODEL</span>{{ currentExif.params.model }}</div>
+            <div class="param-line" v-if="currentExif.params.hires"><span class="pl">HIRES</span>{{ currentExif.params.hires }}</div>
+            <div class="param-line" v-if="currentExif.params.extensions"><span class="pl">EXT</span>{{ currentExif.params.extensions }}</div>
+            <div class="param-line other" v-if="currentExif.params.other"><span class="pl">ETC</span>{{ currentExif.params.other }}</div>
+          </div>
+          <div class="exif-content" v-else>{{ currentExif.params_line || currentExif.raw || 'No parameters' }}</div>
         </div>
       </section>
 
@@ -235,6 +358,7 @@
             <div class="ctx-item" @click="ctxSendEditor">✏️ SEND TO EDITOR</div>
             <div class="ctx-item" @click="ctxCompare('before')">🔍 COMPARE (BEFORE)</div>
             <div class="ctx-item" @click="ctxCompare('after')">🔍 COMPARE (AFTER)</div>
+            <div class="ctx-item" @click="ctxRunAdetailer">🎯 ADETAILER</div>
             <div class="ctx-separator"></div>
             <div class="ctx-item" @click="ctxCopyPath">📋 COPY PATH</div>
             <div class="ctx-item delete" @click="ctxDelete">🗑️ DELETE</div>
@@ -356,12 +480,7 @@
                 </div>
                 <!-- 하단: 삽입 + 저장 -->
                 <div class="wc-bottom-bar">
-                  <select v-model="wcInsertTarget" class="wc-insert-sel">
-                    <option value="main">Main Tags</option>
-                    <option value="prefix">Prefix</option>
-                    <option value="suffix">Suffix</option>
-                    <option value="clipboard">클립보드</option>
-                  </select>
+                  <CustomSelect v-model="wcInsertTarget" :options="['main', 'prefix', 'suffix', 'clipboard']" placeholder="삽입 위치" class="wc-insert-sel" />
                   <button class="wc-use-btn" @click="useWcSyntax">USE</button>
                   <div class="wc-spacer"></div>
                   <button class="wc-save-btn" @click="saveCurrentWildcard">💾 SAVE</button>
@@ -369,6 +488,86 @@
               </template>
               <div v-else class="wc-empty">좌측에서 와일드카드를 선택하거나 NEW를 클릭하세요</div>
             </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Generation Stats Modal -->
+    <transition name="fade">
+      <div v-if="showStatsModal" class="stats-overlay" @click.self="showStatsModal = false">
+        <div class="stats-modal">
+          <div class="stats-header">
+            <h3>GENERATION STATISTICS</h3>
+            <button class="close-btn" @click="showStatsModal = false">X</button>
+          </div>
+          <div class="stats-body" v-if="genStats.total > 0">
+            <div class="stats-cards">
+              <div class="stat-card">
+                <div class="stat-val">{{ genStats.total }}</div>
+                <div class="stat-label">Total</div>
+              </div>
+              <div class="stat-card accent">
+                <div class="stat-val">{{ genStats.success_rate }}%</div>
+                <div class="stat-label">Success</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-val">{{ genStats.avg_time }}s</div>
+                <div class="stat-label">Avg Time</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-val">{{ formatTime(genStats.total_time) }}</div>
+                <div class="stat-label">Total Time</div>
+              </div>
+            </div>
+
+            <div class="stats-section" v-if="genStats.daily && genStats.daily.length">
+              <h4>DAILY GENERATIONS (30 days)</h4>
+              <div class="daily-chart">
+                <div v-for="d in genStats.daily" :key="d.date" class="daily-bar-wrap"
+                  :title="d.date + ': ' + d.count + '장'">
+                  <div class="daily-bar" :style="{ height: genStats.daily_max ? (d.count / genStats.daily_max * 100) + '%' : '0%' }"></div>
+                </div>
+              </div>
+              <div class="daily-labels">
+                <span>30일 전</span><span>오늘</span>
+              </div>
+            </div>
+
+            <div class="stats-two-col">
+              <div class="stats-section" v-if="genStats.top_models && genStats.top_models.length">
+                <h4>TOP MODELS</h4>
+                <div v-for="m in genStats.top_models" :key="m.name" class="stats-bar-row">
+                  <span class="bar-name">{{ m.name }}</span>
+                  <div class="bar-track"><div class="bar-fill" :style="{ width: (m.count / genStats.total * 100) + '%' }"></div></div>
+                  <span class="bar-count">{{ m.count }}</span>
+                </div>
+              </div>
+              <div class="stats-section" v-if="genStats.top_resolutions && genStats.top_resolutions.length">
+                <h4>TOP RESOLUTIONS</h4>
+                <div v-for="r in genStats.top_resolutions" :key="r.res" class="stats-bar-row">
+                  <span class="bar-name">{{ r.res }}</span>
+                  <div class="bar-track"><div class="bar-fill" :style="{ width: (r.count / genStats.total * 100) + '%' }"></div></div>
+                  <span class="bar-count">{{ r.count }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="stats-section" v-if="genStats.recent && genStats.recent.length">
+              <h4>RECENT GENERATIONS</h4>
+              <div class="recent-table">
+                <div v-for="r in genStats.recent" :key="r.timestamp" class="recent-row">
+                  <span class="r-time">{{ r.timestamp?.slice(5, 16).replace('T', ' ') }}</span>
+                  <span class="r-status" :class="r.success ? 'ok' : 'fail'">{{ r.success ? 'OK' : 'FAIL' }}</span>
+                  <span class="r-dur">{{ r.duration_sec }}s</span>
+                  <span class="r-res">{{ r.width }}x{{ r.height }}</span>
+                  <span class="r-model">{{ (r.model || '').split('/').pop()?.slice(0, 20) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="stats-body stats-empty" v-else>
+            <div class="stats-empty-msg">아직 생성 기록이 없습니다</div>
           </div>
         </div>
       </div>
@@ -385,7 +584,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
 import { initBridge, onBackendEvent, getBackend } from './bridge.js'
 import { requestAction, useWidgetStore } from './stores/widgetStore.js'
 
@@ -397,11 +596,65 @@ const upscalerItems = computed(() => wStore.getProperty('upscaler_combo', 'items
 const adModelItems = ref([])
 
 // Hires/ADetailer 체크박스 (proxy 연동)
-const randomResEnabled = computed({ get: () => storeWidgets.random_res_check === 'true', set: v => { storeWidgets.random_res_check = v ? 'true' : 'false' } })
+const randomResEnabled = computed({ get: () => storeWidgets.random_res_check === 'true', set: v => { storeWidgets.random_res_check = v ? 'true' : 'false'; if (v) loadRandomResList() } })
 const autoResEnabled = computed({ get: () => storeWidgets.auto_res_check === 'true', set: v => { storeWidgets.auto_res_check = v ? 'true' : 'false' } })
+
+// 랜덤 해상도 관리
+const randomResList = ref([])
+const newResW = ref(832)
+const newResH = ref(1216)
+async function loadRandomResList() {
+  const bk = await getBackend()
+  if (bk.getRandomResolutions) {
+    bk.getRandomResolutions((json) => {
+      try { randomResList.value = JSON.parse(json) } catch {}
+    })
+  }
+}
+function addRandomRes() {
+  const w = Math.round((newResW.value || 832) / 8) * 8
+  const h = Math.round((newResH.value || 1216) / 8) * 8
+  if (w < 256 || h < 256) return
+  randomResList.value.push([w, h, `${w}x${h}`])
+  requestAction('set_random_resolutions', { list: randomResList.value })
+}
+function removeRandomRes(i) {
+  randomResList.value.splice(i, 1)
+  requestAction('set_random_resolutions', { list: randomResList.value })
+}
 const negpipEnabled = computed({ get: () => storeWidgets.negpip_group === 'true', set: v => { storeWidgets.negpip_group = v ? 'true' : 'false' } })
 
 const hires_enabled = computed({ get: () => storeWidgets.hires_options_group === 'true', set: v => { storeWidgets.hires_options_group = v ? 'true' : 'false' } })
+// Rating 필터
+const ratingFilters = reactive([
+  { key: 'g', label: 'G', on: true },
+  { key: 's', label: 'S', on: true },
+  { key: 'q', label: 'Q', on: false },
+  { key: 'e', label: 'E', on: false },
+])
+// localStorage에서 복원
+try {
+  const saved = JSON.parse(window.localStorage.getItem('ratingFilter') || '[]')
+  if (saved.length === 4) saved.forEach((v, i) => { ratingFilters[i].on = v })
+} catch {}
+function saveUiPrefs(payload) {
+  requestAction('save_ui_prefs', payload)
+}
+function saveRatingFilter() {
+  window.localStorage.setItem('ratingFilter', JSON.stringify(ratingFilters.map(r => r.on)))
+  saveUiPrefs({ ratingFilter: ratingFilters.map(r => r.on) })
+  // Python에 전달
+  requestAction('set_rating_filter', { ratings: ratingFilters.filter(r => r.on).map(r => r.key) })
+}
+
+const removeArtist = computed({ get: () => storeWidgets.chk_remove_artist === 'true', set: v => { storeWidgets.chk_remove_artist = v ? 'true' : 'false' } })
+const removeCopyright = computed({ get: () => storeWidgets.chk_remove_copyright === 'true', set: v => { storeWidgets.chk_remove_copyright = v ? 'true' : 'false' } })
+const removeCharacter = computed({ get: () => storeWidgets.chk_remove_character === 'true', set: v => { storeWidgets.chk_remove_character = v ? 'true' : 'false' } })
+const removeCharacterFeatures = computed({ get: () => storeWidgets.chk_remove_character_features === 'true', set: v => { storeWidgets.chk_remove_character_features = v ? 'true' : 'false' } })
+const removeMeta = computed({ get: () => storeWidgets.chk_remove_meta === 'true', set: v => { storeWidgets.chk_remove_meta = v ? 'true' : 'false' } })
+const removeCensorship = computed({ get: () => storeWidgets.chk_remove_censorship === 'true', set: v => { storeWidgets.chk_remove_censorship = v ? 'true' : 'false' } })
+const removeText = computed({ get: () => storeWidgets.chk_remove_text === 'true', set: v => { storeWidgets.chk_remove_text = v ? 'true' : 'false' } })
+const autoCharFeatures = computed({ get: () => storeWidgets.chk_auto_char_features === 'true', set: v => { storeWidgets.chk_auto_char_features = v ? 'true' : 'false' } })
 const ad_enabled = computed({ get: () => storeWidgets.adetailer_group === 'true', set: v => { storeWidgets.adetailer_group = v ? 'true' : 'false' } })
 const ad_s1_enabled = computed({ get: () => storeWidgets.ad_slot1_group === 'true', set: v => { storeWidgets.ad_slot1_group = v ? 'true' : 'false' } })
 const ad_s2_enabled = computed({ get: () => storeWidgets.ad_slot2_group === 'true', set: v => { storeWidgets.ad_slot2_group = v ? 'true' : 'false' } })
@@ -437,9 +690,30 @@ const exifContent = computed(() => {
 })
 
 const autoMode = ref(false)
+const isAutomating = ref(false)
+const autoGenCount = ref(0)
+const autoWaiting = ref(false)
 const vramInfo = ref({ used: 0, total: 0, pct: 0 })
 const vramClass = computed(() => vramInfo.value.pct > 90 ? 'critical' : vramInfo.value.pct > 70 ? 'warn' : 'ok')
 const autoSettings = reactive({ mode: 'count', limit: 10, repeat: 1, delay: 1.0, allowDupes: false })
+
+function syncAutomationSettings() {
+  const limit = Number(autoSettings.limit)
+  const repeat = Number(autoSettings.repeat)
+  const delay = Number(autoSettings.delay)
+
+  action('set_automation_settings', {
+    mode: autoSettings.mode,
+    limit: Number.isFinite(limit) && limit > 0 ? limit : 10,
+    repeat: Number.isFinite(repeat) && repeat > 0 ? repeat : 1,
+    delay: Number.isFinite(delay) && delay >= 0 ? delay : 1,
+    allowDupes: !!autoSettings.allowDupes,
+  })
+}
+
+watch(autoSettings, () => {
+  syncAutomationSettings()
+}, { deep: true })
 
 // Toast 알림 시스템
 const toasts = ref([])
@@ -460,11 +734,58 @@ const extWidgets = reactive({
 })
 const loraStack = reactive([])
 
+// LoRA localStorage 복원
+try {
+  const saved = JSON.parse(window.localStorage.getItem('loraStack') || '[]')
+  if (Array.isArray(saved)) saved.forEach(l => loraStack.push(l))
+} catch {}
+
+let _loraInitialized = false
+function _saveLoraStack() {
+  try { window.localStorage.setItem('loraStack', JSON.stringify(loraStack)) } catch {}
+  // 초기화 완료 전 빈 배열로 덮어쓰기 방지, 이후에는 빈 배열도 정상 저장
+  if (!_loraInitialized && loraStack.length === 0) return
+  _loraInitialized = true
+  saveUiPrefs({ loraStack: loraStack.map(l => ({ ...l })) })
+}
+
+function syncLoraStack() {
+  requestAction('set_lora_stack', {
+    entries: loraStack.map(l => ({
+      name: l.name || '',
+      weight: Number.isFinite(Number(l.weight)) ? Number(l.weight) / 100 : 0.8,
+      enabled: l.enabled !== false,
+      triggerWords: Array.isArray(l.triggerWords) ? l.triggerWords : [],
+    })),
+  })
+}
+
 // LoRA 추가 함수 (Python에서 호출)
-function addLoraToStack(name, weight) {
+function addLoraToStack(name, weight, triggerWords = []) {
   const existing = loraStack.find(l => l.name === name)
-  if (existing) { existing.weight = Math.round(weight * 100); existing.enabled = true }
-  else loraStack.push({ name, weight: Math.round(weight * 100), enabled: true })
+  if (existing) {
+    existing.weight = Math.round(weight * 100); existing.enabled = true
+    if (triggerWords.length) existing.triggerWords = triggerWords
+  }
+  else loraStack.push({ name, weight: Math.round(weight * 100), enabled: true, triggerWords })
+  _saveLoraStack()
+}
+
+// LoRA 변경 감시 → 자동 저장 (복원 중에는 무시)
+let _loraRestoring = false
+watch(loraStack, () => {
+  if (_loraRestoring) return
+  _saveLoraStack()
+  syncLoraStack()
+}, { deep: true })
+function insertTriggerWord(tw) {
+  const cur = storeWidgets.main_prompt_text || ''
+  if (!cur.toLowerCase().includes(tw.toLowerCase())) {
+    storeWidgets.main_prompt_text = cur ? cur.replace(/,?\s*$/, '') + ', ' + tw + ', ' : tw + ', '
+    addToast('info', `트리거 워드 삽입: ${tw}`)
+  } else {
+    addToast('info', `이미 포함된 태그: ${tw}`)
+  }
 }
 
 // History pagination
@@ -547,6 +868,24 @@ function applyGlobalWeights(text) {
   }
   return result
 }
+// Generation Stats
+const showStatsModal = ref(false)
+const genStats = reactive({ total: 0, success: 0, fail: 0, success_rate: 0, avg_time: 0, total_time: 0, daily: [], daily_max: 0, top_models: [], top_resolutions: [], recent: [] })
+async function loadGenStats() {
+  const bk = await getBackend()
+  if (bk.getGenStats) {
+    bk.getGenStats((json) => {
+      try { Object.assign(genStats, JSON.parse(json)) } catch {}
+    })
+  }
+}
+function formatTime(sec) {
+  if (!sec) return '0s'
+  if (sec < 60) return sec + 's'
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ' + Math.round(sec % 60) + 's'
+  return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm'
+}
+
 const showWcManager = ref(false)
 const selectedWc = ref('')
 const selectedWcData = computed(() => wildcards.value.find(w => w.name === selectedWc.value) || null)
@@ -655,6 +994,13 @@ function insertWildcardTag(tag) {
 }
 
 function doGenerate() {
+  // 자동화 중이면 중지
+  if (isAutomating.value) {
+    action('stop_automation')
+    isAutomating.value = false
+    autoWaiting.value = false
+    return
+  }
   // 글로벌 가중치 적용
   if (globalWeights.length > 0) {
     const cur = storeWidgets.main_prompt_text || ''
@@ -667,6 +1013,7 @@ function doGenerate() {
     const loraText = activeLoras.map(l => `<lora:${l.name}:${(l.weight/100).toFixed(2)}>`).join(', ')
     requestAction('set_lora_text', { lora_text: loraText })
   }
+  syncAutomationSettings()
   action('generate')
 }
 
@@ -677,8 +1024,20 @@ const ctxSendI2I = () => { action('send_to_i2i', { path: ctxMenu.value.path }); 
 const ctxSendInpaint = () => { action('send_to_inpaint', { path: ctxMenu.value.path }); hideCtxMenu() }
 const ctxSendEditor = () => { action('send_to_editor', { path: ctxMenu.value.path }); hideCtxMenu() }
 const ctxCompare = (slot) => { action('send_to_compare', { path: ctxMenu.value.path, slot }); hideCtxMenu() }
+const ctxRunAdetailer = () => { action('run_adetailer_single', { path: ctxMenu.value.path, settings: { ad_model: 'face_yolov8n.pt', ad_confidence: 0.3, ad_denoise: 0.4 } }); hideCtxMenu() }
 const ctxCopyPath = () => { navigator.clipboard?.writeText(ctxMenu.value.path); hideCtxMenu() }
-const ctxDelete = () => { action('delete_image', { path: ctxMenu.value.path }); hideCtxMenu() }
+const ctxDelete = () => {
+  const path = ctxMenu.value.path
+  action('delete_image', { path })
+  // 히스토리에서 즉시 제거
+  const idx = historyImages.value.indexOf(path)
+  if (idx >= 0) historyImages.value.splice(idx, 1)
+  // 현재 보고 있는 이미지였으면 다음 이미지로
+  if (currentImage.value === path) {
+    currentImage.value = historyImages.value[0] || ''
+  }
+  hideCtxMenu()
+}
 
 async function selectHistoryImage(path) {
   currentImage.value = path
@@ -691,7 +1050,7 @@ async function selectHistoryImage(path) {
     backend.getImageExif(path, (json) => {
       try {
         const d = JSON.parse(json)
-        currentExif.value = { prompt: d.prompt || '', negative: d.negative || '', raw: d.raw || '' }
+        currentExif.value = { prompt: d.prompt || '', negative: d.negative || '', raw: d.raw || '', params: d.params || null, params_line: d.params_line || '' }
       } catch {}
     })
   }
@@ -729,10 +1088,13 @@ onMounted(async () => {
   // 브라우저 기본 우클릭 메뉴 전역 차단
   document.addEventListener('contextmenu', (e) => { e.preventDefault() })
   document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'g') { e.preventDefault(); action('generate') }
+    if (e.ctrlKey && e.key === 'g') { e.preventDefault(); doGenerate() }
     if (e.ctrlKey && e.key === 's') { e.preventDefault(); action('save_settings') }
     if (e.key === 'F5') { e.preventDefault(); loadHistory() }
   })
+
+  // 초기 rating 필터 전달
+  requestAction('set_rating_filter', { ratings: ratingFilters.filter(r => r.on).map(r => r.key) })
 
   onBackendEvent('tabChanged', (tabId) => {
     const targetPath = tabId === 't2i' ? '/' : `/${tabId}`
@@ -740,7 +1102,7 @@ onMounted(async () => {
     onTabChanged(tabId)
   })
 
-  onBackendEvent('imageGenerated', (data) => {
+  onBackendEvent('imageGenerated', async (data) => {
     const parsed = JSON.parse(data)
     currentImage.value = parsed.path
     resolution.value = `${parsed.width} × ${parsed.height}`
@@ -751,9 +1113,28 @@ onMounted(async () => {
       historyImages.value.unshift(parsed.path)
       if (historyImages.value.length > 100) historyImages.value.pop()
       histPage.value = 0
+      // 생성 직후 EXIF 자동 로드
+      const bk = await getBackend()
+      if (bk.getImageExif) {
+        bk.getImageExif(parsed.path, (json) => {
+          try {
+            const d = JSON.parse(json)
+            currentExif.value = { prompt: d.prompt || '', negative: d.negative || '', raw: d.raw || '', params: d.params || null, params_line: d.params_line || '' }
+          } catch {}
+        })
+      }
     }
   })
-  onBackendEvent('generationStarted', () => { isGenerating.value = true; progressVal.value = 0 })
+  onBackendEvent('generationStarted', () => { isGenerating.value = true; autoWaiting.value = false; progressVal.value = 0 })
+  onBackendEvent('automationStatus', (json) => {
+    try {
+      const d = JSON.parse(json)
+      isAutomating.value = d.running || false
+      autoGenCount.value = d.count || 0
+      autoWaiting.value = d.waiting || false
+      if (!d.running) { isGenerating.value = false }
+    } catch {}
+  })
   onBackendEvent('generationProgress', (step, total) => {
     progressVal.value = Math.round(step / total * 100)
     status.value = `Generating... ${step}/${total}`
@@ -765,8 +1146,12 @@ onMounted(async () => {
     try { const d = JSON.parse(json); globalWeights.splice(0); d.forEach(w => globalWeights.push(w)) } catch {}
   })
 
+  // 랜덤 해상도 로드
+  loadRandomResList()
+
   // ADetailer 모델 로드
   const _bk = await getBackend()
+  syncAutomationSettings()
   if (_bk.getADetailerModels) _bk.getADetailerModels((json) => { try { adModelItems.value = JSON.parse(json) } catch {} })
 
   // 와일드카드 로드
@@ -778,6 +1163,27 @@ onMounted(async () => {
   // Global Toast 알림 (Python → Vue)
   onBackendEvent('showNotification', (type, msg) => { addToast(type, msg) })
 
+  onBackendEvent('uiPrefsLoaded', (json) => {
+    try {
+      const prefs = JSON.parse(json)
+      if (Array.isArray(prefs.ratingFilter) && prefs.ratingFilter.length === ratingFilters.length) {
+        prefs.ratingFilter.forEach((v, i) => { ratingFilters[i].on = !!v })
+        window.localStorage.setItem('ratingFilter', JSON.stringify(prefs.ratingFilter))
+        requestAction('set_rating_filter', { ratings: ratingFilters.filter(r => r.on).map(r => r.key) })
+      }
+      if (Array.isArray(prefs.loraStack)) {
+        _loraRestoring = true
+        loraStack.splice(0, loraStack.length, ...prefs.loraStack.map(l => ({ ...l })))
+        window.localStorage.setItem('loraStack', JSON.stringify(prefs.loraStack))
+        nextTick(() => { _loraRestoring = false; _loraInitialized = true })
+      }
+      // tabOrder 복원 (Settings 탭 미방문 시에도 적용)
+      if (Array.isArray(prefs.tabOrder) && prefs.tabOrder.length > 0) {
+        window.localStorage.setItem('tabOrder', JSON.stringify(prefs.tabOrder))
+      }
+    } catch {}
+  })
+
   // 에러도 Toast로 표시
   onBackendEvent('generationError', (msg) => { addToast('error', msg) })
 
@@ -785,10 +1191,29 @@ onMounted(async () => {
   onBackendEvent('loraInserted', (json) => {
     try {
       const d = JSON.parse(json)
-      addLoraToStack(d.name, d.weight || 0.8)
+      addLoraToStack(d.name, d.weight || 0.8, d.trigger_words || [])
       showExtendPanel.value = true
     } catch {}
   })
+
+  onBackendEvent('loraStackLoaded', (json) => {
+    try {
+      const entries = JSON.parse(json)
+      if (!Array.isArray(entries)) return
+      _loraRestoring = true
+      loraStack.splice(0, loraStack.length, ...entries.map(entry => ({
+        name: entry.name || '',
+        weight: Number.isFinite(Number(entry.weight)) ? Math.round(Number(entry.weight) * 100) : 80,
+        enabled: entry.enabled !== false,
+        triggerWords: Array.isArray(entry.triggerWords) ? entry.triggerWords : [],
+      })))
+      // localStorage만 업데이트, ui_prefs 재저장 안 함 (루프 방지)
+      try { window.localStorage.setItem('loraStack', JSON.stringify(loraStack)) } catch {}
+      nextTick(() => { _loraRestoring = false; _loraInitialized = true })
+    } catch {}
+  })
+
+  syncLoraStack()
 })
 </script>
 
@@ -831,13 +1256,29 @@ onMounted(async () => {
 .ext-field { margin-bottom: 8px; }
 .ext-field label { font-size: 9px; color: var(--text-muted); font-weight: 700; display: block; margin-bottom: 3px; }
 .ext-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rating-toggle-row { display: flex; gap: 4px; margin-bottom: 8px; }
+.rating-toggle {
+  flex: 1; padding: 4px; background: var(--bg-button); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--text-muted); font-size: 10px; font-weight: 900;
+  cursor: pointer; text-align: center; transition: var(--transition);
+}
+.rating-toggle.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.ext-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
 .ext-sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .ext-sub summary { font-size: 10px; color: var(--text-secondary); cursor: pointer; }
 .ext-sub-title { font-size: 10px; font-weight: 800; color: var(--accent); letter-spacing: 1px; margin: 8px 0 4px; }
 
 /* LoRA block */
 .lora-block { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg-button); border-radius: 6px; margin-bottom: 4px; }
-.lora-name { flex: 1; font-size: 11px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lora-info-col { flex: 1; min-width: 0; }
+.lora-name { font-size: 11px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lora-triggers { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.trigger-chip {
+  padding: 1px 6px; font-size: 9px; font-weight: 700; color: var(--accent);
+  background: var(--accent-dim); border: 1px solid rgba(250, 204, 21, 0.15);
+  border-radius: 4px; cursor: pointer; transition: var(--transition);
+}
+.trigger-chip:hover { background: rgba(250, 204, 21, 0.2); border-color: var(--accent); }
 .lora-slider { width: 60px; accent-color: var(--accent); }
 .lora-weight { font-size: 10px; color: var(--accent); min-width: 30px; text-align: right; font-family: monospace; }
 .lora-remove { background: none; border: none; color: #f87171; cursor: pointer; font-size: 12px; }
@@ -846,7 +1287,22 @@ onMounted(async () => {
 .ext-res-row input { text-align: center; flex: 1; }
 .ext-res-row span { color: var(--text-muted); }
 .ext-mini-btn { width: 32px; height: 32px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); cursor: pointer; flex-shrink: 0; }
-.ext-res-opts { display: flex; gap: 12px; margin-top: 4px; }
+.ext-res-opts { display: flex; gap: 8px; margin-top: 4px; }
+.ext-check-sm { display: flex; align-items: center; gap: 3px; font-size: 9px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.ext-check-sm input { width: 12px; height: 12px; margin: 0; }
+
+/* 랜덤 해상도 편집기 */
+.rand-res-editor { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 6px; background: rgba(0,0,0,0.15); }
+.rand-res-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.rand-res-item { display: flex; align-items: center; gap: 4px; padding: 2px 6px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; }
+.rand-res-val { color: var(--text-primary); font-weight: 700; font-family: monospace; }
+.rand-res-desc { color: var(--text-muted); font-size: 9px; }
+.rand-res-del { background: none; border: none; color: #f87171; cursor: pointer; font-size: 10px; padding: 0 2px; }
+.rand-res-empty { font-size: 9px; color: var(--text-muted); padding: 4px; }
+.rand-res-add { display: flex; align-items: center; gap: 4px; }
+.rand-res-add span { color: var(--text-muted); font-size: 10px; }
+.rand-res-input { width: 50px; padding: 3px 4px; font-size: 10px; text-align: center; }
+.rand-res-btn { width: 24px; height: 24px; background: var(--accent); border: none; border-radius: 4px; color: #000; font-weight: 900; cursor: pointer; font-size: 14px; }
 .ext-check-row { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-secondary); cursor: pointer; margin-bottom: 4px; white-space: nowrap; }
 .ext-check-row input[type="checkbox"] { flex-shrink: 0; margin: 0; }
 .ext-check-row span { overflow: hidden; text-overflow: ellipsis; }
@@ -910,6 +1366,46 @@ onMounted(async () => {
 .wm-footer { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
 .wm-save { padding: 7px 20px; background: var(--accent); border: none; border-radius: 6px; color: #000; font-size: 11px; font-weight: 800; cursor: pointer; }
 
+/* Generation Stats Modal */
+.stats-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+.stats-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; width: 640px; max-height: 85vh; overflow-y: auto; }
+.stats-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.stats-header h3 { font-size: 13px; font-weight: 900; letter-spacing: 2px; color: var(--text-primary); }
+.stats-body { padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+.stats-empty { display: flex; align-items: center; justify-content: center; min-height: 200px; }
+.stats-empty-msg { color: var(--text-muted); font-size: 14px; }
+
+.stats-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.stat-card { background: var(--bg-input); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
+.stat-card.accent { border-color: var(--accent-dim); }
+.stat-val { font-size: 28px; font-weight: 900; color: var(--text-primary); font-family: monospace; }
+.stat-card.accent .stat-val { color: var(--accent); }
+.stat-label { font-size: 9px; font-weight: 800; color: var(--text-muted); letter-spacing: 1.5px; margin-top: 4px; }
+
+.stats-section h4 { font-size: 10px; font-weight: 900; color: var(--text-muted); letter-spacing: 1.5px; margin-bottom: 12px; }
+.stats-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+.daily-chart { display: flex; align-items: flex-end; gap: 2px; height: 80px; padding: 0 2px; }
+.daily-bar-wrap { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.daily-bar { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; transition: height 0.3s; }
+.daily-labels { display: flex; justify-content: space-between; margin-top: 4px; font-size: 9px; color: var(--text-muted); }
+
+.stats-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.bar-name { font-size: 11px; color: var(--text-secondary); min-width: 80px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { flex: 1; height: 6px; background: var(--bg-button); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+.bar-count { font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right; font-family: monospace; }
+
+.recent-table { display: flex; flex-direction: column; gap: 4px; }
+.recent-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-input); border-radius: 6px; font-size: 11px; }
+.r-time { color: var(--text-muted); min-width: 80px; font-family: monospace; }
+.r-status { font-weight: 800; font-size: 10px; min-width: 30px; }
+.r-status.ok { color: #4ade80; }
+.r-status.fail { color: #f87171; }
+.r-dur { color: var(--accent); min-width: 40px; font-family: monospace; }
+.r-res { color: var(--text-secondary); min-width: 70px; }
+.r-model { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Wildcard Manager Modal */
 .wc-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
 .wc-modal { width: 700px; height: 500px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
@@ -962,12 +1458,22 @@ onMounted(async () => {
 .auto-row { display: flex; align-items: center; gap: 4px; }
 .auto-row label { font-size: 9px; color: var(--text-muted); font-weight: 700; min-width: 32px; }
 .auto-input { width: 50px; padding: 4px 6px; font-size: 11px; text-align: center; }
-.auto-select { width: 60px; padding: 4px; font-size: 10px; }
+.auto-select { min-width: 90px; padding: 4px; font-size: 10px; }
+
+/* 자동화 상태 */
+.auto-status { padding: 8px 12px; background: rgba(250, 204, 21, 0.05); border: 1px solid var(--accent-dim); border-radius: 8px; margin-bottom: 8px; }
+.auto-status-bar { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--accent); font-weight: 700; }
+.auto-status-sub { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+.auto-pulse { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.generate-row { display: flex; gap: 6px; }
 .auto-check { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-secondary); cursor: pointer; }
 .auto-check input { accent-color: #4ade80; }
 .btn-generate { width: 100%; height: 50px; background: var(--accent); border: none; border-radius: var(--radius-pill); color: #000; font-weight: 800; font-size: 14px; letter-spacing: 1px; cursor: pointer; transition: var(--transition); }
 .btn-generate:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(250, 204, 21, 0.3); }
 .btn-generate:disabled { opacity: 0.5; cursor: wait; }
+.btn-generate.automating { background: #f87171; color: #fff; }
+.btn-generate.automating:hover:not(:disabled) { background: #ef4444; box-shadow: 0 8px 24px rgba(248, 113, 113, 0.3); }
 
 /* Viewport */
 .viewport-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #050505; }
@@ -979,6 +1485,10 @@ onMounted(async () => {
 .exif-tab { flex: 1; padding: 6px; background: transparent; border: none; color: var(--text-muted); font-size: 10px; font-weight: 700; cursor: pointer; text-align: center; border-bottom: 2px solid transparent; }
 .exif-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .exif-content { padding: 6px 12px; font-size: 11px; color: var(--text-secondary); max-height: 80px; overflow-y: auto; line-height: 1.5; font-family: 'Consolas', monospace; white-space: pre-wrap; word-break: break-all; }
+.exif-params { padding: 4px 12px; max-height: 80px; overflow-y: auto; }
+.exif-params .param-line { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 10px; color: var(--text-secondary); font-family: 'Consolas', monospace; }
+.exif-params .pl { font-size: 8px; font-weight: 900; color: var(--accent); letter-spacing: 1px; min-width: 40px; flex-shrink: 0; }
+.exif-params .param-line.other { color: var(--text-muted); }
 
 /* History */
 .hist-header { padding: 16px; display: flex; justify-content: space-between; align-items: center; }

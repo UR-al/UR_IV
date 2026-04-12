@@ -495,32 +495,45 @@ class UISetupMixin:
         self.ad_settings_container = type('WProxy', (), {
             'hide': lambda s: None, 'show': lambda s: None, 'setVisible': lambda s, v: None,
         })()
-        # ADetailer 슬롯 (더미)
-        self.ad_slot1_group = type('GBProxy', (), {
-            'setChecked': lambda s, v: None, 'isChecked': lambda s: False,
-            'setCheckable': lambda s, v: None,
-        })()
-        self.ad_slot2_group = type('GBProxy', (), {
-            'setChecked': lambda s, v: None, 'isChecked': lambda s: False,
-            'setCheckable': lambda s, v: None,
-        })()
+        # ADetailer 슬롯 체크박스 (Vue 연동)
+        self.ad_slot1_group = CheckBoxProxy(b, 'ad_slot1_group')
+        self.ad_slot2_group = CheckBoxProxy(b, 'ad_slot2_group')
         # ADetailer 슬롯 위젯 더미 (전체 키)
         def _ad_slot(prefix):
             _W = type('WProxy', (), {
                 'setVisible': lambda s, v: None, 'hide': lambda s: None,
                 'show': lambda s: None, 'isVisible': lambda s: False,
             })
+            # SliderProxy 생성 후 기본값 설정 (Vue에도 push)
+            confidence = SliderProxy(b, f'{prefix}_confidence')
+            confidence.setText('0.3')
+            strength = SliderProxy(b, f'{prefix}_str')
+            strength.setText('0.4')
+            mask_blur = SliderProxy(b, f'{prefix}_mask_blur')
+            mask_blur.setText('4')
+            denoise = SliderProxy(b, f'{prefix}_denoise')
+            denoise.setText('0.4')
+            padding = SliderProxy(b, f'{prefix}_padding')
+            padding.setText('32')
+            steps = SliderProxy(b, f'{prefix}_steps')
+            steps.setText('28')
+            cfg = SliderProxy(b, f'{prefix}_cfg')
+            cfg.setText('7.0')
+            dilate_erode = SliderProxy(b, f'{prefix}_dilate_erode')
+            dilate_erode.setText('4')
             return {
                 'prompt': TextEditProxy(b, f'{prefix}_prompt'),
                 'neg_prompt': TextEditProxy(b, f'{prefix}_neg'),
                 'model': ComboBoxProxy(b, f'{prefix}_model'),
-                'confidence': SliderProxy(b, f'{prefix}_confidence'),
-                'strength': SliderProxy(b, f'{prefix}_str'),
-                'mask_blur': SliderProxy(b, f'{prefix}_mask_blur'),
-                'denoise': SliderProxy(b, f'{prefix}_denoise'),
-                'padding': SliderProxy(b, f'{prefix}_padding'),
-                'steps': SliderProxy(b, f'{prefix}_steps'),
-                'cfg': SliderProxy(b, f'{prefix}_cfg'),
+                'confidence': confidence,
+                'strength': strength,
+                'mask_blur': mask_blur,
+                'denoise': denoise,
+                'padding': padding,
+                'steps': steps,
+                'cfg': cfg,
+                'dilate_erode': dilate_erode,
+                'mask_merge_invert': ComboBoxProxy(b, f'{prefix}_mask_merge'),
                 'use_inpaint_size_check': CheckBoxProxy(b, f'{prefix}_use_inp_size'),
                 'use_steps_check': CheckBoxProxy(b, f'{prefix}_use_steps'),
                 'use_cfg_check': CheckBoxProxy(b, f'{prefix}_use_cfg'),
@@ -537,12 +550,15 @@ class UISetupMixin:
                 'sampler_container': _W(),
             }
         self.s1_widgets = _ad_slot('_ad_s1')
+        self.s1_widgets['model'].setText('face_yolov8n.pt')
         self.s2_widgets = _ad_slot('_ad_s2')
+        self.s2_widgets['model'].setText('hand_yolov8n.pt')
 
         # 제거 옵션
         self.chk_remove_artist = CheckBoxProxy(b, 'chk_remove_artist')
         self.chk_remove_copyright = CheckBoxProxy(b, 'chk_remove_copyright')
         self.chk_remove_character = CheckBoxProxy(b, 'chk_remove_character')
+        self.chk_remove_character_features = CheckBoxProxy(b, 'chk_remove_character_features')
         self.chk_remove_meta = CheckBoxProxy(b, 'chk_remove_meta')
         self.chk_remove_censorship = CheckBoxProxy(b, 'chk_remove_censorship')
         self.chk_remove_text = CheckBoxProxy(b, 'chk_remove_text')
@@ -561,6 +577,7 @@ class UISetupMixin:
         self.btn_random_prompt = ButtonProxy(b, 'btn_random_prompt')
         self.btn_auto_toggle = ButtonProxy(b, 'btn_auto_toggle')
         self.btn_auto_toggle.setCheckable(True)
+        self.btn_auto_toggle.toggled.connect(self.toggle_automation_ui)
 
         self.btn_save_settings = ButtonProxy(b, 'btn_save_settings')
         self.btn_preset_save = ButtonProxy(b, 'btn_preset_save')
@@ -572,10 +589,54 @@ class UISetupMixin:
         self.btn_ab_test = ButtonProxy(b, 'btn_ab_test')
         self.btn_api_manager = None
 
+        self._vue_automation_settings = {
+            'mode': 'count',
+            'limit': 10,
+            'repeat': 1,
+            'delay': 1.0,
+            'allowDupes': False,
+        }
+
+        def _get_vue_automation_settings():
+            raw = getattr(self, '_vue_automation_settings', {}) or {}
+
+            mode = str(raw.get('mode', 'count'))
+            if mode not in ('count', 'timer'):
+                mode = 'count'
+
+            try:
+                limit = float(raw.get('limit', 10))
+            except (TypeError, ValueError):
+                limit = 10.0
+
+            try:
+                repeat = int(raw.get('repeat', 1))
+            except (TypeError, ValueError):
+                repeat = 1
+
+            try:
+                delay = float(raw.get('delay', 1.0))
+            except (TypeError, ValueError):
+                delay = 1.0
+
+            limit = max(1.0, limit)
+            repeat = max(1, repeat)
+            delay = max(0.0, delay)
+
+            termination_limit = int(limit) if mode == 'count' else limit * 60
+
+            return {
+                'termination_mode': mode,
+                'termination_limit': termination_limit,
+                'repeat_per_prompt': repeat,
+                'delay': delay,
+                'allow_duplicates': bool(raw.get('allowDupes', False)),
+            }
+
         # 자동화 위젯 (더미)
         self.automation_widget = type('AutoProxy', (), {
             'hide': lambda s: None, 'show': lambda s: None,
-            'get_settings': lambda s: {},
+            'get_settings': lambda s: _get_vue_automation_settings(),
             'setVisible': lambda s, v: None,
         })()
 
@@ -921,10 +982,12 @@ class UISetupMixin:
         self.chk_remove_artist = QCheckBox("작가명 제거")
         self.chk_remove_copyright = QCheckBox("작품명 제거")
         self.chk_remove_character = QCheckBox("캐릭터 제거")
+        self.chk_remove_character_features = QCheckBox("캐릭터 특징 제거")
         self.chk_remove_meta = QCheckBox("메타 제거")
         self.chk_remove_censorship = QCheckBox("검열 제거")
         self.chk_remove_text = QCheckBox("텍스트 제거")
         for chk in [self.chk_remove_artist, self.chk_remove_copyright, self.chk_remove_character,
+                     self.chk_remove_character_features,
                      self.chk_remove_meta, self.chk_remove_censorship, self.chk_remove_text]:
             rg_l.addWidget(chk)
         sl.addWidget(remove_group)
@@ -1689,15 +1752,26 @@ class UISetupMixin:
 
     def _on_lora_inserted(self, lora_text: str):
         """LoRA를 활성 패널에 추가 + Vue로 전달"""
-        import re
+        import re, json as _json
+        # 트리거 워드 분리 (||TRIGGER:[...] 포맷)
+        trigger_words = []
+        if '||TRIGGER:' in lora_text:
+            parts = lora_text.split('||TRIGGER:', 1)
+            lora_text = parts[0]
+            try:
+                trigger_words = _json.loads(parts[1])
+            except Exception:
+                pass
         m = re.match(r'<lora:(.+?):([-\d.]+)>', lora_text)
         if m:
             name, weight = m.group(1), float(m.group(2))
             self.lora_active_panel.add_lora(name, weight)
-            # Vue LoRA Stack으로 전달
+            # Vue LoRA Stack으로 전달 (트리거 워드 포함)
             if hasattr(self, 'vue_bridge'):
-                import json as _json
-                self.vue_bridge.loraInserted.emit(_json.dumps({'name': name, 'weight': weight}))
+                payload = {'name': name, 'weight': weight}
+                if trigger_words:
+                    payload['trigger_words'] = trigger_words
+                self.vue_bridge.loraInserted.emit(_json.dumps(payload))
 
     def _on_lora_batch_inserted(self, text: str):
         """다이얼로그에서 일괄 붙여넣기된 LoRA 텍스트를 패널에 추가"""
