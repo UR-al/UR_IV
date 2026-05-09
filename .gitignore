@@ -40,7 +40,9 @@ yolo_model_config.json
 
 # Model files
 *.pt
+*.pth
 *.onnx
+*.safetensors
 
 # Generated output
 generated_images/

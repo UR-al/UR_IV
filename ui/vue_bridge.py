@@ -4,7 +4,13 @@ PyQt6 ↔ Vue 통신 브릿지 (QWebChannel)
 위젯 프록시 값 동기화 + 액션 디스패치 + 이미지 생성 이벤트
 """
 import json
+import logging
+import os
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
+
+from core.path_safety import safe_input_path as _normalize_vue_path  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 
 class VueBridge(QObject):
@@ -35,6 +41,8 @@ class VueBridge(QObject):
     showNotification = pyqtSignal(str, str)  # (type: success|error|info, message)
     adetailerResult = pyqtSignal(str)       # JSON {before, after, output_path} or {error}
     adetailerProgress = pyqtSignal(int, int) # (current, total)
+    sam3Result = pyqtSignal(str)            # JSON {before, after, output_path} or {error}
+    sam3Progress = pyqtSignal(int, int)     # (current, total)
     eventSearchProgress = pyqtSignal(int, int) # (current, total)
     automationStatus = pyqtSignal(str)        # JSON {running, count, waiting}
     eventImportResults = pyqtSignal(str)      # JSON event list
@@ -188,13 +196,11 @@ class VueBridge(QObject):
         try:
             import cv2
             import numpy as np
-            import os
-            
-            # 경로 정규화 (file:/// 제거 및 슬라이시 방향 수정)
-            clean_path = image_path.replace('file:///', '').replace('/', os.sep)
-            if not os.path.exists(clean_path):
-                print(f"[Editor] File not found: {clean_path}")
-                return json.dumps({'error': f'파일을 찾을 수 없습니다: {clean_path}'})
+
+            clean_path = _normalize_vue_path(image_path)
+            if not clean_path:
+                logger.warning("[Editor] invalid or forbidden path")
+                return json.dumps({'error': '유효하지 않은 이미지 경로입니다'})
 
             # params가 객체로 올 수도 있고 JSON 문자열로 올 수도 있음
             if isinstance(params_json, str):
@@ -277,7 +283,7 @@ class VueBridge(QObject):
             elif operation in ('auto_censor', 'auto_detect'):
                 # YOLO 기반 자동 검열 / 마스크만 감지
                 try:
-                    from tabs.editor.mosaic_panel import _load_yolo_model_paths
+                    from tabs.editor.mosaic_panel import _load_yolo_model_paths, _is_sam_file
                     model_paths = _load_yolo_model_paths()
                     if not model_paths:
                         return json.dumps({'error': 'YOLO 모델을 먼저 추가하세요 (+ADD .PT)'})
@@ -286,49 +292,58 @@ class VueBridge(QObject):
                     h_img, w_img = img.shape[:2]
                     combined_mask = np.zeros((h_img, w_img), dtype=np.uint8)
                     detect_count = 0
+                    yolo_boxes = []
+                    has_seg_mask = False
+                    loaded_names, failed = [], []
+
+                    # 단일 패스: 모델당 1회만 로드 → mask + bbox 동시 수집
                     for mp in model_paths:
-                        if not os.path.exists(mp): continue
+                        if not os.path.exists(mp):
+                            failed.append((mp, 'not found'))
+                            continue
+                        if _is_sam_file(mp):
+                            print(f"[YOLO] Skip SAM model (not a detector): {os.path.basename(mp)}")
+                            continue
                         try:
                             model = YOLO(mp)
                         except Exception as me:
                             print(f"[YOLO] Model load failed: {mp} — {me}")
+                            failed.append((os.path.basename(mp), str(me)))
                             continue
-                        results = model(img, conf=conf)
+                        loaded_names.append(os.path.basename(mp))
+                        try:
+                            results = model(img, conf=conf, verbose=False)
+                        except Exception as ie:
+                            print(f"[YOLO] Inference failed: {mp} — {ie}")
+                            failed.append((os.path.basename(mp), f'inference: {ie}'))
+                            continue
                         for r in results:
-                            # 세그먼트 마스크 우선 (성기 형태에 맞춤)
+                            # 세그먼트 마스크 (성기 형태 정밀)
                             if r.masks is not None:
+                                has_seg_mask = True
                                 for m_tensor in r.masks.data:
                                     m_np = m_tensor.cpu().numpy().astype(np.float32)
                                     m_resized = cv2.resize(m_np, (w_img, h_img), interpolation=cv2.INTER_LINEAR)
                                     combined_mask[m_resized > 0.3] = 255
                                     detect_count += 1
-                            # 마스크 없으면 박스 fallback
-                            if r.masks is None and r.boxes is not None:
+                            # 박스 (SAM 정밀화 입력 + 마스크 폴백)
+                            if r.boxes is not None:
                                 for box in r.boxes.xyxy:
                                     bx1, by1, bx2, by2 = map(int, box.tolist())
                                     bx1, by1 = max(0, bx1), max(0, by1)
                                     bx2, by2 = min(w_img, bx2), min(h_img, by2)
-                                    combined_mask[by1:by2, bx1:bx2] = 255
-                                    detect_count += 1
-                    # YOLO bbox 수집 (SAM 정밀 마스킹용)
-                    yolo_boxes = []
-                    has_seg_mask = False
-                    for mp2 in model_paths:
-                        if not os.path.exists(mp2): continue
-                        try:
-                            model2 = YOLO(mp2)
-                        except Exception:
-                            continue
-                        res2 = model2(img, conf=conf)
-                        for r2 in res2:
-                            if r2.masks is not None:
-                                has_seg_mask = True  # seg 모델이면 YOLO 마스크 사용
-                            if r2.boxes is not None:
-                                for box in r2.boxes.xyxy:
-                                    bx1, by1, bx2, by2 = map(int, box.tolist())
-                                    yolo_boxes.append((max(0,bx1), max(0,by1), min(w_img,bx2), min(h_img,by2)))
+                                    if bx2 > bx1 and by2 > by1:
+                                        yolo_boxes.append((bx1, by1, bx2, by2))
+                                        if r.masks is None:
+                                            combined_mask[by1:by2, bx1:bx2] = 255
+                                            detect_count += 1
 
-                    print(f"[YOLO] Detected {detect_count} regions, {len(yolo_boxes)} boxes, seg_mask={has_seg_mask}")
+                    if not loaded_names:
+                        # 등록된 모든 모델이 실패한 경우 명확한 에러
+                        msg = '; '.join(f'{n}: {e}' for n, e in failed) or '모든 YOLO 모델 로드 실패'
+                        return json.dumps({'error': f'YOLO 모델 로드 실패 — {msg}'})
+
+                    print(f"[YOLO] Loaded {loaded_names} → {detect_count} regions, {len(yolo_boxes)} boxes, seg_mask={has_seg_mask}")
 
                     # SAM 정밀 마스킹
                     if yolo_boxes:
@@ -339,14 +354,19 @@ class VueBridge(QObject):
                             sam_path, sam_type = find_sam_model(models_dir)
                             print(f"[SAM] models_dir={models_dir}, found={sam_path}, type={sam_type}, has_seg={has_seg_mask}")
 
-                            if has_seg_mask:
+                            if has_seg_mask and sam_type != 'sam3':
+                                # YOLO seg 마스크가 이미 있고 SAM3가 아니면 정밀화 생략
                                 print("[SAM] YOLO seg mask available, skipping SAM")
                             elif sam_path:
-                                sam_mask = refine_boxes_with_sam(img, yolo_boxes, models_dir)
+                                sam_mask = refine_boxes_with_sam(
+                                    img, yolo_boxes, models_dir,
+                                    sam_model_path=sam_path, sam_type=sam_type,
+                                    yolo_model_paths=model_paths,
+                                )
                                 if sam_mask.any():
                                     combined_mask = sam_mask
                                     pixel_count = int(sam_mask.sum() / 255)
-                                    print(f"[SAM] ✓ Refined mask applied ({len(yolo_boxes)} boxes → {pixel_count} pixels)")
+                                    print(f"[SAM] ✓ Refined mask applied ({sam_type}, {len(yolo_boxes)} boxes → {pixel_count} pixels)")
                                 else:
                                     print("[SAM] No mask generated, using YOLO bbox")
                             else:
@@ -501,7 +521,8 @@ class VueBridge(QObject):
             if os.path.exists(cfg):
                 with open(cfg, 'r') as f:
                     return f.read().strip()
-        except Exception: pass
+        except Exception as e:
+            logger.warning("getLastGalleryFolder failed: %s", e)
         from config import OUTPUT_DIR
         return OUTPUT_DIR
 
@@ -527,7 +548,8 @@ class VueBridge(QObject):
                 if f.lower().endswith(exts):
                     fp = os.path.join(target, f).replace('\\', '/')
                     files.append(fp)
-        except Exception: pass
+        except Exception as e:
+            logger.warning("getGalleryImages failed (%s): %s", target, e)
         return json.dumps(files)
 
     @pyqtSlot(result=str)
@@ -666,10 +688,12 @@ class VueBridge(QObject):
     def getEdgeMap(self, image_path: str, canny_low: int, canny_high: int) -> str:
         """Canny edge detection → base64 PNG (자석 올가미용)"""
         try:
-            import cv2, numpy as np, base64, os
+            import cv2, base64
             from io import BytesIO
             from PIL import Image as PILImage
-            clean = image_path.replace('file:///', '').replace('/', os.sep)
+            clean = _normalize_vue_path(image_path)
+            if not clean:
+                return ''
             img = cv2.imread(clean)
             if img is None:
                 return ''
@@ -680,7 +704,8 @@ class VueBridge(QObject):
             buf = BytesIO()
             pil.save(buf, format='PNG')
             return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
-        except Exception:
+        except Exception as e:
+            logger.warning("getEdgeMap failed: %s", e)
             return ''
 
     @pyqtSlot(str, str, str)
@@ -777,7 +802,8 @@ class VueBridge(QObject):
             if os.path.exists(fp):
                 with open(fp, 'r', encoding='utf-8') as f:
                     return f.read()
-        except Exception: pass
+        except Exception as e:
+            logger.warning("getPreset failed (%s): %s", name, e)
         return '{}'
 
     @pyqtSlot(str, str, result=str)
@@ -833,7 +859,8 @@ class VueBridge(QObject):
                         if not line or line.startswith('#'): continue
                         lines.append(line)
                     return ', '.join(lines)
-        except Exception: pass
+        except Exception as e:
+            logger.warning("getDefaultExcludes failed: %s", e)
         return ''
 
     @pyqtSlot(str, result=str)
@@ -868,15 +895,18 @@ class VueBridge(QObject):
                                 if col:
                                     for v in df[col].dropna():
                                         self._all_tags_set.add(str(v).strip().lower())
-                            except Exception: pass
-                except Exception: pass
+                            except Exception as e:
+                                logger.debug("parquet read failed (%s): %s", fn, e)
+                except Exception as e:
+                    logger.warning("tags_db scan failed: %s", e)
                 # TagClassifier의 tag_to_category
                 try:
                     from core.tag_classifier import TagClassifier
                     if not hasattr(self, '_tag_classifier'):
                         self._tag_classifier = TagClassifier()
                     self._all_tags_set.update(self._tag_classifier.tag_to_category.keys())
-                except Exception: pass
+                except Exception as e:
+                    logger.debug("TagClassifier categories load failed: %s", e)
                 # character/copyright/artist 사전도 추가
                 try:
                     from core.tag_classifier import TagClassifier
@@ -886,7 +916,8 @@ class VueBridge(QObject):
                     if hasattr(tc, 'characters'): self._all_tags_set.update(t.lower() for t in tc.characters)
                     if hasattr(tc, 'copyrights'): self._all_tags_set.update(t.lower() for t in tc.copyrights)
                     if hasattr(tc, 'artists'): self._all_tags_set.update(t.lower() for t in tc.artists)
-                except Exception: pass
+                except Exception as e:
+                    logger.debug("TagClassifier name dicts load failed: %s", e)
                 print(f"[Exclude] Tag DB loaded: {len(self._all_tags_set)} tags")
 
             # 규칙 매칭
@@ -1166,7 +1197,8 @@ class VueBridge(QObject):
             if os.path.exists(fp):
                 with open(fp, 'r', encoding='utf-8') as f:
                     return f.read()
-        except Exception: pass
+        except Exception as e:
+            logger.warning("getTabDefaults failed: %s", e)
         return '{}'
 
     @pyqtSlot(result=str)
@@ -1346,11 +1378,11 @@ class VueBridge(QObject):
                 hires_parts.append(f"{k}: {params.pop(k)}")
         result['hires'] = ', '.join(hires_parts)
 
-        # Line 5: Extensions (ADetailer, NegPiP 등)
+        # Line 5: Extensions (ADetailer, SAM3, NegPiP 등)
         ext_parts = []
         for k in list(params.keys()):
             kl = k.lower()
-            if any(x in kl for x in ['adetailer', 'negpip', 'controlnet', 'ad_', 'tiled']):
+            if any(x in kl for x in ['adetailer', 'sam3', 'negpip', 'controlnet', 'ad_', 'tiled']):
                 ext_parts.append(f"{k}: {params.pop(k)}")
         result['extensions'] = ', '.join(ext_parts)
 

@@ -23,8 +23,23 @@ _YOLO_CONFIG_PATH = os.path.join(_EDITOR_MODELS_DIR, "yolo_config.json")
 os.makedirs(_EDITOR_MODELS_DIR, exist_ok=True)
 
 
+# SAM 계열 모델 파일명 키워드 (YOLO 검출용으로 잘못 로드되는 것을 방지)
+_SAM_KEYWORDS = (
+    'mobile_sam', 'fastsam', 'fast_sam',
+    'sam_vit', 'sam_hq', 'sam2', 'sam3',
+)
+
+
+def _is_sam_file(fname: str) -> bool:
+    """파일명이 SAM 계열인지 판정"""
+    fl = os.path.basename(fname).lower()
+    return any(k in fl for k in _SAM_KEYWORDS)
+
+
 def _load_yolo_model_paths() -> list:
-    """저장된 YOLO 모델 경로 목록 불러오기 (editor_models/ 기준)"""
+    """저장된 YOLO 모델 경로 목록 불러오기 (editor_models/ 기준)
+    SAM 계열(mobile_sam / FastSAM / sam_vit*)은 검출 모델이 아니므로 제외.
+    """
     paths = []
     try:
         # 1. config에서 등록된 경로 로드
@@ -44,8 +59,8 @@ def _load_yolo_model_paths() -> list:
     except Exception:
         pass
 
-    # 존재하지 않는 경로 필터링
-    return [p for p in paths if os.path.exists(p)]
+    # 존재하는 경로 + SAM 계열 제외
+    return [p for p in paths if os.path.exists(p) and not _is_sam_file(p)]
 
 
 def _save_yolo_model_paths(paths: list):
