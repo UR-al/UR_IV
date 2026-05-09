@@ -23,6 +23,12 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _REQ_FILE = os.path.join(_PROJECT_ROOT, "requirements.txt")
 _SPEC_SPLIT = re.compile(r"[<>=!~\s;]")
 
+# CUDA torch (SAM3는 GPU 전제 — CPU torch는 미지원)
+# 시스템 CUDA 버전이 다르면 cu121 / cu126 등으로 변경
+_TORCH_CUDA_INDEX = "https://download.pytorch.org/whl/cu128"
+_TORCH_CUDA_TAG = "+cu"  # 메타데이터의 local version에 포함되는 식별자
+_TORCH_PACKAGES = ("torch", "torchvision")
+
 
 def _parse_requirements(path: str) -> list[tuple[str, str]]:
     """requirements.txt → [(package_name, full_spec), ...]
@@ -121,7 +127,67 @@ def install_missing(missing: list[str], prefer_uv: bool = True) -> int:
     return 0  # 앱 실행은 계속 — import 실패 시 각 모듈이 알아서 폴백
 
 
+def _torch_is_cuda_build() -> bool:
+    """torch 메타데이터에 CUDA local-version 태그(`+cuXXX`)가 있는지 확인.
+    torch import 없이 빠르게 판정.
+    """
+    try:
+        v = version("torch")
+    except PackageNotFoundError:
+        return False
+    return _TORCH_CUDA_TAG in v
+
+
+def ensure_cuda_torch(prefer_uv: bool = True) -> bool:
+    """torch가 CUDA 빌드인지 보장. CPU 빌드 또는 미설치면 PyTorch CUDA index에서 재설치.
+    SAM3는 GPU 전제이므로 CPU torch는 받지 않음.
+    """
+    if _torch_is_cuda_build():
+        try:
+            v = version("torch")
+        except PackageNotFoundError:
+            v = "?"
+        print(f"[deps] torch CUDA build detected ({v})")
+        return True
+
+    try:
+        v = version("torch")
+        print(f"[deps] torch is CPU/unknown build ({v}) — reinstalling with CUDA from {_TORCH_CUDA_INDEX}")
+    except PackageNotFoundError:
+        print(f"[deps] torch not installed — installing CUDA build from {_TORCH_CUDA_INDEX}")
+
+    uv = _uv_executable() if prefer_uv else None
+    if uv:
+        cmd = [uv, "pip", "install", "--python", sys.executable, "--reinstall",
+               "--index-url", _TORCH_CUDA_INDEX, *_TORCH_PACKAGES]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall",
+               "--disable-pip-version-check",
+               "--index-url", _TORCH_CUDA_INDEX, *_TORCH_PACKAGES]
+
+    rc = subprocess.call(cmd)
+    if rc != 0:
+        print(f"[deps] WARNING — CUDA torch install failed (rc={rc}). "
+              f"시스템 CUDA가 없거나 인덱스 URL을 시스템 CUDA 버전에 맞게 변경 필요.")
+        return False
+
+    # 재확인 (subprocess 후 메타데이터는 최신 상태)
+    if _torch_is_cuda_build():
+        try:
+            v = version("torch")
+        except PackageNotFoundError:
+            v = "?"
+        print(f"[deps] torch CUDA installed: {v}")
+        return True
+    print("[deps] WARNING — install 성공했으나 CUDA 태그가 없음. 인덱스 URL 확인 필요.")
+    return False
+
+
 def main() -> int:
+    # 1) GPU torch 우선 확보 (SAM3 전제 조건)
+    ensure_cuda_torch()
+
+    # 2) requirements.txt의 나머지 패키지 누락 검사 + 설치
     missing = find_missing()
     if not missing:
         print("[deps] All requirements satisfied.")

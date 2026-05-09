@@ -27,8 +27,13 @@ numpy>=1.24.0
 # 파일 시스템
 send2trash>=1.8.0
 
+# === GPU 가속 (필수) ===
+# torch / torchvision은 SAM3 + YOLO 가속에 필수 — CPU 빌드는 사용 안 함.
+# 별도 PyPI 인덱스가 필요해서 이 파일이 아니라 core/check_requirements.py의
+# ensure_cuda_torch()가 처리합니다 (PyTorch CUDA index에서 자동 설치/재설치).
+# 시스템 CUDA가 다르면 core/check_requirements.py의 _TORCH_CUDA_INDEX 변경.
+
 # === Auto Censor (YOLO 검출) ===
-# torch는 ultralytics 설치 시 자동 동반
 ultralytics>=8.0.0
 
 # === SAM 정밀 마스킹 ===
