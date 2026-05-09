@@ -1,26 +1,71 @@
-# Core
+# =============================================================================
+# AI Studio Pro — Python 의존성
+# 설치: pip install -r requirements.txt  (또는 uv pip install -r requirements.txt)
+# uv 추천: https://github.com/astral-sh/uv
+# new_run_main_ui.bat 실행 시 누락 패키지가 자동 설치됩니다.
+# =============================================================================
+
+# === Core (필수) ===
+# UI / WebEngine
 PyQt6>=6.5.0
 PyQt6-WebEngine>=6.5.0
+
+# 네트워크 / 통신
 requests>=2.31.0
+websocket-client>=1.6.0
+
+# 데이터 / 메타데이터
 pandas>=2.0.0
 pyarrow>=12.0.0
+exifread>=2.3.2
+
+# 이미지 / 비전
 Pillow>=9.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
-exifread>=2.3.2
-websocket-client>=1.6.0
+
+# 파일 시스템
 send2trash>=1.8.0
 
-# YOLO Auto Censor
+# === Auto Censor (YOLO 검출) ===
+# torch는 ultralytics 설치 시 자동 동반
 ultralytics>=8.0.0
 
-# MobileSAM (정밀 마스킹)
-# pip install git+https://github.com/ChaoningZhang/MobileSAM.git
+# === SAM 정밀 마스킹 ===
+# SAM3 (Meta, 텍스트 프롬프트 — 권장, 정확도 최상)
+#   editor_models/sam3.pt 필요 (.safetensors 미지원)
+sam3
+einops
+iopath
+huggingface_hub>=0.16.0
+# triton-windows: SAM3 내부 GPU 커널(triton) Windows용 — Linux는 'triton'으로 교체
+triton-windows
+
+# SAM 공통 (vision transformers backbone)
 timm>=0.9.0
 
-# 배경 제거
+# === 배경 제거 ===
 rembg>=2.0.50
 pymatting>=1.1.0
 
-# OpenCV 고급 (가이디드 필터 등)
-# opencv-contrib-python>=4.8.0  # opencv-python 대체 시
+# =============================================================================
+# Optional: SAM 대체 구현 (SAM3 미설치 시에만 사용)
+# =============================================================================
+# MobileSAM (가벼움, vit_t):
+#   pip install git+https://github.com/ChaoningZhang/MobileSAM.git
+# SAM v1 (Meta, vit_b/l/h):
+#   pip install segment-anything
+
+# =============================================================================
+# Optional: 부가 기능
+# =============================================================================
+# 갤러리 폴더 변경 자동 감지:
+#   pip install watchdog
+# 워터마크 시스템 폰트 룩업 (Editor 탭):
+#   pip install matplotlib
+
+# =============================================================================
+# Optional: OpenCV 고급 필터 (가이디드 필터 등)
+# =============================================================================
+# opencv-python을 다음으로 교체 시 적용:
+#   pip install opencv-contrib-python>=4.8.0
