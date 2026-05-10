@@ -15,28 +15,52 @@ import numpy as np
 import cv2
 
 
-def find_sam_model(models_dir: str) -> tuple:
-    """editor_models/에서 SAM 모델 자동 감지 → (path, type)
-    우선순위: SAM3 > MobileSAM > FastSAM > SAM v1
-    - SAM3는 .pt만 허용 (.safetensors는 SAM3 코드가 거부함)
-    - SAM3는 text-prompted segmentation으로 정확도 최상
+_AUTO_PRIORITY = [
+    # Default 'auto' priority — MobileSAM first (가볍고 이전부터 안정 동작)
+    # SAM3가 항상 더 좋은 마스크를 주지는 않으므로 사용자가 명시 선택하지 않으면 보수적
+    ('mobile_sam', 'mobile_sam'),
+    ('sam3',       'sam3'),
+    ('FastSAM',    'fast_sam'),
+    ('sam_vit_b',  'sam'),
+    ('sam_vit_l',  'sam'),
+    ('sam_vit_h',  'sam'),
+]
+
+# 사용자가 명시 지정 시 해당 타입의 파일만 검색
+_TYPE_KEYWORDS = {
+    'sam3':       [('sam3',       'sam3')],
+    'mobile_sam': [('mobile_sam', 'mobile_sam'), ('mobile',     'mobile_sam')],
+    'fast_sam':   [('FastSAM',    'fast_sam'),   ('fastsam',    'fast_sam')],
+    'sam':        [('sam_vit_b',  'sam'),        ('sam_vit_l',  'sam'),       ('sam_vit_h', 'sam')],
+}
+
+_YOLO_KEYWORDS = ('yolo', 'nsfw', 'detect', 'censor')
+
+
+def find_sam_model(models_dir: str, prefer_type: str = 'auto') -> tuple:
+    """editor_models/에서 SAM 모델 감지 → (path, type)
+
+    prefer_type:
+      - 'auto'        : MobileSAM > SAM3 > FastSAM > SAM v1 우선순위로 자동 선택
+      - 'sam3'        : SAM3 (.pt) 만 검색 — 텍스트 프롬프트 기반
+      - 'mobile_sam'  : MobileSAM (.pt) 만 검색 — bbox 프롬프트 기반
+      - 'fast_sam'    : FastSAM 만 검색
+      - 'sam'         : SAM v1 만 검색
+      - 'off'         : (None, None) 반환 — SAM 정밀화 건너뜀
+
+    SAM3는 .pt만 허용 (.safetensors는 sam3 패키지가 거부).
     """
+    if prefer_type == 'off':
+        return None, None
     if not os.path.isdir(models_dir):
         return None, None
 
-    priority = [
-        ('sam3',        'sam3'),         # 최우선 — Meta SAM 3 (text-prompted)
-        ('mobile_sam',  'mobile_sam'),
-        ('FastSAM',     'fast_sam'),
-        ('sam_vit_b',   'sam'),
-        ('sam_vit_l',   'sam'),
-        ('sam_vit_h',   'sam'),
-    ]
-
-    yolo_keywords = ['yolo', 'nsfw', 'detect', 'censor']
+    if prefer_type == 'auto':
+        priority = _AUTO_PRIORITY
+    else:
+        priority = _TYPE_KEYWORDS.get(prefer_type, _AUTO_PRIORITY)
 
     def _ext_ok(fname: str, sam_type: str) -> bool:
-        # SAM3는 .pt만, 나머지는 .pt/.pth/.onnx 허용
         fl = fname.lower()
         if sam_type == 'sam3':
             return fl.endswith('.pt')
@@ -44,31 +68,32 @@ def find_sam_model(models_dir: str) -> tuple:
 
     files = sorted(os.listdir(models_dir))
 
-    # 1차: priority 순서대로 매칭 (priority가 outer loop여야 우선순위가 보장됨)
+    # priority가 outer loop여야 우선순위 보장
     for keyword, sam_type in priority:
         kw = keyword.lower()
         for fname in files:
             flow = fname.lower()
-            if any(yk in flow for yk in yolo_keywords):
+            if any(yk in flow for yk in _YOLO_KEYWORDS):
                 continue
             if kw in flow and _ext_ok(fname, sam_type):
                 return os.path.join(models_dir, fname), sam_type
 
-    # 2차: 'sam'이 포함된 파일 폴백
-    for fname in sorted(os.listdir(models_dir)):
-        flow = fname.lower()
-        if not flow.endswith(('.pt', '.pth', '.onnx')):
-            continue
-        if any(yk in flow for yk in yolo_keywords):
-            continue
-        if 'sam' in flow:
-            if 'sam3' in flow and flow.endswith('.pt'):
-                sam_type = 'sam3'
-            elif 'mobile' in flow:
-                sam_type = 'mobile_sam'
-            else:
-                sam_type = 'sam'
-            return os.path.join(models_dir, fname), sam_type
+    # 폴백 (auto 전용): 'sam'이 포함된 파일
+    if prefer_type == 'auto':
+        for fname in files:
+            flow = fname.lower()
+            if not flow.endswith(('.pt', '.pth', '.onnx')):
+                continue
+            if any(yk in flow for yk in _YOLO_KEYWORDS):
+                continue
+            if 'sam' in flow:
+                if 'sam3' in flow and flow.endswith('.pt'):
+                    sam_type = 'sam3'
+                elif 'mobile' in flow:
+                    sam_type = 'mobile_sam'
+                else:
+                    sam_type = 'sam'
+                return os.path.join(models_dir, fname), sam_type
 
     return None, None
 

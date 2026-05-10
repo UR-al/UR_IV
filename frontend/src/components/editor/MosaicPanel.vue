@@ -45,9 +45,20 @@
         </div>
         <input type="range" min="1" max="100" v-model.number="detectConf" class="modern-slider" />
       </div>
+      <label class="mt-12 sub-label">SAM Refiner</label>
+      <div class="chip-grid-4">
+        <button v-for="m in samModels" :key="m.id"
+          class="chip-btn"
+          :class="{ active: samModel === m.id }"
+          @click="samModel = m.id"
+          :title="m.tip"
+        >
+          <span class="label">{{ m.label }}</span>
+        </button>
+      </div>
       <div class="btn-row mt-12">
-        <button class="action-btn primary" @click="$emit('auto-censor', { confidence: detectConf })">AUTO CENSOR</button>
-        <button class="action-btn" @click="$emit('auto-detect', { confidence: detectConf })">MASK ONLY</button>
+        <button class="action-btn primary" @click="$emit('auto-censor', { confidence: detectConf, samModel })">AUTO CENSOR</button>
+        <button class="action-btn" @click="$emit('auto-detect', { confidence: detectConf, samModel })">MASK ONLY</button>
       </div>
     </div>
 
@@ -181,6 +192,20 @@ const selectedEffect = ref(0)
 const toolSize = ref(20)
 const strength = ref(15)
 const detectConf = ref(25)
+const samModel = ref('auto')
+const samModels = [
+  { id: 'auto',       label: 'AUTO',   tip: '자동 — MobileSAM 우선, 없으면 SAM3' },
+  { id: 'mobile_sam', label: 'MOBILE', tip: 'MobileSAM (가벼움/빠름, bbox 기반)' },
+  { id: 'sam3',       label: 'SAM3',   tip: 'Meta SAM 3 (텍스트 프롬프트, GPU 권장)' },
+  { id: 'off',        label: 'OFF',    tip: 'SAM 정밀화 끔 — YOLO bbox만 사용' },
+]
+
+// localStorage 영속화
+try {
+  const saved = localStorage.getItem('editor.samModel')
+  if (saved && samModels.some(m => m.id === saved)) samModel.value = saved
+} catch {}
+watch(samModel, (v) => { try { localStorage.setItem('editor.samModel', v) } catch {} })
 const eraserMode = ref('brush')
 const eraserRestore = ref(false)
 const magneticLasso = ref(false)
@@ -215,8 +240,10 @@ watch([toolSize, strength, stampSpacing, stampShapeLocal, barW, barH, selectedEf
 .mt-12 { margin-top: 12px; }
 .mt-auto { margin-top: auto; }
 
-.chip-grid, .chip-grid-3 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.chip-grid, .chip-grid-3, .chip-grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .chip-grid-3 { grid-template-columns: repeat(3, 1fr); }
+.chip-grid-4 { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.sub-label { font-size: 10px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; }
 
 .chip-btn {
   height: 38px; background: var(--bg-button); border: 1px solid var(--border);

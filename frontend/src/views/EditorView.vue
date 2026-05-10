@@ -282,7 +282,8 @@ async function runAutoCensor(params) {
   const backend = await getBackend()
   const cleanPath = imagePath.value.replace('file:///', '')
   backend.editorProcess(cleanPath, 'auto_censor', JSON.stringify({
-    confidence: (params?.confidence || 25) / 100
+    confidence: (params?.confidence || 25) / 100,
+    sam_model: params?.samModel || 'auto',
   }), (json) => {
     try {
       const result = JSON.parse(json)
@@ -298,7 +299,8 @@ async function runAutoDetect(params) {
   const backend = await getBackend()
   const cleanPath = imagePath.value.replace('file:///', '')
   backend.editorProcess(cleanPath, 'auto_detect', JSON.stringify({
-    confidence: (params?.confidence || 25) / 100
+    confidence: (params?.confidence || 25) / 100,
+    sam_model: params?.samModel || 'auto',
   }), (json) => {
     try {
       const result = JSON.parse(json)

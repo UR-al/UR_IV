@@ -345,14 +345,15 @@ class VueBridge(QObject):
 
                     print(f"[YOLO] Loaded {loaded_names} → {detect_count} regions, {len(yolo_boxes)} boxes, seg_mask={has_seg_mask}")
 
-                    # SAM 정밀 마스킹
-                    if yolo_boxes:
+                    # SAM 정밀 마스킹 — 사용자가 모델 선택 가능
+                    sam_choice = str(params.get('sam_model', 'auto')).lower()
+                    if yolo_boxes and sam_choice != 'off':
                         try:
                             from core.sam_refiner import refine_boxes_with_sam, find_sam_model
                             from tabs.editor.mosaic_panel import get_editor_models_dir
                             models_dir = get_editor_models_dir()
-                            sam_path, sam_type = find_sam_model(models_dir)
-                            print(f"[SAM] models_dir={models_dir}, found={sam_path}, type={sam_type}, has_seg={has_seg_mask}")
+                            sam_path, sam_type = find_sam_model(models_dir, prefer_type=sam_choice)
+                            print(f"[SAM] choice={sam_choice}, models_dir={models_dir}, found={sam_path}, type={sam_type}, has_seg={has_seg_mask}")
 
                             if has_seg_mask and sam_type != 'sam3':
                                 # YOLO seg 마스크가 이미 있고 SAM3가 아니면 정밀화 생략
@@ -370,7 +371,10 @@ class VueBridge(QObject):
                                 else:
                                     print("[SAM] No mask generated, using YOLO bbox")
                             else:
-                                print(f"[SAM] No SAM model in {models_dir}, using YOLO bbox")
+                                if sam_choice != 'auto':
+                                    print(f"[SAM] '{sam_choice}' 모델이 editor_models/에 없음 — bbox 사용")
+                                else:
+                                    print(f"[SAM] No SAM model in {models_dir}, using YOLO bbox")
                         except ImportError as ie:
                             print(f"[SAM] Import error: {ie}")
                         except Exception as sam_e:
