@@ -46,6 +46,7 @@ yolo_model_config.json
 
 # Generated output
 generated_images/
+ex/
 
 # Logs & backups
 *.log
