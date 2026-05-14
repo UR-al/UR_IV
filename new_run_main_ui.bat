@@ -15,5 +15,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
+python core\fetch_data.py
+if errorlevel 1 (
+    echo [run] Data fetch failed. See log above.
+    pause
+    exit /b 1
+)
+
 python new_main_ui.py
 endlocal
