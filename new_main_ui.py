@@ -5,6 +5,14 @@ AI Studio - Pro
 """
 import sys
 import os
+
+# Chromium/QtWebEngine 네이티브 로그 억제 (QApplication 생성 전에 설정)
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--disable-logging --log-level=3 --disable-features=WebRtcHideLocalIpsWithMdns",
+)
+os.environ.setdefault("QT_LOGGING_RULES", "qt.webenginecontext.debug=false")
+
 from config import *
 from ui.generator_main import GeneratorMainUI
 from PyQt6.QtWidgets import QApplication, QPushButton

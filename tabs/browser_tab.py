@@ -4,7 +4,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEngineSettings
+from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
+
+
+class _QuietPage(QWebEnginePage):
+    """외부 사이트의 JS 콘솔 잡음(CSP, Permissions-Policy, 코덱 등) 억제"""
+    def javaScriptConsoleMessage(self, level, message, line, source):
+        pass
+
 
 class BrowserTab(QWidget):
     """내장 웹 브라우저 탭"""
@@ -50,7 +57,8 @@ class BrowserTab(QWidget):
         
         # 웹뷰
         self.web_view = QWebEngineView()
-        
+        self.web_view.setPage(_QuietPage(self.web_view))
+
         page = self.web_view.page()
         profile = page.profile()
         
