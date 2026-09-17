@@ -1,44 +1,58 @@
 <template>
   <section class="instruction-presets" :aria-label="`${label} 사용자 프리셋`" :aria-busy="busy">
     <strong>{{ label }} 사용자 프리셋</strong>
-    <div class="preset-controls">
-      <select v-model="selected" :disabled="busy || disabled" :aria-label="`${label} 저장된 프리셋`" @change="confirmAction = ''">
+    <div v-if="scope === 'schema'" class="preset-buttons" role="group" aria-label="구조화된 출력 프리셋 선택">
+      <button v-for="item in presets" :key="item.id" type="button" :disabled="busy || disabled"
+        :aria-pressed="selected === item.id && item.instructions === instructions" @click="chooseSchema(item)">{{ item.name }}</button>
+      <span v-if="!presets.length">저장된 스키마 프리셋이 없습니다.</span>
+      <button type="button" :disabled="busy" @click="load">프리셋 새로고침</button>
+    </div>
+    <div v-else-if="showPicker !== false" class="preset-controls">
+      <select v-model="selected" :disabled="busy || disabled" :aria-label="`${label} 저장된 프리셋`" @change="chooseForEditing">
         <option value="">저장된 프리셋 선택…</option>
         <option v-for="item in presets" :key="item.id" :value="item.id">{{ item.name }}</option>
       </select>
       <button type="button" :disabled="busy || disabled || !chosen" @click="apply">불러오기</button>
-      <button type="button" :disabled="busy || disabled || !chosen" @click="confirmAction = 'delete'">삭제</button>
       <button type="button" :disabled="busy" @click="load">목록 새로고침</button>
     </div>
+    <label class="preset-field">프리셋 이름
+      <input v-model="name" :disabled="busy || disabled" maxlength="80" :aria-label="`${label} 새 프리셋 이름`" placeholder="프리셋 이름 (최대 80자)" @input="editorDirty = true" @keydown.enter.prevent="save(false)" />
+    </label>
+    <label v-if="scope === 'chat'" class="preset-field">프리셋 내용
+      <textarea v-model="draftContent" :disabled="busy || disabled" :aria-label="`${label} 프리셋 내용`" rows="5" maxlength="64000"
+        placeholder="이 프리셋에 저장할 지침을 작성하세요. 현재 대화 지침과 별도로 편집됩니다." @input="editorDirty = true" />
+    </label>
+    <small v-else>프리셋 내용: {{ scope === 'schema' ? '위 JSON 스키마 편집기의 내용' : '공통 지침과 9개 기능별 지침 전체' }}</small>
     <div class="preset-controls">
-      <input v-model="name" :disabled="busy || disabled" maxlength="80" :aria-label="`${label} 새 프리셋 이름`" placeholder="프리셋 이름 (최대 80자)" @keydown.enter.prevent="save(false)" />
       <button type="button" :disabled="busy || disabled || !name.trim()" @click="save(false)">새 프리셋 저장</button>
-      <button type="button" :disabled="busy || disabled || !chosen" @click="confirmAction = 'replace'">선택 프리셋 덮어쓰기</button>
+      <button type="button" :disabled="busy || disabled || !chosen || !name.trim()" @click="confirmAction = 'replace'">선택 프리셋 이름·내용 수정</button>
+      <button type="button" :disabled="busy || disabled || !chosen" @click="confirmAction = 'delete'">삭제</button>
     </div>
     <div v-if="confirmAction && chosen" class="preset-confirm" role="group" aria-label="프리셋 변경 확인">
-      <span>“{{ chosen.name }}”{{ confirmAction === 'delete' ? ' 프리셋을 삭제할까요? 현재 작성 중인 지침은 유지됩니다.' : '에 현재 작성 중인 지침을 덮어쓸까요?' }}</span>
+      <span>“{{ chosen.name }}”{{ confirmAction === 'delete' ? ' 프리셋을 삭제할까요? 현재 작성 중인 내용은 유지됩니다.' : `의 이름과 내용을 현재 편집본 “${name}”으로 바꿀까요?` }}</span>
       <button type="button" :disabled="busy" @click="confirmAction === 'delete' ? remove() : save(true)">{{ confirmAction === 'delete' ? '삭제 확인' : '덮어쓰기 확인' }}</button>
       <button type="button" :disabled="busy" @click="confirmAction = ''">취소</button>
     </div>
-    <small>프리셋 저장·삭제는 현재 적용된 지침을 바꾸지 않습니다. 불러오기는 편집기에 적용합니다.</small>
+    <small>{{ scope === 'chat' ? '저장하면 위 지침 프리셋 목록이 즉시 갱신됩니다. 선택한 지침 적용을 눌러야 대화에 사용됩니다.' : scope === 'schema' ? '이름 버튼을 누르면 스키마를 불러와 자동 저장합니다. ON/OFF는 변경하지 않습니다. 편집 중 자동 저장과 이름별 프리셋 저장은 별개입니다.' : '프리셋 저장·삭제는 현재 적용된 지침을 바꾸지 않습니다. 불러오기는 편집기에 적용합니다.' }}</small>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-else role="status" aria-live="polite">{{ busy ? '처리 중…' : notice }}</p>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
-import type { AiAssistInstructions } from '../types/bridge'
+import type { AiAssistInstructions, InstructionPreset } from '../types/bridge'
 
 type Instructions = string | AiAssistInstructions
-type Preset = { id: string; name: string; scope: string; instructions: Instructions }
-const props = defineProps<{ scope: 'chat' | 'assist'; instructions: Instructions; disabled?: boolean }>()
-const emit = defineEmits<{ apply: [instructions: Instructions] }>()
-const label = computed(() => props.scope === 'chat' ? '대화 지침' : 'AI 어시스트 지침')
-const presets = ref<Preset[]>([])
+const props = withDefaults(defineProps<{ scope: 'chat' | 'assist' | 'schema'; instructions: Instructions; disabled?: boolean; showPicker?: boolean; selectedId?: string }>(), { showPicker: true })
+const emit = defineEmits<{ apply: [instructions: Instructions]; listChanged: [presets: InstructionPreset[]]; selected: [id: string] }>()
+const label = computed(() => props.scope === 'chat' ? '대화 지침' : props.scope === 'schema' ? '구조화된 출력' : 'AI 어시스트 지침')
+const presets = ref<InstructionPreset[]>([])
 const selected = ref('')
 const name = ref('')
+const draftContent = ref(typeof props.instructions === 'string' ? props.instructions : '')
+const editorDirty = ref(false)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -53,6 +67,7 @@ function acceptList(reply: any) {
   if (reply.scope !== props.scope || !Array.isArray(reply.presets)) return
   presets.value = reply.presets
   if (!chosen.value) { selected.value = ''; confirmAction.value = '' }
+  emit('listChanged', presets.value)
 }
 async function request(method: string, payload: string, success: string) {
   if (busy.value || disposed) return
@@ -75,7 +90,11 @@ async function request(method: string, payload: string, success: string) {
         const reply = JSON.parse(raw)
         if (!reply.ok) throw Error(reply.error || '프리셋 요청에 실패했습니다')
         acceptList(reply)
-        if (reply.preset?.id) selected.value = reply.preset.id
+        if (reply.preset?.id) {
+          selected.value = reply.preset.id
+          editorDirty.value = false
+          emit('selected', selected.value)
+        }
         confirmAction.value = ''; notice.value = success
       } catch (problem) { error.value = problem instanceof Error ? problem.message : '프리셋 응답 오류' }
     })
@@ -86,11 +105,12 @@ async function request(method: string, payload: string, success: string) {
   }
 }
 function load() { return request('getInstructionPresets', props.scope, '') }
+defineExpose({ refresh: load, busy })
 function save(replace: boolean) {
-  if (props.disabled || (replace ? !chosen.value : !name.value.trim())) return
+  if (props.disabled || !name.value.trim() || (replace && !chosen.value)) return
   return request('saveInstructionPreset', JSON.stringify({ scope: props.scope,
-    id: replace ? chosen.value?.id : undefined, name: replace ? chosen.value?.name : name.value.trim(),
-    instructions: props.instructions }), '프리셋을 저장했습니다.')
+    id: replace ? chosen.value?.id : undefined, name: name.value.trim(),
+    instructions: props.scope === 'chat' ? draftContent.value : props.instructions }), '프리셋을 저장했습니다.')
 }
 function remove() {
   if (!chosen.value || props.disabled) return
@@ -101,6 +121,26 @@ function apply() {
   emit('apply', JSON.parse(JSON.stringify(chosen.value.instructions)))
   notice.value = '편집기에 불러왔습니다.'; error.value = ''
 }
+function chooseForEditing() {
+  confirmAction.value = ''
+  if (chosen.value) {
+    name.value = chosen.value.name
+    if (props.scope === 'chat' && typeof chosen.value.instructions === 'string') draftContent.value = chosen.value.instructions
+    editorDirty.value = false
+  }
+  emit('selected', selected.value)
+}
+function chooseSchema(item: InstructionPreset) {
+  if (busy.value || props.disabled) return
+  selected.value = item.id; chooseForEditing(); apply()
+}
+watch(() => props.selectedId, id => {
+  if (id === undefined || id === selected.value) return
+  selected.value = id; chooseForEditing()
+})
+watch(() => props.instructions, value => {
+  if (props.scope === 'chat' && !editorDirty.value && !selected.value && typeof value === 'string') draftContent.value = value
+})
 onMounted(() => {
   unsubscribe = onBackendEvent('instructionPresetsChanged', (raw: string) => {
     try { const reply = JSON.parse(raw); if (reply.ok) acceptList(reply) } catch { /* malformed events are ignored */ }
@@ -113,6 +153,12 @@ onUnmounted(() => { disposed = true; ++serial; clearTimeout(timer); unsubscribe?
 <style scoped>
 .instruction-presets { min-width: 0; padding: 12px; margin: 10px 0; border: 1px solid var(--border); border-radius: var(--radius-base, 8px); background: var(--bg-card); color: var(--text-primary); font-size: 12px; }
 .preset-controls, .preset-confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.preset-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.preset-buttons button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.preset-buttons [aria-pressed=true] { border-color: var(--accent); background: var(--accent-dim); }
+.preset-field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; color: var(--text-primary); }
+.preset-field input { flex: none; box-sizing: border-box; }
+.preset-field textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 100px; padding: 9px; font: inherit; line-height: 1.6; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; }
 input, select { flex: 1 1 180px; min-width: 0; width: 100%; }
 input, select, button { font: inherit; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }
 button { cursor: pointer; background: var(--bg-button); }

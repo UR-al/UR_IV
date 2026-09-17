@@ -14,18 +14,22 @@ import * as clipboard from '../utils/clipboard'
 import * as chatSettings from '../utils/chatSettings'
 import * as chatStructuredOutput from '../utils/chatStructuredOutput'
 import * as chatGeneration from '../utils/chatGeneration'
+import * as schemaAutosave from '../composables/useSchemaAutosave'
 import * as dropdownPlacement from '../utils/dropdownPlacement'
 
 const bridge = vi.hoisted(() => ({
   handlers: new Map<string, (raw: string) => void>(),
+  listeners: new Map<string, Set<(raw: string) => void>>(),
   action: vi.fn(),
   backend: null as any,
 }))
 vi.mock('../bridge.js', () => ({
   getBackend: async () => bridge.backend,
   onBackendEvent: (name: string, callback: (raw: string) => void) => {
-    bridge.handlers.set(name, callback)
-    return () => bridge.handlers.delete(name)
+    const listeners = bridge.listeners.get(name) || new Set()
+    listeners.add(callback); bridge.listeners.set(name, listeners)
+    bridge.handlers.set(name, raw => listeners.forEach(listener => listener(raw)))
+    return () => { listeners.delete(callback); if (!listeners.size) { bridge.listeners.delete(name); bridge.handlers.delete(name) } }
   },
 }))
 vi.mock('../stores/widgetStore.js', () => ({ requestAction: bridge.action }))
@@ -48,10 +52,11 @@ const ChatView = compileClient(chatSource, {
   vue: Vue, '../bridge.js': chatBridge, '../stores/widgetStore.js': widgetStore,
   '../utils/media.js': media, '../utils/chatMarkdown': chatMarkdown, '../utils/clipboard': clipboard,
   '../utils/chatSettings': chatSettings, '../utils/chatGeneration': chatGeneration,
+  '../composables/useSchemaAutosave': schemaAutosave,
   '../components/CustomSelect.vue': { __esModule: true, default: CustomSelect },
   '../utils/chatStructuredOutput': chatStructuredOutput,
   '../components/AiAssistInstructionsSettings.vue': { __esModule: true, default: { render: () => null } },
-  '../components/InstructionPresets.vue': { __esModule: true, default: { render: () => null } },
+  '../components/InstructionPresets.vue': { __esModule: true, default: InstructionPresets },
 })
 
 // Vue's public renderer boundary supplies a tiny in-memory DOM. No browser,
@@ -101,6 +106,7 @@ let app: App | undefined
 beforeEach(() => {
   vi.useFakeTimers()
   bridge.handlers.clear()
+  bridge.listeners.clear()
   bridge.action.mockClear()
   bridge.backend = null
   body.children = []
@@ -212,16 +218,115 @@ it('named presets save explicitly, apply separately and delete only after confir
   app = renderer.createApp(InstructionPresets, { scope: 'chat', instructions: '내 지침', onApply: apply })
   app.mount(root); await nextTick()
   find(root, n => n.props['aria-label'] === '대화 지침 새 프리셋 이름')!.props['onUpdate:modelValue']('태그 작업')
+  find(root, n => n.props['aria-label'] === '대화 지침 프리셋 내용')!.props['onUpdate:modelValue']('프리셋만의 다른 지침')
   await nextTick()
   await button(root, '새 프리셋 저장').props.onClick(); await nextTick()
   expect(apply).not.toHaveBeenCalled()
-  expect(JSON.parse(bridge.backend.saveInstructionPreset.mock.calls[0][0])).toMatchObject({ scope: 'chat', instructions: '내 지침', name: '태그 작업' })
+  expect(JSON.parse(bridge.backend.saveInstructionPreset.mock.calls[0][0])).toMatchObject({ scope: 'chat', instructions: '프리셋만의 다른 지침', name: '태그 작업' })
   button(root, '불러오기').props.onClick()
-  expect(apply).toHaveBeenCalledWith('내 지침')
+  expect(apply).toHaveBeenCalledWith('프리셋만의 다른 지침')
   button(root, '삭제').props.onClick(); await nextTick()
   expect(bridge.backend.deleteInstructionPreset).not.toHaveBeenCalled()
   await button(root, '삭제 확인').props.onClick(); await nextTick()
   expect(bridge.backend.deleteInstructionPreset).toHaveBeenCalledTimes(1)
   expect(apply).toHaveBeenCalledTimes(1)
   expect(root.textContent).toContain('현재 지침은 유지됩니다')
+})
+
+function presetBackend() {
+  let items: any[] = []
+  const reply = (scope: string, preset?: any) => JSON.stringify({ ok: true, scope, presets: items.filter(item => item.scope === scope), preset })
+  return {
+    getInstructionPresets: vi.fn((scope: string, cb: Function) => cb(reply(scope))),
+    saveInstructionPreset: vi.fn((raw: string, cb: Function) => {
+      const value = JSON.parse(raw); value.id ||= `preset-${items.length + 1}`
+      items = [...items.filter(item => item.id !== value.id), value]
+      bridge.handlers.get('instructionPresetsChanged')?.(reply(value.scope, value))
+      cb(reply(value.scope, value))
+    }),
+    deleteInstructionPreset: vi.fn((raw: string, cb: Function) => {
+      const value = JSON.parse(raw); items = items.filter(item => item.id !== value.id)
+      bridge.handlers.get('instructionPresetsChanged')?.(reply(value.scope))
+      cb(reply(value.scope))
+    }),
+    saveChatSchemaDraft: vi.fn((schemaText: string, cb: Function) => cb(JSON.stringify({ ok: true, schemaText }))),
+  }
+}
+
+it('refreshes the top preset list after save, applies explicitly, and renames/deletes the same preset', async () => {
+  bridge.backend = presetBackend()
+  const root = await mountChat()
+  const section = find(root, n => n.props['aria-label'] === '대화 지침 사용자 프리셋')!
+  const prompt = find(root, n => n.props.id === 'chat-system-prompt')!
+  const original = prompt.value
+  const name = find(section, n => n.tag === 'input')!
+  const contents = find(section, n => n.tag === 'textarea')!
+  name.props['onUpdate:modelValue']('내 태그 지침')
+  contents.props['onUpdate:modelValue']('테스트 전용 새 내용')
+  await nextTick()
+  await button(section, '새 프리셋 저장').props.onClick(); await nextTick()
+  const select = find(root, n => n.props['aria-label'] === '지침 프리셋')!
+  expect(select.textContent).toContain('내 태그 지침 · 내 프리셋')
+  expect(find(section, n => n.tag === 'select')).toBeUndefined()
+  expect(prompt.value).toBe(original)
+  button(root, '선택한 지침 적용').props.onClick(); await nextTick()
+  expect(prompt.value).toBe('테스트 전용 새 내용')
+  name.props['onUpdate:modelValue']('이름 수정')
+  contents.props['onUpdate:modelValue']('수정된 프리셋 내용')
+  await nextTick()
+  button(section, '선택 프리셋 이름·내용 수정').props.onClick(); await nextTick()
+  await button(section, '덮어쓰기 확인').props.onClick(); await nextTick()
+  expect(select.textContent).toContain('이름 수정 · 내 프리셋')
+  expect(select.textContent).not.toContain('내 태그 지침 · 내 프리셋')
+  expect(prompt.value).toBe('테스트 전용 새 내용')
+  const row = find(root, n => n.props.class === 'cm-preset-row')!
+  await button(row, '프리셋 새로고침').props.onClick(); await nextTick()
+  expect(bridge.backend.getInstructionPresets.mock.calls.filter((c: any) => c[0] === 'chat')).toHaveLength(2)
+  button(section, '삭제').props.onClick(); await nextTick()
+  await button(section, '삭제 확인').props.onClick(); await nextTick()
+  expect(select.textContent).not.toContain('이름 수정 · 내 프리셋')
+  expect(prompt.value).toBe('테스트 전용 새 내용')
+})
+
+it('autosaves unfinished schema without blur, restores named schema buttons, and keeps the toggle unchanged', async () => {
+  bridge.backend = presetBackend()
+  const root = await mountChat()
+  const schema = find(root, n => n.props.id === 'chat-json-schema')!
+  schema.props['onUpdate:modelValue']('{"type":')
+  await vi.advanceTimersByTimeAsync(400)
+  expect(bridge.backend.saveChatSchemaDraft.mock.calls[0][0]).toBe('{"type":')
+  expect(root.textContent).toContain('입력 내용 자동 저장됨')
+  expect(localStorage.getItem('chatJsonSchemaPending')).toBe('0')
+  const valid = '{"type":"object","properties":{"tags":{"type":"string"}}}'
+  schema.props['onUpdate:modelValue'](valid)
+  const section = find(root, n => n.props['aria-label'] === '구조화된 출력 사용자 프리셋')!
+  find(section, n => n.tag === 'input')!.props['onUpdate:modelValue']('태그 JSON')
+  await nextTick()
+  await button(section, '새 프리셋 저장').props.onClick(); await nextTick()
+  expect(JSON.parse(bridge.backend.saveInstructionPreset.mock.calls[0][0])).toMatchObject({ scope: 'schema', name: '태그 JSON', instructions: valid })
+  schema.props['onUpdate:modelValue']('{"type":"string"}')
+  await nextTick()
+  button(section, '태그 JSON').props.onClick(); await nextTick()
+  expect(schema.value).toBe(valid)
+  expect(button(section, '태그 JSON').props['aria-pressed']).toBe(true)
+  await vi.advanceTimersByTimeAsync(400)
+  const calls = bridge.backend.saveChatSchemaDraft.mock.calls
+  expect(calls[calls.length - 1][0]).toBe(valid)
+  expect(find(root, n => n.tag === 'input' && n.props.type === 'checkbox')!.props['onUpdate:modelValue']).toBeDefined()
+  expect(localStorage.getItem('chatStructuredEnabled')).not.toBe('1')
+  expect(find(root, n => n.props['aria-label'] === '지침 프리셋')!.textContent).not.toContain('태그 JSON')
+})
+
+it('recovers an unacknowledged schema draft even if a stale disk read arrives after the new save', async () => {
+  localStorage.setItem('chatJsonSchema', '{recover me')
+  localStorage.setItem('chatJsonSchemaPending', '1')
+  let restore: (raw: string) => void = () => {}
+  bridge.backend = { ...presetBackend(), getUiPrefs: (cb: typeof restore) => { restore = cb } }
+  const root = await mountChat()
+  await vi.advanceTimersByTimeAsync(400)
+  expect(bridge.backend.saveChatSchemaDraft.mock.calls[0][0]).toBe('{recover me')
+  restore(JSON.stringify({ chatSettingsV2: { schemaText: '{"type":"string"}', systemPrompt: '복구된 지침', provider: 'lmstudio' } }))
+  await nextTick()
+  expect(find(root, n => n.props.id === 'chat-json-schema')!.value).toBe('{recover me')
+  expect(find(root, n => n.props.id === 'chat-system-prompt')!.value).toBe('복구된 지침')
 })

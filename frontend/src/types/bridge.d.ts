@@ -89,6 +89,13 @@ export interface AiAssistInstructions {
   features: Record<AiAssistFeature, string>
 }
 
+export interface InstructionPreset {
+  id: string
+  name: string
+  scope: 'chat' | 'assist' | 'schema'
+  instructions: string | AiAssistInstructions
+}
+
 export type AiAssistInstructionsResult =
   | { ok: true; instructions: AiAssistInstructions }
   | { ok: false; error: string }

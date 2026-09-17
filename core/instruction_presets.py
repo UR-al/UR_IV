@@ -1,4 +1,4 @@
-"""Named chat/assist instruction snapshots. CRUD never changes live settings."""
+"""Named chat/assist/schema snapshots. CRUD never changes live settings."""
 from __future__ import annotations
 
 import json
@@ -15,14 +15,20 @@ MAX_PRESETS = 100
 
 
 def _scope(scope):
-    if scope not in ('chat', 'assist'):
-        raise ValueError('프리셋 종류는 chat 또는 assist여야 합니다')
+    if scope not in ('chat', 'assist', 'schema'):
+        raise ValueError('프리셋 종류는 chat, assist 또는 schema여야 합니다')
     return scope
 
 
 def _content(scope, value):
     if scope == 'assist':
         return normalize_instructions(value, strict=True)
+    if scope == 'schema':
+        from core.structured_output import parse_schema
+        if not isinstance(value, str):
+            raise ValueError('스키마 프리셋 내용은 JSON 문자열이어야 합니다')
+        parse_schema(value)
+        return value
     if not isinstance(value, str) or len(value) > 32000:
         raise ValueError('대화 지침은 32,000자 이하의 문자열이어야 합니다')
     return value
@@ -36,7 +42,7 @@ def _read(path):
     if not path.exists():
         return {'version': 1, 'presets': []}
     try:
-        if path.stat().st_size > 64_000_000:
+        if path.stat().st_size > 96_000_000:
             raise ValueError('파일 용량 초과')
         data = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('presets'), list):

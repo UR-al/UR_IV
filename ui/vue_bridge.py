@@ -2084,6 +2084,22 @@ class VueBridge(QObject):
         return self._instruction_presets_request('list', scope)
 
     @pyqtSlot(str, result=str)
+    def saveChatSchemaDraft(self, text):
+        """Acknowledge after atomic persistence, not after a fire-and-forget action."""
+        try:
+            from core.chat_schema_settings import save_schema_draft
+            return json.dumps({'ok': True, 'schemaText': save_schema_draft(text)}, ensure_ascii=False)
+        except (ValueError, TypeError) as exc:
+            return json.dumps({'ok': False, 'error': str(exc)[:500]}, ensure_ascii=False)
+        except Exception as exc:
+            from core.error_handler import handle_error
+            try:
+                handle_error('E030', '구조화된 출력 자동 저장', exc, notify=False)
+            except Exception:
+                pass
+            return json.dumps({'ok': False, 'error': '스키마를 저장하지 못했습니다. 파일과 쓰기 권한을 확인하세요.'}, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
     def saveInstructionPreset(self, payload):
         return self._instruction_presets_request('save', payload)
 

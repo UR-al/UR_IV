@@ -153,6 +153,7 @@ _WEB_METHODS = frozenset({
     "getActiveSearchDataset", "getUiPrefs",
     "getAiAssistInstructions", "saveAiAssistInstructions",
     "getInstructionPresets", "saveInstructionPreset", "deleteInstructionPreset",
+    "saveChatSchemaDraft",
     # Backend runtime, generation API, model-path 설정은 redaction과 native
     # capability 검사를 한곳에서 강제하는 ``studio`` 객체로만 공개한다.
     "getUpscalers", "requestUpscalers", "saveImageExif", "renameFile",

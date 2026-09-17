@@ -75,6 +75,10 @@ const methods = {
   onWidgetChanged: (id, value) => { widgetValues[id] = value },
   getInitialConfig: reply(() => json({ uiPrefs: prefs, condRules: { positive: [], negative: [] }, globalWeights: [] })),
   getUiPrefs: reply(() => json(prefs)), getSettings: reply('{}'), getTabDefaults: reply('{}'),
+  saveChatSchemaDraft: (schemaText, callback) => {
+    prefs.chatSettingsV2 = { ...prefs.chatSettingsV2, schemaText }
+    callback(json({ ok: true, schemaText })); record('JSON 스키마 초안: 메모리에만 자동 저장')
+  },
   getAiAssistInstructions: reply(() => json({ ok: true, instructions })),
   saveAiAssistInstructions: (raw, callback) => { instructions = JSON.parse(raw); const result = json({ ok: true, instructions }); emit('aiAssistInstructionsChanged', result); callback(result); record('AI 어시스트 지침: 메모리에만 저장') },
   getInstructionPresets: (scope, callback) => callback(presetReply(scope)),

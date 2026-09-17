@@ -61,23 +61,29 @@
           <select v-model="systemPreset" aria-label="지침 프리셋">
             <option value="">프리셋 선택…</option>
             <option v-for="preset in CHAT_SYSTEM_PRESETS" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
+            <option v-for="preset in customSystemPresets" :key="preset.id" :value="`custom:${preset.id}`">{{ preset.name }} · 내 프리셋</option>
             <option v-if="personalSystemPrompt !== null" value="personal">저장된 개인 지침 복원</option>
           </select>
           <button type="button" :disabled="!systemPreset" @click="applySystemPreset">선택한 지침 적용</button>
+          <button type="button" :disabled="chatPresetsRef?.busy" @click="chatPresetsRef?.refresh()">프리셋 새로고침</button>
           <small>직접 적용할 때만 변경됩니다. 개인 지침은 복원할 수 있습니다.</small>
         </div>
         <textarea id="chat-system-prompt" v-model="systemPrompt" rows="3" spellcheck="false" @input="systemPreset = ''; markPreferencesEdited()" @change="saveSystemPrompt"></textarea>
-        <InstructionPresets scope="chat" :instructions="systemPrompt" @apply="applyCustomSystemPreset" />
+        <InstructionPresets ref="chatPresetsRef" scope="chat" :instructions="systemPrompt" :show-picker="false" :selected-id="selectedCustomPresetId"
+          @list-changed="updateChatPresets" @selected="selectCustomPreset" />
         <details class="cm-structured" :open="structuredEnabled">
           <summary>구조화된 출력 · JSON 스키마</summary>
           <label class="cm-schema-toggle"><input v-model="structuredEnabled" type="checkbox" :disabled="!!busyId" @change="saveStructured" /> JSON 스키마로 대화 응답 형식 제한</label>
           <p class="cm-settings-hint">켜면 ‘대화만’ 모드로 동작하며 이미지·영상 생성은 실행하지 않습니다. Ollama는 format, LM Studio는 response_format으로 전달합니다. 모델에 따라 지원 범위가 다르며, 구조는 제한해도 내용의 정확성까지 보장하지는 않습니다.</p>
           <label for="chat-json-schema">JSON Schema (Draft 2020-12 · 참조 없는 인라인 스키마)</label>
-          <textarea id="chat-json-schema" v-model="schemaText" :disabled="!!busyId" rows="9" spellcheck="false" maxlength="128000" :aria-invalid="!!schemaError" aria-describedby="chat-schema-help" @input="markPreferencesEdited" @change="savePreferences"></textarea>
+          <textarea id="chat-json-schema" v-model="schemaText" :disabled="!!busyId" rows="9" spellcheck="false" maxlength="128000" :aria-invalid="!!schemaError" aria-describedby="chat-schema-help" @blur="schemaAutosave.flush"></textarea>
+          <p class="cm-settings-hint" role="status" aria-live="polite">{{ schemaSaveStatus }}</p>
+          <p v-if="schemaSaveError" class="cm-schema-error" role="alert">{{ schemaSaveError }} <button type="button" @click="schemaAutosave.flush">다시 저장</button></p>
           <button type="button" :disabled="!!busyId" @click="schemaExamplePending = !schemaExamplePending">태그·자연어·한국어 설명 예제</button>
           <span v-if="schemaExamplePending">현재 스키마를 예제로 바꿀까요? <button type="button" @click="useSchemaExample">예제로 교체</button><button type="button" @click="schemaExamplePending = false">취소</button></span>
           <p id="chat-schema-help" class="cm-settings-hint">최대 64,000자. $ref/$id 참조는 지원하지 않습니다. 답변 최대 토큰이 ‘제한 없음’이면 JSON 출력에만 4,096 토큰을 적용합니다. 완료된 응답은 스키마를 다시 검증하며 중지·잘림·불일치는 오류로 표시합니다. 형식과 충돌하는 대화 지침도 함께 조정하세요.</p>
           <p v-if="schemaError" class="cm-schema-error" role="alert">{{ schemaError }}</p>
+          <InstructionPresets scope="schema" :instructions="schemaText" :disabled="!!busyId" @apply="applySchemaPreset" />
         </details>
         <div class="cm-opts">
           <label class="cm-opt">
@@ -244,7 +250,7 @@
  * 붙는 순간 5MB 를 넘겨 조용히 실패한다. 브리지: chat_load/chat_save/chat_send/chat_stop,
  * 시그널 chatThreads/chatToken/chatDone (tests/test_bridge_contract.py 가 이름을 지킨다).
  */
-import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
 import { mediaUrl } from '../utils/media.js'
@@ -256,7 +262,8 @@ import CustomSelect from '../components/CustomSelect.vue'
 import AiAssistInstructionsSettings from '../components/AiAssistInstructionsSettings.vue'
 import InstructionPresets from '../components/InstructionPresets.vue'
 import { PROMPT_JSON_SCHEMA, parseChatSchema } from '../utils/chatStructuredOutput'
-import type { AiAssistInstructions } from '../types/bridge'
+import { createSchemaAutosave } from '../composables/useSchemaAutosave'
+import type { AiAssistInstructions, InstructionPreset } from '../types/bridge'
 
 interface ChatMessage {
   id: string
@@ -312,6 +319,27 @@ let modelsRequestId = ''
 let modelsTimer: ReturnType<typeof setTimeout> | undefined
 const structuredEnabled = ref(localStorage.getItem('chatStructuredEnabled') === '1')
 const schemaText = ref(localStorage.getItem('chatJsonSchema') ?? PROMPT_JSON_SCHEMA)
+const recoveringSchema = localStorage.getItem('chatJsonSchemaPending') === '1'
+const schemaAutosave = createSchemaAutosave()
+const schemaSaveError = schemaAutosave.error
+const schemaSaveStatus = computed(() => ({
+  idle: '입력하면 자동 저장됩니다. 작성 중인 JSON도 보관합니다.',
+  pending: '입력 내용 저장 대기 중…', saving: '입력 내용 저장 중…',
+  saved: '입력 내용 자동 저장됨', error: '자동 저장하지 못했습니다. 입력 내용은 유지됩니다.',
+}[schemaAutosave.state.value]))
+let restoringSchema = false
+watch(schemaText, text => {
+  if (restoringSchema) return
+  markPreferencesEdited()
+  // Keep an unacknowledged draft across a restart or a disconnected bridge.
+  try { localStorage.setItem('chatJsonSchema', text); localStorage.setItem('chatJsonSchemaPending', '1') } catch { /* file save still runs */ }
+  schemaAutosave.queue(text)
+}, { flush: 'sync' })
+watch(schemaAutosave.state, state => {
+  if (state === 'saved') {
+    try { localStorage.setItem('chatJsonSchemaPending', '0') } catch { /* saved on disk */ }
+  }
+}, { flush: 'sync' })
 const schemaExamplePending = ref(false)
 const schemaError = computed(() => { try { parseChatSchema(schemaText.value); return '' } catch (error) { return (error as Error).message } })
 if (structuredEnabled.value) generationRequest.value.mode = 'chat'
@@ -321,6 +349,9 @@ let disposed = false
 const systemPrompt = ref(localStorage.getItem('chatSystemPrompt') ?? DEFAULT_SYSTEM)
 const personalSystemPrompt = ref<string | null>(localStorage.getItem('chatPersonalSystemPrompt'))
 const systemPreset = ref('')
+const customSystemPresets = ref<InstructionPreset[]>([])
+const chatPresetsRef = ref<{ refresh: () => Promise<void>; busy: boolean } | null>(null)
+const selectedCustomPresetId = computed(() => systemPreset.value.startsWith('custom:') ? systemPreset.value.slice(7) : '')
 const showSystem = ref(false)
 const showThreads = ref(false)
 const modelInfo = ref<ChatModelInfo | null>(null)
@@ -698,6 +729,11 @@ function saveSystemPrompt() {
   savePreferences()
 }
 function applySystemPreset() {
+  if (selectedCustomPresetId.value) {
+    const preset = customSystemPresets.value.find(item => item.id === selectedCustomPresetId.value)
+    if (preset && typeof preset.instructions === 'string') { systemPrompt.value = preset.instructions; saveSystemPrompt() }
+    return
+  }
   const selected = selectSystemPreset(systemPreset.value, systemPrompt.value, personalSystemPrompt.value)
   systemPrompt.value = selected.prompt
   personalSystemPrompt.value = selected.personal
@@ -705,9 +741,13 @@ function applySystemPreset() {
   localStorage.setItem('chatSystemPrompt', selected.prompt)
   savePreferences()
 }
-function applyCustomSystemPreset(value: string | AiAssistInstructions) {
-  if (typeof value !== 'string') return
-  systemPrompt.value = value; systemPreset.value = ''; saveSystemPrompt()
+function updateChatPresets(presets: InstructionPreset[]) {
+  customSystemPresets.value = presets
+  if (selectedCustomPresetId.value && !presets.some(item => item.id === selectedCustomPresetId.value)) systemPreset.value = ''
+}
+function selectCustomPreset(id: string) {
+  if (id) systemPreset.value = `custom:${id}`
+  else if (selectedCustomPresetId.value) systemPreset.value = ''
 }
 function checkSchema() {
   if (!structuredEnabled.value || !schemaError.value) return true
@@ -719,7 +759,10 @@ function saveStructured() {
   if (structuredEnabled.value) generationRequest.value.mode = 'chat'
   savePreferences()
 }
-function useSchemaExample() { schemaText.value = PROMPT_JSON_SCHEMA; schemaExamplePending.value = false; savePreferences() }
+function applySchemaPreset(value: string | AiAssistInstructions) {
+  if (typeof value === 'string' && !busyId.value) { schemaText.value = value; schemaExamplePending.value = false }
+}
+function useSchemaExample() { schemaText.value = PROMPT_JSON_SCHEMA; schemaExamplePending.value = false }
 function savePreferences() {
   preferencesEdited = true
   localStorage.setItem('chatProvider', provider.value)
@@ -753,7 +796,12 @@ async function restorePreferences() {
       }
       if (typeof saved.systemPrompt === 'string') systemPrompt.value = saved.systemPrompt
       if (typeof saved.personalSystemPrompt === 'string') personalSystemPrompt.value = saved.personalSystemPrompt
-      if (typeof saved.schemaText === 'string') schemaText.value = saved.schemaText
+      if (typeof saved.schemaText === 'string' && !recoveringSchema && localStorage.getItem('chatJsonSchemaPending') !== '1') {
+        restoringSchema = true
+        schemaText.value = saved.schemaText
+        restoringSchema = false
+        localStorage.setItem('chatJsonSchema', saved.schemaText)
+      }
       if (saved.options && typeof saved.options === 'object') {
         localStorage.setItem('chatOptions.v1', JSON.stringify(saved.options))
         chatOptions.value = loadChatOptions()
@@ -876,6 +924,8 @@ onMounted(() => {
   unsubs.push(onBackendEvent('chatModelInfo', onModelInfo))
   unsubs.push(onBackendEvent('chatModelsReady', onChatModels))
   window.addEventListener('keydown', onGlobalKey)
+  window.addEventListener('beforeunload', schemaAutosave.flush)
+  if (recoveringSchema) schemaAutosave.queue(schemaText.value)
   requestAction('chat_load')
   requestModels()
   restorePreferences().catch(() => {})
@@ -884,10 +934,13 @@ onMounted(() => {
   setTimeout(() => { if (!threads.value.length) newThread() }, 1500)
 })
 onActivated(() => { requestModels(); focusComposer() })
+onDeactivated(schemaAutosave.flush)
+onBeforeUnmount(schemaAutosave.close)
 onUnmounted(() => {
   disposed = true; clearTimeout(modelsTimer)
   unsubs.forEach((u) => { try { u() } catch {} })
   window.removeEventListener('keydown', onGlobalKey)
+  window.removeEventListener('beforeunload', schemaAutosave.flush)
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
   if (modelInfoTimer) { clearTimeout(modelInfoTimer); modelInfoTimer = null }
 })
