@@ -176,13 +176,80 @@ it('sends JSON schema only when enabled and leaves an invalid draft unsent', asy
   send()
   const sent = bridge.action.mock.calls.find(call => call[0] === 'chat_send')![1]
   expect(sent.schema.type).toBe('object')
-  expect(sent.generation.mode).toBe('chat')
+  expect(sent.generation.mode).toBe('auto')
   expect(sent.provider).toBe('ollama')
   expect(sent.system).not.toContain('AI 어시스트')
   bridge.handlers.get('chatDone')!(JSON.stringify({ id: sent.id, ok: false, content: '{partial', error: '형식 오류' }))
   await nextTick()
   expect(root.textContent).toContain('{partial')
   expect(root.textContent).toContain('형식 오류')
+})
+
+it.each(['ollama', 'lmstudio'])('keeps image attachments and schema together for %s without locking the request mode', async provider => {
+  localStorage.setItem('chatProvider', provider)
+  localStorage.setItem('chatStructuredEnabled', '1')
+  localStorage.setItem('chatLmStudioModel', 'vision-fixture')
+  const root = await mountChat()
+  const mode = find(root, n => n.props['aria-label'] === '채팅 또는 생성 모드')!
+  expect(mode.props.disabled).toBe(false)
+  find(root, n => n.props.class === 'chat-view')!.props.onDrop({ preventDefault() {}, dataTransfer: { files: [], getData: () => 'C:/fixture/portrait.png' } })
+  find(root, n => n.props.class === 'cmp-input')!.props['onUpdate:modelValue']('첨부 이미지를 보고 JSON으로 설명해 줘')
+  await nextTick()
+  find(root, n => n.props.title === '보내기 (Enter)')!.props.onClick()
+  const sent = bridge.action.mock.calls.find(call => call[0] === 'chat_send')![1]
+  expect(sent.provider).toBe(provider)
+  expect(sent.generation.mode).toBe('auto')
+  expect(sent.schema.type).toBe('object')
+  expect(sent.messages[0].images).toEqual(['C:/fixture/portrait.png'])
+  const content = '{"tags":["portrait"],"caption":"A portrait. The subject is visible.","explanation_ko":"인물 초상"}'
+  bridge.handlers.get('chatDone')!(JSON.stringify({ id: sent.id, ok: true, content, structured: true }))
+  await nextTick()
+  expect(find(root, n => n.tag === 'pre' && String(n.props.class).includes('msg-json'))!.textContent).toBe(content)
+})
+
+it.each(['image', 'video'])('keeps %s selected when schema is enabled and ignores schema drafts on generation and retry', async kind => {
+  const root = await mountChat()
+  const mode = find(root, n => n.props['aria-label'] === '채팅 또는 생성 모드')!
+  mode.props['onUpdate:modelValue'](kind)
+  const toggle = find(root, n => n.tag === 'input' && n.props.type === 'checkbox')!
+  toggle.props['onUpdate:modelValue'](true); toggle.props.onChange()
+  find(root, n => n.props.id === 'chat-json-schema')!.props['onUpdate:modelValue']('{unfinished')
+  find(root, n => n.props.class === 'cmp-input')!.props['onUpdate:modelValue']('a cat in the garden')
+  await nextTick()
+  expect(mode.props.disabled).toBe(false)
+  find(root, n => n.props.title === '보내기 (Enter)')!.props.onClick()
+  const sent = bridge.action.mock.calls.find(call => call[0] === 'chat_send')![1]
+  expect(sent.schema).toBeUndefined()
+  expect(sent.generation.mode).toBe(kind)
+  bridge.handlers.get('chatGenerationEvent')!(JSON.stringify({ id: sent.id, kind, done: true, ok: true,
+    artifacts: [{ kind, path: `C:/output/result.${kind === 'image' ? 'png' : 'mp4'}` }] }))
+  await nextTick()
+  expect(find(root, n => kind === 'image' ? n.props.alt === '생성 결과' : n.tag === 'video')).toBeDefined()
+  expect(find(root, n => n.tag === 'pre' && String(n.props.class).includes('msg-json'))).toBeUndefined()
+  // Retry uses the original request, not the newly selected composer mode.
+  mode.props['onUpdate:modelValue']('chat'); await nextTick()
+  find(root, n => n.props.title === '같은 요청 · 현재 모델 설정으로 다시 생성')!.props.onClick()
+  const calls = bridge.action.mock.calls.filter(call => call[0] === 'chat_send')
+  expect(calls).toHaveLength(2)
+  expect(calls[1][1].generation.mode).toBe(kind)
+  expect(calls[1][1].schema).toBeUndefined()
+})
+
+it('restoring enabled schema does not force chat mode and auto media results leave JSON rendering', async () => {
+  bridge.backend = { ...presetBackend(), getUiPrefs: (cb: Function) => cb(JSON.stringify({ chatSettingsV2: { structuredEnabled: true } })) }
+  const root = await mountChat()
+  expect(find(root, n => n.props['aria-label'] === '채팅 또는 생성 모드')!.props.disabled).toBe(false)
+  find(root, n => n.props.class === 'cmp-input')!.props['onUpdate:modelValue']('고양이 이미지 만들어줘')
+  await nextTick()
+  find(root, n => n.props.title === '보내기 (Enter)')!.props.onClick()
+  const sent = bridge.action.mock.calls.find(call => call[0] === 'chat_send')![1]
+  expect(sent.generation.mode).toBe('auto')
+  expect(sent.schema.type).toBe('object')
+  bridge.handlers.get('chatGenerationEvent')!(JSON.stringify({ id: sent.id, kind: 'image', done: true, ok: true,
+    artifacts: [{ kind: 'image', path: 'C:/output/cat.png' }] }))
+  await nextTick()
+  expect(find(root, n => n.props.alt === '생성 결과')).toBeDefined()
+  expect(find(root, n => n.tag === 'pre' && String(n.props.class).includes('msg-json'))).toBeUndefined()
 })
 
 it('LM Studio selection uses a separate model list and does not overwrite assist Ollama preferences', async () => {

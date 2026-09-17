@@ -74,7 +74,7 @@
         <details class="cm-structured" :open="structuredEnabled">
           <summary>구조화된 출력 · JSON 스키마</summary>
           <label class="cm-schema-toggle"><input v-model="structuredEnabled" type="checkbox" :disabled="!!busyId" @change="saveStructured" /> JSON 스키마로 대화 응답 형식 제한</label>
-          <p class="cm-settings-hint">켜면 ‘대화만’ 모드로 동작하며 이미지·영상 생성은 실행하지 않습니다. Ollama는 format, LM Studio는 response_format으로 전달합니다. 모델에 따라 지원 범위가 다르며, 구조는 제한해도 내용의 정확성까지 보장하지는 않습니다.</p>
+          <p class="cm-settings-hint">첨부 이미지를 보면서 JSON 형식으로 답할 수 있습니다. 이미지 인식은 비전 모델이 필요하며, 모델에 따라 스키마 지원 범위가 다릅니다. 요청 모드는 자유롭게 선택할 수 있고, 이미지·영상 생성 결과에는 JSON 스키마를 적용하지 않습니다. Ollama는 format, LM Studio는 response_format으로 전달하며, 구조를 제한해도 내용의 정확성까지 보장하지는 않습니다.</p>
           <label for="chat-json-schema">JSON Schema (Draft 2020-12 · 참조 없는 인라인 스키마)</label>
           <textarea id="chat-json-schema" v-model="schemaText" :disabled="!!busyId" rows="9" spellcheck="false" maxlength="128000" :aria-invalid="!!schemaError" aria-describedby="chat-schema-help" @blur="schemaAutosave.flush"></textarea>
           <p class="cm-settings-hint" role="status" aria-live="polite">{{ schemaSaveStatus }}</p>
@@ -185,7 +185,7 @@
         <button v-if="!followBottom" class="cm-jump" type="button" @click="scrollToBottom(true)" title="맨 아래로"><Icon name="arrow-down" size="14" /></button>
          <div class="cm-composer" :class="{ drag: dragOver }">
          <div class="cmp-generation-options">
-           <label>요청 <select v-model="generationRequest.mode" :disabled="!!busyId || structuredEnabled" aria-label="채팅 또는 생성 모드">
+           <label>요청 <select v-model="generationRequest.mode" :disabled="!!busyId" aria-label="채팅 또는 생성 모드">
              <option value="auto">자동</option><option value="chat">대화만</option>
              <option value="image">이미지 생성</option><option value="video">영상 · H3 기본 품질</option>
            </select></label>
@@ -202,7 +202,7 @@
            <label v-if="attachments.length && generationRequest.family === 'current' && generationRequest.mode !== 'video'">변화량
              <input v-model.number="generationRequest.denoise" type="number" min="0.01" max="1" step="0.05" :disabled="!!busyId" aria-label="이미지 편집 변화량" />
            </label>
-           <small>{{ structuredEnabled ? 'JSON 스키마 출력 켜짐 · 대화만 전송' : generationRequest.mode === 'chat' ? '대화 모델에 질문만 전달합니다' : '자동은 명확한 생성 요청만 실행 · 현재 모델은 T2I 설정 사용 · Krea2/H3는 ComfyUI 필요' }}</small>
+           <small>{{ structuredEnabled ? 'JSON 스키마: 대화·이미지 인식 응답에 적용 · 이미지·영상 생성 결과에는 미적용' : generationRequest.mode === 'chat' ? '대화 모델에 질문만 전달합니다' : '자동은 명확한 생성 요청만 실행 · 현재 모델은 T2I 설정 사용 · Krea2/H3는 ComfyUI 필요' }}</small>
          </div>
         <div v-if="attachments.length" class="cmp-attach">
           <div v-for="(a, i) in attachments" :key="i" class="cmp-thumb">
@@ -342,7 +342,6 @@ watch(schemaAutosave.state, state => {
 }, { flush: 'sync' })
 const schemaExamplePending = ref(false)
 const schemaError = computed(() => { try { parseChatSchema(schemaText.value); return '' } catch (error) { return (error as Error).message } })
-if (structuredEnabled.value) generationRequest.value.mode = 'chat'
 let preferencesEdited = false
 function markPreferencesEdited() { preferencesEdited = true }
 let disposed = false
@@ -517,10 +516,9 @@ function ask(thread: ChatThread, retryRequest?: GenerationRequest) {
   const requestId = uid()
   const latestUser = [...thread.messages].reverse().find(m => m.role === 'user')
   const request = { ...(retryRequest || latestUser?.generationRequest || generationRequest.value) }
-  if (structuredEnabled.value) request.mode = 'chat'
   const assistant: ChatMessage = { id: uid(), role: 'assistant', content: '', createdAt: Date.now(), pending: true, requestId, model: model.value }
   assistant.generationRequest = request
-  assistant.structured = structuredEnabled.value
+  assistant.structured = usesStructuredOutput(request)
   thread.messages.push(assistant)
   thread.model = model.value
   thread.updatedAt = Date.now()
@@ -530,7 +528,7 @@ function ask(thread: ChatThread, retryRequest?: GenerationRequest) {
   requestAction('chat_send', {
     id: requestId,
     provider: provider.value,
-    schema: structuredEnabled.value ? parseChatSchema(schemaText.value) : undefined,
+    schema: usesStructuredOutput(request) ? parseChatSchema(schemaText.value) : undefined,
     url: url.value,
     model: model.value,
     system: systemPrompt.value,
@@ -549,10 +547,11 @@ function stop() {
 function regenerate() {
   const thread = active.value
   if (!thread || busyId.value) return
-  if (!checkSchema()) return
   const last = thread.messages[thread.messages.length - 1]
+  const request = last?.generationRequest || [...thread.messages].reverse().find(m => m.role === 'user')?.generationRequest || generationRequest.value
+  if (!checkSchema(request)) return
   if (last?.role === 'assistant') thread.messages.pop()
-  ask(thread, last?.generationRequest)
+  ask(thread, request)
 }
 function findPending(requestId: string): ChatMessage | null {
   for (const t of threads.value) {
@@ -598,6 +597,8 @@ function onGeneration(json: string) {
     const event = JSON.parse(json)
     const message = findPending(event.id)
     if (!message || !applyGenerationEvent(message, event)) return
+    // Auto mode may route to media after sending: this is not a JSON response.
+    message.structured = false
     if (event.model) message.model = String(event.model)
     const thread = threads.value.find(t => t.messages.includes(message))
     if (thread) thread.updatedAt = Date.now()
@@ -749,14 +750,16 @@ function selectCustomPreset(id: string) {
   if (id) systemPreset.value = `custom:${id}`
   else if (selectedCustomPresetId.value) systemPreset.value = ''
 }
-function checkSchema() {
-  if (!structuredEnabled.value || !schemaError.value) return true
+function usesStructuredOutput(request: GenerationRequest) {
+  return structuredEnabled.value && request.mode !== 'image' && request.mode !== 'video'
+}
+function checkSchema(request: GenerationRequest = generationRequest.value) {
+  if (!usesStructuredOutput(request) || !schemaError.value) return true
   showSystem.value = true
   requestAction('show_toast', { type: 'error', msg: schemaError.value })
   return false
 }
 function saveStructured() {
-  if (structuredEnabled.value) generationRequest.value.mode = 'chat'
   savePreferences()
 }
 function applySchemaPreset(value: string | AiAssistInstructions) {
@@ -807,7 +810,6 @@ async function restorePreferences() {
         chatOptions.value = loadChatOptions()
       }
       structuredEnabled.value = saved.structuredEnabled === true
-      if (structuredEnabled.value) generationRequest.value.mode = 'chat'
       requestModels()
     } catch { /* do not replace local edits on invalid saved settings */ }
   })

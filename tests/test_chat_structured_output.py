@@ -1,16 +1,23 @@
 """Offline chat contracts, plus a real loopback SSE round trip. No model runs."""
 import base64
 import json
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+from PyQt6.QtCore import QCoreApplication, QObject
 from core.lmstudio_client import LMStudioClient
 from core.ollama_client import OllamaClient
 from core.structured_output import parse_schema, validate_output
 from workers.chat_worker import ChatWorker
 from tests.test_chat_feature import _FakeResponse, _chunks
+from ui.chat_actions import ChatActionsMixin
+from ui.vue_bridge import VueBridge
 
 SCHEMA = {'type': 'object', 'properties': {'answer': {'type': 'string'}},
           'required': ['answer'], 'additionalProperties': False}
@@ -24,6 +31,10 @@ def sse(content='{"answer":"안녕"}', reason='stop', done=True):
 
 
 class StructuredOutputTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QCoreApplication.instance() or QCoreApplication([])
+
     def test_inline_schema_and_exact_output(self):
         self.assertEqual(parse_schema(json.dumps(SCHEMA)), SCHEMA)
         validate_output('{"answer":"안녕"}', SCHEMA)
@@ -126,3 +137,65 @@ class StructuredOutputTests(unittest.TestCase):
             self.assertEqual(captured[0][1]['response_format']['type'], 'json_schema')
         finally:
             server.shutdown(); server.server_close(); thread.join(2)
+
+    def test_public_chat_action_keeps_images_and_schema_through_both_provider_clients(self):
+        class Host(QObject, ChatActionsMixin):
+            def __init__(self):
+                super().__init__()
+                self.vue_bridge = VueBridge(self)
+
+        image = BytesIO()
+        Image.new('RGB', (2, 2), 'green').save(image, format='PNG')
+        encoded = base64.b64encode(image.getvalue()).decode('ascii')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'reference.png'
+            path.write_bytes(image.getvalue())
+            for provider in ('ollama', 'lmstudio'):
+                for attachment in (str(path), 'data:image/png;base64,' + encoded):
+                    with self.subTest(provider=provider, attachment=attachment[:30]):
+                        host, completed = Host(), []
+                        host.vue_bridge.chatDone.connect(lambda raw: completed.append(json.loads(raw)))
+                        lines = sse() if provider == 'lmstudio' else _chunks('{"answer":"안녕"}')
+                        with patch('requests.post', return_value=_FakeResponse(lines)) as post, \
+                                patch.object(ChatWorker, 'start', new=lambda worker: worker.run()), \
+                                patch.object(host, '_chat_start_media') as media:
+                            host._handle_chat_action('chat_send', {
+                                'id': 'vision-schema', 'provider': provider, 'model': 'vision-fixture',
+                                'schema': SCHEMA, 'generation': {'mode': 'auto'},
+                                'messages': [{'role': 'user', 'content': '첨부 이미지를 JSON으로 설명해 줘', 'images': [attachment]}],
+                            })
+                        media.assert_not_called()
+                        body = post.call_args.kwargs['json']
+                        if provider == 'ollama':
+                            self.assertEqual(body['format'], SCHEMA)
+                            self.assertEqual(body['messages'][0]['images'], [encoded])
+                        else:
+                            self.assertEqual(body['response_format']['json_schema']['schema'], SCHEMA)
+                            self.assertEqual(body['messages'][0]['content'][1]['image_url']['url'], 'data:image/png;base64,' + encoded)
+                        self.assertTrue(completed[0]['ok'], completed[0].get('error'))
+                        self.assertTrue(completed[0]['structured'])
+                        validate_output(completed[0]['content'], SCHEMA)
+
+    def test_schema_never_blocks_public_media_dispatch_or_goes_to_the_image_backend(self):
+        class Host(QObject, ChatActionsMixin):
+            def __init__(self):
+                super().__init__()
+                self.vue_bridge = VueBridge(self)
+
+        for mode, content, kind in (
+                ('auto', '고양이 이미지 만들어줘', 'image'),
+                ('image', 'a cat', 'image'), ('video', 'a cat', 'video')):
+            for schema in (SCHEMA, '{unfinished'):
+                with self.subTest(mode=mode, schema=schema):
+                    host = Host()
+                    with patch.object(host, '_chat_start_media') as media, patch('ui.chat_actions.ChatWorker') as worker:
+                        host._handle_chat_action('chat_send', {
+                            'id': 'media-schema', 'schema': schema, 'generation': {'mode': mode},
+                            'messages': [{'role': 'user', 'content': content, 'images': ['C:/reference.png']}],
+                        })
+                    media.assert_called_once()
+                    plan = media.call_args.args[1]
+                    self.assertEqual(plan.kind, kind)
+                    self.assertEqual(plan.image, 'C:/reference.png')
+                    self.assertFalse(hasattr(plan, 'schema'))
+                    worker.assert_not_called()
