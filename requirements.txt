@@ -19,6 +19,7 @@ websocket-client>=1.9.0
 
 # 데이터 / 메타데이터
 packaging>=24.0
+jsonschema>=4.18.0,<5  # 대화 구조화된 출력의 JSON Schema 검증
 pandas>=2.3.0
 pyarrow>=21.0.0
 exifread>=3.3.0

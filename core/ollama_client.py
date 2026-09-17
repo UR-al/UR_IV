@@ -538,7 +538,7 @@ class OllamaClient:
         except Exception as e:
             raise RuntimeError(f"캡션 오류: {e}")
 
-    def chat_stream(self, messages, *, model=None, options=None, think=None,
+    def chat_stream(self, messages, *, model=None, options=None, think=None, schema=None,
                     on_token=None, on_thinking=None, should_stop=None, timeout=600):
         """`/api/chat` 을 스트리밍으로. 조각마다 ``on_token(text)``, 끝나면 dict 를 돌려준다.
 
@@ -553,6 +553,12 @@ class OllamaClient:
         payload = {"model": model or self.model, "messages": messages, "stream": True}
         if options:
             payload["options"] = dict(options)
+        if schema is not None:
+            from core.structured_output import parse_schema
+            payload['format'] = parse_schema(schema)
+            opts = payload.setdefault('options', {})
+            if opts.get('num_predict', -1) <= 0:
+                opts['num_predict'] = 4096
         if think is not None:
             if not isinstance(think, bool) and think not in ('low', 'medium', 'high', 'max'):
                 raise ValueError('지원하지 않는 추론 설정입니다')

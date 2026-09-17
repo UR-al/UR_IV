@@ -69,6 +69,8 @@ def _clean_message(raw: Any) -> dict[str, Any] | None:
         out["doneReason"] = str(raw["doneReason"])[:40]
     if raw.get("model"):
         out["model"] = str(raw["model"])[:200]
+    if raw.get('structured') is True:
+        out['structured'] = True
     artifacts = []
     raw_artifacts = raw.get('artifacts')
     for item in (raw_artifacts[:32] if isinstance(raw_artifacts, list) else []):

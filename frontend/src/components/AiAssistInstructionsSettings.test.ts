@@ -6,8 +6,10 @@ import ts from 'typescript'
 import source from './AiAssistInstructionsSettings.vue?raw'
 import * as hostBridge from '../bridge.js'
 
-const bridge = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), connect: vi.fn() }))
-vi.mock('../bridge.js', () => ({ getBackend: () => bridge.connect() }))
+const bridge = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), connect: vi.fn(), handlers: new Set<(raw: string) => void>() }))
+vi.mock('../bridge.js', () => ({ getBackend: () => bridge.connect(),
+  onBackendEvent: (_: string, fn: (raw: string) => void) => { bridge.handlers.add(fn); return () => bridge.handlers.delete(fn) },
+}))
 
 const script = compileScript(parse(source).descriptor, { id: 'assist-settings-test', inlineTemplate: true })
 const code = ts.transpileModule(script.content, {
@@ -17,6 +19,7 @@ const exports: { default?: any } = {}
 new Function('require', 'exports', code)((id: string) => {
   if (id === 'vue') return Vue
   if (id === '../bridge.js') return hostBridge
+  if (id === './InstructionPresets.vue') return { __esModule: true, default: { render: () => null } }
   throw Error(`Unknown component dependency: ${id}`)
 }, exports)
 
@@ -65,6 +68,7 @@ async function mount() {
 beforeEach(() => {
   vi.useFakeTimers()
   bridge.get.mockReset(); bridge.save.mockReset(); bridge.connect.mockReset()
+  bridge.handlers.clear()
   bridge.connect.mockResolvedValue({ getAiAssistInstructions: bridge.get, saveAiAssistInstructions: bridge.save })
 })
 afterEach(() => { app?.unmount(); app = undefined; vi.clearAllTimers(); vi.useRealTimers() })
@@ -92,6 +96,24 @@ it('loads all ten fields and reports saved only after the explicit host acknowle
   expect(root.textContent).toContain('지침을 저장했습니다')
   expect(root.textContent).not.toContain('저장하지 않은 변경사항')
   expect(control(root, 'ai-assist-expand').props.disabled).toBe(false)
+})
+
+it('synchronizes clean editors but keeps dirty drafts until a conflict is explicitly resolved', async () => {
+  bridge.get.mockImplementation(callback => callback(JSON.stringify({ ok: true, instructions: instructions('initial') })))
+  const root = await mount()
+  for (const handler of bridge.handlers) handler(JSON.stringify({ ok: true, instructions: instructions('remote one') }))
+  await nextTick()
+  expect(control(root, 'ai-assist-common').value).toBe('remote one')
+  control(root, 'ai-assist-common').props.onInput({ target: { value: 'local draft' } })
+  for (const handler of bridge.handlers) handler(JSON.stringify({ ok: true, instructions: instructions('remote two') }))
+  await nextTick()
+  expect(control(root, 'ai-assist-common').value).toBe('local draft')
+  expect(root.textContent).toContain('다른 화면에서 지침을 저장했습니다')
+  expect(button(root, '지침 저장').props.disabled).toBe(true)
+  button(root, '새 저장본 불러오기').props.onClick()
+  await nextTick()
+  expect(control(root, 'ai-assist-common').value).toBe('remote two')
+  expect(bridge.save).not.toHaveBeenCalled()
 })
 
 it('keeps failed saves dirty and allows a successful explicit retry', async () => {

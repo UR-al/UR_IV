@@ -14,6 +14,8 @@ from typing import Any
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.ollama_client import OllamaClient
+from core.lmstudio_client import LMStudioClient
+from core.structured_output import validate_output
 
 #: 토큰을 모아 보내는 간격(초).
 FLUSH_INTERVAL = 0.04
@@ -27,7 +29,7 @@ class ChatWorker(QThread):
 
     def __init__(self, request_id: str, base_url: str, model: str,
                  messages: list[dict[str, Any]], options: dict[str, Any] | None = None,
-                 think: bool | str | None = None, parent=None):
+                 think: bool | str | None = None, parent=None, *, provider='ollama', schema=None):
         super().__init__(parent)
         self.request_id = request_id
         self.base_url = base_url
@@ -35,13 +37,15 @@ class ChatWorker(QThread):
         self.messages = messages
         self.options = options or {}
         self.think = think
+        self.provider = provider
+        self.schema = schema
         self._stop = threading.Event()
 
     def stop(self) -> None:
         self._stop.set()
 
     def run(self) -> None:
-        client = OllamaClient(base_url=self.base_url, model=self.model)
+        client_type = LMStudioClient if self.provider == 'lmstudio' else OllamaClient
         buffer: list[str] = []
         thoughts: list[str] = []
         last_flush = time.monotonic()
@@ -71,13 +75,26 @@ class ChatWorker(QThread):
 
         started = time.monotonic()
         try:
+            client = client_type(base_url=self.base_url, model=self.model)
+            kwargs = {'schema': self.schema} if self.schema is not None else {}
             result = client.chat_stream(
                 self.messages, model=self.model, options=self.options, think=self.think,
-                on_token=on_token, on_thinking=on_thinking, should_stop=self._stop.is_set,
+                on_token=on_token, on_thinking=on_thinking, should_stop=self._stop.is_set, **kwargs,
             )
             flush()
+            validation_error = ''
+            if self.schema is not None:
+                if result.get('stopped') or result.get('done_reason') not in ('stop', None):
+                    validation_error = 'JSON 응답이 중지되거나 완료되지 않았습니다. 형식을 보장할 수 없습니다. 받은 내용은 유지됩니다.'
+                else:
+                    try:
+                        validate_output(result.get('content', ''), self.schema)
+                    except ValueError as exc:
+                        validation_error = str(exc)
             self.done.emit(json.dumps({
-                "id": self.request_id, "ok": True,
+                "id": self.request_id, "ok": not bool(validation_error),
+                **({'error': validation_error} if validation_error else {}),
+                "structured": self.schema is not None,
                 "content": result.get("content", ""),
                 "thinking": result.get("thinking", ""),
                 "stopped": bool(result.get("stopped")),

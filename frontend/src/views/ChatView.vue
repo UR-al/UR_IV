@@ -23,9 +23,9 @@
         </div>
       </div>
       <div class="ct-foot">
-        <span class="ct-foot-label">모델</span>
+        <span class="ct-foot-label">모델 · {{ provider === 'lmstudio' ? 'LM Studio' : 'Ollama' }}</span>
         <CustomSelect v-if="models.length" v-model="model" :options="models" placeholder="모델 선택..." @update:modelValue="saveModel" />
-        <span v-else class="ct-foot-none" :title="url">Ollama 모델 없음 — Settings › AI 어시스트</span>
+        <span v-else class="ct-foot-none" :title="url">모델 없음 — 대화 설정에서 연결 확인</span>
       </div>
     </aside>
 
@@ -48,7 +48,14 @@
         </div>
       </header>
 
-      <div v-if="showSystem" class="cm-system">
+      <div v-show="showSystem" class="cm-system">
+        <div class="cm-provider-row">
+          <label>대화 서버 <select v-model="provider" :disabled="!!busyId" @change="changeProvider"><option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option></select></label>
+          <label>서버 주소 <input v-model.trim="url" :disabled="!!busyId" aria-label="대화 서버 주소" placeholder="http://localhost:1234" @input="markPreferencesEdited" @change="saveConnection" /></label>
+          <button type="button" :disabled="modelsLoading || !!busyId" @click="requestModels">모델 목록 새로고침</button>
+        </div>
+        <p v-if="modelsError" class="cm-schema-error" role="alert">{{ modelsError }}</p>
+        <p v-if="provider === 'lmstudio'" class="cm-settings-hint">LM Studio의 Developer에서 서버를 시작하세요 (기본 포트 1234). 주소는 /v1 포함·생략 모두 가능합니다. 인증 없는 로컬 서버 연결을 지원하며, 문맥 길이·모델 로딩 설정은 LM Studio에서 변경합니다. AI 어시스트의 Ollama 설정은 변경하지 않습니다.</p>
         <label for="chat-system-prompt">지침 — 모든 대화의 맨 앞에 붙습니다</label>
         <div class="cm-preset-row">
           <select v-model="systemPreset" aria-label="지침 프리셋">
@@ -59,7 +66,19 @@
           <button type="button" :disabled="!systemPreset" @click="applySystemPreset">선택한 지침 적용</button>
           <small>직접 적용할 때만 변경됩니다. 개인 지침은 복원할 수 있습니다.</small>
         </div>
-        <textarea id="chat-system-prompt" v-model="systemPrompt" rows="3" spellcheck="false" @input="systemPreset = ''" @change="saveSystemPrompt"></textarea>
+        <textarea id="chat-system-prompt" v-model="systemPrompt" rows="3" spellcheck="false" @input="systemPreset = ''; markPreferencesEdited()" @change="saveSystemPrompt"></textarea>
+        <InstructionPresets scope="chat" :instructions="systemPrompt" @apply="applyCustomSystemPreset" />
+        <details class="cm-structured" :open="structuredEnabled">
+          <summary>구조화된 출력 · JSON 스키마</summary>
+          <label class="cm-schema-toggle"><input v-model="structuredEnabled" type="checkbox" :disabled="!!busyId" @change="saveStructured" /> JSON 스키마로 대화 응답 형식 제한</label>
+          <p class="cm-settings-hint">켜면 ‘대화만’ 모드로 동작하며 이미지·영상 생성은 실행하지 않습니다. Ollama는 format, LM Studio는 response_format으로 전달합니다. 모델에 따라 지원 범위가 다르며, 구조는 제한해도 내용의 정확성까지 보장하지는 않습니다.</p>
+          <label for="chat-json-schema">JSON Schema (Draft 2020-12 · 참조 없는 인라인 스키마)</label>
+          <textarea id="chat-json-schema" v-model="schemaText" :disabled="!!busyId" rows="9" spellcheck="false" maxlength="128000" :aria-invalid="!!schemaError" aria-describedby="chat-schema-help" @input="markPreferencesEdited" @change="savePreferences"></textarea>
+          <button type="button" :disabled="!!busyId" @click="schemaExamplePending = !schemaExamplePending">태그·자연어·한국어 설명 예제</button>
+          <span v-if="schemaExamplePending">현재 스키마를 예제로 바꿀까요? <button type="button" @click="useSchemaExample">예제로 교체</button><button type="button" @click="schemaExamplePending = false">취소</button></span>
+          <p id="chat-schema-help" class="cm-settings-hint">최대 64,000자. $ref/$id 참조는 지원하지 않습니다. 답변 최대 토큰이 ‘제한 없음’이면 JSON 출력에만 4,096 토큰을 적용합니다. 완료된 응답은 스키마를 다시 검증하며 중지·잘림·불일치는 오류로 표시합니다. 형식과 충돌하는 대화 지침도 함께 조정하세요.</p>
+          <p v-if="schemaError" class="cm-schema-error" role="alert">{{ schemaError }}</p>
+        </details>
         <div class="cm-opts">
           <label class="cm-opt">
             <span>답변 최대 토큰</span>
@@ -68,7 +87,7 @@
               <option v-for="n in PREDICT_CHOICES" :key="n" :value="n">{{ n.toLocaleString() }}</option>
             </select>
           </label>
-          <label class="cm-opt">
+          <label v-if="provider === 'ollama'" class="cm-opt">
             <span>문맥 창 (num_ctx)</span>
             <select v-model.number="chatOptions.numCtx" @change="saveChatOptions">
               <option :value="0">모델 기본</option>
@@ -94,6 +113,10 @@
           <label v-if="modelInfo?.thinkingMode === 'levels'" class="cm-thinking-level">추론 강도 <select v-model="thinkingLevel" @change="saveThinkingLevel"><option value="low">낮음 · 빠르게</option><option value="medium">중간</option><option value="high">높음 · 깊게</option></select></label>
           <p class="cm-settings-hint">MoE는 모델 내부 구조로 자동 사용됩니다. Dense↔MoE 전환이나 전문가 수 변경은 Ollama 채팅 옵션이 아닙니다. 다른 구조를 쓰려면 모델을 선택하세요. 도구 사용은 모델 지원 여부와 별개로 이 채팅에서는 실행하지 않습니다.</p>
         </div>
+        <details class="cm-assist-link">
+          <summary>Settings와 연동된 AI 어시스트 지침 편집 · 대화에는 적용 안 됨</summary>
+          <AiAssistInstructionsSettings id-prefix="chat-ai-assist" />
+        </details>
       </div>
 
       <div class="cm-scroll" ref="scrollRef" @scroll="onScroll" @wheel="onWheel">
@@ -120,7 +143,8 @@
                 <summary><Icon name="bulb" size="12" /> {{ m.pending && !m.content ? '생각하는 중…' : `생각 (${m.thinking.length}자)` }}</summary>
                 <pre>{{ m.thinking }}</pre>
               </details>
-              <div v-if="m.role === 'assistant'" class="msg-content md" v-html="renderMarkdown(m.content)"></div>
+              <pre v-if="m.role === 'assistant' && m.structured" class="msg-content msg-json">{{ m.content }}</pre>
+              <div v-else-if="m.role === 'assistant'" class="msg-content md" v-html="renderMarkdown(m.content)"></div>
               <div v-else class="msg-content plain">{{ m.content }}</div>
               <div v-if="m.generation && m.pending" class="msg-generation" role="status" aria-live="polite">
                 <strong>{{ m.generation.kind === 'video' ? '영상 생성' : '이미지 생성' }}</strong>
@@ -155,7 +179,7 @@
         <button v-if="!followBottom" class="cm-jump" type="button" @click="scrollToBottom(true)" title="맨 아래로"><Icon name="arrow-down" size="14" /></button>
          <div class="cm-composer" :class="{ drag: dragOver }">
          <div class="cmp-generation-options">
-           <label>요청 <select v-model="generationRequest.mode" :disabled="!!busyId" aria-label="채팅 또는 생성 모드">
+           <label>요청 <select v-model="generationRequest.mode" :disabled="!!busyId || structuredEnabled" aria-label="채팅 또는 생성 모드">
              <option value="auto">자동</option><option value="chat">대화만</option>
              <option value="image">이미지 생성</option><option value="video">영상 · H3 기본 품질</option>
            </select></label>
@@ -172,7 +196,7 @@
            <label v-if="attachments.length && generationRequest.family === 'current' && generationRequest.mode !== 'video'">변화량
              <input v-model.number="generationRequest.denoise" type="number" min="0.01" max="1" step="0.05" :disabled="!!busyId" aria-label="이미지 편집 변화량" />
            </label>
-           <small>{{ generationRequest.mode === 'chat' ? '대화 모델에 질문만 전달합니다' : '자동은 명확한 생성 요청만 실행 · 현재 모델은 T2I 설정 사용 · Krea2/H3는 ComfyUI 필요' }}</small>
+           <small>{{ structuredEnabled ? 'JSON 스키마 출력 켜짐 · 대화만 전송' : generationRequest.mode === 'chat' ? '대화 모델에 질문만 전달합니다' : '자동은 명확한 생성 요청만 실행 · 현재 모델은 T2I 설정 사용 · Krea2/H3는 ComfyUI 필요' }}</small>
          </div>
         <div v-if="attachments.length" class="cmp-attach">
           <div v-for="(a, i) in attachments" :key="i" class="cmp-thumb">
@@ -229,6 +253,10 @@ import { copyTextToClipboard } from '../utils/clipboard'
 import { CHAT_SYSTEM_PRESETS, selectSystemPreset, thinkingValue, type ChatModelInfo } from '../utils/chatSettings'
 import { applyGenerationEvent, artifactMarkdown, type ChatArtifact, type GenerationRequest, type GenerationState } from '../utils/chatGeneration'
 import CustomSelect from '../components/CustomSelect.vue'
+import AiAssistInstructionsSettings from '../components/AiAssistInstructionsSettings.vue'
+import InstructionPresets from '../components/InstructionPresets.vue'
+import { PROMPT_JSON_SCHEMA, parseChatSchema } from '../utils/chatStructuredOutput'
+import type { AiAssistInstructions } from '../types/bridge'
 
 interface ChatMessage {
   id: string
@@ -244,6 +272,7 @@ interface ChatMessage {
   pending?: boolean
   requestId?: string
   error?: string
+  structured?: boolean
   artifacts?: ChatArtifact[]
   generationRequest?: GenerationRequest
   generation?: GenerationState
@@ -274,8 +303,21 @@ const draft = ref('')
 const attachments = ref<string[]>([])
 const generationRequest = ref<GenerationRequest>({ mode: 'auto', family: 'current', duration: 5, denoise: 0.65 })
 const models = ref<string[]>([])
-const model = ref(localStorage.getItem('ollamaModel') || '')
-const url = ref(localStorage.getItem('ollamaUrl') || 'http://localhost:11434')
+const provider = ref<'ollama' | 'lmstudio'>(localStorage.getItem('chatProvider') === 'lmstudio' ? 'lmstudio' : 'ollama')
+const model = ref(localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel') || '')
+const url = ref(localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : 'http://localhost:11434'))
+const modelsError = ref('')
+const modelsLoading = ref(false)
+let modelsRequestId = ''
+let modelsTimer: ReturnType<typeof setTimeout> | undefined
+const structuredEnabled = ref(localStorage.getItem('chatStructuredEnabled') === '1')
+const schemaText = ref(localStorage.getItem('chatJsonSchema') ?? PROMPT_JSON_SCHEMA)
+const schemaExamplePending = ref(false)
+const schemaError = computed(() => { try { parseChatSchema(schemaText.value); return '' } catch (error) { return (error as Error).message } })
+if (structuredEnabled.value) generationRequest.value.mode = 'chat'
+let preferencesEdited = false
+function markPreferencesEdited() { preferencesEdited = true }
+let disposed = false
 const systemPrompt = ref(localStorage.getItem('chatSystemPrompt') ?? DEFAULT_SYSTEM)
 const personalSystemPrompt = ref<string | null>(localStorage.getItem('chatPersonalSystemPrompt'))
 const systemPreset = ref('')
@@ -311,12 +353,12 @@ function loadChatOptions(): ChatOptions {
   return o
 }
 const chatOptions = ref<ChatOptions>(loadChatOptions())
-function saveChatOptions() { localStorage.setItem('chatOptions.v1', JSON.stringify(chatOptions.value)) }
+function saveChatOptions() { localStorage.setItem('chatOptions.v1', JSON.stringify(chatOptions.value)); savePreferences() }
 function ollamaOptions(): Record<string, number> {
   const o: Record<string, number> = { temperature: chatOptions.value.temperature }
   // '제한 없음' 도 -1 로 명시한다 — 모델파일이 num_predict 를 박아 둔 모델이 있다
   o.num_predict = chatOptions.value.numPredict > 0 ? chatOptions.value.numPredict : -1
-  if (chatOptions.value.numCtx > 0) o.num_ctx = chatOptions.value.numCtx
+  if (provider.value === 'ollama' && chatOptions.value.numCtx > 0) o.num_ctx = chatOptions.value.numCtx
   return o
 }
 // 깊은 추론 — Gemma 4 / Qwen3.x 같은 thinking 모델은 기본으로 생각부터 하느라 첫 글자가 1분 뒤에 온다.
@@ -427,6 +469,7 @@ function finishRename() {
 // ── 보내기 · 받기 ──
 function send() {
   if (!canSend.value || !active.value) return
+  if (!checkSchema()) return
   const thread = active.value
   const text = draft.value.trim()
   const user: ChatMessage = { id: uid(), role: 'user', content: text, createdAt: Date.now() }
@@ -443,8 +486,10 @@ function ask(thread: ChatThread, retryRequest?: GenerationRequest) {
   const requestId = uid()
   const latestUser = [...thread.messages].reverse().find(m => m.role === 'user')
   const request = { ...(retryRequest || latestUser?.generationRequest || generationRequest.value) }
+  if (structuredEnabled.value) request.mode = 'chat'
   const assistant: ChatMessage = { id: uid(), role: 'assistant', content: '', createdAt: Date.now(), pending: true, requestId, model: model.value }
   assistant.generationRequest = request
+  assistant.structured = structuredEnabled.value
   thread.messages.push(assistant)
   thread.model = model.value
   thread.updatedAt = Date.now()
@@ -453,6 +498,8 @@ function ask(thread: ChatThread, retryRequest?: GenerationRequest) {
   nextTick(() => scrollToBottom(false))
   requestAction('chat_send', {
     id: requestId,
+    provider: provider.value,
+    schema: structuredEnabled.value ? parseChatSchema(schemaText.value) : undefined,
     url: url.value,
     model: model.value,
     system: systemPrompt.value,
@@ -471,6 +518,7 @@ function stop() {
 function regenerate() {
   const thread = active.value
   if (!thread || busyId.value) return
+  if (!checkSchema()) return
   const last = thread.messages[thread.messages.length - 1]
   if (last?.role === 'assistant') thread.messages.pop()
   ask(thread, last?.generationRequest)
@@ -498,7 +546,7 @@ function onDone(json: string) {
     const d = JSON.parse(json)
     const m = findPending(d.id)
     if (m) {
-      if (d.ok && typeof d.content === 'string' && d.content.length >= m.content.length) m.content = d.content
+      if (typeof d.content === 'string' && d.content.length >= m.content.length) m.content = d.content
       if (!d.ok) m.error = d.error || '응답을 받지 못했습니다'
       else if (d.stopped) m.error = m.content ? '' : '중지됨'
       if (typeof d.evalCount === 'number') m.evalCount = d.evalCount
@@ -637,8 +685,9 @@ onUnmounted(() => { _bottomObserver?.disconnect(); _bottomObserver = null })
 
 // ── 모델 · 설정 ──
 function saveModel() {
-  localStorage.setItem('ollamaModel', model.value)
-  requestAction('save_ui_prefs', { ollamaModel: model.value, ollamaUrl: url.value })
+  localStorage.setItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel', model.value)
+  if (provider.value === 'ollama') requestAction('save_ui_prefs', { ollamaModel: model.value, ollamaUrl: url.value })
+  savePreferences()
 }
 function saveSystemPrompt() {
   localStorage.setItem('chatSystemPrompt', systemPrompt.value)
@@ -646,6 +695,7 @@ function saveSystemPrompt() {
     personalSystemPrompt.value = systemPrompt.value
     localStorage.setItem('chatPersonalSystemPrompt', systemPrompt.value)
   }
+  savePreferences()
 }
 function applySystemPreset() {
   const selected = selectSystemPreset(systemPreset.value, systemPrompt.value, personalSystemPrompt.value)
@@ -653,6 +703,76 @@ function applySystemPreset() {
   personalSystemPrompt.value = selected.personal
   if (selected.personal !== null) localStorage.setItem('chatPersonalSystemPrompt', selected.personal)
   localStorage.setItem('chatSystemPrompt', selected.prompt)
+  savePreferences()
+}
+function applyCustomSystemPreset(value: string | AiAssistInstructions) {
+  if (typeof value !== 'string') return
+  systemPrompt.value = value; systemPreset.value = ''; saveSystemPrompt()
+}
+function checkSchema() {
+  if (!structuredEnabled.value || !schemaError.value) return true
+  showSystem.value = true
+  requestAction('show_toast', { type: 'error', msg: schemaError.value })
+  return false
+}
+function saveStructured() {
+  if (structuredEnabled.value) generationRequest.value.mode = 'chat'
+  savePreferences()
+}
+function useSchemaExample() { schemaText.value = PROMPT_JSON_SCHEMA; schemaExamplePending.value = false; savePreferences() }
+function savePreferences() {
+  preferencesEdited = true
+  localStorage.setItem('chatProvider', provider.value)
+  localStorage.setItem('chatStructuredEnabled', structuredEnabled.value ? '1' : '0')
+  localStorage.setItem('chatJsonSchema', schemaText.value)
+  requestAction('save_ui_prefs', { chatSettingsV2: {
+    provider: provider.value, lmStudioUrl: localStorage.getItem('chatLmStudioUrl') || 'http://localhost:1234',
+    lmStudioModel: localStorage.getItem('chatLmStudioModel') || '',
+    structuredEnabled: structuredEnabled.value, schemaText: schemaText.value,
+    systemPrompt: systemPrompt.value, personalSystemPrompt: personalSystemPrompt.value,
+    options: chatOptions.value,
+  } })
+}
+async function restorePreferences() {
+  const backend = await getBackend()
+  if (disposed || preferencesEdited || !backend?.getUiPrefs) return
+  backend.getUiPrefs((raw: string) => {
+    if (disposed || preferencesEdited) return
+    try {
+      const prefs = JSON.parse(raw), saved = prefs.chatSettingsV2
+      if (!saved || typeof saved !== 'object') return
+      if (typeof saved.lmStudioUrl === 'string') localStorage.setItem('chatLmStudioUrl', saved.lmStudioUrl)
+      if (typeof saved.lmStudioModel === 'string') localStorage.setItem('chatLmStudioModel', saved.lmStudioModel)
+      provider.value = saved.provider === 'lmstudio' ? 'lmstudio' : 'ollama'
+      localStorage.setItem('chatProvider', provider.value)
+      model.value = provider.value === 'lmstudio' ? saved.lmStudioModel || '' : prefs.ollamaModel || model.value
+      url.value = provider.value === 'lmstudio' ? saved.lmStudioUrl || 'http://localhost:1234' : prefs.ollamaUrl || url.value
+      if (provider.value === 'ollama') {
+        localStorage.setItem('ollamaUrl', url.value)
+        localStorage.setItem('ollamaModel', model.value)
+      }
+      if (typeof saved.systemPrompt === 'string') systemPrompt.value = saved.systemPrompt
+      if (typeof saved.personalSystemPrompt === 'string') personalSystemPrompt.value = saved.personalSystemPrompt
+      if (typeof saved.schemaText === 'string') schemaText.value = saved.schemaText
+      if (saved.options && typeof saved.options === 'object') {
+        localStorage.setItem('chatOptions.v1', JSON.stringify(saved.options))
+        chatOptions.value = loadChatOptions()
+      }
+      structuredEnabled.value = saved.structuredEnabled === true
+      if (structuredEnabled.value) generationRequest.value.mode = 'chat'
+      requestModels()
+    } catch { /* do not replace local edits on invalid saved settings */ }
+  })
+}
+function changeProvider() {
+  models.value = []; modelsError.value = ''
+  model.value = localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel') || ''
+  url.value = localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : 'http://localhost:11434')
+  savePreferences(); requestModels()
+}
+function saveConnection() {
+  localStorage.setItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl', url.value)
+  models.value = []; saveModel(); requestModels()
 }
 function requestModelInfo() {
   modelInfo.value = null
@@ -662,7 +782,7 @@ function requestModelInfo() {
   modelInfoLoading.value = !!model.value
   if (!model.value) return
   const id = modelInfoRequestId
-  requestAction('chat_model_info', { id, url: url.value, model: model.value })
+  requestAction('chat_model_info', { id, url: url.value, model: model.value, provider: provider.value })
   modelInfoTimer = setTimeout(() => {
     if (modelInfoRequestId === id && modelInfoLoading.value) {
       modelInfoLoading.value = false
@@ -683,25 +803,55 @@ function onModelInfo(raw: string) {
     else modelInfoError.value = event.error || '모델 정보를 확인할 수 없습니다'
   } catch { /* stale/malformed metadata never changes the selected model */ }
 }
-watch([model, url], requestModelInfo)
+watch([model, url, provider], requestModelInfo)
 async function requestModels() {
+  modelsRequestId = uid()
+  const id = modelsRequestId
+  clearTimeout(modelsTimer)
+  modelsLoading.value = true; modelsError.value = ''
+  modelsTimer = setTimeout(() => {
+    if (id !== modelsRequestId) return
+    modelsLoading.value = false; modelsError.value = '모델 목록 응답이 없습니다. 서버 실행과 주소를 확인하세요.'
+  }, 12000)
+  if (provider.value === 'lmstudio') {
+    requestAction('chat_models', { id, url: url.value })
+    return
+  }
   try {
     const bk: any = await getBackend()
+    if (disposed || id !== modelsRequestId || provider.value !== 'ollama') return
     url.value = localStorage.getItem('ollamaUrl') || url.value
     if (bk?.requestOllamaModels) bk.requestOllamaModels(url.value)
   } catch {}
 }
 function onModels(json: string) {
+  if (provider.value !== 'ollama') return
   try {
     const p = JSON.parse(json)
     const list = Array.isArray(p) ? p : p.models
     if (!Array.isArray(list)) return
+    clearTimeout(modelsTimer); modelsLoading.value = false
     models.value = list
     if (list.length && !list.includes(model.value)) {
       const base = (s: string) => (s || '').split(':')[0].toLowerCase()
       model.value = list.find((m: string) => base(m) === base(model.value)) || list[0]
     }
   } catch {}
+}
+function onChatModels(raw: string) {
+  try {
+    const event = JSON.parse(raw)
+    if (provider.value !== 'lmstudio' || event.id !== modelsRequestId) return
+    clearTimeout(modelsTimer); modelsLoading.value = false
+    if (!event.ok) { models.value = []; modelsError.value = event.error || '모델 목록을 받지 못했습니다'; return }
+    if (!Array.isArray(event.models)) return
+    models.value = event.models.filter((item: unknown) => typeof item === 'string')
+    if (!models.value.includes(model.value)) {
+      model.value = models.value[0] || ''
+      localStorage.setItem('chatLmStudioModel', model.value)
+    }
+    if (!models.value.length) modelsError.value = '서버에 모델이 없습니다. LM Studio에서 모델을 준비하세요.'
+  } catch { /* obsolete/malformed model lists do not alter the selection */ }
 }
 async function copyText(text: string) {
   const ok = await copyTextToClipboard(text)
@@ -724,15 +874,18 @@ onMounted(() => {
   unsubs.push(onBackendEvent('chatGenerationEvent', onGeneration))
   unsubs.push(onBackendEvent('ollamaModelsReady', onModels))
   unsubs.push(onBackendEvent('chatModelInfo', onModelInfo))
+  unsubs.push(onBackendEvent('chatModelsReady', onChatModels))
   window.addEventListener('keydown', onGlobalKey)
   requestAction('chat_load')
   requestModels()
+  restorePreferences().catch(() => {})
   requestModelInfo()
   // 백엔드가 목록을 안 돌려줘도(웹 모드·개발 서버) 빈 대화 하나는 있어야 입력이 된다
   setTimeout(() => { if (!threads.value.length) newThread() }, 1500)
 })
 onActivated(() => { requestModels(); focusComposer() })
 onUnmounted(() => {
+  disposed = true; clearTimeout(modelsTimer)
   unsubs.forEach((u) => { try { u() } catch {} })
   window.removeEventListener('keydown', onGlobalKey)
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
@@ -742,6 +895,17 @@ onUnmounted(() => {
 
 <style scoped>
 .chat-view { height: 100%; display: flex; position: relative; background: var(--bg-primary); overflow: hidden; }
+.cm-provider-row { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.cm-provider-row label { display: flex; flex: 1 1 180px; min-width: 0; flex-direction: column; gap: 4px; }
+.cm-provider-row input, .cm-provider-row select { min-width: 0; width: 100%; box-sizing: border-box; }
+.cm-provider-row input, .cm-provider-row select, .cm-provider-row button, .cm-structured button { padding: 7px 9px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-base); font: inherit; font-size: 12px; }
+.cm-structured, .cm-assist-link { border-top: 1px solid var(--border); padding: 10px 0; min-width: 0; color: var(--text-primary); }
+.cm-structured summary, .cm-assist-link summary { cursor: pointer; font-size: 12px; line-height: 1.7; }
+.cm-schema-toggle { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.cm-system #chat-json-schema, .msg-json { font-family: ui-monospace, Consolas, monospace; tab-size: 2; }
+.cm-schema-error { color: var(--state-alert-fg); font-size: 12px; overflow-wrap: anywhere; }
+.cm-system :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.msg-json { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); }
 .cm-tool.cm-mobile-threads, .cm-thread-backdrop { display: none; }
 
 /* ── 대화 목록 ── */
@@ -783,7 +947,8 @@ onUnmounted(() => {
 .cm-tool:hover { color: var(--text-primary); border-color: var(--text-muted); }
 .cm-tool.on { color: var(--accent); border-color: var(--accent); }
 .cm-tool:disabled { opacity: .35; cursor: default; }
-.cm-system { padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); display: flex; flex-direction: column; gap: 6px; max-height: 45vh; overflow-y: auto; flex-shrink: 0; }
+.cm-system { padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); display: flex; flex-direction: column; gap: 6px; max-height: 45%; min-height: 0; overflow-y: auto; flex-shrink: 1; }
+.cm-system > * { flex-shrink: 0; }
 .cm-system label { font-size: var(--fs-label); font-weight: var(--fw-medium); color: var(--text-muted); }
 .cm-opts { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; padding-top: 2px; }
 .cm-opt { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-label); color: var(--text-muted); }
@@ -884,7 +1049,7 @@ onUnmounted(() => {
 .cmp-send:disabled { opacity: .3; cursor: default; }
 .cmp-send.stop { background: var(--state-alert); color: var(--state-alert-fg); }
 .cmp-generation-options { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
-.cmp-generation-options label { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--fs-label); }
+.cmp-generation-options label { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--fs-label); white-space: nowrap; }
 .cmp-generation-options select, .cmp-generation-options input { max-width: 230px; min-height: 27px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text-primary); font: inherit; }
 .cmp-generation-options input { width: 64px; }
 .cmp-generation-options small { flex-basis: 100%; color: var(--text-muted); font-size: var(--fs-label); }

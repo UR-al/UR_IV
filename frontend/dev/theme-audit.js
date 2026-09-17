@@ -47,6 +47,8 @@ let prefs = { theme: 'light', themeOverrides: {}, iconAnimationStyle: 'none',
 let instructions = { common: '', features: Object.fromEntries(
   ['expand', 'suggest', 'nl2tags', 'nl_caption', 'nl_scene', 'translate', 'creative', 'negative', 'auto_nl'].map(key => [key, ''])) }
 let session = {}
+let instructionPresets = []
+function presetReply(scope, preset = null) { return json({ ok: true, scope, preset, presets: instructionPresets.filter(item => item.scope === scope) }) }
 // History appends a cache-busting query; keep it in a fragment, outside SVG bytes.
 const sampleImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="768"><rect width="640" height="768" fill="#d7e3e9"/><circle cx="440" cy="130" r="70" fill="#eed996"/><path d="M0 520L160 350 320 500 500 300 640 470V768H0Z" fill="#81998c"/><circle cx="310" cy="280" r="55" fill="#ddb9a1"/><path d="M250 350H370L410 590H210Z" fill="#4c698e"/><text x="26" y="724" font-family="sans-serif" font-size="22" fill="#1b1b19">Offline theme sample · no personal files</text></svg>') + '#offline-preview'
 const sampleRows = [{ id: 1, copyright: 'original', character: '', artist: 'fixture_artist',
@@ -74,7 +76,21 @@ const methods = {
   getInitialConfig: reply(() => json({ uiPrefs: prefs, condRules: { positive: [], negative: [] }, globalWeights: [] })),
   getUiPrefs: reply(() => json(prefs)), getSettings: reply('{}'), getTabDefaults: reply('{}'),
   getAiAssistInstructions: reply(() => json({ ok: true, instructions })),
-  saveAiAssistInstructions: (raw, callback) => { instructions = JSON.parse(raw); callback(json({ ok: true, instructions })); record('AI 어시스트 지침: 메모리에만 저장') },
+  saveAiAssistInstructions: (raw, callback) => { instructions = JSON.parse(raw); const result = json({ ok: true, instructions }); emit('aiAssistInstructionsChanged', result); callback(result); record('AI 어시스트 지침: 메모리에만 저장') },
+  getInstructionPresets: (scope, callback) => callback(presetReply(scope)),
+  saveInstructionPreset: (raw, callback) => {
+    const data = JSON.parse(raw)
+    const item = { ...data, id: data.id || crypto.randomUUID() }
+    instructionPresets = [...instructionPresets.filter(p => p.id !== item.id), item]
+    const result = presetReply(item.scope, item)
+    emit('instructionPresetsChanged', result); callback(result); record('지침 프리셋: 메모리에만 저장')
+  },
+  deleteInstructionPreset: (raw, callback) => {
+    const data = JSON.parse(raw)
+    instructionPresets = instructionPresets.filter(p => p.id !== data.id || p.scope !== data.scope)
+    const result = presetReply(data.scope)
+    emit('instructionPresetsChanged', result); callback(result); record('지침 프리셋: 모의 목록에서만 삭제')
+  },
   getSession: reply(() => json(session)), saveSession: (raw, callback) => { session = JSON.parse(raw); callback?.('{}') },
   getRandomResolutions: reply('[]'), getPresetList: reply('["오프라인 샘플"]'), getPresetData: reply(json({ prompt: metadata.prompt, negative: metadata.negative })),
   getGenStats: reply('{}'), getWildcardTree: reply('[]'), getLoras: reply('[]'), getCharFeatureOverride: reply('{}'),
@@ -144,6 +160,13 @@ methods.onAction = (name, raw) => {
     emit('chatThreads', json([{ id: 'offline-chat', title: '오프라인 예시 대화', model: 'offline-preview:8b', messages: [{ id: 'sample-message', role: 'assistant', content: '테마 점검용 예시입니다. 실제 모델 호출은 하지 않습니다.', createdAt: Date.now() }], createdAt: Date.now(), updatedAt: Date.now() }])); return
   }
   if (name === 'chat_model_info') { emit('chatModelInfo', json({ id: payload.id, model: payload.model, ok: true, info: { architecture: 'offline', moe: null, vision: false } })); return }
+  if (name === 'chat_models') { emit('chatModelsReady', json({ id: payload.id, ok: true, models: ['offline-lmstudio'] })); return }
+  if (name === 'chat_send') {
+    record(`모의 대화 요청: ${payload.provider || 'ollama'} · JSON 스키마 ${payload.schema ? 'ON' : 'OFF'} · 실제 모델 호출 없음`)
+    const content = payload.schema ? json({ tags: ['outdoors'], caption: 'A scene in daylight. Soft light fills the scene.', explanation_ko: '오프라인 모의 출력이며 실제 모델 결과가 아닙니다.' }) : '오프라인 모의 답변입니다.'
+    emit('chatToken', json({ id: payload.id, text: content }))
+    emit('chatDone', json({ id: payload.id, ok: true, content, structured: !!payload.schema, doneReason: 'stop' })); return
+  }
   if (name === 'model_download_status') {
     emit('modelDownloadEvent', json({ available: true, state: 'idle', busy: false, files: catalog.artifacts.map(file => ({ ...file, status: 'missing' })), packs: catalog.packs.map(pack => ({ ...pack, fileIds: pack.artifact_ids, ready: false, runtimeReady: false, downloadable: false, installedCount: 0, missingCount: pack.artifact_ids.length, blockedReason: offlineMessage })), selectedPackIds: [], message: offlineMessage })); return
   }

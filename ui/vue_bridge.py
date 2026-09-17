@@ -107,6 +107,9 @@ class VueBridge(QObject):
     chatDone = pyqtSignal(str)           # JSON {id, ok, content, stopped, error?}
     chatThreads = pyqtSignal(str)        # JSON [threads] — 저장된 대화 목록
     chatModelInfo = pyqtSignal(str)      # capability metadata, never loads a model
+    chatModelsReady = pyqtSignal(str)
+    aiAssistInstructionsChanged = pyqtSignal(str)
+    instructionPresetsChanged = pyqtSignal(str)
     xyzCapabilitiesReceived = pyqtSignal(str)
     xyzPlotEvent = pyqtSignal(str)
     chatGenerationEvent = pyqtSignal(str)  # JSON request-owned generation progress/media
@@ -2036,6 +2039,7 @@ class VueBridge(QObject):
             if len(payload_json) > 600_000:
                 raise ValueError('지침 데이터가 너무 큽니다. 각 입력란을 8,000자 이내로 작성하세요.')
             instructions = save_instructions(json.loads(payload_json))
+            self.aiAssistInstructionsChanged.emit(json.dumps({'ok': True, 'instructions': instructions}, ensure_ascii=False))
             return json.dumps({'ok': True, 'instructions': instructions}, ensure_ascii=False)
         except (ValueError, TypeError):
             return json.dumps({'ok': False, 'error': '지침 형식이 올바르지 않습니다. 각 입력란을 8,000자 이내로 작성하세요.'}, ensure_ascii=False)
@@ -2046,6 +2050,46 @@ class VueBridge(QObject):
             except Exception:
                 pass  # Still deliver a usable error if console logging itself fails.
             return json.dumps({'ok': False, 'error': 'AI 어시스트 지침을 저장하지 못했습니다. 설정 파일과 쓰기 권한을 확인하세요.'}, ensure_ascii=False)
+
+    def _instruction_presets_request(self, operation, payload):
+        try:
+            from core.instruction_presets import list_presets, save_preset, delete_preset
+            if not isinstance(payload, str) or len(payload) > 600_000:
+                raise ValueError('프리셋 데이터가 너무 큽니다')
+            data = {'scope': payload} if operation == 'list' else json.loads(payload)
+            if not isinstance(data, dict):
+                raise ValueError('프리셋 요청 형식이 올바르지 않습니다')
+            scope = data.get('scope')
+            item = None
+            if operation == 'save':
+                item = save_preset(scope, data.get('name'), data.get('instructions'), preset_id=data.get('id'))
+            elif operation == 'delete':
+                delete_preset(scope, data.get('id'))
+            reply = json.dumps({'ok': True, 'scope': scope, 'presets': list_presets(scope), 'preset': item}, ensure_ascii=False)
+            if operation != 'list':
+                self.instructionPresetsChanged.emit(reply)
+            return reply
+        except (ValueError, TypeError) as exc:
+            return json.dumps({'ok': False, 'error': str(exc)[:500]}, ensure_ascii=False)
+        except Exception as exc:
+            from core.error_handler import handle_error
+            try:
+                handle_error('E030', '지침 프리셋 저장소', exc, notify=False)
+            except Exception:
+                pass
+            return json.dumps({'ok': False, 'error': '프리셋을 처리하지 못했습니다. 파일과 쓰기 권한을 확인하세요.'}, ensure_ascii=False)
+
+    @pyqtSlot(str, result=str)
+    def getInstructionPresets(self, scope):
+        return self._instruction_presets_request('list', scope)
+
+    @pyqtSlot(str, result=str)
+    def saveInstructionPreset(self, payload):
+        return self._instruction_presets_request('save', payload)
+
+    @pyqtSlot(str, result=str)
+    def deleteInstructionPreset(self, payload):
+        return self._instruction_presets_request('delete', payload)
 
     def _refresh_forge_module_widgets(self) -> None:
         """저장된 Forge VAE/TE 경로를 현재 프록시 목록에 즉시 반영."""

@@ -53,7 +53,7 @@ class ChatActionsMixin:
                                                 'stopped': False, 'error': str(error)[:2000]}, ensure_ascii=False))
 
     def _handle_chat_action(self, action: str, payload: dict) -> bool:
-        if action in ("chat_send", "chat_stop", "chat_load", "chat_save", "chat_export", "chat_model_info"):
+        if action in ("chat_send", "chat_stop", "chat_load", "chat_save", "chat_export", "chat_model_info", "chat_models"):
             pass
         else:
             return False
@@ -64,6 +64,7 @@ class ChatActionsMixin:
             "chat_save": self._chat_save,
             "chat_export": self._chat_export,
             "chat_model_info": self._chat_model_info,
+            "chat_models": self._chat_models,
         }
         handlers[action](payload or {})
         return True
@@ -75,7 +76,7 @@ class ChatActionsMixin:
             self._chat_info_running = False
         request = (str(payload.get('id') or '')[:100],
                    str(payload.get('url') or DEFAULT_OLLAMA_URL)[:2000],
-                   str(payload.get('model') or '')[:300])
+                   str(payload.get('model') or '')[:300], str(payload.get('provider') or 'ollama'))
         with self._chat_info_lock:
             self._chat_info_pending = request
             if self._chat_info_running:
@@ -84,6 +85,7 @@ class ChatActionsMixin:
 
         def work():
             from core.ollama_client import OllamaClient
+            from core.lmstudio_client import LMStudioClient
             while True:
                 with self._chat_info_lock:
                     current = self._chat_info_pending
@@ -91,12 +93,15 @@ class ChatActionsMixin:
                     if current is None:
                         self._chat_info_running = False
                         return
-                request_id, url, model = current
+                request_id, url, model, provider = current
                 event = {'id': request_id, 'model': model}
                 try:
                     if not model:
                         raise ValueError('모델을 선택해 주세요')
-                    event.update(ok=True, info=OllamaClient(url, model).get_model_info())
+                    if provider not in ('ollama', 'lmstudio'):
+                        raise ValueError('지원하지 않는 대화 서버입니다')
+                    client = LMStudioClient if provider == 'lmstudio' else OllamaClient
+                    event.update(ok=True, info=client(url, model).get_model_info())
                 except Exception as exc:
                     event.update(ok=False, error=str(exc)[:500])
                 try:
@@ -104,6 +109,39 @@ class ChatActionsMixin:
                 except RuntimeError:
                     return  # window was destroyed while metadata HTTP finished
         threading.Thread(target=work, daemon=True, name='chat-model-info').start()
+
+    def _chat_models(self, payload):
+        """LM Studio model discovery, bounded to one coalescing worker."""
+        if not hasattr(self, '_chat_models_lock'):
+            self._chat_models_lock = threading.Lock()
+            self._chat_models_running = False
+        with self._chat_models_lock:
+            self._chat_models_pending = (str(payload.get('id') or '')[:100],
+                                         str(payload.get('url') or 'http://localhost:1234')[:2000])
+            if self._chat_models_running:
+                return
+            self._chat_models_running = True
+
+        def work():
+            from core.lmstudio_client import LMStudioClient
+            while True:
+                with self._chat_models_lock:
+                    current = self._chat_models_pending
+                    self._chat_models_pending = None
+                    if current is None:
+                        self._chat_models_running = False
+                        return
+                request_id, url = current
+                event = {'id': request_id}
+                try:
+                    event.update(ok=True, models=LMStudioClient(url).list_models())
+                except Exception as exc:
+                    event.update(ok=False, error=str(exc)[:500])
+                try:
+                    self.vue_bridge.chatModelsReady.emit(json.dumps(event, ensure_ascii=False))
+                except RuntimeError:
+                    return
+        threading.Thread(target=work, daemon=True, name='chat-models').start()
 
     # ── 저장 ──
     def _chat_store_instance(self) -> ChatStore:
@@ -155,12 +193,21 @@ class ChatActionsMixin:
         except Exception as exc:
             self._chat_reject(request_id, exc)
             return
-        url = str(payload.get("url") or "").strip() or DEFAULT_OLLAMA_URL
+        provider = payload.get('provider') or 'ollama'
+        try:
+            if provider not in ('ollama', 'lmstudio'):
+                raise ValueError('지원하지 않는 대화 서버입니다')
+            from core.structured_output import parse_schema
+            schema = parse_schema(payload['schema']) if payload.get('schema') is not None else None
+        except (ValueError, TypeError) as exc:
+            self._chat_reject(request_id, exc)
+            return
+        url = str(payload.get("url") or "").strip() or ('http://localhost:1234' if provider == 'lmstudio' else DEFAULT_OLLAMA_URL)
         model = str(payload.get("model") or "").strip()
         if not model:
             self.vue_bridge.chatDone.emit(json.dumps({
                 "id": request_id, "ok": False, "content": "", "stopped": False,
-                "error": "모델이 선택되지 않았습니다 — Settings › AI 어시스트에서 고르세요",
+                "error": "모델이 선택되지 않았습니다 — 대화 설정에서 서버 연결을 확인하고 모델을 고르세요",
             }, ensure_ascii=False))
             return
         messages = build_ollama_messages(
@@ -174,7 +221,8 @@ class ChatActionsMixin:
         if not isinstance(think, bool) and think not in (None, 'low', 'medium', 'high', 'max'):
             self._chat_reject(request_id, '지원하지 않는 추론 설정입니다')
             return
-        worker = ChatWorker(request_id, url, model, messages, options, think=think, parent=self)
+        worker = ChatWorker(request_id, url, model, messages, options, think=think, parent=self,
+                            provider=provider, schema=schema)
         worker.token.connect(self.vue_bridge.chatToken.emit)
         worker.done.connect(self._on_chat_done)
         worker.finished.connect(worker.deleteLater)   # 교체된 옛 워커도 스스로 정리된다

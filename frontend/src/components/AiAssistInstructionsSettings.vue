@@ -1,10 +1,11 @@
 <template>
-  <section class="assist-instructions" aria-labelledby="ai-assist-instructions-title" :aria-busy="busy">
+  <section class="assist-instructions" :aria-labelledby="`${idPrefix}-instructions-title`" :aria-busy="busy">
     <header>
-      <h2 id="ai-assist-instructions-title">AI 어시스트 사용자 지침</h2>
+      <h2 :id="`${idPrefix}-instructions-title`">AI 어시스트 사용자 지침</h2>
       <p>공통 지침과 기능별 추가 지침을 설정합니다. 빈칸은 기존 동작을 유지합니다. 여기서 작성한 지침은 Chat 대화와 Batch/Upscale 이미지 캡션에 적용되지 않습니다.</p>
     </header>
-    <div class="instruction-guide" id="ai-assist-instructions-guide">
+    <InstructionPresets scope="assist" :instructions="draft" :disabled="locked" @apply="applyPreset" />
+    <div class="instruction-guide" :id="`${idPrefix}-instructions-guide`">
       <p>일반 기능은 <strong>공통 지침 → 선택한 기능의 추가 지침</strong> 순서로 적용합니다. 기능별 지침으로 공통 지침을 구체화하세요.</p>
       <p>자동 자연어 변환은 <strong>공통 → 자연어 캡션 → 생성 전 자동 자연어 변환</strong> 순서로 이어받습니다.</p>
       <p>태그·문장 등의 출력 형식은 앱이 관리합니다. 원하는 표현, 관찰 기준, 제외할 내용 중심으로 작성하세요.</p>
@@ -12,12 +13,12 @@
 
     <div class="instruction-field common-field">
       <div class="field-heading">
-        <label for="ai-assist-common">공통 지침</label>
+        <label :for="`${idPrefix}-common`">공통 지침</label>
         <small aria-hidden="true">{{ characterCount(draft.common).toLocaleString() }} / 8,000</small>
       </div>
-      <p id="ai-assist-common-help">아래 9개 기능에 함께 적용합니다. 각 입력란은 최대 8,000자이며, 모두 비워 저장하면 추가 지침 없이 기존 기능을 사용합니다.</p>
-      <textarea id="ai-assist-common" :value="draft.common" :disabled="locked" :maxlength="LIMIT * 2" rows="4"
-        aria-describedby="ai-assist-common-help ai-assist-instructions-guide"
+      <p :id="`${idPrefix}-common-help`">아래 9개 기능에 함께 적용합니다. 각 입력란은 최대 8,000자이며, 모두 비워 저장하면 추가 지침 없이 기존 기능을 사용합니다.</p>
+      <textarea :id="`${idPrefix}-common`" :value="draft.common" :disabled="locked" :maxlength="LIMIT * 2" rows="4"
+        :aria-describedby="`${idPrefix}-common-help ${idPrefix}-instructions-guide`"
         placeholder="예: 입력에 없는 인물 관계나 감정을 추측하지 말고, 확인할 수 있는 외형과 행동을 중심으로 표현하세요."
         @input="edit('common', $event)" />
     </div>
@@ -25,17 +26,22 @@
     <div class="feature-grid">
       <div v-for="feature in features" :key="feature.id" class="instruction-field">
         <div class="field-heading">
-          <label :for="`ai-assist-${feature.id}`">{{ feature.label }} 추가 지침</label>
+          <label :for="`${idPrefix}-${feature.id}`">{{ feature.label }} 추가 지침</label>
           <small aria-hidden="true">{{ characterCount(draft.features[feature.id]).toLocaleString() }} / 8,000</small>
         </div>
-        <p :id="`ai-assist-${feature.id}-help`">{{ feature.description }}</p>
-        <textarea :id="`ai-assist-${feature.id}`" :value="draft.features[feature.id]" :disabled="locked" :maxlength="LIMIT * 2" rows="3"
-          :aria-describedby="`ai-assist-${feature.id}-help`" :aria-label="`${feature.label} 추가 지침, 최대 8000자`"
+        <p :id="`${idPrefix}-${feature.id}-help`">{{ feature.description }}</p>
+        <textarea :id="`${idPrefix}-${feature.id}`" :value="draft.features[feature.id]" :disabled="locked" :maxlength="LIMIT * 2" rows="3"
+          :aria-describedby="`${idPrefix}-${feature.id}-help`" :aria-label="`${feature.label} 추가 지침, 최대 8000자`"
           :placeholder="feature.placeholder" @input="edit(feature.id, $event)" />
       </div>
     </div>
 
     <footer>
+      <div v-if="remoteChange" role="alert">
+        <p>다른 화면에서 지침을 저장했습니다. 이 화면의 편집 내용은 유지됩니다. 사용할 내용을 선택하세요.</p>
+        <button type="button" :disabled="busy" @click="useRemote">새 저장본 불러오기</button>
+        <button type="button" :disabled="busy" @click="overwriteRemote">내 편집으로 덮어쓰기</button>
+      </div>
       <div class="save-state" role="status" aria-live="polite">
         <span v-if="phase === 'loading'">저장된 지침을 불러오는 중…</span>
         <span v-else-if="phase === 'saving'">지침 저장 중…</span>
@@ -45,7 +51,7 @@
       </div>
       <div class="instruction-actions">
         <button v-if="!loaded && !busy" type="button" @click="load">연결 다시 시도</button>
-        <button type="button" class="save-button" :disabled="!loaded || busy || !dirty" @click="save">
+        <button type="button" class="save-button" :disabled="!loaded || busy || !dirty || !!remoteChange" @click="save">
           {{ phase === 'saving' ? '저장 중…' : '지침 저장' }}
         </button>
       </div>
@@ -57,8 +63,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { getBackend } from '../bridge.js'
+import { getBackend, onBackendEvent } from '../bridge.js'
+import InstructionPresets from './InstructionPresets.vue'
 import type { AiAssistFeature, AiAssistInstructions } from '../types/bridge'
+withDefaults(defineProps<{ idPrefix?: string }>(), { idPrefix: 'ai-assist' })
+const remoteChange = ref('')
+let unsubscribe: (() => void) | undefined
 
 const LIMIT = 8000
 const RESPONSE_TIMEOUT = 12000
@@ -142,6 +152,7 @@ function accept(token: number, raw: string, operation: 'loading' | 'saving') {
     ++serial
     draft.value = clean
     saved.value = JSON.stringify(clean)
+    remoteChange.value = ''
     loaded.value = true
     phase.value = 'idle'
     notice.value = operation === 'saving' ? '지침을 저장했습니다.' : ''
@@ -177,7 +188,7 @@ async function load() {
   }
 }
 async function save() {
-  if (disposed || locked.value || !dirty.value) return
+  if (disposed || locked.value || !dirty.value || remoteChange.value) return
   const payload = JSON.stringify(draft.value)
   const token = begin('saving')
   try {
@@ -189,8 +200,31 @@ async function save() {
     fail(token, problem instanceof Error ? problem.message : '지침을 저장하지 못했습니다. 다시 시도하세요.')
   }
 }
-onMounted(load)
-onUnmounted(() => { disposed = true; ++serial; clearTimeout(timer) })
+function applyPreset(value: string | AiAssistInstructions) {
+  if (locked.value || typeof value === 'string') return
+  draft.value = JSON.parse(JSON.stringify(value))
+  notice.value = '프리셋을 불러왔습니다. 지침 저장을 눌러 적용하세요.'
+}
+function useRemote() {
+  const raw = remoteChange.value
+  if (raw) accept(++serial, raw, 'loading')
+}
+function overwriteRemote() { remoteChange.value = ''; save() }
+onMounted(() => {
+  unsubscribe = onBackendEvent('aiAssistInstructionsChanged', (raw: string) => {
+    if (phase.value === 'saving') return // The save callback owns this acknowledgement.
+    try {
+      const reply = JSON.parse(raw)
+      if (!reply.ok || !reply.instructions) return
+      const snapshot = JSON.stringify(reply.instructions)
+      if (snapshot === saved.value) return
+      if (dirty.value && snapshot !== JSON.stringify(draft.value)) remoteChange.value = raw
+      else accept(++serial, raw, 'loading')
+    } catch { /* keep draft on malformed events */ }
+  })
+  load()
+})
+onUnmounted(() => { disposed = true; ++serial; clearTimeout(timer); unsubscribe?.() })
 </script>
 
 <style scoped>

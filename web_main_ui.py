@@ -152,6 +152,7 @@ _WEB_METHODS = frozenset({
     "searchDanbooru", "loadLastSearchResults", "loadFullResults",
     "getActiveSearchDataset", "getUiPrefs",
     "getAiAssistInstructions", "saveAiAssistInstructions",
+    "getInstructionPresets", "saveInstructionPreset", "deleteInstructionPreset",
     # Backend runtime, generation API, model-path 설정은 redaction과 native
     # capability 검사를 한곳에서 강제하는 ``studio`` 객체로만 공개한다.
     "getUpscalers", "requestUpscalers", "saveImageExif", "renameFile",
@@ -186,6 +187,7 @@ _WEB_SIGNALS = frozenset({
     "genNlResult", "globalWeightsLoaded", "uiPrefsLoaded", "compareImageLoaded",
     "galleryImagesReady", "thumbnailReady", "upscalersReady", "ollamaModelsReady",
     "chatToken", "chatDone", "chatThreads", "chatGenerationEvent", "chatModelInfo",
+    "chatModelsReady", "aiAssistInstructionsChanged", "instructionPresetsChanged",
     "xyzCapabilitiesReceived", "xyzPlotEvent",
     "adetailerModelsReady", "queueUpdated", "queueItemAdded", "queueCompleted",
     "showNotification", "adetailerResult", "adetailerProgress", "sam3Result",
