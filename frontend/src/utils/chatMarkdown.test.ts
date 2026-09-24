@@ -1,5 +1,32 @@
-import { describe, expect, it } from 'vitest'
-import { escapeHtml, inlineMarkdown, renderMarkdown } from './chatMarkdown'
+import { describe, expect, it, vi } from 'vitest'
+import { createMarkdownMemo, escapeHtml, inlineMarkdown, renderMarkdown } from './chatMarkdown'
+
+describe('createMarkdownMemo — 스트리밍 중 바뀌지 않은 답은 다시 렌더하지 않는다', () => {
+  it('같은 메시지·같은 원문은 캐시를, 바뀐 원문만 다시 렌더한다', () => {
+    const render = vi.fn((source: string) => `<p>${source}</p>`)
+    const md = createMarkdownMemo(render)
+    const done = { content: '긴 이전 답' }
+    const streaming = { content: '부분' }
+    expect(md(done)).toBe('<p>긴 이전 답</p>')
+    expect(md(streaming)).toBe('<p>부분</p>')
+    for (let packet = 0; packet < 25; packet++) {   // 초당 약 25패킷
+      streaming.content += '.'
+      md(done)
+      md(streaming)
+    }
+    expect(render.mock.calls.filter(([source]) => source === '긴 이전 답')).toHaveLength(1)
+    expect(render).toHaveBeenCalledTimes(27)
+    expect(md(streaming)).toBe(`<p>${streaming.content}</p>`)
+  })
+
+  it('기본 렌더러는 renderMarkdown 그대로라 이스케이프 보장이 유지된다', () => {
+    const md = createMarkdownMemo()
+    const message = { content: '<script>x</script> **굵게**' }
+    expect(md(message)).toBe(renderMarkdown(message.content))
+    expect(md(message)).not.toContain('<script')
+    expect(md({ content: undefined })).toBe('')
+  })
+})
 
 describe('chatMarkdown — 모델 출력은 신뢰할 수 없는 문자열이다', () => {
   it('HTML 을 먼저 이스케이프한다 — 모델이 <script> 를 뱉어도 글자로 남는다', () => {

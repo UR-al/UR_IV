@@ -11,14 +11,12 @@ tests.
 """
 from __future__ import annotations
 
-import configparser
 import json
 import os
 import shlex
 import queue
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import threading
@@ -30,6 +28,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
+from core.backend_probe import HEALTH_PATHS
 from core.process_guard import app_job, clear_pid_file, marker_for, sweep_orphan, write_pid_file
 from core.launch_args import LaunchArgsImport, discover_launch_args, merge_args
 from core.storage_paths import config_file
@@ -95,7 +94,7 @@ ENGINE_DEFINITIONS: dict[str, EngineDefinition] = {
         branch="neo",
         protocol="webui",
         preferred_port=17860,
-        health_path="/sdapi/v1/samplers",
+        health_path=HEALTH_PATHS["forge"],
         extension_folder="extensions",
         entrypoint="launch.py",
     ),
@@ -106,11 +105,15 @@ ENGINE_DEFINITIONS: dict[str, EngineDefinition] = {
         branch="master",
         protocol="comfyui",
         preferred_port=18188,
-        health_path="/system_stats",
+        health_path=HEALTH_PATHS["comfyui"],
         extension_folder="custom_nodes",
         entrypoint="main.py",
     ),
 }
+
+
+#: execute 결과의 ``state`` 를 마지막에 한 번 계산하는 스냅샷으로 채우라는 표시.
+_FINAL_SNAPSHOT = object()
 
 
 def _utc_now() -> str:
@@ -393,23 +396,16 @@ class LocalRuntimeAdapter:
         return process
 
     def probe(self, url: str, path: str, timeout: float = 2.0) -> bool:
-        try:
-            import requests
+        # 시작 게이트와 같은 probe — 루프백은 connect 만 짧게 끊는다(core/backend_probe.py).
+        from core.backend_probe import probe_url
 
-            response = requests.get(f"{url.rstrip('/')}{path}", timeout=timeout)
-            return response.status_code == 200
-        except Exception:
-            return False
+        return probe_url(url, path, timeout=timeout)
 
     def port_available(self, host: str, port: int) -> bool:
-        family = socket.AF_INET6 if ":" in host else socket.AF_INET
-        try:
-            with socket.socket(family, socket.SOCK_STREAM) as sock:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind((host, int(port)))
-            return True
-        except OSError:
-            return False
+        # Windows 는 SO_EXCLUSIVEADDRUSE 로 host 와 와일드카드를 모두 시험한다 — core/port_probe.py
+        from core.port_probe import port_available
+
+        return port_available(host, port)
 
 
 @dataclass
@@ -437,11 +433,15 @@ class BackendRuntimeManager:
         runtime_root: Path | str | None = None,
         adapter: RuntimeAdapter | None = None,
         health_timeout: float = 180.0,
+        reserved_ports: Callable[[], Any] | None = None,
     ):
         self.config_path = Path(config_path or CONFIG_PATH)
         self.runtime_root = Path(runtime_root or _default_runtime_root()).resolve()
         self.adapter: RuntimeAdapter = adapter or LocalRuntimeAdapter()
         self.health_timeout = float(health_timeout)
+        # 앱의 다른 구성요소가 쓰기로 한 포트(아직 bind 전일 수 있음)를 돌려주는 함수.
+        # 앱 싱글턴은 켜 둔 Generation API 포트를 넘긴다 — get_backend_runtime_manager.
+        self._reserved_ports_source = reserved_ports
         self._state_lock = threading.RLock()
         # An operation for either engine may stop/restart the other engine.  Keep
         # the entire managed-runtime transaction linearizable across engines;
@@ -457,6 +457,8 @@ class BackendRuntimeManager:
         self._healthy: dict[str, bool] = {key: False for key in ENGINE_DEFINITIONS}
         self._busy: dict[str, bool] = {key: False for key in ENGINE_DEFINITIONS}
         self._last_messages: dict[str, str] = {key: "" for key in ENGINE_DEFINITIONS}
+        # 이전 release(.trash-*) 백그라운드 삭제 스레드 — core/release_trash.py
+        self._release_purge_thread: threading.Thread | None = None
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         self._state = self._load_state()
         self._cleanup_inactive_releases()
@@ -610,11 +612,21 @@ class BackendRuntimeManager:
             atomic_write_json(str(self.config_path), self._state, indent=2)
 
     def _cleanup_inactive_releases(self) -> None:
-        """Remove only unreferenced app-owned release trees left by updates/crashes."""
+        """Retire unreferenced app-owned release trees left by updates/crashes.
+
+        생성자(시작 시 GUI 스레드)에서 불린다. 수 GB 트리를 여기서 지우지 않고
+        ``.trash-*`` 로 이름만 바꾼 뒤 데몬 스레드가 지운다 — core/release_trash.py.
+        이름을 바꾸는 이 단계는 동기라, 이후 설치 작업이 만드는 후보 release 와
+        삭제 스레드가 겹치지 않는다(삭제 스레드는 ``.trash-*`` 만 지운다).
+        """
+        from core.release_trash import is_trash, move_to_trash
+
+        roots: list[Path] = []
         for engine in ENGINE_DEFINITIONS:
             releases_root = (self._engine_root(engine) / "releases").resolve()
             if not releases_root.is_dir():
                 continue
+            roots.append(releases_root)
             active_id = str(self._state["engines"][engine].get("release", "") or "")
             active = (releases_root / active_id).resolve() if active_id else None
             try:
@@ -623,14 +635,38 @@ class BackendRuntimeManager:
                 continue
             for child in children:
                 try:
+                    if is_trash(child) or not child.is_dir():
+                        continue
                     resolved = child.resolve()
-                    if not child.is_dir() or (active is not None and resolved == active):
+                    if active is not None and resolved == active:
                         continue
                     if not _is_relative_to(resolved, releases_root):
                         continue
-                    shutil.rmtree(resolved, ignore_errors=True)
+                    move_to_trash(resolved, releases_root)
                 except OSError:
                     continue
+        self._purge_retired_releases(roots)
+
+    def _purge_retired_releases(self, roots: list[Path]) -> None:
+        from core.release_trash import purge_trash_async
+
+        thread = purge_trash_async(roots)
+        if thread is not None:
+            self._release_purge_thread = thread
+
+    def _retire_release(self, engine: str, release_id: str) -> None:
+        """업데이트로 비활성이 된 이전 release 를 즉시 치운다(삭제는 백그라운드)."""
+        from core.release_trash import move_to_trash
+
+        release_id = str(release_id or "")
+        if not release_id or release_id == str(self._state["engines"][engine].get("release") or ""):
+            return
+        releases_root = (self._engine_root(engine) / "releases").resolve()
+        candidate = (releases_root / release_id).resolve()
+        if candidate == releases_root or not _is_relative_to(candidate, releases_root):
+            return
+        if move_to_trash(candidate, releases_root) is not None:
+            self._purge_retired_releases([releases_root])
 
     # --------------------------------------------------------------- filesystem
 
@@ -729,9 +765,9 @@ class BackendRuntimeManager:
                 )
             for source, python in portable_pairs:
                 if python.is_file():
-                    install_root = source.parent if python.parent.parent == source.parent else root
-                    if python.parent.name.casefold() in {"python_embeded", "python_embedded"}:
-                        install_root = python.parent.parent
+                    # 후보 python 은 항상 python_embed(d)ed 폴더 안에 있으므로 번들
+                    # 루트는 그 폴더의 부모다(바깥 번들 / 안쪽 ComfyUI 선택 모두).
+                    install_root = python.parent.parent
                     return RuntimeLocation(
                         install_root.resolve(), source.resolve(), python.resolve(), portable=True
                     )
@@ -964,72 +1000,24 @@ class BackendRuntimeManager:
 
     # ---------------------------------------------------------------- snapshot
 
+    # .git 파일 읽기는 core/git_metadata.py 한 곳에 둔다(app_updater 표시용 정체성과 공유).
     @staticmethod
     def _git_dir(source: Path) -> Path | None:
-        dot_git = source / ".git"
-        if dot_git.is_dir():
-            return dot_git.resolve()
-        if not dot_git.is_file():
-            return None
-        try:
-            marker = dot_git.read_text(encoding="utf-8", errors="replace").strip()
-            if not marker.casefold().startswith("gitdir:"):
-                return None
-            value = marker.split(":", 1)[1].strip()
-            candidate = Path(value)
-            if not candidate.is_absolute():
-                candidate = source / candidate
-            candidate = candidate.resolve()
-            return candidate if candidate.is_dir() else None
-        except OSError:
-            return None
+        from core.git_metadata import git_dir
+
+        return git_dir(source)
 
     @staticmethod
     def _read_git_ref(git_dir: Path, ref: str) -> str:
-        if not ref.startswith("refs/") or ".." in Path(ref).parts:
-            return ""
-        loose = (git_dir / Path(ref)).resolve()
-        if _is_relative_to(loose, git_dir):
-            try:
-                value = loose.read_text(encoding="ascii", errors="ignore").strip()
-                if re.fullmatch(r"[0-9a-fA-F]{40,64}", value):
-                    return value.lower()
-            except OSError:
-                pass
-        try:
-            for line in (git_dir / "packed-refs").read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines():
-                if not line or line.startswith(("#", "^")):
-                    continue
-                commit, _, packed_ref = line.partition(" ")
-                if packed_ref.strip() == ref and re.fullmatch(r"[0-9a-fA-F]{40,64}", commit):
-                    return commit.lower()
-        except OSError:
-            pass
-        return ""
+        from core.git_metadata import read_ref
+
+        return read_ref(git_dir, ref)
 
     def _local_git_info(self, source: Path) -> tuple[str, str, str]:
         """Read local Git metadata without spawning processes or contacting remotes."""
-        git_dir = self._git_dir(source)
-        if git_dir is None:
-            return "", "", ""
-        try:
-            head = (git_dir / "HEAD").read_text(
-                encoding="ascii", errors="ignore"
-            ).strip()
-        except OSError:
-            return "", "", ""
-        branch = ""
-        if head.startswith("ref:"):
-            ref = head.split(":", 1)[1].strip()
-            commit = self._read_git_ref(git_dir, ref)
-            if ref.startswith("refs/heads/"):
-                branch = ref[len("refs/heads/"):]
-        elif re.fullmatch(r"[0-9a-fA-F]{40,64}", head):
-            commit = head.lower()
-        else:
-            commit = ""
+        from core.git_metadata import head_info
+
+        commit, branch = head_info(source)
         return (commit[:12] if commit else ""), commit, branch
 
     @staticmethod
@@ -1056,15 +1044,9 @@ class BackendRuntimeManager:
         return ""
 
     def _git_origin_url(self, source: Path) -> str:
-        git_dir = self._git_dir(source)
-        if git_dir is None:
-            return ""
-        parser = configparser.RawConfigParser(strict=False)
-        try:
-            parser.read(git_dir / "config", encoding="utf-8")
-            return str(parser.get('remote "origin"', "url", fallback="") or "").strip()
-        except (OSError, configparser.Error):
-            return ""
+        from core.git_metadata import remote_url
+
+        return remote_url(source, "origin")
 
     @staticmethod
     def _sanitize_repository_url(value: str) -> str:
@@ -1315,23 +1297,56 @@ class BackendRuntimeManager:
                     combined[category].append(value)
         return combined
 
+    def _install_state(self, key: str) -> dict[str, Any]:
+        """installed·sourceMode·확장 폴더 쓰기 가능 여부 — snapshot() 의 가벼운 부분.
+
+        내부 작업(install/update/start/extension)은 이 몇 필드만 필요하다. 전체
+        snapshot() 은 확장마다 .git·marker 를 읽고 모델 경로를 탐색해 한 번에 약 20ms 가
+        걸리므로, 작업 한 번에 여러 번 부르지 않도록 이 헬퍼를 snapshot() 과 공유한다.
+        """
+        definition = ENGINE_DEFINITIONS[key]
+        with self._state_lock:
+            saved = self._state["engines"][key]
+            location = self._runtime_location(key)
+            source = location.source_root if location is not None else Path()
+            python_path = location.python_path if location is not None else Path()
+            installed = bool(
+                location is not None
+                and (source / definition.entrypoint).is_file()
+                and python_path.is_file()
+            )
+            extension_root = self._extension_root(key)
+            extension_approved = bool(saved.get("extensionDirApproved"))
+            extension_writable = bool(
+                (_is_relative_to(extension_root.resolve(), self.runtime_root) or extension_approved)
+                and (not extension_root.exists() or os.access(extension_root, os.W_OK))
+            )
+            return {
+                "location": location,
+                "source": source,
+                "pythonPath": python_path,
+                "installed": installed,
+                "sourceMode": str(saved.get("sourceMode", "managed") or "managed"),
+                "extensionRoot": extension_root,
+                "extensionDirApproved": extension_approved,
+                "extensionDirExternal": extension_root != self._default_extension_root(key).resolve(),
+                "extensionWritable": extension_writable,
+            }
+
     def snapshot(self) -> dict[str, Any]:
         """Return cached/local state only; never contacts GitHub or PyPI."""
         with self._state_lock:
             engines: dict[str, Any] = {}
             for key, definition in ENGINE_DEFINITIONS.items():
                 saved = self._state["engines"][key]
-                source_mode = str(saved.get("sourceMode", "managed") or "managed")
+                basics = self._install_state(key)
+                source_mode = basics["sourceMode"]
                 existing_root = str(saved.get("existingRoot", "") or "")
-                location = self._runtime_location(key)
+                location = basics["location"]
                 detected = self._detected_launch_args(key, location, saved)
-                source = location.source_root if location is not None else Path()
-                python_path = location.python_path if location is not None else Path()
-                installed = bool(
-                    location is not None
-                    and (source / definition.entrypoint).is_file()
-                    and python_path.is_file()
-                )
+                source = basics["source"]
+                python_path = basics["pythonPath"]
+                installed = basics["installed"]
                 version, commit, branch = self._local_git_info(source) if installed else ("", "", "")
                 if installed and not version:
                     version = self._declared_local_version(key, source)
@@ -1349,12 +1364,9 @@ class BackendRuntimeManager:
                     update_status = "Update available"
                 else:
                     update_status = "Up to date"
-                extension_root = self._extension_root(key)
-                extension_approved = bool(saved.get("extensionDirApproved"))
-                extension_writable = bool(
-                    (_is_relative_to(extension_root.resolve(), self.runtime_root) or extension_approved)
-                    and (not extension_root.exists() or os.access(extension_root, os.W_OK))
-                )
+                extension_root = basics["extensionRoot"]
+                extension_approved = basics["extensionDirApproved"]
+                extension_writable = basics["extensionWritable"]
                 engines[key] = {
                     "engine": key,
                     "name": definition.name,
@@ -1387,7 +1399,7 @@ class BackendRuntimeManager:
                     "updateStatus": update_status,
                     "extensionDir": str(extension_root),
                     "defaultExtensionDir": str(self._default_extension_root(key)),
-                    "extensionDirExternal": extension_root != self._default_extension_root(key).resolve(),
+                    "extensionDirExternal": basics["extensionDirExternal"],
                     "extensionDirApproved": extension_approved,
                     "extensionWritable": extension_writable,
                     "extensions": self._extension_state(key),
@@ -1411,7 +1423,14 @@ class BackendRuntimeManager:
 
     # -------------------------------------------------------------- configure
 
-    def configure(self, engine: str, patch: Mapping[str, Any]) -> dict[str, Any]:
+    def configure(
+        self, engine: str, patch: Mapping[str, Any], *, return_snapshot: bool = True
+    ) -> dict[str, Any]:
+        """설정 저장. 공개 호출은 전체 snapshot 을 돌려준다(계약).
+
+        execute 안의 내부 호출은 ``return_snapshot=False`` 로 스냅샷 계산을 건너뛴다 —
+        execute 가 끝에서 한 번 계산한 스냅샷을 결과의 ``state`` 로 재사용한다.
+        """
         key = _canonical_engine(engine)
         if not isinstance(patch, Mapping):
             raise BackendRuntimeError("INVALID_PAYLOAD", "설정 payload가 객체가 아닙니다")
@@ -1512,7 +1531,7 @@ class BackendRuntimeManager:
             if patch.get("active") is True:
                 self._state["activeEngine"] = key
             self._save_state()
-        return self.snapshot()
+        return self.snapshot() if return_snapshot else {}
 
     @staticmethod
     def _normalise_extra_args(value: object) -> str:
@@ -1620,7 +1639,8 @@ class BackendRuntimeManager:
             patch: dict[str, Any] = {"sourceMode": source_mode}
             if source_mode == "existing":
                 patch["existingRoot"] = existing_root
-            self.configure(engine, patch)
+            # 결과 스냅샷은 execute 가 끝에서 한 번만 계산한다(result['state'] 와 공유).
+            self.configure(engine, patch, return_snapshot=False)
             self._ensure_primary_model_engine(engine)
             self._ensure_extension_mount(engine)
             location = self._runtime_location(engine)
@@ -1649,7 +1669,7 @@ class BackendRuntimeManager:
         mode_label = "기존 설치" if source_mode == "existing" else "앱 관리형 설치"
         return {
             "message": f"{ENGINE_DEFINITIONS[engine].name}을 {mode_label}로 전환했습니다",
-            "state": self.snapshot(),
+            "state": _FINAL_SNAPSHOT,
         }
 
     def _set_primary_model_engine(
@@ -1720,7 +1740,7 @@ class BackendRuntimeManager:
                 result = self._install(key, on_progress)
             elif action_name == "update":
                 result = self._update(key, on_progress)
-            elif action_name in {"check", "check_update", "check_version"}:
+            elif action_name == "check_update":
                 result = self._check_update(key, on_progress)
             elif action_name in {"start", "use"}:
                 # Explicit Start/Use may prepare a missing runtime. Startup auto-start
@@ -1746,33 +1766,33 @@ class BackendRuntimeManager:
                         # must never change auto-start just because it switched.
                         if action_name == "use":
                             patch["autoStart"] = bool(payload.get("autoStart"))
-                    self.configure(key, patch)
+                    self.configure(key, patch, return_snapshot=False)
                 result["activate"] = activate
             elif action_name == "stop":
                 result = self._stop(key, on_progress)
             elif action_name == "set_auto_start":
-                state = self.configure(key, {"autoStart": bool(payload.get("autoStart"))})
-                result = {"message": "자동 시작 설정을 저장했습니다", "state": state}
+                self.configure(key, {"autoStart": bool(payload.get("autoStart"))}, return_snapshot=False)
+                result = {"message": "자동 시작 설정을 저장했습니다", "state": _FINAL_SNAPSHOT}
             elif action_name == "set_launch_options":
                 option_patch = {
                     name: bool(payload.get(name))
                     for name in ("importLaunchArgs", "fastFp16")
                     if name in payload
                 }
-                state = self.configure(key, option_patch)
+                self.configure(key, option_patch, return_snapshot=False)
                 running = self._process_running(key)
                 result = {
                     "message": "실행 옵션을 저장했습니다" + (" — 다음 시작부터 적용됩니다" if running else ""),
-                    "state": state,
+                    "state": _FINAL_SNAPSHOT,
                 }
             elif action_name == "set_extra_args":
                 # 저장만 한다. 돌고 있는 프로세스엔 다음 기동부터 적용된다 —
                 # 인자를 바꿨다고 백엔드를 말없이 재시작하면 진행 중인 생성이 죽는다.
-                state = self.configure(key, {"extraArgs": payload.get("extraArgs", "")})
+                self.configure(key, {"extraArgs": payload.get("extraArgs", "")}, return_snapshot=False)
                 running = self._process_running(key)
                 result = {
                     "message": "실행 인자를 저장했습니다" + (" — 다음 시작부터 적용됩니다" if running else ""),
-                    "state": state,
+                    "state": _FINAL_SNAPSHOT,
                 }
             elif action_name == "set_install_root":
                 install_root = str(
@@ -1800,7 +1820,7 @@ class BackendRuntimeManager:
                 result = self._set_primary_model_engine(
                     _canonical_engine(requested), on_progress
                 )
-            elif action_name in {"save_extension_dir", "set_extension_dir"}:
+            elif action_name == "save_extension_dir":
                 was_running = self._process_running(key)
                 previous = str(self._state["engines"][key].get("extensionDir", "") or "")
                 previous_approved = bool(
@@ -1809,7 +1829,9 @@ class BackendRuntimeManager:
                 if was_running:
                     self._stop(key, on_progress)
                 try:
-                    state = self.configure(key, {"extensionDir": payload.get("extensionDir", "")})
+                    self.configure(
+                        key, {"extensionDir": payload.get("extensionDir", "")}, return_snapshot=False
+                    )
                     self._ensure_extension_mount(key)
                 except Exception:
                     self.configure(
@@ -1818,6 +1840,7 @@ class BackendRuntimeManager:
                             "extensionDir": previous,
                             "extensionDirApproved": previous_approved,
                         },
+                        return_snapshot=False,
                     )
                     try:
                         self._ensure_extension_mount(key)
@@ -1831,7 +1854,7 @@ class BackendRuntimeManager:
                     raise
                 if was_running:
                     self._start(key, on_progress, install_if_missing=False)
-                result = {"message": "확장 폴더를 저장했습니다", "state": state}
+                result = {"message": "확장 폴더를 저장했습니다", "state": _FINAL_SNAPSHOT}
             elif action_name == "install_extension":
                 result = self._install_extension(key, payload, on_progress)
             elif action_name in {"check_extension", "check_extensions"}:
@@ -1844,12 +1867,16 @@ class BackendRuntimeManager:
             self._last_messages[key] = message
             self._state["engines"][key]["lastError"] = ""
             self._save_state()
+            # 결과 스냅샷은 한 번만 계산한다 — 설정 작업의 ``state`` 도 같은 값을 쓴다.
+            snapshot = self.snapshot()
+            if result.get("state") is _FINAL_SNAPSHOT:
+                result["state"] = snapshot
             final = {
                 "ok": True,
                 "engine": key,
                 "action": action_name,
                 **result,
-                "snapshot": self.snapshot(),
+                "snapshot": snapshot,
             }
             self._progress(on_progress, key, action_name, "complete", message, 100)
             return final
@@ -2104,7 +2131,7 @@ class BackendRuntimeManager:
         *,
         restart_model_consumer: bool = True,
     ) -> dict[str, Any]:
-        current = self.snapshot()["engines"][engine]
+        current = self._install_state(engine)
         if current["installed"]:
             return {"message": f"{ENGINE_DEFINITIONS[engine].name}가 이미 설치되어 있습니다"}
         if current.get("sourceMode") == "existing":
@@ -2203,7 +2230,7 @@ class BackendRuntimeManager:
         }
 
     def _update(self, engine: str, on_progress: ProgressCallback | None) -> dict[str, Any]:
-        state = self.snapshot()["engines"][engine]
+        state = self._install_state(engine)
         if state.get("sourceMode") == "existing":
             raise BackendRuntimeError(
                 "LINKED_UPDATE_UNSUPPORTED",
@@ -2249,13 +2276,32 @@ class BackendRuntimeManager:
                 "UPDATE_VERIFY_FAILED", "업데이트 실행 확인에 실패해 이전 버전으로 되돌렸습니다",
                 stage="rollback", retryable=True, details={"reason": str(exc)},
             ) from exc
+        # 이전 release 는 다음 실행까지 남기지 않는다 — 다음 시작 때 GUI 스레드가 수 GB 를
+        # 지우던 문제를 없애고, 삭제 자체는 백그라운드 스레드가 한다.
+        self._retire_release(engine, str(previous_engine.get("release") or ""))
         return {"message": f"{ENGINE_DEFINITIONS[engine].name} 업데이트를 완료했습니다", "release": release}
 
     # --------------------------------------------------------------- launching
 
+    def _reserved_ports(self) -> frozenset[int]:
+        """다른 구성요소가 쓰기로 한 포트 — 실패해도 포트 선택을 막지 않는다."""
+        source = self._reserved_ports_source
+        if source is None:
+            return frozenset()
+        try:
+            return frozenset(int(port) for port in (source() or ()))
+        except Exception:
+            return frozenset()
+
     def _choose_port(self, engine: str) -> int:
         preferred = int(self._state["engines"][engine].get("port") or ENGINE_DEFINITIONS[engine].preferred_port)
+        # 켜 둔 Generation API 포트는 아직 bind 전이어도 건너뛴다. 앱 시작 때는 엔진 자동
+        # 시작(여기)이 API 서버 bind(start_if_enabled)보다 먼저라, bind 시험만으로는 API 가
+        # 곧 쓸 포트를 가져가 버린다(core/generation_api_port.py).
+        reserved = self._reserved_ports()
         for port in range(preferred, preferred + 50):
+            if port in reserved:
+                continue
             if self.adapter.port_available("127.0.0.1", port):
                 return port
         raise BackendRuntimeError(
@@ -2275,10 +2321,8 @@ class BackendRuntimeManager:
             if values
         })
         payload = {"aistudio_shared": shared}
-        text = json.dumps(payload, ensure_ascii=False, indent=2)
-        tmp = output.with_suffix(output.suffix + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, output)
+        # 공용 원자 쓰기(fsync + 실패 시 tmp 정리) — 같은 '<파일>.tmp' 이름·텍스트 모드.
+        atomic_write_json(str(output), payload, indent=2)
         return output
 
     @staticmethod
@@ -2319,6 +2363,11 @@ class BackendRuntimeManager:
         env["AISTUDIO_MANAGED_ENGINE"] = engine
         env["AISTUDIO_LAUNCH_NONCE"] = uuid.uuid4().hex
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        # 한국어 Windows 콘솔(CP949)에서 커스텀 노드가 이모지·CJK 를 print 하면
+        # UnicodeEncodeError 로 엔진이 기동 중에 죽는다 — 자식의 stdout/stderr 만 UTF-8 로 고정.
+        # PYTHONUTF8 은 일부러 안 건드린다: open()/subprocess 기본 인코딩까지 바꿔 CP949 로
+        # 저장된 확장 설정 파일을 못 읽게 만들 수 있다. setdefault: 사용자 값은 존중.
+        env.setdefault("PYTHONIOENCODING", "utf-8")
         if engine == "forge":
             # Forge 의 `auto_launch_browser` 기본값은 "Local" — 서버가 로컬이면 기동할 때마다
             # OS 브라우저를 연다. 앱은 API 만 쓰므로 그 창은 매번 낯선 탭 하나일 뿐이다.
@@ -2460,7 +2509,7 @@ class BackendRuntimeManager:
                     "apiUrl": owned.endpoint,
                 }
 
-        state = self.snapshot()["engines"][engine]
+        state = self._install_state(engine)
         if not state["installed"]:
             if not install_if_missing:
                 raise BackendRuntimeError(
@@ -2734,7 +2783,7 @@ class BackendRuntimeManager:
         payload: Mapping[str, Any],
         on_progress: ProgressCallback | None,
     ) -> dict[str, Any]:
-        state = self.snapshot()["engines"][engine]
+        state = self._install_state(engine)
         installed = bool(state["installed"])
         external_directory = bool(state.get("extensionDirExternal"))
         if not installed and not external_directory:
@@ -2861,7 +2910,7 @@ class BackendRuntimeManager:
         payload: Mapping[str, Any],
         on_progress: ProgressCallback | None,
     ) -> dict[str, Any]:
-        state = self.snapshot()["engines"][engine]
+        state = self._install_state(engine)
         installed = bool(state["installed"])
         if not installed and not state.get("extensionDirExternal"):
             raise BackendRuntimeError(
@@ -2950,14 +2999,8 @@ def get_backend_runtime_manager() -> BackendRuntimeManager:
     global _MANAGER
     with _MANAGER_LOCK:
         if _MANAGER is None:
-            _MANAGER = BackendRuntimeManager()
+            # 켜 둔 Generation API 의 포트는 시작 순서와 무관하게 엔진 포트 선택에서 뺀다.
+            from core.generation_api_port import reserved_ports as generation_api_reserved_ports
+
+            _MANAGER = BackendRuntimeManager(reserved_ports=generation_api_reserved_ports)
         return _MANAGER
-
-
-def reset_backend_runtime_manager_for_tests() -> None:
-    """Test helper; production callers should never drop owned process handles."""
-    global _MANAGER
-    with _MANAGER_LOCK:
-        if _MANAGER is not None:
-            _MANAGER.stop_all_owned()
-        _MANAGER = None

@@ -333,6 +333,14 @@ class Img2ImgTab(QWidget):
         except (TypeError, ValueError):
             self._krea2_fidelity = 4.0
 
+        from core.image_payload import (
+            ImagePayloadError,
+            encode_image_file,
+            image_size_from_base64,
+            resolve_target_size,
+        )
+        # 보낼 이미지의 크기 — 요청 width/height 칸이 비었을 때만 쓴다(아래 resolve_target_size).
+        image_size = None
         img = payload.get('image') or ''
         if isinstance(img, str) and img.startswith('data:'):
             img = img.split(',', 1)[-1]
@@ -341,7 +349,18 @@ class Img2ImgTab(QWidget):
             if payload.get('image_path'):
                 self.current_image_path = payload['image_path']
         elif payload.get('image_path') and os.path.exists(payload['image_path']):
-            self._load_image(payload['image_path'])
+            # 경로로 온 이미지(갤러리·히스토리 전송)는 원본 바이트를 그대로 보낸다
+            # (core/image_payload — 알파·방향 태그 등만 RGB PNG 재인코딩). 예전 _load_image 는
+            # 클릭마다 메인 스레드에서 QPixmap 디코드·스케일·PNG 재인코딩으로 ~250ms 를 썼다.
+            try:
+                encoded = encode_image_file(payload['image_path'], label='I2I')
+            except ImagePayloadError as exc:
+                if self.main_window and hasattr(self.main_window, 'vue_bridge'):
+                    self.main_window.vue_bridge.showNotification.emit('error', str(exc))
+                return
+            self.current_image_path = payload['image_path']
+            self.current_base64 = encoded.b64
+            image_size = (encoded.width, encoded.height)
 
         reference = payload.get('reference_image') or ''
         if isinstance(reference, str) and reference.startswith('data:'):
@@ -367,10 +386,17 @@ class Img2ImgTab(QWidget):
         self.steps_input.setText(str(payload.get('steps', 20)))
         self.cfg_input.setText(str(payload.get('cfg', 7.0)))
         self.seed_input.setText(str(payload.get('seed', -1)))
-        if payload.get('width'):
-            self.width_input.setText(str(payload['width']))
-        if payload.get('height'):
-            self.height_input.setText(str(payload['height']))
+        # 크기 칸을 비우면(parseInt → null) 숨은 입력칸의 옛 값(1024·이전 이미지)이 아니라 보낼
+        # 이미지의 크기로 — 예전 _load_image 가 하던 대로. 경로 전송은 encode 가 이미 알고,
+        # data URL 은 필요할 때만 헤더를 읽는다.
+        current_b64 = self.current_base64
+        width, height = resolve_target_size(
+            payload.get('width'), payload.get('height'),
+            image_size or (lambda: image_size_from_base64(current_b64, label='I2I')))
+        if width is not None:
+            self.width_input.setText(str(width))
+        if height is not None:
+            self.height_input.setText(str(height))
         try:
             if 'resize_mode' in payload:
                 self.resize_combo.setCurrentIndex(int(payload['resize_mode']))
@@ -472,15 +498,10 @@ class Img2ImgTab(QWidget):
         self.btn_generate.setEnabled(True)
 
         if isinstance(result, bytes):
-            pixmap = QPixmap()
-            pixmap.loadFromData(result)
-            self.result_label.setPixmap(
-                pixmap.scaled(
-                    self.result_label.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-            )
+            info = gen_info if isinstance(gen_info, dict) else {}
+            # 이 탭은 화면에 없다(결과는 Vue 히스토리가 보여 준다) — 예전처럼 GUI 스레드에서 결과를
+            # 풀 디코드·스무스 축소해 보이지 않는 result_label 에 그리지 않는다.
+            self.result_label.setText("✅ img2img 생성 완료")
 
             # 저장
             filename = f"i2i_{int(time.time())}_{random.randint(100, 999)}.png"
@@ -491,20 +512,19 @@ class Img2ImgTab(QWidget):
 
             self.info_text.setPlainText(
                 f"저장: {filepath}\n"
-                f"Seed: {gen_info.get('seed', '?')}, "
-                f"Steps: {gen_info.get('steps', '?')}, "
-                f"CFG: {gen_info.get('cfg_scale', '?')}"
+                f"Seed: {info.get('seed', '?')}, "
+                f"Steps: {info.get('steps', '?')}, "
+                f"CFG: {info.get('cfg_scale', '?')}"
             )
 
-            # 메인 윈도우 갤러리에도 추가
-            if self.main_window and hasattr(self.main_window, 'add_image_to_gallery'):
-                self.main_window.add_image_to_gallery(filepath)
-            # Vue 히스토리/갤러리에 결과 전달
+            # Vue 히스토리/갤러리에 결과 전달 — 해상도는 결과 헤더(요청 크기는 폴백, core.result_image).
+            # (숨은 PyQt 갤러리 add_image_to_gallery 는 은퇴했다 — 풀해상도 QPixmap 을 최대 100장 들고 있었다)
             if self.main_window and hasattr(self.main_window, 'vue_bridge'):
                 try:
+                    from core.result_image import result_image_size
+                    width, height = result_image_size(result, info)
                     self.main_window.vue_bridge.send_image(
-                        filepath, int(gen_info.get('width', 0) or 0),
-                        int(gen_info.get('height', 0) or 0), gen_info.get('seed', -1))
+                        filepath, width, height, info.get('seed', -1))
                     self.main_window.vue_bridge.showNotification.emit('success', 'I2I 생성 완료')
                 except Exception:
                     pass

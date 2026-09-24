@@ -10,19 +10,20 @@ from __future__ import annotations
 
 import base64
 import binascii
-import inspect
 import re
 import secrets
-import uuid
 from collections.abc import Mapping
 from io import BytesIO
-from pathlib import Path
 from typing import Any, Callable
 
 from PIL import Image
 
 from backends.base import GenerationResult
+from core.cancellable_call import call_with_optional_cancel
+from core.comfy_choice_resolver import check_required_nodes, resolve_choices
+from core.comfy_upload_names import upload_content as upload_named_content
 from core.creator_workflows import build
+from core.generation_family import KREA2_SEED_MAX
 
 
 KREA2_FAMILY = "krea2"
@@ -57,20 +58,20 @@ def run_krea2_generation(
             if cancel_check and cancel_check():
                 raise RuntimeError("사용자가 작업을 취소했습니다")
 
-        def call_cancellable(method: Callable[..., Any], *args: Any) -> Any:
+        def call_cancellable(method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
             ensure_not_cancelled()
-            try:
-                parameters = inspect.signature(method).parameters.values()
-                supports_cancel = any(
-                    parameter.name == "cancel_check"
-                    or parameter.kind == inspect.Parameter.VAR_KEYWORD
-                    for parameter in parameters
-                )
-            except (TypeError, ValueError):
-                supports_cancel = False
-            if supports_cancel:
-                return method(*args, cancel_check=cancel_check)
-            return method(*args)
+            # get_object_info 처럼 cancel_check 를 안 받는 메서드·duck-typed fake 는 그대로 호출.
+            # 시그니처 판정은 공용 헬퍼(core/cancellable_call.py) — 예외 타입만 이 모듈 것.
+            return call_with_optional_cancel(method, *args, cancel_check=cancel_check, **kwargs)
+
+        def upload_content(data: bytes, prefix: str, extension: str, mime: str) -> str:
+            # 내용 해시 이름(core/comfy_upload_names.py): 같은 원본·참조를 N번 돌려도
+            # ComfyUI/input 에 사본이 쌓이지 않는다(예전 uuid 이름은 실행마다 1~2개씩 영구 누적).
+            # overwrite=False 판정·cancel_check 전달은 Creator 업로드와 같은 공용 헬퍼 한 벌.
+            ensure_not_cancelled()
+            return upload_named_content(
+                backend, data, prefix, extension, mime, cancel_check=cancel_check,
+            )
 
         ensure_not_cancelled()
         _require_comfy_adapter(backend, operation)
@@ -79,7 +80,7 @@ def run_krea2_generation(
         if mode not in {"t2i", "i2i"}:
             raise ValueError("operation은 't2i' 또는 'i2i'여야 합니다")
 
-        prompt = _strip_standard_lora_tags(str(values.get("prompt", "") or ""))
+        prompt = strip_standard_lora_tags(str(values.get("prompt", "") or ""))
         seed = _normalise_seed(values.get("seed", -1))
         width = _int_value(values.get("width", 1024), "width")
         height = _int_value(values.get("height", 1024), "height")
@@ -92,7 +93,7 @@ def run_krea2_generation(
                 "seed": seed,
                 "steps": _int_value(values.get("steps", 8), "steps"),
                 "cfg": _float_value(values.get("cfg_scale", values.get("cfg", 1)), "cfg"),
-                "sampler": _normalise_sampler(values.get("sampler_name", values.get("sampler", "euler"))),
+                "sampler": normalise_sampler(values.get("sampler_name", values.get("sampler", "euler"))),
                 "use_textfusion": False,
                 "output_prefix": "Krea2/T2I",
             }
@@ -100,12 +101,7 @@ def run_krea2_generation(
         else:
             source = _first_image(values.get("init_images"))
             source_data, source_ext, source_mime = _decode_image(source, "Krea2 I2I 원본")
-            source_name = call_cancellable(
-                backend.upload_media,
-                source_data,
-                f"krea2_source_{uuid.uuid4().hex}.{source_ext}",
-                source_mime,
-            )
+            source_name = upload_content(source_data, "krea2_source", source_ext, source_mime)
             params = {
                 "prompt": prompt,
                 "input_image": source_name,
@@ -114,26 +110,24 @@ def run_krea2_generation(
                 "seed": seed,
                 "steps": _int_value(values.get("steps", 15), "steps"),
                 "cfg": _float_value(values.get("cfg_scale", values.get("cfg", 1)), "cfg"),
-                "sampler": _normalise_sampler(values.get("sampler_name", values.get("sampler", "euler"))),
+                "sampler": normalise_sampler(values.get("sampler_name", values.get("sampler", "euler"))),
                 "fidelity": _float_value(values.get("krea2_fidelity", values.get("fidelity", 4)), "fidelity"),
                 "output_prefix": "Krea2/I2I",
             }
             reference = values.get("krea2_reference_image")
             if reference:
                 ref_data, ref_ext, ref_mime = _decode_image(reference, "Krea2 identity reference")
-                params["reference_image"] = call_cancellable(
-                    backend.upload_media,
-                    ref_data,
-                    f"krea2_reference_{uuid.uuid4().hex}.{ref_ext}",
-                    ref_mime,
+                params["reference_image"] = upload_content(
+                    ref_data, "krea2_reference", ref_ext, ref_mime,
                 )
             built = build("krea2_edit", params)
 
         object_info = call_cancellable(backend.get_object_info)
         if not isinstance(object_info, dict):
             raise RuntimeError("ComfyUI /object_info 응답이 올바른 객체가 아닙니다")
-        _check_required_nodes(built, set(object_info))
-        _resolve_comfy_choices(built, object_info)
+        # 노드 검사·선택지 해석은 Creator Studio 와 같은 한 벌(core/comfy_choice_resolver).
+        check_required_nodes(built, set(object_info))
+        resolve_choices(built, object_info)
 
         result = call_cancellable(
             backend.run_workflow, built["workflow"], progress_callback
@@ -185,8 +179,8 @@ def _normalise_seed(raw: Any) -> int:
     seed = _int_value(raw, "seed")
     if seed < 0:
         return secrets.randbits(32)
-    if seed > 0xFFFFFFFF:
-        raise ValueError("seed는 -1 또는 0~4294967295 범위여야 합니다")
+    if seed > KREA2_SEED_MAX:
+        raise ValueError(f"seed는 -1 또는 0~{KREA2_SEED_MAX} 범위여야 합니다")
     return seed
 
 
@@ -209,7 +203,8 @@ def _float_value(raw: Any, name: str) -> float:
         raise ValueError(f"{name}은 숫자여야 합니다") from exc
 
 
-def _normalise_sampler(raw: Any) -> str:
+def normalise_sampler(raw: Any) -> str:
+    """A1111/Forge 샘플러 이름 → Krea2 그래프가 받는 4종(euler/heun/dpmpp_sde/dpmpp_2m_sde)."""
     value = str(raw or "").strip().lower().replace("++", "pp")
     value = re.sub(r"[^a-z0-9]+", "_", value).strip("_")
     if "2m" in value and "sde" in value:
@@ -221,7 +216,8 @@ def _normalise_sampler(raw: Any) -> str:
     return "euler"
 
 
-def _strip_standard_lora_tags(prompt: str) -> str:
+def strip_standard_lora_tags(prompt: str) -> str:
+    """Forge 식 ``<lora:...>`` 태그 제거 — Creator 그래프(Krea2/H3)는 이 문법을 해석하지 않는다."""
     cleaned = _LORA_TAG.sub("", prompt)
     cleaned = re.sub(r"\s*,\s*,+", ", ", cleaned)
     cleaned = re.sub(r",\s+", ", ", cleaned)
@@ -260,66 +256,3 @@ def _decode_image(raw: Any, label: str) -> tuple[bytes, str, str]:
         raise ValueError(f"{label} 형식은 PNG/JPEG/WebP/BMP/TIFF 중 하나여야 합니다")
     extension, mime = _IMAGE_FORMATS[image_format]
     return data, extension, mime
-
-
-def _check_required_nodes(built: Mapping[str, Any], available: set[str]) -> None:
-    missing = sorted(set(built.get("required_node_types", ())) - available)
-    if missing:
-        raise RuntimeError("ComfyUI 필수 노드가 없습니다: " + ", ".join(missing))
-
-
-def _resolve_comfy_choices(
-    built: Mapping[str, Any],
-    object_info: Mapping[str, Any],
-) -> None:
-    """Resolve portable model paths to exact server-native combo values."""
-
-    for node in built.get("workflow", {}).values():
-        if not isinstance(node, dict):
-            continue
-        class_type = str(node.get("class_type", ""))
-        schema = object_info.get(class_type, {})
-        input_schema = schema.get("input", {}) if isinstance(schema, dict) else {}
-        definitions: dict[str, Any] = {}
-        for section in ("required", "optional"):
-            section_values = input_schema.get(section, {}) if isinstance(input_schema, dict) else {}
-            if isinstance(section_values, dict):
-                definitions.update(section_values)
-        inputs = node.get("inputs", {})
-        if not isinstance(inputs, dict):
-            continue
-        for name, value in list(inputs.items()):
-            if class_type == "LoadImage" and name == "image":
-                continue
-            definition = definitions.get(name)
-            if not isinstance(value, str) or not isinstance(definition, (list, tuple)) or not definition:
-                continue
-            choices = definition[0]
-            if not isinstance(choices, (list, tuple)):
-                continue
-            normalized = value.replace("\\", "/").casefold()
-            match = next(
-                (
-                    choice
-                    for choice in choices
-                    if isinstance(choice, str)
-                    and choice.replace("\\", "/").casefold() == normalized
-                ),
-                None,
-            )
-            if match is None:
-                requested_stem = Path(normalized).stem
-                stem_matches = [
-                    choice
-                    for choice in choices
-                    if isinstance(choice, str)
-                    and Path(choice.replace("\\", "/").casefold()).stem == requested_stem
-                ]
-                if len(stem_matches) == 1:
-                    match = stem_matches[0]
-            if match is not None:
-                inputs[name] = match
-            elif choices:
-                raise RuntimeError(
-                    f"ComfyUI 리소스 선택지에 {class_type}.{name}={value!r} 항목이 없습니다"
-                )

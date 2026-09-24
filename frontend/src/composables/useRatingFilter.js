@@ -33,11 +33,19 @@ export function useRatingFilter({ saveUiPrefs }) {
     pushRatingFilter()   // Python에 전달
   }
 
-  // 단일 소스(ui_prefs) 복원 — App.vue uiPrefsLoaded 핸들러에서 호출
+  // 단일 소스(ui_prefs) 복원 — App.vue uiPrefsLoaded 핸들러에서 호출. 복원 뒤 Python 에 보낸다.
+  // 마운트 때는 보내지 않는다 — 이 브라우저의 localStorage 캐시가 공유 필터(웹 모드)나 파일 값을
+  // 덮지 않게(감사 #107). ui_prefs 에 필터가 한 번도 저장된 적 없으면 화면 값이 곧 사용자가 보던
+  // 값이므로 Python 에 보내고 파일로 한 번 이관한다.
   function restoreFromPrefs(prefs) {
-    if (!prefs || !Array.isArray(prefs.ratingFilter) || prefs.ratingFilter.length !== ratingFilters.length) return
-    prefs.ratingFilter.forEach((v, i) => { ratingFilters[i].on = !!v })
-    try { window.localStorage.setItem('ratingFilter', JSON.stringify(prefs.ratingFilter)) } catch {}
+    if (!prefs || typeof prefs !== 'object') return
+    const saved = prefs.ratingFilter
+    if (Array.isArray(saved) && saved.length === ratingFilters.length) {
+      saved.forEach((v, i) => { ratingFilters[i].on = !!v })
+      try { window.localStorage.setItem('ratingFilter', JSON.stringify(saved.map(v => !!v))) } catch {}
+    } else if (saved === undefined) {
+      saveUiPrefs({ ratingFilter: ratingFilters.map(r => r.on) })
+    }
     pushRatingFilter()
   }
 

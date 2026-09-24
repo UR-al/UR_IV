@@ -95,7 +95,7 @@ class LegacyQueueControlTests(unittest.TestCase):
                 setattr(host, key, MutableWidget(widget.value))
         host.random_res_check.value = False
         host.hires_options_group.value = False
-        host.settings_tab.chk_wildcard_enabled = ReadOnlyWidget(False)
+        host.prompt_settings_extras.wildcard_enabled = False
         host._on_generation_requested = lambda item: GeneratorMainUI._on_generation_requested(host, item)
         host._apply_payload_to_ui = lambda item: GeneratorMainUI._apply_payload_to_ui(host, item)
         for name in ('_on_queue_completed', '_sync_queue_to_vue', '_sync_queue_item_added', '_abort_generation'):

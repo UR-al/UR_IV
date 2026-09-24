@@ -67,36 +67,20 @@
 
     <div class="divider" />
 
-    <!-- Inpaint -->
+    <!-- Inpaint — 이미지를 Inpaint 탭으로 넘긴다. 프롬프트는 그 탭에서 쓴다.
+         (여기 있던 Prompt/Negative 입력칸은 어디로도 전달되지 않아 지웠다) -->
     <button
       class="inpaint-btn"
       :disabled="!canInpaint"
-      @click="onSendInpaint"
+      @click="$emit('send-inpaint')"
     >
       인페인트
     </button>
-
-    <!-- Prompt -->
-    <div class="small-header">Prompt</div>
-    <textarea
-      v-model="prompt"
-      class="prompt-input"
-      placeholder="인페인트할 내용 (비우면 메인 프롬프트 사용)"
-      rows="2"
-    />
-
-    <div class="small-header">Negative Prompt</div>
-    <textarea
-      v-model="negPrompt"
-      class="prompt-input small"
-      placeholder="네거티브 (비우면 메인 네거티브 사용)"
-      rows="1"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import CustomSelect from '../CustomSelect.vue'
 
 interface MoveStartPayload {
@@ -105,14 +89,10 @@ interface MoveStartPayload {
   scale: number
 }
 
+/** 회전·크기는 확정할 때 이 페이로드로만 넘긴다 (슬라이더마다 따로 올리던 emit 은 받는 쪽이 안 썼다) */
 interface MoveConfirmPayload {
   rotation: number
   scale: number
-}
-
-interface InpaintPayload {
-  prompt: string
-  negPrompt: string
 }
 
 const emit = defineEmits<{
@@ -120,9 +100,7 @@ const emit = defineEmits<{
   'confirm-move': [payload: MoveConfirmPayload]
   'cancel-move': []
   'undo-move': []
-  'send-inpaint': [payload: InpaintPayload]
-  'rotation-changed': [val: number]
-  'scale-changed': [val: number]
+  'send-inpaint': []
 }>()
 
 const props = withDefaults(defineProps<{
@@ -142,16 +120,6 @@ const isMoving = ref(false)
 const fillColor = ref('black')
 const rotation = ref(0)
 const scale = ref(100)
-const prompt = ref('')
-const negPrompt = ref('')
-
-watch(rotation, (val) => {
-  emit('rotation-changed', val)
-})
-
-watch(scale, (val) => {
-  emit('scale-changed', val)
-})
 
 function onStartMove() {
   isMoving.value = true
@@ -173,13 +141,6 @@ function onConfirm() {
 function onCancel() {
   isMoving.value = false
   emit('cancel-move')
-}
-
-function onSendInpaint() {
-  emit('send-inpaint', {
-    prompt: prompt.value,
-    negPrompt: negPrompt.value,
-  })
 }
 
 /** Called by parent to update moving state */
@@ -351,22 +312,4 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   cursor: default;
 }
 
-.prompt-input {
-  background-color: var(--bg-input);
-  color: var(--text-secondary);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 4px;
-  font-size: 12px;
-  resize: vertical;
-  width: 100%;
-  box-sizing: border-box;
-  font-family: inherit;
-}
-.prompt-input::placeholder {
-  color: var(--text-muted);
-}
-.prompt-input.small {
-  min-height: 35px;
-}
 </style>

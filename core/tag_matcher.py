@@ -10,9 +10,18 @@
   [A, B]    → AND 그룹 (A와 B 모두 존재)
   [A|B]     → OR 그룹 (A 또는 B 중 하나 이상)
   쉼표(,)   → AND (대괄호 밖에서)
+
+pandas 는 마스크를 만드는 함수 안에서 import 한다(주석의 타입은 TYPE_CHECKING 전용) —
+parse_query 만 쓰는 곳이나 창 표시 전 import 경로(core.event_data_loader)가 pandas 로드를
+떠안지 않게 한다.
 """
+from __future__ import annotations
+
 import re
-import pandas as pd
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 def _normalize(text: str) -> str:
@@ -75,11 +84,31 @@ def parse_query(query: str) -> list:
     return conditions
 
 
+def _both(text: str) -> str:
+    """공백형·밑줄형 양쪽을 잡는 정규식(이스케이프됨). 두 형태가 같으면 하나만."""
+    t1 = re.escape(text.lower().replace('_', ' '))
+    t2 = re.escape(text.lower().replace(' ', '_'))
+    return f'(?:{t1}|{t2})' if t1 != t2 else t1
+
+
+def contains_tag_text(col_series: pd.Series, text: str) -> pd.Series:
+    """태그 문자열 부분일치 — 공백형(long hair)·밑줄형(long_hair) 어느 쪽이든.
+
+    col_series 는 소문자 기준(질의만 여기서 소문자로 맞춘다). 두 형태를 정규식 교대
+    하나로 묶어 컬럼을 **한 번만** 스캔한다 — 형태마다 str.contains 를 따로 돌리면
+    같은 전체 스캔을 두 번 해 plain 텀 비용이 두 배가 된다. 텍스트는 이스케이프되므로
+    '(', '+', '?' 같은 문자도 글자 그대로 매칭된다.
+    """
+    return col_series.str.contains(_both(text), regex=True, na=False)
+
+
 def _apply_or_plain(col_series: pd.Series, terms: list) -> pd.Series:
     """연산자(*, _ 접두/접미) 없는 plain 텀 여러 개를 '하나의 정규식 교대'로 1회 매칭(OR).
     큰 OR 그룹(수백 캐릭터)에서 텀마다 전체 컬럼을 재스캔하던 것을 1회로 단축 — 9.2M행에서 수십 배 빠름.
     의미는 _apply_pattern 기본 경로와 동일(공백/언더스코어 양쪽 부분일치).
     """
+    import pandas as pd
+
     alts = []
     for t in terms:
         tl = (t or '').strip().lower()
@@ -100,6 +129,8 @@ def _eval_condition(col_lower: pd.Series, cond: dict, index) -> pd.Series:
     """단일 조건(dict)을 평가하여 Boolean mask 반환.
     cond['type']: 'or' | 'and' | 'single'
     """
+    import pandas as pd
+
     if cond['type'] == 'or':
         # has_wildcard=True 면 [A|B|] 같은 빈 토큰 포함 그룹 → 무조건 통과
         if cond.get('has_wildcard'):
@@ -147,6 +178,8 @@ def filter_dataframe(df: pd.DataFrame, col: str, query: str,
       AND 모드: True에서 시작해 &= 누적 → short-circuit 비슷한 효과
       OR  모드: False에서 시작해 |= 누적
     """
+    import pandas as pd
+
     conditions = parse_query(query)
     if not conditions:
         return pd.Series(True, index=df.index)
@@ -176,13 +209,9 @@ def _apply_pattern(col_series: pd.Series, pattern: str) -> pd.Series:
     """
     pattern = pattern.strip()
     if not pattern:
-        return pd.Series(True, index=col_series.index)
+        import pandas as pd
 
-    def _both(text):
-        """공백과 밑줄 양쪽 버전의 정규식 OR 패턴"""
-        t1 = re.escape(text.lower().replace('_', ' '))
-        t2 = re.escape(text.lower().replace(' ', '_'))
-        return f'(?:{t1}|{t2})' if t1 != t2 else t1
+        return pd.Series(True, index=col_series.index)
 
     # 태그 경계: 시작/끝 또는 구분자(콤마, 공백)
     SEP_L = r'(?:^|[,\s]\s*)'
@@ -194,12 +223,9 @@ def _apply_pattern(col_series: pd.Series, pattern: str) -> pd.Series:
         pat = SEP_L + _both(target) + SEP_R
         return col_series.str.contains(pat, regex=True, na=False)
 
-    # _word_ → 포함 (명시적)
+    # _word_ → 포함 (명시적) — 두 형태를 한 번의 스캔으로
     if pattern.startswith('_') and pattern.endswith('_') and len(pattern) > 2:
-        target = pattern[1:-1].strip()
-        t1 = target.lower().replace('_', ' ')
-        t2 = target.lower().replace(' ', '_')
-        return col_series.str.contains(t1, regex=False, na=False) | col_series.str.contains(t2, regex=False, na=False)
+        return contains_tag_text(col_series, pattern[1:-1].strip())
 
     # _word → 접미 (태그가 word로 끝남)
     if pattern.startswith('_') and not pattern.endswith('_'):
@@ -213,7 +239,5 @@ def _apply_pattern(col_series: pd.Series, pattern: str) -> pd.Series:
         pat = SEP_L + _both(target)
         return col_series.str.contains(pat, regex=True, na=False)
 
-    # 기본: 포함 매칭 (양쪽 형식)
-    t1 = pattern.lower().replace('_', ' ')
-    t2 = pattern.lower().replace(' ', '_')
-    return col_series.str.contains(t1, regex=False, na=False) | col_series.str.contains(t2, regex=False, na=False)
+    # 기본: 포함 매칭 (양쪽 형식) — 두 형태를 한 번의 스캔으로
+    return contains_tag_text(col_series, pattern)

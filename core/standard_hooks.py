@@ -5,51 +5,57 @@ Standard Hooks — 시작 시 PromptPipeline에 표준 훅을 일괄 등록.
 파이프라인은 기존 처리 *뒤*에 호출되므로 회귀 위험 없음.
 
 등록 훅 (priority 낮을수록 먼저):
-- AFTER_WILDCARD (50)   : ``$$name$$`` 인스턴트 와일드카드 확장
-                          (instant_wildcards 모듈이 게으른 초기화 시 자동 등록)
+- POST_PROCESSING (80)  : ``$$name$$`` 인스턴트 와일드카드 확장
+                          (core.instant_wildcards.ensure_hook_registered — 부팅 때 즉시 등록)
 - FINAL          (90)   : 메인 태그 중복 제거 + prefix/postfix 충돌 제거
+                          (core.rfp_engine.make_dedupe_hook)
 
-향후 확장 예:
-- RFP 압축, 빈도 제한 (사용자 설정 시)
-- 조건부 명령 (사용자가 명령 텍스트 입력 시)
+조건부 프롬프트는 여기가 아니라 utils.condition_block(cond_rules)이 맡는다 — rfp_engine 에 있던
+두 번째 조건 DSL 은 호출자 없이 남아 있어 지웠다.
 """
 from __future__ import annotations
 
 from utils.app_logger import get_logger
 
 _logger = get_logger("std_hooks")
-_registered = False
+
+DEDUPE_HOOK_NAME = "standard_dedupe"
 
 
-def register_standard_hooks() -> int:
-    """표준 훅 일괄 등록. 멱등 — 여러 번 호출돼도 한 번만 등록.
+def register_standard_hooks(pipeline=None, instant_wildcards=None) -> int:
+    """표준 훅 일괄 등록. 멱등 — 훅 이름으로 확인해 여러 번 호출돼도 한 번만 등록.
 
+    :param pipeline: 등록 대상(기본 프로세스 전역 파이프라인 — 테스트는 새 인스턴스 주입)
+    :param instant_wildcards: ``$$name$$`` 매니저(기본 프로세스 싱글톤)
     :return: 새로 등록된 훅 개수
     """
-    global _registered
-    if _registered:
-        return 0
-    _registered = True
-
     from core.prompt_pipeline import get_pipeline, HookPoint
     from core.rfp_engine import make_dedupe_hook
 
-    pl = get_pipeline()
+    pl = pipeline if pipeline is not None else get_pipeline()
     n = 0
 
     # FINAL — 중복 제거 + prefix/postfix 충돌 제거
-    pl.register(
-        HookPoint.FINAL,
-        make_dedupe_hook(),
-        priority=90,
-        name="standard_dedupe",
-    )
-    n += 1
+    if not pl.has_hook(HookPoint.FINAL, DEDUPE_HOOK_NAME):
+        pl.register(
+            HookPoint.FINAL,
+            make_dedupe_hook(),
+            priority=90,
+            name=DEDUPE_HOOK_NAME,
+        )
+        n += 1
 
-    # InstantWildcards 훅은 instant_wildcards.py가 게으르게 등록함
-    # (사용자가 매니저 열거나 첫 액션 호출 시)
+    # POST_PROCESSING — $$name$$ 인스턴트 와일드카드. 저장 경로를 못 여는 등(StoragePathError)
+    # 실패해도 나머지 훅과 부팅은 계속된다 — 그때 $$name$$ 은 원문 그대로 남는다.
+    try:
+        from core.instant_wildcards import ensure_hook_registered
+        if ensure_hook_registered(pl, instant_wildcards):
+            n += 1
+    except Exception:
+        _logger.exception("인스턴트 와일드카드 훅 등록 실패 — $$name$$ 치환 없이 계속")
 
-    _logger.info(f"표준 훅 {n}개 등록")
+    if n:
+        _logger.info(f"표준 훅 {n}개 등록")
     return n
 
 

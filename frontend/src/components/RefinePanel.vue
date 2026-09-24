@@ -102,40 +102,8 @@
           </label>
         </details>
 
-        <!-- ControlNet -->
-        <details class="glass-card">
-          <summary class="card-header">ControlNet</summary>
-          <label class="ext-check-row mt-12">
-            <ToggleSwitch v-model="cnEnable" size="sm" />
-            <span>Enable ControlNet (인페인트 패스에 주입)</span>
-          </label>
-          <template v-if="cnEnable">
-            <label class="mt-8">Model</label>
-            <input v-model="cnModel" type="text" placeholder="None" spellcheck="false" />
-            <label class="mt-8">Module</label>
-            <CustomSelect v-model="cnModule" :options="cnModules" placeholder="inpaint_only" />
-            <div class="grid-2 mt-8">
-              <div class="input-unit"><label>Weight</label>
-                <input v-model.number="cnWeight" type="number" step="0.05" min="0" max="2" /></div>
-              <div class="input-unit"><label>Processor res</label>
-                <input v-model.number="cnRes" type="number" min="0" /></div>
-            </div>
-            <div class="grid-2 mt-8">
-              <div class="input-unit"><label>Guidance start</label>
-                <input v-model.number="cnStart" type="number" step="0.01" min="0" max="1" /></div>
-              <div class="input-unit"><label>Guidance end</label>
-                <input v-model.number="cnEnd" type="number" step="0.01" min="0" max="1" /></div>
-            </div>
-            <label class="mt-8">Control mode</label>
-            <CustomSelect v-model="cnControlMode" :options="cnControlModes" placeholder="Balanced" />
-            <label class="mt-8">Resize mode</label>
-            <CustomSelect v-model="cnResizeMode" :options="cnResizeModes" placeholder="Crop and Resize" />
-            <label class="ext-check-row mt-8">
-              <ToggleSwitch v-model="cnPixelPerfect" size="sm" />
-              <span>Pixel perfect</span>
-            </label>
-          </template>
-        </details>
+        <!-- ControlNet — T2I·배치 SAM3 와 같은 13필드 패널 (선택지는 Python 한 벌) -->
+        <Sam3ControlNetPanel class="glass-card" :widgets="cn" />
       </div>
 
       <div class="sidebar-footer">
@@ -172,12 +140,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
 import { onBackendEvent } from '../bridge.js'
 import { mediaUrl } from '../utils/media.js'
+import { sam3CnDefaults, sam3CnSettings } from '../utils/sam3ControlNet'
 import CustomSelect from './CustomSelect.vue'
 import ToggleSwitch from './ToggleSwitch.vue'
+import Sam3ControlNetPanel from './Sam3ControlNetPanel.vue'
 
 /**
  * SAM3 Refine 패널 (sam-extra 워크플로 2).
@@ -241,27 +211,9 @@ const seed = ref('-1')
 const checkpoint = ref('sam3.pt')
 const unloadAfter = ref(true)
 
-// ControlNet
-const cnEnable = ref(false)
-const cnModel = ref('None')
-const cnModule = ref('inpaint_only')
-const cnWeight = ref(1.0)
-const cnRes = ref(512)
-const cnStart = ref(0)
-const cnEnd = ref(1)
-const cnPixelPerfect = ref(true)
-const cnControlMode = ref('Balanced')
-const cnResizeMode = ref('Crop and Resize')
-const cnModules = [
-  'inpaint_only', 'inpaint_only+lama', 'inpaint_global_harmonious',
-  'tile_resample', 'tile_colorfix', 'tile_colorfix+sharp',
-  'depth_midas', 'depth_zoe', 'depth_anything',
-  'openpose', 'openpose_full', 'openpose_hand',
-  'lineart_realistic', 'lineart_anime', 'lineart_coarse',
-  'canny', 'softedge_hed', 'scribble_pidinet', 'none',
-]
-const cnControlModes = ['Balanced', 'My prompt is more important', 'ControlNet is more important']
-const cnResizeModes = ['Just Resize', 'Crop and Resize', 'Resize and Fill']
+// ControlNet 13필드 — widget id 키의 로컬 상태 (utils/sam3ControlNet). 예전엔 10필드만
+// 있었고(override_external·threshold_a/b 누락) 전처리기 목록을 손으로 복제해 두었다.
+const cn = reactive(sam3CnDefaults())
 
 function setImage(path: string) {
   const normalized = (path || '').replace(/\\/g, '/')
@@ -315,17 +267,8 @@ function run() {
       sam3_scheduler: scheduler.value,
       sam3_use_seed: seed.value !== '-1',
       sam3_seed: parseInt(seed.value) || -1,
-      // ControlNet
-      sam3_cn_enable: cnEnable.value,
-      sam3_cn_model: cnModel.value,
-      sam3_cn_module: cnModule.value,
-      sam3_cn_weight: cnWeight.value,
-      sam3_cn_processor_res: cnRes.value,
-      sam3_cn_guidance_start: cnStart.value,
-      sam3_cn_guidance_end: cnEnd.value,
-      sam3_cn_pixel_perfect: cnPixelPerfect.value,
-      sam3_cn_control_mode: cnControlMode.value,
-      sam3_cn_resize_mode: cnResizeMode.value,
+      // ControlNet 13필드 (sam3_cn_*)
+      ...sam3CnSettings(cn),
       // 부모 i2i 샘플링 파라미터
       steps: steps.value,
       cfg_scale: cfg.value,
@@ -336,8 +279,11 @@ function run() {
   })
 }
 
+// I2IView 가 서브탭을 v-if 로 바꿀 때마다 이 패널이 마운트·언마운트된다 — 구독을 풀지 않으면
+// 전환마다 죽은 콜백(과 그 setup 스코프)이 bridge 구독 목록에 쌓인다.
+let offRefineResult: (() => void) | null = null
 onMounted(() => {
-  onBackendEvent('refineResult', (json: string) => {
+  offRefineResult = onBackendEvent('refineResult', (json: string) => {
     busy.value = false
     try {
       const r = JSON.parse(json)
@@ -352,6 +298,10 @@ onMounted(() => {
       errorText.value = 'Refine 결과를 해석하지 못했습니다'
     }
   })
+})
+onUnmounted(() => {
+  offRefineResult?.()
+  offRefineResult = null
 })
 
 defineExpose({ setImage })

@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat as _stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -122,14 +123,21 @@ def _stable_id(source: str, category: str, resolved_path: str) -> str:
     return f"{source}:{category}:{digest}"
 
 
-def _physical_key(path: Path, stat_result: os.stat_result) -> tuple[Any, ...]:
-    """Return a cheap same-file identity before any sampled I/O."""
-    resolved = os.path.normcase(str(path.resolve(strict=False)))
+def _physical_key(
+    path: Path, stat_result: os.stat_result, resolved: str | None = None
+) -> tuple[Any, ...]:
+    """Return a cheap same-file identity before any sampled I/O.
+
+    inode 가 있으면(NTFS·ext4 등) 경로를 resolve 하지 않는다 — 파일마다 반복되던
+    resolve 가 카탈로그 비용의 큰 몫이었다. ``resolved`` 를 이미 알면 재사용한다.
+    """
     inode = int(getattr(stat_result, "st_ino", 0) or 0)
     device = int(getattr(stat_result, "st_dev", 0) or 0)
     if inode:
         return ("inode", device, inode)
-    return ("path", resolved)
+    if resolved is None:
+        resolved = os.path.realpath(path)
+    return ("path", os.path.normcase(resolved))
 
 
 def _sampled_fingerprint(path: Path, size: int) -> str | None:
@@ -169,8 +177,9 @@ def _iter_model_files(root: Path, category: str):
                 if category in {"checkpoints", "diffusion_models"} and filename.casefold().endswith(".vae.safetensors"):
                     continue
                 try:
-                    stat_result = path.stat()
-                    if not path.is_file():
+                    # stat 1회 — is_file() 을 따로 부르면 같은 파일을 한 번 더 stat 한다.
+                    stat_result = os.stat(path)
+                    if not _stat.S_ISREG(stat_result.st_mode):
                         continue
                     relative = path.relative_to(root).as_posix()
                 except (OSError, ValueError):
@@ -250,7 +259,7 @@ def _resolved_path_key(value: str) -> str:
 def _existing_physical_key(value: str) -> tuple[Any, ...] | None:
     path = Path(value)
     try:
-        return _physical_key(path, path.stat())
+        return _physical_key(path, os.stat(path))
     except (OSError, ValueError):
         return None
 
@@ -265,9 +274,16 @@ class _EntryMatcher:
     to the small collision buckets that can actually match.
     """
 
-    def __init__(self, entries: Sequence[Mapping[str, Any]], active_engine: str):
+    def __init__(
+        self,
+        entries: Sequence[Mapping[str, Any]],
+        active_engine: str,
+        physical_keys: Mapping[str, tuple[Any, ...]] | None = None,
+    ):
         self.entries = list(entries)
         self.active_engine = active_engine
+        # 카탈로그가 이미 계산한 물리 키(정규화 경로 → 키). 없을 때만 다시 stat 한다.
+        known_physical = physical_keys or {}
         self._variant_index: dict[str, list[tuple[int, int]]] = {}
         self._path_index: dict[str, list[int]] = {}
         self._physical_index: dict[tuple[Any, ...], list[int]] = {}
@@ -290,8 +306,12 @@ class _EntryMatcher:
                 self._variant_index.setdefault(variant, []).append((index, rank))
 
             if entry_path and os.path.isabs(entry_path):
-                self._path_index.setdefault(_resolved_path_key(entry_path), []).append(index)
-                physical = _existing_physical_key(entry_path)
+                # 카탈로그의 path 는 이미 resolve 된 값이라 다시 resolve 하지 않는다.
+                path_key = os.path.normcase(entry_path)
+                self._path_index.setdefault(path_key, []).append(index)
+                physical = known_physical.get(path_key)
+                if physical is None:
+                    physical = _existing_physical_key(entry_path)
                 if physical is not None:
                     self._physical_index.setdefault(physical, []).append(index)
 
@@ -372,6 +392,9 @@ class ModelInventory:
         self.primary_engine = requested_primary
         self._catalog_cache: dict[str, list[dict[str, Any]]] = {}
         self._matcher_cache: dict[str, _EntryMatcher] = {}
+        # 카테고리별 {정규화 경로: 물리 키} — entry dict 는 그대로 브리지 JSON 으로 나가므로
+        # 내부 키를 거기에 싣지 않고 여기에 따로 둔다.
+        self._physical_keys: dict[str, dict[str, tuple[Any, ...]]] = {}
 
     def _source_name(self, engine: str) -> str:
         data = self.engines.get(engine, {})
@@ -391,6 +414,7 @@ class ModelInventory:
             return cached
 
         accepted: list[dict[str, Any]] = []
+        physical_keys: dict[str, tuple[Any, ...]] = {}
         physical_seen: set[tuple[Any, ...]] = set()
         content_candidates: dict[tuple[str, int], list[dict[str, Any]]] = {}
         fingerprint_cache: dict[str, str | None] = {}
@@ -421,6 +445,9 @@ class ModelInventory:
                     physical = _physical_key(path, stat_result)
                     if physical in physical_seen:
                         continue
+                    # 파일당 resolve 는 여기 한 번 — 중복 판정 캐시와 entry 가 같이 쓴다.
+                    # Path.resolve(strict=False) 는 결과를 다시 stat 하므로 realpath 를 쓴다.
+                    resolved = os.path.realpath(path)
 
                     size = int(stat_result.st_size)
                     duplicate_key = (_name_key(relative), size)
@@ -438,7 +465,7 @@ class ModelInventory:
                                 fingerprint_cache[candidate_path] = candidate_fingerprint
                             if not secondary_fingerprint_computed:
                                 secondary_fingerprint = _sampled_fingerprint(path, size)
-                                fingerprint_cache[str(path.resolve(strict=False))] = secondary_fingerprint
+                                fingerprint_cache[resolved] = secondary_fingerprint
                                 secondary_fingerprint_computed = True
                             if (
                                 secondary_fingerprint is not None
@@ -451,7 +478,6 @@ class ModelInventory:
                             physical_seen.add(physical)
                             continue
 
-                    resolved = str(path.resolve(strict=False))
                     runtime_name = _native_runtime_name(engine, category, relative)
                     entry = {
                         "id": _stable_id(engine, category, resolved),
@@ -470,6 +496,7 @@ class ModelInventory:
                     }
                     accepted.append(entry)
                     physical_seen.add(physical)
+                    physical_keys[os.path.normcase(resolved)] = physical
                     content_candidates.setdefault(duplicate_key, []).append(entry)
 
         by_name: dict[str, list[dict[str, Any]]] = {}
@@ -481,13 +508,17 @@ class ModelInventory:
                     entry["nameConflict"] = True
 
         self._catalog_cache[category] = accepted
+        self._physical_keys[category] = physical_keys
         return accepted
 
     def _matcher(self, category: str) -> _EntryMatcher:
         category = _canonical_category(category)
         matcher = self._matcher_cache.get(category)
         if matcher is None:
-            matcher = _EntryMatcher(self._catalog(category), self.active_engine)
+            entries = self._catalog(category)
+            matcher = _EntryMatcher(
+                entries, self.active_engine, self._physical_keys.get(category)
+            )
             self._matcher_cache[category] = matcher
         return matcher
 

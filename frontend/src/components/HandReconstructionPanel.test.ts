@@ -80,8 +80,9 @@ async function start(root: Node) {
   const calls = host.action.mock.calls.filter(([action]) => action === GENERATE)
   return calls[calls.length - 1]![1]
 }
+// The backend no longer echoes the source: the panel compares against the image it sent.
 function finalEvent(requestId: string, extras: Record<string, unknown> = {}) {
-  return { action: GENERATE, requestId, phase: 'complete', ok: true, source: DATA, prepared: MASK,
+  return { action: GENERATE, requestId, phase: 'complete', ok: true, prepared: MASK,
     candidates: [{ index: 0, seed: 20, image: DATA }, { index: 1, seed: 21, image: AFTER }], ...extras }
 }
 async function complete(root: Node) {
@@ -160,6 +161,33 @@ it('lets the user choose, compare, and save a candidate without changing the sou
   expect(revision.value).toBe(1)
   button(root, '비교 닫기').props.onClick()
   expect(dialog.open).toBe(false)
+})
+
+it('compares against the exact image sent with that request and ignores any source echoed by the backend', async () => {
+  const SENT = 'data:image/png;base64,U0VOVA=='
+  const NEXT = 'data:image/jpeg;base64,TkVYVA=='
+  let image = SENT
+  const { root, revision } = await mount(() => ({ image, mask: MASK }))
+  await enable(root)
+  const first = await start(root)
+  expect(first.image).toBe(SENT)
+  receive(finalEvent(first.requestId, { source: 'https://external.invalid/echo.png' }))
+  await nextTick()
+  await button(root, '크게 전후 비교').props.onClick()
+  await nextTick()
+  const dialog = all(root, node => node.tag === 'dialog')[0]!
+  expect(all(dialog, node => node.tag === 'img')[0]!.props.src).toBe(SENT)
+  // A new source revision + request pairs the comparison with the NEW input, not the old one.
+  image = NEXT
+  revision.value++
+  await nextTick()
+  const second = await start(root)
+  receive(finalEvent(first.requestId))          // stale completion for the old request is ignored
+  receive(finalEvent(second.requestId))
+  await nextTick()
+  await button(root, '크게 전후 비교').props.onClick()
+  await nextTick()
+  expect(all(all(root, node => node.tag === 'dialog')[0]!, node => node.tag === 'img')[0]!.props.src).toBe(NEXT)
 })
 
 it('accepts progress only for the current request and ignores cancel acknowledgement until final partial results', async () => {
@@ -274,10 +302,12 @@ it('cancels and releases listeners after timeout or unmount', async () => {
 it('wires Inpaint to source bytes/mask snapshots and revisions, never stale native image paths', () => {
   expect(inpaintSource).toContain('<HandReconstructionPanel :source-revision="handSourceRevision"')
   expect(inpaintSource).toContain(':get-input="getHandReconstructionInput"')
-  expect(inpaintSource).toMatch(/function initCanvas[\s\S]*?handSourceRevision\.value\+\+/)
+  // 새 이미지 읽기를 시작하는 순간(파일은 FileReader 전) 원본 revision 이 바뀐다 — 모든 로드가 beginImageLoad 를 거친다.
+  expect(inpaintSource).toMatch(/function beginImageLoad\(\)[^{]*\{[^}]*handSourceRevision\.value\+\+/)
+  expect(inpaintSource).toMatch(/function loadFile[\s\S]*?beginImageLoad\(\)[\s\S]*?readAsDataURL/)
   expect(inpaintSource).toMatch(/function renderDirty[\s\S]*?handSourceRevision\.value\+\+/)
   expect(inpaintSource).toContain("image: input.sourceKind === 'canvas' ? imgRef.value.toDataURL('image/png') : input.image")
-  expect(inpaintSource).toMatch(/async function loadFromPath[\s\S]*?path\.startsWith\('blob:'\)[\s\S]*?imagePath\.value = ''[\s\S]*?initCanvas\(path\)/)
+  expect(inpaintSource).toMatch(/async function loadFromPath[\s\S]*?path\.startsWith\('blob:'\)[\s\S]*?imagePath\.value = ''[\s\S]*?initCanvas\(path, beginImageLoad\(\)\)/)
   expect(source).toContain('@keydown.stop')
   expect(source).toContain('prefers-reduced-motion: reduce')
 })

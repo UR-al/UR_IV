@@ -11,6 +11,8 @@ from pathlib import Path
 
 from core.config_migration import save_ui_prefs
 from core.storage_paths import config_file
+# 경로 이름만 공유한다 — 이 모듈의 reader 는 마이그레이션(.bak) 부작용을 일부러 피한다(load_instructions).
+from core.ui_prefs import UI_PREFS_NAME
 
 FEATURES = ("expand", "suggest", "nl2tags", "nl_caption", "nl_scene",
             "translate", "creative", "negative", "auto_nl")
@@ -87,7 +89,7 @@ def _read_prefs(path, *, strict=False):
 def load_instructions(path=None):
     """Read a settings snapshot without migration, backups or config rewrites."""
     try:
-        prefs_path = path if path is not None else config_file("ui_prefs.json")
+        prefs_path = path if path is not None else config_file(UI_PREFS_NAME)
         with _SAVE_LOCK:
             prefs = _read_prefs(prefs_path)
         return normalize_instructions(prefs.get(PREFS_KEY))
@@ -102,7 +104,7 @@ def save_instructions(value, path=None):
     The established UI preference writer owns schema/version normalization.
     """
     normalized = normalize_instructions(value, strict=True)
-    prefs_path = Path(path if path is not None else config_file("ui_prefs.json")).absolute()
+    prefs_path = Path(path if path is not None else config_file(UI_PREFS_NAME)).absolute()
     with _SAVE_LOCK:
         prefs = _read_prefs(prefs_path, strict=True)
         prefs[PREFS_KEY] = normalized

@@ -8,6 +8,8 @@ import * as hostBridge from '../bridge.js'
 import * as widgetStore from '../stores/widgetStore.js'
 import * as compositionUtils from '../utils/compositionPrompt'
 import { DEFAULT_COMPOSITION } from '../utils/compositionPrompt'
+import { createAppKeydownHandler } from '../utils/appShortcuts'
+import { createModalStack } from '../utils/modalStack'
 import panelSource from './PromptPanel.vue?raw'
 
 const host = vi.hoisted(() => ({ get: vi.fn(), action: vi.fn(), off: vi.fn(), event: vi.fn() }))
@@ -151,6 +153,32 @@ it('handles keyboard, touch cancellation and repeated drags without leftover poi
   expect(range(root, 'azimuth').props.value).toBe(22)
   expect(target.releasePointerCapture).toHaveBeenCalledWith(7)
   expect(append).not.toHaveBeenCalled()
+})
+
+// 궤도는 PromptPanel 안의 포커스 가능한 div 라 입력 칸이 아니다 — 예전엔 ↑/↓ 가 고도를 바꾸면서 버블링된
+// 같은 키로 App 의 전역 단축키가 생성 히스토리까지 넘겼다(utils/appShortcuts 는 이제 쓴 키를 비켜 간다).
+it('orbit ↑/↓ change the elevation only — the same key does not also move the history', async () => {
+  const { root } = await mount()
+  const navigateHistory = vi.fn()
+  const appKeydown = createAppKeydownHandler({
+    isGateOpen: () => false, generate: vi.fn(), saveSettings: vi.fn(), reloadHistory: vi.fn(), navigateTabs: vi.fn(),
+    isParamsPanelOpen: () => false, closeParamsPanel: vi.fn(), hasHistory: () => true,
+    navigateHistory, navigateHistoryEdge: vi.fn(),
+    activeElement: () => ({ tagName: 'DIV', isContentEditable: false }), jumpModifier: () => null,
+    modalStack: createModalStack(),
+  })
+  const press = async (key: string) => {
+    const ev = { key, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true } }
+    orbit(root).props.onKeydown(ev)      // 포커스된 궤도가 먼저, 그다음 document 의 App keydown
+    appKeydown(ev)
+    await nextTick()
+  }
+  await press('ArrowUp')
+  expect(range(root, 'elevation').props.value).toBe(5)
+  await press('ArrowDown')
+  await press('ArrowDown')
+  expect(range(root, 'elevation').props.value).toBe(-5)
+  expect(navigateHistory).not.toHaveBeenCalled()
 })
 
 it('connects the panel to the same main_prompt_text proxy used by text and block inputs', () => {

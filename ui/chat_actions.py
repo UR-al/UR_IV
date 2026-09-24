@@ -1,8 +1,9 @@
 """대화 탭 액션 — Vue `requestAction('chat_*')` 의 Python 쪽.
 
 GeneratorMainUI 에 믹스인으로 얹힌다(`ui/creator_actions.py` 와 같은 방식).
-브리지 계약: tests/test_bridge_contract.py 가 아래 `action in (...)` 리터럴에서 이름을
-읽어 frontend 의 requestAction 과 대조한다 — 튜플을 변수로 빼면 검사가 눈을 감는다.
+브리지 계약: tests/test_bridge_contract.py 가 AST 로 아래 `action in (...)` 의 이름을
+읽어 frontend 의 requestAction 과 양방향 대조한다 — 비교 대상은 리터럴이나 모듈·클래스 상수,
+함수 안 지역 표로 둘 것(정적으로 못 읽는 식이면 그 검사가 실패한다).
 
 시그널(ui/vue_bridge.py): chatToken {id,text} · chatDone {id,ok,content,stopped,error?} ·
 chatThreads [threads].
@@ -19,11 +20,10 @@ import threading
 from dataclasses import replace
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
 
-from core.chat_store import ChatStore, build_ollama_messages, clean_options, inline_image_paths
+from core.chat_store import ChatStore, build_ollama_messages, clean_options
 from core.chat_generation import MediaGenerationJob, plan_chat_generation
 from workers.chat_worker import ChatWorker
-
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+from core.ollama_client import DEFAULT_OLLAMA_URL
 
 
 class _ChatMediaDispatch(QObject):
@@ -210,8 +210,11 @@ class ChatActionsMixin:
                 "error": "모델이 선택되지 않았습니다 — 대화 설정에서 서버 연결을 확인하고 모델을 고르세요",
             }, ensure_ascii=False))
             return
+        # GUI 스레드에서는 최근 턴만 남기는 일만 한다. 경로 이미지(히스토리·갤러리 드롭, 최대 20MB)
+        # 읽기와 base64 인코딩은 ChatWorker.run 이 잘라 낸 뒤의 메시지에만 한다 — 잘려 나갈 옛 턴의
+        # 파일까지 매번 읽으며 onAction(동기 슬롯)을 막지 않게.
         messages = build_ollama_messages(
-            inline_image_paths(payload.get("messages") or []),
+            payload.get("messages") or [],
             system_prompt=str(payload.get("system") or ""),
         )
         options: dict[str, Any] = clean_options(payload.get("options"))
@@ -245,7 +248,9 @@ class ChatActionsMixin:
         from backends import get_backend
         from core.resource_coordinator import get_generation_coordinator
 
-        if getattr(self, '_creator_running', False) or get_generation_coordinator().state.phase != 'idle':
+        # 모델 언로드 hold(HOLD_PHASE)는 생성이 아니다 — 거절하지 않고, 작업 스레드의
+        # reserve_generation_lease 가 그 언로드가 끝나길 기다린 뒤 리스를 잡는다.
+        if getattr(self, '_creator_running', False) or get_generation_coordinator().generation_active():
             raise RuntimeError('다른 이미지·영상 생성 작업이 실행 중입니다')
         model, snapshot = '', {'prompt': plan.prompt}
         if plan.kind == 'image' and plan.family == 'current':

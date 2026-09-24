@@ -7,14 +7,15 @@ from types import SimpleNamespace
 from unittest import mock
 
 from core.creator_workflows import build
+from tests._optional_deps import load_torch, requires_torch
 
 
-def _torch(test):
-    try:
-        import torch
-        return torch
-    except ImportError:
-        test.skipTest("CPU tensor cache checks require torch")
+def _torch(_test):
+    """CPU 텐서 캐시 검사용 지연 import — @requires_torch 로 표시한 테스트만 부른다.
+
+    (torch 미설치면 SkipTest. --quick 은 표시된 테스트를 걸러 torch 를 올리지 않는다.)
+    """
+    return load_torch()
 
 
 class H3CacheWorkflowTests(unittest.TestCase):
@@ -31,6 +32,7 @@ class H3CacheWorkflowTests(unittest.TestCase):
         self.assertEqual(encode["90"]["class_type"], "ForgeNeoH3ConditioningCachePrepare")
         json.dumps(built)
 
+    @requires_torch
     def test_cache_public_store_round_trip_uses_cpu_tensors(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import ConditioningCache
         torch = _torch(self)
@@ -44,6 +46,7 @@ class H3CacheWorkflowTests(unittest.TestCase):
             self.assertFalse(loaded[0][0].requires_grad)
             self.assertEqual(store.stats()["entries"], 1)
 
+    @requires_torch
     def test_comfy_prepare_hit_does_not_request_lazy_encoder_inputs(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import (
             ForgeNeoH3ConditioningCachePrepare, ForgeNeoH3ConditioningCacheLoad,
@@ -58,25 +61,130 @@ class H3CacheWorkflowTests(unittest.TestCase):
                 get_output_directory=lambda: str(Path(tmp) / "output"),
                 get_input_directory=lambda: str(Path(tmp) / "input"), base_path=tmp)
             calls = []
+
+            class FakeBaseModel:  # comfy.model_base.BaseModel 계약만 흉내 낸다
+                pass
+
+            diffusion = SimpleNamespace(model=SimpleNamespace(model=FakeBaseModel()))
+            text_encoder = SimpleNamespace(model=SimpleNamespace(model=object()))
             manager = SimpleNamespace(processing_interrupted=lambda: False,
-                unload_all_models=lambda: calls.append("unload"), soft_empty_cache=lambda: calls.append("empty"))
-            with mock.patch.dict("sys.modules", {"folder_paths": folder_paths, "comfy.model_management": manager}):
+                unload_all_models=lambda: calls.append("unload"), soft_empty_cache=lambda: calls.append("empty"),
+                current_loaded_models=[diffusion, text_encoder],
+                get_all_torch_devices=lambda: ["cuda:0"],
+                free_memory=lambda memory, device, keep_loaded=(): calls.append(
+                    ("free", device, tuple(keep_loaded))))
+            with mock.patch.dict("sys.modules", {
+                "folder_paths": folder_paths, "comfy.model_management": manager,
+                "comfy.model_base": SimpleNamespace(BaseModel=FakeBaseModel),
+            }):
                 first = ForgeNeoH3ConditioningCachePrepare()
                 self.assertEqual(first.check_lazy_status(descriptor), ["conditioning"])
                 saved = first.prepare(descriptor, conditioning=[[torch.tensor([[4.0]]), {}]])
                 self.assertTrue(saved["ui"]["h3_conditioning_cache"][0].get("models_unloaded"))
+                self.assertFalse(saved["ui"]["h3_conditioning_cache"][0].get("diffusion_model_kept"))
+                # 미스: 방금 TE 로 인코딩했으니 전부 내린다.
                 self.assertEqual(calls, ["unload", "empty"])
+                calls.clear()
                 second = ForgeNeoH3ConditioningCachePrepare()
                 self.assertEqual(second.check_lazy_status(descriptor), [])
                 receipt = second.prepare(descriptor)["ui"]["h3_conditioning_cache"][0]
                 self.assertTrue(receipt["hit"])
                 self.assertTrue(receipt["models_unloaded"])
+                # 히트(시드 리롤): 인코더 배리어는 돌되 상주한 UNET 은 남긴다.
+                self.assertTrue(receipt["diffusion_model_kept"])
+                self.assertEqual(calls, [("free", "cuda:0", (diffusion,)), "empty"])
                 loaded = ForgeNeoH3ConditioningCacheLoad().load(descriptor)[0]
                 self.assertEqual(loaded[0][0].tolist(), [[4.0]])
+                # 배리어 실패는 히트에서도 삼키지 않는다(선별 해제 경로 포함).
+                manager.free_memory = mock.Mock(side_effect=RuntimeError("synthetic unload failure"))
+                with self.assertRaisesRegex(RuntimeError, "synthetic unload failure"):
+                    ForgeNeoH3ConditioningCachePrepare().prepare(descriptor)
                 manager.unload_all_models = mock.Mock(side_effect=RuntimeError("synthetic unload failure"))
+                manager.current_loaded_models = None  # 선별 불가 → 전체 해제 폴백
                 with self.assertRaisesRegex(RuntimeError, "synthetic unload failure"):
                     ForgeNeoH3ConditioningCachePrepare().prepare(descriptor)
 
+    def test_hit_without_model_manager_introspection_falls_back_to_full_unload(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import h3_cache_nodes
+        calls = []
+        manager = SimpleNamespace(processing_interrupted=lambda: False,
+            unload_all_models=lambda: calls.append("unload"),
+            soft_empty_cache=lambda: calls.append("empty"))
+        with mock.patch.dict("sys.modules", {"comfy.model_management": manager}):
+            kept = h3_cache_nodes._unload_encoder_models(keep_diffusion=True)
+        self.assertFalse(kept)
+        self.assertEqual(calls, ["unload", "empty"])
+
+    def test_model_digest_survives_a_restart_through_the_sidecar(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import h3_cache_nodes
+        with tempfile.TemporaryDirectory() as tmp:
+            model = Path(tmp) / "unet.safetensors"
+            model.write_bytes(b"large synthetic model")
+            sidecar = Path(tmp) / "cache" / h3_cache_nodes.DIGEST_SIDECAR
+            self.addCleanup(h3_cache_nodes._FINGERPRINTS.clear)
+            h3_cache_nodes._FINGERPRINTS.clear()
+            first = h3_cache_nodes.content_identity(model, memoize=True, sidecar=sidecar)
+            self.assertTrue(sidecar.is_file())
+            # '재시작': 메모리 memo 가 비어도 사이드카가 같은 stamp 의 digest 를 준다.
+            h3_cache_nodes._FINGERPRINTS.clear()
+            with mock.patch.object(h3_cache_nodes, "_digest_file",
+                                   side_effect=AssertionError("must not re-hash")):
+                again = h3_cache_nodes.content_identity(model, memoize=True, sidecar=sidecar)
+            self.assertEqual(again, first)
+            # 파일이 바뀌면 stamp 가 달라져 다시 해시한다.
+            h3_cache_nodes._FINGERPRINTS.clear()
+            model.write_bytes(b"replaced synthetic model!")
+            changed = h3_cache_nodes.content_identity(model, memoize=True, sidecar=sidecar)
+            self.assertNotEqual(changed["sha256"], first["sha256"])
+            # 깨진 사이드카는 무시하고(오류 없이) 다시 해시한다.
+            sidecar.write_text("{not json", encoding="utf-8")
+            h3_cache_nodes._FINGERPRINTS.clear()
+            self.assertEqual(
+                h3_cache_nodes.content_identity(model, memoize=True, sidecar=sidecar), changed,
+            )
+            # 미디어(memoize=False)는 사이드카에 남기지 않는다.
+            media = Path(tmp) / "input.png"
+            media.write_bytes(b"media")
+            h3_cache_nodes.content_identity(media, sidecar=sidecar)
+            entries = json.loads(sidecar.read_text(encoding="utf-8"))["entries"]
+            self.assertEqual(set(entries), {str(model.resolve())})
+
+    @requires_torch
+    def test_orphaned_temporary_files_are_reclaimed_but_live_data_is_not(self):
+        from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import (
+            ConditioningCache, DIGEST_SIDECAR,
+        )
+        import os
+        import time
+        torch = _torch(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "h3"
+            root.mkdir()
+            old_tmp = root / (("b" * 64) + "." + ("1" * 32) + ".tmp")
+            old_manifest = root / (("b" * 64) + "." + ("2" * 32) + ".json.tmp")
+            recent_tmp = root / (("c" * 64) + "." + ("3" * 32) + ".tmp")
+            old_sidecar_part = root / (DIGEST_SIDECAR + "." + ("4" * 32) + ".part")
+            foreign = root / "notes.tmp"
+            sidecar = root / DIGEST_SIDECAR
+            for path in (old_tmp, old_manifest, recent_tmp, old_sidecar_part, foreign, sidecar):
+                path.write_bytes(b"x" * 8)
+            stale = time.time() - 3600
+            for path in (old_tmp, old_manifest, old_sidecar_part):
+                os.utime(path, (stale, stale))
+            store = ConditioningCache(root)
+            store.put("a" * 64, [[torch.tensor([[1.0]]), {}]])
+            # put 시작 정리는 오래된 고아만 지운다(다른 프로세스가 쓰는 중일 수 있는 최근 것은 둔다).
+            self.assertFalse(old_tmp.exists())
+            self.assertFalse(old_manifest.exists())
+            self.assertFalse(old_sidecar_part.exists())
+            self.assertTrue(recent_tmp.exists())
+            result = store.clear()
+            self.assertEqual(result["removedEntries"], 1)
+            self.assertFalse(recent_tmp.exists())
+            self.assertTrue(foreign.exists())
+            self.assertTrue(sidecar.exists())
+
+    @requires_torch
     def test_reduced_limit_is_enforced_even_on_a_cache_hit(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import ConditioningCache
         torch = _torch(self)
@@ -89,6 +197,7 @@ class H3CacheWorkflowTests(unittest.TestCase):
             self.assertIsNotNone(limited.get("a" * 64))
             self.assertEqual(limited.stats()["entries"], 1)
 
+    @requires_torch
     def test_second_lazy_check_rejects_inputs_changed_while_encoding(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import ForgeNeoH3ConditioningCachePrepare
         torch = _torch(self)
@@ -108,6 +217,7 @@ class H3CacheWorkflowTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "변경"):
                     node.check_lazy_status(descriptor, conditioning=[[torch.tensor([[1.0]]), {}]])
 
+    @requires_torch
     def test_in_place_model_replacement_requires_server_restart(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import ForgeNeoH3ConditioningCachePrepare
         _torch(self)
@@ -124,6 +234,7 @@ class H3CacheWorkflowTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "재시작"):
                     ForgeNeoH3ConditioningCachePrepare().check_lazy_status(descriptor)
 
+    @requires_torch
     def test_corrupt_entry_is_a_miss_and_foreign_files_survive_clear(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import ConditioningCache
         torch = _torch(self)
@@ -140,6 +251,7 @@ class H3CacheWorkflowTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.get("../escape")
 
+    @requires_torch
     def test_cancel_during_save_never_publishes_partial_entry(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import ConditioningCache, ConditioningCacheCancelled
         torch = _torch(self)
@@ -174,6 +286,7 @@ class H3CacheWorkflowTests(unittest.TestCase):
             model.write_bytes(b"model-v2-has-different-content")
             self.assertNotEqual(first, key())
 
+    @requires_torch
     def test_byte_budget_rejects_a_single_oversized_conditioning(self):
         from comfy_custom_nodes.ai_studio_forge_parity.h3_cache_nodes import ConditioningCache
         torch = _torch(self)

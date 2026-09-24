@@ -14,7 +14,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .anima_lora import PreparedAnimaLora, prepare_anima_lora_for_model
 from .compat import filename_choices, folder_paths_module, node_result, provider_class
@@ -188,11 +188,28 @@ def _attach_lora_metadata(model: Any, clip: Any, metadata: Any) -> None:
         set_clip("lora_metadata", metadata)
 
 
-def _alias_has_payload(alias: str, state_keys: tuple[str, ...]) -> bool:
-    return any(
-        key == alias or key.startswith(f"{alias}.") or key.startswith(f"{alias}_")
-        for key in state_keys
-    )
+_ALIAS_BOUNDARIES = frozenset("._")
+
+
+def _payload_alias_prefixes(state_keys: Iterable[str]) -> frozenset[str]:
+    """Every string an alias may equal to own a payload key.
+
+    An alias owns ``key`` exactly when ``key == alias`` or ``key`` starts with
+    ``alias + "."`` / ``alias + "_"``.  The latter holds iff ``alias`` is the
+    prefix of ``key`` that ends right before one of its ``.``/``_``
+    characters, so collecting the key itself plus every such boundary prefix
+    turns the per-alias linear scan into one set lookup with the same result.
+    Multi-dot aliases (``diffusion_model.blocks.0.attn``) are covered because
+    *every* boundary is recorded, not only the first one.
+    """
+
+    prefixes: set[str] = set()
+    for key in state_keys:
+        prefixes.add(key)
+        for index, character in enumerate(key):
+            if character in _ALIAS_BOUNDARIES:
+                prefixes.add(key[:index])
+    return frozenset(prefixes)
 
 
 def _reject_comfy_alias_collisions(
@@ -201,10 +218,12 @@ def _reject_comfy_alias_collisions(
 ) -> None:
     """Fail before Comfy silently lets a later alias overwrite the first patch."""
 
-    state_keys = tuple(key for key in state_dict if isinstance(key, str))
+    payload_prefixes = _payload_alias_prefixes(
+        key for key in state_dict if isinstance(key, str)
+    )
     aliases_by_target: dict[str, list[str]] = {}
     for alias, target in key_map.items():
-        if not isinstance(alias, str) or not _alias_has_payload(alias, state_keys):
+        if not isinstance(alias, str) or alias not in payload_prefixes:
             continue
         target_name = str(target[0] if isinstance(target, tuple) else target)
         aliases_by_target.setdefault(target_name, []).append(alias)

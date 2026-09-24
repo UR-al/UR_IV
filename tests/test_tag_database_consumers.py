@@ -177,18 +177,35 @@ class TagIntelligenceDatabaseTests(unittest.TestCase):
             self.assertTrue(intelligence.is_known(tag), tag)
         self.assertEqual(intelligence.tag_group("score_9"), "quality")
 
-    def test_redundancy_uses_transitive_implications_without_damaging_cycles(self):
-        intelligence = TagIntelligence(database=FakeTagDatabase())
-        original = ["clothes", "gown", "ornate_gown", "cycle_a", "cycle_b", "smile"]
+    def test_dead_prompt_helpers_stay_removed(self):
+        # 호출자 없던 슬롯(pairColors·getClothingRegions·refineToSpecificTags)과 함께 지운 전용
+        # 로직 — 되살리지 말 것(감사 #135).
+        self.assertFalse(hasattr(TagIntelligence, "pair_colors"))
+        self.assertFalse(hasattr(TagIntelligence, "group_by_region"))
+        self.assertFalse(hasattr(TagIntelligence, "remove_redundant_subtags"))
 
-        kept, removed = intelligence.remove_redundant_subtags(original)
+    def test_lookups_never_load_the_implication_table(self):
+        """활성 implication 표(실데이터 약 4.6만 행 parquet)는 TagIntelligence 가 올리지 않는다.
 
-        self.assertEqual(kept, ["ornate_gown", "cycle_a", "cycle_b", "smile"])
-        self.assertEqual(removed, ["clothes", "gown"])
-        self.assertEqual(
-            original,
-            ["clothes", "gown", "ornate_gown", "cycle_a", "cycle_b", "smile"],
-        )
+        예전엔 공용 적재(_ensure) 8단계가 호출자 없던 remove_redundant_subtags 하나를 위해
+        copyright_of·tag_group 같은 조회마다 올렸다. 상위 태그 추론은 TagClassifier 몫이다.
+        """
+        database = FakeTagDatabase()
+        intelligence = TagIntelligence(database=database)
+
+        self.assertEqual(intelligence.copyright_of("profile hero"), "profile series")
+        self.assertEqual(intelligence.tag_group("score_9"), "quality")
+        self.assertTrue(intelligence.is_known("smile"))
+        intelligence.split_by_categories(["smile", "gown"], ["expression", "clothing"])
+
+        self.assertTrue(database.calls)  # 공용 사전은 실제로 적재됐다(공허한 통과 방지)
+        self.assertNotIn("implications", {method for method, _asset in database.calls})
+        self.assertFalse(hasattr(intelligence, "_implications"))
+
+        # 같은 표를 쓰는 TagClassifier 는 그대로 읽는다(TagDatabase.load_active_implications 는 살아 있다)
+        classifier_db = FakeTagDatabase()
+        TagClassifier(database=classifier_db).classify_tag("evening_gown")
+        self.assertIn("implications", {method for method, _asset in classifier_db.calls})
 
 
 if __name__ == "__main__":

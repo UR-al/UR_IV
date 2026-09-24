@@ -171,10 +171,14 @@ class MediaGenerationJob:
     def prepare_creator(self, snapshot: dict) -> dict:
         self.check_cancelled()
         self.event('preparing', message='Creator 생성과 참조 이미지를 준비하는 중')
+        from core.krea2_generation import normalise_sampler, strip_standard_lora_tags
+
         values = prepare_prompt_payload(snapshot)
         video = self.plan.kind == 'video'
         mode = ('h3_i2v' if self.plan.image else 'h3_t2v') if video else ('krea2_edit' if self.plan.image else 'krea2_t2i')
-        params = {'requestId': self.id, 'mode': mode, 'prompt': values.get('prompt', self.plan.prompt),
+        # Creator 그래프(Krea2/H3)는 Forge 식 <lora:...> 를 해석하지 않는다 — T2I Krea2 러너와 같이 뗀다.
+        prompt = strip_standard_lora_tags(str(values.get('prompt', self.plan.prompt) or ''))
+        params = {'requestId': self.id, 'mode': mode, 'prompt': prompt,
                   'seed': int(values.get('seed', -1))}
         if video:
             # The base H3 pack works without optional Turbo LoRA/grid assets.
@@ -182,6 +186,14 @@ class MediaGenerationJob:
                           quality='quality', steps=20)
         else:
             params.update(width=int(values.get('width', 1024)), height=int(values.get('height', 1024)))
+            # T2I 스냅샷에서 온 요청이면 사용자가 정한 샘플링 설정을 따른다(Krea2 T2I 워커와 같은 해석).
+            # steps 는 T2I(Turbo) 기준이라 T2I 모드에만 — 편집(krea2_edit)은 자기 기본 step 을 쓴다.
+            if 'cfg_scale' in values or 'cfg' in values:
+                params['cfg'] = float(values.get('cfg_scale', values.get('cfg')))
+            if 'sampler_name' in values or 'sampler' in values:
+                params['sampler'] = normalise_sampler(values.get('sampler_name', values.get('sampler')))
+            if mode == 'krea2_t2i' and 'steps' in values:
+                params['steps'] = int(values['steps'])
         if self.plan.image:
             data = read_reference_image(self.plan.image)
             self.check_cancelled()
@@ -211,7 +223,6 @@ class MediaGenerationJob:
             self.event('preparing', message='선택한 모델과 생성 설정을 준비하는 중')
             params = prepare_prompt_payload(payload)
             params.pop('_generation_family', None)
-            chain = params.pop('_postprocess_chain', [])
             params['save_images'] = False  # publish owned outputs only after success
             if self.plan.image:
                 params['init_images'] = [base64.b64encode(read_reference_image(self.plan.image)).decode('ascii')]
@@ -220,9 +231,15 @@ class MediaGenerationJob:
                 for key in list(params):
                     if key.startswith('hr_') or key == 'enable_hr':
                         params.pop(key)
+            # 직전 생성 뒤의 '생성 후 언로드' 요청이 아직 날아가는 중이면 끝난 뒤에 보낸다
+            # (이 작업 스레드에서 기다린다 — 생성 워커와 같은 규칙, core.post_generation)
+            from core.post_generation import reserve_generation_lease, wait_for_pending_unload
+            wait_for_pending_unload(cancelled=self.cancelled.is_set)
             self.check_cancelled()
-            with (coordinator or get_generation_coordinator()).reserve(
-                f'chat:{self.id}', unload_llm=unload_llm, timeout=0
+            # 기다림 뒤 막 시작된 언로드가 리스를 쥐었으면 그걸 기다렸다 다시 잡는다(언로드와 배타)
+            with reserve_generation_lease(
+                f'chat:{self.id}', coordinator=coordinator or get_generation_coordinator(),
+                unload_llm=unload_llm, cancelled=self.cancelled.is_set,
             ):
                 with self._lock:
                     self.check_cancelled()
@@ -233,17 +250,16 @@ class MediaGenerationJob:
                         if not self.cancelled.is_set():
                             self.event('generating', progress=max(0, min(100, round(value * 100 / maximum))) if maximum else 0)
                     generate = backend.img2img if self.plan.image else backend.txt2img
-                    result = generate(model, params, progress_callback=progress)
+                    # cancel_check 로 모델 전환 중·발송 직후의 중지도 백엔드가 직접 확인한다
+                    # (전역 interrupt 한 번은 그 구간에서 사라진다 — core/cancellable_call.py).
+                    from core.cancellable_call import call_with_optional_cancel
+                    result = call_with_optional_cancel(
+                        generate, model, params,
+                        progress_callback=progress, cancel_check=self.cancelled.is_set,
+                    )
                     self.check_cancelled()
                     if not result.success:
                         raise RuntimeError(result.error or '생성 결과를 받지 못했습니다')
-                    if chain and result.image_data:
-                        from workers.generation_worker import _run_postprocess_chain
-                        result.image_data, warnings = _run_postprocess_chain(
-                            backend, result.image_data, chain, cancelled_cb=self.cancelled.is_set)
-                        if warnings:
-                            self.event('postprocess', message=' · '.join(warnings))
-                    self.check_cancelled()
                 finally:
                     with self._lock:
                         self._backend = None
@@ -263,8 +279,6 @@ class MediaGenerationJob:
                     data = Path(artifact.path).read_bytes()
                 if not data:
                     continue
-                if index == 0 and chain and result.image_data:
-                    data = result.image_data
                 suffix = Path(getattr(artifact, 'filename', '') or 'image.png').suffix.lower()
                 if suffix not in {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.webm'}:
                     suffix = '.png'

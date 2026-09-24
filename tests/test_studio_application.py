@@ -409,6 +409,129 @@ class StudioApplicationContractTests(unittest.TestCase):
         self.assertNotIn("paths", reply["data"]["modelPaths"])
         self.assertTrue(reply["data"]["modelPaths"]["configured"]["lora_dir"])
 
+    def _run_runtime_job(self, payload, updates):
+        snapshots = []
+        original_snapshot = self.runtime.snapshot
+
+        def counting_snapshot():
+            snapshots.append(1)
+            return original_snapshot()
+
+        def execute(engine, action, job_payload, on_progress=None):
+            self.runtime.calls.append((engine, action, dict(job_payload)))
+            for update in updates:
+                on_progress(update)
+            return {"ok": True, "engine": engine, "action": action, "message": "done"}
+
+        self.runtime.snapshot = counting_snapshot
+        self.runtime.execute = execute
+        events = []
+        terminal = threading.Event()
+        host_before = len(self.host.runtime_events)
+        stop = self.app.subscribe(
+            NATIVE,
+            lambda event: (
+                events.append(event),
+                terminal.set() if event["type"] in {"completed", "error"} else None,
+            ),
+            after_seq=self.app.describe(NATIVE)["eventCursor"],
+        )
+        reply = self.app.invoke(NATIVE, request("rt-gate", "runtime.execute", {
+            "engine": "forge", "action": "start", "payload": payload,
+        }))
+        self.assertTrue(terminal.wait(2))
+        stop()
+        # host 통보는 completed 발행 직후에 온다 — 도착까지 잠깐 기다린다.
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not any(
+            event.get("type") in {"completed", "error"}
+            for event in self.host.runtime_events[host_before:]
+        ):
+            time.sleep(0.01)
+        job = [event for event in events if event.get("jobId") == reply["data"]["jobId"]]
+        return job, snapshots
+
+    def test_runtime_progress_carries_a_snapshot_only_when_the_phase_changes(self):
+        updates = [{"phase": "download", "message": f"line {i}"} for i in range(6)]
+        updates += [{"phase": "health", "message": "waiting"}] * 3
+        job, snapshots = self._run_runtime_job({}, updates)
+        progress = [event for event in job if event["type"] == "progress"]
+        self.assertEqual(9, len(progress))
+        with_snapshot = [event for event in progress if "snapshot" in event["data"]]
+        self.assertEqual(
+            ["download", "health"],
+            [event["data"]["update"]["phase"] for event in with_snapshot],
+        )
+        # started 1 + 단계 2 + completed 1 — 예전엔 progress 마다 1번씩 더 계산했다(=11).
+        self.assertEqual(4, len(snapshots))
+        self.assertIn("snapshot", job[-1]["data"])
+
+    def test_host_receives_started_and_progress_only_for_startup_jobs(self):
+        self._run_runtime_job({}, [{"phase": "health", "message": "waiting"}])
+        self.assertEqual(["completed"], [event["type"] for event in self.host.runtime_events])
+        self.host.runtime_events.clear()
+        self._run_runtime_job({"startup": True}, [{"phase": "health", "message": "waiting"}])
+        self.assertEqual(
+            ["started", "progress", "completed"],
+            [event["type"] for event in self.host.runtime_events],
+        )
+        progress = self.host.runtime_events[1]
+        self.assertNotIn("snapshot", progress)
+        self.assertEqual("waiting", progress["message"])
+
+    def test_job_reporting_failure_still_publishes_a_minimal_error(self):
+        original_publish = self.app._publish
+        failed = {"started": False}
+
+        def flaky_publish(**kwargs):
+            if kwargs.get("event_type") == "started" and not failed["started"]:
+                failed["started"] = True
+                raise RuntimeError("journal unavailable")
+            if kwargs.get("event_type") == "error" and "snapshot" in (kwargs.get("data") or {}):
+                raise RuntimeError("snapshot publish broken")
+            return original_publish(**kwargs)
+
+        self.app._publish = flaky_publish
+        events = []
+        terminal = threading.Event()
+        stop = self.app.subscribe(NATIVE, lambda event: (
+            events.append(event),
+            terminal.set() if event["type"] == "error" else None,
+        ))
+        reply = self.app.invoke(NATIVE, request("gen-flaky", "generation_api.execute", {
+            "action": "start", "payload": {},
+        }))
+        self.assertTrue(terminal.wait(2))
+        stop()
+        error = [event for event in events if event["type"] == "error"][-1]
+        self.assertEqual(reply["data"]["jobId"], error["jobId"])
+        self.assertNotIn("snapshot", error["data"])
+        # 작업 락도 풀려 다음 요청을 받을 수 있다.
+        self.app._publish = original_publish
+        again = self.app.invoke(NATIVE, request("gen-again", "generation_api.execute", {
+            "action": "start", "payload": {},
+        }))
+        self.assertEqual("accepted", again["status"])
+
+    def test_bootstrap_can_skip_the_git_backed_app_update_snapshot(self):
+        state = {"paths": {}, "defaults": {}, "entries": {}, "environmentLocked": {}}
+        calls = []
+        original = self.updates.snapshot
+        self.updates.snapshot = lambda: calls.append("snapshot") or original()
+        with patch("core.forge_modules.get_forge_path_state", return_value=state):
+            reply = self.app.invoke(
+                WEB, request("boot-lite", "sync.bootstrap", {"includeAppUpdate": False})
+            )
+            self.assertEqual(reply["status"], "ok")
+            self.assertNotIn("appUpdate", reply["data"])
+            self.assertIn("runtime", reply["data"])
+            self.assertEqual(calls, [])
+            invalid = self.app.invoke(
+                WEB, request("boot-bad", "sync.bootstrap", {"includeAppUpdate": "no"})
+            )
+        self.assertEqual(invalid["status"], "error")
+        self.assertEqual(invalid["error"]["code"], "INVALID_ARGUMENT")
+
     def test_app_update_job_publishes_progress_and_requests_restart_after_completion(self):
         events = []
         terminal = threading.Event()

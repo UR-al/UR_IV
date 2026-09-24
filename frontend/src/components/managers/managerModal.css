@@ -1,0 +1,96 @@
+/*
+ * 스튜디오 도구 매니저 모달 공용 모양 — 와일드카드 · 즉석 와일드카드 · 프로파일 · 프롬프트 순서.
+ *
+ * 전역 스타일이 아니다. 각 모달이 `<style scoped src="./managerModal.css">` 로 가져가 제 템플릿에만
+ * 적용한다(예전 App.vue 의 scoped 규칙과 같은 범위·같은 우선순위). 규칙 순서도 App.vue 에 있던
+ * 그대로 두었다 — 같은 특이도의 규칙이 겹칠 때 뒤의 것이 이기므로 순서가 곧 모양이다.
+ * main.js 에서 import 하지 말 것(전역이 되면 다른 화면의 .close-btn · .order-* 에 번진다).
+ */
+.close-btn { width: 28px; height: 28px; background: var(--bg-button); border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text-secondary); font-size: 16px; cursor: pointer; }
+.close-btn:hover { border-color: var(--state-alert-fg); color: var(--state-alert-fg); background: rgba(248, 113, 113, 0.08); }
+
+/* Wildcard Manager Modal */
+.wc-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+.wc-modal { width: min(980px, 95vw); height: min(740px, 90vh); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+.wc-modal-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.wc-modal-header h3 { font-size: 12px; letter-spacing: 0; color: var(--text-muted); }
+.wc-path { font-size: var(--fs-label); color: var(--text-muted); font-family: monospace; flex: 1; }
+.wc-modal-body { flex: 1; display: flex; overflow: hidden; }
+.wc-sidebar { width: 180px; overflow-y: auto; border-right: 1px solid var(--border); padding: 8px; }
+.wc-file-item { padding: 6px 10px; font-size: 11px; color: var(--text-secondary); cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; }
+.wc-file-item:hover { background: var(--bg-input); }
+.wc-file-item.active { background: var(--accent-dim); color: var(--accent); }
+.wc-file-count { font-size: var(--fs-label); color: var(--text-muted); }
+.wc-content { flex: 1; overflow-y: auto; padding: 16px; }
+.wc-content-header { margin-bottom: 12px; }
+.wc-content-header h4 { font-size: 14px; color: var(--text-primary); }
+.wc-content-header span { font-size: var(--fs-label); color: var(--text-muted); }
+.wc-content-header code { background: var(--bg-input); padding: 2px 6px; border-radius: 3px; font-size: var(--fs-label); color: var(--accent); }
+.wc-new-btn { padding: 4px 12px; background: var(--accent-fill); border: none; border-radius: 4px; color: var(--on-accent); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
+.wc-fname { flex: 1; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.wc-del { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: 11px; opacity: 0; transition: 0.15s; }
+.wc-file-item:hover .wc-del { opacity: 1; }
+.wc-syntax { font-size: var(--fs-label); color: var(--text-muted); }
+.wc-syntax code { background: var(--bg-input); padding: 1px 6px; border-radius: 3px; color: var(--accent); }
+.wc-blocks { display: flex; flex-direction: column; gap: 3px; max-height: 300px; overflow-y: auto; }
+.wc-block-row { display: flex; align-items: center; gap: 4px; }
+/* # 주석 줄 — 해석에서 빠지지만 파일에는 남는다는 걸 흐리게 보여 준다 */
+.wc-block-row.comment .wc-block-input { color: var(--text-muted); font-style: italic; }
+.wc-enable { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-label); color: var(--text-secondary); cursor: pointer; }
+.wc-block-idx { font-size: var(--fs-label); color: var(--text-muted); min-width: 20px; text-align: right; font-family: monospace; }
+.wc-block-input { flex: 1; padding: 4px 8px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); }
+.wc-block-rm { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: 12px; }
+.wc-add-line { width: 100%; padding: 4px; background: var(--bg-button); border: 1px dashed var(--border); border-radius: 3px; color: var(--text-muted); font-size: var(--fs-label); cursor: pointer; margin-top: 4px; }
+.wc-rename-input { font-size: 14px; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 4px; color: var(--text-primary); padding: 2px 8px; width: 200px; }
+.wc-bottom-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.wc-insert-sel { padding: 4px 8px; font-size: var(--fs-label); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); }
+.wc-use-btn { padding: 5px 16px; background: var(--accent-fill); border: none; border-radius: 4px; color: var(--on-accent); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
+.wc-spacer { flex: 1; }
+.wc-save-btn { padding: 5px 14px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
+.wc-save-btn:hover { border-color: var(--accent); color: var(--accent); }
+.wc-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-size: 13px; }
+
+/* 워크플로우 프로파일 목록 */
+.profile-item { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  background: rgba(255,255,255,0.04); border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.08); }
+.profile-item:hover { background: rgba(96,165,250,0.08); }
+.profile-info { flex: 1; min-width: 0; }
+.profile-name { font-size: 13px; font-weight: var(--fw-bold); color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-meta { font-size: var(--fs-label); color: var(--text-muted); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 프롬프트 순서 모달 */
+.order-modal-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.order-list { display: flex; flex-direction: column; gap: 4px;
+  background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px; padding: 8px; }
+.order-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  background: rgba(255,255,255,0.04); border-radius: 4px;
+  transition: background 0.15s; }
+.order-item:hover { background: rgba(96,165,250,0.08); }
+.order-num { width: 22px; height: 22px; display: inline-flex; align-items: center;
+  justify-content: center; background: rgba(96,165,250,0.2); color: var(--state-info-fg);
+  border-radius: 50%; font-size: 11px; font-weight: var(--fw-bold); }
+.order-label { flex: 1; font-size: 13px; color: var(--text-primary); }
+.order-btn { width: 28px; height: 28px; font-size: 13px; cursor: pointer;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px; color: var(--text-primary); }
+.order-btn:hover:not(:disabled) { background: rgba(96,165,250,0.15);
+  border-color: var(--state-info-fg); color: var(--state-info-fg); }
+.order-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.order-preview { padding: 8px 10px; background: rgba(255,255,255,0.03);
+  border-left: 2px solid var(--state-info-fg); border-radius: 0 4px 4px 0; }
+.order-preview-label { font-size: var(--fs-label); color: var(--text-muted); margin-right: 6px; }
+.order-preview-text { font-size: 11px; color: var(--state-info-fg); font-family: Consolas, monospace; }
+.order-actions { display: flex; gap: 8px; align-items: center; padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.08); }
+.order-reset, .order-cancel, .order-save { padding: 6px 14px; border-radius: 4px;
+  font-size: 12px; cursor: pointer; font-weight: var(--fw-bold); }
+.order-reset { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-muted); }
+.order-cancel { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-primary); }
+.order-save { background: var(--state-info); border: 1px solid var(--state-info); color: white; }
+.order-save:hover { filter: brightness(1.15); }

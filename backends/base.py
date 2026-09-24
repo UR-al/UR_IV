@@ -84,14 +84,23 @@ class AbstractBackend(ABC):
 
     @abstractmethod
     def txt2img(self, model_name: str, payload: Dict,
-                progress_callback: Optional[ProgressCallback] = None) -> GenerationResult:
-        """텍스트→이미지 생성"""
+                progress_callback: Optional[ProgressCallback] = None,
+                cancel_check: Optional[Callable[[], bool]] = None) -> GenerationResult:
+        """텍스트→이미지 생성.
+
+        ``cancel_check`` 가 주어지면 True 를 돌려주는 즉시 협조적으로 멈춘다 — 모델 전환 뒤·
+        발송 직전에 다시 확인하고, 이미 보낸 요청은 **이 어댑터의 작업만** 중단한다(다른
+        클라이언트의 작업을 끊지 않는다). 취소되면 ``success=False`` 결과를 돌려준다.
+        호출부는 ``core.cancellable_call.call_with_optional_cancel`` 로 넘긴다
+        (duck-typed 옛 어댑터·fake 는 이 인자를 모를 수 있다).
+        """
         ...
 
     @abstractmethod
     def img2img(self, model_name: str, payload: Dict,
-                progress_callback: Optional[ProgressCallback] = None) -> GenerationResult:
-        """이미지→이미지 생성"""
+                progress_callback: Optional[ProgressCallback] = None,
+                cancel_check: Optional[Callable[[], bool]] = None) -> GenerationResult:
+        """이미지→이미지 생성. ``cancel_check`` 계약은 :meth:`txt2img` 와 같다."""
         ...
 
     @abstractmethod
@@ -126,7 +135,11 @@ class AbstractBackend(ABC):
         return
 
     def get_loras(self) -> List[Dict]:
-        """LoRA 목록 반환. 각 항목: {'name': str, 'alias': str, 'path': str}"""
+        """LoRA 목록 반환.
+
+        각 항목: ``{'name': str, 'alias': str, 'path': str, 'trigger_words': list[str]}``
+        (trigger_words 는 메타데이터가 없으면 빈 리스트).
+        """
         return []
 
     def get_system_stats(self) -> Dict:

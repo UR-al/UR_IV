@@ -97,10 +97,20 @@ class ModeAwareMixin:
         )
 
     def save_mode_settings(self, mode_value: Optional[str] = None) -> bool:
-        """현재 (또는 지정한) 모드로 설정 저장. 성공 시 True."""
+        """현재 (또는 지정한) 모드로 설정 저장. 성공 시 True.
+
+        파일 내용이 이미 같으면 쓰지 않는다 — 같은 값을 다시 보내는 동기화(Vue 마운트·생성 직전·
+        모드 전환 때의 이전 모드 저장)가 파일을 매번 다시 쓰지 않게(감사 #42).
+        """
         try:
             path = self._settings_path(mode_value)
             data = self.collect_current_settings()
+            if path.exists():
+                try:
+                    if json.loads(path.read_text(encoding="utf-8")) == data:
+                        return True
+                except (OSError, ValueError):
+                    pass   # 깨진 파일은 아래에서 새로 쓴다
             from utils.atomic_json import atomic_write_json
             atomic_write_json(str(path), data, indent=2)
             _logger.debug(f"saved: {path.name}")

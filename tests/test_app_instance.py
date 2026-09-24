@@ -5,11 +5,12 @@ import unittest
 from unittest.mock import patch
 
 from core.app_instance import (
+    _registry_dir,
     live_app_instance_pids,
     register_app_instance,
     unregister_app_instance,
-    wait_for_update_lock,
 )
+from core.app_update_lock import UpdateLockBusy
 
 
 class AppInstanceRegistryTests(unittest.TestCase):
@@ -45,13 +46,21 @@ class AppInstanceRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             with (
                 patch(
-                    "core.app_update_lock.wait_until_update_complete",
-                    side_effect=RuntimeError("busy"),
-                ) as wait,
-                self.assertRaises(RuntimeError),
+                    "core.app_update_lock.acquire_update_lock",
+                    side_effect=UpdateLockBusy("busy"),
+                ) as acquire,
+                self.assertRaises(UpdateLockBusy),
             ):
-                wait_for_update_lock(temp, timeout=0)
-            wait.assert_called_once_with(temp, timeout=0)
+                register_app_instance(temp, pid=43213)
+            acquire.assert_called_once_with(temp, timeout=120.0)
+            self.assertFalse((_registry_dir(temp) / "43213.json").exists())
+
+    def test_update_guarded_entrypoint_does_not_reacquire_the_lock(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch("core.app_update_lock.acquire_update_lock") as acquire:
+                marker = register_app_instance(temp, pid=43214, update_guarded=True)
+            acquire.assert_not_called()
+            self.assertTrue(marker.is_file())
 
 
 if __name__ == "__main__":

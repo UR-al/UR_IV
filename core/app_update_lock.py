@@ -127,25 +127,10 @@ def is_update_in_progress(
     return False
 
 
-def wait_until_update_complete(
-    project_root: str | os.PathLike[str] = PROJECT_ROOT,
-    *,
-    timeout: float = 120.0,
-) -> None:
-    """Wait for an active updater and immediately release the probe lock."""
-
-    try:
-        lock = acquire_update_lock(project_root, timeout=timeout)
-    except UpdateLockBusy as exc:
-        raise RuntimeError("앱 업데이트가 아직 진행 중입니다. 잠시 후 다시 실행하세요.") from exc
-    lock.release()
-
-
 __all__ = [
     "MUTEX_NAME",
     "UpdateLock",
     "UpdateLockBusy",
     "acquire_update_lock",
     "is_update_in_progress",
-    "wait_until_update_complete",
 ]

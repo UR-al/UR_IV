@@ -22,7 +22,7 @@ def _capabilities(*, include_forge: bool = True) -> dict:
         "CheckpointLoaderSimple", "UNETLoader", "CLIPLoader", "DualCLIPLoader",
         "TripleCLIPLoader", "VAELoader", "CLIPTextEncode", "EmptyLatentImage",
         "LoadImage", "LoraLoader", "ModelSamplingSD3", "KSampler", "KSamplerAdvanced",
-        "SamplerCustom", "VAEDecode", "SaveImage", "LatentUpscale",
+        "SamplerCustom", "VAEDecode", "SaveImage", "PreviewImage", "LatentUpscale",
         "MaskToImage", "ImageScale", "ImageScaleBy", "UpscaleModelLoader",
         "ImageUpscaleWithModel",
     }
@@ -57,6 +57,15 @@ def _capabilities(*, include_forge: bool = True) -> dict:
         "sampler_name": _choice("euler", "euler_ancestral", "dpmpp_2m"),
         "scheduler": _choice("normal", "karras", "simple"),
     })
+    if include_forge:
+        # ForgeNeoADetailer calls Impact Pack/Subpack providers internally.
+        result["FaceDetailer"] = {"input": {"required": {}}}
+        result["UltralyticsDetectorProvider"] = {"input": {"required": {
+            "model_name": _choice(
+                "bbox/face_yolov8n.pt", "bbox/face.pt", "bbox/hand_yolov8n.pt",
+                "bbox/person_yolov8n-seg.pt", "segm/person_yolov8n-seg.pt",
+            ),
+        }}}
     return result
 
 
@@ -594,7 +603,9 @@ class TestAdvancedWorkflowCompilation(unittest.TestCase):
                 upscale_id, _ = _node(graph, "ImageUpscaleWithModel")
                 self.assertEqual(resize["inputs"]["image"], [upscale_id, 0])
                 self.assertEqual((resize["inputs"]["width"], resize["inputs"]["height"]), (width, height))
-                self.assertEqual(_node(graph, "SaveImage")[1]["inputs"]["images"], [resize_id, 0])
+                # Forge extras API 처럼 서버 output 에 사본을 남기지 않는다(temp 미리보기로 반환).
+                self.assertEqual(_node(graph, "PreviewImage")[1]["inputs"]["images"], [resize_id, 0])
+                self.assertNotIn("SaveImage", _classes(graph))
 
     def test_model_upscale_factor_rejects_missing_source_dimensions(self):
         with self.assertRaisesRegex(WorkflowCompileError, "원본 너비와 높이"):
@@ -643,6 +654,73 @@ class TestAdvancedWorkflowCompilation(unittest.TestCase):
                 sam3_detailer_class="UnknownDetailer",
             )
 
+    def test_sam3_detailer_samples_at_forge_generation_resolution(self):
+        scripts = sam3_args.build_alwayson({"sam3_mode": "Inpaint", "sam3_prompt": "face"})
+        graph = ComfyWorkflowCompiler(_capabilities()).compile(
+            "txt2img", "checkpoint.safetensors",
+            {"prompt": "portrait", "width": 832, "height": 1216, "enable_hr": True,
+             "hr_scale": 1.5, "alwayson_scripts": scripts},
+        )
+        _sam_id, sam = _node(graph, "ForgeNeoSAM3Detailer")
+        # Forge p.width/p.height = 기본 생성 해상도(Hires 이전)
+        self.assertEqual((sam["inputs"]["target_width"], sam["inputs"]["target_height"]), (832, 1216))
+
+        # 단독 후처리: Forge 단독 img2img 처럼 payload 크기(= 입력 이미지 크기)로 샘플링한다.
+        graph = ComfyWorkflowCompiler(_capabilities()).compile_postprocess(
+            "checkpoint.safetensors",
+            {"prompt": "portrait", "width": 1248, "height": 1824, "alwayson_scripts": scripts},
+            uploaded_image="source.png", sam3_detailer_class="ForgeNeoSAM3Refine",
+        )
+        _sam_id, sam = _node(graph, "ForgeNeoSAM3Refine")
+        self.assertEqual((sam["inputs"]["target_width"], sam["inputs"]["target_height"]), (1248, 1824))
+
+        # 명시한 _sam3_processing_* 가 payload 크기보다 우선한다(백엔드가 이미지 크기로 고정).
+        graph = ComfyWorkflowCompiler(_capabilities()).compile_postprocess(
+            "checkpoint.safetensors",
+            {"prompt": "portrait", "width": 1248, "height": 1824,
+             "_sam3_processing_width": 832, "_sam3_processing_height": 1216,
+             "alwayson_scripts": scripts},
+            uploaded_image="source.png", sam3_detailer_class="ForgeNeoSAM3Refine",
+        )
+        _sam_id, sam = _node(graph, "ForgeNeoSAM3Refine")
+        self.assertEqual((sam["inputs"]["target_width"], sam["inputs"]["target_height"]), (832, 1216))
+
+        for payload_size, expected in (({}, (0, 0)), ({"width": 32, "height": 20000}, (64, 8192))):
+            with self.subTest(payload_size=payload_size):
+                self.assertEqual(
+                    ComfyWorkflowCompiler._sam3_processing_size(payload_size), expected,
+                )
+
+    def test_sam3_mask_cache_model_follows_keep_in_ram_setting_like_forge(self):
+        # Forge: 'Unload after' 를 끄면 번들을 장치에 계속 두고, 켜면 설정
+        # sam3_unload_keep_in_ram 이 CPU RAM 보관 여부를 정한다. 앱 설정이 그 역할이다.
+        cases = (
+            (True, True, True),    # 기본: 언로드 후 RAM 보관
+            (False, True, False),  # 설정 끔: 매번 로드, 보관본 해제
+            (False, False, True),  # Unload after 끔: 설정과 무관하게 장치에 유지
+            (True, False, True),
+        )
+        for keep_in_ram, unload_after, expected in cases:
+            with self.subTest(keep_in_ram=keep_in_ram, unload_after=unload_after):
+                compiler = ComfyWorkflowCompiler(_capabilities(), sam3_keep_in_ram=keep_in_ram)
+                inpaint = compiler.compile(
+                    "txt2img", "checkpoint.safetensors",
+                    {"prompt": "portrait", "alwayson_scripts": sam3_args.build_alwayson({
+                        "sam3_mode": "Inpaint", "sam3_unload_after": unload_after,
+                    })},
+                )
+                mask_only = compiler.compile_sam3_mask_only(
+                    {"alwayson_scripts": sam3_args.build_alwayson({
+                        "sam3_mode": "Mask only", "sam3_unload_after": unload_after,
+                    })},
+                    uploaded_image="source.png",
+                )
+                for graph in (inpaint, mask_only):
+                    _mask_id, mask = _node(graph, "ForgeNeoSAM3Mask")
+                    self.assertIs(mask["inputs"]["cache_model"], expected)
+        # 설정을 모르는 호출부(사전 검증 등)는 노드 기본값과 같은 보관을 쓴다.
+        self.assertTrue(ComfyWorkflowCompiler().sam3_keep_in_ram)
+
     def test_sam3_mask_only_does_not_load_a_diffusion_model(self):
         graph = ComfyWorkflowCompiler(_capabilities()).compile_sam3_mask_only(
             {"alwayson_scripts": sam3_args.build_alwayson({
@@ -655,8 +733,41 @@ class TestAdvancedWorkflowCompilation(unittest.TestCase):
         self.assertNotIn("ForgeNeoSAM3Detailer", _classes(graph))
         self.assertIn("ForgeNeoSAM3Mask", _classes(graph))
         mask_id, _mask = _node(graph, "ForgeNeoSAM3Mask")
-        _save_id, save = _node(graph, "SaveImage")
+        _save_id, save = _node(graph, "PreviewImage")
         self.assertEqual(save["inputs"]["images"], [mask_id, 3])
+
+    def test_only_explicit_save_images_leaves_a_comfy_output_copy(self):
+        base = {"prompt": "portrait"}
+        compiler = ComfyWorkflowCompiler(_capabilities())
+        for payload, expected in (
+            ({**base, "save_images": True, "filename_prefix": "AIStudio/main"}, "SaveImage"),
+            ({**base, "save_images": False}, "PreviewImage"),
+            (base, "PreviewImage"),  # Forge API 기본값(save_images=False)
+        ):
+            with self.subTest(save_images=payload.get("save_images")):
+                graph = compiler.compile("txt2img", "checkpoint.safetensors", payload)
+                classes = _classes(graph)
+                self.assertIn(expected, classes)
+                self.assertEqual(
+                    sum(cls in {"SaveImage", "PreviewImage"} for cls in classes), 1,
+                )
+                _id, output = _node(graph, expected)
+                decode_id, _decode = _node(graph, "VAEDecode")
+                self.assertEqual(output["inputs"]["images"], [decode_id, 0])
+                if expected == "SaveImage":
+                    self.assertEqual(output["inputs"]["filename_prefix"], "AIStudio/main")
+                else:
+                    self.assertNotIn("filename_prefix", output["inputs"])
+
+        postprocess = compiler.compile_postprocess(
+            "checkpoint.safetensors",
+            {**base, "save_images": False, "alwayson_scripts": sam3_args.build_alwayson({
+                "sam3_mode": "Inpaint", "sam3_prompt": "face",
+            })},
+            uploaded_image="source.png",
+        )
+        self.assertIn("PreviewImage", _classes(postprocess))
+        self.assertNotIn("SaveImage", _classes(postprocess))
 
 
 if __name__ == "__main__":

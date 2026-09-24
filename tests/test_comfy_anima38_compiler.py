@@ -591,6 +591,30 @@ class TestAnima38CustomCompilation(unittest.TestCase):
                 }, workflow=workflow,
             )
 
+    def test_empty_selection_keeps_the_v2_loader_workflow_on_semantic_connector(self):
+        # 모델 콤보가 비면(ComfyUI 는 허용) 워크플로 자신의 v2 번들이 모델이다 — 예전엔
+        # 판별을 건너뛰어 Semantic Connector v2 없이 native 조건부로 컴파일됐다.
+        workflow = _split_custom_workflow()
+        workflow["1"] = {"class_type": "ForgeNeoAnima38V2Loader", "inputs": {"model_name": V2_MODEL}}
+        payload = {"prompt": "selected, <lora:ink:0.7>", "forge_additional_modules": _modules()}
+        empty = ComfyWorkflowCompiler(_anima_capabilities()).compile(
+            "txt2img", "", copy.deepcopy(payload), workflow=copy.deepcopy(workflow),
+        )
+        self.assertIn("ForgeNeoAnima38V2Prompt", _classes(empty))
+        self.assertIn("ForgeNeoAnimaQwen35Loader", _classes(empty))
+        self.assertEqual(empty["1"]["class_type"], "ForgeNeoAnima38V2Loader")
+        self.assertEqual(empty["1"]["inputs"], {"model_name": V2_MODEL})
+        self.assertIn("ForgeNeoAnimaLoraLoader", _classes(empty))
+        # 워크플로 자신의 모델을 고른 것과 같은 그래프.
+        selected = ComfyWorkflowCompiler(_anima_capabilities()).compile(
+            "txt2img", V2_MODEL, copy.deepcopy(payload), workflow=copy.deepcopy(workflow),
+        )
+        for graph in (empty, selected):
+            for node in graph.values():
+                node["inputs"].pop("seed", None)
+                node["inputs"].pop("noise_seed", None)
+        self.assertEqual(empty, selected)
+
     def test_stale_v2_prompt_schema_is_rejected_before_queue(self):
         capabilities = _anima_capabilities()
         del capabilities["ForgeNeoAnima38V2Prompt"]["input"]["required"]["prompt"]

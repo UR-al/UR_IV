@@ -61,6 +61,47 @@ class TestStandaloneComfyContext(unittest.TestCase):
                 self.assertEqual(targets, [] if kind == "adetailer" else ["face"])
                 self.assertEqual(backend._last_generation_context, before)
 
+    def test_standalone_sam3_samples_only_masked_at_the_input_image_size(self):
+        # Forge 단독 SAM3/Refine 은 width/height = 입력 이미지 크기로 보내고(webui_backend
+        # sam3()/refine()), 확장은 p.width/p.height 로 샘플링한다. 직전 txt2img 의 크기·종횡비
+        # (Hires 이전 기본 크기 포함)나 세션 이력이 결과를 바꾸면 안 된다.
+        previous_generations = (
+            {},  # 생성 크기를 모름
+            {"width": 832, "height": 1216},  # 같은 종횡비, Hires 이전 기본 크기
+            {"width": 1216, "height": 832},  # 가로 생성 뒤 세로 이미지
+            {"width": 1024, "height": 1536,
+             "_sam3_processing_width": 1024, "_sam3_processing_height": 1536},  # 남은 키
+        )
+        for kind in ("sam3", "refine"):
+            for previous in previous_generations:
+                with self.subTest(kind=kind, previous=previous):
+                    backend = self._backend({})
+                    backend._last_generation_context["payload"].update(previous)
+                    before = copy.deepcopy(backend._last_generation_context)
+                    getattr(backend, kind)(_png(96, 128), {"sam3_prompt": "face"})
+                    graph = backend._queue_and_wait.call_args.args[0]
+                    detail = next(node for node in graph.values() if node["class_type"] in {
+                        "ForgeNeoSAM3Detailer", "ForgeNeoSAM3Refine",
+                    })
+                    self.assertEqual(
+                        (detail["inputs"]["target_width"], detail["inputs"]["target_height"]),
+                        (96, 128),
+                    )
+                    self.assertEqual(backend._last_generation_context, before)
+
+    def test_standalone_detail_never_leaves_a_comfy_output_copy(self):
+        # 직전 메인 생성 payload 는 save_images=True 지만 단독 후처리는 Forge 처럼 False.
+        for kind in ("adetailer", "sam3", "refine"):
+            with self.subTest(kind=kind):
+                backend = self._backend({})
+                backend._last_generation_context["payload"]["save_images"] = True
+                getattr(backend, kind)(_png(), {"sam3_prompt": "face"})
+                graph = backend._queue_and_wait.call_args.args[0]
+                classes = [node["class_type"] for node in graph.values()]
+                self.assertIn("PreviewImage", classes)
+                self.assertNotIn("SaveImage", classes)
+                self.assertTrue(backend._last_generation_context["payload"]["save_images"])
+
     def test_negative_semantic_survives_but_old_image_passes_do_not(self):
         backend = self._backend({
             anima38.SCRIPT_NAME: {"args": [{"negative": True}]},

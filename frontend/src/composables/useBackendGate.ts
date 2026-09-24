@@ -6,7 +6,12 @@ import type {
   BackendSelectedResult,
   BackendSelectionRequired,
   ComfyWorkflowPicked,
+  ProbeBackendPayload,
+  SelectBackendPayload,
 } from '../types/bridge'
+import { toGateWorkflowInfo, type GateWorkflowInfo } from '../utils/gateWorkflowInfo'
+
+export type { GateWorkflowInfo }
 
 /**
  * 시작 백엔드 게이트의 배선 — `components/BackendGate.vue`(그림)와 파이썬
@@ -20,20 +25,8 @@ import type {
 /** 감지 결과. 'checking' 은 요청은 나갔는데 답이 안 온 상태. */
 type ProbeState = 'ok' | 'fail' | 'checking'
 
-/**
- * BackendGate 가 받는 워크플로 요약. 파이썬 `analyze_workflow()` 의 snake_case 를
- * 그대로 넘기면 게이트가 못 읽으므로(node_count ≠ nodeCount) 여기서 한 번 옮긴다.
- */
-export interface GateWorkflowInfo {
-  valid: boolean
-  format?: string
-  nodeCount?: number
-  width?: number
-  height?: number
-  locked?: boolean
-  classification?: string
-  error?: string
-}
+// BackendGate 가 받는 워크플로 요약(GateWorkflowInfo)과 파이썬 snake_case → 게이트
+// 이름 변환(toGateWorkflowInfo)은 utils/gateWorkflowInfo.ts 의 순수 로직이다.
 
 /** 시그널 페이로드는 전부 JSON 문자열이다. 깨진 JSON 하나로 시작이 막히면 안 된다. */
 function parseEvent<T>(json: string): T | null {
@@ -42,22 +35,6 @@ function parseEvent<T>(json: string): T | null {
   } catch {
     console.error('[backendGate] 페이로드 파싱 실패', json)
     return null
-  }
-}
-
-function toGateWorkflowInfo(info: ComfyWorkflowPicked['info'] | undefined): GateWorkflowInfo | undefined {
-  if (!info) return undefined
-  // 파이썬은 '없음'을 None(→ null) 로 보내는데 게이트는 optional(undefined) 로 본다.
-  // `?? undefined` 가 그 경계를 흡수한다 — null 이 그대로 새면 '0×0' 같은 헛것이 찍힌다.
-  return {
-    valid: !!info.valid,
-    format: info.format ?? undefined,
-    nodeCount: typeof info.node_count === 'number' ? info.node_count : undefined,
-    width: info.width ?? undefined,
-    height: info.height ?? undefined,
-    locked: !!info.is_locked,
-    classification: info.classification ?? undefined,
-    error: info.error ?? undefined,
   }
 }
 
@@ -123,13 +100,15 @@ export function useBackendGate() {
   }
 
   // ── Vue → Python ────────────────────────────────────────────────────────
-  function onGateProbe(payload: { webuiUrl: string; comfyUrl: string }) {
+  // 페이로드 모양은 types/bridge.d.ts 한 벌(ProbeBackendPayload/SelectBackendPayload)을 따른다 —
+  // 여기 따로 적으면 d.ts 와 어긋난다(예전: workflowPath 필수/선택 불일치).
+  function onGateProbe(payload: ProbeBackendPayload) {
     // 답이 오기 전까지 '확인 중'. 옛 결과를 남겨 두면 방금 고친 주소의 상태인 척한다.
     gateProbe.value = { webui: 'checking', comfy: 'checking' }
     requestAction('probe_backend', payload)
   }
 
-  function onGateSelect(payload: { type: 'webui' | 'comfyui'; url: string; workflowPath: string }) {
+  function onGateSelect(payload: SelectBackendPayload) {
     if (gateBusy.value) return   // 연결 중 두 번 누르면 파이썬이 워커를 겹쳐 띄운다
     gateBusy.value = true
     gateError.value = ''         // 새 시도이니 지난 실패 문구는 치운다

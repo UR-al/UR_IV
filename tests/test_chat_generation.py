@@ -142,6 +142,28 @@ class CurrentBackendTests(unittest.TestCase):
             self.assertTrue(all(event['id'] == 'request-1' for event in events))
             self.assertTrue(any(event.get('progress') == 50 for event in events))
 
+    def test_backend_receives_live_cancel_check_and_cancel_is_reported_as_stopped(self):
+        # 감사 #31: 채팅 생성도 cancel_check 를 넘겨 모델 전환 중·발송 직후의 중지를 백엔드가 확인
+        plan = plan_chat_generation({'generation': {'mode': 'image'}, 'messages': [{'role': 'user', 'content': 'cat'}]})
+        job = MediaGenerationJob('cancel-check', plan)
+
+        class Backend:
+            def txt2img(self, model, payload, progress_callback=None, cancel_check=None):
+                self.cancel_check = cancel_check
+                self.before = cancel_check()
+                job.cancelled.set()          # 체크포인트 전환 중에 사용자가 중지
+                self.after = cancel_check()
+                return SimpleNamespace(success=False, image_data=None, artifacts=[], info={},
+                                       error='사용자가 작업을 취소했습니다')
+
+        backend = Backend()
+        with tempfile.TemporaryDirectory() as directory:
+            result = job.run_current(backend, 'model', {'prompt': 'cat'}, directory,
+                                     coordinator=GenerationResourceCoordinator())
+        self.assertEqual((backend.before, backend.after), (False, True))
+        self.assertTrue(result['stopped'])
+        self.assertFalse(result['ok'])
+
 
 class GenerationIntentTests(unittest.TestCase):
     def test_explicit_media_mode_uses_scene_text_even_when_it_mentions_prompts(self):

@@ -2,95 +2,69 @@
 
 No input paths, URLs, models, GPU allocations or network access are accepted.
 The one cached result may only be exported by its exact preview request ID.
+
+Upload decoding, still-raster checks, PNG metadata preservation and exclusive
+export are shared with hand reconstruction via core.local_image_io, so both
+experimental editors apply one validation policy (strict MIME, fail on oversized
+metadata instead of silently dropping it, RGB-only ICC).
 """
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
-import io
 import json
-from pathlib import Path
 import re
 import secrets
 import threading
 from datetime import datetime, timezone
 
 import numpy as np
-from PIL import Image, ImageOps, PngImagePlugin
+from PIL import Image, ImageOps
 
-from comfy_custom_nodes.ai_studio_forge_parity.relight import relight_image, settings_from
+# comfy_custom_nodes 의 relight 노드는 render_relight_preview 안에서 import 한다. 여기서
+# 최상단 import 하면 노드 팩 패키지 __init__ 전체(13개 모듈)가 앱 기동 경로에 올라, 노드 팩
+# 한 파일의 SyntaxError·ImportError·노드 ID 충돌이 앱 전체 기동 실패로 번진다. 지연 import 면
+# 그런 고장은 조명 미리보기 한 건의 오류 이벤트로 끝난다(워커의 try/except).
+from core.local_image_io import (capture_png_metadata, decode_image_data_url, encode_png,
+                                 export_exclusive_png, open_still_raster, png_data_url)
 
+# Limits stay module globals and are read at call time (tests patch them).
 MAX_PIXELS = 16_777_216
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_CHARS = 128 * 1024 * 1024
-_DATA_URL = re.compile(r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$")
+MAX_METADATA_BYTES = 1024 * 1024
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
 
 
-def decode_relight_image(value, label, *, shape=None, normal=False):
-    if not isinstance(value, str) or len(value) > (MAX_FILE_BYTES * 4 // 3 + 128):
-        raise ValueError(f"{label}: 64 MB 이하의 PNG/JPEG/WebP data URL이 필요합니다.")
-    match = _DATA_URL.fullmatch(value)
-    if not match:
-        raise ValueError(f"{label}: 로컬 파일을 업로드하세요. 경로나 외부 URL은 허용하지 않습니다.")
-    try:
-        data = base64.b64decode(match[2], validate=True)
-    except (ValueError, binascii.Error) as exc:
-        raise ValueError(f"{label}: 올바르지 않은 base64 이미지입니다.") from exc
-    if len(data) > MAX_FILE_BYTES:
-        raise ValueError(f"{label}: 이미지 파일이 64 MB를 넘습니다.")
-    with Image.open(io.BytesIO(data)) as opened:
-        if opened.format not in {"PNG", "JPEG", "WEBP"} or getattr(opened, "n_frames", 1) != 1:
-            raise ValueError(f"{label}: 정지 PNG/JPEG/WebP만 사용할 수 있습니다.")
-        width, height = opened.size
-        if min(width, height) < 2 or width * height > MAX_PIXELS:
-            raise ValueError(f"{label}: 최소 2×2, 최대 16 MP 이미지를 사용하세요.")
+def decode_relight_image(value, label, *, shape=None, normal=False, metadata=True):
+    """data URL → (float32 픽셀, 메타데이터). 깊이·노멀·마스크 맵은 metadata=False —
+    결과 PNG에 쓰지 않는 맵의 메타데이터 때문에 거부되지 않게 한다."""
+    data = decode_image_data_url(value, label, max_bytes=MAX_FILE_BYTES)
+    with open_still_raster(data, label, max_bytes=MAX_FILE_BYTES, max_pixels=MAX_PIXELS) as opened:
         if normal and opened.mode not in {"RGB", "RGBA"}:
             raise ValueError("노멀: RGB로 XYZ가 인코딩된 맵이 필요합니다.")
-        metadata = {}
-        size = 0
-        for key, text in opened.info.items():
-            if isinstance(key, str) and isinstance(text, str) and len(key) <= 100:
-                size += len(text.encode("utf-8"))
-                if size <= 1024 * 1024:
-                    metadata[key] = text
-        icc = opened.info.get("icc_profile")
-        if not isinstance(icc, bytes) or len(icc) > 1024 * 1024 or opened.mode not in {"RGB", "RGBA", "P"}:
-            icc = None
+        # load() first: PNG text chunks after IDAT are only visible afterwards.
+        opened.load()
         image = ImageOps.exif_transpose(opened)
         if shape is not None and image.size != shape:
             raise ValueError(f"{label}: 원본과 같은 해상도 {shape[0]}×{shape[1]} 맵을 사용하세요. 자동 리사이즈하지 않습니다.")
         # Preserve source transparency, including indexed PNG transparency.
         mode = "RGBA" if "A" in image.getbands() or "transparency" in opened.info else "RGB"
         pixels = np.asarray(image.convert(mode), dtype=np.float32) / 255.
-        exif = image.getexif().tobytes() if image.getexif() else None
-    return pixels, {"text": metadata, "icc": icc, "exif": exif, "sha256": hashlib.sha256(data).hexdigest()}
+        details = (capture_png_metadata(image, limit=MAX_METADATA_BYTES, source_mode=opened.mode)
+                   if metadata else {"text": {}, "icc": None, "exif": None})
+    return pixels, {**details, "sha256": hashlib.sha256(data).hexdigest()}
 
 
 def encode_relight_png(pixels, *, metadata=None, diagnostic=False):
     image = Image.fromarray(np.rint(np.clip(pixels, 0, 1) * 255).astype(np.uint8))
     if diagnostic:
         image.thumbnail((512, 512), Image.Resampling.LANCZOS)
-    options = {}
-    if metadata:
-        info = PngImagePlugin.PngInfo()
-        for key, value in metadata.get("text", {}).items():
-            info.add_text(key, value)
-        options["pnginfo"] = info
-        for key in ("icc", "exif"):
-            if metadata.get(key):
-                options["icc_profile" if key == "icc" else key] = metadata[key]
-    out = io.BytesIO()
-    image.save(out, format="PNG", **options)
-    return out.getvalue()
-
-
-def png_data_url(data):
-    return "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+    return encode_png(image, metadata)
 
 
 def render_relight_preview(request):
+    from comfy_custom_nodes.ai_studio_forge_parity.relight import relight_image, settings_from
+
     values = [request.get(key, "") for key in ("image", "depth", "normals", "mask")]
     if any(not isinstance(value, str) for value in values) or sum(map(len, values)) > MAX_REQUEST_CHARS:
         raise ValueError("이미지·맵의 총 전송 크기는 128 MB 이하로 제한됩니다.")
@@ -100,7 +74,7 @@ def render_relight_preview(request):
     maps = {}
     for key, label, value in zip(("depth", "normals", "mask"), ("깊이", "노멀", "마스크"), values[1:]):
         if value:
-            pixels, _ = decode_relight_image(value, label, shape=shape, normal=key == "normals")
+            pixels, _ = decode_relight_image(value, label, shape=shape, normal=key == "normals", metadata=False)
             maps[key] = pixels if key == "normals" else pixels[..., 0]
     result = relight_image(image, settings=settings, **maps)
     provenance = {
@@ -119,27 +93,14 @@ def render_relight_preview(request):
 
 
 def export_relight_png(data, output_root):
-    root = Path(output_root).resolve()
-    destination = root / "relight"
-    destination.mkdir(parents=True, exist_ok=True)
-    destination = destination.resolve()
-    if not destination.is_relative_to(root):
-        raise ValueError("조명 결과 폴더가 앱 출력 폴더 밖을 가리킵니다.")
     # Explicit O_EXCL creation: no original or previous export can be replaced.
-    for _ in range(5):
-        path = destination / f"relight_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(6)}.png"
-        try:
-            with path.open("xb") as stream:
-                try:
-                    stream.write(data)
-                except Exception:
-                    stream.close()
-                    path.unlink(missing_ok=True)  # Only this newly-created partial export.
-                    raise
-            return str(path)
-        except FileExistsError:
-            continue
-    raise ValueError("새 결과 파일 이름을 만들지 못했습니다. 다시 저장하세요.")
+    # datetime/secrets are resolved here at call time so tests can patch this module.
+    return export_exclusive_png(
+        data, output_root, subdir="relight", prefix="relight",
+        now=lambda: datetime.now(), token=lambda: secrets.token_hex(6),
+        outside_message="조명 결과 폴더가 앱 출력 폴더 밖을 가리킵니다.",
+        exhausted_message="새 결과 파일 이름을 만들지 못했습니다. 다시 저장하세요.",
+    )
 
 
 class RelightActionsMixin:

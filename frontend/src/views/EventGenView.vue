@@ -65,7 +65,7 @@
         <button class="go-btn" @click="searchEvents" :disabled="searching">
           <Icon name="rocket" /> {{ searching ? '검색 중…' : '검색' }}
         </button>
-        <button class="io-btn" @click="importEvents"><Icon name="download" /> .parquet 가져오기</button>
+        <button class="io-btn" v-host-dialog="'import_event_results'" @click="importEvents"><Icon name="download" /> .parquet 가져오기</button>
       </div>
     </aside>
 
@@ -96,7 +96,7 @@
         <div class="result-bar">
           <span class="bar-count">이벤트 {{ events.length }}개</span>
           <div class="bar-spacer"></div>
-          <button class="bar-btn" @click="exportEvents"><Icon name="upload" /> 내보내기</button>
+          <button class="bar-btn" v-host-dialog="'export_event_results'" @click="exportEvents"><Icon name="upload" /> 내보내기</button>
           <button class="bar-btn" @click="clearResults">결과 지우기</button>
         </div>
 
@@ -164,7 +164,7 @@
                     <span v-for="t in (step.added || [])" :key="'a'+t" class="diff-tag add">+ {{ t }}</span>
                     <span v-for="t in (step.removed || [])" :key="'r'+t" class="diff-tag rm">- {{ t }}</span>
                   </div>
-                  <div class="step-prompt">{{ step.displayPrompt || step.prompt || '' }}</div>
+                  <div class="step-prompt">{{ effectiveStepPrompt(step) }}</div>
                 </div>
               </div>
 
@@ -191,6 +191,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
+import { vHostDialog } from '../utils/hostDialogs'
+import { applyEventCarry, effectiveStepPrompt } from '../utils/eventCarry'
 import { onBackendEvent } from '../bridge.js'
 
 interface Rating { key: string; label: string; checked: boolean }
@@ -245,6 +247,9 @@ function _saveEventFields() {
 }
 
 function searchEvents() {
+  // 입력칸의 Enter 는 버튼의 :disabled 가드를 거치지 않는다 — 검색 중 재진입을 여기서 막는다.
+  // (막지 않으면 워커가 하나 더 떠 늦게 끝난 옛 결과가 새 결과를 덮어쓴다)
+  if (searching.value) return
   _saveEventFields()
   searching.value = true
   loadingMsg.value = '데이터 로딩 중...'
@@ -263,48 +268,12 @@ function searchEvents() {
   })
 }
 
-// 외모/의상/배경 태그 분류용 키워드
-const APPEARANCE_KEYS = ['hair', 'eyes', 'skin', 'ears', 'horns', 'tail', 'wings', 'fang', 'mole', 'scar', 'freckle', 'eyelash', 'pupil', 'iris', 'ahoge', 'bangs', 'sidelocks', 'ponytail', 'twintails', 'braid', 'bun', 'bob', 'short hair', 'long hair', 'medium hair']
-const COSTUME_KEYS = ['dress', 'shirt', 'skirt', 'pants', 'uniform', 'armor', 'suit', 'coat', 'jacket', 'hat', 'ribbon', 'bow', 'gloves', 'boots', 'shoes', 'socks', 'stockings', 'thighhighs', 'pantyhose', 'bikini', 'swimsuit', 'cape', 'scarf', 'necktie', 'collar', 'headband', 'hairclip', 'earrings', 'necklace', 'bracelet', 'belt', 'glasses', 'mask', 'hood', 'apron', 'maid', 'school uniform', 'sailor', 'kimono', 'yukata']
-const BG_KEYS = ['background', 'outdoors', 'indoors', 'sky', 'cloud', 'tree', 'grass', 'water', 'ocean', 'beach', 'mountain', 'city', 'room', 'bed', 'floor', 'wall', 'window', 'night', 'day', 'sunset', 'sunrise', 'rain', 'snow', 'forest', 'garden', 'street', 'school', 'classroom', 'library', 'kitchen', 'bathroom', 'rooftop', 'bridge', 'castle', 'temple', 'church']
-
-function classifyTag(tag: string) {
-  const t = tag.toLowerCase()
-  if (APPEARANCE_KEYS.some(k => t.includes(k))) return 'appearance'
-  if (COSTUME_KEYS.some(k => t.includes(k))) return 'costume'
-  if (BG_KEYS.some(k => t.includes(k))) return 'background'
-  return 'other'
-}
-
-// carry 옵션 적용된 스텝 표시
-const displaySteps = computed(() => {
-  if (steps.value.length === 0) return []
-  const parentTags = steps.value[0]?.prompt?.split(',').map(t => t.trim()).filter(Boolean) || []
-  const parentByType: Record<string, string[]> = {}
-  parentTags.forEach(t => {
-    const cls = classifyTag(t)
-    if (!parentByType[cls]) parentByType[cls] = []
-    parentByType[cls].push(t)
-  })
-
-  return steps.value.map((step, i) => {
-    if (i === 0) return { ...step, displayPrompt: step.prompt }
-    let tags = step.prompt?.split(',').map(t => t.trim()).filter(Boolean) || []
-    const tagSet = new Set(tags.map(t => t.toLowerCase()))
-
-    // carry: Parent의 해당 카테고리 태그를 추가
-    if (carryAppearance.value) {
-      (parentByType.appearance || []).forEach(t => { if (!tagSet.has(t.toLowerCase())) tags.push(t) })
-    }
-    if (carryCostume.value) {
-      (parentByType.costume || []).forEach(t => { if (!tagSet.has(t.toLowerCase())) tags.push(t) })
-    }
-    if (carryBackground.value) {
-      (parentByType.background || []).forEach(t => { if (!tagSet.has(t.toLowerCase())) tags.push(t) })
-    }
-    return { ...step, displayPrompt: tags.join(', ') }
-  })
-})
+// carry 옵션 적용된 스텝 — 카드 표시·큐·T2I 전송이 모두 이 결과(effectiveStepPrompt)를 쓴다.
+const displaySteps = computed(() => applyEventCarry(steps.value, {
+  appearance: carryAppearance.value,
+  costume: carryCostume.value,
+  background: carryBackground.value,
+}))
 
 /**
  * 결과 목록 갈아끼우기.
@@ -357,7 +326,7 @@ function _buildScenarios() {
     if (!checked) continue
     const step = dSteps[parseInt(idx)]
     if (!step) continue
-    const prompt = step.displayPrompt || step.prompt || ''
+    const prompt = effectiveStepPrompt(step)
     if (!prompt) continue
     for (let r = 0; r < repeatCount.value; r++) {
       scenarios.push({ payload: { prompt, negative_prompt: '' } })
@@ -379,7 +348,8 @@ function generateNow() {
 }
 
 function sendStepToT2I(step: EventStep) {
-  const prompt = step.prompt || ''
+  // 카드에 보이는 carry 적용 프롬프트를 그대로 보낸다 (원본 step.prompt 가 아니라).
+  const prompt = effectiveStepPrompt(step)
   if (!prompt) return
   requestAction('pnginfo_send_prompt', { prompt, negative: '' })
   requestAction('show_toast', { type: 'success', msg: 'T2I로 전송됨' })
@@ -417,8 +387,10 @@ onMounted(() => {
       if (Array.isArray(data) && data.length > 0) _setEvents(data)
     }
   } catch {}
-  onBackendEvent('searchStatus', (msg: string) => {
-    loadingMsg.value = msg
+  // Event 데이터 적재 문구 전용 채널. Search 탭의 searchStatus 를 같이 들으면
+  // 두 탭이 keep-alive 로 살아 있는 동안 서로의 로딩 문구를 덮어쓴다.
+  onBackendEvent('eventLoadStatus', (msg: string) => {
+    if (searching.value) loadingMsg.value = msg
   })
   onBackendEvent('eventSearchProgress', (cur: number, total: number) => {
     searchCur.value = cur

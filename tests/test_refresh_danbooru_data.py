@@ -124,6 +124,66 @@ class DanbooruDatasetRefreshTests(unittest.TestCase):
             stored = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertTrue(stored["build"]["cross_rating_parent_duplication"])
 
+    def test_tag_columns_are_published_lower_case(self):
+        """Search 워커는 소문자 사본 없이 원본 태그 컬럼으로 매칭하므로 빌드가 소문자를 보장한다."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "posts.parquet"
+            output = root / "runtime"
+            mixed = _post(1, "g")
+            mixed.update({
+                "tag_string_general": "Long_Hair SMILE",
+                "tag_string_character": "Hatsune_Miku",
+                "tag_string_copyright": "VOCALOID",
+                "tag_string_artist": "SomeArtist",
+                "tag_string_meta": "HighRes",
+            })
+            missing = _post(2, "g", 1)   # post 1 의 자식 — Event 그래프에도 두 행이 실린다
+            missing["tag_string_meta"] = None
+            frame = pd.DataFrame([mixed, missing])
+            frame["parent_id"] = frame["parent_id"].astype("Int64")
+            frame.to_parquet(source, index=False)
+
+            with redirect_stdout(StringIO()):
+                result = main(
+                    [
+                        "posts",
+                        "--source",
+                        str(source),
+                        "--output-dir",
+                        str(output),
+                        "--dataset-label",
+                        "case_release",
+                        "--source-url",
+                        "https://example.test/posts.parquet",
+                        "--source-revision",
+                        "immutable-test-revision",
+                        "--snapshot-at",
+                        "2026-07-13T00:00:00Z",
+                    ]
+                )
+            self.assertEqual(result, 0)
+
+            search_g = pq.read_table(output / "danbooru_case_release_g.parquet").to_pylist()
+            by_general = {row["general"]: row for row in search_g}
+            row = by_general["long_hair smile"]
+            self.assertEqual(row["character"], "hatsune_miku")
+            self.assertEqual(row["copyright"], "vocaloid")
+            self.assertEqual(row["artist"], "someartist")
+            self.assertEqual(row["meta"], "highres")
+            self.assertIsNone(by_general["post_2"]["meta"])   # null 은 null 그대로
+            for record in search_g:
+                for column in ("general", "character", "copyright", "artist", "meta"):
+                    value = record[column]
+                    if value is not None:
+                        self.assertEqual(value, value.lower(), (column, value))
+
+            event_g = pq.read_table(
+                output / "danbooru_sorted" / "danbooru_g.parquet"
+            ).to_pylist()
+            event_row = next(r for r in event_g if r["id"] == 1)
+            self.assertEqual(event_row["tag_string_general"], "long_hair smile")
+
     def test_archives_unique_tags_missing_from_latest_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

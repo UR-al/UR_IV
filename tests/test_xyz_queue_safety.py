@@ -13,19 +13,16 @@ from widgets.queue_manager import QueueManager
 from workers.generation_worker import GenerationFlowWorker
 
 
-class _Signal:
-    def connect(self, _callback):
-        pass
-
-
 class _Panel:
+    """QueuePanel 의 대기열 매니저용 표면(항목 목록 + 실행 중 표시)만 흉내 낸다."""
+
     def __init__(self):
         self.items = []
-        self.start_requested = _Signal()
-        self.stop_requested = _Signal()
+        self._next_id = 0
 
     def add_single_item(self, item):
-        self.items.append({"id": str(len(self.items)), **item})
+        self._next_id += 1
+        self.items.append({"id": str(self._next_id), **item})
 
     def is_empty(self):
         return not self.items
@@ -36,17 +33,26 @@ class _Panel:
     def get_first_item(self):
         return self.items[0] if self.items else None
 
+    def get_item_by_id(self, item_id):
+        return next((item for item in self.items if item["id"] == item_id), None)
+
     def remove_first_item(self):
         return self.items.pop(0)
 
-    def update_progress(self, *_args):
-        pass
+    def consume_item(self, item_id):
+        for index, item in enumerate(self.items):
+            if item["id"] == item_id:
+                return self.items.pop(index)
+        return None
 
-    def set_processing(self, *_args):
-        pass
+    def claim_processing(self, item_id, _owner):
+        return self.get_item_by_id(item_id) is not None
 
-    def reset_progress(self):
-        pass
+    def release_processing(self, *_args):
+        return False
+
+    def processing_held_by_other(self, _owner):
+        return False
 
 
 class _Host(GenerationMixin, XYZActionsMixin):
@@ -77,8 +83,8 @@ class _Host(GenerationMixin, XYZActionsMixin):
         self._backend_needs_checkpoint = lambda: False
         self._abort_generation = mock.Mock()
         for name in (
-            "setWindowTitle", "btn_generate", "show_status", "viewer_label", "vue_bridge",
-            "gen_progress_bar", "_restore_generate_button", "_process_new_image", "isActiveWindow",
+            "setWindowTitle", "btn_generate", "show_status", "vue_bridge",
+            "_restore_generate_button", "_process_new_image", "isActiveWindow",
         ):
             setattr(self, name, mock.MagicMock())
 

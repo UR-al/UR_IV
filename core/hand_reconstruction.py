@@ -3,32 +3,39 @@
 This is deliberately not a finger counter or an anatomical correctness judge.
 It removes the old pixels under a user-drawn mask before handing a context crop
 to the selected image backend. No files, network, models, or GPU are accessed.
+
+Upload decoding, still-raster checks and PNG metadata preservation are shared
+with the relight editor through core.local_image_io (one validation policy).
 """
 from __future__ import annotations
 
-import base64
-import binascii
 from dataclasses import dataclass
 import hashlib
-import io
 import json
 import math
-import re
 from typing import Any
 
-from PIL import Image, ImageChops, ImageFilter, ImageOps, PngImagePlugin
+from PIL import Image, ImageChops, ImageFilter, ImageOps
+
+from core.local_image_io import (capture_png_metadata, decode_image_data_url, encode_png,
+                                 open_still_raster)
 
 
+# Limits stay module globals and are read at call time (tests patch them).
 MAX_PIXELS = 16_777_216
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_CHARS = 128 * 1024 * 1024
 MAX_METADATA_BYTES = 1024 * 1024
-_DATA_URL = re.compile(r"data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)")
-_FORMATS = {"png": "PNG", "jpeg": "JPEG", "webp": "WEBP"}
 
 
 @dataclass(frozen=True)
 class PreparedHandRepair:
+    """Validated repair input.
+
+    There is deliberately no re-encoded full-resolution copy of the source: the
+    panel already holds the exact image it sent, so the completion event carries
+    only the working-size prepared crop and the composited candidates.
+    """
     source: Image.Image
     source_metadata: dict[str, Any]
     edit_mask: Image.Image
@@ -39,7 +46,6 @@ class PreparedHandRepair:
     source_sha256: str
     init_png: bytes
     mask_png: bytes
-    source_png: bytes
     prepared_png: bytes
 
 
@@ -66,75 +72,25 @@ def _settings_from(raw: Any) -> dict[str, Any]:
 
 
 def _decode_data_url(value: Any, label: str) -> bytes:
-    if not isinstance(value, str) or len(value) > MAX_FILE_BYTES * 4 // 3 + 128:
-        raise ValueError(f"{label}: 64 MB 이하의 PNG/JPEG/WebP data URL이 필요합니다.")
-    match = _DATA_URL.fullmatch(value)
-    if not match:
-        raise ValueError(f"{label}: 업로드한 PNG/JPEG/WebP만 허용합니다. 경로나 외부 URL은 사용할 수 없습니다.")
-    try:
-        data = base64.b64decode(match[2], validate=True)
-    except (ValueError, binascii.Error) as exc:
-        raise ValueError(f"{label}: 올바르지 않은 base64 이미지입니다.") from exc
-    if not data or len(data) > MAX_FILE_BYTES:
-        raise ValueError(f"{label}: 이미지 파일은 64 MB 이하여야 합니다.")
-    # Verify the claimed MIME against the actual raster format, not its suffix.
-    try:
-        with Image.open(io.BytesIO(data)) as opened:
-            if opened.format != _FORMATS[match[1]]:
-                raise ValueError(f"{label}: 이미지 MIME과 실제 파일 형식이 다릅니다.")
-    except (OSError, SyntaxError, Image.DecompressionBombError) as exc:
-        raise ValueError(f"{label}: 이미지를 읽을 수 없습니다.") from exc
-    return data
+    # Verifies the claimed MIME against the actual raster format, not its suffix.
+    return decode_image_data_url(value, label, max_bytes=MAX_FILE_BYTES)
 
 
 def _read_raster(data: bytes, label: str, *, metadata: bool = False) -> tuple[Image.Image, dict[str, Any]]:
-    if not isinstance(data, bytes) or not data or len(data) > MAX_FILE_BYTES:
-        raise ValueError(f"{label}: 64 MB 이하의 이미지 바이트가 필요합니다.")
-    try:
-        with Image.open(io.BytesIO(data)) as opened:
-            if opened.format not in _FORMATS.values() or getattr(opened, "n_frames", 1) != 1:
-                raise ValueError(f"{label}: 단일 정지 PNG/JPEG/WebP 이미지만 허용합니다.")
-            width, height = opened.size
-            if min(width, height) < 2 or width * height > MAX_PIXELS:
-                raise ValueError(f"{label}: 최소 2×2, 최대 16 MP 이미지를 사용하세요.")
-            opened.load()
-            oriented = ImageOps.exif_transpose(opened)
-            mode = "RGBA" if "A" in oriented.getbands() or "transparency" in oriented.info else "RGB"
-            source = oriented.convert(mode)
-            details: dict[str, Any] = {}
-            if metadata:
-                # Preserve PNG text (including original generation parameters),
-                # ICC and EXIF; fail rather than silently dropping oversized data.
-                text = {key: value for key, value in oriented.info.items()
-                        if isinstance(key, str) and isinstance(value, str)}
-                if sum(len(key.encode("utf-8")) + len(value.encode("utf-8"))
-                       for key, value in text.items()) > MAX_METADATA_BYTES:
-                    raise ValueError("원본의 텍스트 메타데이터가 1 MB를 넘습니다.")
-                icc = oriented.info.get("icc_profile")
-                exif = oriented.getexif().tobytes() if oriented.getexif() else None
-                for value in (icc, exif):
-                    if value is not None and (not isinstance(value, bytes) or len(value) > MAX_METADATA_BYTES):
-                        raise ValueError("원본의 ICC/EXIF 메타데이터가 지원 범위를 넘습니다.")
-                details = {"text": text, "icc": icc, "exif": exif}
-            return source, details
-    except (OSError, SyntaxError, Image.DecompressionBombError) as exc:
-        raise ValueError(f"{label}: 손상되었거나 지원되지 않는 이미지입니다.") from exc
+    with open_still_raster(data, label, max_bytes=MAX_FILE_BYTES, max_pixels=MAX_PIXELS) as opened:
+        opened.load()
+        oriented = ImageOps.exif_transpose(opened)
+        mode = "RGBA" if "A" in oriented.getbands() or "transparency" in oriented.info else "RGB"
+        source = oriented.convert(mode)
+        # Preserve PNG text (including original generation parameters), ICC and
+        # EXIF; fail rather than silently dropping oversized data.
+        details = (capture_png_metadata(oriented, limit=MAX_METADATA_BYTES, source_mode=opened.mode)
+                   if metadata else {})
+        return source, details
 
 
 def _png(image: Image.Image, metadata: dict[str, Any] | None = None) -> bytes:
-    options: dict[str, Any] = {}
-    if metadata:
-        text = PngImagePlugin.PngInfo()
-        for key, value in metadata.get("text", {}).items():
-            text.add_text(key, value)
-        options["pnginfo"] = text
-        if metadata.get("icc"):
-            options["icc_profile"] = metadata["icc"]
-        if metadata.get("exif"):
-            options["exif"] = metadata["exif"]
-    stream = io.BytesIO()
-    image.save(stream, format="PNG", **options)
-    return stream.getvalue()
+    return encode_png(image, metadata)
 
 
 def prepare_hand_repair(request: Any) -> PreparedHandRepair:
@@ -199,7 +155,7 @@ def prepare_hand_repair(request: Any) -> PreparedHandRepair:
         source=source, source_metadata=metadata, edit_mask=edit_mask, bbox=bbox,
         working_size=working_size, content_box=content_box, settings=settings,
         source_sha256=hashlib.sha256(source_bytes).hexdigest(), init_png=init_png,
-        mask_png=_png(working_mask), source_png=_png(source, metadata), prepared_png=init_png,
+        mask_png=_png(working_mask), prepared_png=init_png,
     )
 
 

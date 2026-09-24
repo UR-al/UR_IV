@@ -47,15 +47,6 @@ def save_character_preset(name: str, extra_prompt: str,
     _save(data)
 
 
-def get_character_preset(name: str) -> str | None:
-    """캐릭터 프리셋에서 extra_prompt 로드. 없으면 None."""
-    data = _load()
-    entry = data.get(_normalize(name))
-    if entry:
-        return entry.get("extra_prompt", "")
-    return None
-
-
 def get_character_preset_full(name: str) -> dict | None:
     """캐릭터 프리셋 전체 데이터 로드. 없으면 None.
     Returns: {extra_prompt, cond_rules_json, display_name}
@@ -84,3 +75,43 @@ def has_preset(name: str) -> bool:
     """프리셋 존재 여부"""
     data = _load()
     return _normalize(name) in data
+
+
+def _clean_entry(key: str, value) -> tuple[str, dict] | None:
+    """공유 파일의 항목 하나를 검증·정규화. 형식이 아니면 None."""
+    if not isinstance(key, str) or not key.strip() or not isinstance(value, dict):
+        return None
+    extra = value.get("extra_prompt", "")
+    if not isinstance(extra, str):
+        return None
+    entry = {"extra_prompt": extra, "display_name": str(value.get("display_name") or key).strip()}
+    for opt in ("cond_rules_json", "cond_rules", "cond_neg_rules"):
+        if isinstance(value.get(opt), str) and value.get(opt):
+            entry[opt] = value[opt]
+    return _normalize(key), entry
+
+
+def export_character_presets() -> dict:
+    """공유용 사본 — {정규화이름: 항목}."""
+    import copy
+    return copy.deepcopy(_load())
+
+
+def import_character_presets(data, *, replace: bool = False) -> dict:
+    """공유 파일을 가져온다. replace=False 면 병합(같은 캐릭터는 가져온 것으로 교체).
+
+    예전 숨은 설정 탭은 파일을 직접 덮어써 모듈 캐시가 옛 값을 계속 돌려줬다 — 여기선 캐시와
+    파일을 함께 갱신한다. 반환: {imported, total}.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("캐릭터 프리셋 파일 형식이 아닙니다(JSON 객체가 필요합니다)")
+    cleaned: dict = {}
+    for key, value in data.items():
+        item = _clean_entry(key, value)
+        if item is not None:
+            cleaned[item[0]] = item[1]
+    if not cleaned:
+        raise ValueError("가져올 캐릭터 프리셋이 없습니다")
+    merged = dict(cleaned) if replace else {**_load(), **cleaned}
+    _save(merged)
+    return {"imported": len(cleaned), "total": len(merged)}

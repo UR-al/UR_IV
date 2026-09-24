@@ -8,6 +8,8 @@ lowercase, underscore-to-space comparison form.
 
 from __future__ import annotations
 
+import threading
+
 from core.tag_database import TagAsset, TagDatabase, get_tag_database
 
 
@@ -56,16 +58,32 @@ class TagIntelligence:
         self._totals = None
         # 신규: region / copyright / 카테고리 사전
         self._regions: dict[str, str] = {}      # norm 의류태그 → REGION 키
-        self._region_order: list[str] = []      # region 표시 순서
         self._copyright: dict[str, str] = {}    # norm 캐릭터/별칭 → 시리즈(copyright)
-        self._copyright_vals = None              # copyright 값 집합(지연 생성)
+        self._copyright_vals: set[str] = set()   # copyright 값 집합(적재 끝에 함께 생성)
         self._expression: set[str] = set()
         self._location: set[str] = set()
         self._pose: set[str] = set()
         self._object: set[str] = set()
         self._meta: set[str] = set()
         self._group_tags: set[str] = set()
-        self._implications: dict[str, set[str]] = {}
+        # 적재 직렬화 — 여러 스레드(예열·GUI 슬롯·워커)가 첫 조회를 동시에 해도 한 번만
+        # 적재하고, 적재 중인 반쪽 사전을 누구도 조회하지 않게 한다.
+        self._load_lock = threading.RLock()
+
+    def _ensure(self):
+        if self._loaded:          # 빠른 경로 — 적재가 **끝난 뒤에만** 참
+            return
+        with self._load_lock:
+            if self._loaded:
+                return
+            try:
+                self._load_all()
+            finally:
+                # copyright 값 집합은 여기서 한 번에 만든다 — 예전처럼 is_known 이 적재
+                # 도중에 지연 생성하면 부분 집합이 세션 내내 캐시될 수 있었다.
+                self._copyright_vals = set(self._copyright.values())
+                # 실패해도 표시 — 자산이 없을 때 조회마다 재적재하지 않게.
+                self._loaded = True
 
     def _load_lines(self, asset: TagAsset) -> set[str]:
         try:
@@ -74,11 +92,8 @@ class TagIntelligence:
             print(f"[TagIntel] {asset.value} load failed: {exc}")
             return set()
 
-    def _ensure(self):
-        if self._loaded:
-            return
-        self._loaded = True
-
+    def _load_all(self):
+        """모든 자산 적재 — _ensure 가 락 안에서 한 번만 부른다."""
         # 1) Korean category/count catalog.
         try:
             df = self._database.read_parquet(TagAsset.KOREAN_TAG_CATALOG)
@@ -123,7 +138,6 @@ class TagIntelligence:
             region_data = self._database.read_json(TagAsset.CLOTHING_REGIONS)
             if isinstance(region_data, dict):
                 for region, tags in (region_data.get("regions") or {}).items():
-                    self._region_order.append(region)
                     for tag in tags:
                         n = _norm(tag)
                         if n:
@@ -153,16 +167,9 @@ class TagIntelligence:
         except Exception as exc:
             print(f"[TagIntel] tag group load failed: {exc}")
 
-        # 8) Active implications augment only explicit redundancy removal.
-        try:
-            implication_data = self._database.load_active_implications()
-            for antecedent, consequences in implication_data.items():
-                key = _norm(antecedent)
-                values = {_norm(value) for value in consequences if _norm(value)}
-                if key and values:
-                    self._implications.setdefault(key, set()).update(values)
-        except Exception as exc:
-            print(f"[TagIntel] tag implications load failed: {exc}")
+        # (활성 implication 표는 올리지 않는다 — 쓰던 remove_redundant_subtags 가 호출자 없던
+        #  refineToSpecificTags 슬롯과 함께 은퇴했다(감사 #135). 상위 태그 추론은 TagClassifier 가
+        #  TagDatabase.load_active_implications 로 따로 읽는다.)
 
         print(f"[TagIntel] KR태그 {len(self._cat):,} · 레이팅 {len(self._rating):,} · "
               f"의류 {len(self._clothes):,} · 특징 {len(self._charac):,} · 색상 {len(self._colors):,} · "
@@ -291,8 +298,6 @@ class TagIntelligence:
     def is_known(self, tag: str) -> bool:
         self._ensure()
         n = _norm(tag)
-        if self._copyright_vals is None:
-            self._copyright_vals = set(self._copyright.values())
         return (n in _PROMPT_ALLOW or n in self._cat or n in self._rating or
                 n in self._clothes or n in self._charac or n in self._colors or
                 n in self._expression or n in self._location or n in self._pose or
@@ -350,21 +355,6 @@ class TagIntelligence:
     def region_label(self, region: str) -> str:
         return REGION_LABELS.get(region, region)
 
-    def group_by_region(self, tags):
-        """의류 태그들을 region별로 그룹화. Returns [{region, label, tags:[...]}] (표시순)."""
-        self._ensure()
-        buckets: dict[str, list] = {}
-        for t in tags:
-            r = self._regions.get(_norm(t), "UNASSIGNED")
-            buckets.setdefault(r, []).append(t)
-        out = []
-        for r in self._region_order + ["UNASSIGNED"]:
-            if r in buckets:
-                out.append({"region": r, "label": REGION_LABELS.get(r, r), "tags": buckets.pop(r)})
-        for r, ts in buckets.items():   # order에 없던 나머지
-            out.append({"region": r, "label": REGION_LABELS.get(r, r), "tags": ts})
-        return out
-
     # ── ③ copyright (캐릭터 → 시리즈) ──
     def copyright_of(self, character: str) -> str:
         """캐릭터명/별칭 → 대표 copyright(시리즈) 태그. 없으면 ''."""
@@ -379,8 +369,6 @@ class TagIntelligence:
     def is_copyright(self, tag: str) -> bool:
         """알려진 copyright(시리즈) 태그인지."""
         self._ensure()
-        if self._copyright_vals is None:
-            self._copyright_vals = set(self._copyright.values())
         return _norm(tag) in self._copyright_vals
 
     # ── ⑤ 카테고리 판별 ──
@@ -441,86 +429,18 @@ class TagIntelligence:
                 rest.append(t)
         return {"rest": rest, "groups": groups}
 
-    def remove_redundant_subtags(self, tags):
-        """Remove lexical or actively-implied parent tags.
-
-        Original spelling and order are preserved.  An implication cycle never
-        removes either side solely because of that cycle.
-        """
-        self._ensure()
-        items = []
-        for t in tags:
-            normalized = _norm(t)
-            items.append((t, normalized, frozenset(normalized.split())))
-
-        closure_cache: dict[str, set[str]] = {}
-
-        def implied_by(tag: str) -> set[str]:
-            cached = closure_cache.get(tag)
-            if cached is not None:
-                return cached
-            seen = {tag}
-            pending = list(self._implications.get(tag, set()))
-            result: set[str] = set()
-            while pending:
-                parent = pending.pop()
-                if parent in seen:
-                    continue
-                seen.add(parent)
-                result.add(parent)
-                pending.extend(self._implications.get(parent, set()) - seen)
-            closure_cache[tag] = result
-            return result
-
-        kept, removed = [], []
-        for i, (t, normalized, words) in enumerate(items):
-            if not words:
-                kept.append(t)
-                continue
-
-            lexical_parent = any(
-                j != i and words < other_words
-                for j, (_other, _other_normalized, other_words) in enumerate(items)
-            )
-            implication_parent = any(
-                j != i
-                and normalized != other_normalized
-                and normalized in implied_by(other_normalized)
-                and other_normalized not in implied_by(normalized)
-                for j, (_other, other_normalized, _other_words) in enumerate(items)
-            )
-            if lexical_parent or implication_parent:
-                removed.append(t)
-            else:
-                kept.append(t)
-        return kept, removed
-
-    # ── ② color 페어링 결합 ──
-    def pair_colors(self, tags):
-        """분리된 단일 색상 단어를 바로 뒤 태그와 결합 (결합 결과가 실재 태그일 때만).
-        예: ['blue','dress'] → ['blue dress']; ['red','xyz'] → 그대로(미존재)."""
-        self._ensure()
-        out = []
-        i, n = 0, len(tags)
-        while i < n:
-            cur = tags[i]
-            cn = _norm(cur)
-            if i + 1 < n and cn in self._colors and len(cn.split()) == 1:
-                combo = f"{cur} {tags[i + 1]}".strip()
-                if self.is_known(combo):
-                    out.append(combo)
-                    i += 2
-                    continue
-            out.append(cur)
-            i += 1
-        return out
-
 
 _instance = None
+_instance_lock = threading.Lock()
 
 
 def get_tag_intelligence() -> TagIntelligence:
+    """프로세스 싱글턴 — 여러 스레드가 동시에 불러도 한 벌만 만든다(이중 확인)."""
     global _instance
-    if _instance is None:
-        _instance = TagIntelligence()
-    return _instance
+    instance = _instance
+    if instance is not None:
+        return instance
+    with _instance_lock:
+        if _instance is None:
+            _instance = TagIntelligence()
+        return _instance

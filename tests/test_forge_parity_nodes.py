@@ -8,6 +8,7 @@ from unittest import mock
 from comfy_custom_nodes.ai_studio_forge_parity import compat
 from comfy_custom_nodes.ai_studio_forge_parity import generation
 from comfy_custom_nodes.ai_studio_forge_parity import guidance
+from tests._optional_deps import load_torch, requires_torch
 
 
 class _FakeModel:
@@ -318,6 +319,62 @@ class TestForgeParityDisabledPaths(unittest.TestCase):
             guidance.ForgeNeoAnimaGuidanceSuite().patch(
                 object(), object(), object(), object(), True, payload
             )
+
+    @requires_torch
+    def test_standalone_dave_shares_suite_wrapper_and_tau_cutoff(self):
+        torch = load_torch()
+
+        class _Block:
+            def forward(self, *args, **kwargs):
+                return torch.ones((1, 4, 2)) * 2.0
+
+        class _BlockModel:
+            def __init__(self, count):
+                self.model = SimpleNamespace(diffusion_model=SimpleNamespace(
+                    blocks=[_Block() for _ in range(count)]
+                ))
+                self.object_patches = {}
+
+            def clone(self):
+                clone = _BlockModel(0)
+                clone.model = self.model
+                clone.object_patches = dict(self.object_patches)
+                return clone
+
+            def add_object_patch(self, path, value):
+                self.object_patches[path] = value
+
+        model = _BlockModel(24)
+        (patched,) = guidance.ForgeNeoAnimaDAVE().patch(
+            model, True, "dave_alpha.npz", 0.5, 0.5,
+        )
+        self.assertIsNot(patched, model)
+        self.assertEqual(model.object_patches, {})
+        # 'dave_alpha.npz' keeps the saved COMBO valid and maps to Forge 8-18.
+        self.assertEqual(
+            set(patched.object_patches),
+            {f"diffusion_model.blocks.{index}.forward" for index in range(8, 19)},
+        )
+        wrapper = patched.object_patches["diffusion_model.blocks.8.forward"]
+        early = {"sigmas": torch.tensor([0.9])}   # progress 0.1 < tau 0.5
+        late = {"sigmas": torch.tensor([0.1])}    # progress 0.9 >= tau 0.5
+        # Keyword and Cosmos positional (#7) transformer_options are honoured
+        # the same way — the old standalone copy only read the keyword.
+        positional_early = wrapper(*([None] * 6), early)
+        positional_late = wrapper(*([None] * 6), late)
+        keyword_late = wrapper(None, transformer_options=late)
+        self.assertTrue(torch.allclose(positional_early, torch.ones((1, 4, 2))))
+        self.assertTrue(torch.allclose(positional_late, torch.full((1, 4, 2), 2.0)))
+        self.assertTrue(torch.allclose(keyword_late, torch.full((1, 4, 2), 2.0)))
+
+        (explicit,) = guidance.ForgeNeoAnimaDAVE().patch(
+            _BlockModel(24), True, "blocks:8-18", 0.5, 0.0,
+        )
+        self.assertEqual(set(explicit.object_patches), set(patched.object_patches))
+        self.assertIs(
+            guidance.ForgeNeoAnimaDAVE().patch(model, True, "blocks:8-18", 0.0)[0],
+            model,
+        )
 
     def test_enabled_but_neutral_suite_and_disabled_inner_daemon_are_identity(self):
         model = _FakeModel()

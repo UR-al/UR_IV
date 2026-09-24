@@ -44,6 +44,11 @@ class AiAssistIntegrationTests(unittest.TestCase):
         self.path_patch = patch('core.ai_assist_instructions.config_file', return_value=self.prefs)
         self.path_patch.start()
         self.addCleanup(self.path_patch.stop)
+        # /api/show 능력 조회(think 제어)는 (서버, 모델)별로 캐시된다 — 테스트 순서에 따라
+        # 조회 요청이 끼거나 빠지지 않게 매번 비운다. 요청은 URL 로 골라 본다.
+        from core.ollama_client import clear_thinking_mode_cache
+        clear_thinking_mode_cache()
+        self.addCleanup(clear_thinking_mode_cache)
         self.bridge = VueBridge()
         self.instructions = {
             'common': 'AI_ASSIST_COMMON_SENTINEL',
@@ -126,7 +131,9 @@ class AiAssistIntegrationTests(unittest.TestCase):
                 str(image), system_prompt='BATCH_PRIVATE_SYSTEM'), 'A cat sits.')
         self.assertTrue(done[0]['ok'])
         self.assertEqual(self.posts[0][1]['messages'], messages)
-        self.assertEqual(self.posts[2][1]['system'], 'BATCH_PRIVATE_SYSTEM')
+        captions = [payload for url, payload in self.posts if url.endswith('/api/generate')]
+        self.assertEqual(len(captions), 2)
+        self.assertEqual(captions[1]['system'], 'BATCH_PRIVATE_SYSTEM')
         for _url, payload in self.posts:
             self.assertNotIn(self.instructions['common'], json.dumps(payload))
             for instruction in self.instructions['features'].values():

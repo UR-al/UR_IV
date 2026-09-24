@@ -93,6 +93,7 @@ from PyQt6.QtWebSockets import QWebSocketServer, QWebSocketProtocol
 from PyQt6.QtNetwork import QHostAddress
 
 from core.studio_application import CallContext
+from core.web_action_policy import is_loopback_bind_host
 from ui.studio_qwebchannel import StudioQWebChannelAdapter
 
 # ── 포트 설정 (환경변수로 덮어쓰기 가능) ──
@@ -109,6 +110,15 @@ SESSION_COOKIE = "aistudio_session"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _DIST = os.path.join(_ROOT, "frontend_dist")
 _THUMB_DIR = os.path.join(_ROOT, "image_cache", "web_thumbs")
+
+
+def _host_dialogs_available() -> bool:
+    """호스트 네이티브 대화상자를 웹 클라이언트가 볼 수 있는가 = loopback 바인드.
+
+    0.0.0.0/LAN 바인드면 요청이 다른 기기에서 올 수 있고 대화상자는 호스트에만 뜬다.
+    서버는 요청한 소켓을 모르므로(QWebChannel) 바인드 주소로 판단한다.
+    """
+    return is_loopback_bind_host(BIND_HOST)
 
 
 def _token_matches(candidate: str | None) -> bool:
@@ -147,7 +157,10 @@ def _origin_matches(origin_text: str, request_host: str) -> bool:
 # 새 프론트 기능이 슬롯을 추가하면 이 목록도 함께 갱신해야 한다.
 _WEB_METHODS = frozenset({
     "onWidgetChanged", "onAction", "getWidgetValue", "getAllWidgetValues",
-    "editorProcess", "getLastGalleryFolder", "getGalleryImages",
+    # 위젯 속성(콤보 선택지 등) 스냅숏 — 웹 클라이언트는 늘 _setup_ui 의 push 뒤에 붙는다.
+    "getAllWidgetProperties",
+    # 갤러리 목록은 워커 스레드 스캔만(응답: galleryImagesReady) — 동기 getGalleryImages 는 없앴다.
+    "editorProcess", "getLastGalleryFolder",
     "requestGalleryImages", "getFavorites", "generateThumbnails",
     "searchDanbooru", "loadLastSearchResults", "loadFullResults",
     "getActiveSearchDataset", "getUiPrefs",
@@ -156,22 +169,37 @@ _WEB_METHODS = frozenset({
     "saveChatSchemaDraft",
     # Backend runtime, generation API, model-path 설정은 redaction과 native
     # capability 검사를 한곳에서 강제하는 ``studio`` 객체로만 공개한다.
-    "getUpscalers", "requestUpscalers", "saveImageExif", "renameFile",
+    "requestUpscalers", "saveImagePrompt", "renameFile",
+    # 갤러리·즐겨찾기 EXIF 검색 — 검색 텍스트만 백그라운드로(응답: imageSearchTextsReady)
+    "requestImageSearchTexts",
     "getEdgeMap", "ollamaEnhance", "convertPromptToNl", "editorPasteImage",
-    "editorAutoSave", "editorCheckAutoSave", "editorClearAutoSave", "getFileInfo",
-    "ollamaListModels", "requestOllamaModels", "getRandomResolutions",
+    # 크래시 복구본 쓰기는 워커에서(응답: editorAutoSaveReady) — 레이어 합성이 GUI 스레드를 막지 않게
+    "requestEditorAutoSave", "editorCheckAutoSave", "editorClearAutoSave", "editorRecoverAutoSave",
+    "getFileInfo",
+    "requestOllamaModels", "getRandomResolutions",
     "getInitialConfig", "getGenStats", "getWildcardTree", "getPresetList",
+    # 자동화 설정(모드별 파일) — 클라이언트별 pull, 방송 없음
+    "getAutomationSettings",
+    # 작품명은 getCharacterFeatures 의 copyright 로 온다(사문 getCharacterCopyright·pairColors·
+    # refineToSpecificTags·getClothingRegions·generateXYZCombinations 슬롯은 없앴다 — P13c).
     "getPresetData", "searchCharacters", "getCharacterFeatures",
-    "getCharacterCopyright", "fetchCharacterTagsOnline", "separateTags", "pairColors",
-    "refineToSpecificTags", "getLoras", "saveSession", "getSession",
-    "getClothingRegions", "saveCharacterPreset", "deleteCharacterPreset",
+    "separateTags", "saveSession", "getSession",
+    # 네트워크·디스크를 쓰는 조회는 비동기(request* → *Ready, 요청 id 동봉) — GUI 스레드를 막지 않는다.
+    # 동기 getLoras 는 슬롯이 아닌 파이썬 전용 메서드라 여기(웹)에도 두지 않는다.
+    # 업스케일러·Ollama·ADetailer 목록도 request* 만 — 동기 getUpscalers·ollamaListModels·
+    # getADetailerModels 슬롯(GUI 스레드 HTTP)은 없앴다(tests/test_async_bridge_lookups.py 가 지킨다).
+    "requestCharacterTagsOnline", "requestLoras", "requestCompareGif",
+    # 하단 상태줄 마지막 한 줄 — 늦게 붙은 클라이언트가 한 번 읽는다(statusMessage 짝)
+    "getStatusMessage",
+    "saveCharacterPreset", "deleteCharacterPreset",
     "getCharGlobalPrefs", "saveCharGlobalPrefs", "applyCharacterPreset",
     "getDeckCharacters", "submitABTest", "getCharFeatureOverride",
-    "setCharFeatureOverride", "saveWildcard", "deleteWildcard", "renameWildcard",
+    "setCharFeatureOverride", "saveWildcard", "createWildcard", "deleteWildcard", "renameWildcard",
     "getExcludeMatches", "deepCleanPrompt", "getCharacterInsight", "classifyTags",
-    "exportCompareGif", "getTabDefaults", "getADetailerModels",
+    "getTabDefaults",
     "requestADetailerModels", "getYoloModelLabel", "refreshYoloModels",
-    "getTagSuggestions", "generateXYZCombinations", "captionImage",
+    "getTagSuggestionsRich",
+    # 캡션은 워커 스레드 경로만 — 동기 captionImage(GUI 스레드 Ollama HTTP·ONNX 추론)는 없앴다.
     "startCaptionBatch", "requestCaptionRuntime", "getCaptionJobStatus",
     "loadCaption", "saveCaption", "getImageExif",
     # sam-extra 임베드 LoRA Manager 주소 조회 (워크플로 4)
@@ -183,20 +211,28 @@ _WEB_SIGNALS = frozenset({
     "editorImageLoaded", "editorResult", "captionFilesSelected", "captionProgress",
     "captionDone", "captionOutDirSelected", "captionModelDirSelected", "captionRuntimeReady",
     "i2iImageLoaded", "galleryFolderLoaded",
-    "inpaintImageLoaded", "searchStatus", "searchResultLineage", "loraInserted", "loraStackLoaded",
+    # 삭제 결과 — 빠지면 웹 모드에서 휴지통으로 옮겨도 목록에서 영영 안 빠진다.
+    "imageDeleteResult",
+    "inpaintImageLoaded", "searchStatus", "searchResultLineage", "loraStackLoaded",
+    # PNG Info '열기' 전용 — inpaintImageLoaded 와 분리(인페인트 캔버스를 날리지 않게).
+    "pngInfoImageLoaded",
     "yoloModelUpdated", "condRulesLoaded", "batchFilesSelected", "ollamaResult",
+    # 일괄 처리·업스케일 진행 — 빠지면 웹 모드에서 시작 버튼이 실행 중에도 풀려 있다.
+    "batchJobState",
     "genNlResult", "globalWeightsLoaded", "uiPrefsLoaded", "compareImageLoaded",
-    "galleryImagesReady", "thumbnailReady", "upscalersReady", "ollamaModelsReady",
+    "galleryImagesReady", "thumbnailReady", "imageSearchTextsReady", "upscalersReady", "ollamaModelsReady",
     "chatToken", "chatDone", "chatThreads", "chatGenerationEvent", "chatModelInfo",
     "chatModelsReady", "aiAssistInstructionsChanged", "instructionPresetsChanged",
     "xyzCapabilitiesReceived", "xyzPlotEvent",
     "adetailerModelsReady", "queueUpdated", "queueItemAdded", "queueCompleted",
     "showNotification", "adetailerResult", "adetailerProgress", "sam3Result",
     "sam3Progress", "eventSearchProgress", "eventSearchResults", "eventImportResults",
+    "eventLoadStatus",
     # automationStatus 는 prompt·paused 필드가 늘어도 그대로 통과한다(JSON 통째 전달).
     # 새 액션(automation_override_next / pause_automation / resume_automation)은
-    # onAction 이 이미 _WEB_METHODS 에 있어 별도 등록이 필요 없다 — 액션은 이름별로
-    # 막지 않는다. 여기 목록은 '시그널'만 막는다.
+    # onAction 이 이미 _WEB_METHODS 에 있어 별도 등록이 필요 없다. 여기 목록은 '시그널'만
+    # 막는다 — 액션 이름별 거부는 VueBridge.onAction 의 core.web_action_policy 가 한다
+    # (호스트 권한 액션은 웹 전체, 호스트 대화상자 액션은 원격 웹 모드에서 거부).
     "automationStatus", "automationSettingsLoaded", "instantWildcardsList",
     "promptOrderLoaded", "workflowProfilesList", "widgetValueChanged",
     "widgetPropertyChanged", "batchUpdate", "tabChanged", "vramUpdated",
@@ -205,16 +241,25 @@ _WEB_SIGNALS = frozenset({
     # SAM3 Refine (sam-extra 워크플로 2) + 임베드 LoRA Manager (워크플로 4)
     "refineResult", "loraManagerUrlReady",
     "editorWatermarkImageLoaded",
+    # 에디터 저장 결과 — 빠지면 웹 모드에서 저장이 끝나도 '저장 중'에서 풀리지 않는다.
+    "editorSaveResult",
+    # 자동저장(크래시 복구본) 결과 — requestEditorAutoSave 짝.
+    "editorAutoSaveReady",
     # 태그 검색 결과 — 누락되면 웹 모드에서 결과가 영영 도착하지 않는다.
     "searchResultsReady",
-    # 백엔드 선택 게이트 4종. 액션(probe_backend/select_backend/pick_comfy_workflow)은
-    # 이미 onAction 으로 열려 있으니 여기 빠지면 '요청은 가는데 답이 안 오는' 반쪽이
-    # 된다 — 게이트가 backendSelected 로만 닫히므로 웹 모드에서 영영 안 닫힌다.
+    # 백엔드 선택 게이트 4종. 웹 모드에선 게이트가 열리지 않고(generator_webui.
+    # _can_use_backend_gate), 게이트 액션(probe_backend/select_backend/pick_comfy_workflow)도
+    # core.web_action_policy 가 onAction 에서 거부한다. 시그널은 무해해서 남겨 둔다 —
+    # 빼려면 tests/test_web_mode_security.py 의 native_only_events 에 함께 넣어야 한다.
     "backendSelectionRequired", "backendProbeResult", "backendSelected",
     "comfyWorkflowPicked",
     # 하단 계기 스트립의 백엔드 칸. 빠지면 웹 모드에서만 스트립이 영영 비어 있고
     # 데스크톱은 멀쩡해 눈치채기 어렵다(게이트 4종과 같은 함정).
     "backendStatus",
+    # 하단 계기 스트립의 상태 한 줄(show_status) — 빠지면 웹 모드에서만 상태 문구가 사라진다.
+    "statusMessage",
+    # 비동기 조회 결과(request* 짝) — 빠지면 웹 모드에서 LoRA 매니저·danbooru·GIF 가 '불러오는 중'에 멈춘다.
+    "lorasReady", "characterTagsOnlineReady", "compareGifReady",
 })
 
 
@@ -470,7 +515,14 @@ class _DistHandler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
 
     def _serve_runtime_config(self, head_only=False):
-        body = f"window.__AISTUDIO_WS_PORT__={WS_PORT};\n".encode("utf-8")
+        # __AISTUDIO_HOST_DIALOGS__: 호스트 파일 대화상자가 이 브라우저와 같은 화면에 뜨는가
+        # (loopback 바인드). 원격(LAN) 모드면 프론트가 해당 버튼을 끄고, 서버도
+        # core.web_action_policy 로 같은 액션을 거부한다(frontend/src/utils/hostDialogs.ts).
+        host_dialogs = "true" if _host_dialogs_available() else "false"
+        body = (
+            f"window.__AISTUDIO_WS_PORT__={WS_PORT};\n"
+            f"window.__AISTUDIO_HOST_DIALOGS__={host_dialogs};\n"
+        ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/javascript; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -490,8 +542,13 @@ class _DistHandler(SimpleHTTPRequestHandler):
         return safe_input_path(raw)
 
     def _not_modified(self, stat, etag) -> bool:
-        if self.headers.get("If-None-Match") == etag:
-            return True
+        # RFC 9110 §13.1.3: If-None-Match 가 있으면 그것만 보고 If-Modified-Since 는 무시한다.
+        # 예전에는 ETag 가 달라도 If-Modified-Since(1초 정밀도 + 1초 여유)로 넘어가, 같은 초 안에 덮어쓴
+        # 파일(에디터 재저장 등)에 304 를 돌려줘 브라우저가 옛 그림을 계속 썼다.
+        inm = self.headers.get("If-None-Match")
+        if inm is not None:
+            tags = [t.strip() for t in inm.split(",")]
+            return "*" in tags or etag in tags or f"W/{etag}" in tags
         since = self.headers.get("If-Modified-Since")
         if not since:
             return False
@@ -550,41 +607,17 @@ class _DistHandler(SimpleHTTPRequestHandler):
         if not safe:
             self.send_error(404, "file not found or not allowed")
             return
+        from core.thumb_cache import bucket_thumb_width, get_or_make_thumb
         query = parse_qs(urlparse(self.path).query)
+        # 폭은 갤러리 버킷으로 올린다 — 슬라이더 단계×DPR 마다 캐시 변형이 쌓이지 않게(프런트도 같은 버킷).
+        width = bucket_thumb_width((query.get("width") or ["384"])[0])
         try:
-            width = max(64, min(1024, int((query.get("width") or ["384"])[0])))
-        except (TypeError, ValueError):
-            width = 384
-
-        os.makedirs(_THUMB_DIR, exist_ok=True)
-        key = hashlib.sha256(f"{os.path.normcase(safe)}@{width}".encode("utf-8")).hexdigest()
-        thumb = os.path.join(_THUMB_DIR, f"{key}.jpg")
-        try:
-            source_stat = os.stat(safe)
-            stale = not os.path.isfile(thumb) or os.stat(thumb).st_mtime_ns < source_stat.st_mtime_ns
-            if stale:
-                from PIL import Image, ImageOps
-                tmp = f"{thumb}.{threading.get_ident()}.tmp"
-                try:
-                    with Image.open(safe) as image:
-                        image = ImageOps.exif_transpose(image)
-                        image.thumbnail((width, width), Image.Resampling.LANCZOS)
-                        if image.mode in ("RGBA", "LA"):
-                            canvas = Image.new("RGB", image.size, (13, 13, 13))
-                            canvas.paste(image, mask=image.getchannel("A"))
-                            image = canvas
-                        else:
-                            image = image.convert("RGB")
-                        image.save(tmp, "JPEG", quality=86, optimize=True)
-                    os.replace(tmp, thumb)
-                finally:
-                    try:
-                        if os.path.exists(tmp):
-                            os.remove(tmp)
-                    except OSError:
-                        pass
+            os.makedirs(_THUMB_DIR, exist_ok=True)
+            thumb = get_or_make_thumb(safe, width, _THUMB_DIR)
         except Exception as e:
             print(f"[web] 썸네일 생성 실패: {e}")
+            thumb = None
+        if not thumb:
             self.send_error(500, "thumbnail error")
             return
         self._stream_file(thumb, content_type="image/jpeg", head_only=head_only, cache_seconds=3600)
@@ -626,11 +659,26 @@ class _DistHandler(SimpleHTTPRequestHandler):
         super().do_HEAD()
 
 
+_WEB_THUMB_CACHE_MAX_BYTES = 200 * 1024 * 1024
+
+
+def _prune_web_thumb_cache():
+    """웹 썸네일 캐시 상한 정리 — 원래 cache_cleanup 대상에서 빠져 끝없이 쌓였다."""
+    try:
+        from core.cache_cleanup import prune_thumbs
+        removed = prune_thumbs(_THUMB_DIR, _WEB_THUMB_CACHE_MAX_BYTES)
+        if removed:
+            print(f"[web] 썸네일 캐시 정리: {removed}개 삭제")
+    except Exception as e:
+        print(f"[web] 썸네일 캐시 정리 실패(무시): {e}")
+
+
 def _start_http_server():
     httpd = ThreadingHTTPServer((BIND_HOST, HTTP_PORT), _DistHandler)
     httpd.daemon_threads = True
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
+    threading.Thread(target=_prune_web_thumb_cache, daemon=True, name="web-thumb-prune").start()
     print(f"[web] HTTP 정적 서버: http://{BIND_HOST}:{HTTP_PORT}")
     return httpd
 
@@ -638,6 +686,24 @@ def _start_http_server():
 # ──────────────────────────────────────────────────────────────────────────
 # 웹 모드 시작 시퀀스 — 임베드 Vue 로드/대기는 건너뛰고 백엔드만 준비
 # ──────────────────────────────────────────────────────────────────────────
+def _flush_window_state_on_quit(window) -> None:
+    """웹 모드 종료(aboutToQuit) — 모아 둔 덱 진행도와 대기열을 저장한다.
+
+    덱 진행도는 뽑을 때마다 쓰지 않고 모아 둔다(core.search_deck.DeckSaveThrottle). 대기열도
+    변경을 모아 한 번에 쓴다(widgets/queue_panel.py PERSIST_DELAY_MS). 데스크톱은 _quit_app 이
+    저장하지만 웹 모드는 그 경로를 타지 않아, 여기서 안 쓰면 마지막 저장 뒤 뽑은 진행(최대 19장)과
+    마지막 대기열 변경이 사라진다. 종료를 막지 않도록 실패는 기록만 한다.
+    """
+    for name, label in (('_flush_deck_state', '덱 진행도'), ('_flush_queue_state', '대기열')):
+        flush = getattr(window, name, None)
+        if not callable(flush):
+            continue
+        try:
+            flush()
+        except Exception as exc:
+            print(f"[web] {label} 저장 실패(계속 종료): {exc}")
+
+
 def _web_startup(window, app, web_server):
     """창 모드의 _run_startup_sequence 에서 '임베드 뷰 로드/대기'만 제외한 버전.
 
@@ -654,10 +720,21 @@ def _web_startup(window, app, web_server):
     if web_server._had_client:
         pass
     else:
+        waited_out = []
         web_server._on_first_client = loop.quit
-        QTimer.singleShot(60000, loop.quit)  # 안전 타임아웃
+
+        def _wait_timeout():
+            waited_out.append(True)
+            loop.quit()
+
+        QTimer.singleShot(60000, _wait_timeout)  # 안전 타임아웃
         print("[web] 브라우저 접속 대기 중…")
         loop.exec()
+        if not web_server._had_client and not waited_out:
+            # 접속도 시간 초과도 아닌데 대기가 끝났다 — 앱 종료(콘솔 Ctrl+C 등)가 모든 이벤트 루프를
+            # 끝냈다. 종료 정리(aboutToQuit) 뒤에 백엔드 연결 워커를 새로 띄우지 않는다.
+            print("[web] 종료 요청 — 백엔드 적용을 건너뜁니다")
+            return
 
     # 3. 백엔드 연결 + 모델/샘플러/LoRA → Vue(브라우저)로 push
     try:
@@ -675,9 +752,8 @@ def _web_startup(window, app, web_server):
 def main():
     if sys.platform == "win32":
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "mycompany.myproduct.subproduct.version"
-        )
+        from core.app_instance import APP_USER_MODEL_ID
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
@@ -689,6 +765,18 @@ def main():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)  # noqa: F405
 
+    # 처리되지 않은 예외 훅 — 창 모드(new_main_ui)와 같은 core/crash_hooks. 훅이 없으면 PyQt6 는
+    # Qt 가 부른 슬롯(프록시 toggled·QWebChannel 호출)의 예외를 qFatal 로 처리해 웹 서버 프로세스
+    # 전체가 끝난다. 훅은 트레이스백을 콘솔·logs/last_crash_web.log(데스크톱과 다른 파일 — 동시에
+    # 떠도 서로의 크래시 기록을 지우지 않게)에 남기고 이벤트 루프를 살린다.
+    from core.crash_hooks import install_crash_handlers
+    _crash_fp = install_crash_handlers(label="web")  # noqa: F841 — 앱 수명 동안 파일을 열어 둔다
+    # 콘솔 Ctrl+C = 서버 종료. 훅이 슬롯 예외를 삼키므로 기본 SIGINT(슬롯 안 KeyboardInterrupt)로는
+    # 더 이상 멈추지 않는다 — 이벤트 루프 안이면 app.quit() 으로 aboutToQuit 정리(_shutdown_servers)까지
+    # 타고 끝낸다(core/console_interrupt). 타이머는 app 이 부모라 앱 수명 동안 돈다.
+    from core.console_interrupt import install_sigint_quit, run_main_loop
+    _sigint_keepalive = install_sigint_quit(app)  # noqa: F841
+
     if not os.path.exists(os.path.join(_DIST, "index.html")):
         print("[web] frontend_dist 가 없습니다. 먼저 'cd frontend && npm run build' 하세요.")
         sys.exit(1)
@@ -697,6 +785,9 @@ def main():
     window = GeneratorMainUI()
     # 웹 모드 표시 — 저장된 창 기하 복원(showMaximized 등)이 호스트 창을 띄우지 않게.
     window.web_mode = True
+    # 원격(LAN) 웹 모드 표시 — VueBridge.onAction 이 호스트 대화상자 액션을 거부하는 기준
+    # (core.web_action_policy.DESKTOP_DIALOG_ACTIONS). loopback 이면 같은 화면이라 허용.
+    window.web_remote = not _host_dialogs_available()
 
     # WebChannel + WebSocket 서버 — 네트워크에는 허용 목록 façade만 공개
     channel = QWebChannel()
@@ -752,6 +843,7 @@ def main():
     def _shutdown_servers():
         from core.app_instance import unregister_app_instance
 
+        _flush_window_state_on_quit(window)
         unregister_app_instance()
         if generation_api_manager is not None:
             generation_api_manager.shutdown()
@@ -761,7 +853,8 @@ def main():
 
     app.aboutToQuit.connect(_shutdown_servers)
 
-    sys.exit(app.exec())
+    # run_main_loop = app.exec() + 메인 루프 표시(시작 중 받은 Ctrl+C 도 여기서 곧바로 quit 한다).
+    sys.exit(run_main_loop(app))
 
 
 if __name__ == "__main__":

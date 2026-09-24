@@ -8,8 +8,13 @@ testable without importing ComfyUI at discovery time.
 
 from __future__ import annotations
 
+import functools
+import gc
 import inspect
 import json
+import logging
+import os
+import threading
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -17,7 +22,9 @@ from .mask_ops import (
     empty_mask_like,
     ensure_image,
     ensure_mask,
+    expand_crop_region,
     finish_masks,
+    fit_sample_size,
     make_overlay,
     mask_bounds,
     refine_generated_mask,
@@ -158,12 +165,8 @@ _FORGE_TILE_ONLY_KEYS = {
 }
 
 
-def _torch():
-    try:
-        import torch
-    except ImportError as exc:  # pragma: no cover - Comfy always provides it
-        raise RuntimeError("Forge parity SAM3 nodes require PyTorch.") from exc
-    return torch
+# Lazy torch import shared by the whole pack (compat.require_torch).
+from .compat import require_torch as _torch  # noqa: E402
 
 
 def _fallback_samplers() -> list[str]:
@@ -239,8 +242,7 @@ def _result_tuple(value: Any) -> tuple[Any, ...]:
     return (value,)
 
 
-def _load_sam3(checkpoint: str, device: str, precision: str):
-    loader = _resolve_easy_node(_EASY_LOADER_KEYS, "model loader")
+def _resolve_sam3_request(checkpoint: str, device: str, precision: str):
     resolved_device = str(device or "cuda").lower()
     if resolved_device == "auto":
         torch = _torch()
@@ -254,11 +256,192 @@ def _load_sam3(checkpoint: str, device: str, precision: str):
         raise ValueError("Easy SAM3 does not support fp16/bf16 on CPU")
     checkpoint_value = str(checkpoint or "sam3.pt").strip()
     checkpoint_path = Path(checkpoint_value).expanduser()
-    restore_registry = None
     if checkpoint_path.is_absolute():
         if not checkpoint_path.is_file():
             raise FileNotFoundError(f"SAM3 checkpoint not found: {checkpoint_path}")
         model_name = checkpoint_path.name
+    else:
+        model_name = checkpoint_value.replace("\\", "/")
+    return resolved_device, resolved_precision, checkpoint_path, model_name
+
+
+# One CPU/GPU-resident Easy SAM3 bundle (~3.3-3.5 GB), reused across nodes
+# and prompts like the Forge extension's _BUNDLE.  Keyed by the checkpoint
+# file identity so a replaced sam3.pt is never served from memory.
+_SAM3_CACHE_LOCK = threading.Lock()
+_SAM3_CACHE: dict[str, Any] = {}
+
+
+def _sam3_checkpoint_file(checkpoint_path: Path, model_name: str) -> Path | None:
+    if checkpoint_path.is_absolute():
+        return checkpoint_path
+    try:
+        import folder_paths
+
+        full_path = folder_paths.get_full_path("sam3", model_name)
+    except Exception:
+        return None
+    return Path(full_path) if full_path else None
+
+
+def _sam3_cache_key(checkpoint_file: Path | None, device: str, precision: str):
+    """(resolved path, mtime, size, device, precision), or None if unknowable."""
+
+    if checkpoint_file is None:
+        return None
+    try:
+        resolved = checkpoint_file.resolve()
+        stat = resolved.stat()
+    except OSError:
+        return None
+    return (
+        os.path.normcase(str(resolved)), int(stat.st_mtime_ns), int(stat.st_size),
+        str(device), str(precision),
+    )
+
+
+def _sam3_home_device(bundle: dict[str, Any], fallback: str):
+    model = bundle.get("model")
+    parameters = getattr(model, "parameters", None)
+    if callable(parameters):
+        try:
+            return next(iter(parameters())).device
+        except (StopIteration, TypeError, RuntimeError, AttributeError):
+            pass
+    return fallback
+
+
+def _replace_sam3_cache(entry: dict[str, Any] | None, *, in_use: Any = None) -> bool:
+    """Swap the cache slot; offload the evicted bundle unless it is in use.
+
+    A provider may hand back the very same bundle/model object again (its
+    own cache), so the evicted one is only moved off the device when it is
+    not the bundle the current node is about to use.  Returns whether a
+    different bundle was evicted (its memory is now releasable).
+    """
+
+    with _SAM3_CACHE_LOCK:
+        previous = _SAM3_CACHE.get("bundle")
+        _SAM3_CACHE.clear()
+        if entry:
+            _SAM3_CACHE.update(entry)
+    if previous is None or previous is in_use:
+        return False
+    if isinstance(in_use, dict) and previous.get("model") is in_use.get("model"):
+        return False
+    try:
+        # Moving it off the GPU first frees its VRAM even if something else
+        # (e.g. an exception traceback) still references the bundle.
+        _offload_sam3(previous)
+    except Exception:
+        pass
+    return True
+
+
+def clear_sam3_cache() -> bool:
+    """Drop the cached bundle (moving it off the GPU first when it is there).
+
+    Returns whether a bundle was released.  Called on ComfyUI "unload all
+    models" (see :func:`install_unload_release_hook`), when ``cache_model``
+    is off, and when a cache hit fails to move the bundle back.
+    """
+
+    released = _replace_sam3_cache(None)
+    if released:
+        # Return the ~3.4 GB CPU copy now rather than at some later GC pass.
+        gc.collect()
+    return released
+
+
+_UNLOAD_HOOK_MARK = "_aistudio_releases_sam3_cache"
+
+
+def install_unload_release_hook(management: Any = None) -> bool:
+    """Make ComfyUI's ``unload_all_models`` also release the SAM3 cache.
+
+    The cached bundle is not a Comfy-managed model, so ``/free`` (the app's
+    "unload after generation"), OOM recovery and ``--disable-smart-memory``
+    would otherwise leave ~3.4 GB in RAM (or VRAM with ``unload_after=False``)
+    for the process lifetime.  Those callers all run on the prompt worker
+    thread, never while a SAM3 node is using the bundle.  Idempotent; returns
+    whether the hook was installed by this call.
+    """
+
+    if management is None:
+        try:
+            import comfy.model_management as management
+        except Exception:
+            return False  # standalone import (tests, the app's relight action)
+    original = getattr(management, "unload_all_models", None)
+    if not callable(original) or getattr(original, _UNLOAD_HOOK_MARK, False):
+        return False
+
+    @functools.wraps(original)
+    def unload_all_models(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        finally:
+            try:
+                clear_sam3_cache()
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "AI Studio SAM3 cache release failed", exc_info=True,
+                )
+
+    setattr(unload_all_models, _UNLOAD_HOOK_MARK, True)
+    management.unload_all_models = unload_all_models
+    return True
+
+
+def _acquire_sam3(checkpoint: str, device: str, precision: str, *, use_cache: bool = True):
+    """Return ``(bundle, device, model_name, cache_state)`` for one Mask node.
+
+    ``cache_state`` is ``hit`` (reused, moved back to its device), ``miss``
+    (loaded and now cached), or ``disabled`` (loaded for this node only; any
+    cached bundle is released so ``cache_model=False`` frees its RAM).
+    """
+
+    resolved_device, resolved_precision, checkpoint_path, model_name = _resolve_sam3_request(
+        checkpoint, device, precision,
+    )
+    key = _sam3_cache_key(
+        _sam3_checkpoint_file(checkpoint_path, model_name),
+        resolved_device, resolved_precision,
+    ) if use_cache else None
+    with _SAM3_CACHE_LOCK:
+        cached = dict(_SAM3_CACHE) if key is not None and _SAM3_CACHE.get("key") == key else None
+    if cached is not None:
+        bundle = cached["bundle"]
+        model = bundle.get("model")
+        if model is not None and hasattr(model, "to"):
+            try:
+                model.to(cached["home"])
+            except BaseException:
+                # A half-moved bundle (e.g. CUDA OOM midway) cannot be trusted:
+                # drop it like Forge's release_sam3 so the next run reloads
+                # cleanly instead of reusing a split CPU/GPU model.
+                clear_sam3_cache()
+                raise
+        return bundle, resolved_device, model_name, "hit"
+    bundle = _invoke_sam3_loader(
+        checkpoint_path, model_name, resolved_device, resolved_precision,
+    )
+    if key is None:
+        _replace_sam3_cache(None, in_use=bundle)
+        return bundle, resolved_device, model_name, "disabled"
+    _replace_sam3_cache({
+        "key": key,
+        "bundle": bundle,
+        "home": _sam3_home_device(bundle, resolved_device),
+    }, in_use=bundle)
+    return bundle, resolved_device, model_name, "miss"
+
+
+def _invoke_sam3_loader(checkpoint_path: Path, model_name: str,
+                        resolved_device: str, resolved_precision: str):
+    loader = _resolve_easy_node(_EASY_LOADER_KEYS, "model loader")
+    restore_registry = None
+    if checkpoint_path.is_absolute():
         try:
             import folder_paths
 
@@ -273,8 +456,6 @@ def _load_sam3(checkpoint: str, device: str, precision: str):
             )
         except ImportError as exc:
             raise RuntimeError("Absolute SAM3 checkpoints require ComfyUI folder_paths.") from exc
-    else:
-        model_name = checkpoint_value.replace("\\", "/")
     try:
         output = _invoke_node(
             loader,
@@ -292,7 +473,7 @@ def _load_sam3(checkpoint: str, device: str, precision: str):
     result = _result_tuple(output)
     if not result or not isinstance(result[0], dict):
         raise RuntimeError("Easy SAM3 loader returned an invalid model bundle.")
-    return result[0], resolved_device, model_name
+    return result[0]
 
 
 def _offload_sam3(bundle: Any) -> None:
@@ -436,6 +617,11 @@ class ForgeNeoSAM3Mask:
             "optional": {
                 "sam3_model": ("EASY_SAM3_MODEL",),
                 "manual_mask": ("MASK",),
+                # Keep the node-loaded bundle between runs (CPU RAM when
+                # unload_after, on the device otherwise). False frees it.
+                # The app compiler sets it from its "keep SAM3 in RAM"
+                # setting; ComfyUI's unload-all-models (/free) also frees it.
+                "cache_model": ("BOOLEAN", {"default": True}),
             },
         }
 
@@ -472,6 +658,7 @@ class ForgeNeoSAM3Mask:
         enabled=True,
         sam3_model=None,
         manual_mask=None,
+        cache_model=True,
     ):
         image_value = ensure_image(image)
         mode = str(mask_mode).strip().casefold()
@@ -501,17 +688,19 @@ class ForgeNeoSAM3Mask:
             raise ValueError("A non-empty SAM3 prompt is required for generated masks.")
 
         loaded_here = False
+        cache_state = "not_loaded"
         resolved_device = str(device)
         resolved_checkpoint = str(checkpoint)
         model_bundle = sam3_model
         if needs_provider and model_bundle is None:
-            model_bundle, resolved_device, resolved_checkpoint = _load_sam3(
-                checkpoint, device, precision
+            model_bundle, resolved_device, resolved_checkpoint, cache_state = _acquire_sam3(
+                checkpoint, device, precision, use_cache=bool(cache_model),
             )
             loaded_here = True
         elif isinstance(model_bundle, dict):
             resolved_device = str(model_bundle.get("device", "external"))
             resolved_checkpoint = "externally supplied EASY_SAM3_MODEL"
+            cache_state = "external"
 
         provider = None
         generated: list[Any] = []
@@ -563,7 +752,11 @@ class ForgeNeoSAM3Mask:
                 blur_pixels=int(mask_blur), invert=bool(invert),
             )
         finally:
-            if needs_provider and unload_after and model_bundle is not None:
+            # Only a bundle this node loaded is offloaded. An externally
+            # connected EASY_SAM3_MODEL is owned (and cached) by its loader
+            # node; moving it to CPU in place would hand the next run a CPU
+            # model still labelled device='cuda'.
+            if needs_provider and loaded_here and unload_after and model_bundle is not None:
                 _offload_sam3(model_bundle)
 
         selected = combined if mode == "combined" else individuals
@@ -579,7 +772,8 @@ class ForgeNeoSAM3Mask:
             "checkpoint": resolved_checkpoint,
             "device": resolved_device,
             "model_loaded_by_node": loaded_here,
-            "unloaded": bool(unload_after),
+            "model_cache": cache_state,
+            "unloaded": bool(unload_after and loaded_here),
             "boxes": all_boxes,
             "scores": all_scores,
         }
@@ -856,36 +1050,138 @@ def _load_controlnet(control_net: Any, model_name: str):
     return values[0], requested
 
 
-def _fit_control_image(image: Any, target_height: int, target_width: int,
-                       resize_mode: str):
-    torch = _torch()
+_CONTROL_RESIZE_MODES = frozenset({"Just Resize", "Crop and Resize", "Resize and Fill"})
+
+
+def _effective_control_resize_mode(resize_mode: Any, *, explicit_control_image: bool) -> str:
+    """ControlNet 힌트를 sample 크기에 맞출 때 실제로 쓸 resize mode.
+
+    힌트를 입력(샘플링할) 이미지에서 뽑으면 잠재 입력과 같은 기하여야 한다. 잠재 입력은
+    region 을 sample 크기로 '늘려'(Just Resize) 만들므로 — 전체 이미지 + 다른 종횡비 요청이면
+    실제로 찌그러진다 — 힌트도 Just Resize 로 맞춘다. 설정값(기본 Crop and Resize)을 쓰면
+    힌트만 가운데가 잘려 잠재 입력과 어긋났다. Forge ControlNet(get_input_data)도 유닛
+    이미지가 없으면 unit.resize_mode 대신 p.resize_mode(ADetailer/SAM3 i2i 는 0 = Just Resize)를
+    쓴다. 따로 연결한 control_image 는 Forge 유닛 이미지처럼 설정값을 따르되, 입력 크기로
+    미리 늘리지 않는다: 전체 이미지 패스는 원본 control 을 이 모드로 sample 크기에 맞추고
+    (controlnet.py crop_and_resize_image), only-masked 패스는 이 모드로 입력 이미지 크기에
+    맞춘 control 에서 크롭을 잘라 잠재 입력과 같이 늘린다(try_crop_image_with_a1111_mask).
+    설정값은 두 경우 모두 검증한다(입력 힌트에서 무시되더라도 잘못된 값을 조용히 넘기지 않는다).
+    """
+
     mode = str(resize_mode)
-    valid = {"Just Resize", "Crop and Resize", "Resize and Fill"}
+    if mode not in _CONTROL_RESIZE_MODES:
+        raise ValueError(
+            f"controlnet resize_mode must be one of {sorted(_CONTROL_RESIZE_MODES)}, got {mode!r}"
+        )
+    return mode if explicit_control_image else "Just Resize"
+
+
+# Resize and Fill 의 띠(맞춘 control 이 덮지 않는 칸)를 채우는 방식 — 흉내 내는 Forge 함수마다 다르다.
+_CONTROL_FILL_MODES = frozenset({"median", "edge"})
+
+
+def _resize_and_fill_box(source_height: int, source_width: int,
+                         target_height: int, target_width: int) -> tuple[int, int, int, int]:
+    """Resize and Fill 로 맞춘 원본이 캔버스에서 차지하는 칸 ``(top, left, height, width)``.
+
+    비율을 지켜 캔버스 안에 들어가게 줄이고(반올림) 가운데 둔다(Forge ControlNet
+    crop_and_resize_image 의 OUTER_FIT 과 같은 기하). 나머지 칸이 띠다.
+    """
+    scale = min(target_height / source_height, target_width / source_width)
+    height = max(1, min(int(target_height), int(round(source_height * scale))))
+    width = max(1, min(int(target_width), int(round(source_width * scale))))
+    return (int(target_height) - height) // 2, (int(target_width) - width) // 2, height, width
+
+
+def _border_median(image: Any):
+    """Forge crop_and_resize_image 의 띠 색: 맨 위·아래 행과 맨 왼·오른 열 픽셀의 채널별 중앙값.
+
+    ``np.median`` 처럼 짝수 개면 가운데 두 값의 평균이다(``torch.median`` 은 아래 값을 준다).
+    반환 모양은 ``(batch, channels)``.
+    """
+    torch = _torch()
+    value = ensure_image(image)
+    borders = torch.cat(
+        (value[:, 0, :, :], value[:, -1, :, :], value[:, :, 0, :], value[:, :, -1, :]),
+        dim=1,
+    )
+    return torch.quantile(borders.float(), 0.5, dim=1).to(dtype=value.dtype)
+
+
+def _resize_and_fill_band_mask(source: Any, target_height: int, target_width: int,
+                               padding: tuple[int, int, int, int] = (0, 0, 0, 0)):
+    """Resize and Fill 로 맞춘 ``source`` 가 덮지 않는 띠 = 1 인 MASK ``(B, H, W)``.
+
+    Forge inpaint 전처리기(expand_mask_when_resize_and_fill ·
+    fill_mask_with_one_when_resize_and_fill)는 유닛 마스크를 띠를 255 로 채워 맞춘다 — 띠는
+    새로 그릴 칸(inpaint 힌트 -1)이 된다. ``padding`` 은 힌트와 같은 VAE 패딩(가장자리 복제).
+    """
+    import torch.nn.functional as functional
+
+    torch = _torch()
+    value = ensure_image(source)
+    top, left, height, width = _resize_and_fill_box(
+        value.shape[1], value.shape[2], target_height, target_width,
+    )
+    mask = torch.ones(
+        (value.shape[0], int(target_height), int(target_width)),
+        device=value.device, dtype=value.dtype,
+    )
+    mask[:, top:top + height, left:left + width] = 0.0
+    if any(padding):
+        mask = functional.pad(mask.unsqueeze(1), padding, mode="replicate").squeeze(1)
+    return mask
+
+
+def _fit_control_image(image: Any, target_height: int, target_width: int,
+                       resize_mode: str, *, fill: str = "median"):
+    """control 이미지를 ``resize_mode`` 로 target 크기에 맞춘다.
+
+    Resize and Fill 의 띠는 흉내 내는 Forge 함수대로 채운다 — 검정으로 채우는 경로는 Forge 에 없다.
+
+    * ``fill="median"`` — ControlNet crop_and_resize_image(OUTER_FIT): 원본 테두리 픽셀의
+      채널별 중앙값. 힌트를 sample(p.width/p.height) 크기로 맞출 때 쓴다.
+    * ``fill="edge"`` — A1111 images.resize_image(2): 맞춘 이미지의 가장자리 행/열을 띠 끝까지
+      늘린다. only-masked 의 try_crop_image_with_a1111_mask 가 유닛 이미지를 입력 이미지 크기로
+      맞출 때 쓴다.
+    """
+    import torch.nn.functional as functional
+
+    mode = str(resize_mode)
+    valid = _CONTROL_RESIZE_MODES
     if mode not in valid:
         raise ValueError(f"controlnet resize_mode must be one of {sorted(valid)}, got {mode!r}")
+    if fill not in _CONTROL_FILL_MODES:
+        raise ValueError(
+            f"controlnet fill must be one of {sorted(_CONTROL_FILL_MODES)}, got {fill!r}"
+        )
     source = ensure_image(image)[..., :3]
     if mode == "Just Resize" or tuple(source.shape[1:3]) == (target_height, target_width):
         return _resize_image(source, target_height, target_width)
     source_height, source_width = source.shape[1:3]
-    scale = (
-        max(target_height / source_height, target_width / source_width)
-        if mode == "Crop and Resize"
-        else min(target_height / source_height, target_width / source_width)
-    )
-    scaled_height = max(1, int(round(source_height * scale)))
-    scaled_width = max(1, int(round(source_width * scale)))
-    resized = _resize_image(source, scaled_height, scaled_width)
     if mode == "Crop and Resize":
+        scale = max(target_height / source_height, target_width / source_width)
+        scaled_height = max(1, int(round(source_height * scale)))
+        scaled_width = max(1, int(round(source_width * scale)))
+        resized = _resize_image(source, scaled_height, scaled_width)
         y = max(0, (scaled_height - target_height) // 2)
         x = max(0, (scaled_width - target_width) // 2)
         return resized[:, y:y + target_height, x:x + target_width, :]
-    canvas = torch.zeros(
-        (source.shape[0], target_height, target_width, source.shape[-1]),
-        device=source.device, dtype=source.dtype,
+    top, left, height, width = _resize_and_fill_box(
+        source_height, source_width, target_height, target_width,
     )
-    y = max(0, (target_height - scaled_height) // 2)
-    x = max(0, (target_width - scaled_width) // 2)
-    canvas[:, y:y + scaled_height, x:x + scaled_width, :] = resized
+    resized = _resize_image(source, height, width)
+    bottom = int(target_height) - height - top
+    right = int(target_width) - width - left
+    if fill == "edge":
+        return functional.pad(
+            resized.permute(0, 3, 1, 2), (left, right, top, bottom), mode="replicate",
+        ).permute(0, 2, 3, 1)
+    color = _border_median(source).to(device=resized.device, dtype=resized.dtype)
+    canvas = color[:, None, None, :].expand(
+        -1, int(target_height), int(target_width), -1,
+    ).clone()
+    canvas[:, top:top + height, left:left + width, :] = resized
     return canvas
 
 
@@ -962,9 +1258,15 @@ def _preprocessor_kwargs(node_type: Any, image: Any, mask: Any, resolution: int,
     return parameters
 
 
+def _control_module_name(module: Any) -> str:
+    """정규화한 ControlNet 전처리기 이름(빈 값 = 기본 inpaint_only)."""
+
+    return str(module or "inpaint_only").strip().casefold()
+
+
 def _prepare_control_hint(image: Any, mask: Any, module: str, resolution: int,
                           threshold_a: float, threshold_b: float):
-    name = str(module or "inpaint_only").strip().casefold()
+    name = _control_module_name(module)
     if name == "inpaint_only":
         return _inpaint_control_hint(image, mask), name
     if name in _UNSUPPORTED_CONTROL_MODULES:
@@ -1177,14 +1479,50 @@ def _resize_image(image: Any, height: int, width: int):
     ).permute(0, 2, 3, 1)
 
 
+def _resample_image(image: Any, height: int, width: int):
+    """Scale a crop to/from its sampling size like Forge's LANCZOS resize.
+
+    Bicubic with antialiasing is the closest torch equivalent for both the
+    enlarge-to-processing-size and the shrink-back-to-crop step; the bicubic
+    overshoot is clamped so the result stays a valid ``[0,1]`` IMAGE.
+    """
+
+    import torch.nn.functional as functional
+
+    value = ensure_image(image)
+    if tuple(value.shape[1:3]) == (int(height), int(width)):
+        return value
+    return functional.interpolate(
+        value.permute(0, 3, 1, 2), size=(int(height), int(width)),
+        mode="bicubic", align_corners=False, antialias=True,
+    ).clamp(0.0, 1.0).permute(0, 2, 3, 1)
+
+
 def _resize_mask(mask: Any, height: int, width: int):
     import torch.nn.functional as functional
 
     value = ensure_mask(mask)
     return functional.interpolate(
         value.unsqueeze(1), size=(height, width), mode="bilinear",
-        align_corners=False,
+        align_corners=False, antialias=True,
     ).squeeze(1).clamp(0.0, 1.0)
+
+
+def _processing_size(use_custom_size: bool, custom_width: int, custom_height: int,
+                     target_width: int, target_height: int) -> tuple[int, int] | None:
+    """Forge's img2img ``p.width/p.height`` for an inpaint pass, if any.
+
+    ``use_custom_size`` mirrors ``sam3_use_inpaint_width_height``; otherwise
+    the caller-supplied target (the generation resolution before hires) is
+    used.  ``None`` keeps the legacy behaviour of sampling at crop size.
+    """
+
+    if use_custom_size:
+        return int(custom_width), int(custom_height)
+    width, height = int(target_width or 0), int(target_height or 0)
+    if width == 0 and height == 0:
+        return None
+    return width, height
 
 
 def _vae_spatial_ratio(vae: Any) -> int:
@@ -1276,16 +1614,6 @@ def _mask_passes(mask: Any, image_batch: int, height: int, width: int,
     return groups
 
 
-def _prefill(image: Any, mask: Any, mode: str, seed: int):
-    value = ensure_image(image)
-    normalized = str(mode or "original").strip().casefold()
-    if normalized == "original":
-        return value
-    if normalized in {"fill", "latent noise", "latent nothing"}:
-        return _forge_fill_pixels(value, mask)
-    raise ValueError("fill_mode must be fill, original, latent noise, or latent nothing")
-
-
 class ForgeNeoSAM3Detailer:
     """Sequential VAE inpaint over Combined or slash-derived Individual masks."""
 
@@ -1341,6 +1669,11 @@ class ForgeNeoSAM3Detailer:
                 "control_net": ("CONTROL_NET",),
                 "control_image": ("IMAGE",),
                 "face_detector": ("BBOX_DETECTOR",),
+                # Forge p.width/p.height for "only masked": the crop is
+                # widened to this aspect and sampled at this size. 0 keeps the
+                # crop-size sampling of saved workflows. Custom size wins.
+                "target_width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
+                "target_height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
             },
         }
 
@@ -1390,6 +1723,8 @@ class ForgeNeoSAM3Detailer:
         control_net=None,
         control_image=None,
         face_detector=None,
+        target_width=0,
+        target_height=0,
     ):
         image_value = ensure_image(image)[..., :3]
         mask_value = ensure_mask(mask, height=image_value.shape[1], width=image_value.shape[2])
@@ -1420,6 +1755,18 @@ class ForgeNeoSAM3Detailer:
             64 <= int(custom_width) <= 8192 and 64 <= int(custom_height) <= 8192
         ):
             raise ValueError("SAM3 detailer custom size must be between 64 and 8192.")
+        target_width_value = int(target_width or 0)
+        target_height_value = int(target_height or 0)
+        if (target_width_value, target_height_value) != (0, 0) and not (
+            64 <= target_width_value <= 8192 and 64 <= target_height_value <= 8192
+        ):
+            raise ValueError(
+                "SAM3 detailer target size must be 0x0 (crop size) or between 64 and 8192."
+            )
+        processing_size = _processing_size(
+            bool(use_custom_size), int(custom_width), int(custom_height),
+            target_width_value, target_height_value,
+        )
         controlnet_strength_value = float(controlnet_strength)
         if not 0.0 <= controlnet_strength_value <= 10.0:
             raise ValueError("ControlNet strength must be between zero and 10")
@@ -1439,6 +1786,7 @@ class ForgeNeoSAM3Detailer:
         control_model = None
         control_model_source = None
         control_source = None
+        control_image_mode = None
         controlnet_requested = bool(controlnet_enable)
         controlnet_active = (
             controlnet_requested
@@ -1472,10 +1820,21 @@ class ForgeNeoSAM3Detailer:
                     raise ValueError(
                         f"control_image batch {control_source.shape[0]} does not match image batch {image_value.shape[0]}"
                     )
-                if tuple(control_source.shape[1:3]) != tuple(image_value.shape[1:3]):
-                    control_source = _resize_image(
-                        control_source, image_value.shape[1], image_value.shape[2]
-                    )
+            # 설정한 resize_mode 는 여기서 한 번 검증한다(입력 힌트에선 쓰지 않더라도).
+            control_image_mode = _effective_control_resize_mode(
+                control_settings["resize_mode"], explicit_control_image=True,
+            )
+            if control_source is not None and only_masked:
+                # Forge only-masked(try_crop_image_with_a1111_mask): 유닛 이미지를 먼저
+                # unit.resize_mode 로 init 이미지 크기에 맞춘 뒤 마스크 크롭을 자른다. 예전엔
+                # 모드와 상관없이 입력 크기로 늘려(Just Resize) 종횡비가 다른 control 이 찌그러졌다.
+                # 이 맞춤은 A1111 images.resize_image 라 Resize and Fill 의 띠는 가장자리 행/열을
+                # 늘려 채운다(검정 띠면 띠에 걸린 크롭 힌트가 Forge 와 달라진다).
+                # 전체 이미지 패스는 원본 control 을 그대로 sample 크기에 맞춘다(아래 루프).
+                control_source = _fit_control_image(
+                    control_source, image_value.shape[1], image_value.shape[2],
+                    control_image_mode, fill="edge",
+                )
         passes = _mask_passes(
             mask_value, image_value.shape[0], image_value.shape[1], image_value.shape[2],
             mask_mode,
@@ -1483,24 +1842,45 @@ class ForgeNeoSAM3Detailer:
         current = image_value.clone()
         pass_reports = []
         applied = union_masks(passes, reference=image_value)
+        image_height, image_width = image_value.shape[1:3]
         for pass_index, pass_mask in enumerate(passes):
-            bounds = mask_bounds(pass_mask, int(mask_padding)) if only_masked else (
-                0, 0, image_value.shape[2], image_value.shape[1]
+            mask_crop = mask_bounds(pass_mask, int(mask_padding)) if only_masked else (
+                0, 0, image_width, image_height
             )
-            if bounds is None:
+            if mask_crop is None:
                 pass_reports.append({"pass": pass_index + 1, "status": "empty_skipped"})
                 continue
+            bounds = mask_crop
+            if only_masked and processing_size is not None:
+                # Forge inpaint_full_res: widen the padded mask crop to the
+                # processing aspect ratio before scaling it to that size.
+                bounds = expand_crop_region(
+                    mask_crop, processing_size[0], processing_size[1],
+                    image_width, image_height,
+                )
             x1, y1, x2, y2 = bounds
             region = current[:, y1:y2, x1:x2, :]
             region_mask = pass_mask[:, y1:y2, x1:x2]
             original_height, original_width = region.shape[1:3]
-            if use_custom_size:
-                target_width = int(custom_width)
-                target_height = int(custom_height)
-                work_image = _resize_image(region, target_height, target_width)
-                work_mask = _resize_mask(region_mask, target_height, target_width)
+            if processing_size is None:
+                sample_width, sample_height = original_width, original_height
+            elif only_masked:
+                sample_width, sample_height = fit_sample_size(
+                    original_width, original_height,
+                    processing_size[0], processing_size[1],
+                )
             else:
-                target_height, target_width = original_height, original_width
+                # Forge whole picture (inpaint_full_res=False): img2img
+                # resize_mode 0 "Just Resize" samples the whole image at exactly
+                # p.width/p.height.  The aspect-fitting above is only for the
+                # only-masked crop; here it would sample below the requested
+                # size (1024x512 image, 512x512 → 512x256).  The result is still
+                # resampled back to the original size below.
+                sample_width, sample_height = int(processing_size[0]), int(processing_size[1])
+            if (sample_height, sample_width) != (original_height, original_width):
+                work_image = _resample_image(region, sample_height, sample_width)
+                work_mask = _resize_mask(region_mask, sample_height, sample_width)
+            else:
                 work_image, work_mask = region, region_mask
 
             # Forge builds every individual pass with the selected seed; it
@@ -1512,7 +1892,8 @@ class ForgeNeoSAM3Detailer:
                     "status": "no_op_zero_denoise",
                     "seed": pass_seed,
                     "crop": [x1, y1, x2, y2],
-                    "sample_size": [target_width, target_height],
+                    "mask_crop": list(mask_crop),
+                    "sample_size": [sample_width, sample_height],
                     "controlnet": None,
                 })
                 continue
@@ -1528,31 +1909,77 @@ class ForgeNeoSAM3Detailer:
                 # An explicitly connected control image stays fixed. Without
                 # one, Forge feeds the image being processed, so later
                 # sequential passes must see the preceding pass's result.
-                pass_control_source = control_source if control_source is not None else current
-                control_region = pass_control_source[:, y1:y2, x1:x2, :]
-                resized_control = _fit_control_image(
-                    control_region,
-                    requested_height,
-                    requested_width,
-                    str(control_settings["resize_mode"]),
-                )
-                resized_control = _pad_image(resized_control, vae_padding)
+                whole_image_control = control_source is not None and not only_masked
+                if whole_image_control:
+                    # Forge 전체 이미지: 유닛 이미지를 그대로 unit.resize_mode 로 p.width/p.height
+                    # (= sample 크기)에 맞춘다 — 입력 크기로 먼저 늘리지 않는다.
+                    control_region = control_source
+                    control_resize_mode = control_image_mode
+                else:
+                    # 입력 이미지(또는 입력 크기에 맞춘 control)의 같은 크롭은 잠재 입력(region 을
+                    # sample 크기로 늘린 것)과 같은 기하여야 한다 — Forge 도 유닛 이미지가 없으면
+                    # p.resize_mode(0)로, only-masked 유닛 이미지는 크롭 뒤 잠재 입력과 같은
+                    # 맞춤(OUTER_FIT, 여기선 비율 유지 sample 크기라 그대로 늘리기)으로 맞춘다.
+                    pass_control_source = control_source if control_source is not None else current
+                    control_region = pass_control_source[:, y1:y2, x1:x2, :]
+                    control_resize_mode = _effective_control_resize_mode(
+                        control_settings["resize_mode"], explicit_control_image=False,
+                    )
                 processor_resolution = int(controlnet_processor_resolution) or 512
                 if bool(control_settings["pixel_perfect"]):
                     processor_resolution = _pixel_perfect_resolution(
                         control_region,
                         requested_height,
                         requested_width,
-                        str(control_settings["resize_mode"]),
+                        control_resize_mode,
                     )
-                hint, preprocessor_used = _prepare_control_hint(
-                    resized_control,
-                    work_mask,
-                    str(controlnet_module),
-                    processor_resolution,
-                    float(control_settings["threshold_a"]),
-                    float(control_settings["threshold_b"]),
-                )
+                mask_driven_module = _control_module_name(controlnet_module) == "inpaint_only"
+                if whole_image_control and not mask_driven_module:
+                    # Forge 전체 이미지 + 마스크를 안 쓰는 전처리기: preprocessor(유닛 이미지) 다음
+                    # crop_and_resize_image(출력, unit.resize_mode, h, w). Resize and Fill 띠는
+                    # 전처리 '출력' 테두리의 중앙값이다 — 입력에 띠를 먼저 칠하고 전처리하면 띠
+                    # 경계에 캐니 선·가짜 깊이면 같은 힌트가 생긴다. 매핑된 전처리기는 마스크를
+                    # 받지 않지만, 받는다면 control 크기로 늘린 패스 마스크를 준다.
+                    raw_hint, preprocessor_used = _prepare_control_hint(
+                        control_region,
+                        _resize_mask(region_mask, control_region.shape[1], control_region.shape[2]),
+                        str(controlnet_module),
+                        processor_resolution,
+                        float(control_settings["threshold_a"]),
+                        float(control_settings["threshold_b"]),
+                    )
+                    hint = _pad_image(
+                        _fit_control_image(
+                            raw_hint, requested_height, requested_width, control_resize_mode,
+                        ),
+                        vae_padding,
+                    )
+                else:
+                    resized_control = _fit_control_image(
+                        control_region,
+                        requested_height,
+                        requested_width,
+                        control_resize_mode,
+                    )
+                    resized_control = _pad_image(resized_control, vae_padding)
+                    hint_mask = work_mask
+                    if whole_image_control and control_resize_mode == "Resize and Fill":
+                        # Forge inpaint 전처리기는 Resize and Fill 에서 유닛 마스크의 띠를 255 로
+                        # 채운다(expand_mask_when_resize_and_fill) — 띠는 힌트 -1(새로 그릴 칸).
+                        band = _resize_and_fill_band_mask(
+                            control_region, requested_height, requested_width, vae_padding,
+                        )
+                        hint_mask = work_mask.maximum(
+                            band.to(device=work_mask.device, dtype=work_mask.dtype)
+                        )
+                    hint, preprocessor_used = _prepare_control_hint(
+                        resized_control,
+                        hint_mask,
+                        str(controlnet_module),
+                        processor_resolution,
+                        float(control_settings["threshold_a"]),
+                        float(control_settings["threshold_b"]),
+                    )
                 control_positive = (
                     _without_existing_control(positive_value)
                     if controlnet_override_external else positive_value
@@ -1578,7 +2005,13 @@ class ForgeNeoSAM3Detailer:
                     "preprocessor": preprocessor_used,
                     "processor_resolution": processor_resolution,
                     "pixel_perfect": bool(control_settings["pixel_perfect"]),
-                    "resize_mode": str(control_settings["resize_mode"]),
+                    "resize_mode": control_resize_mode,
+                    "resize_mode_setting": str(control_settings["resize_mode"]),
+                    "hint_source": "control_image" if control_source is not None else "input",
+                    # control_image 를 맞춘 모드(only-masked 는 입력 크기로, 전체 이미지는 sample 크기로).
+                    "control_image_resize_mode": (
+                        control_image_mode if control_source is not None else None
+                    ),
                     "threshold_a": float(control_settings["threshold_a"]),
                     "threshold_b": float(control_settings["threshold_b"]),
                     "override_external": bool(controlnet_override_external),
@@ -1606,7 +2039,8 @@ class ForgeNeoSAM3Detailer:
                 generated = _resize_image(generated, vae_height, vae_width)
             generated = _unpad_image(generated, vae_padding)
             if tuple(generated.shape[1:3]) != (original_height, original_width):
-                generated = _resize_image(generated, original_height, original_width)
+                # Back from the processing size into the (expanded) crop.
+                generated = _resample_image(generated, original_height, original_width)
             alpha = region_mask.unsqueeze(-1).to(device=current.device, dtype=current.dtype)
             generated = generated.to(device=current.device, dtype=current.dtype)[..., : current.shape[-1]]
             original_region = current[:, y1:y2, x1:x2, :]
@@ -1616,7 +2050,8 @@ class ForgeNeoSAM3Detailer:
                 "status": "sampled",
                 "seed": pass_seed,
                 "crop": [x1, y1, x2, y2],
-                "sample_size": [target_width, target_height],
+                "mask_crop": list(mask_crop),
+                "sample_size": [sample_width, sample_height],
                 "vae_sample_size": [vae_width, vae_height],
                 "vae_padding": list(vae_padding),
                 "controlnet": control_report,
@@ -1660,6 +2095,7 @@ class ForgeNeoSAM3Detailer:
             "only_masked": bool(only_masked),
             "padding": int(mask_padding),
             "custom_size": [int(custom_width), int(custom_height)] if use_custom_size else None,
+            "processing_size": list(processing_size) if processing_size is not None else None,
             "controlnet_requested": controlnet_requested,
             "controlnet_enabled": controlnet_active,
             "controlnet_disabled_reason": controlnet_disabled_reason,
@@ -1713,8 +2149,11 @@ class ForgeNeoSAM3Refine(ForgeNeoSAM3Detailer):
         control_net=None,
         control_image=None,
         face_detector=None,
+        target_width=0,
+        target_height=0,
     ):
         image_value = ensure_image(image)[..., :3]
+        shared_control_net = control_net
 
         def run_one(pass_mask, pass_mode):
             return ForgeNeoSAM3Detailer.detail(
@@ -1755,9 +2194,11 @@ class ForgeNeoSAM3Refine(ForgeNeoSAM3Detailer):
                 restore_face=restore_face,
                 restore_face_settings_json=restore_face_settings_json,
                 enabled=enabled,
-                control_net=control_net,
+                control_net=shared_control_net,
                 control_image=control_image,
                 face_detector=face_detector,
+                target_width=target_width,
+                target_height=target_height,
             )
 
         if not enabled or str(mask_mode).casefold() == "combined":
@@ -1781,6 +2222,21 @@ class ForgeNeoSAM3Refine(ForgeNeoSAM3Detailer):
                 "results": [],
             })
 
+        # Every independent result would otherwise run ControlNetLoader again
+        # (Comfy's loader has no cache). Load a named model once and hand the
+        # same CONTROL_NET to each pass; a connected one is reused as-is.
+        preloaded_source = None
+        if (
+            shared_control_net is None
+            and len(nonempty) > 1
+            and bool(controlnet_enable)
+            and 0.0 < float(controlnet_strength) <= 10.0
+            and 0.0 < float(denoise) <= 1.0
+        ):
+            shared_control_net, preloaded_source = _load_controlnet(
+                None, str(controlnet_model_name)
+            )
+
         outputs = []
         reports = []
         for mask_index, pass_mask in enumerate(nonempty, start=1):
@@ -1788,6 +2244,10 @@ class ForgeNeoSAM3Refine(ForgeNeoSAM3Detailer):
             outputs.append(ensure_image(refined)[..., :3])
             child_report = json.loads(report_json)
             child_report["mask_index"] = mask_index
+            if preloaded_source is not None:
+                for pass_report in child_report.get("passes", []):
+                    if isinstance(pass_report.get("controlnet"), dict):
+                        pass_report["controlnet"]["model"] = preloaded_source
             reports.append(child_report)
 
         statuses = {str(item.get("status")) for item in reports}

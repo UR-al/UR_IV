@@ -68,3 +68,72 @@ details > summary.card-header::before {
 details[open] > summary.card-header::before {
   transform: rotate(90deg);
 }
+
+/* 파라미터 열의 확장 카드(.ext-card)와 그 안의 필드 배치.
+ *
+ * 예전엔 App.vue 의 <style scoped> 에만 있었다. scoped 규칙은 자식 컴포넌트의 **루트**에만
+ * 닿으므로 AnimaGuidancePanel · Sam3ControlNetPanel 은 카드 테두리(.ext-card)만 받고, 안쪽
+ * .ext-row 의 2열 그리드와 .ext-field 라벨 스타일이 빠져 있었다.
+ *
+ * 전역으로 두되 **파라미터 열(App.vue 의 .extend-overlay) 안의 카드로만** 범위를 좁힌다.
+ * Sam3ControlNetPanel 은 RefinePanel(.glass-card 헤어라인 섹션)과 BatchView(.sam3-cn)에도
+ * 들어가는데, 그 두 곳은 예전처럼 App 의 카드 모양을 받지 않아야 한다 — 전역 .ext-card 가
+ * 같은 특이도의 .glass-card 를 덮어 테두리·배경·둥근 모서리가 생겼었다.
+ * :where() 로 감싸 특이도는 예전 그대로(.ext-card 하나)라 패널 자신의 scoped 규칙과의 우선순위도
+ * 달라지지 않는다. RefinePanel 처럼 카드 밖에서 자기 .ext-check-row 를 쓰는 곳도 영향이 없다. */
+:where(.extend-overlay) .ext-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 12px;
+}
+:where(.extend-overlay) .ext-card .ext-title {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-bold);
+  color: var(--text-muted);
+  letter-spacing: 0;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+:where(.extend-overlay) .ext-card .ext-field { margin-bottom: 8px; }
+:where(.extend-overlay) .ext-card .ext-field label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-bold);
+  color: var(--text-muted);
+}
+:where(.extend-overlay) .ext-card .ext-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+:where(.extend-overlay) .ext-card .ext-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+:where(.extend-overlay) .ext-card .ext-sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+:where(.extend-overlay) .ext-card .ext-sub summary { font-size: var(--fs-label); color: var(--text-secondary); cursor: pointer; }
+:where(.extend-overlay) .ext-card .ext-sub-title {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-bold);
+  color: var(--accent);
+  letter-spacing: 0;
+  margin: 8px 0 4px;
+}
+:where(.extend-overlay) .ext-card .ext-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 5px;
+  font-size: var(--fs-label);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+:where(.extend-overlay) .ext-card .ext-check-row span { overflow: hidden; text-overflow: ellipsis; }
+/* 네이티브 체크박스 — appearance:none 토글이 왕복 위젯에서 한 박자 늦게 켜져 네이티브로 복귀했다.
+   accent-color 로 색만 입힌다. */
+:where(.extend-overlay) .ext-card .ext-check-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}

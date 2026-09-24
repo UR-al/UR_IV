@@ -106,7 +106,7 @@
             </button>
           </div>
           <div class="io-row">
-            <button class="io-btn" @click="importResults"><Icon name="upload" /> .parquet 가져오기</button>
+            <button class="io-btn" v-host-dialog="'import_search_results'" @click="importResults"><Icon name="upload" /> .parquet 가져오기</button>
           </div>
           <button class="go-btn" @click="search" :disabled="searching"><Icon name="rocket" /> 검색</button>
         </div>
@@ -166,7 +166,7 @@
           <button class="bar-btn gold" @click="randomResult"><Icon name="dice" /> Random</button>
         </div>
         <div class="bar-right">
-          <button class="bar-btn parquet" @click="exportResults"><Icon name="download" /> .parquet 내보내기</button>
+          <button class="bar-btn parquet" v-host-dialog="'export_search_results'" @click="exportResults"><Icon name="download" /> .parquet 내보내기</button>
           <button class="bar-btn" @click="newSearch"><Icon name="search" /> 새 검색</button>
         </div>
       </div>
@@ -338,16 +338,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, shallowRef, markRaw, toRaw, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { condRulesPayload } from '../composables/condRules.js'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import { vHostDialog } from '../utils/hostDialogs'
 import {
   buildSearchDeckUpdate,
   parseSearchResultLineage,
   resolveSearchCacheRestore,
+  sameSearchLineage,
   type SearchResultLineage,
 } from '../utils/searchRestore'
+import { cachedTagSplitter } from '../utils/searchTags'
 import CustomSelect from '../components/CustomSelect.vue'
 
 interface RatingChip { key: string; label: string; checked: boolean }
@@ -369,10 +372,14 @@ const fields = reactive<SearchField[]>([
   { key: 'general', label: 'TAGS', placeholder: '1girl, blue_hair...', include: '', exclude: '' },
 ])
 
-const results = ref<SearchRow[]>([])
-const filteredResults = ref<SearchRow[]>([])
-const deepBase = ref<SearchRow[]>([])  // 심층검색 결과(매니저 필터 적용 전 베이스) — rating 등 매니저 필터와 합성
-const lastResults = ref<SearchRow[]>([])  // 검색 폼으로 돌아가도 보존
+// 결과 배열은 shallowRef — 수만~50만 행을 깊은 reactive proxy 로 감싸지 않는다(정렬·필터·
+// 직렬화가 행마다 proxy 를 거치던 비용 제거). 행은 불변이고 배열은 언제나 통째로 교체하므로
+// 얕은 추적으로 충분하다. 제자리 변경(push/splice) 금지 — 반드시 새 배열을 대입한다.
+const results = shallowRef<SearchRow[]>([])   // 필터 base — Python base 와 같은 순서(덱 인덱스 기준)
+const filteredResults = shallowRef<SearchRow[]>([])
+const deepBase = shallowRef<SearchRow[]>([])  // 심층검색 결과(매니저 필터 적용 전 베이스) — rating 등 매니저 필터와 합성
+const lastResults = shallowRef<SearchRow[]>([])  // 검색 폼으로 돌아가도 보존
+const lastResultsLineage = ref<SearchResultLineage | null>(null)  // lastResults 를 만든 검색 스냅숏
 const previewIdx = ref(0)
 const searching = ref(false)
 const statusText = ref('READY')
@@ -387,7 +394,8 @@ const viewMode = ref('single')
 const deepInclude = ref('')
 const deepExclude = ref('')
 const isFiltered = ref(false)
-const filterHistory = ref<FilterBranch[]>([])
+// 분기 스냅숏도 shallowRef — push 대신 새 배열 대입(data 는 불변 deepBase 배열 참조)
+const filterHistory = shallowRef<FilterBranch[]>([])
 
 // 정렬 + 페이지네이션
 const sortBy = ref(localStorage.getItem('search.sortBy') || 'default')  // default | character | artist | copyright | random
@@ -566,25 +574,43 @@ async function search() {
 function newSearch() {
   results.value = []; deepBase.value = []; filteredResults.value = []; previewIdx.value = 0
   deepInclude.value = ''; deepExclude.value = ''; isFiltered.value = false
+  // 이전 검색의 정밀검색 분기는 버린다 — 남겨 두면 새 검색 뒤에도 '분기:' 버튼이 보이고,
+  // 누르면 옛 행이 현재 lineage 로 자동화 덱을 덮는다(옛 배열도 keep-alive 로 계속 남는다).
+  filterHistory.value = []
   // lastResults는 보존 — 검색 폼에서 다시 볼 수 있음
 }
 
+// 이전 결과(= 그 검색의 base)를 다시 펼친다. 매니저 필터 칩은 그대로 적용해 표시·칩·자동화
+// 덱이 같은 집합을 가리키게 하고, lastResults 가 현재 lineage 의 것일 때만 덱을 동기화한다.
+function _reopenLastResults() {
+  const base = lastResults.value
+  results.value = base
+  deepBase.value = base
+  filterHistory.value = []
+  isFiltered.value = false
+  filteredResults.value = _applyManagerFilters(base)
+  if (sameSearchLineage(lastResultsLineage.value, activeResultLineage.value)) {
+    syncDeck()
+  } else {
+    requestAction('show_toast', {
+      type: 'warning',
+      msg: '이전 결과의 검색 출처가 현재와 달라 자동화 덱은 바꾸지 않았습니다.',
+    })
+  }
+}
+
 function restoreLastResults() {
-  results.value = lastResults.value
-  deepBase.value = lastResults.value
-  filteredResults.value = lastResults.value
+  _reopenLastResults()
   previewIdx.value = 0
   viewMode.value = 'list'
-  statusText.value = `${lastResults.value.length} MATCHES (복원)`
+  statusText.value = `${filteredResults.value.length} MATCHES (복원)`
 }
 
 function restoreAndRandom() {
-  results.value = lastResults.value
-  deepBase.value = lastResults.value
-  filteredResults.value = lastResults.value
-  previewIdx.value = Math.floor(Math.random() * lastResults.value.length)
+  _reopenLastResults()
+  previewIdx.value = Math.floor(Math.random() * filteredResults.value.length)
   viewMode.value = 'single'
-  statusText.value = `${lastResults.value.length} MATCHES (랜덤)`
+  statusText.value = `${filteredResults.value.length} MATCHES (랜덤)`
 }
 
 // localStorage가 진실의 원천 — 복원 여부 추적해서 uiPrefsLoaded 덮어쓰기 방지
@@ -624,9 +650,9 @@ onMounted(() => {
       _restoredFromLocalStorage = true
     }
   } catch {}
-  // 재시작 후 localStorage가 비어 복원 실패한 경우 — ui_prefs.json(파일)에서 능동 복원.
-  // QWebEngine 저장소가 PID 경로라 재시작 시 localStorage가 비워지고, uiPrefsLoaded
-  // 이벤트는 startup 1회뿐이라 늦게 mount되면 놓치므로, getter로 직접 가져옴.
+  // localStorage 캐시가 없을 때(새 프로필·지운 저장소·다른 기기의 웹 클라이언트) — ui_prefs.json(파일)
+  // 에서 능동 복원. uiPrefsLoaded 는 부팅 때 당겨 온 시작 시점 스냅숏이라(bridge.js sticky 재생)
+  // 그 뒤 저장된 검색 상태는 getter 로 직접 가져와야 최신이다.
   if (!_restoredFromLocalStorage) {
     ;(async () => {
       try {
@@ -656,11 +682,15 @@ onMounted(() => {
       if (restored) {
         activeResultLineage.value = pendingResultLineage.value
         pendingResultLineage.value = null
-        results.value = restored.base; lastResults.value = restored.base   // 전체(필터 해제 베이스)
+        // 결과 배열은 proxy 로 감싸지 않는다(markRaw) — 행 수만큼 proxy 를 만들지 않게.
+        const base = markRaw(restored.base)
+        results.value = base; lastResults.value = base   // 전체(필터 해제 베이스) — Python base 와 같은 순서
+        lastResultsLineage.value = activeResultLineage.value
         // deep-only 중간층은 별도 저장하지 않으므로 full을 복원 기준으로 삼는다.
         // 그래야 0건 필터를 포함해 재시작 후 필터 해제/RESET으로 전체를 회복할 수 있다.
-        deepBase.value = restored.base
-        filteredResults.value = restored.active                    // 표시 = 필터된 셋
+        deepBase.value = base
+        filterHistory.value = []
+        filteredResults.value = markRaw(restored.active)           // 표시 = 필터된 셋
         isFiltered.value = restored.isFiltered
         statusText.value = `${restored.active.length.toLocaleString()} MATCHES (디스크 복원)`
         return
@@ -682,8 +712,13 @@ onMounted(() => {
       if (Array.isArray(data)) {
         activeResultLineage.value = pendingResultLineage.value
         pendingResultLineage.value = null
+        markRaw(data)   // 결과 배열은 proxy 로 감싸지 않는다(행 불변, 통째 교체)
         results.value = data; deepBase.value = data; filteredResults.value = data; previewIdx.value = 0
         lastResults.value = data
+        lastResultsLineage.value = activeResultLineage.value
+        // 새 결과 → 이전 검색의 정밀검색 분기·필터 상태를 버린다(옛 분기가 새 lineage 로 덱을 덮지 않게)
+        filterHistory.value = []
+        isFiltered.value = false
         statusText.value = `${data.length} MATCHES`
         // 새 검색 → 기존 필터 칩 초기화 (옛 필터가 stale하게 남지 않도록)
         activeFilters.ratings.clear(); activeFilters.characters.clear()
@@ -738,7 +773,9 @@ function applyDeepSearch() {
   if (!inc && !exc) return
   // deepBase(매니저 필터 전) 스냅샷을 분기로 저장
   const label = [inc ? `+${inc.substring(0,15)}` : '', exc ? `-${exc.substring(0,15)}` : ''].filter(Boolean).join(' ')
-  filterHistory.value.push({ label, count: deepBase.value.length, data: [...deepBase.value] })
+  // shallowRef 라 push 대신 새 배열 대입. deepBase 배열은 제자리 변경되지 않으므로(늘 새 배열
+  // 대입) 복사 없이 참조를 스냅숏으로 둔다.
+  filterHistory.value = [...filterHistory.value, { label, count: deepBase.value.length, data: deepBase.value }]
   // deepBase 누적 필터 → 매니저 필터(rating 등) 재적용해 표시/덱 갱신
   // '태그 단위 정확 일치'로 매칭한다. 데이터는 "monkey_d._luffy roronoa_zoro"처럼 공백으로
   // 태그를 구분하고 언더스코어는 태그 '내부'에 둔다. 입력의 공백을 언더스코어로 바꿔 태그 형식과
@@ -762,7 +799,9 @@ function applyDeepSearch() {
   syncDeck()
 }
 function restoreBranch(idx: number) {
-  deepBase.value = [...filterHistory.value[idx].data]
+  const branch = filterHistory.value[idx]
+  if (!branch) return
+  deepBase.value = branch.data
   filterHistory.value = filterHistory.value.slice(0, idx)
   filteredResults.value = _applyManagerFilters(deepBase.value)
   previewIdx.value = 0
@@ -871,29 +910,21 @@ try {
   }
 } catch {}
 
-function _splitDanbooruTags(raw: any): string[] {
-  const text = String(raw || '').trim()
-  if (!text) return []
-  if (text.includes(',')) return text.split(',').map(v => v.trim().replace(/_/g, ' ')).filter(Boolean)
-  const tags: string[] = []; let current = ''; let depth = 0
-  for (const ch of text) {
-    if (ch === '(') { depth++; current += ch }
-    else if (ch === ')') { depth--; current += ch }
-    else if (ch === ' ' && depth === 0) { if (current.trim()) tags.push(current.trim().replace(/_/g, ' ')); current = '' }
-    else { current += ch }
-  }
-  if (current.trim()) tags.push(current.trim().replace(/_/g, ' '))
-  return tags
+// 칸 문자열 분해는 현재 base(results) 배열 범위로 메모이즈 — 필터 모달에서 칩을 토글할
+// 때마다 전 행의 character/copyright/artist 를 다시 쪼개지 않는다(utils/searchTags).
+function _tagSplitter() {
+  return cachedTagSplitter(results.value)
 }
 
 // 검색 결과에서 필터 옵션 추출
 const filterOptions = computed(() => {
   const chars = new Set<string>(), copys = new Set<string>(), arts = new Set<string>(), rats = new Set<string>()
+  const split = _tagSplitter()
   for (const row of results.value) {
     if (row.rating) rats.add(row.rating)
-    for (const c of _splitDanbooruTags(row.character)) chars.add(c)
-    for (const c of _splitDanbooruTags(row.copyright)) copys.add(c)
-    for (const a of _splitDanbooruTags(row.artist)) arts.add(a)
+    for (const c of split(row.character)) chars.add(c)
+    for (const c of split(row.copyright)) copys.add(c)
+    for (const a of split(row.artist)) arts.add(a)
   }
   return {
     ratings: [...rats].sort(),
@@ -932,17 +963,25 @@ const activeFilterCount = computed(() =>
 // 매니저 필터 로직 (주어진 배열에 적용) — deepBase 위에서 합성하므로 심층검색 유지
 function _applyManagerFilters(arr: SearchRow[]): SearchRow[] {
   let next = arr
+  const split = _tagSplitter()
   if (activeFilters.ratings.size) next = next.filter(r => activeFilters.ratings.has(r.rating as string))
-  if (activeFilters.characters.size) next = next.filter(r => _splitDanbooruTags(r.character).some(c => activeFilters.characters.has(c)))
-  if (activeFilters.copyrights.size) next = next.filter(r => _splitDanbooruTags(r.copyright).some(c => activeFilters.copyrights.has(c)))
-  if (activeFilters.artists.size) next = next.filter(r => _splitDanbooruTags(r.artist).some(a => activeFilters.artists.has(a)))
+  if (activeFilters.characters.size) next = next.filter(r => split(r.character).some(c => activeFilters.characters.has(c)))
+  if (activeFilters.copyrights.size) next = next.filter(r => split(r.copyright).some(c => activeFilters.copyrights.has(c)))
+  if (activeFilters.artists.size) next = next.filter(r => split(r.artist).some(a => activeFilters.artists.has(a)))
   return next
 }
 // 필터 적용 미리보기 — 전체(results)가 아니라 deepBase(심층검색 결과) 위에서 필터
 const filteredByManager = computed(() => _applyManagerFilters(deepBase.value))
 // filteredResults → 자동화 덱 동기화 (모든 필터 변경 시 호출 → 덱이 항상 표시와 일치)
+// 행 전체가 아니라 base(results) 배열의 인덱스만 보낸다 — 4만 행이면 20MB → 수백 KB.
+// Python 은 같은 순서의 base 를 들고 있고 lineage·base_size 가 맞을 때만 받아들인다.
 function syncDeck() {
-  const payload = buildSearchDeckUpdate(filteredResults.value, activeResultLineage.value)
+  const payload = buildSearchDeckUpdate(
+    filteredResults.value,
+    activeResultLineage.value,
+    toRaw(results.value),
+    row => toRaw(row),
+  )
   if (!payload) {
     requestAction('show_toast', {
       type: 'error',
@@ -1011,7 +1050,10 @@ function addToQueue() {
 // (조건부 규칙 저장/자동저장은 composables/condRules.js가 담당)
 
 function exportResults() { requestAction('export_search_results', { count: filteredResults.value.length, data: filteredResults.value }) }
-function importResults() { requestAction('import_search_results') }
+// 가져오기도 검색과 같은 결과 상한(50만, 무작위 표본)을 따른다 — '무제한' 모드면 끈다
+function importResults() {
+  requestAction('import_search_results', { disable_result_cap: resultCapMode.value === 'unlimited' })
+}
 </script>
 
 <style scoped>

@@ -162,21 +162,13 @@
  */
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import ComfyWorkflowControls from './ComfyWorkflowControls.vue'
+import { describeWorkflowLine, type GateWorkflowInfo } from '../utils/gateWorkflowInfo'
 
 /** 감지 결과. 'checking' 은 요청이 나갔지만 답이 안 온 상태. */
 type ProbeState = 'ok' | 'fail' | 'checking'
 
 /** `backends/comfyui_backend.analyze_workflow()` 결과를 프론트 이름으로 옮긴 것. */
-interface WorkflowInfo {
-  valid: boolean
-  format?: string
-  nodeCount?: number
-  width?: number
-  height?: number
-  locked?: boolean
-  classification?: string
-  error?: string
-}
+type WorkflowInfo = GateWorkflowInfo
 
 const props = withDefaults(defineProps<{
   /** 게이트를 보일지. */
@@ -257,34 +249,10 @@ const webui = computed(() => view(props.probe?.webui))
 const comfy = computed(() => view(props.probe?.comfy))
 
 // ── 워크플로 한 줄 ────────────────────────────────────────────────────────
-/** 분류 코드를 사람이 읽는 말로. 파이썬 `WorkflowClassification` 값과 짝이다. */
-const WORKFLOW_KIND: Record<string, string> = {
-  native_checkpoint: 'Checkpoint 로더',
-  native_unet: 'UNet 로더',
-  locked_unknown: '커스텀 로더',
-  no_sampler: '샘플러 없음',
-  unknown: '알 수 없는 구성',
-}
-
-const workflowLine = computed<{ tone: 'muted' | 'warn' | 'alert'; text: string } | null>(() => {
-  if (!workflowPathLocal.value.trim()) {
-    return { tone: 'muted', text: '워크플로 JSON 이 있어야 ComfyUI 가 생성을 실행합니다.' }
-  }
-  const info = props.workflowInfo
-  if (!info) return null  // 경로는 있는데 분석 전 — 빈 줄이 낫다(가짜 정보보다)
-  if (!info.valid) {
-    return { tone: 'alert', text: `읽을 수 없음 — ${info.error || '알 수 없는 오류'}` }
-  }
-  const parts: string[] = []
-  if (info.format) parts.push(`${info.format.toUpperCase()} 형식`)
-  if (typeof info.nodeCount === 'number') parts.push(`노드 ${info.nodeCount}개`)
-  if (info.width && info.height) parts.push(`${info.width}×${info.height}`)
-  if (info.classification) parts.push(WORKFLOW_KIND[info.classification] ?? info.classification)
-  // 모델 콤보가 잠기는지는 사용자가 시작 전에 알아야 한다 — 나중에 회색 콤보를
-  // 보고 고장으로 오해하는 게 이 화면의 단골 문의였다.
-  parts.push(info.locked ? '워크플로가 모델을 고정' : '모델 선택 가능')
-  return { tone: info.locked ? 'warn' : 'muted', text: parts.join(' · ') }
-})
+// 문구 규칙(분류 이름, 모델 고정, '생성 불가' 경고)은 utils/gateWorkflowInfo.ts.
+const workflowLine = computed(() =>
+  describeWorkflowLine(workflowPathLocal.value, props.workflowInfo),
+)
 
 // ── 동작 ──────────────────────────────────────────────────────────────────
 function probeNow() {

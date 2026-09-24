@@ -21,46 +21,26 @@ import time
 from contextlib import contextmanager
 
 
-_CREATOR_ACTIONS = {
-    "creator_get_state",
-    "creator_select_media",
-    "creator_generate",
-    "creator_cancel",
-    "creator_h3_cache_status",
-    "creator_h3_cache_clear",
-    "comic_plan",
-    "comic_save",
-    "comic_generate_all",
-    "comic_animate_all",
-    "comic_export_page",
-    "comic_export_living",
-}
+# UI 스레드가 뜬 컷별 T2I 스냅샷을 워커에 넘기는 내부 키. Vue 가 보낸 같은 키는 시작 시 버린다
+# (원격 web 모드에서 임의 payload 를 Forge 로 주입하지 못하게).
+_COMIC_T2I_KEY = "_comicT2I"
 
 
 class CreatorActionsMixin:
     """Handle all Creator actions behind one small action-dispatch interface."""
 
     def _handle_creator_action(self, action: str, payload: dict) -> bool:
-        # Literal tuple is intentional: tests/test_bridge_contract.py extracts
-        # action names statically from ``action in (...)`` expressions.
-        if action in (
-            "creator_get_state", "creator_select_media", "creator_generate",
-            "creator_cancel", "comic_plan", "comic_save",
-            "comic_generate_all", "comic_animate_all", "comic_export_page",
-            "comic_export_living",
-            "creator_h3_cache_status", "creator_h3_cache_clear",
-        ):
-            pass
-        else:
-            return False
-        self._ensure_creator_runtime()
+        # Vue 액션 → 처리 메서드. 이 표 한 벌이 게이트와 디스패치를 겸한다(이름 목록 사본 없음).
+        # 정적 검사 두 곳이 이 모양에 기대므로 유지할 것:
+        #   - tests/test_bridge_contract.py: `action not in handlers` 의 dict 키 = 계약 액션 이름
+        #   - tests/test_web_action_policy.py: {'action': self._method} 값으로 대화상자 도달 분석
         handlers = {
             "creator_get_state": self._creator_request_state,
             "creator_select_media": self._creator_select_media,
             "creator_generate": self._creator_start_generation,
             "creator_cancel": self._creator_cancel,
-            "creator_h3_cache_status": lambda data: self._creator_cache_request("status", data),
-            "creator_h3_cache_clear": lambda data: self._creator_cache_request("clear", data),
+            "creator_h3_cache_status": self._creator_cache_status,
+            "creator_h3_cache_clear": self._creator_cache_clear,
             "comic_plan": self._comic_start_plan,
             "comic_save": self._comic_save,
             "comic_generate_all": self._comic_start_generate_all,
@@ -68,8 +48,17 @@ class CreatorActionsMixin:
             "comic_export_page": self._comic_export_page,
             "comic_export_living": self._comic_start_export_living,
         }
+        if action not in handlers:
+            return False
+        self._ensure_creator_runtime()
         handlers[action](payload or {})
         return True
+
+    def _creator_cache_status(self, payload: dict) -> None:
+        self._creator_cache_request("status", payload)
+
+    def _creator_cache_clear(self, payload: dict) -> None:
+        self._creator_cache_request("clear", payload)
 
     def _ensure_creator_runtime(self) -> None:
         if hasattr(self, "_creator_coordinator"):
@@ -186,18 +175,18 @@ class CreatorActionsMixin:
                 "connected": False,
                 "ready": False,
                 "status": "checking",
-                "nodeTypes": [],
             }
             try:
                 from backends import get_backend, get_backend_type
 
                 backend = get_backend()
                 state["backend"] = get_backend_type().value
+                # 상태 조회는 연결 확인만 한다. 노드 목록(/object_info 전체)은 생성
+                # 경로가 필요할 때 따로 받으므로, 여기서 받으면 느린/실패한 요청이
+                # 연결된 백엔드를 '오류'로 표시하고 Comic 복구 emit까지 늦춘다.
                 state["connected"] = bool(backend.test_connection())
                 state["ready"] = state["connected"]
                 state["status"] = "ready" if state["connected"] else "offline"
-                if state["backend"] == "comfyui" and state["connected"]:
-                    state["nodeTypes"] = sorted(self._creator_object_info(backend).keys())
             except Exception as exc:
                 state["error"] = str(exc)
                 state["status"] = "error"
@@ -232,12 +221,17 @@ class CreatorActionsMixin:
 
     def _creator_start_generation(self, payload: dict) -> None:
         mode = str(payload.get("mode", "")).strip()
-        target = self._comic_generate_panel if mode == "comic_panel" else self._creator_generate
-        self._creator_run_thread(mode or "creator", target, payload)
+        if mode == "comic_panel":
+            # 컷 T2I 는 메인 T2I 설정을 따른다 — 위젯은 UI 스레드에서만 읽으므로 여기서 스냅샷.
+            request = self._comic_prepare_request(payload, mode)
+            if request is not None:
+                self._creator_run_thread(mode, self._comic_generate_panel, request)
+            return
+        self._creator_run_thread(mode or "creator", self._creator_generate, payload)
 
     def _creator_generate(self, payload: dict) -> None:
         from backends import BackendType, get_backend, get_backend_type
-        from core.creator_workflows import build
+        from core.creator_workflows import build, canonical_mode as creator_canonical_mode
 
         if get_backend_type() is not BackendType.COMFYUI:
             raise RuntimeError("Creator 영상/Krea2 생성은 ComfyUI 백엔드가 필요합니다")
@@ -246,18 +240,12 @@ class CreatorActionsMixin:
             raise RuntimeError("현재 ComfyUI adapter가 Creator 워크플로 실행을 지원하지 않습니다")
 
         requested_mode = str(payload.get("mode", ""))
+        # 별칭 표는 creator_workflows 한 벌 — 지원하지 않는 mode 는 업로드 전에 실패한다.
+        canonical_mode = creator_canonical_mode(requested_mode)
         params = self._creator_prepare_params(backend, dict(payload))
-        canonical_mode = "krea2_edit" if requested_mode in {"krea2", "krea_edit"} else requested_mode
-        object_info = self._creator_object_info(backend)
+        object_info = self._creator_object_info(backend, self._creator_cancel_event.is_set)
         available = set(object_info.keys())
         self._creator_configure_h3_cache(canonical_mode, params, available)
-        if (
-            canonical_mode in {"h3_t2v", "h3_i2v"}
-            and str(params.get("quality", "turbo")).strip().lower() == "turbo"
-            and "block_cache" not in params
-            and "blockCache" not in params
-        ):
-            params["block_cache"] = "MiniMaxH3BlockCacheT8" in available
         built = build(canonical_mode, params)
         self._creator_check_nodes(built, available)
         self._creator_resolve_comfy_choices(built, object_info)
@@ -279,9 +267,11 @@ class CreatorActionsMixin:
                 )
                 if primary is None:
                     raise RuntimeError("Krea2 hires 입력으로 사용할 이미지 결과가 없습니다")
-                hires_name = backend.upload_media(
+                hires_name = self._creator_upload_bytes(
+                    backend,
                     primary.data,
-                    primary.filename or "krea2_edit.png",
+                    "krea2_hires_input",
+                    self._creator_artifact_extension(primary.filename, primary.mime),
                     primary.mime or "image/png",
                 )
                 hires_params = {
@@ -319,7 +309,12 @@ class CreatorActionsMixin:
 
     @contextmanager
     def _creator_reserve(self, backend, owner, unload):
-        with self._creator_coordinator.reserve(owner, unload_llm=unload, timeout=0):
+        # 진행 중인 '생성 후 언로드'가 있으면 끝난 뒤 리스를 잡는다 — 언로드도 같은 리스를 쥐므로
+        # 기다리지 않으면 그 틈에 시작한 Creator 작업이 '사용 중'으로 실패한다(작업 스레드에서 기다림).
+        from core.post_generation import reserve_generation_lease
+        cancel_event = getattr(self, "_creator_cancel_event", None)
+        with reserve_generation_lease(owner, coordinator=self._creator_coordinator, unload_llm=unload,
+                                      cancelled=cancel_event.is_set if cancel_event is not None else None):
             self._creator_claim_backend(backend)
             try:
                 self._creator_check_cancelled()
@@ -356,8 +351,21 @@ class CreatorActionsMixin:
         return enabled, gb * 1024 ** 3, entries
 
     def _creator_configure_h3_cache(self, mode, params, available):
+        """H3 실행 전 서버 능력에 맞춘 캐시 설정 — Creator 생성과 Living Comic 이 같이 쓴다.
+
+        - turbo T2V/I2V 는 사용자가 따로 정하지 않았으면 서버에 MiniMaxH3BlockCacheT8 가
+          있을 때 block cache 를 켠다(예전엔 _creator_generate 에만 있어 Living Comic 이 못 썼다).
+        - 조건부 인코딩 캐시(conditioning_cache)는 설정·노드 지원 여부로 정한다.
+        """
         if not mode.startswith("h3_"):
             return
+        if (
+            mode in {"h3_t2v", "h3_i2v"}
+            and str(params.get("quality", "turbo")).strip().lower() == "turbo"
+            and "block_cache" not in params
+            and "blockCache" not in params
+        ):
+            params["block_cache"] = "MiniMaxH3BlockCacheT8" in available
         from core.h3_conditioning_cache import CACHE_NODE_TYPES
         enabled, max_bytes, max_entries = self._creator_cache_preferences()
         enabled = params.get("conditioning_cache", params.get("h3ConditioningCacheEnabled", enabled)) is True
@@ -488,7 +496,19 @@ class CreatorActionsMixin:
         )
 
     @staticmethod
-    def _creator_object_info(backend) -> dict:
+    def _creator_object_info(backend, cancel_check=None) -> dict:
+        """ComfyUI /object_info — Krea2 T2I/I2I 러너와 같은 backend.get_object_info(재시도 3회).
+
+        get_object_info 가 없는 duck-typed 어댑터(테스트 fake·옛 확장)만 직접 GET 으로 폴백한다.
+        """
+        getter = getattr(backend, "get_object_info", None)
+        if callable(getter):
+            from core.cancellable_call import call_with_optional_cancel
+
+            data = call_with_optional_cancel(getter, cancel_check=cancel_check)
+            if not isinstance(data, dict):
+                raise RuntimeError("ComfyUI /object_info 응답이 올바른 객체가 아닙니다")
+            return data
         import requests
 
         response = requests.get(f"{backend.api_url.rstrip('/')}/object_info", timeout=15)
@@ -496,39 +516,129 @@ class CreatorActionsMixin:
         data = response.json()
         return data if isinstance(data, dict) else {}
 
+    @staticmethod
+    def _creator_random_seed(mode: str) -> int:
+        """-1 seed 의 실제 값. Krea2 는 앱 replay 범위(32비트) 안에서만 뽑는다."""
+        from core.generation_family import KREA2_SEED_MAX
+
+        if str(mode).startswith("krea2"):
+            return secrets.randbelow(KREA2_SEED_MAX + 1)
+        return secrets.randbits(63)
+
+    @staticmethod
+    def _creator_upload_extension(path: Path) -> str:
+        """업로드 이름(내용 해시)에 붙일 확장자 — 없거나 영숫자가 아니면 업로드 전에 거부한다.
+
+        추측하지 않는다: build() 의 입력 확장자 검사(이미지/영상)가 이 값에 기댄다.
+        """
+        extension = path.suffix.lstrip(".").lower()
+        if not extension or not extension.isascii() or not extension.isalnum():
+            raise ValueError(f"입력 파일의 확장자를 알 수 없습니다: {path}")
+        return extension
+
+    @staticmethod
+    def _creator_artifact_extension(filename: Any, mime: Any) -> str:
+        """ComfyUI 결과물을 다시 올릴 때의 확장자 — 결과 파일명 → MIME → ``png`` 순.
+
+        이미지 MIME 은 표로 먼저 본다 — ``mimetypes`` 는 Windows 레지스트리에 기대 webp 등을
+        모를 수 있다.
+        """
+        suffix = Path(str(filename or "")).suffix.lstrip(".").lower()
+        if suffix and suffix.isascii() and suffix.isalnum():
+            return suffix
+        clean_mime = str(mime or "").split(";")[0].strip().lower()
+        known = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+                 "image/bmp": "bmp", "image/tiff": "tiff"}.get(clean_mime)
+        if known:
+            return known
+        guessed = (mimetypes.guess_extension(clean_mime) or "").lstrip(".").lower()
+        if guessed and guessed.isascii() and guessed.isalnum():
+            return guessed
+        return "png"
+
+    def _creator_upload_bytes(self, backend, data: bytes, prefix: str, extension: str, mime: str) -> str:
+        """Creator 의 모든 ComfyUI 업로드 — 내용 해시 이름 + ``overwrite=False``.
+
+        예전엔 사용자 파일명(basename)으로 ``overwrite=true`` 업로드해, 다른 폴더의 동명
+        원본·참조(0001.png 등)가 서로를 덮어써 Krea2 편집의 두 LoadImage 가 같은(참조) 그림을
+        읽었고, ComfyUI/input 에 원래 있던 같은 이름의 파일도 조용히 덮였다. 같은 바이트는 같은
+        이름이라 다시 올려도 input 폴더에 사본이 쌓이지 않는다(core/comfy_upload_names.py).
+        """
+        from core.comfy_upload_names import upload_content
+
+        event = getattr(self, "_creator_cancel_event", None)
+        return upload_content(
+            backend, data, prefix, extension, mime,
+            cancel_check=event.is_set if event is not None else None,
+        )
+
+    def _creator_upload_file(self, backend, path: Path, prefix: str) -> str:
+        extension = self._creator_upload_extension(path)
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return self._creator_upload_bytes(backend, path.read_bytes(), prefix, extension, mime)
+
     def _creator_prepare_params(self, backend, params: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize the Vue payload and upload only media used by the graph."""
+        from core.creator_workflows import (
+            CreatorWorkflowError,
+            canonical_mode as creator_canonical_mode,
+            media_inputs as creator_media_inputs,
+        )
+        from core.generation_family import KREA2_SEED_MAX
 
         mode = str(params.get("mode", "")).strip().lower()
-        source_key = "input_video" if mode == "h3_v2v" else "input_image"
-        uploads = (
-            (("sourcePath", "source_path"), source_key),
-            (("identityPath", "identity_path"), "input_image"),
-            (("referencePath", "reference_path"), "reference_image"),
-            (("imagePath", "image_path"), "input_image"),
-            (("videoPath", "video_path"), "input_video"),
-        )
-        for incoming_names, normalized in uploads:
-            path_text = ""
-            for incoming in incoming_names:
-                value = params.pop(incoming, "")
-                if value:
-                    path_text = value
-                    break
-            if not path_text:
-                continue
-            path = Path(str(path_text)).expanduser().resolve()
-            if not path.is_file():
-                raise FileNotFoundError(f"입력 파일을 찾을 수 없습니다: {path}")
-            mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-            params[normalized] = backend.upload_media(path.read_bytes(), path.name, mime)
+        try:
+            canonical = creator_canonical_mode(mode)
+        except CreatorWorkflowError:
+            canonical = mode  # 알 수 없는 mode 는 build() 가 같은 오류로 거부한다
 
+        # seed 는 업로드 전에 검증한다 — 잘못된 요청이 ComfyUI/input 에 파일만 남기지 않게.
         seed = params.get("seed", -1)
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise ValueError("seed는 정수여야 합니다")
-        params["seed"] = secrets.randbits(63) if seed < 0 else seed
+        if canonical.startswith("krea2") and seed > KREA2_SEED_MAX:
+            raise ValueError(f"seed는 -1 또는 0~{KREA2_SEED_MAX} 범위여야 합니다")
+        params["seed"] = self._creator_random_seed(canonical) if seed < 0 else seed
+
+        # 이하 mode 분기는 전부 정규 mode 기준 — 'h3-v2v'/'H3_V2V' 같은 별칭도 build('h3_v2v') 와
+        # 같은 업로드 키·오디오·레퍼런스 지시를 받는다(원문 문자열로 가르면 input_image 로 올라가
+        # 업로드 뒤에 확장자 오류로 실패했다).
+        is_v2v = canonical == "h3_v2v"
+        source_key = "input_video" if is_v2v else "input_image"
+        # 슬롯 → (그래프 입력 키, 업로드 이름 접두어). 그 mode 의 그래프가 읽지 않는 입력은 올리지
+        # 않는다(creator_workflows.media_inputs): 아이덴티티는 V2V 전용이라, V2V 에서 고른 사진이
+        # 폼에 남은 채 I2V 로 바꾸면 예전엔 그 사진이 시작 프레임(input_image)을 덮어썼다. T2V/T2I
+        # 에 남은 원본도 올리지 않는다. 같은 입력 키를 여러 슬롯이 채우면 앞 슬롯이 이긴다.
+        try:
+            accepted = creator_media_inputs(canonical)
+        except CreatorWorkflowError:
+            accepted = frozenset()  # 알 수 없는 mode — 아무것도 올리지 않고 build() 가 거부한다
+        slots = (
+            (("sourcePath", "source_path"), source_key, "creator_source"),
+            (("identityPath", "identity_path"), "input_image" if is_v2v else "", "creator_identity"),
+            (("referencePath", "reference_path"), "reference_image", "creator_reference"),
+            (("imagePath", "image_path"), "input_image", "creator_image"),
+            (("videoPath", "video_path"), "input_video", "creator_video"),
+        )
+        planned: list[tuple[str, str, Path]] = []
+        for incoming_names, normalized, prefix in slots:
+            values = [params.pop(incoming, "") for incoming in incoming_names]
+            path_text = next((str(value) for value in values if value), "")
+            if (not path_text or normalized not in accepted
+                    or any(key == normalized for key, _prefix, _path in planned)):
+                continue
+            path = Path(path_text).expanduser().resolve()
+            if not path.is_file():
+                raise FileNotFoundError(f"입력 파일을 찾을 수 없습니다: {path}")
+            self._creator_upload_extension(path)
+            planned.append((normalized, prefix, path))
+        # 모든 입력을 검증한 뒤에 올린다 — 두 번째 파일이 없거나 확장자가 없을 때 첫 파일만
+        # ComfyUI/input 에 남지 않게.
+        for normalized, prefix, path in planned:
+            params[normalized] = self._creator_upload_file(backend, path, prefix)
+
         params["generate_audio"] = bool(params.get("includeAudio", params.get("generate_audio", False)))
-        if mode == "h3_v2v":
+        if is_v2v:
             params["include_reference_audio"] = bool(params["generate_audio"])
 
         audio_prompt = str(params.pop("audioPrompt", params.pop("audio_prompt", "")) or "").strip()
@@ -541,7 +651,7 @@ class CreatorActionsMixin:
         negative = str(params.pop("negative", "") or "").strip()
         if negative:
             prompt_parts.append(f"Avoid: {negative}")
-        if mode == "h3_v2v":
+        if is_v2v:
             reference_instructions = []
             if params.get("input_image"):
                 reference_instructions.append("Use <Picture 1> for subject identity and appearance.")
@@ -554,81 +664,20 @@ class CreatorActionsMixin:
 
     @staticmethod
     def _creator_check_nodes(built: Dict[str, Any], available: set[str]) -> None:
-        missing = sorted(set(built.get("required_node_types", ())) - available)
-        if missing:
-            raise RuntimeError("ComfyUI 필수 노드가 없습니다: " + ", ".join(missing))
+        # Krea2 T2I/I2I 러너와 같은 한 벌 (core/comfy_choice_resolver).
+        from core.comfy_choice_resolver import check_required_nodes
+        check_required_nodes(built, available)
 
     @staticmethod
     def _creator_resolve_comfy_choices(
         built: Dict[str, Any], object_info: Dict[str, Any]
     ) -> None:
-        """Replace portable model paths with the server's exact combo values.
+        """이식 가능한 모델 경로 → 서버의 정확한 combo 값 (H3 캐시 descriptor 포함).
 
-        ComfyUI returns subfolder choices with OS-native separators.  Matching
-        them slash-insensitively keeps one workflow portable across Windows and
-        Linux while still satisfying Comfy's exact ``value_not_in_list`` check.
+        구현은 Krea2 러너와 공유하는 core/comfy_choice_resolver.resolve_choices 한 벌.
         """
-
-        graphs = [built.get("workflow", {})] + [stage["workflow"] for stage in built.get("stages", [])]
-        descriptors = []
-        for graph in list(graphs):
-            for node in graph.values():
-                if node.get("class_type") not in {"ForgeNeoH3ConditioningCachePrepare", "ForgeNeoH3ConditioningCacheLoad"}:
-                    continue
-                inputs = node["inputs"]
-                descriptor = json.loads(inputs["descriptor"])
-                descriptors.append((inputs, descriptor))
-                graphs.extend([descriptor["conditioning"], dict(enumerate(descriptor["models"]))])
-        for node in (node for graph in graphs for node in graph.values()):
-            if not isinstance(node, dict):
-                continue
-            schema = object_info.get(str(node.get("class_type", "")), {})
-            input_schema = schema.get("input", {}) if isinstance(schema, dict) else {}
-            definitions: Dict[str, Any] = {}
-            for section in ("required", "optional"):
-                values = input_schema.get(section, {}) if isinstance(input_schema, dict) else {}
-                if isinstance(values, dict):
-                    definitions.update(values)
-            inputs = node.get("inputs", {})
-            if not isinstance(inputs, dict):
-                continue
-            for name, value in list(inputs.items()):
-                if node.get("class_type") == "LoadImage" and name == "image":
-                    # Uploaded files may be newer than this /object_info snapshot.
-                    continue
-                definition = definitions.get(name)
-                if not isinstance(value, str) or not isinstance(definition, (list, tuple)) or not definition:
-                    continue
-                choices = definition[0]
-                if not isinstance(choices, (list, tuple)):
-                    continue
-                normalized = value.replace("\\", "/").casefold()
-                match = next(
-                    (
-                        choice for choice in choices
-                        if isinstance(choice, str)
-                        and choice.replace("\\", "/").casefold() == normalized
-                    ),
-                    None,
-                )
-                if match is None:
-                    requested_stem = Path(normalized).stem
-                    stem_matches = [
-                        choice for choice in choices
-                        if isinstance(choice, str)
-                        and Path(choice.replace("\\", "/").casefold()).stem == requested_stem
-                    ]
-                    if len(stem_matches) == 1:
-                        match = stem_matches[0]
-                if match is not None:
-                    inputs[name] = match
-                elif choices:
-                    raise RuntimeError(
-                        f"ComfyUI 리소스 선택지에 {node.get('class_type')}.{name}="
-                        f"{value!r} 항목이 없습니다"
-                    )
-        for inputs, descriptor in descriptors:
-            inputs["descriptor"] = json.dumps(descriptor, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        from core.comfy_choice_resolver import resolve_choices
+        resolve_choices(built, object_info)
 
     @staticmethod
     def _creator_image_size(data: bytes) -> tuple[int, int]:
@@ -716,7 +765,160 @@ class CreatorActionsMixin:
         self._creator_emit("comicDocumentChanged", payload)
 
     def _comic_start_generate_all(self, payload: dict) -> None:
-        self._creator_run_thread("comic_generate", self._comic_generate_all, payload)
+        # 컷 T2I 는 메인 T2I 설정을 따른다 — 위젯은 UI 스레드에서만 읽으므로 여기서 스냅샷.
+        request = self._comic_prepare_request(payload, "comic_generate")
+        if request is not None:
+            self._creator_run_thread("comic_generate", self._comic_generate_all, request)
+
+    @staticmethod
+    def _comic_requested_panel_id(payload: dict) -> str:
+        return str((payload.get("panel") or {}).get("id", payload.get("panelId", "")))
+
+    def _comic_prepare_request(self, payload: dict, mode: str) -> Optional[dict]:
+        """UI 스레드: 컷별 T2I 스냅샷을 떠 워커 payload 에 싣는다. 실패하면 결과 오류를 보내고 None."""
+        request = {key: value for key, value in dict(payload or {}).items() if key != _COMIC_T2I_KEY}
+        try:
+            block = self._comic_t2i_snapshots(request, mode)
+            # 워커는 UI 스레드가 정규화한 문서를 그대로 다시 읽는다 — 원문을 따로 정규화하면
+            # 정리 후 비는 id('컷')가 매번 다른 무작위 id 를 받아 스냅샷과 어긋났다.
+            request["document"] = block.pop("document")
+            request[_COMIC_T2I_KEY] = block
+        except Exception as exc:
+            self._creator_emit(
+                "creatorResult",
+                {"ok": False, "mode": mode, "requestId": str(request.get("requestId") or "")[:100],
+                 "error": str(exc)[:2000]},
+            )
+            return None
+        return request
+
+    def _comic_t2i_snapshots(self, request: dict, mode: str) -> dict:
+        """컷마다 메인 T2I payload 빌더(_build_generation_payload)로 요청을 만든다.
+
+        - 빌더가 컷 프롬프트에 LoRA 스택을 붙이고 sampler/steps/cfg·VAE/TE·Hires·NegPiP·
+          ADetailer/SAM3·Comfy 프리셋·KREA2 family 를 T2I 와 똑같이 채운다.
+        - snapshot=True: 와일드카드·프롬프트 훅은 워커에서(core.comic_generation.run_panel).
+        - 랜덤 해상도여도 컷 크기가 흩어지지 않게 첫 스냅샷(또는 요청의 명시 크기)으로 고정한다.
+        - ComfyUI 워크플로 상세 설정은 누른 시점 것으로 고정한다(채팅·대기열과 같은 규칙).
+        - 스냅샷은 컷 인덱스 순서 목록에 컷 id 를 같이 싣는다(core.comic_generation.panel_entry).
+          id 로 키를 잡으면 id 가 겹친 컷끼리 한 스냅샷으로 뭉쳐 다른 컷 프롬프트로 생성됐다.
+        - 반환 dict 의 "document" 는 이 정규화 결과 — 호출자가 워커 요청의 문서로 바꿔 싣는다.
+        """
+        from core import comic_generation as comic_t2i
+        from core.comic_studio import panel_generation_payloads
+
+        raw_document = request.get("document", request)
+        document = self._comic_studio().normalize(raw_document)
+        # 겹친 컷 id 는 여기서 한 번 풀어 워커·저장·결과 panelId 가 모두 유일한 id 를 쓰게 한다
+        panel_ids = comic_t2i.unique_panel_ids([panel.id for panel in document.panels])
+        for panel, panel_id in zip(document.panels, panel_ids):
+            panel.id = panel_id
+        panel_payloads = list(panel_generation_payloads(document))
+        indexes = list(range(len(panel_payloads)))
+        target: Dict[str, Any] = {}
+        if mode == "comic_panel":
+            # 요청 id 는 같은 원문 문서의 컷 id 로 푼다(정규화로 바뀐 id 도 찾는다).
+            # 없는 컷이면 워커가 '생성할 Comic 컷을 찾을 수 없습니다' 로 거부한다
+            panel_index = comic_t2i.resolve_panel_index(
+                raw_document, panel_ids, self._comic_requested_panel_id(request),
+            )
+            indexes = [] if panel_index is None else [panel_index]
+            target = {"panelIndex": panel_index,
+                      "panelId": panel_ids[panel_index] if panel_index is not None else ""}
+
+        builder = getattr(self, "_build_generation_payload", None)
+        size = comic_t2i.explicit_size(request)
+        entries: list[Dict[str, Any]] = []
+        for index in indexes:
+            panel_payload = panel_payloads[index]
+            if callable(builder):
+                snapshot, error = builder(prompt_override=panel_payload["prompt"], snapshot=True)
+                if error or snapshot is None:
+                    raise ValueError(error or "T2I 설정으로 컷 생성 요청을 만들지 못했습니다")
+            else:
+                snapshot = comic_t2i.fallback_snapshot(panel_payload["prompt"])
+            if size is None:
+                size = (int(snapshot.get("width") or comic_t2i.DEFAULT_SIZE),
+                        int(snapshot.get("height") or comic_t2i.DEFAULT_SIZE))
+            entries.append(comic_t2i.panel_entry(
+                index, panel_ids[index], comic_t2i.panel_request(snapshot, panel_payload, size=size),
+            ))
+
+        krea2 = any(comic_t2i.is_krea2_snapshot(entry["request"]) for entry in entries)
+        model = str(request.get("model", "") or self._creator_current_model())
+        needs_checkpoint = getattr(self, "_backend_needs_checkpoint", None)
+        if callable(builder) and not krea2 and not model.strip() and callable(needs_checkpoint) and needs_checkpoint():
+            raise ValueError("T2I에서 사용할 모델을 먼저 선택하세요.")
+        if callable(builder) and entries and not krea2:
+            from backends import BackendType, get_backend, get_backend_type
+
+            if get_backend_type() == BackendType.COMFYUI:
+                from core.comfy_workflow_controls import snapshot_comfy_payload
+
+                frozen = snapshot_comfy_payload(get_backend(), {}, "txt2img")["_comfy_workflow_snapshot"]
+                for entry in entries:
+                    entry["request"]["_comfy_workflow_snapshot"] = copy.deepcopy(frozen)
+        return {"model": model, "panels": entries, "document": document.to_dict(), **target}
+
+    def _comic_panel_generation_payload(self, payload: dict, document, index: int, panel_payload: dict) -> dict:
+        """워커: UI 스레드 스냅샷에서 이 컷의 요청을 꺼낸다.
+
+        스냅샷이 아예 없을 때(T2I 빌더 없는 호스트·직접 호출)만 예전 최소 payload 로 폴백한다.
+        스냅샷이 있는데 이 컷(인덱스 + id 둘 다)이 없으면 조용히 기본값·다른 컷 설정으로
+        생성하지 않고 오류로 멈춘다.
+        """
+        from core import comic_generation as comic_t2i
+
+        t2i = payload.get(_COMIC_T2I_KEY)
+        if t2i is None:
+            size = comic_t2i.explicit_size(payload) or (comic_t2i.DEFAULT_SIZE, comic_t2i.DEFAULT_SIZE)
+            return comic_t2i.panel_request(
+                comic_t2i.fallback_snapshot(panel_payload["prompt"]), panel_payload, size=size,
+            )
+        panel_id = document.panels[index].id if 0 <= index < len(document.panels) else ""
+        request = comic_t2i.find_panel_request(
+            t2i.get("panels") if isinstance(t2i, dict) else None, index, panel_id,
+        )
+        if request is None:
+            raise RuntimeError(f"컷 {index + 1}의 T2I 설정 스냅샷이 없습니다. 다시 생성하세요")
+        return request
+
+    def _comic_target_panel_index(self, payload: dict, document) -> int:
+        """워커: 단일 컷 생성 대상 인덱스.
+
+        UI 스레드가 푼 인덱스가 있으면 그 자리의 컷 id 까지 맞는지 확인해 쓰고, 스냅샷 없는
+        직접 호출이면 요청 원문 기준으로 푼다(core.comic_generation.resolve_panel_index).
+        """
+        from core import comic_generation as comic_t2i
+
+        panel_ids = [panel.id for panel in document.panels]
+        t2i = payload.get(_COMIC_T2I_KEY)
+        if isinstance(t2i, dict) and "panelIndex" in t2i:
+            index = t2i.get("panelIndex")
+            valid = (isinstance(index, int) and not isinstance(index, bool)
+                     and 0 <= index < len(panel_ids) and panel_ids[index] == str(t2i.get("panelId", "")))
+        else:
+            index = comic_t2i.resolve_panel_index(
+                payload.get("document", payload), panel_ids, self._comic_requested_panel_id(payload),
+            )
+            valid = index is not None
+        if not valid:
+            raise ValueError("생성할 Comic 컷을 찾을 수 없습니다")
+        return int(index)
+
+    def _comic_generation_model(self, payload: dict) -> str:
+        t2i = payload.get(_COMIC_T2I_KEY)
+        if isinstance(t2i, dict) and "model" in t2i:
+            return str(t2i.get("model") or "")
+        return str(payload.get("model", "") or self._creator_current_model())
+
+    def _comic_wait_for_pending_unload(self) -> None:
+        """T2I 워커와 같은 규칙: 직전 '생성 후 언로드' 요청이 끝난 뒤에 보낸다(이 워커 스레드에서)."""
+        from core.post_generation import wait_for_pending_unload
+
+        wait_for_pending_unload(cancelled=self._creator_cancel_event.is_set)
+        if self._creator_cancel_event.is_set():
+            raise RuntimeError("Comic 컷 생성이 취소되었습니다")
 
     def _comic_generate_all(self, payload: dict) -> None:
         from backends import get_backend
@@ -725,22 +927,17 @@ class CreatorActionsMixin:
         studio = self._comic_studio()
         document = studio.normalize(payload.get("document", payload))
         backend = get_backend()
-        model = str(payload.get("model", "") or self._creator_current_model())
-        width = int(payload.get("width", 1024) or 1024)
-        height = int(payload.get("height", 1024) or 1024)
+        model = self._comic_generation_model(payload)
         panel_payloads = list(panel_generation_payloads(document))
         unload = self._creator_should_unload_ollama()
+        self._comic_wait_for_pending_unload()
         with self._creator_reserve(backend, "comic_generate", unload):
             for index, panel_payload in enumerate(panel_payloads):
                 if self._creator_cancel_event.is_set():
                     raise RuntimeError("Comic 컷 생성이 취소되었습니다")
-                generation_payload = {
-                    "prompt": panel_payload["prompt"],
-                    "negative_prompt": panel_payload["negative_prompt"],
-                    "seed": panel_payload["seed"],
-                    "width": width,
-                    "height": height,
-                }
+                generation_payload = self._comic_panel_generation_payload(
+                    payload, document, index, panel_payload,
+                )
 
                 def _progress(value, maximum, preview=None, panel_index=index):
                     local = value / maximum if maximum else 0
@@ -755,7 +952,10 @@ class CreatorActionsMixin:
                         },
                     )
 
-                result = backend.txt2img(model, generation_payload, _progress)
+                result = self._comic_txt2img(backend, model, generation_payload, _progress)
+                # 취소로 끊긴 부분 결과를 컷 이미지로 저장하지 않는다
+                if self._creator_cancel_event.is_set():
+                    raise RuntimeError("Comic 컷 생성이 취소되었습니다")
                 if not result.success or not result.image_data:
                     raise RuntimeError(result.error or f"컷 {index + 1} 생성 결과가 없습니다")
                 path = self._creator_write_bytes(
@@ -777,29 +977,38 @@ class CreatorActionsMixin:
             },
         )
 
+    def _comic_txt2img(self, backend, model: str, generation_payload: dict, progress_callback):
+        """Comic 컷 T2I — T2I 워커와 같은 라우팅(core.comic_generation.run_panel).
+
+        지연 프롬프트 훅을 풀고, 비공개 키를 떼고, KREA2 면 Krea2 러너·아니면 backend.txt2img.
+        받을 수 있는 어댑터에는 이 작업의 취소 확인을 넘긴다 — 예전엔 cancel_check 없이 불러,
+        WebUI 가 체크포인트를 바꾸는 동안(_switch_model_if_needed) 누른 취소가 사라졌다.
+        """
+        from core.comic_generation import run_panel
+
+        return run_panel(
+            backend, model, generation_payload, progress_callback,
+            cancel_check=self._creator_cancel_event.is_set,
+        )
+
     def _comic_generate_panel(self, payload: dict) -> None:
         from backends import get_backend
         from core.comic_studio import panel_generation_payloads
 
         studio = self._comic_studio()
         document = studio.normalize(payload.get("document", payload))
-        panel_id = str((payload.get("panel") or {}).get("id", payload.get("panelId", "")))
-        try:
-            panel_index = next(index for index, panel in enumerate(document.panels) if panel.id == panel_id)
-        except StopIteration as exc:
-            raise ValueError("생성할 Comic 컷을 찾을 수 없습니다") from exc
+        panel_index = self._comic_target_panel_index(payload, document)
+        # 결과의 panelId 는 함께 보내는 (정규화된) 문서의 id — 프론트가 그 문서로 컷을 찾는다
+        panel_id = document.panels[panel_index].id
         panel_payload = list(panel_generation_payloads(document))[panel_index]
         backend = get_backend()
-        generation_payload = {
-            "prompt": panel_payload["prompt"],
-            "negative_prompt": panel_payload["negative_prompt"],
-            "seed": panel_payload["seed"],
-            "width": int(payload.get("width", 1024) or 1024),
-            "height": int(payload.get("height", 1024) or 1024),
-        }
+        generation_payload = self._comic_panel_generation_payload(payload, document, panel_index, panel_payload)
+        model = self._comic_generation_model(payload)
+        self._comic_wait_for_pending_unload()
         with self._creator_reserve(backend, "comic_panel", self._creator_should_unload_ollama()):
-            result = backend.txt2img(
-                str(payload.get("model", "") or self._creator_current_model()),
+            result = self._comic_txt2img(
+                backend,
+                model,
                 generation_payload,
                 self._creator_progress_callback,
             )
@@ -837,7 +1046,7 @@ class CreatorActionsMixin:
         studio = self._comic_studio()
         document = studio.normalize(payload.get("document", payload))
         backend = get_backend()
-        object_info = self._creator_object_info(backend)
+        object_info = self._creator_object_info(backend, self._creator_cancel_event.is_set)
         available = set(object_info.keys())
         unload = self._creator_should_unload_ollama()
         with self._creator_reserve(backend, "comic_animate", unload):
@@ -846,17 +1055,13 @@ class CreatorActionsMixin:
                     raise RuntimeError("Comic 애니메이션이 취소되었습니다")
                 if not panel.image_path:
                     raise RuntimeError(f"컷 {index + 1} 이미지가 없습니다")
-                uploaded = backend.upload_media(
-                    Path(panel.image_path).read_bytes(),
-                    Path(panel.image_path).name,
-                    mimetypes.guess_type(panel.image_path)[0] or "image/png",
-                )
+                uploaded = self._creator_upload_file(backend, Path(panel.image_path), "comic_panel")
                 params = dict(payload.get("videoSettings", {}))
                 params.update(
                     {
                         "input_image": uploaded,
                         "prompt": panel.motion_prompt or panel.text,
-                        "seed": secrets.randbits(63) if panel.seed < 0 else panel.seed,
+                        "seed": self._creator_random_seed("h3_i2v") if panel.seed < 0 else panel.seed,
                     }
                 )
                 self._creator_configure_h3_cache("h3_i2v", params, available)
@@ -1024,58 +1229,52 @@ class CreatorActionsMixin:
 
     @staticmethod
     def _creator_prefs() -> dict:
-        path = Path(__file__).resolve().parent.parent / "config" / "ui_prefs.json"
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
+        # 경로·마이그레이션은 core.ui_prefs 한 곳 — 예전엔 여기서 경로를 조립해 json.load 로 따로 읽었다.
+        from core.ui_prefs import read_ui_prefs
+
+        return read_ui_prefs()
 
     def _creator_ollama_config(self) -> tuple[str, str]:
+        from core.ollama_client import DEFAULT_OLLAMA_URL
+
         prefs = self._creator_prefs()
         return (
-            str(prefs.get("ollamaUrl", "http://localhost:11434") or "http://localhost:11434").rstrip("/"),
+            str(prefs.get("ollamaUrl", DEFAULT_OLLAMA_URL) or DEFAULT_OLLAMA_URL).rstrip("/"),
             str(prefs.get("ollamaModel", "") or ""),
         )
 
     def _creator_should_unload_ollama(self) -> bool:
-        prefs = self._creator_prefs()
-        return bool(prefs.get("ollamaUnloadOnGen", False) and prefs.get("ollamaModel"))
+        # 수동 생성(_maybe_unload_ollama)과 같은 판단 규칙 한 벌
+        from core.ui_prefs import ollama_unload_target
+
+        return ollama_unload_target(self._creator_prefs()) is not None
 
     def _creator_unload_ollama(self) -> bool:
-        from core.ollama_client import OllamaClient
+        from core.ollama_client import unload_configured_model
 
         url, model = self._creator_ollama_config()
-        if not model:
-            return True
-        client = OllamaClient(url, model)
-        if not client.test_connection():
-            # Ollama 가 떠 있지 않으면 점유한 VRAM 도 없다 → 언로드 성공으로 본다.
-            # ui/generator_generation.py 의 _maybe_unload_ollama 와 같은 의미론
-            # ("Ollama 미실행/미설정이면 조용히 무시").
-            return True
-        return client.unload()
+        # Ollama 가 떠 있지 않으면(설치 목록이 비면) 점유한 VRAM 도 없다 → 언로드 성공으로 본다.
+        # ui/generator_generation.py 의 _maybe_unload_ollama 와 같은 의미론
+        # ("Ollama 미실행/미설정이면 조용히 무시"). 설정 이름이 설치되지 않은 태그면
+        # 태그 강화·NL·Comic 이 실제로 올린 같은 계열의 설치 모델을 골라 내린다(resolve_model).
+        return unload_configured_model(url, model)
 
     def _comic_ollama_complete(self, system: str, user: str) -> str:
-        import requests
+        from core.ollama_client import OllamaClient, resolve_installed_model
 
         url, model = self._creator_ollama_config()
         if not model:
             raise RuntimeError("Settings에서 Comic Director용 Ollama 모델을 선택하세요")
-        response = requests.post(
-            f"{url}/api/chat",
-            json={
-                "model": model,
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.35, "num_predict": 3600},
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-            },
+        # 설정 이름이 설치되지 않은 태그(추천 카드만 고르고 pull 안 함)면 그대로 보내면 404 —
+        # 태그 강화·NL 워커와 같은 규칙으로 설치 모델에 맞춘다(_creator_run_thread 백그라운드라 HTTP 가능)
+        model = resolve_installed_model(url, model)
+        # 추론형 모델이 num_predict 3600 을 사고에 다 써 JSON 본문이 비지 않게 think 를 능력에 맞춰 끈다
+        return OllamaClient(url, model).complete_chat(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            options={"temperature": 0.35, "num_predict": 3600},
+            response_format="json",
             timeout=300,
         )
-        response.raise_for_status()
-        data = response.json()
-        return str((data.get("message") or {}).get("content") or data.get("response") or "")

@@ -300,7 +300,12 @@ class HandReconstructionActionTests(unittest.TestCase):
             for key in ("enable_hr", "hr_scale", "_postprocess_chain", "_comfy_detail_passes",
                         "adetailer_enabled", "sam3_enabled", "comfy_workflow_controls", "override_settings"):
                 self.assertNotIn(key, payload)
-        with Image.open(io.BytesIO(url_bytes(result["source"]))) as source, \
+        # The completion event no longer re-sends the source: the panel keeps the
+        # exact image it sent with this requestId (display-only re-encode removed).
+        self.assertNotIn("source", result)
+        self.assertTrue(result["prepared"].startswith("data:image/png;base64,"))
+        self.assertEqual(url_bytes(result["prepared"]), prepared.prepared_png)
+        with Image.open(io.BytesIO(url_bytes(request["image"]))) as source, \
                 Image.open(io.BytesIO(url_bytes(result["candidates"][0]["image"]))) as output:
             self.assertEqual(output.size, source.size)
             self.assertEqual(output.getpixel((0, 0)), source.getpixel((0, 0)))
@@ -435,6 +440,30 @@ class HandReconstructionActionTests(unittest.TestCase):
         self.assertIn("128 MB", result["error"])
         self.assertIsNone(self.host._hand_preview)
         self.assertEqual(len(self.backend.calls), 1)
+
+    def generate_on_fresh_host(self, request):
+        host = Host()   # fresh FakeBackend → identical candidate bytes for identical input
+        host._handle_hand_reconstruction_action(GENERATE, request)
+        event = host.vue_bridge.handReconstructionEvent.wait_for(
+            lambda item: item.get("requestId") == request["requestId"] and item.get("phase") == "complete")
+        for thread in self.threads:
+            if thread.ident is not None:
+                thread.join(5)
+        return host, event
+
+    def test_cache_budget_counts_only_prepared_crop_and_candidates(self):
+        """회귀: 표시 전용 source_png가 예산을 잡아먹어 JPEG 원본에서 후보가 거부되던 문제."""
+        request = repair_request(candidates=1)
+        host, event = self.generate_on_fresh_host(request)
+        self.assertTrue(event["ok"])
+        needed = len(prepare_hand_repair(request).prepared_png) + len(host._hand_preview["candidates"][0]["png"])
+        with mock.patch("ui.hand_reconstruction_actions.MAX_CACHED_BYTES", needed):
+            _host, exact = self.generate_on_fresh_host(request)
+        self.assertTrue(exact["ok"], "원본 재인코딩이 예산에 포함되면 정확히 맞춘 예산에서 실패한다")
+        with mock.patch("ui.hand_reconstruction_actions.MAX_CACHED_BYTES", needed - 1):
+            _host, over = self.generate_on_fresh_host(request)
+        self.assertFalse(over["ok"])
+        self.assertIn("128 MB", over["error"])
 
     def test_export_requires_current_cache_and_strict_index_and_ignores_client_paths(self):
         generated = self.generate(repair_request(candidates=1))
@@ -682,8 +711,11 @@ class HandReconstructionIntegrationBoundaryTests(unittest.TestCase):
         decode_id, decode = _node(graph, "VAEDecode")
         self.assertEqual(decode["inputs"]["samples"], [sampler_id, 0])
         self.assertEqual(decode["inputs"]["vae"], [vae_id, 0])
-        self.assertEqual(_classes(graph).count("SaveImage"), 1)
-        self.assertEqual(_node(graph, "SaveImage")[1]["inputs"]["images"], [decode_id, 0])
+        # 손 재구성 payload 는 save_images=False — Forge 처럼 ComfyUI/output 에
+        # 사본을 남기지 않고 temp 미리보기로 결과만 돌려받는다.
+        self.assertNotIn("SaveImage", _classes(graph))
+        self.assertEqual(_classes(graph).count("PreviewImage"), 1)
+        self.assertEqual(_node(graph, "PreviewImage")[1]["inputs"]["images"], [decode_id, 0])
         self.assertEqual(payload, payload_before)
         self.assertEqual(snapshot, snapshot_before)
 
@@ -708,12 +740,13 @@ class HandReconstructionIntegrationBoundaryTests(unittest.TestCase):
                     self.assertEqual(prepared.source_sha256, original_hash)
                     self.assertEqual(prepared.source_metadata["text"]["workflow"], '{"nodes":[]}')
                     self.assertIn("original scene", prepared.source_metadata["text"]["parameters"])
-                    with Image.open(io.BytesIO(original_bytes)) as original, \
-                            Image.open(io.BytesIO(prepared.source_png)) as source_preview:
-                        self.assertEqual(source_preview.size, original.size)
-                        self.assertEqual(source_preview.tobytes(), original.tobytes())
-                        self.assertEqual(source_preview.info["parameters"], original.info["parameters"])
-                        self.assertEqual(source_preview.info["workflow"], original.info["workflow"])
+                    self.assertFalse(hasattr(prepared, "source_png"),
+                                     "표시 전용 원본 재인코딩은 만들지 않는다 (패널이 보낸 원본을 쓴다)")
+                    with Image.open(io.BytesIO(original_bytes)) as original:
+                        self.assertEqual(prepared.source.size, original.size)
+                        self.assertEqual(prepared.source.tobytes(), original.convert(prepared.source.mode).tobytes())
+                        self.assertEqual(prepared.source_metadata["text"]["parameters"], original.info["parameters"])
+                        self.assertEqual(prepared.source_metadata["text"]["workflow"], original.info["workflow"])
                     self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), original_hash)
             self.assertEqual(list(Path(temporary).iterdir()), [path])
 

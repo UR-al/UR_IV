@@ -180,6 +180,61 @@
   transform: translateY(-4px);
   border-color: var(--text-muted);
 }
+/* 카드 안 미디어 — 즐겨찾기에도 영상·오디오가 있어 두 뷰가 같은 규칙을 쓴다(예전엔 Gallery 에만). */
+.gallery-workspace .gallery-card img,
+.gallery-workspace .gallery-card > video {
+  width: 100%;
+  display: block;
+  transition: var(--transition);
+}
+/* contain 여백(레터박스)은 카드 안의 '파인 면'이라 --bg-primary — 라이트에서도 카드보다 한 단 어둡다 */
+.gallery-workspace .gallery-card > video {
+  min-height: 120px;
+  max-height: 320px;
+  object-fit: contain;
+  background: var(--bg-primary);
+}
+.gallery-workspace .gallery-card:hover img,
+.gallery-workspace .gallery-card:hover > video {
+  filter: brightness(0.7);
+}
+/* 원래 푸른기 도는 고정 어두운 그라디언트였다 — 테마를 안 타서 라이트에서 이 카드만 검게 남는다.
+   기울기(밝은 면 → 파인 면)만 살려 토큰으로 옮겼다. */
+.gallery-workspace .audio-card {
+  min-height: 128px;
+  padding: 20px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(145deg, var(--bg-card), var(--bg-primary));
+}
+.gallery-workspace .audio-icon { font-size: 34px; color: var(--accent); }
+.gallery-workspace .audio-name {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: var(--fs-label);
+  color: var(--text-muted);
+}
+.gallery-workspace .audio-card audio { width: 100%; height: 32px; }
+/* 흰 글자를 그대로 둔다: 배지 바탕이 테마를 안 타는 검정 오버레이라 --text-primary 로 바꾸면 라이트에서 검정 위 검정이 된다 */
+.gallery-workspace .media-kind-badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.72);
+  color: #fff;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0;
+  pointer-events: none;
+}
 .gallery-workspace .card-hover-actions {
   position: absolute;
   top: 10px;

@@ -180,6 +180,17 @@ class HandReconstructionTests(unittest.TestCase):
         self.assertEqual(result.getexif().get(315), "original artist")
         self.assertIn(result.getexif().get(274), (None, 1))
 
+    def test_icc_is_kept_only_for_rgb_sources(self):
+        """공용 정책(relight와 동일): 회색 ICC를 RGB PNG 결과에 붙이지 않는다."""
+        gray = Image.new("L", self.source.size, 90)
+        prepared = prepare_hand_repair({"image": data_url(gray, icc_profile=b"gray-profile"),
+                                        "mask": data_url(self.mask), "settings": {"enabled": True}})
+        self.assertIsNone(prepared.source_metadata["icc"])
+        self.assertNotIn("icc_profile", pixels(self.candidate(prepared)).info)
+        rgb = prepare_hand_repair({"image": data_url(self.source, icc_profile=b"rgb-profile"),
+                                   "mask": data_url(self.mask), "settings": {"enabled": True}})
+        self.assertEqual(pixels(self.candidate(rgb)).info["icc_profile"], b"rgb-profile")
+
     def test_transparent_mask_pixels_are_not_editable(self):
         mask = Image.new("RGBA", self.source.size, (255, 255, 255, 0))
         ImageDraw.Draw(mask).rectangle((60, 30, 80, 60), fill=(255, 255, 255, 255))

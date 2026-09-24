@@ -53,6 +53,52 @@ class CacheRouteTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(foreign.read_text(encoding="utf-8"), "preserve")
 
 
+    async def test_status_and_clear_wait_for_the_disk_lock_off_the_event_loop(self):
+        import asyncio
+
+        web = SimpleNamespace(json_response=lambda data, status=200:
+            SimpleNamespace(body=json.dumps(data).encode("utf-8"), status=status))
+        handlers = {}
+
+        def register(path):
+            def save(function):
+                handlers[path] = function
+                return function
+            return save
+
+        server = SimpleNamespace(routes=SimpleNamespace(get=register, post=register),
+                                 prompt_queue=SimpleNamespace(get_current_queue=lambda: ([], [])))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict("sys.modules", {
+            "server": SimpleNamespace(PromptServer=SimpleNamespace(instance=server)),
+            "folder_paths": SimpleNamespace(get_output_directory=lambda: tmp),
+            "aiohttp": SimpleNamespace(web=web),
+        }):
+            h3_cache_nodes._register_routes()
+            for path in ("/aistudio/h3-cache/status", "/aistudio/h3-cache/clear"):
+                with self.subTest(path=path):
+                    held, release = threading.Event(), threading.Event()
+
+                    def hold_lock():
+                        # prompt_worker 가 put/get 중 _LOCK 을 쥐고 있는 상황
+                        with h3_cache_nodes._LOCK:
+                            held.set()
+                            release.wait(5)
+
+                    holder = threading.Thread(target=hold_lock)
+                    holder.start()
+                    self.assertTrue(held.wait(2))
+                    try:
+                        task = asyncio.ensure_future(handlers[path](None))
+                        await asyncio.sleep(0.05)
+                        # 루프가 멈추지 않았고, 핸들러는 락을 워커 스레드에서 기다린다.
+                        self.assertFalse(task.done())
+                    finally:
+                        release.set()
+                    response = await asyncio.wait_for(task, 5)
+                    holder.join(5)
+                    self.assertEqual(response.status, 200)
+
+
 class CacheActionTests(unittest.TestCase):
     def test_status_uses_strict_disabled_pref_and_does_not_forward_server_paths(self):
         from ui.creator_actions import CreatorActionsMixin

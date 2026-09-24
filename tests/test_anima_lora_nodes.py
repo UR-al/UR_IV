@@ -392,6 +392,46 @@ class AnimaLoraNodeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "same Comfy destination"):
             anima_lora_nodes._reject_comfy_alias_collisions(state, key_map)
 
+    def test_alias_prefix_set_matches_the_linear_payload_scan_exactly(self):
+        # 원래 조건(key == alias / alias + "." / alias + "_" 접두)을 오라클로 두고
+        # set 기반 판정이 모든 경계 — 점이 여러 개인 별칭 포함 — 에서 같은지 본다.
+        keys = (
+            "diffusion_model.blocks.0.attn.lora_up.weight",
+            "lora_unet_blocks_12_mlp_fc1.alpha",
+            "text_encoders.qwen3.layer_3.lora_down.weight",
+            "plain",
+        )
+        aliases = (
+            "diffusion_model", "diffusion_model.blocks", "diffusion_model.blocks.0",
+            "diffusion_model.blocks.0.attn", "diffusion_model.blocks.0.att",
+            "diffusion_model.blocks.1.attn", "lora_unet", "lora_unet_blocks_12",
+            "lora_unet_blocks_1", "lora_unet_blocks_12_mlp_fc1",
+            "lora_unet_blocks_12_mlp_fc1.alpha", "lora_unet_blocks_12_mlp_fc",
+            "text_encoders.qwen3.layer_3", "text_encoders.qwen3.layer",
+            "plain", "pla", "plain.", "", "unrelated",
+        )
+
+        def oracle(alias):
+            return any(
+                key == alias or key.startswith(f"{alias}.") or key.startswith(f"{alias}_")
+                for key in keys
+            )
+
+        prefixes = anima_lora_nodes._payload_alias_prefixes(keys)
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                self.assertEqual(alias in prefixes, oracle(alias))
+
+    def test_alias_collision_ignores_aliases_without_payload(self):
+        state = {"diffusion_model.blocks.0.attn.lora_up.weight": object(), 7: object()}
+        key_map = {
+            # 같은 목적지지만 두 번째 별칭은 payload가 없으므로 충돌이 아니다.
+            "diffusion_model.blocks.0.attn": "diffusion_model.blocks.0.attn.weight",
+            "lora_unet_blocks_0_attn": "diffusion_model.blocks.0.attn.weight",
+            ("tuple", "alias"): "ignored",
+        }
+        anima_lora_nodes._reject_comfy_alias_collisions(state, key_map)
+
     def test_standard_anima_loader_checks_connector_alias_collisions(self):
         raw = {
             "lora_unet_anima_v2_connector_proj.lora_up.weight": object(),

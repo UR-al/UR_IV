@@ -13,6 +13,7 @@ from typing import Any
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core.chat_store import inline_image_paths
 from core.ollama_client import OllamaClient
 from core.lmstudio_client import LMStudioClient
 from core.structured_output import validate_output
@@ -75,6 +76,9 @@ class ChatWorker(QThread):
 
         started = time.monotonic()
         try:
+            # 경로 이미지 → base64 는 여기(워커 스레드)서, 이미 최근 턴만 남은 메시지에만 한다.
+            # 역할·본문은 그대로 두고 경로 이미지만 바꾼다(맨 base64 는 looks_like_image_path 가 거른다).
+            self.messages = inline_image_paths(self.messages)
             client = client_type(base_url=self.base_url, model=self.model)
             kwargs = {'schema': self.schema} if self.schema is not None else {}
             result = client.chat_stream(

@@ -172,32 +172,35 @@ class TestForgeModelPaths(unittest.TestCase):
             (paths["vae_dir"] / "vae.sft").write_bytes(b"")
             (paths["text_encoder_dir"] / "clip.bin").write_bytes(b"")
 
+            self.assertEqual(
+                forge_modules._checkpoint_files(paths["checkpoint_dir"]),
+                ["quant.gguf", "nested/model.safetensors"],
+            )
+            self.assertEqual(forge_modules._lora_files(paths["lora_dir"]), ["style.pt"])
             with patch.object(forge_modules, "get_forge_paths", return_value=paths):
-                self.assertEqual(
-                    forge_modules.list_model_files(),
-                    ["quant.gguf", "nested/model.safetensors"],
-                )
-                self.assertEqual(forge_modules.list_lora_files(), ["style.pt"])
                 self.assertEqual(forge_modules.list_vae_files(), ["vae.sft"])
                 self.assertEqual(forge_modules.list_te_files(), ["clip.bin"])
 
-    def test_lora_entries_use_forge_basename_and_case_insensitive_dedupe(self):
+    def test_path_state_counts_use_the_same_scanners(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             paths = self._make_dirs(root)
-            first = paths["lora_dir"] / "a"
-            second = paths["lora_dir"] / "b"
-            first.mkdir()
-            second.mkdir()
-            (first / "Style.safetensors").write_bytes(b"")
-            (second / "style.pt").write_bytes(b"")
+            (paths["checkpoint_dir"] / "model.safetensors").write_bytes(b"")
+            (paths["checkpoint_dir"] / "sidecar.vae.safetensors").write_bytes(b"")
+            (paths["lora_dir"] / "style.safetensors").write_bytes(b"")
+            (paths["lora_dir"] / "style.gguf").write_bytes(b"")
+            (paths["vae_dir"] / "a" ).mkdir()
+            (paths["vae_dir"] / "a" / "vae.sft").write_bytes(b"")
+            (paths["vae_dir"] / "vae.sft").write_bytes(b"")
 
-            with patch.object(forge_modules, "get_forge_paths", return_value=paths):
-                entries = forge_modules.list_lora_entries()
+            with patch.object(forge_modules, "get_forge_paths", return_value=paths),                     patch.object(forge_modules, "get_default_forge_paths", return_value=paths):
+                state = forge_modules.get_forge_path_state()
 
-            self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]["name"], "Style")
-            self.assertTrue(Path(entries[0]["path"]).is_absolute())
+            counts = {key: entry["count"] for key, entry in state["entries"].items()}
+            self.assertEqual(counts["checkpoint_dir"], 1)  # .vae. 사이드카 제외
+            self.assertEqual(counts["lora_dir"], 1)        # LoRA 확장자만
+            self.assertEqual(counts["vae_dir"], 1)         # 파일명 기준 중복 제거
+            self.assertEqual(counts["text_encoder_dir"], 0)
 
 
 if __name__ == "__main__":

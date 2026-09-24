@@ -76,8 +76,8 @@
     <fieldset class="group-box">
       <legend>이미지 워터마크</legend>
 
-      <button class="file-btn" @click="$emit('load-watermark-image')">이미지 불러오기</button>
-      <div class="file-label">{{ imageFileName }}</div>
+      <button class="file-btn" v-host-dialog="'editor_load_watermark_image'" @click="$emit('load-watermark-image')">이미지 불러오기</button>
+      <div class="file-label" :title="imagePath || undefined">{{ imageLabel }}</div>
 
       <!-- Position Presets -->
       <div class="preset-row">
@@ -127,7 +127,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { vHostDialog } from '../../utils/hostDialogs'
+import {
+  NO_WATERMARK_IMAGE, WATERMARK_FONTS, watermarkFileLabel, watermarkPreviewToRefresh,
+  type WatermarkKind,
+} from '../../utils/watermark'
 import CustomSelect from '../CustomSelect.vue'
 
 interface PositionPreset {
@@ -153,6 +158,7 @@ interface ImageWatermarkConfig {
   xPct: number
   yPct: number
   opacity: number
+  /** 원래 크기 대비 % (슬라이더 '크기 (%)' 그대로). 백엔드도 %로 받는다. */
   scale: number
 }
 
@@ -169,15 +175,21 @@ const emit = defineEmits<{
 const props = withDefaults(
   defineProps<{
     textColor?: string
+    /** 불러온 워터마크 이미지 경로 — 파일 이름 표시와, 바뀌면 이미지 프리뷰 다시 그리기 */
+    imagePath?: string
+    /** 이미지가 없을 때 보일 문구 */
     imageFileName?: string
     fonts?: string[]
   }>(),
   {
     textColor: '#FFFFFF',
-    imageFileName: '이미지 없음',
-    fonts: () => ['Arial', 'Times New Roman', 'Courier New', 'Verdana', 'Georgia'],
+    imagePath: '',
+    imageFileName: NO_WATERMARK_IMAGE,
+    fonts: () => [...WATERMARK_FONTS],
   }
 )
+
+const imageLabel = computed(() => watermarkFileLabel(props.imagePath, props.imageFileName))
 
 const positionPresets: PositionPreset[] = [
   { name: '좌상', x: 5, y: 5 },
@@ -213,24 +225,41 @@ function setImagePosition(x: number, y: number) {
   imgY.value = y
 }
 
-// Emit preview on relevant changes
+// 마지막으로 보여 준 프리뷰 종류 — 공용 옵션(영역 제한·글자 색)이 바뀌면 그걸 다시 그린다
+let lastPreview: WatermarkKind | null = null
+function previewText() { lastPreview = 'text'; emit('preview', buildTextConfig()) }
+function previewImage() { lastPreview = 'image'; emit('preview', buildImageConfig()) }
+function clearPreviewFromText() { lastPreview = null; emit('preview-clear') }
+
+// Emit preview on relevant changes — 글꼴도 결과를 바꾸므로 목록에 있어야 한다(예전엔 빠져 있었다)
 watch(
-  [textValue, fontSize, textX, textY, textOpacity, textRotation, tileRepeat],
+  [textValue, fontFamily, fontSize, textX, textY, textOpacity, textRotation, tileRepeat],
   () => {
-    if (textValue.value.trim()) {
-      emit('preview', buildTextConfig())
-    } else {
-      emit('preview-clear')
-    }
+    if (textValue.value.trim()) previewText()
+    else clearPreviewFromText()
   }
 )
 
+// 글자 색은 부모(EditorView)가 고른다 — 바뀌면 텍스트 프리뷰를 다시 그린다
+watch(() => props.textColor, () => {
+  if (textValue.value.trim()) previewText()
+})
+
 watch([imgX, imgY, imgOpacity, imgScale], () => {
-  emit('preview', buildImageConfig())
+  previewImage()
+})
+
+// 워터마크 이미지를 (다시) 불러오면 슬라이더를 건드리지 않아도 바로 보여 준다
+watch(() => props.imagePath, (path) => {
+  if (path) previewImage()
 })
 
 watch(clampToImage, (val) => {
+  // 부모가 새 값을 먼저 받아야 다시 그린 프리뷰에 반영된다
   emit('clamp-changed', val)
+  const kind = watermarkPreviewToRefresh(lastPreview, !!textValue.value.trim(), !!props.imagePath)
+  if (kind === 'text') previewText()
+  else if (kind === 'image') previewImage()
 })
 
 function buildTextConfig(): TextWatermarkConfig {
@@ -253,17 +282,20 @@ function buildImageConfig(): ImageWatermarkConfig {
     xPct: imgX.value,
     yPct: imgY.value,
     opacity: imgOpacity.value / 100.0,
-    scale: imgScale.value / 100.0,
+    // % 그대로 — 예전 `/ 100` 은 백엔드가 다시 100 으로 나눠 100% 가 1% 로 줄었다
+    scale: imgScale.value,
   }
 }
 
 function onApplyText() {
   if (!textValue.value.trim()) return
+  lastPreview = null
   emit('preview-clear')
   emit('apply-text', buildTextConfig())
 }
 
 function onApplyImage() {
+  lastPreview = null
   emit('preview-clear')
   emit('apply-image', buildImageConfig())
 }

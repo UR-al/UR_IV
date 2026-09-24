@@ -28,16 +28,12 @@ from core.theme_presets import (
 DEFAULT_FONT_FAMILY = "'Pretendard', 'Malgun Gothic', sans-serif"
 DEFAULT_FONT_SIZE = "10.5pt"
 
-#: 설정 탭의 테마 콤보가 보여주는 이름. 색 선택은 프리셋(Vue 설정)으로 옮겼지만
-#: ``ui/generator_ui_setup._get_tab_title`` 이 이 이름으로 탭 라벨 방식(이모지/미니멀)을
-#: 고르므로 이름 자체는 유지한다. 여기서 바꾸면 탭 제목에 이모지가 되돌아온다.
-LEGACY_THEME_NAME = '모던'
+# (옛 테마 '이름' API — LEGACY_THEME_NAME·THEMES·MODERN_THEME·current_theme_name·available_themes —
+#  는 숨은 레거시 설정 탭의 테마 콤보와 _get_tab_title 만 썼다. 둘 다 은퇴해 지웠다(audit #175·#178).
+#  색은 프리셋(ui_prefs.theme/themeOverrides)이 정한다.)
 
-#: 테마 선택이 저장되는 곳. Vue 설정과 같은 파일이라 두 쪽이 같은 값을 본다.
-_UI_PREFS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'config', 'ui_prefs.json',
-)
+#: 테마 선택이 저장되는 곳은 ui_prefs.json — Vue 설정과 같은 파일이라 두 쪽이 같은 값을 본다.
+#: 경로는 core.ui_prefs.ui_prefs_path() 한 곳에서 (읽을 때마다) 정한다.
 
 #: 밑줄 키 → 프리셋 토큰. 값을 그대로 옮기는 것만 여기 둔다.
 _TOKEN_ALIASES: dict[str, str] = {
@@ -130,13 +126,6 @@ def _build_colors(preset_name: str, overrides: dict | None = None) -> dict:
     colors['mode'] = tokens['mode']
     return colors
 
-
-#: 기본 프리셋의 색표. 옛 코드가 이 이름을 직접 import 하던 것에 대한 호환.
-MODERN_THEME = _build_colors(DEFAULT_PRESET)
-
-THEMES = {
-    LEGACY_THEME_NAME: MODERN_THEME,
-}
 
 _QSS_TEMPLATE = """
     QWidget {{
@@ -354,18 +343,11 @@ class ThemeManager:
     """
 
     def __init__(self):
-        self._current = LEGACY_THEME_NAME
         self._font_family = DEFAULT_FONT_FAMILY
         self._font_size = DEFAULT_FONT_SIZE
         self._preset = DEFAULT_PRESET
         self._overrides: dict = {}
         self._colors: dict | None = None  # None = ui_prefs 를 아직 안 읽음
-
-    # ── 테마 이름(레거시 콤보용) ──
-
-    @property
-    def current_theme_name(self) -> str:
-        return self._current
 
     @property
     def current_preset(self) -> str:
@@ -412,8 +394,9 @@ class ThemeManager:
         preset, overrides = DEFAULT_PRESET, {}
         try:
             from core.config_migration import load_ui_prefs
+            from core.ui_prefs import ui_prefs_path
 
-            prefs = load_ui_prefs(_UI_PREFS_PATH)
+            prefs = load_ui_prefs(ui_prefs_path())
             if isinstance(prefs, dict):
                 preset = prefs.get('theme') or DEFAULT_PRESET
                 raw = prefs.get('themeOverrides')
@@ -445,24 +428,18 @@ class ThemeManager:
         self._ensure_colors()
         return self._colors
 
-    def get_stylesheet(self, theme_name: str | None = None) -> str:
-        """전역 QSS 문자열 반환.
+    def get_stylesheet(self) -> str:
+        """전역 QSS 문자열 반환 — 색은 프리셋에서 온다.
 
-        ``theme_name`` 은 레거시 콤보의 이름일 뿐 색을 고르지 않는다 — 색은
-        프리셋에서 온다. (앱은 ``app.setStyleSheet("")`` 로 전역 QSS 를 비우고
-        화면 대부분을 Vue 가 그리므로, 이 QSS 는 남은 PyQt 다이얼로그용이다.)
+        (앱은 ``app.setStyleSheet("")`` 로 전역 QSS 를 비우고 화면 대부분을 Vue 가 그리므로,
+        이 QSS 는 남은 PyQt 창·다이얼로그용이다.)
         """
-        self._current = theme_name or self._current
         fmt_vars = {
             **self.get_colors(),
             'font_family': self._font_family,
             'font_size': self._font_size,
         }
         return _QSS_TEMPLATE.format(**fmt_vars)
-
-    @staticmethod
-    def available_themes() -> list[str]:
-        return list(THEMES.keys())
 
 
 # 싱글톤

@@ -1,9 +1,85 @@
 # AI Studio Forge Neo parity nodes
 
 This node pack is bundled with AI Studio Pro and installed into the selected
-ComfyUI `custom_nodes` directory. It is the execution layer used by the app's
-default ComfyUI workflow compiler; no workflow JSON is required for normal
-T2I, I2I, inpaint, upscale, ADetailer, or SAM3 jobs.
+ComfyUI `custom_nodes` directory. Part of it is the execution layer used by
+the app's default ComfyUI workflow compiler (no workflow JSON is required for
+normal T2I, I2I, inpaint, upscale, ADetailer, or SAM3 jobs); the rest are
+public nodes for user-built ComfyUI workflows. See "Nodes by consumer".
+
+## Nodes by consumer
+
+### Built by the app compiler
+
+`core/comfy_workflow_compiler.py` (and the Creator H3 path in
+`core/creator_workflows.py`) emits these nodes. The compiler follows Forge's
+`save_images`: only payloads that send `save_images=True` (the main
+T2I/I2I/inpaint generation) end in Comfy's core `SaveImage`, leaving a copy in
+ComfyUI/output. Every other compiled graph (post-processing, ADetailer/SAM3/
+Refine, upscale, SAM3 mask-only, chat, hand repair) ends in core
+`PreviewImage`, so its result is returned through ComfyUI's temp folder and
+read back the same way. Creator workflows keep their own `SaveImage` nodes.
+
+- Loaders/prompts: `ForgeNeoAnimaQwen35Loader`, `ForgeNeoAnimaQwen35Prompt`,
+  `ForgeNeoAnima38V2Loader`, `ForgeNeoAnima38V2Prompt`,
+  `ForgeNeoAnimaLoraLoader`
+- Model patches/guidance: `ForgeNeoModelSamplingShift`, `ForgeNeoNegPip`,
+  `ForgeNeoSkimmedCFG`, `ForgeNeoAnimaGuidanceSuite`,
+  `ForgeNeoAnimaDetailDaemon`
+- Sampling: `ForgeNeoLatentInput`, `ForgeNeoKSamplerCNS`, `ForgeNeoHiresFix`
+- Detailers: `ForgeNeoADetailer`, `ForgeNeoSAM3Mask`, `ForgeNeoSAM3Detailer`,
+  `ForgeNeoSAM3Refine`
+- Creator H3 conditioning cache: `ForgeNeoH3ConditioningCachePrepare`,
+  `ForgeNeoH3ConditioningCacheLoad`
+
+### Custom ComfyUI workflows only
+
+The app compiler never emits these. They stay registered because saved user
+workflows and the embedded ComfyUI editor reference them, and the workflow
+inspector recognises them.
+
+- `ForgeNeoAnimaLoraLoaderModelOnly`, `ForgeNeoLoraBlockWeight`
+- `ForgeNeoAnimaDAVE`, `ForgeNeoAnimaModGuidance`, `ForgeNeoAnimaSafePAG`,
+  `ForgeNeoDCWCWMSMC`
+- `ForgeNeoCharacterReference`, `ForgeNeoReferencePrompt`,
+  `ForgeNeoReferenceOutput`, `ForgeNeoMaskSelector`
+- `ForgeNeoAnimaPiD`, `ForgeNeoAnimaVAE2x`, `ForgeNeoSAM3TileRepair`
+- `ForgeNeoSaveImage`, `AIStudioRelight`
+
+When the app generates from an ANIMA custom workflow it keeps
+`ForgeNeoLoraBlockWeight` and `ForgeNeoAnimaLoraLoaderModelOnly` in the active
+model chain as they are (they already handle the 28/40/52-block layouts) and
+remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
+(including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.3.0 changes
+
+- SAM3 Detailer/Refine "only masked" now follows Forge `inpaint_full_res`:
+  the padded mask crop is widened to the processing aspect ratio
+  (`expand_crop_region`) and sampled at the processing size
+  (`target_width`/`target_height`, or the custom size), then scaled back into
+  the crop. `0` keeps the old crop-size sampling for saved workflows.
+- IMAGE/MASK normalisation only rescales integer tensors; float bicubic
+  overshoot (values slightly above 1.0) is clamped instead of divided by 255.
+- A loaded SAM3 bundle is kept in CPU RAM between runs (`unload_after`) and
+  moved back to the device instead of being re-read from disk. The
+  `ForgeNeoSAM3Mask` input `cache_model=False` loads per run and frees the
+  kept copy; the app sets it from its "keep SAM3 in RAM" setting (like Forge's
+  `sam3_unload_keep_in_ram`), and `unload_after=False` always keeps the
+  bundle on its device. ComfyUI's "unload all models" (`/free`, which the
+  app's unload-after-generation sends, OOM recovery, `--disable-smart-memory`)
+  also releases the kept bundle. A failed move back to the device drops the
+  half-moved bundle instead of caching it.
+- Standalone SAM3/Refine sample "only masked" at the input image size, like
+  Forge's standalone img2img (the app pins `target_width`/`target_height`).
+- App compiler (same release): graphs honour `save_images` — `SaveImage` only
+  for `save_images=True` (main generation), core `PreviewImage` (temp output)
+  for everything else, so post-processing, chat and hand-repair results no
+  longer accumulate in ComfyUI/output. Input uploads are named by content
+  hash (`input_<sha256[:32]>`, `krea2_source_…`, `krea2_reference_…`) with
+  `overwrite=false`, so re-processing the same image reuses one input file.
+- The H3 conditioning cache keeps the diffusion model loaded on a cache hit,
+  persists model digests across restarts, and serves its HTTP routes off the
+  event loop.
 
 ## 1.1.2 compatibility fixes
 

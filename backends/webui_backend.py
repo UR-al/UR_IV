@@ -32,6 +32,32 @@ _IMAGE_EXTENSIONS = {
 _MAX_RESULT_ARTIFACTS = 64
 _MAX_RESULT_BYTES = 256 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 384 * 1024 * 1024
+# get_info 의 sd-models — 5xx(모델 로딩 중)면 이만큼 쉬고 딱 한 번 더 묻는다.
+_TRANSIENT_STATUS = (500, 502, 503, 504)
+_SD_MODELS_RETRY_PAUSE_S = 1.0
+
+
+def _get_retrying_once(url: str, *, headers, timeout):
+    """GET — 응답 지연(ReadTimeout)·5xx 만 **정확히 한 번** 더 시도한다(총 최대 2회).
+
+    연결 거부·connect 타임아웃(``ConnectTimeout`` 도 ``ConnectionError``)은 곧바로 올린다 —
+    꺼진 백엔드를 1+2+4초 백오프로 기다리면 '연결 실패' 통보만 7~15초 늦는다. 두 번째 시도의
+    실패도 그대로 올린다. 공유 http_retry(get_with_retry) 는 retries+1 회를 시도하므로 여기에는
+    쓰지 않는다(첫 요청 + retries=1 이면 3회였다).
+    """
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+    except requests.exceptions.ConnectionError:
+        raise
+    except requests.exceptions.Timeout as exc:
+        logger.warning("GET %s 응답 지연(%s) — 한 번 더 시도", url, type(exc).__name__)
+        return requests.get(url, headers=headers, timeout=timeout)
+    if response.status_code in _TRANSIENT_STATUS:
+        logger.warning("GET %s → %d — %.1f초 뒤 한 번 더 시도",
+                       url, response.status_code, _SD_MODELS_RETRY_PAUSE_S)
+        time.sleep(_SD_MODELS_RETRY_PAUSE_S)
+        return requests.get(url, headers=headers, timeout=timeout)
+    return response
 
 
 def _bounded_response_json(response):
@@ -117,50 +143,58 @@ class WebUIBackend(AbstractBackend):
         super().__init__(api_url)
         self._generation_state_lock = threading.Lock()
         self._generation_inflight = False
+        # force_task_id → interrupt 요청 이벤트. interrupt() 는 여기에 표시만 하고, 요청별
+        # 감시 스레드가 '우리 작업이 active 일 때만' 전역 interrupt 를 보낸다 (core/webui_cancel.py).
+        self._inflight_interrupts: Dict[str, threading.Event] = {}
+        # /internal/progress 가 없는 서버(--nowebui)면 False — 매 폴링마다 404 를 다시 치지 않는다.
+        self._task_progress_supported: Optional[bool] = None
+
+    @staticmethod
+    def _setting_number(settings: Dict, key: str, default, cast):
+        """settings 의 숫자 값 — 비었거나 잘못된 값이면 기본값(빈 문자열 → ValueError 방지)."""
+        value = settings.get(key, default)
+        try:
+            return cast(float(value)) if cast is int else cast(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
 
     @staticmethod
     def _build_postprocess_payload(image_b64: str, settings: Dict, *, prompt: str, negative_prompt: str) -> Dict:
-        base_payload = copy.deepcopy(settings.get('_postprocess_base_payload', {}))
-        passthrough_scripts = copy.deepcopy(base_payload.pop('alwayson_scripts', {}))
-        for key in (
-            "images",
-            "image",
-            "mask",
-            "mask_blur",
-            "init_images",
-            "include_init_images",
-            "infotext",
-            "enable_hr",
-            "hr_upscaler",
-            "hr_second_pass_steps",
-            "hr_scale",
-            "hr_cfg",
-            "hr_additional_modules",
-            "hr_checkpoint_name",
-            "hr_sampler_name",
-            "hr_scheduler",
-            "hr_prompt",
-            "hr_negative_prompt",
-        ):
-            base_payload.pop(key, None)
+        """단독 ADetailer img2img payload.
 
+        입력 원본 크기와 샘플링 파라미터(steps/cfg/seed/sampler/scheduler)를 명시한다 —
+        ADetailer 의 skip_img2img 는 이 값들을 ``_ad_orig`` 로 보관해 인페인트 패스에 쓰므로,
+        안 보내면 Forge API 기본값(steps 50·기본 sampler)이 그대로 들어간다.
+        (예전엔 ``_postprocess_base_payload`` 를 복사·정리하는 코드가 있었지만 그 값을 채우는
+        호출자가 없어 늘 빈 dict 였다.)
+        """
         image_bytes = base64.b64decode(image_b64)
         with Image.open(io.BytesIO(image_bytes)) as init_image:
             init_width, init_height = init_image.size
 
-        payload = base_payload
-        payload.update({
+        number = WebUIBackend._setting_number
+        payload = {
             "init_images": [image_b64],
-            "resize_mode": int(payload.get("resize_mode", 0)),
+            "resize_mode": 0,
             "prompt": prompt,
             "negative_prompt": negative_prompt,
             "send_images": True,
             "save_images": False,
             "width": init_width,
             "height": init_height,
-        })
-        payload.setdefault("denoising_strength", float(settings.get('denoising_strength', payload.get('denoising_strength', 0.1))))
-        payload["alwayson_scripts"] = passthrough_scripts
+            # skip_img2img 면 부모 패스(1스텝·128×128) 결과는 버려지므로 값 자체는 결과에 영향이 없다.
+            "denoising_strength": number(settings, 'denoising_strength', 0.1, float),
+            "steps": number(settings, 'steps', 28, int),
+            "cfg_scale": number(settings, 'cfg_scale', 7.0, float),
+            "seed": number(settings, 'seed', -1, int),
+            "alwayson_scripts": {},
+        }
+        sampler = str(settings.get('sampler') or '').strip()
+        if sampler and sampler != 'Use same sampler':
+            payload["sampler_name"] = sampler
+        scheduler = str(settings.get('scheduler') or '').strip()
+        if scheduler and scheduler != 'Use same scheduler':
+            payload["scheduler"] = scheduler
         return payload
 
     @staticmethod
@@ -228,13 +262,78 @@ class WebUIBackend(AbstractBackend):
         return "webui"
 
     def interrupt(self):
-        """진행 중 생성 중단 — POST /sdapi/v1/interrupt (best-effort, 실패 무시).
-        호출되면 진행 중이던 txt2img/img2img requests.post가 부분 결과로 곧 반환된다."""
+        """진행 중인 **이 어댑터의** 생성 중단 요청 (best-effort, 실패 무시).
+
+        전역 ``/sdapi/v1/interrupt`` 를 바로 보내지 않는다 — 우리 요청이 외부 Forge 작업 뒤에
+        줄 서 있으면 남의 작업을 끊기 때문이다. 요청별 감시 스레드가 우리 작업이 실제로
+        돌기 시작한(active) 뒤에만 보낸다. 진행 중인 요청이 없으면 아무것도 하지 않는다."""
         with self._generation_state_lock:
-            inflight = self._generation_inflight
-        if not inflight:
-            return
-        self._post_interrupt()
+            pending = list(self._inflight_interrupts.values())
+        for requested in pending:
+            requested.set()
+
+    def _task_state(self, task_id: str) -> str:
+        """``POST /internal/progress`` 로 우리 작업의 상태 (core.webui_cancel.TASK_*).
+
+        '엔드포인트 없음'(404/405, 처음부터 모르는 응답 모양 → TASK_UNKNOWN, 예전 방식 폴백)과
+        '일시 실패'(타임아웃·연결 끊김·5xx, 정상 응답을 받은 뒤의 이상한 응답 → TASK_TRANSIENT)를
+        나눈다. 예전엔 한 번의 일시 실패도 UNKNOWN 이라, 우리 요청이 외부 작업 뒤에 줄 서 있는
+        동안 전역 interrupt 가 나가 남의 작업을 끊었다. TRANSIENT 처리는 TaskInterruptPolicy.
+        """
+        from core.webui_cancel import TASK_TRANSIENT, TASK_UNKNOWN, parse_task_state
+        if self._task_progress_supported is False:
+            return TASK_UNKNOWN
+        try:
+            response = requests.post(
+                f'{self.api_url}/internal/progress',
+                json={'id_task': task_id, 'id_live_preview': -1, 'live_preview': False},
+                headers=_HEADERS, timeout=3,
+            )
+            if response.status_code in (404, 405):
+                self._task_progress_supported = False
+                return TASK_UNKNOWN
+            response.raise_for_status()
+            state = parse_task_state(response.json())
+        except Exception as e:
+            logger.debug("task progress 조회 실패(일시): %s", e)
+            return TASK_TRANSIENT
+        if state != TASK_UNKNOWN:
+            self._task_progress_supported = True
+            return state
+        # 200 인데 모르는 모양 — 전에 정상 응답을 받았으면 일시 이상, 아니면 지원 안 하는 서버
+        return TASK_TRANSIENT if self._task_progress_supported else TASK_UNKNOWN
+
+    def _watch_cancellation(self, task_id: str, stop_event: threading.Event,
+                            interrupt_requested: threading.Event,
+                            cancel_check: Optional[Callable[[], bool]],
+                            unseen_grace: float) -> None:
+        """취소(cancel_check 또는 interrupt())가 오면, 우리 작업이 도는 동안 interrupt 를 반복한다.
+
+        Forge 는 ``state.begin()`` 에서 interrupted 플래그를 지우므로 시작 전에 보낸 한 번은
+        사라진다 — active 가 된 뒤에 보내고, HTTP 가 끝날 때까지 반복한다. queued(남의 작업이
+        도는 중)·completed 에는 보내지 않는다. 판단은 core.webui_cancel.TaskInterruptPolicy.
+        ``unseen_grace`` 는 본문 크기에 맞춘 unseen 유예(core.webui_cancel.unseen_grace_seconds).
+        """
+        from core.webui_cancel import TaskInterruptPolicy
+        while not stop_event.wait(0.05):
+            if interrupt_requested.is_set():
+                break
+            try:
+                if cancel_check is not None and cancel_check():
+                    break
+            except Exception:
+                logger.debug("cancel_check 실패(무시)", exc_info=True)
+        else:
+            return   # 취소 없이 요청이 끝났다
+        policy = TaskInterruptPolicy(grace_seconds=unseen_grace)
+        while not stop_event.is_set():
+            state = self._task_state(task_id)
+            if stop_event.is_set():
+                return
+            if policy.should_interrupt(state, time.monotonic()):
+                self._post_interrupt()
+            if stop_event.wait(0.25):
+                return
 
     def _post_interrupt(self):
         try:
@@ -259,15 +358,18 @@ class WebUIBackend(AbstractBackend):
     def get_info(self) -> BackendInfo:
         """WebUI API에서 모델, 샘플러 등 정보 가져오기"""
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        from core.backend_probe import request_timeout
         headers = {"accept": "application/json"}
-        timeout = 5
+        # 루프백이면 connect 만 0.3초 — 꺼진 로컬 백엔드를 약 2~4초 대신 곧바로 알아챈다.
+        timeout = request_timeout(self.api_url, 5)
         info = BackendInfo()
 
-        # 모델 목록 (필수 - 재시도 포함 동기 호출)
-        res = get_with_retry(
-            f'{self.api_url}/sdapi/v1/sd-models',
-            headers=headers, timeout=timeout, retries=3,
-        )
+        # 모델 목록 (필수). 연결 자체가 거부되면(백엔드가 꺼짐) 재시도하지 않는다 —
+        # 1+2+4초 백오프는 '연결 실패' 통보만 7~15초 늦췄다. 응답 지연(ReadTimeout)이나
+        # 5xx(모델 로딩 중)만 딱 한 번 더 시도한다(_get_retrying_once, 총 최대 2회).
+        # 공유 http_retry 정책은 건드리지 않는다.
+        url = f'{self.api_url}/sdapi/v1/sd-models'
+        res = _get_retrying_once(url, headers=headers, timeout=timeout)
         res.raise_for_status()
         sd_models = res.json()
         if isinstance(sd_models, list):
@@ -277,10 +379,13 @@ class WebUIBackend(AbstractBackend):
             ]
 
         def _fetch(endpoint):
-            return get_with_retry(
+            response = get_with_retry(
                 f'{self.api_url}{endpoint}',
                 headers=headers, timeout=timeout, retries=2,
-            ).json()
+            )
+            # 404(구 A1111 의 /schedulers 등)·5xx 본문을 목록으로 오인하지 않는다.
+            response.raise_for_status()
+            return response.json()
 
         # 나머지 5개 병렬 호출
         tasks = {
@@ -310,6 +415,9 @@ class WebUIBackend(AbstractBackend):
                 except Exception as e:
                     logger.warning("get_info endpoint '%s' failed: %s", name, e)
 
+        # 구 A1111 은 /sdapi/v1/schedulers 가 없다 — 빈 콤보 대신 WebUI 기본값을 둔다.
+        if not info.schedulers:
+            info.schedulers = ["Automatic"]
         return info
 
     def get_system_stats(self) -> dict:
@@ -439,51 +547,57 @@ class WebUIBackend(AbstractBackend):
         )
         switch_response.raise_for_status()
 
-    def cleanup_models(self, full_reload: bool = False) -> bool:
-        """LoRA patches + 캐시 정리.
-        Forge/A1111의 API 호출 누적으로 patches가 쌓일 때 호출.
+    def refresh_loras(self) -> bool:
+        """Forge 가 LoRA 폴더를 다시 스캔하게 한다(POST /sdapi/v1/refresh-loras).
 
-        :param full_reload: True면 checkpoint unload+reload (확실하지만 느림 ~10s)
-                            False면 LoRA 리프레시만 (빠르지만 patches 일부 남을 수도)
-        :return: 성공 여부
+        메모리는 정리하지 않는다 — 새로 넣은 LoRA 파일을 목록에 보이게 할 뿐이다. LoRA 매니저의
+        '목록 다시 스캔'(mode='force')에서만 부른다: requestLoras 워커 스레드
+        (ui.lora_catalog_cache.load_catalog_json)가 목록보다 먼저 보낸다 — Forge 가 파일을 전부 다시
+        읽어 오래 걸릴 수 있으니 GUI 스레드(동기 슬롯)에서 부르지 않는다. 예전엔 대기열 정기 정리
+        (cleanup_models)가 VRAM 정리인 줄 알고 매번 불렀다.
         """
         try:
-            if full_reload:
-                # 가장 확실한 cleanup — checkpoint unload → 다음 generation 시 자동 reload
-                # patches 완전 초기화, VRAM 회수
-                try:
-                    requests.post(
-                        url=f'{self.api_url}/sdapi/v1/unload-checkpoint',
-                        headers=_HEADERS, timeout=30
-                    )
-                    logger.info("[cleanup] checkpoint unloaded — fresh state on next gen")
-                except requests.exceptions.RequestException:
-                    pass  # 엔드포인트 없는 버전 — 무시
-            # LoRA 캐시 리프레시 (가벼움)
-            try:
-                requests.post(
-                    url=f'{self.api_url}/sdapi/v1/refresh-loras',
-                    headers=_HEADERS, timeout=20
-                )
-            except requests.exceptions.RequestException:
-                pass
-            # Forge: gc/cache clear 트리거 (있다면)
-            try:
-                requests.post(
-                    url=f'{self.api_url}/sdapi/v1/options',
-                    json={'memmon_poll_rate': 8},  # no-op 같은 옵션 set로 forge gc 유발
-                    headers=_HEADERS, timeout=10
-                )
-            except requests.exceptions.RequestException:
-                pass
+            response = requests.post(
+                url=f'{self.api_url}/sdapi/v1/refresh-loras',
+                headers=_HEADERS, timeout=20,
+            )
+            response.raise_for_status()
             return True
-        except Exception as e:
-            logger.warning("cleanup_models failed: %s", e)
+        except requests.exceptions.RequestException as e:
+            logger.warning("refresh-loras failed: %s", e)
             return False
 
-    # 기존 코드와의 호환 — D6에서 vram-bar 클릭 핸들러가 unload_models() 찾음
-    def unload_models(self):
-        return self.cleanup_models(full_reload=True)
+    def unload_models(self) -> bool:
+        """VRAM 게이지 수동 언로드 — Forge 에선 체크포인트 언로드가 VRAM 을 실제로 회수하는 유일한 API 다.
+
+        예전 cleanup_models(full_reload=True) 는 여기에 LoRA 재스캔과 ``options``
+        ``{'memmon_poll_rate': 8}`` POST 를 붙였는데, 둘 다 메모리를 정리하지 않고 options POST 는
+        사용자의 Forge 설정(기본 5)을 영구히 8 로 바꾸며 config.json 을 매번 다시 썼다.
+        """
+        return self.unload_checkpoint()
+
+    def unload_checkpoint(self) -> bool:
+        """체크포인트를 내린다(POST /sdapi/v1/unload-checkpoint — Forge 가 모델을 내리고
+        캐시를 비운 뒤 gc 한다). 다음 생성 때 Forge 가 알아서 다시 올린다.
+
+        '생성 후 모델 언로드' · 대기열 정기 정리 · VRAM 게이지 수동 언로드가 모두 이것을 쓴다.
+        엔드포인트가 없는 옛 버전(404)이나 서버 오류면 False — 성공으로 보고하지 않는다.
+
+        타임아웃은 공유 상수 — 후처리 작업이 이 언로드(hold)를 기다리는 시간
+        (BACKEND_JOB_UNLOAD_WAIT_SECONDS)이 이 요청의 상한보다 길도록 한 곳에서 맞춘다.
+        """
+        from core.resource_coordinator import UNLOAD_HTTP_TIMEOUT_SECONDS
+        try:
+            response = requests.post(
+                url=f'{self.api_url}/sdapi/v1/unload-checkpoint',
+                headers=_HEADERS, timeout=UNLOAD_HTTP_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            logger.info("[unload] checkpoint unloaded")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.warning("[unload] unload-checkpoint failed: %s", e)
+            return False
 
     @staticmethod
     def _progress_preview(response: Any) -> Optional[str]:
@@ -547,12 +661,26 @@ class WebUIBackend(AbstractBackend):
             # 정리하므로 사전 unload는 불필요 + 메모리 단편화로 가용 VRAM
             # 4GB 정도 손실시킴 (사용자 로그 비교로 확인). 제거.
 
+            # 요청마다 force_task_id 를 붙여 취소 시 '우리 작업'의 상태를 볼 수 있게 한다
+            # (core/webui_cancel.py). save_images 는 Forge 숨은 폴더 중복 저장 방지 정책으로
+            # 확정한다 — 사용자가 설정에서 Forge 쪽 저장을 켰을 때만 요청값을 따른다.
+            # 설정은 GUI 가 메모리로 밀어 넣은 값만 읽는다(이 워커 스레드가 ui_prefs.json 을
+            # 열면 GUI 의 os.replace 저장이 Windows 에서 PermissionError 로 실패했다).
+            from core.forge_output_policy import apply_save_policy, forge_save_outputs_setting
+            from core.webui_cancel import approx_payload_bytes, unseen_grace_seconds, with_task_id
+            request_payload, task_id = with_task_id(
+                apply_save_policy(payload, forge_save_outputs_setting()))
+            # 큰 본문(init 이미지·마스크)은 업로드·파싱이 끝나야 큐에 보인다 — unseen 유예를 늘린다.
+            unseen_grace = unseen_grace_seconds(approx_payload_bytes(request_payload))
+
             # 진행률 폴링 시작
             stop_event = threading.Event()
+            interrupt_requested = threading.Event()
             with self._generation_state_lock:
                 if cancel_check and cancel_check():
                     return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
                 self._generation_inflight = True
+                self._inflight_interrupts[task_id] = interrupt_requested
             if progress_callback:
                 poll_thread = threading.Thread(
                     target=self._start_progress_polling,
@@ -560,36 +688,24 @@ class WebUIBackend(AbstractBackend):
                     daemon=True
                 )
                 poll_thread.start()
-            if cancel_check:
-                def watch_cancellation():
-                    while not stop_event.wait(0.05):
-                        if not cancel_check():
-                            continue
-                        # A1111/Forge exposes only a global interrupt and no
-                        # prompt id. Repeat while the generation HTTP call is
-                        # alive so an interrupt racing just before submission
-                        # cannot leave a later-starting request running.
-                        while not stop_event.is_set():
-                            self._post_interrupt()
-                            if stop_event.wait(0.25):
-                                return
-                        return
-
-                threading.Thread(
-                    target=watch_cancellation,
-                    name="webui-cancel-watch",
-                    daemon=True,
-                ).start()
+            # cancel_check 또는 interrupt() 가 오면 우리 작업이 active 일 때만 전역 interrupt 반복.
+            threading.Thread(
+                target=self._watch_cancellation,
+                args=(task_id, stop_event, interrupt_requested, cancel_check, unseen_grace),
+                name="webui-cancel-watch",
+                daemon=True,
+            ).start()
 
             try:
                 response = requests.post(
                     url=f'{self.api_url}{endpoint}',
-                    json=payload, headers=_HEADERS, timeout=600, stream=True
+                    json=request_payload, headers=_HEADERS, timeout=600, stream=True
                 )
                 response.raise_for_status()
             finally:
                 with self._generation_state_lock:
-                    self._generation_inflight = False
+                    self._inflight_interrupts.pop(task_id, None)
+                    self._generation_inflight = bool(self._inflight_interrupts)
                 stop_event.set()
 
             try:
@@ -679,20 +795,25 @@ class WebUIBackend(AbstractBackend):
         raise RuntimeError("업스케일 API 응답에 이미지가 없습니다.")
 
     def adetailer(self, image_b64: str, settings: Dict) -> str:
-        """img2img + ADetailer로 디테일 보정"""
+        """단독/배치 ADetailer — 확장의 공식 ``skip_img2img`` 로 부모 재확산 없이 보정한다.
+
+        확장 인자는 ``[enable, skip_img2img, slot...]`` 이다(aadetailer ui.py 의 components 순서).
+        예전엔 ``[True, False, slot]`` 이라 skip 이 꺼져 있었다 — 부모 img2img 가 denoise 0.1·
+        빈 프롬프트·API 기본 steps 로 **원본 전체를 한 번 더 재확산**했고(얼굴이 없어도 드리프트,
+        그 재확산본이 저장됨), 이미지마다 풀해상도 샘플링과 VAE 왕복이 한 번씩 더 들었다.
+
+        skip_img2img=True 면 확장이 부모 패스를 1스텝·128×128 로 줄이고 원래 steps/sampler/
+        width/height 를 ``_ad_orig`` 에 보관해 인페인트 패스에 쓰며, 입력은 init 이미지 원본이다.
+        그래서 그 값들을 sam3()/refine() 처럼 명시 전송한다(``_build_postprocess_payload``).
+        t2i/i2i 안의 ADetailer(generator_generation)는 부모 생성 자체가 목적이라 False 가 맞다.
+        """
         adetailer_args = settings.get('adetailer_args')
         if not adetailer_args:
-            from workers.upscale_worker import _build_adetailer_slot
+            # 슬롯 본문·기본값은 core/adetailer_args 한 벌 (예전엔 workers 레이어를 역참조했다).
+            from core.adetailer_args import slot_from_settings
 
-            ad_slot = _build_adetailer_slot(
-                model=settings.get('ad_model', 'face_yolov8s.pt'),
-                confidence=settings.get('ad_confidence', 0.3),
-                denoise=settings.get('ad_denoise', 0.25),
-                prompt=settings.get('ad_prompt', ''),
-            )
-            if settings.get('ad_negative'):
-                ad_slot['ad_negative_prompt'] = settings['ad_negative']
-            adetailer_args = [True, False, ad_slot]
+            adetailer_args = [True, True, slot_from_settings(settings)]
+        # 호출자가 완성된 adetailer_args 를 넘기면(현재 없음) 그 skip 값을 그대로 존중한다.
 
         payload = self._build_postprocess_payload(
             image_b64,
@@ -709,10 +830,10 @@ class WebUIBackend(AbstractBackend):
         sam-extra 워크플로 2를 앱에서 구현한 것. 확장의 Refine 패널은 Gradio 전용이라
         HTTP로 부를 수 없어서, 같은 결과가 나오도록 여기서 payload를 만든다.
 
-        `sam3()` 와의 차이 (이게 핵심):
-          · sam3()는 `_build_postprocess_payload`를 쓰는데 denoising_strength가 0.1로
-            고정돼 **이미지 전체가 한 번 재확산**된다. Refine은 마스크 영역만 건드려야
-            하므로 부모 i2i는 denoise 0으로 통과시키고 SAM3 인페인트만 일하게 한다.
+        핵심 (sam3() 와 같은 규칙):
+          · Refine은 마스크 영역만 건드려야 하므로 부모 i2i는 denoise 0으로 통과시키고
+            SAM3 인페인트만 일하게 한다. (예전 sam3()는 denoise 0.1 부모 패스로 **이미지
+            전체를 한 번 재확산**했다 — 지금은 sam3()도 denoise 0.)
           · steps/cfg/sampler/seed를 명시해 Forge 현재 UI 값에 좌우되지 않게 한다.
         """
         from core.refine_prompt import build_refine_prompts

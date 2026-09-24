@@ -7,15 +7,16 @@ import copy
 import time
 import random
 import json
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt
 
 from config import OUTPUT_DIR
 from workers.generation_worker import GenerationFlowWorker
-from utils.file_wildcard import resolve_file_wildcards
+from utils.file_wildcard import resolve_file_wildcards, wildcards_enabled
 from utils.wildcard import process_wildcards
 from utils.app_logger import get_logger
-from utils.theme_manager import get_theme_manager
+
+#: '생성 후 모델 언로드 요청' 을 띄운 뒤 언로드 스레드가 건너뛰었을 때(판단 뒤에 시작된 생성·후처리
+#: 작업이 GPU 를 쓰는 중) 그 문구를 바꿔 놓는 상태 한 줄. ⚠ 로 경고 수준(core/status_message.py).
+POST_GEN_UNLOAD_SKIPPED_STATUS = "⚠ 생성 후 모델 언로드 건너뜀 — 다른 작업이 GPU 를 쓰는 중"
 
 
 def _widget_text(w, fallback: str = '') -> str:
@@ -72,32 +73,28 @@ class GenerationMixin:
         combo = getattr(self, 'generation_family_combo', None)
         if combo is None or not hasattr(combo, 'currentText'):
             return False
-        return str(combo.currentText() or '').strip().upper() == 'KREA2'
+        from core.generation_family import is_krea2_family
+        return is_krea2_family(combo.currentText())
     
     def _maybe_unload_ollama(self):
         """생성 직전 Ollama LLM 언로드 (ui_prefs.ollamaUnloadOnGen 켜진 경우) → VRAM 양보.
-        best-effort 비동기 — Ollama 미실행/미설정이면 조용히 무시. 자동화·수동 공통 경로."""
+        best-effort 비동기 — Ollama 미실행/미설정이면 조용히 무시. 자동화·수동 공통 경로.
+        판단 규칙은 Creator 와 같은 core.ui_prefs.ollama_unload_target 하나다."""
         try:
-            import json as _json
             import threading as _th
-            prefs_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'config', 'ui_prefs.json')
-            if not os.path.exists(prefs_path):
+            from core.ui_prefs import ollama_unload_target, read_ui_prefs
+            target = ollama_unload_target(read_ui_prefs())
+            if target is None:
                 return
-            with open(prefs_path, 'r', encoding='utf-8') as f:
-                prefs = _json.load(f)
-            if not prefs.get('ollamaUnloadOnGen'):
-                return
-            model = (prefs.get('ollamaModel') or '').strip()
-            if not model:
-                return
-            url = prefs.get('ollamaUrl') or 'http://localhost:11434'
+            url, model = target
 
             def _do():
                 try:
-                    from core.ollama_client import OllamaClient
-                    OllamaClient(url, model).unload()
+                    # 설정 이름이 설치되지 않은 태그(추천 카드만 고름)면 태그 강화·NL 워커가 실제로 올린 건
+                    # 같은 계열의 설치 모델이다 — 같은 규칙(resolve_model)으로 골라 내린다. /api/tags 도
+                    # HTTP 라 이 스레드에서.
+                    from core.ollama_client import unload_configured_model
+                    unload_configured_model(url, model)
                 except Exception:
                     pass
             _th.Thread(target=_do, daemon=True).start()
@@ -147,20 +144,9 @@ class GenerationMixin:
         # 상태바 업데이트
         self.show_status("🎨 이미지 생성 중...")
 
-        # 뷰어에 로딩 표시
+        # 뷰어(Vue)에 로딩 표시
         if hasattr(self, 'vue_bridge'):
             self.vue_bridge.send_start()
-        self.viewer_label.setText("🎨 이미지 생성 중...\n\n잠시만 기다려주세요.")
-        c = get_theme_manager().get_colors()
-        self.viewer_label.setStyleSheet(f"""
-            QLabel {{
-                background-color: {c['bg_secondary']};
-                border-radius: 8px;
-                color: #e67e22;
-                font-size: 16px;
-                font-weight: bold;
-            }}
-        """)
 
         _logger.info("Sending Payload to WebUI API")
         _logger.debug(f"프롬프트: {payload['prompt'][:100]}...")
@@ -170,18 +156,17 @@ class GenerationMixin:
             self._abort_generation("체크포인트가 아직 선택되지 않았습니다 — 목록이 로딩 중이면 잠시 후 다시 누르세요")
             return False
         self._cleanup_gen_worker()
+        # '생성 후 언로드' 요청이 아직 날아가는 중이면 워커가 run() 초입에서 기다린다
+        # (core.post_generation.wait_for_pending_unload) — UI 스레드는 막지 않는다.
         if backend_override is None:
             self.gen_worker = GenerationFlowWorker(selected_model, payload)
         else:
             self.gen_worker = GenerationFlowWorker(selected_model, payload, backend=backend_override)
+        # 통계는 UI 위젯이 아니라 실제 요청(hires 배율·Anima 가드·XYZ/Comfy override 반영)으로 기록
+        from core.gen_stats import request_meta_from_payload
+        self._gen_request_meta = request_meta_from_payload(selected_model, payload)
         self.gen_worker.finished.connect(self.on_generation_finished)
         self.gen_worker.progress.connect(self._on_generation_progress)
-
-        # 프로그레스 바 초기화
-        self.gen_progress_bar.setValue(0)
-        self.gen_progress_bar.setRange(0, 100)
-        self.gen_progress_bar.setFormat("생성 준비 중...")
-        self.gen_progress_bar.show()
 
         self.gen_worker.start()
         return True
@@ -201,10 +186,6 @@ class GenerationMixin:
         _logger.error("generation aborted: %s", msg)
         try:
             self._restore_generate_button()
-        except Exception:
-            pass
-        try:
-            self.gen_progress_bar.hide()
         except Exception:
             pass
         self.show_status(f"설정 오류: {msg}", 5000)
@@ -275,9 +256,7 @@ class GenerationMixin:
 
         # 와일드카드 치환
         final_prompt = self.total_prompt_display.toPlainText() if prompt_override is None else str(prompt_override)
-        wc_enabled = (hasattr(self, 'settings_tab') and
-                      hasattr(self.settings_tab, 'chk_wildcard_enabled') and
-                      self.settings_tab.chk_wildcard_enabled.isChecked())
+        wc_enabled = wildcards_enabled(self)
         if wc_enabled and not snapshot:
             final_prompt = resolve_file_wildcards(final_prompt)
             final_prompt = process_wildcards(final_prompt)
@@ -295,28 +274,13 @@ class GenerationMixin:
         except Exception as e:
             _logger.warning(f"pipeline 실행 실패 (원본 유지): {e}")
 
-        # LoRA 합침 (Vue LoRA Stack 우선, 없으면 Python panel)
-        lora_text = getattr(self, '_vue_lora_text', '')
-        if not lora_text and hasattr(self, 'lora_active_panel'):
-            lora_text = self.lora_active_panel.get_active_lora_text()
-        if lora_text and not self._is_krea2_generation():
-            # 프롬프트에 이미 <lora:NAME...>이 있으면(큐 항목의 EXIF 로라 등) 스택의 같은
-            # LoRA는 제외 — 동일 LoRA 이중 적용 방지.
-            import re as _re
-            existing = {n.strip().lower()
-                        for n in _re.findall(r'<lora:([^:>]+)', final_prompt or '', flags=_re.IGNORECASE)}
-            if existing:
-                kept = []
-                for seg in lora_text.split(','):
-                    s = seg.strip()
-                    m = _re.match(r'<lora:([^:>]+)', s, flags=_re.IGNORECASE)
-                    if m and m.group(1).strip().lower() in existing:
-                        continue
-                    if s:
-                        kept.append(s)
-                lora_text = ', '.join(kept)
-            if lora_text:
-                final_prompt = f"{final_prompt}, {lora_text}" if final_prompt else lora_text
+        # LoRA 합침 — 단일 소스 _vue_lora_entries(배율 단위, Vue set_lora_stack·부팅 복원·프로파일
+        # 적용이 갱신)에서 매번 파생한다. 스택이 비었거나 전부 꺼져 있으면 아무것도 붙이지 않는다.
+        # 프롬프트에 같은 <lora:NAME...>이 이미 있으면(큐 항목의 EXIF 로라 등) 그 LoRA는 제외.
+        if not self._is_krea2_generation():
+            from core.lora_stack import UNIT_MULTIPLIER, append_lora_stack_to_prompt
+            final_prompt = append_lora_stack_to_prompt(
+                final_prompt, getattr(self, '_vue_lora_entries', None) or [], unit=UNIT_MULTIPLIER)
 
         # Payload 생성
         payload = {
@@ -330,6 +294,8 @@ class GenerationMixin:
             "width": width,
             "height": height,
             "send_images": True,
+            # '저장해도 되는 결과'라는 요청일 뿐 — Forge 가 실제로 자기 output 에도 저장할지는
+            # WebUI 백엔드가 설정 forgeSaveOutputs(기본 off)로 확정한다(core/forge_output_policy.py).
             "save_images": True,
             "alwayson_scripts": {}
         }
@@ -406,12 +372,11 @@ class GenerationMixin:
         # Never leak provider-specific switches into Forge or Krea2 requests.
         from backends import BackendType, get_backend_type, get_backend
         if get_backend_type() == BackendType.COMFYUI and not self._is_krea2_generation():
-            from core.config_migration import load_ui_prefs
-            from core.storage_paths import config_file
+            from core.ui_prefs import read_ui_prefs
             from core.spectrum_settings import spectrum_payload_from_prefs
             from ui.comfy_workflow_actions import quality_preset_payload
             try:
-                payload.update(spectrum_payload_from_prefs(load_ui_prefs(str(config_file('ui_prefs.json')))))
+                payload.update(spectrum_payload_from_prefs(read_ui_prefs()))
                 payload.update(quality_preset_payload(payload, host=self, endpoint=get_backend().api_url))
                 if prompt_override is None:
                     if comfy_workflow_snapshot is not None:
@@ -503,9 +468,6 @@ class GenerationMixin:
         if total <= 0:
             return
 
-        self.gen_progress_bar.setRange(0, total)
-        self.gen_progress_bar.setValue(step)
-
         # ETA 계산 — worker._start_time 기준 경과시간으로 남은 시간 추정
         eta_str = ""
         try:
@@ -522,14 +484,8 @@ class GenerationMixin:
         except Exception:
             eta_str = ""
 
-        self.gen_progress_bar.setFormat(f"{step} / {total} steps{eta_str}")
-
         pct = int(step / total * 100)
         self.setWindowTitle(f"AI Studio - Pro [{step}/{total} steps · {pct}%{eta_str}]")
-        self.viewer_label.setText(
-            f"🎨 이미지 생성 중...\n\n"
-            f"{step} / {total} steps ({pct}%){eta_str}"
-        )
         self.show_status(f"🎨 생성 중... {step}/{total} steps ({pct}%){eta_str}")
 
         # Vue에 진행률 전달 + 라이브 프리뷰(바뀐 것만 — 백엔드가 이미 같은 그림은 None 으로 준다)
@@ -554,11 +510,23 @@ class GenerationMixin:
         self.setWindowTitle("AI Studio - Pro")
 
     def _generation_matches_queue(self, gen_info):
-        """Only a matching XYZ result may consume its queued snapshot."""
+        """Only a matching XYZ result may consume its queued snapshot.
+
+        대기열 매니저가 결과를 기다리는 항목(보낸 항목 · 중지 뒤에도 워커가 만드는 항목)과 비교한다.
+        중지된 매니저라도 그런 항목이 있으면 결과를 넘긴다 — 멈춘 채 끝난 장을 정리해야(만들어졌으면
+        소비, 아니면 표시 해제) 다음 시작 때 같은 장을 또 만들지 않는다.
+        """
         manager = getattr(self, 'queue_manager', None)
-        if manager is None or not manager.is_running:
+        if manager is None:
             return False
-        current = manager.queue_panel.get_first_item()
+        expects = getattr(manager, 'expects_result', None)
+        awaiting = bool(expects()) if callable(expects) else False
+        if not manager.is_running and not awaiting:
+            return False
+        awaited = getattr(manager, 'awaited_item', None)
+        current = awaited() if (awaiting and callable(awaited)) else None
+        if current is None:
+            current = manager.queue_panel.get_first_item()
         expected = current.get('_xyz_info') if isinstance(current, dict) else None
         actual = gen_info.get('_xyz_info') if isinstance(gen_info, dict) else None
         if expected or actual:
@@ -570,40 +538,49 @@ class GenerationMixin:
             )
         return True
 
+    def _generation_stats_meta(self) -> dict:
+        """통계용 요청 메타 — start_generation 이 저장한 실제 요청값. 없으면 위젯 폴백(_widget_int)."""
+        meta = getattr(self, '_gen_request_meta', None)
+        if isinstance(meta, dict):
+            return meta
+        model_combo = getattr(self, 'model_combo', None)
+        width_input = getattr(self, 'width_input', None)
+        height_input = getattr(self, 'height_input', None)
+        return {
+            'model': model_combo.currentText() if model_combo is not None else '',
+            'width': _widget_int(width_input, 0) if width_input is not None else 0,
+            'height': _widget_int(height_input, 0) if height_input is not None else 0,
+            'seed': None,
+        }
+
     def on_generation_finished(self, result, gen_info):
         """생성 완료 처리"""
         # 버튼/타이틀 복구 (자동화 모드에 따라 다르게)
         self._restore_generate_button()
 
-        # 프로그레스 바 숨김
-        self.gen_progress_bar.hide()
-        self.gen_progress_bar.setValue(0)
-
-        # 뷰어 스타일 복구
-        c = get_theme_manager().get_colors()
-        self.viewer_label.setStyleSheet(f"""
-            QLabel {{
-                background-color: {c['bg_secondary']};
-                border-radius: 8px;
-                color: {c['text_muted']};
-            }}
-        """)
-
         # The request never reached a backend. This is not a failed image and
         # must not consume the queued snapshot or advance automation.
         if isinstance(gen_info, dict) and gen_info.get('_queue_deferred'):
             manager = getattr(self, 'queue_manager', None)
+            by_automation = False
             if manager is not None and self._generation_matches_queue(gen_info):
-                manager.pause()
-            self.viewer_label.setText(f"⏸ 대기열 일시정지\n{result}")
-            self.show_status(f"대기열 일시정지: {result}", 5000)
+                # 일시정지 + '보낸 항목' 표시 해제 — 항목은 남고 재개 때 다시 나간다
+                deferred = getattr(manager, 'on_generation_deferred', None)
+                (deferred if callable(deferred) else manager.pause)()
+            elif getattr(self, 'is_automating', False):
+                # 자동화 '큐 우선'이 보낸 동결 항목(시드 탐색·XYZ·ComfyUI 스냅숏) — 자동화 중엔 대기열
+                # 매니저가 멈춰 있어 위 분기가 받지 않는다. 자동화가 같은 규칙(항목은 남기고 일시정지)으로
+                # 맡아야 '실행 중'인 채 조용히 멈추지 않는다(재개하면 같은 항목부터 다시 낸다).
+                on_deferred = getattr(self, '_automation_queue_item_deferred', None)
+                by_automation = bool(callable(on_deferred) and on_deferred(str(result)))
+            if not by_automation:   # 자동화 쪽은 _automation_queue_item_deferred 가 알렸다
+                self.show_status(f"대기열 일시정지: {result}", 5000)
             if hasattr(self, 'vue_bridge'):
                 self.vue_bridge.generationError.emit(str(result))
             return
         
         # 취소 분기 — 에러(E020)/실패 통계/자동화 재시도로 처리하지 않음
         if isinstance(gen_info, dict) and gen_info.get('cancelled'):
-            self.viewer_label.setText("⏹ 생성 취소됨")
             self.show_status("⏹ 생성 취소됨", 3000)
             if hasattr(self, 'vue_bridge'):
                 # Vue 스피너 리셋 (✕로 이미 리셋된 경우 무해)
@@ -627,67 +604,49 @@ class GenerationMixin:
             except Exception:
                 pass
 
-            # 생성 통계 기록
+            # 생성 통계 기록 — 실제 요청 메타(start_generation 에서 저장) 기준
             try:
-                from core.gen_stats import get_gen_stats
+                from core.gen_stats import build_generation_record, get_gen_stats
                 duration = round(time.time() - getattr(self, '_gen_start_time', time.time()), 1)
-                get_gen_stats().record({
-                    'success': True,
-                    'duration_sec': duration,
-                    'model': self.model_combo.currentText() if hasattr(self, 'model_combo') else '',
-                    'seed': gen_info.get('seed', 0) if isinstance(gen_info, dict) else 0,
-                    'width': int(self.width_input.text()) if hasattr(self, 'width_input') else 0,
-                    'height': int(self.height_input.text()) if hasattr(self, 'height_input') else 0,
-                })
+                get_gen_stats().record(build_generation_record(
+                    success=True, duration_sec=duration,
+                    request_meta=self._generation_stats_meta(), gen_info=gen_info,
+                ))
             except Exception:
-                pass
+                _logger.debug("생성 통계 기록 실패", exc_info=True)
 
             # 비활성 창이면 알림 (단일 생성, 비자동화)
             if not self.is_automating and not self.isActiveWindow():
                 self._notify_generation_done()
 
-            # 자동화 중이면 카운트 증가
+            # 자동화 중이면 카운트 증가 — 덱 장만 센다(큐 우선 항목 제외: _automation_after_generation)
             if self.is_automating:
-                self.auto_gen_count += 1
+                self._automation_after_generation(True)
                 self.show_status(
                     f"🔄 자동 생성 중... ({self.auto_gen_count}장 완료)"
                 )
         else:
             error_msg = f"[E020] 생성 실패: {result}"
-            # 실패 통계 기록
+            # 실패 통계 기록 (설계상 model 만 — 해상도·시드는 남기지 않는다)
             try:
-                from core.gen_stats import get_gen_stats
+                from core.gen_stats import build_generation_record, get_gen_stats
                 duration = round(time.time() - getattr(self, '_gen_start_time', time.time()), 1)
-                get_gen_stats().record({
-                    'success': False,
-                    'duration_sec': duration,
-                    'model': self.model_combo.currentText() if hasattr(self, 'model_combo') else '',
-                })
+                get_gen_stats().record(build_generation_record(
+                    success=False, duration_sec=duration,
+                    request_meta=self._generation_stats_meta(), gen_info=gen_info,
+                ))
             except Exception:
-                pass
-            self.viewer_label.setText(f"❌ {error_msg}")
+                _logger.debug("실패 통계 기록 실패", exc_info=True)
             self.show_status(error_msg, 5000)
             print(f"\n[E020] Generation Failed: {result}")
             if hasattr(self, 'vue_bridge'):
                 # generationError → App.vue가 에러 토스트 + isGenerating(스피너) 리셋
                 # (단일 생성 실패 시 스피너가 안 풀리던 버그 수정)
                 self.vue_bridge.generationError.emit(error_msg)
-            # 자동화 실패 재시도 (max_retries + 지수 백오프) — 라이브 경로에 접목
-            # (기존엔 dead 메서드에만 있어 max_retries가 실제로 동작 안 했음)
-            if self.is_automating:
-                if not hasattr(self, '_auto_retry_count'):
-                    self._auto_retry_count = 0
-                max_retries = int((getattr(self, 'auto_settings', {}) or {}).get('max_retries', 0))
-                if self._auto_retry_count < max_retries:
-                    self._auto_retry_count += 1
-                    backoff = min(2.0 ** self._auto_retry_count, 30.0)
-                    self.show_status(
-                        f"⚠️ 생성 실패 — {backoff:.1f}초 후 재시도 "
-                        f"({self._auto_retry_count}/{max_retries})")
-                    from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(int(backoff * 1000), self._automation_generate)
-                    return   # 큐 진행/다음 사이클 스킵 — 재시도가 이어받음
-                self._auto_retry_count = 0   # 재시도 소진
+            # 자동화 실패 재시도 (max_retries + 지수 백오프) — 같은 장을 반복 카운터·자연어
+            # 변환 없이 다시 낸다(generator_actions._automation_after_generation).
+            if self.is_automating and self._automation_after_generation(False):
+                return   # 큐 진행/다음 사이클 스킵 — 재시도가 이어받음
 
         # 대기열 매니저에 생성 완료 알림
         if self._generation_matches_queue(gen_info):
@@ -696,113 +655,93 @@ class GenerationMixin:
         # ★★★ 자동화 계속 (generator_actions.py의 메서드 호출) ★★★
         if self.is_automating:
             self._continue_automation()
-        
-    def _process_new_image(self, image_data, gen_info):
-        """새 이미지 처리"""
-        pixmap = QPixmap()
-        pixmap.loadFromData(image_data)
-        self.viewer_label.setPixmap(
-            pixmap.scaled(
-                self.viewer_label.size(), 
-                Qt.AspectRatioMode.KeepAspectRatio, 
-                Qt.TransformationMode.SmoothTransformation
+        else:
+            # 설정 '생성 후 모델 언로드' — 연속 작업의 마지막 장 뒤에만 (core/post_generation)
+            self._maybe_unload_models_after_generation()
+
+    def _maybe_unload_models_after_generation(self):
+        """ui_prefs.unloadModelsAfterGen 이 켜져 있고 자동화/대기열이 끝났으면 백엔드 모델을 내린다.
+
+        호출 지점: 단일 생성 완료 · 자동화 종료(_stop_automation) · 대기열 종료(_on_queue_completed).
+        HTTP 호출(Forge unload-checkpoint / ComfyUI /free)은 UI 스레드를 막지 않게 데몬
+        스레드에서 보내고, 다음 생성은 생성 워커(T2I·PNG Info 즉시 생성·I2I/인페인트·채팅)가
+        run() 초입에서 이 요청을 기다린 뒤 시작한다(샘플링 도중 언로드가 끼어드는 경쟁 방지 —
+        core.post_generation.wait_for_pending_unload). 실패해도 생성 결과에는 영향 없다.
+        ``gen_worker`` 밖의 생성(인페인트·I2I 탭·편집기·채팅·Creator·생성 API)이 공유 GPU 리스를
+        쥐고 있으면 내리지 않는다 — 인페인트 중 T2I 를 눌러 곧바로 '사용 중' 실패한 경우나, 대기열
+        끝 1초 사이·자동화 중지 직후 인페인트가 시작된 경우. 언로드 스레드도 리스를 잡은 동안에만
+        HTTP 를 보내 그 사이에 시작된 작업과도 겹치지 않는다(core.post_generation).
+        리스를 잡지 않는 후처리 작업(ADetailer·SAM3·Refine·배치 업스케일, backend_job)이 도는 중에도
+        내리지 않는다(unload_blocked). 판단 뒤에 시작된 작업 때문에 언로드 스레드가 건너뛰면 앞서 띄운
+        '요청' 문구를 건너뜀 문구로 바꾼다.
+        """
+        try:
+            from core.post_generation import (
+                UNLOAD_SKIPPED_BUSY, should_unload_after_generation, start_post_generation_unload,
             )
-        )
-        
+            from core.resource_coordinator import get_generation_coordinator
+            from core.safe_print import safe_print
+            from core.ui_prefs import read_ui_prefs
+            # 완료 시점에 다시 읽는다 — 긴 대기열·자동화 도중 바뀐 unloadModelsAfterGen 을 따라야 한다
+            prefs = read_ui_prefs()
+            queue = getattr(self, 'queue_manager', None)
+            worker = getattr(self, 'gen_worker', None)
+            if not should_unload_after_generation(
+                prefs,
+                automating=bool(getattr(self, 'is_automating', False)),
+                queue_running=bool(getattr(queue, 'is_running', False)),
+                worker_running=bool(worker is not None and hasattr(worker, 'isRunning') and worker.isRunning()),
+                generation_active=get_generation_coordinator().unload_blocked(),
+            ):
+                return
+            from backends import get_backend
+            backend = get_backend()
+
+            def _report(ok):
+                # 언로드 스레드에서 불린다 — show_status 는 워커 스레드에서도 안전하다(ui/status_line.py 가
+                # GUI 스레드로 넘긴다). 콘솔 로그는 safe_print(cp949 파이프에서도 예외 없음).
+                if ok is UNLOAD_SKIPPED_BUSY:
+                    safe_print("[PostGen] 생성 후 모델 언로드 건너뜀 - 다른 작업이 GPU 를 쓰는 중", flush=True)
+                    self.show_status(POST_GEN_UNLOAD_SKIPPED_STATUS, 5000)
+                    return
+                safe_print(f"[PostGen] 생성 후 모델 언로드 {'요청됨' if ok else '실패(무시)'}", flush=True)
+
+            # 앞선 언로드가 아직 진행 중이면 새로 보내지 않는다(None)
+            if start_post_generation_unload(backend, on_done=_report) is not None:
+                self.show_status("생성 후 모델 언로드 요청", 3000)
+        except Exception as e:
+            print(f"[PostGen] unload check skipped: {e}")
+
+    def _process_new_image(self, image_data, gen_info):
+        """새 이미지 저장 → Vue 뷰어·히스토리에 알림 → XYZ 결과 통지.
+
+        해상도(App.vue 해상도 표시)는 결과 바이트의 헤더만 읽는다(core.result_image) —
+        gen_info 의 width/height 는 요청값이라 hires fix·업스케일 결과와 다르다(폴백 전용).
+        예전엔 장마다 GUI 스레드에서 QPixmap 풀 디코드 + 스무스 축소를 no-op 뷰어 더미에 넘기고,
+        아무도 읽지 않는 150px 평면 썸네일(PIL 재디코드)과 보이지 않는 ThumbnailItem(최대 100개)을
+        만들고, 읽는 곳 없는 generation_data 를 쌓았다(장당 60~210ms). Vue 히스토리 썸네일은
+        generateThumbnails(core.thumb_prefetch)가 작업자 스레드에서 따로 만든다.
+        """
         filename = f"generated_{int(time.time())}_{random.randint(100,999)}.png"
         filepath = os.path.join(OUTPUT_DIR, filename)
         with open(filepath, "wb") as f:
             f.write(image_data)
-        
+
         self.current_image_path = filepath
+        info = gen_info if isinstance(gen_info, dict) else {}
 
         # Vue 뷰어에 이미지 전달
         if hasattr(self, 'vue_bridge'):
-            w = pixmap.width()
-            h = pixmap.height()
-            seed = gen_info.get('seed', 0) if isinstance(gen_info, dict) else 0
-            self.vue_bridge.send_image(filepath, w, h, seed)
+            from core.result_image import result_image_size
+            w, h = result_image_size(image_data, info)
+            self.vue_bridge.send_image(filepath, w, h, info.get('seed', 0))
 
-        # _xyz_info 주입
-        if hasattr(self, '_pending_xyz_info') and self._pending_xyz_info:
-            if isinstance(gen_info, dict):
-                gen_info['_xyz_info'] = self._pending_xyz_info
-            else:
-                gen_info = {'_xyz_info': self._pending_xyz_info, '_raw': gen_info}
-            self._pending_xyz_info = None
-        self.generation_data[filepath] = gen_info
-        
-        from core.image_utils import exif_for_display
-        self.exif_display.setPlainText(exif_for_display(gen_info))
-
-        # 뷰어 정보 바 업데이트 (모던 UI)
-        if hasattr(self, 'viewer_info_bar') and isinstance(gen_info, dict):
-            w = gen_info.get('width', 0)
-            h = gen_info.get('height', 0)
-            seed = gen_info.get('seed', '')
-            info_parts = []
-            if w and h:
-                info_parts.append(f"해상도 {w}×{h}")
-            if seed:
-                info_parts.append(f"시드 {seed}")
-            if info_parts:
-                self.viewer_info_bar.setText("  |  ".join(info_parts))
-                self.viewer_info_bar.show()
-
-        # XYZ Plot 결과 전달
-        xyz_info = gen_info.get('_xyz_info') if isinstance(gen_info, dict) else None
-        if not xyz_info and hasattr(self, 'generation_data'):
-            # generation_data에서 _xyz_info 확인
-            last_gen = self.generation_data.get(filepath)
-            if isinstance(last_gen, dict):
-                xyz_info = last_gen.get('_xyz_info')
-        if xyz_info and hasattr(self, 'xyz_plot_tab'):
-            self.xyz_plot_tab.add_result_image(filepath, xyz_info)
-        if xyz_info and hasattr(self, '_xyz_emit'):
+        # XYZ Plot 결과 전달 — _xyz_info 는 XYZ 대기열 항목이 gen_info 에 싣는다(ui/xyz_actions)
+        xyz_info = info.get('_xyz_info')
+        if isinstance(xyz_info, dict) and xyz_info and hasattr(self, '_xyz_emit'):
             self._xyz_emit('xyzPlotEvent', {"type": "result", "ok": True,
                 "requestId": xyz_info.get('requestId', ''), "path": filepath,
                 "label": xyz_info.get('label', ''), "axes": xyz_info.get('axes', {})})
-
-        self._create_thumbnail(filepath)
-        self.add_image_to_gallery(filepath)
-    
-    def handle_immediate_generation(self, payload):
-        """PNG Info에서 온 즉시 생성 요청"""
-        self.center_tabs.setCurrentIndex(0)
-        
-        # ★★★ 먼저 alwayson_scripts 확인/생성 ★★★
-        if "alwayson_scripts" not in payload:
-            payload["alwayson_scripts"] = {}
-        
-        # NegPiP 적용
-        if hasattr(self, 'negpip_group') and self.negpip_group.isChecked():
-            payload["alwayson_scripts"]["NegPiP"] = {"args": [True]}
-
-        self._apply_postprocess_chain(payload)
-        if self._is_krea2_generation():
-            payload["_generation_family"] = "krea2"
-        
-        selected_model = self.model_combo.currentText()
-        if not str(selected_model or '').strip() and self._backend_needs_checkpoint():
-            self._abort_generation("체크포인트가 아직 선택되지 않았습니다 — 목록이 로딩 중이면 잠시 후 다시 누르세요")
-            return
-        
-        _logger.info("Immediate Generation from EXIF")
-        self.btn_generate.setText("생성 중...")
-        self.btn_generate.setEnabled(False)
-        self.viewer_label.setText("EXIF 설정으로 생성 중...")
-        
-        self._cleanup_gen_worker()
-        self.gen_worker = GenerationFlowWorker(selected_model, payload)
-        self.gen_worker.finished.connect(self.on_generation_finished)
-        self.gen_worker.progress.connect(self._on_generation_progress)
-
-        self.gen_progress_bar.setValue(0)
-        self.gen_progress_bar.setRange(0, 100)
-        self.gen_progress_bar.setFormat("생성 준비 중...")
-        self.gen_progress_bar.show()
-
-        self.gen_worker.start()
 
     def _build_adetailer_args(self):
         """활성화된 ADetailer 슬롯 args 생성"""
@@ -877,86 +816,68 @@ class GenerationMixin:
     def _build_adetailer_slot(self, widgets):
         """ADetailer 슬롯 딕셔너리 생성 (공식 REST API 스펙 준수)
 
-        widgets dict에서 proxy를 통해 읽되,
-        proxy 값이 비어있으면 bridge._proxies에서 직접 읽기를 시도한다.
+        슬롯의 상수 부분·기본값은 core/adetailer_args 한 벌이고, 여기서는 위젯 값만
+        override 로 넘긴다. widgets dict에서 proxy를 통해 읽는다.
         """
+        from core import adetailer_args as ad
+
         _txt, _float, _int = _widget_text, _widget_float, _widget_int
+        defaults = ad.DEFAULT_SLOT
 
-        model_name = _txt(widgets['model'], 'face_yolov8n.pt')
+        model_name = _txt(widgets['model'], ad.DEFAULT_MODEL)
         if model_name == 'None' or not model_name.strip():
-            model_name = 'face_yolov8n.pt'
+            model_name = ad.DEFAULT_MODEL
 
-        confidence = _float(widgets['confidence'], 0.3)
-        denoise = _float(widgets['denoise'], 0.4)
-        mask_blur = _int(widgets['mask_blur'], 4)
-        padding = _int(widgets['padding'], 32)
+        confidence = _float(widgets['confidence'], ad.DEFAULT_CONFIDENCE)
+        denoise = _float(widgets['denoise'], ad.DEFAULT_DENOISE)
+        mask_blur = _int(widgets['mask_blur'], defaults['ad_mask_blur'])
+        padding = _int(widgets['padding'], defaults['ad_inpaint_only_masked_padding'])
         prompt = widgets['prompt'].toPlainText() if hasattr(widgets['prompt'], 'toPlainText') else ''
 
         _logger.debug(f"AD Slot: model={model_name}, confidence={confidence}, "
                       f"denoise={denoise}, mask_blur={mask_blur}, prompt='{prompt[:30]}'")
 
         neg_prompt = widgets['neg_prompt'].toPlainText() if hasattr(widgets['neg_prompt'], 'toPlainText') else ''
-        dilate_erode = _int(widgets.get('dilate_erode', type('', (), {'text': lambda s: '4'})()), 4) if 'dilate_erode' in widgets else 4
-        mask_merge = _txt(widgets.get('mask_merge_invert', type('', (), {'text': lambda s: 'None', 'currentText': lambda s: 'None'})()), 'None') if 'mask_merge_invert' in widgets else 'None'
+        dilate_erode = (_int(widgets['dilate_erode'], defaults['ad_dilate_erode'])
+                        if 'dilate_erode' in widgets else defaults['ad_dilate_erode'])
+        mask_merge = (_txt(widgets['mask_merge_invert'], defaults['ad_mask_merge_invert'])
+                      if 'mask_merge_invert' in widgets else defaults['ad_mask_merge_invert'])
 
-        slot = {
+        overrides = {
             "ad_model": model_name,
-            "ad_model_classes": "",
-            "ad_tab_enable": True,
             "ad_prompt": prompt,
             "ad_negative_prompt": neg_prompt,
             "ad_confidence": confidence,
-            "ad_mask_filter_method": "Area",
-            "ad_mask_k": 0,
-            "ad_mask_min_ratio": 0.0,
-            "ad_mask_max_ratio": 1.0,
             "ad_dilate_erode": dilate_erode,
-            "ad_x_offset": 0,
-            "ad_y_offset": 0,
             "ad_mask_merge_invert": mask_merge,
             "ad_mask_blur": mask_blur,
             "ad_denoising_strength": denoise,
-            "ad_inpaint_only_masked": True,
             "ad_inpaint_only_masked_padding": padding,
             "ad_use_inpaint_width_height": widgets['use_inpaint_size_check'].isChecked(),
-            "ad_inpaint_width": _int(widgets['inpaint_width'], 512),
-            "ad_inpaint_height": _int(widgets['inpaint_height'], 512),
+            "ad_inpaint_width": _int(widgets['inpaint_width'], defaults['ad_inpaint_width']),
+            "ad_inpaint_height": _int(widgets['inpaint_height'], defaults['ad_inpaint_height']),
             "ad_use_steps": widgets['use_steps_check'].isChecked(),
-            "ad_steps": _int(widgets['steps'], 28),
+            "ad_steps": _int(widgets['steps'], defaults['ad_steps']),
             "ad_use_cfg_scale": widgets['use_cfg_check'].isChecked(),
-            "ad_cfg_scale": _float(widgets['cfg'], 7.0),
+            "ad_cfg_scale": _float(widgets['cfg'], defaults['ad_cfg_scale']),
             "ad_use_checkpoint": widgets['use_checkpoint_check'].isChecked(),
-            "ad_checkpoint": None,
             "ad_use_vae": widgets['use_vae_check'].isChecked(),
-            "ad_vae": None,
             "ad_use_sampler": widgets['use_sampler_check'].isChecked(),
-            "ad_sampler": "DPM++ 2M Karras",
-            "ad_scheduler": "Use same scheduler",
-            "ad_use_noise_multiplier": False,
-            "ad_noise_multiplier": 1.0,
-            "ad_use_clip_skip": False,
-            "ad_clip_skip": 1,
-            "ad_restore_face": False,
-            "ad_controlnet_model": "None",
-            "ad_controlnet_module": "None",
-            "ad_controlnet_weight": 1.0,
-            "ad_controlnet_guidance_start": 0.0,
-            "ad_controlnet_guidance_end": 1.0,
         }
         # use_* 가 켜져있을 때만 값을 오버라이드
         if widgets['use_checkpoint_check'].isChecked():
             ckpt = _txt(widgets['checkpoint_combo'])
             if ckpt:
-                slot["ad_checkpoint"] = ckpt
+                overrides["ad_checkpoint"] = ckpt
         if widgets['use_vae_check'].isChecked():
             vae = _txt(widgets['vae_combo'])
             if vae:
-                slot["ad_vae"] = vae
+                overrides["ad_vae"] = vae
         if widgets['use_sampler_check'].isChecked():
-            slot["ad_sampler"] = _txt(widgets['sampler_combo'], "DPM++ 2M Karras")
-            slot["ad_scheduler"] = _txt(widgets['scheduler_combo'], "Use same scheduler")
+            overrides["ad_sampler"] = _txt(widgets['sampler_combo'], ad.DEFAULT_SAMPLER)
+            overrides["ad_scheduler"] = _txt(widgets['scheduler_combo'], ad.DEFAULT_SCHEDULER)
 
-        return slot
+        return ad.build_slot(**overrides)
     
     def _notify_generation_done(self):
         """생성 완료 알림 (비활성 창일 때)"""
@@ -978,54 +899,6 @@ class GenerationMixin:
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
         except Exception:
             pass
-
-    def _build_empty_adetailer_slot(self):
-        """빈 ADetailer 슬롯"""
-        return {
-            "ad_cfg_scale": 7,
-            "ad_checkpoint": "Use same checkpoint",
-            "ad_clip_skip": 1,
-            "ad_confidence": 0.3,
-            "ad_controlnet_guidance_end": 1,
-            "ad_controlnet_guidance_start": 0,
-            "ad_controlnet_model": "None",
-            "ad_controlnet_module": "None",
-            "ad_controlnet_weight": 1,
-            "ad_denoising_strength": 0.4,
-            "ad_dilate_erode": 4,
-            "ad_inpaint_height": 512,
-            "ad_inpaint_only_masked": True,
-            "ad_inpaint_only_masked_padding": 32,
-            "ad_inpaint_width": 512,
-            "ad_mask_blur": 4,
-            "ad_mask_filter_method": "Area",
-            "ad_mask_k": 0,
-            "ad_mask_max_ratio": 1,
-            "ad_mask_merge_invert": "None",
-            "ad_mask_min_ratio": 0,
-            "ad_model": "None",
-            "ad_model_classes": "",
-            "ad_negative_prompt": "",
-            "ad_noise_multiplier": 1,
-            "ad_prompt": "",
-            "ad_restore_face": False,
-            "ad_sampler": "DPM++ 2M",
-            "ad_scheduler": "Use same scheduler",
-            "ad_steps": 28,
-            "ad_tab_enable": False,
-            "ad_use_cfg_scale": False,
-            "ad_use_checkpoint": False,
-            "ad_use_clip_skip": False,
-            "ad_use_inpaint_width_height": False,
-            "ad_use_noise_multiplier": False,
-            "ad_use_sampler": False,
-            "ad_use_steps": False,
-            "ad_use_vae": False,
-            "ad_vae": "Use same VAE",
-            "ad_x_offset": 0,
-            "ad_y_offset": 0,
-            "is_api": []
-        }
 
     def _build_sam3_settings(self, payload):
         """SAM3 설정 딕셔너리 생성"""

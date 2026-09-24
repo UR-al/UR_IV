@@ -300,6 +300,26 @@ def _has_extension(raw: Any, extensions: frozenset[str]) -> bool:
     return PurePosixPath(raw.replace("\\", "/")).suffix.lower() in extensions
 
 
+def canonical_mode(mode: Any) -> str:
+    """요청 mode 문자열 → build() 가 쓰는 정규 mode (별칭·대소문자·'-' 처리).
+
+    호출부(Creator 액션 등)가 별칭 표를 따로 들고 있다 갈라지지 않게 이 함수만 쓴다.
+    지원하지 않는 mode 는 CreatorWorkflowError.
+    """
+    return _canonical_mode(mode)
+
+
+def media_inputs(mode: Any) -> frozenset[str]:
+    """mode 의 그래프가 읽는 업로드 입력 키(``input_image``/``input_video``/``reference_image``).
+
+    ``_CAPABILITIES`` 의 ``inputs`` 에서 ``prompt`` 를 뺀 것(선택 입력의 ``?`` 제거). Creator
+    액션은 이 집합 밖의 미디어(t2v 의 원본, i2v 에 남은 아이덴티티 등)를 올리지 않는다.
+    지원하지 않는 mode 는 CreatorWorkflowError.
+    """
+    names = (str(name).rstrip("?") for name in _CAPABILITIES[_canonical_mode(mode)]["inputs"])
+    return frozenset(name for name in names if name != "prompt")
+
+
 def _canonical_mode(mode: Any) -> str:
     if not isinstance(mode, str) or not mode.strip():
         raise CreatorWorkflowError("mode must be a non-empty string")
@@ -1039,8 +1059,3 @@ def _node(class_type: str, **inputs: Any) -> dict[str, Any]:
 
 def _ref(node_id: int | str, slot: int = 0) -> list[Any]:
     return [str(node_id), slot]
-
-
-# Compatibility name used by the Creator action adapter.  This is the same
-# callable, not a second implementation or an additional seam.
-build_creator_workflow = build

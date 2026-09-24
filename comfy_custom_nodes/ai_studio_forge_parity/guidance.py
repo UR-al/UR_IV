@@ -17,6 +17,7 @@ from .compat import (
     clone_model,
     filename_choices,
     invoke_provider,
+    json_object,
     node_result,
     provider,
     require_torch,
@@ -88,18 +89,8 @@ def _sampling_percent_for_model(model: Any, sigma: Any) -> float:
         return _sampling_percent(sigma)
 
 
-def _json_settings(value: Any, feature: str) -> dict[str, Any]:
-    if value in (None, ""):
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    try:
-        parsed = json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{feature} settings_json must be a JSON object: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise ValueError(f"{feature} settings_json must be a JSON object.")
-    return parsed
+# settings_json parsing is shared by every node in this pack (compat.json_object).
+_json_settings = json_object
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -734,33 +725,24 @@ class ForgeNeoAnimaDAVE:
     def patch(self, model, enabled=False, mask="dave_alpha.npz", strength=0.3, tau=0.1):
         if not enabled or float(strength) == 0:
             return (model,)
-        patched = clone_model(model, "DAVE")
-        blocks = _model_blocks(patched)
-        if not blocks:
-            raise RuntimeError("DAVE requires an Anima/Cosmos MODEL exposing diffusion_model.blocks.")
+        # 'dave_alpha.npz' stays a COMBO choice so saved workflows validate,
+        # but Comfy has no per-block alpha file: it means Forge's 8-18 range.
         spec = str(mask or "")
         if spec.casefold().startswith("blocks:"):
             spec = spec.split(":", 1)[1]
         elif not any(ch.isdigit() for ch in spec):
             spec = "8-18"
-        targets = parse_indices(spec, len(blocks), default="8-18")
-        if not targets:
-            raise RuntimeError("DAVE has no valid target blocks for this model.")
-        for index in sorted(targets):
-            original = blocks[index].forward
-
-            def dave_forward(*args, _original=original, **kwargs):
-                output = _original(*args, **kwargs)
-                options = kwargs.get("transformer_options") or {}
-                progress = _sampling_percent(options.get("sigmas", 1.0))
-                if float(tau) <= 0 or progress < float(tau):
-                    return apply_dave(output, float(strength))
-                return output
-
-            patched.add_object_patch(
-                f"diffusion_model.blocks.{index}.forward", dave_forward
-            )
-        return (patched,)
+        # One block wrapper for the standalone node and the Suite keeps the
+        # tau cutoff and positional transformer_options fallback identical.
+        return (_patch_anima_blocks(
+            model,
+            dave_enabled=True,
+            dave_blocks=spec,
+            dave_strength=float(strength),
+            dave_tau=float(tau),
+            slg_enabled=False,
+            slg_blocks="",
+        ),)
 
 
 class ForgeNeoAnimaModGuidance:

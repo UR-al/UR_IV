@@ -196,11 +196,29 @@ def clean_options(raw) -> dict:
     return out
 
 
+_BASE64_BODY = re.compile(r"[A-Za-z0-9+/]+={0,2}")
+
+
+def looks_like_image_path(value: str) -> bool:
+    """이미지 항목이 파일 **경로**인지 — `data:` URL 과 맨 base64 본문은 아니다.
+
+    '/' 포함 여부만 보면 안 된다: JPEG base64 는 '/9j/' 로 시작하고 본문에도 '/' 가 흔하다
+    (os.path.isabs 도 '/9j/…' 를 절대경로로 오판한다). base64 알파벳만으로 된 문자열은
+    본문으로 본다 — 그래서 `build_ollama_messages` 가 접두사를 뗀 뒤에 불러도 안전하다.
+    """
+    if not isinstance(value, str) or not value or value.startswith("data:"):
+        return False
+    if _BASE64_BODY.fullmatch(value):
+        return False
+    return "/" in value or "\\" in value
+
+
 def inline_image_paths(messages, *, max_bytes=20_000_000):
     """히스토리·갤러리 카드를 끌어다 놓으면 이미지가 **경로**로 온다 — 파일을 읽어 base64 로 바꾼다.
 
     `data:` URL 과 맨 base64 는 그대로 둔다(`build_ollama_messages` 가 접두사를 뗀다).
     없거나 너무 큰 파일은 조용히 뺀다 — 모델에게 깨진 이미지를 주느니 안 주는 편이 낫다.
+    파일 I/O 라 GUI 스레드가 아니라 ChatWorker.run 에서, 최근 턴만 남긴 뒤에 부른다.
     """
     out = []
     for msg in messages or []:
@@ -211,14 +229,20 @@ def inline_image_paths(messages, *, max_bytes=20_000_000):
         for img in msg["images"]:
             if not isinstance(img, str) or not img:
                 continue
-            looks_like_path = not img.startswith("data:") and ("/" in img or "\\" in img)
-            if not looks_like_path:
+            if not looks_like_image_path(img):
                 fixed.append(img)
                 continue
             try:
-                if not os.path.isfile(img) or os.path.getsize(img) > max_bytes:
+                if not os.path.isfile(img):
                     continue
-                with open(img, "rb") as fh:
+                # 이 base64 는 호출자가 고른 URL(Ollama/LM Studio)로 나간다 — 웹의 다른 파일
+                # 읽기 경로와 같은 검증(이미지 확장자 화이트리스트 + 시스템 폴더 차단)을 거친다.
+                # 없으면 토큰 보유 웹 클라이언트가 config JSON 같은 임의 파일을 외부로 빼낼 수 있다.
+                from core.path_safety import safe_input_path
+                safe = safe_input_path(img)
+                if not safe or os.path.getsize(safe) > max_bytes:
+                    continue
+                with open(safe, "rb") as fh:
                     fixed.append(base64.b64encode(fh.read()).decode("ascii"))
             except OSError:
                 continue

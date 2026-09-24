@@ -41,11 +41,66 @@ class TestAnimaSettingsPersistence(unittest.TestCase):
         self.assertEqual(widgets['guid_rdc_tau'].text(), '0.15')
         self.assertEqual(widgets['guid_rdc_alpha_ll'].text(), '0.03')
 
+    def test_reset_restores_every_spec_default_in_one_batch(self):
+        """Vue '전체 초기화' — 기본값은 스펙(default_settings) 한 곳에서만 온다(#99)."""
+        calls = []
+
+        class _Signal:
+            def emit(self, *args):
+                calls.append(('notify',) + args)
+
+        class _Bridge:
+            showNotification = _Signal()
+
+            def beginBatchUpdate(self):
+                calls.append(('begin',))
+
+            def endBatchUpdate(self):
+                calls.append(('end',))
+
+        class _Proxy2(_Proxy):
+            def setText(self, value):
+                calls.append(('set', value))
+                super().setText(value)
+
+        defaults = default_settings()
+        widgets = {key: _Proxy2('user-value') for key in defaults}
+        self.mixin.anima_guidance_widgets = widgets
+        self.mixin.vue_bridge = _Bridge()
+
+        self.assertEqual(self.mixin._reset_anima_guidance(), 82)
+        for key, value in defaults.items():
+            expected = ('true' if value else 'false') if isinstance(value, bool) else str(value)
+            self.assertEqual(widgets[key].text(), expected, key)
+        # 82개 값이 배치 안에서 한 번에 Vue 로 간다
+        kinds = [c[0] for c in calls]
+        self.assertEqual(kinds[0], 'begin')
+        self.assertEqual(kinds.index('end'), 1 + kinds.count('set'))
+        self.assertEqual(kinds[-1], 'notify')
+
+    def test_reset_without_widgets_is_a_no_op(self):
+        self.mixin.anima_guidance_widgets = {}
+        self.assertEqual(self.mixin._reset_anima_guidance(), 0)
+
+    def test_vue_panel_keeps_no_copy_of_the_defaults(self):
+        panel = (Path(__file__).resolve().parents[1] / 'frontend' / 'src' / 'components'
+                 / 'AnimaGuidancePanel.vue').read_text(encoding='utf-8')
+        self.assertIn("requestAction('reset_anima_guidance')", panel)
+        self.assertNotRegex(panel, r"const\s+DEFAULTS\b")
+        main = (Path(__file__).resolve().parents[1] / 'ui' / 'generator_main.py').read_text(encoding='utf-8')
+        self.assertIn("action == 'reset_anima_guidance'", main)
+
     def test_save_and_load_paths_include_anima_settings(self):
-        source = (Path(__file__).resolve().parents[1] / 'ui' / 'generator_settings.py').read_text(
-            encoding='utf-8'
-        )
-        self.assertGreaterEqual(source.count('"anima_guidance_settings"'), 3)
+        root = Path(__file__).resolve().parents[1] / 'ui'
+        # 저장은 generator_settings._build_settings_dict, 복원은 load_settings 와 프리셋 불러오기가
+        # 함께 쓰는 ui/generation_settings_apply.apply_generation_settings(audit #154).
+        save_source = (root / 'generator_settings.py').read_text(encoding='utf-8')
+        load_source = (root / 'generation_settings_apply.py').read_text(encoding='utf-8')
+        self.assertGreaterEqual(save_source.count('"anima_guidance_settings"'), 1)
+        self.assertGreaterEqual(load_source.count("'anima_guidance_settings'"), 2)
+        self.assertIn('apply_generation_settings(self, settings', save_source)
+        from core.generation_presets import PRESET_KEYS
+        self.assertIn('anima_guidance_settings', PRESET_KEYS)
 
 
 if __name__ == '__main__':

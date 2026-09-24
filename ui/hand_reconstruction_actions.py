@@ -9,13 +9,13 @@ from __future__ import annotations
 import base64
 import copy
 from datetime import datetime
-from pathlib import Path
 import re
 import secrets
 import threading
 import json
 
 from core.hand_reconstruction import prepare_hand_repair, compose_hand_candidate
+from core.local_image_io import export_exclusive_png, png_data_url
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 MAX_CACHED_BYTES = 128 * 1024 * 1024
@@ -34,7 +34,7 @@ def _sampling_scripts(snapshot):
 
 
 def _data_url(png):
-    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    return png_data_url(png)
 
 
 def hand_generation_payload(prepared, snapshot, seed):
@@ -74,26 +74,13 @@ def freeze_hand_backend(backend):
 
 
 def export_hand_candidate(png, output_root):
-    root = Path(output_root).resolve()
-    destination = root / "hand_reconstruction"
-    destination.mkdir(parents=True, exist_ok=True)
-    destination = destination.resolve()
-    if not destination.is_relative_to(root):
-        raise ValueError("손 재구성 저장 폴더가 앱 출력 폴더 밖을 가리킵니다.")
-    for _ in range(5):
-        path = destination / f"hand_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(6)}.png"
-        try:
-            with path.open("xb") as stream:
-                try:
-                    stream.write(png)
-                except Exception:
-                    stream.close()
-                    path.unlink(missing_ok=True)  # Only our new, incomplete export.
-                    raise
-            return str(path)
-        except FileExistsError:
-            continue
-    raise ValueError("새 결과 파일 이름을 만들지 못했습니다.")
+    # datetime/secrets are resolved here at call time so tests can patch this module.
+    return export_exclusive_png(
+        png, output_root, subdir="hand_reconstruction", prefix="hand",
+        now=lambda: datetime.now(), token=lambda: secrets.token_hex(6),
+        outside_message="손 재구성 저장 폴더가 앱 출력 폴더 밖을 가리킵니다.",
+        exhausted_message="새 결과 파일 이름을 만들지 못했습니다.",
+    )
 
 
 class HandReconstructionActionsMixin:
@@ -211,12 +198,17 @@ class HandReconstructionActionsMixin:
                 seed = int(values.get("seed", -1))
                 seed = secrets.randbits(32) if seed < 0 else seed % (2 ** 32)
                 candidates, warning = [], ""
-                total_size = len(prepared.source_png) + len(prepared.prepared_png)
+                # The cache holds only what this process keeps: the prepared crop
+                # and composited candidates. The panel already owns the source.
+                total_size = len(prepared.prepared_png)
+                from core.post_generation import reserve_generation_lease
                 from core.resource_coordinator import get_generation_coordinator
                 # One lease spans ALL candidates and any in-flight cancellation.
                 # Deliberately no global backend interrupt: an external Forge
                 # user's work must never be canceled by this experimental panel.
-                with get_generation_coordinator().reserve("hand-reconstruction", unload_llm=False, timeout=0):
+                # 진행 중인 '생성 후 언로드'(같은 리스를 쥔다)는 끝날 때까지 이 작업 스레드에서 기다린다.
+                with reserve_generation_lease("hand-reconstruction", coordinator=get_generation_coordinator(),
+                                              cancelled=job["cancel"].is_set):
                     for index in range(prepared.settings["candidates"]):
                         if job["cancel"].is_set():
                             break
@@ -259,10 +251,13 @@ class HandReconstructionActionsMixin:
                     if not getattr(self, "_hand_closed", False) and candidates:
                         self._hand_preview = {"requestId": request_id, "candidates": candidates}
                     self._hand_job = None
+                    # No 'source': the panel compares against the exact image it
+                    # sent with this requestId (re-encoding it here was display-only
+                    # and made the event up to ~49 MB of base64).
                     self._hand_emit({**packet, "phase": "complete", "ok": bool(candidates),
                                      "canceled": job["cancel"].is_set(), "warning": warning,
                                      "error": "후보 생성을 취소했습니다." if not candidates else "",
-                                     "source": _data_url(prepared.source_png), "prepared": _data_url(prepared.prepared_png),
+                                     "prepared": _data_url(prepared.prepared_png),
                                      "candidates": [{"index": c["index"], "seed": c["seed"], "image": _data_url(c["png"])} for c in candidates]})
             except Exception as exc:
                 self._hand_error(packet, exc)

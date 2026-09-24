@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 
-from jsonschema import Draft202012Validator, SchemaError, ValidationError
+# jsonschema 는 검사할 때 import 한다 — chat_worker → chat_actions → generator_main 으로
+# 창 표시 전에 import 되는 모듈이라 최상단 import 는 기동 임계 경로에 jsonschema 로드를 얹었다.
 
 MAX_SCHEMA_CHARS = 64000
 
@@ -16,6 +17,9 @@ def _json(text):
 
 def parse_schema(value):
     """Accept inline Draft 2020-12 schemas; never retrieve schema URLs."""
+    # except 절이 이 이름을 쓰므로 try 보다 먼저 import 한다.
+    from jsonschema import Draft202012Validator, SchemaError
+
     try:
         raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, allow_nan=False)
         if len(raw) > MAX_SCHEMA_CHARS:
@@ -55,6 +59,8 @@ def parse_schema(value):
 
 def validate_output(content, schema):
     """Raise on incomplete/non-conforming output; never repair or strip text."""
+    from jsonschema import Draft202012Validator, ValidationError
+
     try:
         instance = _json(content)
         Draft202012Validator(schema).validate(instance)

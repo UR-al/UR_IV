@@ -26,7 +26,6 @@ class SearchWorkerReleaseTests(unittest.TestCase):
     @staticmethod
     def _reset_cache():
         PandasSearchWorker.cached_df = None
-        PandasSearchWorker.cached_col_lower.clear()
         PandasSearchWorker.loaded_ratings = set()
         PandasSearchWorker.loaded_year = ""
         if hasattr(PandasSearchWorker, "loaded_file_signature"):
@@ -436,6 +435,71 @@ class SearchWorkerReleaseTests(unittest.TestCase):
             any(item.startswith("❌") and "변경" in item for item in statuses),
             statuses,
         )
+
+    # ── 워커가 내보내는 행 계약 — 정규화는 워커 스레드에서 끝난다 ──
+
+    def test_results_are_normalised_rows_on_an_object_signal(self):
+        from core.search_rows import SEARCH_ROW_KEYS, NormalizedSearchRows
+
+        self._write_release(
+            "2026_07", "g", "1girl solo",
+            image_width=0, meta="highres",
+        )
+        self._write_manifest("2026_07")
+
+        _worker, (rows, total) = self._run()
+
+        self.assertIsInstance(rows, NormalizedSearchRows)
+        self.assertEqual(total, 1)
+        self.assertEqual(tuple(rows[0]), SEARCH_ROW_KEYS)
+        self.assertEqual(rows[0]["general"], "1girl solo")
+        self.assertIsNone(rows[0]["image_width"])     # 0 → 자동 해상도 폴백
+        self.assertEqual(rows[0]["image_height"], 1024)
+        self.assertNotIn("meta", rows[0])
+        # list(QVariantList) 시그니처면 emit 마다 행 전체가 QVariant 로 왕복 복사된다
+        meta = PandasSearchWorker.staticMetaObject
+        signatures = {
+            bytes(meta.method(i).methodSignature()).decode()
+            for i in range(meta.methodCount())
+        }
+        self.assertIn("results_ready(PyQt_PyObject,int)", signatures)
+        self.assertNotIn("results_ready(QVariantList,int)", signatures)
+
+    def test_empty_release_emits_an_empty_normalised_list(self):
+        from core.search_rows import NormalizedSearchRows
+
+        path = self.data_dir / "danbooru_2026_07_g.parquet"
+        frame = pd.DataFrame([{
+            "rating": "g", "general": "x", "character": "", "copyright": "",
+            "artist": "", "meta": "", "image_width": 1, "image_height": 1,
+        }]).iloc[0:0]
+        frame.to_parquet(path, index=False)
+        self._write_manifest("2026_07")
+
+        _worker, (rows, total) = self._run()
+
+        self.assertIsInstance(rows, NormalizedSearchRows)
+        self.assertEqual((rows, total), ([], 0))
+
+    def test_queries_match_the_loaded_column_without_a_lowercase_copy(self):
+        self._write_release("2026_07", "g", "long_hair smile")
+        self._write_manifest("2026_07")
+        emissions = []
+        worker = PandasSearchWorker(
+            str(self.data_dir), ("g",), queries={"general": "Long Hair"}
+        )
+        worker.results_ready.connect(lambda rows, total: emissions.append((rows, total)))
+
+        worker.run()
+
+        self.assertEqual(emissions[0][1], 1)
+        self.assertFalse(hasattr(PandasSearchWorker, "cached_col_lower"))
+        self.assertFalse(hasattr(PandasSearchWorker, "_get_col_lower"))
+
+    def test_result_cap_is_the_shared_constant(self):
+        from core.search_rows import SEARCH_RESULT_CAP
+
+        self.assertEqual(PandasSearchWorker.DEFAULT_RESULT_CAP, SEARCH_RESULT_CAP)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 import { reactive } from 'vue'
 import { getStudioClient, replyData, type StudioClient } from '../studio/client'
 import { requestAction } from './widgetStore.js'
+import { openExternalUrl } from '../utils/externalUrl'
+import type { ShowToastPayload } from '../types/bridge'
 
 export interface AppUpdateSnapshot {
   ok: boolean
@@ -95,7 +97,7 @@ function applySnapshot(value: unknown): void {
   appUpdateState.available = true
 }
 
-function toast(type: string, msg: string): void {
+function toast(type: ShowToastPayload['type'], msg: string): void {
   requestAction('show_toast', { type, msg })
 }
 
@@ -232,5 +234,6 @@ export async function runAppUpdateAction(
 
 export function openAppRelease(): void {
   const url = appUpdateState.releaseUrl || appUpdateState.releasesUrl
-  if (url) requestAction('open_url', { url })
+  // 웹 모드면 이 브라우저에서 연다(호스트 PC 에서 열리면 원격 기기에선 안 보인다).
+  if (url) openExternalUrl(url)
 }

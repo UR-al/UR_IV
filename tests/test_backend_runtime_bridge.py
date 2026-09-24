@@ -1,3 +1,10 @@
+"""앱 시작 managed runtime 자동기동 — Studio runtime.execute 경로 회귀 테스트.
+
+예전엔 자동기동만 레거시 VueBridge.runBackendRuntimeOperation 을 타서 backendRuntimeEvent 만
+나왔고, Studio journal 만 구독하는 Settings 는 완료 이벤트를 못 받아 런타임 버튼이 앱 재시작
+전까지 비활성으로 남았다(audit #46). 이제 자동기동도 Settings 와 같은 Studio 작업이고,
+레거시 실행기는 제거했다(audit #176).
+"""
 import json
 import sys
 import tempfile
@@ -7,73 +14,48 @@ import types
 import unittest
 from unittest.mock import patch
 
-from PyQt6.QtCore import QCoreApplication, QObject
+from PyQt6.QtCore import QCoreApplication, QObject, pyqtSignal
 
-from ui.vue_bridge import VueBridge
+from core.runtime_autostart import autostart_request, pick_autostart_engine, request_runtime_autostart
+from core.studio_application import CallContext, StudioApplication
 from ui.generator_webui import WebUIMixin
+from ui.studio_qwebchannel import DesktopNativeHost
+from ui.vue_bridge import VueBridge
 
-
-class _Parent(QObject):
-    def __init__(self, *, web_mode=False):
-        super().__init__()
-        self.web_mode = web_mode
+NATIVE = CallContext("desktop-ui", "qwebchannel", frozenset({"native"}))
+WEB = CallContext("web-ui", "qwebchannel-websocket", frozenset())
 
 
 class _Manager:
-    def __init__(self):
+    def __init__(self, *, forge_auto=True, comfy_auto=False, comfy_installed=False, active="forge"):
         self.execute_calls = []
+        self._forge_auto = forge_auto
+        self._comfy_auto = comfy_auto
+        self._comfy_installed = comfy_installed
+        self._active = active
+        self._busy = False
 
     def snapshot(self):
         return {
             "ok": True,
-            "activeEngine": "forge",
-            "primaryModelEngine": "comfyui",
-            "runtimeRoot": "C:/managed",
+            "activeEngine": self._active,
+            "primaryModelEngine": "forge",
             "engines": {
-                "forge": {
-                    "engine": "forge",
-                    "name": "Forge Neo",
-                    "installed": True,
-                    "running": True,
-                    "healthy": True,
-                    "owned": True,
-                    "active": True,
-                    "autoStart": True,
-                    "sourceMode": "existing",
-                    "existingRoot": "C:/existing/forge",
-                    "root": "C:/managed/forge",
-                    "installRoot": "C:/existing/forge",
-                    "sourceRoot": "C:/existing/forge",
-                    "pythonPath": "C:/existing/forge/venv/Scripts/python.exe",
-                    "dataRoot": "C:/managed/forge/data",
-                    "modelPaths": {"loras": ["C:/existing/forge/models/Lora"]},
-                    "apiUrl": "http://127.0.0.1:7860",
-                    "extensionDir": "C:/existing/forge/extensions",
-                    "defaultExtensionDir": "C:/managed/forge/extensions",
-                    "version": "abc123",
-                    "commit": "abc123-full",
-                    "remoteCommit": "def456",
-                    "updateAvailable": True,
-                    "updateStatus": "Update available",
-                },
-                "comfyui": {
-                    "engine": "comfyui",
-                    "installed": False,
-                    "running": False,
-                    "owned": False,
-                    "autoStart": False,
-                    "apiUrl": "http://127.0.0.1:8188",
-                },
+                "forge": {"engine": "forge", "installed": True, "running": False,
+                          "autoStart": self._forge_auto, "busy": self._busy,
+                          "apiUrl": "http://127.0.0.1:7860"},
+                "comfyui": {"engine": "comfyui", "installed": self._comfy_installed,
+                            "running": False, "autoStart": self._comfy_auto, "busy": False,
+                            "apiUrl": "http://127.0.0.1:8188"},
             },
         }
 
-    def configure(self, _engine, _patch):
-        return self.snapshot()
-
     def execute(self, engine, action, payload=None, on_progress=None):
         self.execute_calls.append((engine, action, dict(payload or {})))
+        self._busy = True
         if on_progress:
             on_progress({"phase": "health", "message": "ready"})
+        self._busy = False
         return {
             "ok": True,
             "engine": engine,
@@ -82,7 +64,6 @@ class _Manager:
             "apiUrl": "http://127.0.0.1:7860",
             "owned": True,
             "activate": action == "use" or bool((payload or {}).get("startup", False)),
-            "snapshot": self.snapshot(),
         }
 
 
@@ -92,181 +73,143 @@ def _runtime_module(manager):
     return module
 
 
-class BackendRuntimeBridgeTests(unittest.TestCase):
+class _Host(WebUIMixin):
+    web_mode = False
+
+    def __init__(self, application, context=NATIVE):
+        self.studio_application = application
+        self.studio_native_context = context
+
+
+class _FakeStudio:
+    def __init__(self, reply):
+        self.reply = reply
+        self.calls = []
+
+    def invoke(self, context, request):
+        self.calls.append((context, request))
+        return dict(self.reply, requestId=request["requestId"])
+
+
+def _wait(predicate, timeout=2.0):
+    app = QCoreApplication.instance() or QCoreApplication([])
+    deadline = time.monotonic() + timeout
+    while not predicate() and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+    return predicate()
+
+
+class PickAutostartEngineTests(unittest.TestCase):
+    def test_prefers_active_engine_and_requires_install(self):
+        self.assertEqual(pick_autostart_engine(_Manager().snapshot()), "forge")
+        both = _Manager(comfy_auto=True, comfy_installed=True, active="comfyui").snapshot()
+        self.assertEqual(pick_autostart_engine(both), "comfyui")
+        self.assertEqual(pick_autostart_engine(_Manager(forge_auto=False).snapshot()), "")
+        not_installed = _Manager(forge_auto=False, comfy_auto=True, comfy_installed=False).snapshot()
+        self.assertEqual(pick_autostart_engine(not_installed), "")
+        self.assertEqual(pick_autostart_engine(None), "")
+
+    def test_request_envelope_is_a_startup_runtime_execute(self):
+        request = autostart_request("forge", "rid")
+        self.assertEqual(request["operation"], "runtime.execute")
+        self.assertEqual(request["input"], {"engine": "forge", "action": "start", "payload": {"startup": True}})
+        self.assertEqual(request["version"], 1)
+
+
+class ManagedAutostartTests(unittest.TestCase):
     def test_autostart_uses_the_unique_toggle_even_when_another_engine_was_active(self):
-        class AutoManager(_Manager):
-            def snapshot(self):
-                state = super().snapshot()
-                state["activeEngine"] = "forge"
-                state["engines"]["forge"]["autoStart"] = False
-                state["engines"]["comfyui"].update({
-                    "installed": True,
-                    "autoStart": True,
-                })
-                return state
-
-        class Bridge:
-            def __init__(self):
-                self.calls = []
-
-            def runBackendRuntimeOperation(self, engine, action, payload):
-                self.calls.append((engine, action, json.loads(payload)))
-                return json.dumps({"ok": True, "accepted": True})
-
-        class Host(WebUIMixin):
-            web_mode = False
-
-            def __init__(self):
-                self.vue_bridge = Bridge()
-
-        host = Host()
-        manager = AutoManager()
+        manager = _Manager(forge_auto=False, comfy_auto=True, comfy_installed=True, active="forge")
+        studio = _FakeStudio({"version": 1, "status": "accepted", "seq": 1, "data": {}})
+        host = _Host(studio)
         with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(manager)}):
-            accepted = host._try_managed_backend_autostart()
+            self.assertTrue(host._try_managed_backend_autostart())
 
-        self.assertTrue(accepted)
-        self.assertEqual(host.vue_bridge.calls[0][0], "comfyui")
-        self.assertEqual(host.vue_bridge.calls[0][1], "start")
-        self.assertTrue(host.vue_bridge.calls[0][2]["startup"])
+        context, request = studio.calls[0]
+        self.assertIs(context, NATIVE)
+        self.assertEqual(request["input"]["engine"], "comfyui")
+        self.assertEqual(request["input"]["action"], "start")
+        self.assertTrue(request["input"]["payload"]["startup"])
+        self.assertEqual(host._backend_startup_result, "managed_pending")
+        self.assertTrue(host._managed_runtime_startup_inflight)
 
-    def test_snapshot_normalizes_core_engine_ids_for_settings(self):
+    def test_rejected_request_marks_managed_failed_with_reason(self):
         manager = _Manager()
-        parent = _Parent()
-        bridge = VueBridge(parent)
+        studio = _FakeStudio({"version": 1, "status": "error", "seq": 1,
+                              "error": {"code": "FORBIDDEN", "message": "권한 없음"}})
+        host = _Host(studio)
         with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(manager)}):
-            state = json.loads(bridge.getBackendRuntimeState())
+            self.assertTrue(host._try_managed_backend_autostart())
+        self.assertEqual(host._backend_startup_result, "managed_failed")
+        self.assertFalse(host._managed_runtime_startup_inflight)
+        self.assertEqual(host._managed_runtime_startup_error, "권한 없음")
 
-        self.assertTrue(state["ok"])
-        self.assertTrue(state["nativeOperations"])
-        self.assertEqual(state["active"]["engine"], "forge")
-        self.assertEqual(state["primaryModelEngine"], "comfyui")
-        forge = state["engines"]["forge"]
-        self.assertTrue(forge["installed"])
-        self.assertTrue(forge["running"])
-        self.assertTrue(forge["autoStart"])
-        self.assertEqual(forge["extensionDir"], "C:/existing/forge/extensions")
-        self.assertEqual(forge["version"], "abc123")
-        self.assertEqual(forge["sourceMode"], "existing")
-        self.assertEqual(forge["sourceRoot"], "C:/existing/forge")
-        self.assertTrue(forge["pythonPath"].endswith("python.exe"))
-        self.assertEqual(forge["modelPaths"]["loras"], ["C:/existing/forge/models/Lora"])
+    def test_web_host_and_ineligible_runtime_do_not_start(self):
+        studio = _FakeStudio({"status": "accepted"})
+        web = _Host(studio)
+        web.web_mode = True
+        self.assertFalse(web._try_managed_backend_autostart())
+        host = _Host(studio)
+        with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(_Manager(forge_auto=False))}):
+            self.assertFalse(host._try_managed_backend_autostart())
+        self.assertEqual(studio.calls, [])
 
-    def test_web_mode_allows_snapshot_but_rejects_native_mutators(self):
+    def test_missing_studio_application_fails_without_crashing(self):
+        accepted, error = request_runtime_autostart(None, NATIVE, "forge")
+        self.assertFalse(accepted)
+        self.assertTrue(error)
+
+    def test_autostart_reaches_settings_journal_and_desktop_host_through_real_studio(self):
+        """자동기동 진행/완료가 Settings(Studio journal)와 generator_main(backendRuntimeEvent) 둘 다에 간다."""
+
+        class _Bridge(QObject):
+            backendRuntimeEvent = pyqtSignal(str)
+
+            def __init__(self):
+                super().__init__()
+                self.events = []
+                self.backendRuntimeEvent.connect(lambda raw: self.events.append(json.loads(raw)))
+
+        QCoreApplication.instance() or QCoreApplication([])
+        bridge = _Bridge()
+        window = QObject()
+        native_host = DesktopNativeHost(window, bridge)
         manager = _Manager()
-        parent = _Parent(web_mode=True)
-        bridge = VueBridge(parent)
-        with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(manager)}):
-            state = json.loads(bridge.getBackendRuntimeState())
-            operation = json.loads(
-                bridge.runBackendRuntimeOperation("forge", "start", "{}")
-            )
-            selection = json.loads(bridge.selectBackendExtensionDirectory("forge"))
-            install_selection = json.loads(bridge.selectBackendInstallDirectory("forge"))
+        application = StudioApplication(host=native_host, runtime_manager=manager)
+        journal = []
+        stop = application.subscribe(NATIVE, journal.append)
+        self.addCleanup(stop)
 
-        self.assertTrue(state["ok"])
-        self.assertFalse(state["nativeOperations"])
-        self.assertFalse(operation["accepted"])
-        self.assertFalse(selection["ok"])
-        self.assertFalse(install_selection["ok"])
+        host = _Host(application)
+        with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(manager)}):
+            self.assertTrue(host._try_managed_backend_autostart())
+            self.assertTrue(_wait(lambda: any(e.get("type") == "completed" for e in bridge.events)))
+
+        runtime_types = [e["type"] for e in journal if e["topic"] == "runtime.operation"]
+        self.assertEqual(runtime_types[0], "accepted")
+        self.assertIn("started", runtime_types)
+        self.assertIn("progress", runtime_types)
+        self.assertEqual(runtime_types[-1], "completed", "Settings 가 완료를 받아 busy 를 풀 수 있어야 한다")
+        completed_snapshot = [e for e in journal if e["type"] == "completed"][-1]["data"]["snapshot"]
+        self.assertFalse(completed_snapshot["engines"]["forge"]["busy"])
+
+        host_types = [e["type"] for e in bridge.events]
+        self.assertIn("started", host_types)
+        completed = [e for e in bridge.events if e["type"] == "completed"][-1]
+        self.assertTrue(completed["startup"])
+        self.assertTrue(completed["activate"], "시작 자동기동은 연결 전환(activate)을 일으킨다")
+        self.assertEqual(completed["engine"], "forge")
+        self.assertEqual(manager.execute_calls, [("forge", "start", {"startup": True})])
+
+    def test_web_context_cannot_execute_runtime(self):
+        manager = _Manager()
+        reply = StudioApplication(runtime_manager=manager).invoke(WEB, autostart_request("forge", "r"))
+        self.assertEqual(reply["status"], "error")
+        self.assertEqual(reply["error"]["code"], "FORBIDDEN")
         self.assertEqual(manager.execute_calls, [])
 
-    def test_start_is_nonblocking_and_emits_one_generic_terminal_event(self):
-        manager = _Manager()
-        parent = _Parent()
-        bridge = VueBridge(parent)
-        terminal = threading.Event()
-        events = []
-
-        def collect(raw):
-            event = json.loads(raw)
-            events.append(event)
-            if event.get("type") in {"completed", "error"}:
-                terminal.set()
-
-        bridge.backendRuntimeEvent.connect(collect)
-        with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(manager)}):
-            accepted = json.loads(
-                bridge.runBackendRuntimeOperation("forge", "start", "{}")
-            )
-            self.assertTrue(accepted["accepted"])
-            app = QCoreApplication.instance() or QCoreApplication([])
-            deadline = time.monotonic() + 2.0
-            while not terminal.is_set() and time.monotonic() < deadline:
-                app.processEvents()
-                terminal.wait(0.01)
-            self.assertTrue(terminal.is_set())
-
-        completed = [event for event in events if event.get("type") == "completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertFalse(completed[0]["activate"])
-        self.assertEqual(completed[0]["engine"], "forge")
-        self.assertEqual(manager.execute_calls[0][0], "forge")
-        self.assertEqual(manager.execute_calls[0][1], "start")
-
-    def test_use_and_startup_autostart_activate_but_plain_start_does_not(self):
-        manager = _Manager()
-        parent = _Parent()
-        bridge = VueBridge(parent)
-        terminal = threading.Event()
-        events = []
-
-        def collect(raw):
-            event = json.loads(raw)
-            if event.get("type") in {"completed", "error"}:
-                events.append(event)
-                terminal.set()
-
-        bridge.backendRuntimeEvent.connect(collect)
-        app = QCoreApplication.instance() or QCoreApplication([])
-        with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(manager)}):
-            for action, payload, expected in (
-                ("use", "{}", True),
-                ("start", '{"startup": true}', True),
-            ):
-                terminal.clear()
-                bridge.runBackendRuntimeOperation("forge", action, payload)
-                deadline = time.monotonic() + 2.0
-                while not terminal.is_set() and time.monotonic() < deadline:
-                    app.processEvents()
-                    terminal.wait(0.01)
-                self.assertTrue(terminal.is_set())
-                self.assertEqual(events[-1]["activate"], expected)
-
-    def test_plain_start_forwards_core_replacement_activation(self):
-        class SwitchingManager(_Manager):
-            def execute(self, engine, action, payload=None, on_progress=None):
-                result = super().execute(engine, action, payload, on_progress)
-                result["activate"] = True
-                result["replacedEngine"] = "forge"
-                result["apiUrl"] = "http://127.0.0.1:18188"
-                return result
-
-        manager = SwitchingManager()
-        parent = _Parent()
-        bridge = VueBridge(parent)
-        terminal = threading.Event()
-        events = []
-
-        def collect(raw):
-            event = json.loads(raw)
-            if event.get("type") in {"completed", "error"}:
-                events.append(event)
-                terminal.set()
-
-        bridge.backendRuntimeEvent.connect(collect)
-        app = QCoreApplication.instance() or QCoreApplication([])
-        with patch.dict(sys.modules, {"core.backend_runtime": _runtime_module(manager)}):
-            bridge.runBackendRuntimeOperation("comfyui", "start", "{}")
-            deadline = time.monotonic() + 2.0
-            while not terminal.is_set() and time.monotonic() < deadline:
-                app.processEvents()
-                terminal.wait(0.01)
-
-        self.assertTrue(terminal.is_set())
-        self.assertTrue(events[-1]["activate"])
-        self.assertEqual(events[-1]["result"]["replacedEngine"], "forge")
-
-    def test_actual_core_configure_operation_matches_bridge_contract(self):
+    def test_actual_core_configure_operation_through_studio(self):
         from core import backend_runtime
 
         with tempfile.TemporaryDirectory() as temp:
@@ -274,33 +217,39 @@ class BackendRuntimeBridgeTests(unittest.TestCase):
                 config_path=f"{temp}/runtime.json",
                 runtime_root=f"{temp}/managed",
             )
-            parent = _Parent()
-            bridge = VueBridge(parent)
-            terminal = threading.Event()
+            application = StudioApplication(runtime_manager=manager)
+            done = threading.Event()
             events = []
 
-            def collect(raw):
-                event = json.loads(raw)
-                events.append(event)
-                if event.get("type") in {"completed", "error"}:
-                    terminal.set()
+            def sink(event):
+                if event["topic"] == "runtime.operation":
+                    events.append(event)
+                    if event["type"] in {"completed", "error"}:
+                        done.set()
 
-            bridge.backendRuntimeEvent.connect(collect)
-            with patch.object(backend_runtime, "_MANAGER", manager):
-                accepted = json.loads(bridge.runBackendRuntimeOperation(
-                    "forge", "set_auto_start", '{"autoStart": true}'
-                ))
-                self.assertTrue(accepted["accepted"])
-                app = QCoreApplication.instance() or QCoreApplication([])
-                deadline = time.monotonic() + 2.0
-                while not terminal.is_set() and time.monotonic() < deadline:
-                    app.processEvents()
-                    terminal.wait(0.01)
-                self.assertTrue(terminal.is_set())
-                state = json.loads(bridge.getBackendRuntimeState())
+            stop = application.subscribe(NATIVE, sink)
+            self.addCleanup(stop)
+            reply = application.invoke(NATIVE, {
+                "version": 1, "requestId": "cfg", "operation": "runtime.execute",
+                "input": {"engine": "forge", "action": "set_auto_start", "payload": {"autoStart": True}},
+            })
+            self.assertEqual(reply["status"], "accepted")
+            self.assertTrue(done.wait(2.0))
+            self.assertEqual(events[-1]["type"], "completed")
+            state = application.invoke(NATIVE, {"version": 1, "requestId": "snap",
+                                                "operation": "runtime.snapshot", "input": {}})
+            self.assertTrue(state["data"]["engines"]["forge"]["autoStart"])
 
-            self.assertTrue(events[-1]["ok"])
-            self.assertTrue(state["engines"]["forge"]["autoStart"])
+    def test_legacy_runtime_slots_are_gone(self):
+        for name in ("runBackendRuntimeOperation", "_run_backend_runtime_operation",
+                     "_emit_backend_runtime_event", "getBackendRuntimeState",
+                     "_backend_runtime_public_snapshot", "selectBackendExtensionDirectory",
+                     "selectBackendInstallDirectory"):
+            self.assertFalse(hasattr(VueBridge, name), name)
+        # Python 내부 시그널과 웹 모드 판정은 남는다(DesktopNativeHost·generator_main 이 쓴다).
+        self.assertTrue(hasattr(VueBridge, "backendRuntimeEvent"))
+        self.assertTrue(hasattr(VueBridge, "_backend_runtime_is_web_mode"))
+        self.assertTrue(hasattr(VueBridge, "_refresh_forge_module_widgets"))
 
 
 if __name__ == "__main__":

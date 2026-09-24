@@ -4,7 +4,6 @@ API 연결 및 정보 로드 로직 (WebUI + ComfyUI 지원)
 """
 import json
 import os
-import requests
 from PyQt6.QtWidgets import (
     QMessageBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QFileDialog,
@@ -74,46 +73,29 @@ class WebUIMixin:
         eligible = False
         try:
             from core.backend_runtime import get_backend_runtime_manager
+            from core.runtime_autostart import pick_autostart_engine, request_runtime_autostart
 
-            snapshot = get_backend_runtime_manager().snapshot()
-            runtimes = snapshot.get('engines') if isinstance(snapshot, dict) else {}
-            runtimes = runtimes if isinstance(runtimes, dict) else {}
-            active = str(snapshot.get('activeEngine') or '') if isinstance(snapshot, dict) else ''
-            if active == 'forge_neo':
-                active = 'forge'
-            auto_candidates = [
-                engine for engine in ('forge', 'comfyui')
-                if isinstance(runtimes.get(engine), dict)
-                and bool(runtimes[engine].get('autoStart', False))
-            ]
-            kind = active if active in auto_candidates else (auto_candidates[0] if auto_candidates else '')
-            runtime = runtimes.get(kind)
-            runtime = runtime if isinstance(runtime, dict) else {}
-            eligible = (
-                kind in {'forge', 'comfyui'}
-                and bool(runtime.get('installed', False))
-            )
-            if not eligible:
+            ui_engine = pick_autostart_engine(get_backend_runtime_manager().snapshot())
+            if not ui_engine:
                 return False
+            eligible = True
 
-            ui_engine = kind
             self._backend_startup_result = 'managed_pending'
             self._managed_runtime_startup_inflight = True
             self._managed_runtime_startup_engine = ui_engine
-            raw = self.vue_bridge.runBackendRuntimeOperation(
+            # Settings 와 같은 Studio runtime.execute 로 시작한다 — 진행/완료가 Studio journal
+            # (Settings)과 DesktopNativeHost → backendRuntimeEvent(아래 연결 처리)로 함께 흐른다.
+            accepted, error = request_runtime_autostart(
+                getattr(self, 'studio_application', None),
+                getattr(self, 'studio_native_context', None),
                 ui_engine,
-                'start',
-                '{"startup": true}',
             )
-            result = json.loads(raw or '{}')
-            if result.get('accepted'):
+            if accepted:
                 return True
 
             self._managed_runtime_startup_inflight = False
             self._backend_startup_result = 'managed_failed'
-            self._managed_runtime_startup_error = str(
-                result.get('error') or 'managed backend 시작 요청이 거부되었습니다'
-            )
+            self._managed_runtime_startup_error = error
             return True
         except Exception as exc:
             if eligible:
@@ -349,12 +331,17 @@ class WebUIMixin:
                 # 모델 콤보가 잠기는지는 자물쇠 아이콘이 아니라 글자로 말한다.
                 locked = info.get('is_locked')
                 lock_label = '워크플로가 모델 고정' if locked else '모델 선택 가능'
-                startup_wf_preview.setText(
+                blocker = info.get('generation_blocker')
+                text = (
                     f"{info['format'].upper()} · 노드 {info['node_count']}개 · "
                     f"{info.get('ksampler_type', '?')} · {w}×{h} · {cls_label} · {lock_label}"
                 )
+                if blocker:
+                    # 필수 노드는 있지만 앱 생성이 항상 거부하는 구조(다중 샘플러 등).
+                    text += f"\n생성 불가 — {blocker}"
+                startup_wf_preview.setText(text)
                 startup_wf_preview.setStyleSheet(
-                    f"color: {c_state_warn if locked else c_sub}; font-size: 11px;"
+                    f"color: {c_state_alert if blocker else (c_state_warn if locked else c_sub)}; font-size: 11px;"
                 )
             else:
                 startup_wf_preview.setText(f"읽을 수 없음 — {info.get('error', '알 수 없는 오류')}")
@@ -405,7 +392,6 @@ class WebUIMixin:
 
         # ── 자동 감지 (비동기 — UI 스레드를 막지 않는다) ──
         # _detect_version: URL 을 연달아 고치면 늦게 끝난 옛 검사가 새 결과를 덮어쓴다.
-        import threading
         _detect_version = {'v': 0}
 
         def auto_detect():
@@ -417,24 +403,8 @@ class WebUIMixin:
 
             w_url = webui_url_input.text().strip()
             c_url = comfyui_url_input.text().strip()
-            results = {'done': False}
 
-            def _run():
-                try:
-                    results['w_ok'] = WebUIMixin._quick_test(w_url, '/sdapi/v1/samplers')
-                    results['c_ok'] = WebUIMixin._quick_test(c_url, '/system_stats')
-                except Exception:
-                    results['w_ok'] = False
-                    results['c_ok'] = False
-                results['done'] = True
-
-            def _poll():
-                if current_v != _detect_version['v']:
-                    return
-                if not results['done']:
-                    QTimer.singleShot(100, _poll)
-                    return
-                w_ok, c_ok = results['w_ok'], results['c_ok']
+            def _apply(w_ok, c_ok):
                 set_status(webui_status, '연결됨' if w_ok else '응답 없음',
                            c_state_ok if w_ok else c_state_alert)
                 set_status(comfyui_status, '연결됨' if c_ok else '응답 없음',
@@ -447,8 +417,11 @@ class WebUIMixin:
                 if os.path.exists(new_icon_path):
                     btn_select_comfyui.setIcon(QIcon(new_icon_path))
 
-            threading.Thread(target=_run, daemon=True).start()
-            QTimer.singleShot(200, _poll)
+            WebUIMixin._probe_pair_async(
+                w_url, c_url,
+                is_current=lambda: current_v == _detect_version['v'],
+                on_result=_apply,
+            )
 
         webui_url_input.editingFinished.connect(auto_detect)
         comfyui_url_input.editingFinished.connect(auto_detect)
@@ -508,15 +481,16 @@ class WebUIMixin:
     # ── 시작 백엔드 게이트 (창 위의 Vue 오버레이) ──
     # QDialog 판과 같은 일을 하되, 결정 순간이 '앱을 보기 전'이 아니라
     # '앱을 본 다음'으로 옮겨졌을 뿐이다. 확정 절차(_commit_backend_choice)와
-    # 감지(_quick_test)는 두 경로가 그대로 공유한다.
+    # 감지(_probe_pair_async → _probe_pair → core.backend_probe.probe_backends)는
+    # 두 경로가 그대로 공유한다.
 
     def _commit_backend_choice(self, backend_type: str, webui_url: str,
                                comfy_url: str, workflow_path: str) -> None:
-        """고른 백엔드를 backends·config·settings 탭에 한 번에 반영한다.
+        """고른 백엔드를 backends·config 에 한 번에 반영한다.
 
         set_backend()가 config.WEBUI_API_URL / COMFYUI_API_URL 을 이미 갱신하므로
         여기서 따로 대입하는 건 워크플로 경로뿐이다(set_backend가 모르는 값).
-        settings 탭 동기화가 빠지면 "시작에서 고른 값과 설정 화면이 다르다"가 된다.
+        Vue 설정 화면은 이 config 값을 그대로 읽는다(예전 숨은 PyQt 설정 탭 동기화는 은퇴 — audit #178).
         """
         import config
 
@@ -530,19 +504,6 @@ class WebUIMixin:
             set_backend(BackendType.COMFYUI, comfy_url)
         else:
             set_backend(BackendType.WEBUI, webui_url)
-
-        # settings 탭 동기화 — 고르지 않은 쪽 값도 같이 넣는다(설정 화면은 둘 다 보여준다).
-        if hasattr(self, 'settings_tab'):
-            st = self.settings_tab
-            if hasattr(st, 'radio_webui'):
-                st.radio_webui.setChecked(backend_type == 'webui')
-                st.radio_comfyui.setChecked(backend_type == 'comfyui')
-            if hasattr(st, 'api_input'):
-                st.api_input.setText(webui_url)
-            if hasattr(st, 'comfyui_api_input'):
-                st.comfyui_api_input.setText(comfy_url)
-            if hasattr(st, 'comfyui_workflow_input'):
-                st.comfyui_workflow_input.setText(workflow_path)
 
     def _emit_backend_selection_required(self, attempt: int = 0) -> None:
         """게이트를 열라고 Vue에 알린다 — 짧게 몇 번 되풀이해서.
@@ -581,41 +542,59 @@ class WebUIMixin:
     def _probe_backends_async(self, webui_url: str, comfy_url: str) -> None:
         """두 백엔드 응답 여부를 백그라운드에서 확인하고 결과를 게이트로 보낸다.
 
-        UI 스레드를 막지 않는다(HTTP 2초 × 2 = 최대 4초 프리징이 된다). 또 URL을
-        연달아 고치면 늦게 끝난 옛 검사가 새 결과를 덮어쓰므로 세대 번호로 막는다 —
-        QDialog 판의 auto_detect 와 같은 이유, 같은 방식이다.
+        UI 스레드를 막지 않는다. 두 백엔드는 병렬로, 루프백 주소는 connect 만 짧게
+        확인한다(core/backend_probe.py) — 둘 다 꺼져 있어도 '확인 중'이 예전 약 4초에서
+        1초 안쪽으로 준다. 또 URL을 연달아 고치면 늦게 끝난 옛 검사가 새 결과를 덮어쓰므로
+        세대 번호로 막는다 — QDialog 판의 auto_detect 와 같은 이유, 같은 방식이다.
+        결과는 QTimer 폴링으로 메인 스레드에서 emit 한다(vue_bridge 는 QWebChannel 객체).
         """
-        import threading
-
         self._backend_probe_version = getattr(self, '_backend_probe_version', 0) + 1
         current_v = self._backend_probe_version
-        results = {'done': False, 'w_ok': False, 'c_ok': False}
 
-        def _run():
-            try:
-                results['w_ok'] = WebUIMixin._quick_test(webui_url, '/sdapi/v1/samplers')
-                results['c_ok'] = WebUIMixin._quick_test(comfy_url, '/system_stats')
-            except Exception:
-                results['w_ok'] = False
-                results['c_ok'] = False
-            results['done'] = True
-
-        def _poll():
-            if current_v != getattr(self, '_backend_probe_version', 0):
-                return  # 더 새로운 검사가 시작됐다 — 이 결과는 버린다
-            if not results['done']:
-                QTimer.singleShot(100, _poll)
-                return
+        def _emit(w_ok, c_ok):
             try:
                 self.vue_bridge.backendProbeResult.emit(json.dumps({
-                    'webui': 'ok' if results['w_ok'] else 'fail',
-                    'comfy': 'ok' if results['c_ok'] else 'fail',
+                    'webui': 'ok' if w_ok else 'fail',
+                    'comfy': 'ok' if c_ok else 'fail',
                 }))
             except Exception as exc:
                 print(f"[Backend] 감지 결과 전송 실패: {exc}")
 
-        threading.Thread(target=_run, daemon=True).start()
-        QTimer.singleShot(200, _poll)
+        WebUIMixin._probe_pair_async(
+            webui_url, comfy_url,
+            # 더 새로운 검사가 시작됐으면 이 결과는 버린다
+            is_current=lambda: current_v == getattr(self, '_backend_probe_version', 0),
+            on_result=_emit,
+        )
+
+    @staticmethod
+    def _probe_pair_async(webui_url, comfy_url, *, is_current, on_result, schedule=None) -> None:
+        """두 백엔드 probe 를 워커에서 돌리고, 끝나면 메인 스레드에서 ``on_result(w_ok, c_ok)``.
+
+        시작 게이트(_probe_backends_async)와 비상 선택 창(auto_detect)이 함께 쓴다.
+        워커는 결과만 채우고, 메인 스레드의 QTimer 100ms 폴링이 넘겨받는다 — 워커 스레드에서
+        Qt 위젯이나 QWebChannel 객체를 만지지 않는다. ``is_current()`` 가 거짓이면 늦게 끝난
+        옛 검사이므로 버린다. ``schedule(ms, fn)`` 은 테스트 주입용(기본 QTimer.singleShot).
+        """
+        import threading
+
+        schedule = schedule or QTimer.singleShot
+        results = {'done': False, 'w_ok': False, 'c_ok': False}
+
+        def _run():
+            results['w_ok'], results['c_ok'] = WebUIMixin._probe_pair(webui_url, comfy_url)
+            results['done'] = True
+
+        def _poll():
+            if not is_current():
+                return
+            if not results['done']:
+                schedule(100, _poll)
+                return
+            on_result(results['w_ok'], results['c_ok'])
+
+        threading.Thread(target=_run, daemon=True, name='backend-probe').start()
+        schedule(100, _poll)
 
     def _pick_comfy_workflow(self) -> None:
         """워크플로 JSON 을 고르고, 내용 요약까지 함께 게이트로 보낸다.
@@ -826,23 +805,23 @@ class WebUIMixin:
             self.load_webui_info()
         elif result == 'skipped':
             self._backend_connected = False  # 폴링 안 함 (백엔드 버튼으로 연결 시 재개)
-            self.viewer_label.setText(
-                "백엔드에 연결되지 않았습니다.\n\n"
-                "하단 도구 바의 '백엔드' 버튼으로 연결하세요."
-            )
             # 이 경로는 info worker 를 아예 안 돌린다 — 여기서 안 알리면 스트립이
             # '아직 모름'과 '연결 안 함'을 구분하지 못한 채 영영 비어 있다.
             self._emit_backend_status(False, '백엔드에 연결하지 않고 시작했습니다')
         elif result == 'managed_pending':
             if not getattr(self, '_backend_connected', False):
-                self.viewer_label.setText(
-                    "앱 관리형 백엔드를 시작하는 중입니다…\n\n"
-                    "설정에서 진행 상태를 확인할 수 있습니다."
-                )
                 self.btn_generate.setEnabled(False)
                 # 아직 실패가 아니라 '시작 중'이라 error 는 붙이지 않는다 —
                 # 곧 도착할 연결 성공/실패 통보가 이 값을 덮어쓴다.
                 self._emit_backend_status(False)
+                # 안내는 Vue 가 뜬 뒤인 여기서 토스트로 알린다. 자동기동은 Studio 작업이라 Settings 가 진행을 받는다.
+                try:
+                    engine = str(getattr(self, '_managed_runtime_startup_engine', '') or '')
+                    label = 'Forge Neo' if engine == 'forge' else 'ComfyUI' if engine == 'comfyui' else '앱 관리형 백엔드'
+                    self.vue_bridge.showNotification.emit(
+                        'info', f'{label}를 자동 시작하는 중입니다 — 설정 > 런타임 · 엔진에서 진행 상태를 볼 수 있습니다')
+                except Exception:
+                    pass
         elif result == 'managed_connected':
             # runtime은 Vue보다 먼저 준비될 수 있다. 이 지점은 startup sequence가
             # Vue loadFinished를 기다린 뒤 호출되므로 초기 목록 push가 유실되지 않는다.
@@ -850,12 +829,6 @@ class WebUIMixin:
         elif result == 'managed_failed':
             self._backend_connected = False
             error = str(getattr(self, '_managed_runtime_startup_error', '') or '')
-            suffix = f"\n\n{error}" if error else ''
-            self.viewer_label.setText(
-                "앱 관리형 백엔드를 자동 시작하지 못했습니다.\n"
-                "설정에서 다시 시작하거나 기존 API URL을 연결하세요."
-                + suffix
-            )
             # 자동 시작이 프로세스 단계에서 죽으면 info worker 가 돌지 않는다 —
             # on_webui_info_error 를 못 거치므로 실패를 여기서 직접 알린다.
             self._emit_backend_status(
@@ -863,48 +836,54 @@ class WebUIMixin:
             )
 
     @staticmethod
-    def _quick_test(url: str, endpoint: str) -> bool:
-        """빠른 연결 테스트 (타임아웃 2초)"""
-        if not url:
-            return False
+    def _probe_pair(webui_url: str, comfy_url: str) -> tuple[bool, bool]:
+        """WebUI·ComfyUI 응답 여부를 병렬로 확인한다. 예외는 모두 '응답 없음'.
+
+        시작 게이트(_probe_backends_async)와 비상 QDialog(auto_detect)가 _probe_pair_async 를
+        거쳐 함께 쓰는 유일한 감지 경로다 — 루프백은 connect 0.3초, health 경로는
+        core.backend_probe.HEALTH_PATHS(core/backend_probe.probe_backends)."""
         try:
-            r = requests.get(f'{url.rstrip("/")}{endpoint}', timeout=2)
-            return r.status_code == 200
+            from core.backend_probe import probe_backends
+
+            found = probe_backends({'forge': webui_url, 'comfyui': comfy_url})
+            return bool(found.get('forge')), bool(found.get('comfyui'))
         except Exception:
-            return False
+            return False, False
 
     def load_webui_info(self):
         """서버 정보 로드"""
-        backend_name = "ComfyUI" if get_backend_type() == BackendType.COMFYUI else "WebUI"
-        self.viewer_label.setText(f"{backend_name} 정보를 불러오는 중...")
         self.btn_generate.setEnabled(False)
         self.btn_random_prompt.setEnabled(False)
 
-        # API 버튼: 연결 중 애니메이션
-        if getattr(self, 'btn_api_manager', None):
-            self.btn_api_manager.set_connecting(backend_name)
+        # 이전 워커는 결과만 끊고 스스로 끝나게 둔다. quit()은 이벤트 루프가 없는 워커(run 을
+        # 오버라이드)에는 효과가 없고, wait(3000)은 메인 스레드만 막았다 — 게다가 타임아웃이면
+        # 참조를 잃은 QThread 가 돌던 중에 파괴될 수 있었다. 이제 parent(self)가 수명을 잡고
+        # finished → deleteLater 로 정리된다(ui/chat_actions.py 와 같은 방식).
+        old_worker = getattr(self, 'info_worker', None)
+        if old_worker is not None:
+            for signal_name in ('info_ready', 'error_occurred'):
+                try:
+                    getattr(old_worker, signal_name).disconnect()
+                except (TypeError, RuntimeError):
+                    pass
 
-        # 이전 워커 정리
-        if hasattr(self, 'info_worker') and self.info_worker is not None:
-            try:
-                self.info_worker.info_ready.disconnect()
-                self.info_worker.error_occurred.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            if self.info_worker.isRunning():
-                self.info_worker.quit()
-                self.info_worker.wait(3000)
-
-        self.info_worker = WebUIInfoWorker()
-        self.info_worker.info_ready.connect(self.on_webui_info_loaded)
-        self.info_worker.error_occurred.connect(self.on_webui_info_error)
-        self.info_worker.start()
+        worker = WebUIInfoWorker(self)
+        worker.info_ready.connect(self.on_webui_info_loaded)
+        worker.error_occurred.connect(self.on_webui_info_error)
+        worker.finished.connect(worker.deleteLater)
+        self.info_worker = worker
+        worker.start()
 
     def on_webui_info_loaded(self, info):
         """서버 정보 로드 완료"""
         self._managed_runtime_startup_inflight = False
         backend_name = "ComfyUI" if get_backend_type() == BackendType.COMFYUI else "WebUI"
         inventory_engine = "comfyui" if get_backend_type() == BackendType.COMFYUI else "forge"
+
+        # 아래에서 콤보를 비우기 전에 지금 선택을 기억한다 — 목록을 채운 뒤 같은 항목을 다시
+        # 고른다(ui/combo_restore.py). load_settings() 전체를 다시 돌리지 않는다(감사 #29).
+        from ui.combo_restore import restore_backend_combos, snapshot_backend_combos
+        preserved_combos = snapshot_backend_combos(self)
 
         # 모델
         models = info.get('models', [])
@@ -957,25 +936,21 @@ class WebUIMixin:
 
         # 메인 체크포인트 VAE / TE는 선택한 주 라이브러리 전체 + 보조 UI의
         # content-unique 파일을 사용한다. SAM3는 현재 Forge 전용 경로를 유지한다.
+        # 규칙은 core.main_module_choices 한 곳 — Settings 의 모델 경로 저장/새로고침
+        # (VueBridge._refresh_forge_module_widgets)도 같은 함수와 이 API 목록을 쓴다.
+        from core.main_module_choices import filter_te_selection, main_module_choices
+
+        self._last_vae_api_items = list(vae_list)
+        try:
+            main_vae_list, disk_te = main_module_choices(model_inventory, vae_list)
+        except Exception:
+            main_vae_list, disk_te = main_module_choices(None, vae_list)
         try:
             from core.forge_modules import list_sam3_checkpoints
 
-            vae_entries = model_inventory.entries('vae', backend_items=vae_list) if model_inventory else []
-            te_entries = model_inventory.entries('text_encoders') if model_inventory else []
-            disk_vae = [str(entry.get('runtimeName') or '') for entry in vae_entries]
-            disk_te = [str(entry.get('runtimeName') or '') for entry in te_entries]
-            disk_vae = [name for name in disk_vae if name]
-            disk_te = [name for name in disk_te if name]
             disk_sam3 = list_sam3_checkpoints()
         except Exception:
-            disk_vae, disk_te, disk_sam3 = [], [], []
-
-        if disk_vae:
-            main_vae_list = ["Use checkpoint default"] + disk_vae
-        else:
-            main_vae_list = ["Use checkpoint default"] + [
-                v for v in vae_list if v not in ("Use same VAE", "Use checkpoint default")
-            ]
+            disk_sam3 = []
         self.vae_main_combo.clear()
         self.vae_main_combo.addItems(main_vae_list)
 
@@ -1009,38 +984,41 @@ class WebUIMixin:
             slot_widgets['scheduler_combo'].clear()
             slot_widgets['scheduler_combo'].addItems(schedulers)
 
-        # 저장된 설정 불러오기
-        self.load_settings()
+        # 다시 채운 콤보의 선택 복원 — 연결 전 선택이 새 목록에 있으면 그것, 없을 때만 디스크 값.
+        # 저장하지 않은 프롬프트·슬라이더·백엔드 어댑터는 건드리지 않는다.
+        restored = restore_backend_combos(self, preserved_combos)
 
-        # load_settings()는 저장된 TE chips를 다시 주입한다. 현재 통합
-        # 인벤토리에 없는 파일은 생성 요청으로 흘러가지 않게 여기서 거른다.
+        # TE chips 는 연결 전 선택이 그대로 남는다. 현재 통합 인벤토리에 없는 파일은
+        # 생성 요청으로 흘러가지 않게 여기서 거른다.
         try:
-            available_te = set(disk_te)
-            current_te = [
-                item.strip() for item in (self.te_main_input.text() or '').split(',')
-                if item.strip()
-            ]
-            valid_te = [item for item in current_te if item in available_te]
-            if valid_te != current_te:
-                self.te_main_input.setText(', '.join(valid_te))
+            filtered_te = filter_te_selection(self.te_main_input.text() or '', disk_te)
+            if filtered_te is not None:
+                self.te_main_input.setText(filtered_te)
         except Exception:
             pass
 
-        # ComfyUI: 워크플로우의 체크포인트를 자동 선택
+        # ComfyUI: 워크플로우의 체크포인트를 자동 선택 — 방금 되살린 모델(연결 전 선택·저장값)이
+        # 있으면 덮지 않는다(워크플로를 새로 고른 경우만 예외, core.combo_selection.workflow_model_wins).
         if get_backend_type() == BackendType.COMFYUI:
-            self._auto_select_workflow_model(models)
+            self._auto_select_workflow_model(models, keep_current='model_combo' in restored)
 
-        # UI 활성화 — 백엔드가 실제로 응답함 → 연결됨 표시(VRAM 폴링/LoRA 프리로드 재개)
+        # UI 활성화 — 백엔드가 실제로 응답함 → 연결됨 표시(VRAM 폴링 재개, LoRA 캐시 프리워밍)
         # 오프라인 상태에서 만들어진 merged LoRA 결과는 raw cache가 빈 배열인
         # 채로도 유효해 보일 수 있다. 연결 성공 경계에서 둘 다 무효화해 다음
         # 모달 오픈이 실제 백엔드 목록을 한 번 다시 읽게 한다.
         try:
-            from widgets.lora_manager import LoraManagerDialog
-            LoraManagerDialog._lora_cache = []
-            self.vue_bridge._merged_lora_cache = None
+            from ui.lora_catalog_cache import invalidate as invalidate_lora_cache
+            invalidate_lora_cache(getattr(self, 'vue_bridge', None))
         except Exception:
             pass
         self._backend_connected = True
+        # 방금 비운 LoRA 캐시를 워커에서 다시 채운다(백엔드 HTTP + 디스크 카탈로그 병합).
+        # 그러면 첫 LoRA 매니저 열기가 GUI 스레드에서 get_loras·merge_loras 를 하지 않는다.
+        try:
+            from ui.lora_catalog_cache import prewarm_async
+            prewarm_async(self.vue_bridge)
+        except Exception as exc:
+            print(f"[LoRA] 프리워밍 시작 실패(무시): {exc}")
         # 스트립에 '연결됨'을 알린다. 이름(Forge/WebUI)의 근거인 options 는 이
         # 순간에만 손에 있으므로 먼저 확정해 둔다 — 나중엔 다시 볼 수 없다.
         try:
@@ -1049,14 +1027,9 @@ class WebUIMixin:
         except Exception as exc:
             print(f"[Backend] 상태 통보 실패(무시): {exc}")
         self.btn_generate.setEnabled(True)
-        self.viewer_label.setText(f"✅ {backend_name} 연결 완료!\n생성 버튼을 눌러 시작하세요.")
         self.show_status(
             f"✅ {backend_name} 연결 성공 | 모델: {len(models)}개 | 샘플러: {len(samplers)}개"
         )
-
-        # API 버튼: 연결됨 애니메이션 (체크마크)
-        if getattr(self, 'btn_api_manager', None):
-            self.btn_api_manager.set_connected(backend_name)
 
         # 검색 기능 활성화
         if self.filtered_results:
@@ -1094,6 +1067,8 @@ class WebUIMixin:
         self.model_combo.clear()
         self.hires_checkpoint_combo.clear()
         self.vae_main_combo.clear()
+        # 끊긴 백엔드의 API VAE 이름으로 Settings 경로 새로고침이 목록을 채우지 않게 한다.
+        self._last_vae_api_items = None
         for slot_widgets in [self.s1_widgets, self.s2_widgets]:
             slot_widgets['checkpoint_combo'].clear()
             slot_widgets['vae_combo'].clear()
@@ -1103,16 +1078,7 @@ class WebUIMixin:
         except Exception:
             pass
 
-        self.viewer_label.setText(
-            f"❌ {backend_name} 연결 실패\n\n{error_msg}\n\n"
-            f"현재 URL: {api_url}\n\n"
-            f"설정 탭에서 API 주소를 확인하세요."
-        )
         self.show_status(f"❌ {backend_name} 연결 실패: {error_msg}")
-
-        # API 버튼: 실패 애니메이션 (흔들림 + X)
-        if getattr(self, 'btn_api_manager', None):
-            self.btn_api_manager.set_failed(backend_name)
 
         # 연결 실패 시에도 탭을 열면 그때 시도한다 (웹 인터페이스 직접 접근용)
         if hasattr(self, 'backend_ui_tab'):
@@ -1150,13 +1116,6 @@ class WebUIMixin:
 
         QTimer.singleShot(500, self.load_webui_info)
 
-    def check_webui_connection(self):
-        """연결 상태 확인"""
-        try:
-            return get_backend().test_connection()
-        except Exception:
-            return False
-
     def _update_backend_ui_state(self):
         """백엔드에 따라 UI 기능 활성화/비활성화"""
         is_comfyui = get_backend_type() == BackendType.COMFYUI
@@ -1179,37 +1138,31 @@ class WebUIMixin:
         if hasattr(self, 'hires_options_group'):
             self.hires_options_group.setEnabled(True)
             self.hires_options_group.setToolTip(comfyui_tip if is_comfyui else "")
+        # (T2I/I2I/Inpaint/Upscale 모두 같은 compiler 경로 — 탭 활성 상태는 Vue 가 정한다.)
 
-        # T2I/I2I/Inpaint/Upscale 모두 동일 compiler 경로를 사용한다.
-        if hasattr(self, 'center_tabs'):
-            generation_tabs = []
-            if hasattr(self, 'i2i_tab'):
-                generation_tabs.append(self.i2i_tab)
-            if hasattr(self, 'inpaint_tab'):
-                generation_tabs.append(self.inpaint_tab)
-            if hasattr(self, 'upscale_tab'):
-                generation_tabs.append(self.upscale_tab)
-
-            for tab in generation_tabs:
-                try:
-                    idx = self.center_tabs.indexOf(tab)
-                    if idx is not None and idx >= 0:
-                        self.center_tabs.setTabEnabled(idx, True)
-                except (TypeError, AttributeError):
-                    pass  # Vue 모드에서는 center_tabs가 더미
-
-    def _auto_select_workflow_model(self, available_models: list):
+    def _auto_select_workflow_model(self, available_models: list, *, keep_current: bool = False):
         """ComfyUI 워크플로우에 설정된 체크포인트를 모델 콤보박스에서 자동 선택.
 
         WorkflowInspector가 LOCKED_UNKNOWN으로 분류한 경우 (GGUF, NF4 등 커스텀 로더):
         - 모델 콤보 비활성화 (사용자가 잘못 바꾸지 못하게)
         - 자동 선택 안 함
         - 사용자에게 노티
+
+        ``keep_current`` — 연결 때 restore_backend_combos 가 모델(연결 전 선택·저장값)을 되살렸으면
+        True. 그러면 워크플로를 새로 고른 경우가 아니면 그 선택을 덮지 않는다
+        (core.combo_selection.workflow_model_wins). 컴파일러가 이 콤보 값을 로더에 써 넣으므로,
+        예전처럼 연결마다 덮으면 다음 생성이 사용자가 고르지 않은 워크플로 기본 모델로 돌았다.
+        잠금/해제 판정은 선택 유지와 상관없이 매 연결 한다.
         """
         import config
+        from core.combo_selection import workflow_checkpoint_index, workflow_model_wins
+
         wf_path = getattr(config, 'COMFYUI_WORKFLOW_PATH', '')
         if not wf_path:
             return
+        # 모델을 고른 때의 워크플로 — load_settings(_restore_backend_settings)나 지난 연결이 남긴다.
+        previous_wf_path = getattr(self, '_model_workflow_path', None)
+        self._model_workflow_path = wf_path
 
         from backends.comfyui_backend import analyze_workflow
         info = analyze_workflow(wf_path)
@@ -1247,17 +1200,12 @@ class WebUIMixin:
         ckpt = info.get('checkpoint')
         if not ckpt:
             return
-
-        # 정확히 일치하는 모델 찾기
-        idx = self.model_combo.findText(ckpt)
-        if idx >= 0:
-            self.model_combo.setCurrentIndex(idx)
+        if not workflow_model_wins(kept_selection=keep_current, workflow_path=wf_path,
+                                   previous_workflow_path=previous_wf_path):
             return
 
-        # 부분 일치 (파일명만 비교)
-        ckpt_base = os.path.basename(ckpt).lower()
-        for i in range(self.model_combo.count()):
-            model_name = self.model_combo.itemText(i)
-            if os.path.basename(model_name).lower() == ckpt_base:
-                self.model_combo.setCurrentIndex(i)
-                return
+        # 정확히 일치하는 모델, 없으면 파일명만(폴더·대소문자 무시) 같은 모델
+        items = [self.model_combo.itemText(i) for i in range(self.model_combo.count())]
+        idx = workflow_checkpoint_index(items, ckpt)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)

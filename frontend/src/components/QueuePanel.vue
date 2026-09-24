@@ -30,7 +30,8 @@
         </div>
 
         <div class="qd-actions">
-          <button class="btn" @click="startQueue" v-if="items.length && !isRunning"><Icon name="play" /> 시작</button>
+          <button class="btn" @click="startQueue" v-if="items.length && !isRunning" :disabled="automationRunning"
+            :title="automationRunning ? AUTOMATION_OWNS_QUEUE : '대기열 시작'"><Icon name="play" /> 시작</button>
           <button class="btn" @click="pauseQueue" v-if="isRunning && !isPaused" title="일시정지"><Icon name="pause" /> 일시정지</button>
           <button class="btn primary" @click="resumeQueue" v-if="isPaused" title="재개"><Icon name="play" /> 재개</button>
           <button class="btn danger" @click="stopQueue" v-if="isRunning"><Icon name="stop" /> 중지</button>
@@ -53,11 +54,11 @@
         <div class="qd-list" v-if="items.length">
           <div v-for="(item, i) in items" :key="item.id || i"
             class="q-row"
-            :class="{ active: i === currentIdx && isRunning, done: item._done, sel: item.id && selectedIds.has(item.id) }"
+            :class="{ active: (i === currentIdx && isRunning) || isItemRunning(i), done: item._done, sel: item.id && selectedIds.has(item.id) }"
             @click="onItemClick($event, item, i)"
             :title="(item.prompt || 'No prompt').toString().substring(0, 200)">
             <span class="q-row-st">
-              <template v-if="i === currentIdx && isRunning && !isPaused"><Icon name="hourglass" /></template>
+              <template v-if="isItemRunning(i) || (i === currentIdx && isRunning && !isPaused)"><Icon name="hourglass" /></template>
               <template v-else-if="i === currentIdx && isPaused"><Icon name="pause" /></template>
               <template v-else-if="item._done"><Icon name="check" /></template>
               <template v-else>{{ i + 1 }}</template>
@@ -70,7 +71,8 @@
               <button class="qr-btn" @click="moveItem(item, 'up')" :disabled="!canMoveUp(i)" title="위로"><Icon name="chevron-up" /></button>
               <button class="qr-btn" @click="moveItem(item, 'down')" :disabled="!canMoveDown(i)" title="아래로"><Icon name="chevron-down" /></button>
               <button class="qr-btn" @click="openEdit(item, i)" title="편집"><Icon name="pencil" /></button>
-              <button class="qr-btn danger" @click="removeItem(item, i)" title="삭제"><Icon name="trash" /></button>
+              <button class="qr-btn danger" @click="removeItem(item, i)" :disabled="isItemRunning(i)"
+                :title="isItemRunning(i) ? '생성 중인 항목은 지울 수 없습니다' : '삭제'"><Icon name="trash" /></button>
             </span>
           </div>
         </div>
@@ -93,9 +95,10 @@
         <label class="qe-label">네거티브</label>
         <textarea v-model="editNeg" class="qe-text" rows="3" placeholder="네거티브..."></textarea>
         <div class="qe-foot">
-          <button class="qe-btn" @click="moveEdit('up')" :disabled="editIdx <= 0"><Icon name="chevron-up" /> 위로</button>
-          <button class="qe-btn" @click="moveEdit('down')" :disabled="editIdx >= items.length - 1"><Icon name="chevron-down" /> 아래로</button>
-          <button class="qe-btn danger" @click="deleteEdit"><Icon name="trash" /> 삭제</button>
+          <button class="qe-btn" @click="moveEdit('up')" :disabled="!canMoveUp(editRowIdx)"><Icon name="chevron-up" /> 위로</button>
+          <button class="qe-btn" @click="moveEdit('down')" :disabled="!canMoveDown(editRowIdx)"><Icon name="chevron-down" /> 아래로</button>
+          <button class="qe-btn danger" @click="deleteEdit" :disabled="isItemRunning(editRowIdx)"
+            :title="isItemRunning(editRowIdx) ? '생성 중인 항목은 지울 수 없습니다' : '삭제'"><Icon name="trash" /> 삭제</button>
           <div class="qe-sp"></div>
           <button class="qe-btn" @click="closeEdit">취소</button>
           <button class="qe-btn primary" @click="saveEdit"><Icon name="save" /> 저장</button>
@@ -107,8 +110,16 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { onBackendEvent } from '../bridge.js'
+import { onBackendBound, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import {
+  ONLY_RUNNING_ROW_NOTICE, canMoveDown as rowCanMoveDown, canMoveUp as rowCanMoveUp, clearConfirmMessage,
+  isRowLocked, removableIds,
+} from '../utils/queueLocks'
+
+// 자동화가 돌면 자동화가 '큐 우선'으로 대기열을 먼저 처리한다 — 백엔드가 대기열 '시작'을 거절하므로
+// 버튼을 미리 끈다(ui/queue_coordination.py). 예전엔 둘이 같은 항목을 보내 서로의 '생성 중' 표시를 풀었다.
+const AUTOMATION_OWNS_QUEUE = '자동화가 대기열 항목을 먼저 처리하고 있습니다 — 자동화 중에는 따로 시작하지 않습니다'
 
 interface QueueItem {
   id?: string
@@ -124,7 +135,11 @@ const pinBump = ref(false)      // 항목 추가 시 핀 1회 강조 애니메�
 const isRunning = ref(false)
 const isPaused = ref(false)
 const currentIdx = ref(-1)
+// 지금 실제로 생성 중인 항목(대기열 실행 · 자동화 '큐 우선' 모두) — 없으면 -1. 이 행은 지우거나 옮기지 못한다.
+const processingIdx = ref(-1)
 const completedCount = ref(0)
+// 자동화가 도는가 — queueUpdated.automation(당겨 온 현재 상태) · automationStatus.running(이후 변화)
+const automationRunning = ref(false)
 const selectedIds = ref<Set<string>>(new Set())  // 다중 선택 (Shift+클릭으로 범위 선택)
 const _lastClickedIdx = ref(-1)
 
@@ -140,6 +155,13 @@ function openEdit(item: QueueItem, i: number) {
   editNeg.value = (item.negative_prompt || '').toString()
 }
 function closeEdit() { editItem.value = null; editIdx.value = -1 }
+// 편집 중인 항목의 '지금' 위치 — 모달이 열린 사이 대기열이 줄거나 바뀌어도 id 로 다시 찾는다
+const editRowIdx = computed(() => {
+  const id = editItem.value?.id
+  if (!id) return editIdx.value
+  const i = items.value.findIndex(it => it.id === id)
+  return i >= 0 ? i : -1
+})
 function saveEdit() {
   if (editItem.value && editItem.value.id) {
     requestAction('update_queue_item', {
@@ -151,7 +173,7 @@ function saveEdit() {
   closeEdit()
 }
 function deleteEdit() {
-  if (editItem.value && editItem.value.id) {
+  if (editItem.value && editItem.value.id && !isItemRunning(editRowIdx.value)) {
     requestAction('remove_queue_items', { item_ids: [editItem.value.id] })
   }
   closeEdit()
@@ -185,16 +207,15 @@ const etaText = computed(() => {
   return `${Math.floor(sec / 3600)}시 ${Math.floor((sec % 3600) / 60)}분`
 })
 
+// 생성 중인 항목 — 삭제·이동 금지(백엔드 QueueModel 도 같은 규칙으로 막는다)
 function isItemRunning(i: number) {
-  return i === currentIdx.value && isRunning.value
+  return isRowLocked(i, processingIdx.value)
 }
 function canMoveUp(i: number) {
-  if (isRunning.value && i <= 1) return false  // 0번은 처리 중
-  return i > 0
+  return rowCanMoveUp(i, processingIdx.value)
 }
 function canMoveDown(i: number) {
-  if (isRunning.value && i === 0) return false  // 처리 중인 항목은 못 내림
-  return i < items.value.length - 1
+  return rowCanMoveDown(i, items.value.length, processingIdx.value)
 }
 
 function onItemClick(e: MouseEvent, item: QueueItem, i: number) {
@@ -228,6 +249,7 @@ function moveItem(item: QueueItem, direction: 'up' | 'down') {
 }
 
 function removeItem(item: QueueItem, i: number) {
+  if (isItemRunning(i)) return   // 생성 중 — 버튼도 꺼져 있다
   if (item.id) {
     requestAction('remove_queue_items', { item_ids: [item.id] })
   } else {
@@ -238,18 +260,27 @@ function removeItem(item: QueueItem, i: number) {
 
 function removeSelected() {
   if (selectedIds.value.size === 0) return
-  const ids = Array.from(selectedIds.value)
-  requestAction('remove_queue_items', { item_ids: ids })
-  selectedIds.value = new Set()
+  // 생성 중인 항목은 빼고 보낸다(선택은 유지 — 끝나면 다시 지울 수 있다)
+  const runningId = items.value[processingIdx.value]?.id
+  const ids = removableIds(selectedIds.value, runningId)
+  if (ids.length) requestAction('remove_queue_items', { item_ids: ids })
+  selectedIds.value = runningId && selectedIds.value.has(runningId) ? new Set([runningId]) : new Set()
 }
 
 function clearAll() {
   if (!items.value.length) return
-  if (!confirm(`대기열 ${items.value.length}개 항목을 모두 삭제할까요?`)) return
+  // 생성 중인 항목은 남는다 — 확인 문구에서 빼고, 그것뿐이면 지울 것이 없다고 알린다
+  const message = clearConfirmMessage(items.value.length, processingIdx.value)
+  if (message === null) {
+    requestAction('show_toast', { type: 'warning', msg: ONLY_RUNNING_ROW_NOTICE })
+    return
+  }
+  if (!confirm(message)) return
   requestAction('clear_queue')
   selectedIds.value = new Set()
 }
 function startQueue() {
+  if (automationRunning.value) return   // 버튼도 꺼져 있다 — 백엔드도 거절한다
   _startTime.value = Date.now()
   _completedAtStart.value = completedCount.value
   requestAction('start_queue')
@@ -294,7 +325,9 @@ onMounted(() => {
       if (typeof data.running === 'boolean') isRunning.value = data.running
       if (typeof data.paused === 'boolean') isPaused.value = data.paused
       if (typeof data.current_index === 'number') currentIdx.value = data.current_index
+      processingIdx.value = typeof data.processing_index === 'number' ? data.processing_index : -1
       if (typeof data.completed === 'number') completedCount.value = data.completed
+      if (typeof data.automation === 'boolean') automationRunning.value = data.automation
       // 자동으로 드로어를 열지 않음 — 오버레이가 매번 튀어나오면 거슬림.
       // 대신 항상 보이는 핀의 카운트로 큐 변화를 인지(watch로 핀 강조).
       // 자동시작 없음 — 큐 추가/복원만으로는 절대 생성 시작 안 함. 오직 '▶ 시작' 버튼만.
@@ -316,6 +349,20 @@ onMounted(() => {
     } catch {}
     _startTime.value = 0
   }))
+
+  // 자동화가 시작·중지되면 '시작' 버튼을 따라 켜고 끈다(자동화 중엔 백엔드가 거절한다)
+  _unsubs.push(onBackendEvent('automationStatus', (json: string) => {
+    try {
+      const data: any = JSON.parse(json)
+      if (typeof data.running === 'boolean') automationRunning.value = data.running
+    } catch {}
+  }))
+
+  // 현재 상태를 요청 — 시작 시 복구된 대기열은 이 패널이 뜨기 전에 알려져 그냥은 안 보인다.
+  // 백엔드가 **붙은 뒤에** 보내야 한다: 이 onMounted 는 App 의 onMounted(await initBridge())보다
+  // 먼저 돌아, 여기서 바로 보낸 requestAction 은 스토어에 백엔드가 없어 버려졌다. 웹 모드 재접속은
+  // 패널을 다시 마운트하지 않으므로 붙을 때마다 다시 당겨 온다. 백엔드는 다음 턴에 queueUpdated 로 답한다.
+  _unsubs.push(onBackendBound(() => requestAction('sync_queue_state')))
 })
 
 // Esc — 편집 모달 먼저, 없으면 드로어 닫기
@@ -384,7 +431,8 @@ defineExpose({ items })
 
 .qd-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .btn { padding: 5px 12px; background: var(--bg-button); border: none; border-radius: 5px; color: var(--text-secondary); font-size: 11px; cursor: pointer; font-weight: var(--fw-bold); }
-.btn:hover { background: var(--bg-button-hover); color: var(--text-primary); }
+.btn:hover:not(:disabled) { background: var(--bg-button-hover); color: var(--text-primary); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn.danger { color: var(--state-alert-fg); }
 .btn.primary { background: var(--accent-fill); color: var(--on-accent); }
 .btn.primary:hover { background: var(--accent-fill-hover); }

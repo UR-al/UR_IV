@@ -49,6 +49,49 @@
               <button class="btn-pill" :disabled="generationApiWebMode" @click="act('show_api_manager')">백엔드 관리</button>
             </div>
           </div>
+          <div class="glass-card mt-16">
+            <label>미리보기</label>
+            <div class="defaults-grid">
+              <div class="def-field">
+                <span>히스토리 미리보기 품질
+                  <small class="hint-inline">히스토리 카드에 쓰는 썸네일 해상도. 목록 전체를 미리 만들어 두므로 위아래로 넘겨도 로딩이 없습니다. 클수록 선명하지만 캐시가 커집니다.</small>
+                </span>
+                <CustomSelect :model-value="previewThumbLabel" :options="previewThumbOptions"
+                  @update:model-value="setPreviewThumbByLabel($event)" />
+              </div>
+            </div>
+          </div>
+          <div class="glass-card mt-16">
+            <label>VRAM</label>
+            <div class="toggle-grid">
+              <div class="toggle-row">
+                <span>생성 후 모델 언로드
+                  <small class="hint-inline">메인 생성(T2I·I2I·XYZ·대기열·자동화)이 끝나면 Forge(unload-checkpoint) / ComfyUI(/free) 에 모델을 내리게 요청합니다. 연속 작업은 마지막 장 뒤에만 내립니다. Creator Studio 는 해당 없음.</small>
+                </span>
+                <ToggleSwitch :model-value="unloadModelsAfterGen"
+                  @update:model-value="unloadModelsAfterGen = $event; saveUnloadModelsAfterGen()" />
+              </div>
+              <div class="toggle-row">
+                <span>ComfyUI SAM3 모델을 RAM 에 보관
+                  <small class="hint-inline">SAM3 의 '사용 후 언로드' 뒤에도 모델(약 3.4GB)을 ComfyUI 의 CPU RAM 에 두었다가 다음 SAM3 작업 때 옮기기만 합니다(이미지마다 체크포인트를 다시 읽지 않음, 결과는 같음). 끄면 매번 다시 읽고 보관 중인 사본도 다음 SAM3 작업에서 해제합니다. '사용 후 언로드'를 끈 SAM3 는 VRAM 에 그대로 둡니다. 위의 '생성 후 모델 언로드'(/free)는 어느 쪽이든 보관본을 해제합니다. Forge 는 Forge 설정의 SAM3 항목을 따릅니다.</small>
+                </span>
+                <ToggleSwitch :model-value="comfySam3KeepInRam"
+                  @update:model-value="comfySam3KeepInRam = $event; saveComfySam3KeepInRam()" />
+              </div>
+            </div>
+          </div>
+          <div class="glass-card mt-16">
+            <label>저장</label>
+            <div class="toggle-grid">
+              <div class="toggle-row">
+                <span>Forge 출력 폴더에도 저장
+                  <small class="hint-inline">기본은 꺼짐 — 앱이 결과를 generated_images 에 저장하므로 Forge 가 자기 output 폴더에 같은 이미지를 한 번 더 저장하지 않게 합니다. 켜면 T2I·I2I·Inpaint·PNG Info 생성 결과를 Forge output 에도 남깁니다(채팅·손 재구성·후처리는 제외). ComfyUI 는 워크플로의 저장 노드를 따릅니다.</small>
+                </span>
+                <ToggleSwitch :model-value="forgeSaveOutputs"
+                  @update:model-value="forgeSaveOutputs = $event; saveForgeSaveOutputs()" />
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 2. Application updates -->
@@ -699,23 +742,23 @@
             <div class="toggle-grid">
               <div class="toggle-row">
                 <span>중복 자동 정리</span>
-                <ToggleSwitch v-model="cleanDuplicates" />
+                <ToggleSwitch :model-value="cleanDuplicates" @update:model-value="cleanDuplicates = $event; saveCleanPrefs()" />
               </div>
               <div class="toggle-row">
                 <span>공백 정리</span>
-                <ToggleSwitch v-model="cleanSpaces" />
+                <ToggleSwitch :model-value="cleanSpaces" @update:model-value="cleanSpaces = $event; saveCleanPrefs()" />
               </div>
               <div class="toggle-row">
                 <span>언더바 변환</span>
-                <ToggleSwitch v-model="cleanUnderscore" />
+                <ToggleSwitch :model-value="cleanUnderscore" @update:model-value="cleanUnderscore = $event; saveCleanPrefs()" />
               </div>
               <div class="toggle-row">
                 <span>태그 블록 모드</span>
-                <ToggleSwitch :model-value="defaultBlockMode" @update:model-value="defaultBlockMode = $event; setBlockMode()" />
+                <ToggleSwitch :model-value="tagBlockMode" @update:model-value="setTagBlockMode($event)" />
               </div>
               <div class="toggle-row">
                 <span>갤러리 메타데이터 패널</span>
-                <ToggleSwitch :model-value="galleryMetadata" @update:model-value="galleryMetadata = $event; window.localStorage.setItem('galleryShowMetadata', String(galleryMetadata))" />
+                <ToggleSwitch :model-value="galleryShowMetadata" @update:model-value="setGalleryShowMetadata($event)" />
               </div>
               <div class="toggle-row">
                 <span>캐릭터 적용 시 copyright 자동 추가</span>
@@ -731,7 +774,7 @@
             <label>데이터 저장</label>
             <div class="btn-row-2">
               <button class="btn-pill" @click="act('save_settings')">전역 저장</button>
-              <button class="btn-pill" @click="act('show_prompt_history')">히스토리 열기</button>
+              <button class="btn-pill" v-host-dialog="'show_prompt_history'" @click="act('show_prompt_history')">히스토리 열기</button>
             </div>
           </div>
         </div>
@@ -850,7 +893,8 @@
         <!-- 6. Shortcuts -->
         <div v-show="currentTab === 'shortcuts'" data-settings-tab="shortcuts" class="section-fade">
           <div class="hint-banner"><Icon name="info" /> 같은 단축키도 <strong>현재 활성 탭</strong>에 따라 동작이 달라집니다.
-            예: <kbd>Ctrl+Z</kbd>는 Editor 탭에서는 편집 Undo, T2I/I2I/Inpaint에서는 프롬프트 Undo.
+            예: <kbd>Ctrl+Z</kbd>는 Editor 탭에서는 편집 Undo, T2I/I2I/Inpaint에서는 프롬프트 칸·프롬프트 패널 버튼
+            (또는 포커스가 없을 때) 프롬프트 Undo — 그 밖의 입력칸은 그 칸의 실행 취소.
             전역 키는 모든 탭에서 동일.
           </div>
           <div class="glass-card">
@@ -968,6 +1012,7 @@
 
           <div class="glass-card mt-16">
             <label>T2I 기본값 <span class="sync-badge" v-if="t2iSynced">동기화됨</span></label>
+            <p class="desc">앱을 시작할 때 비어 있는 칸(첫 실행이면 전부)에 채웁니다. '전역 저장'을 누르면 스텝 · CFG · 너비 · 높이 · Seed 는 현재 T2I 값으로 함께 갱신됩니다. Denoising 은 I2I 화면의 처음 값입니다.</p>
             <div class="defaults-grid">
               <div class="def-field"><span>스텝</span><input type="number" v-model.number="defaults.steps" /></div>
               <div class="def-field"><span>CFG</span><input type="number" v-model.number="defaults.cfg" step="0.5" /></div>
@@ -987,6 +1032,7 @@
 
           <div class="glass-card mt-16">
             <label>EDITOR 기본값</label>
+            <p class="desc">에디터의 마스크 브러시 크기 · 효과 세기 · YOLO 신뢰도 · 자석 올가미 스냅 반경의 처음 값입니다. 에디터에서 직접 바꾼 값은 그대로 둡니다.</p>
             <div class="defaults-grid">
               <div class="def-field"><span>브러시 크기</span><input type="number" v-model.number="defaults.brushSize" /></div>
               <div class="def-field"><span>효과 세기</span><input type="number" v-model.number="defaults.effectStrength" /></div>
@@ -1001,27 +1047,23 @@
           </div>
 
           <div class="glass-card mt-16">
-            <label>SEARCH 기본값</label>
-            <div class="defaults-grid">
-              <div class="def-field"><span>기본 등급</span>
-                <CustomSelect v-model="defaults.defaultRating" :options="['g', 's', 'q', 'e']" placeholder="Rating" />
-              </div>
-            </div>
-          </div>
-
-          <div class="glass-card mt-16">
-            <label>확장 기본값</label>
+            <label>확장 기본값 <span class="sync-badge">첫 실행 시에만</span></label>
+            <p class="desc">저장된 생성 설정이 없는 첫 실행에만 적용합니다. 그 뒤로는 마지막으로 쓴 켜짐/꺼짐 상태를 그대로 복원합니다. NegPiP 는 항상 켜져 있습니다.</p>
             <div class="toggle-grid">
-              <label class="toggle-row"><input type="checkbox" v-model="defaults.hires_enabled" /><span>Hires.fix 기본 활성화</span></label>
-              <label class="toggle-row"><input type="checkbox" v-model="defaults.ad_enabled" /><span>ADetailer 기본 활성화</span></label>
-              <label class="toggle-row"><input type="checkbox" v-model="defaults.sam3_enabled" /><span>SAM3 기본 활성화</span></label>
-              <label class="toggle-row"><input type="checkbox" v-model="defaults.negpip_enabled" /><span>NegPiP 기본 활성화</span></label>
+              <label class="toggle-row"><input type="checkbox" v-model="defaults.hires_enabled" /><span>Hires.fix 기본 활성화 (첫 실행 시에만)</span></label>
+              <label class="toggle-row"><input type="checkbox" v-model="defaults.ad_enabled" /><span>ADetailer 기본 활성화 (첫 실행 시에만)</span></label>
+              <label class="toggle-row"><input type="checkbox" v-model="defaults.sam3_enabled" /><span>SAM3 기본 활성화 (첫 실행 시에만)</span></label>
             </div>
           </div>
           <div class="btn-row-2 mt-16">
-            <button class="btn-pill primary" @click="saveDefaults">기본값 저장</button>
-            <button class="btn-pill" @click="resetDefaults">초기 상태로</button>
+            <button class="btn-pill primary" @click="saveDefaultsNow">기본값 저장</button>
+            <button class="btn-pill" @click="resetDefaultsToFactory">초기 상태로</button>
           </div>
+        </div>
+
+        <!-- 데이터 · 백업 — 설정 백업/복원 · 앱 재시작 · 프리셋 공유 (components/SettingsDataBackup.vue) -->
+        <div v-show="currentTab === 'data'" data-settings-tab="data" class="section-fade">
+          <SettingsDataBackup />
         </div>
 
         <!-- 9. AI Assist (Ollama) -->
@@ -1031,15 +1073,15 @@
             <div class="input-stack">
               <div class="input-unit">
                 <span class="unit-label">서버 URL</span>
-                <input v-model="ollamaUrl" @change="saveOllamaSettings" placeholder="http://localhost:11434" />
+                <input v-model="ollamaUrl" @change="saveOllamaUrl" :placeholder="DEFAULT_OLLAMA_URL" />
               </div>
               <div class="input-unit mt-12">
                 <span class="unit-label">모델</span>
-                <CustomSelect v-if="ollamaModels.length" v-model="ollamaModel" :options="ollamaModels" placeholder="모델 선택..." @update:modelValue="saveOllamaSettings" />
-                <input v-else v-model="ollamaModel" @change="saveOllamaSettings" placeholder="gemma4:e4b, qwen3.5:9b 등" />
+                <CustomSelect v-if="ollamaModels.length" v-model="ollamaModel" :options="ollamaModels" placeholder="모델 선택..." @update:modelValue="saveOllamaModel" />
+                <input v-else v-model="ollamaModel" @change="saveOllamaModel" placeholder="gemma4:e4b, qwen3.5:9b 등" />
               </div>
               <label class="ollama-unload-row mt-12">
-                <input type="checkbox" v-model="ollamaUnloadOnGen" @change="saveOllamaSettings" />
+                <input type="checkbox" v-model="ollamaUnloadOnGen" @change="saveOllamaUnloadOnGen" />
                 <span>이미지 생성 시 LLM 언로드 (VRAM 확보) — 12B 등 큰 모델 + SD 공유 시 권장</span>
               </label>
             </div>
@@ -1067,7 +1109,7 @@
             <div class="rec-note mt-12">
               대화 탭에서 이미지를 첨부하거나 캡션을 뽑으려면 이미지를 보는 모델이어야 합니다.
               SD 와 VRAM 을 나눠 쓰면 4b~8b 급을, 24GB 급 GPU 면 27b·32b 도 됩니다.<br/>
-              설치는 <code>ollama pull {{ ollamaModel || 'gemma4:e4b' }}</code>
+              설치는 <code>ollama pull {{ ollamaModel || RECOMMENDED_OLLAMA_MODEL }}</code>
             </div>
           </div>
           <AiAssistInstructionsSettings />
@@ -1078,9 +1120,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactivated, watch } from 'vue'
+import { useTabDefaultsEditor } from '../composables/useTabDefaultsEditor'
 import { searchSettings, type SettingSearchEntry } from '../utils/settingsSearch'
 import { requestAction, useWidgetStore } from '../stores/widgetStore.js'
+import { vHostDialog } from '../utils/hostDialogs'
 import {
   appUpdateState,
   initialiseAppUpdates,
@@ -1089,10 +1133,12 @@ import {
 } from '../stores/appUpdateStore'
 import { getStudioClient, replyData, StudioClientError, type StudioClient } from '../studio/client'
 import CustomSelect from '../components/CustomSelect.vue'
+import { PREVIEW_THUMB_PRESETS, normalizePreviewThumbWidth } from '../composables/useHistoryThumbs'
 import ToggleSwitch from '../components/ToggleSwitch.vue'
 import ColorField from '../components/ColorField.vue'
 import ModelDownloadsSettings from '../components/ModelDownloadsSettings.vue'
 import H3CacheSettings from '../components/H3CacheSettings.vue'
+import SettingsDataBackup from '../components/SettingsDataBackup.vue'
 import SpectrumSettings from '../components/SpectrumSettings.vue'
 import ComfyCompatibilitySettings from '../components/ComfyCompatibilitySettings.vue'
 import ComfyWorkflowControls from '../components/ComfyWorkflowControls.vue'
@@ -1105,6 +1151,23 @@ import {
   applyIconAnimationStyle,
   type IconAnimationStyle,
 } from '../theme/iconAnimationPreference'
+import {
+  DEFAULT_OLLAMA_URL,
+  findInstalledModel,
+  isOllamaModelInstalled as isInstalledOllamaModel,
+  resolveInstalledModel,
+  storedOllamaModel,
+  storedOllamaUrl,
+} from '../utils/ollamaPrefs'
+import { mirrorPrefsToStorage } from '../utils/uiPrefMirror'
+import {
+  galleryShowMetadata,
+  persistUiPrefs,
+  restoreUiFlagsFromPrefs,
+  setGalleryShowMetadata,
+  setTagBlockMode,
+  tagBlockMode,
+} from '../composables/uiPrefs'
 import type { ActionName } from '../types/bridge'
 
 interface SubTab {
@@ -1217,7 +1280,8 @@ const subTabs: SubTab[] = [
   { id: 'theme',     label: '테마',       icon: 'palette', keywords: 'theme 테마 색 컬러 다크 라이트 강조색 accent color dark light icon 아이콘 animation 애니메이션 claude 클로드 gpt' },
   { id: 'shortcuts', label: '단축키',     icon: 'keyboard', keywords: 'hotkeys shortcuts 단축키 키보드 ctrl shift z y s g' },
   { id: 'guard',     label: '가드',       icon: 'shield', keywords: 'anima guard 가드 자동 해상도 제한 최대 면적 픽셀 긴 변 resolution cap vram oom' },
-  { id: 'defaults',  label: '기본값',     icon: 'sliders', keywords: 'defaults 기본값 t2i i2i inpaint 해상도 steps cfg sampler 시드' },
+  { id: 'defaults',  label: '기본값',     icon: 'sliders', keywords: 'defaults 기본값 t2i i2i inpaint 해상도 steps cfg sampler 시드 denoising editor 에디터 브러시 yolo 스냅' },
+  { id: 'data',      label: '데이터 · 백업', icon: 'save', keywords: 'backup restore 백업 복원 내보내기 가져오기 export import zip 재시작 restart preset 프리셋 공유 캐릭터 character' },
   { id: 'ollama',    label: 'AI 어시스트', icon: 'sparkles', keywords: 'ollama ai assist 어시스트 자동완성 번역 사용자 지침 공통 태그 확장 추천 자연어 캡션 영문 장면 창의 네거티브 자동 변환' },
 ]
 const currentTab = ref('general')
@@ -1339,7 +1403,8 @@ const generationApi = reactive({
   enabled: false,
   running: false,
   bindHost: '127.0.0.1',
-  port: 17860,
+  // core/generation_api.py DEFAULT_PORT — 관리형 Forge/ComfyUI 포트 범위 밖
+  port: 17990,
   token: '',
   tokenPreview: '',
   listenUrl: '',
@@ -1420,7 +1485,7 @@ function applyGenerationApiState(raw: unknown) {
   generationApi.enabled = Boolean(config.enabled ?? config.autoStart ?? generationApi.enabled)
   generationApi.running = Boolean(server.running ?? server.started ?? snapshot.running ?? false)
   generationApi.bindHost = String(config.bindHost ?? config.host ?? generationApi.bindHost ?? '127.0.0.1')
-  generationApi.port = Number(config.port ?? generationApi.port ?? 17860)
+  generationApi.port = Number(config.port ?? generationApi.port ?? 17990)
   generationApi.defaultTarget = String(config.defaultTarget ?? config.default_target ?? 'active') || 'active'
   generationApi.listenUrl = String(server.listenUrl || server.baseUrl || snapshot.listenUrl || snapshot.baseUrl || '')
 
@@ -1719,11 +1784,20 @@ const forgeBrowseTitle = computed(() => {
   return '현재 연결은 네이티브 폴더 선택 기능을 제공하지 않습니다.'
 })
 const forgeStatus = ref('')
+// 프롬프트 정리 토글 — ui_prefs 가 주인(Python core/prompt_cleaner_prefs, 기본값도 같다: 모두 켜짐).
+// 바꾸면 곧바로 저장한다 — 예전엔 '전역 저장'을 눌러야 Python 클리너에 반영됐다(감사 #41).
 const cleanDuplicates = ref(true)
 const cleanSpaces = ref(true)
 const cleanUnderscore = ref(true)
-const defaultBlockMode = ref(window.localStorage.getItem('tagBlockMode') === 'true')
-const galleryMetadata = ref(window.localStorage.getItem('galleryShowMetadata') !== 'false')
+function saveCleanPrefs() {
+  persistUiPrefs({
+    cleanDuplicates: cleanDuplicates.value,
+    cleanSpaces: cleanSpaces.value,
+    cleanUnderscore: cleanUnderscore.value,
+  })
+}
+// 블록 모드·갤러리 메타 — PromptPanel·Gallery 와 같은 모듈 전역 ref(composables/uiPrefs). setter 가
+// 곧바로 ui_prefs 에 저장한다(예전엔 localStorage 에만 써서 재시작하면 파일 값으로 되돌아갔다).
 const autoAddCopyright = ref(window.localStorage.getItem('autoAddCopyright') !== 'false')   // ③ 기본 on
 const historyJumpModifier = ref(window.localStorage.getItem('historyJumpModifier') || 'shiftKey')
 const iconAnimationStyle = ref<IconAnimationStyle>(DEFAULT_ICON_ANIMATION_STYLE)
@@ -1759,8 +1833,7 @@ function resetAnimaGuardSettings() {
 }
 
 function saveCopyrightPref() {
-  window.localStorage.setItem('autoAddCopyright', String(autoAddCopyright.value))
-  requestAction('save_ui_prefs', { autoAddCopyright: autoAddCopyright.value })
+  persistUiPrefs({ autoAddCopyright: autoAddCopyright.value })
 }
 
 const historyBlink = ref(window.localStorage.getItem('historyBlinkSelected') !== 'false')
@@ -1769,12 +1842,10 @@ function saveHistoryJumpModifier() {
     ? historyJumpModifier.value
     : 'shiftKey'
   historyJumpModifier.value = value
-  window.localStorage.setItem('historyJumpModifier', value)
-  requestAction('save_ui_prefs', { historyJumpModifier: value })
+  persistUiPrefs({ historyJumpModifier: value })
 }
 function saveHistoryBlink() {
-  window.localStorage.setItem('historyBlinkSelected', String(historyBlink.value))
-  requestAction('save_ui_prefs', { historyBlinkSelected: historyBlink.value })
+  persistUiPrefs({ historyBlinkSelected: historyBlink.value })
   try { window.dispatchEvent(new CustomEvent('historyBlinkChanged', { detail: { value: historyBlink.value } })) } catch {}
 }
 
@@ -1791,45 +1862,40 @@ const schedulerList = computed(() => wStore.getProperty('scheduler_combo', 'item
 
 function applyUiPrefs(prefs: any) {
   if (!prefs || typeof prefs !== 'object') return
+  // localStorage 캐시는 표 한 곳(utils/uiPrefMirror)으로 — 아래는 이 화면의 ref 만 맞춘다
+  const mirrored = new Set(mirrorPrefsToStorage(prefs))
+  restoreUiFlagsFromPrefs(prefs)   // 블록 모드·갤러리 메타(모듈 전역 ref)
   iconAnimationStyle.value = applyIconAnimationStyle(prefs.iconAnimationStyle)
-  if (typeof prefs.tagBlockMode === 'boolean') { defaultBlockMode.value = prefs.tagBlockMode; window.localStorage.setItem('tagBlockMode', String(prefs.tagBlockMode)) }
   if (typeof prefs.cleanDuplicates === 'boolean') cleanDuplicates.value = prefs.cleanDuplicates
   if (typeof prefs.cleanSpaces === 'boolean') cleanSpaces.value = prefs.cleanSpaces
   if (typeof prefs.cleanUnderscore === 'boolean') cleanUnderscore.value = prefs.cleanUnderscore
-  if (typeof prefs.galleryShowMetadata === 'boolean') { galleryMetadata.value = prefs.galleryShowMetadata; window.localStorage.setItem('galleryShowMetadata', String(prefs.galleryShowMetadata)) }
-  if (typeof prefs.autoAddCopyright === 'boolean') { autoAddCopyright.value = prefs.autoAddCopyright; window.localStorage.setItem('autoAddCopyright', String(prefs.autoAddCopyright)) }
-  if (['shiftKey', 'ctrlKey', 'altKey'].includes(prefs.historyJumpModifier)) {
-    historyJumpModifier.value = prefs.historyJumpModifier
-    window.localStorage.setItem('historyJumpModifier', prefs.historyJumpModifier)
-  }
+  if (typeof prefs.autoAddCopyright === 'boolean') autoAddCopyright.value = prefs.autoAddCopyright
+  if (mirrored.has('historyJumpModifier')) historyJumpModifier.value = prefs.historyJumpModifier
   if (typeof prefs.historyBlinkSelected === 'boolean') {
     historyBlink.value = prefs.historyBlinkSelected
-    window.localStorage.setItem('historyBlinkSelected', String(prefs.historyBlinkSelected))
     try { window.dispatchEvent(new CustomEvent('historyBlinkChanged', { detail: { value: prefs.historyBlinkSelected } })) } catch {}
   }
-  const restoredScale = Number(prefs.uiScale)
-  if (Number.isFinite(restoredScale) && restoredScale >= 0.8 && restoredScale <= 1.5) {
+  if (mirrored.has('uiScale')) {
+    const restoredScale = Number(prefs.uiScale)
     uiScale.value = restoredScale
-    window.localStorage.setItem('ui.scale', String(restoredScale))
     try { window.dispatchEvent(new CustomEvent('uiScaleChanged', { detail: { value: restoredScale } })) } catch {}
   }
-  const restoredPanelWidth = Number(prefs.editorSidePanelWidth)
-  if (Number.isInteger(restoredPanelWidth) && restoredPanelWidth >= 200 && restoredPanelWidth <= 500) {
-    editorSidePanelWidth.value = restoredPanelWidth
-    window.localStorage.setItem('editorSidePanelWidth', String(restoredPanelWidth))
+  if (mirrored.has('editorSidePanelWidth')) {
+    editorSidePanelWidth.value = Number(prefs.editorSidePanelWidth)
     try { window.dispatchEvent(new CustomEvent('editorSidePanelWidthChanged')) } catch {}
   }
   if (typeof prefs.animaGuardEnabled === 'boolean') animaGuardEnabled.value = prefs.animaGuardEnabled
   animaGuardMaxAreaSide.value = normalizeGuardDimension(prefs.animaGuardMaxAreaSide, 1536)
   animaGuardMaxSide.value = normalizeGuardDimension(prefs.animaGuardMaxSide, 2048)
-  if (Array.isArray(prefs.tabOrder) && prefs.tabOrder.length > 0) {
-    tabOrder.value = [...prefs.tabOrder]
-    window.localStorage.setItem('tabOrder', JSON.stringify(prefs.tabOrder))
-  }
+  if (mirrored.has('tabOrder')) tabOrder.value = [...prefs.tabOrder]
   // Ollama 설정 복원
-  if (prefs.ollamaUrl) { ollamaUrl.value = prefs.ollamaUrl; window.localStorage.setItem('ollamaUrl', prefs.ollamaUrl) }
-  if (prefs.ollamaModel) { ollamaModel.value = prefs.ollamaModel; window.localStorage.setItem('ollamaModel', prefs.ollamaModel) }
-  if (typeof prefs.ollamaUnloadOnGen === 'boolean') { ollamaUnloadOnGen.value = prefs.ollamaUnloadOnGen; window.localStorage.setItem('ollamaUnloadOnGen', String(prefs.ollamaUnloadOnGen)) }
+  if (mirrored.has('ollamaUrl')) ollamaUrl.value = prefs.ollamaUrl
+  if (mirrored.has('ollamaModel')) ollamaModel.value = prefs.ollamaModel
+  if (typeof prefs.ollamaUnloadOnGen === 'boolean') ollamaUnloadOnGen.value = prefs.ollamaUnloadOnGen
+  if (typeof prefs.unloadModelsAfterGen === 'boolean') unloadModelsAfterGen.value = prefs.unloadModelsAfterGen
+  if (typeof prefs.forgeSaveOutputs === 'boolean') forgeSaveOutputs.value = prefs.forgeSaveOutputs
+  if (typeof prefs.comfySam3KeepInRam === 'boolean') comfySam3KeepInRam.value = prefs.comfySam3KeepInRam
+  if (mirrored.has('previewThumbWidth')) previewThumbWidth.value = normalizePreviewThumbWidth(prefs.previewThumbWidth)
   // 디스크가 테마의 단일 출처다(다른 기기/프로필에서 바꾼 값이 우선). reconcileTheme 은
   // 값이 같으면 아무것도 하지 않으므로 앱 시작 시 이미 맞췄어도 중복 적용이 아니다.
   reconcileTheme(prefs)
@@ -2250,7 +2316,8 @@ async function loadStudioBootstrap(studio: StudioClient): Promise<boolean> {
   runtimeLoading.value = true
   generationApiLoading.value = true
   try {
-    const reply = await studio.invoke('sync.bootstrap', {})
+    // 앱 업데이트 상태는 appUpdateStore 가 따로 가진다 — 여기서 받으면 버릴 git 조회만 한 번 더 돈다.
+    const reply = await studio.invoke('sync.bootstrap', { includeAppUpdate: false })
     const data: any = replyData(reply)
     applyForgePathState(data.modelPaths)
     applyRuntimeSnapshot(data.runtime)
@@ -2465,11 +2532,8 @@ onMounted(async () => {
     await Promise.all([loadForgePaths(), loadBackendRuntimeState(), loadGenerationApiState()])
     if (settingsDisposed) return
   }
-  if (bk.getTabDefaults) {
-    bk.getTabDefaults((json: string) => {
-      try { const d = JSON.parse(json); Object.assign(defaults, d) } catch {}
-    })
-  }
+  await reloadTabDefaults()
+  if (settingsDisposed) return
   // SettingsView는 지연 로드되므로 시작 시 1회 emit된 이벤트를 놓쳐도 파일에서 능동 복원.
   if (bk.getUiPrefs) {
     bk.getUiPrefs((json: string) => {
@@ -2480,8 +2544,17 @@ onMounted(async () => {
     try { applyUiPrefs(JSON.parse(json)) } catch {}
   })
 })
+// keep-alive — 다시 열릴 때 파일의 기본값을 다시 읽는다('전역 저장'이 T2I 값을 반영했을 수 있다).
+// 첫 활성화는 onMounted 가 이미 읽었다.
+let tabDefaultsActivatedOnce = false
+onActivated(() => {
+  if (!tabDefaultsActivatedOnce) { tabDefaultsActivatedOnce = true; return }
+  void reloadTabDefaults()
+})
+onDeactivated(() => { disposeTabDefaults() })   // 대기 중인 기본값 변경을 떠나기 전에 저장
 onUnmounted(() => {
   settingsDisposed = true
+  disposeTabDefaults()
   disconnectBackendRuntimeEvent?.()
   disconnectBackendRuntimeEvent = null
   disconnectGenerationApiEvent?.()
@@ -2493,10 +2566,14 @@ onUnmounted(() => {
   disconnectUiPrefsEvent?.()
   disconnectUiPrefsEvent = null
 })
-function setBlockMode() {
-  window.localStorage.setItem('tagBlockMode', String(defaultBlockMode.value))
-  console.log('[Settings] Block mode set to:', defaultBlockMode.value)
-}
+// keep-alive 로 남은 이 화면의 Ollama URL·모델은 마운트 시점 값에 머문다 — 대화 탭(ChatView.saveModel)
+// 이나 부팅 자동 교체(App ensureOllamaModel)가 바꾼 뒤 여기서 저장하면 옛 모델로 되돌렸다(감사 #41).
+// 다시 열릴 때 캐시(그 경로들이 모두 localStorage 에도 쓴다)에서 다시 읽는다. getUiPrefs 전체를 다시
+// 적용하지는 않는다 — 이 화면의 다른 값은 바꿀 때마다 곧바로 저장되므로 파일과 같다.
+onActivated(() => {
+  ollamaUrl.value = storedOllamaUrl()
+  ollamaModel.value = storedOllamaModel()
+})
 
 const defaultOrder = ['T2I','I2I','Inpaint','Event Gen','Search','Batch / Upscale','Gallery','XYZ Plot','PNG Info','Favorites','Settings']
 function _loadTabOrder() {
@@ -2511,8 +2588,7 @@ let dragIdx = -1
 
 function dragStart(i: number) { dragIdx = i }
 function persistTabOrder() {
-  window.localStorage.setItem('tabOrder', JSON.stringify(tabOrder.value))
-  requestAction('save_ui_prefs', { tabOrder: tabOrder.value })
+  persistUiPrefs({ tabOrder: tabOrder.value })
   requestAction('set_tab_order', { order: tabOrder.value })
   // TabBar에게 즉시 알림 — storage event는 같은 창 변경엔 발생 안 하므로 커스텀 이벤트 사용
   try { window.dispatchEvent(new CustomEvent('tabOrderChanged')) } catch {}
@@ -2615,50 +2691,24 @@ function resetThemeOverrides() {
 }
 
 const act = (name: ActionName) => {
-  // SAVE GLOBAL 시 localStorage 설정도 함께 저장
-  if (name === 'save_settings') {
-    requestAction('save_ui_prefs', {
-      tagBlockMode: defaultBlockMode.value,
-      cleanDuplicates: cleanDuplicates.value,
-      cleanSpaces: cleanSpaces.value,
-      cleanUnderscore: cleanUnderscore.value,
-      galleryShowMetadata: galleryMetadata.value,
-      autoAddCopyright: autoAddCopyright.value,
-      historyJumpModifier: historyJumpModifier.value,
-      historyBlinkSelected: historyBlink.value,
-      iconAnimationStyle: iconAnimationStyle.value,
-      uiScale: uiScale.value,
-      editorSidePanelWidth: editorSidePanelWidth.value,
-      tabOrder: tabOrder.value,
-      animaGuardEnabled: animaGuardEnabled.value,
-      animaGuardMaxAreaSide: animaGuardMaxAreaSide.value,
-      animaGuardMaxSide: animaGuardMaxSide.value,
-      // Ollama
-      ollamaUrl: ollamaUrl.value,
-      ollamaModel: ollamaModel.value,
-      ollamaUnloadOnGen: ollamaUnloadOnGen.value,
-    })
-  }
+  // '전역 저장'은 프롬프트·생성 파라미터(prompt_settings.json)만 저장한다. 이 화면의 ui_prefs 값은
+  // 바꿀 때마다 곧바로 저장되므로 여기서 다시 보내지 않는다 — 예전엔 keep-alive 로 남은 이 화면의
+  // 낡은 ref(예: 대화 탭에서 바꾸기 전 Ollama 모델)를 통째로 다시 써서 다른 화면의 변경을 되돌렸다(감사 #41).
   requestAction(name)
+  // 전역 저장은 T2I 스텝·CFG·해상도·Seed 를 기본값 파일에도 반영한다 — 이 화면의 값을 맞춰 둬야
+  // 다음 기본값 편집이 옛 값을 되쓰지 않는다(audit #140).
+  if (name === 'save_settings') setTimeout(() => { void reloadTabDefaults() }, 400)
 }
 
-// 기본값 설정
-const FACTORY_DEFAULTS = { steps: 20, cfg: 7, width: 1024, height: 1024, seed: '-1', denoising: 0.75, sampler: '', scheduler: '', brushSize: 20, effectStrength: 15, yoloConf: 0.25, snapRadius: 12, defaultRating: 'g', hires_enabled: false, ad_enabled: false, sam3_enabled: false, negpip_enabled: false }
-const defaults = reactive({ ...FACTORY_DEFAULTS })
-
-function saveDefaults() {
-  requestAction('save_tab_defaults', { ...defaults })
-}
-
-// defaults 변경 감시 → 자동 저장 알림
-let defaultsTimer: ReturnType<typeof setTimeout> | null = null
-watch(defaults, () => {
-  clearTimeout(defaultsTimer as ReturnType<typeof setTimeout>)
-  defaultsTimer = setTimeout(() => {
-    requestAction('save_tab_defaults', { ...defaults })
-  }, 1500)
-}, { deep: true })
-function resetDefaults() { Object.assign(defaults, FACTORY_DEFAULTS) }
+// 기본값 설정 — 파일과 맞춘 값을 기억하고 바뀐 키만 저장(composables/useTabDefaultsEditor, audit #140).
+// keep-alive 로 남는 화면이라 다시 열릴 때(onActivated)·전역 저장 뒤 파일에서 다시 읽는다.
+const {
+  defaults,
+  reload: reloadTabDefaults,
+  saveNow: saveDefaultsNow,
+  resetToFactory: resetDefaultsToFactory,
+  dispose: disposeTabDefaults,
+} = useTabDefaultsEditor({ sendAction: requestAction, getBackend })
 
 // 사이드 패널 너비 — localStorage로 즉시 반영하고 ui_prefs에 영속
 const editorSidePanelWidth = ref(parseInt(window.localStorage.getItem('editorSidePanelWidth') || '280'))
@@ -2668,8 +2718,9 @@ const uiScale = ref(parseFloat(window.localStorage.getItem('ui.scale') || '1.0')
 function onUiScaleChange(persist = false) {
   const v = Math.max(0.8, Math.min(1.5, uiScale.value))
   uiScale.value = v
-  try { window.localStorage.setItem('ui.scale', String(v)) } catch {}
-  if (persist) requestAction('save_ui_prefs', { uiScale: v })
+  // 드래그 중에는 캐시만(App 의 zoom 이 읽는다), 놓을 때(change) 파일까지
+  if (persist) persistUiPrefs({ uiScale: v })
+  else { try { window.localStorage.setItem('ui.scale', String(v)) } catch {} }
   // 같은 창에서 즉시 반영
   try { window.dispatchEvent(new CustomEvent('uiScaleChanged', { detail: { value: v } })) } catch {}
 }
@@ -2678,8 +2729,9 @@ function onUiScaleChange(persist = false) {
 function onSidePanelWidthChange(persist = false) {
   const v = Math.max(200, Math.min(500, Math.round(editorSidePanelWidth.value)))
   editorSidePanelWidth.value = v
-  window.localStorage.setItem('editorSidePanelWidth', String(v))
-  if (persist) requestAction('save_ui_prefs', { editorSidePanelWidth: v })
+  // 드래그 중에는 캐시만(에디터가 읽는다), 놓을 때(change) 파일까지
+  if (persist) persistUiPrefs({ editorSidePanelWidth: v })
+  else { try { window.localStorage.setItem('editorSidePanelWidth', String(v)) } catch {} }
   try { window.dispatchEvent(new CustomEvent('editorSidePanelWidthChanged')) } catch {}
 }
 
@@ -2714,39 +2766,73 @@ const OLLAMA_RECOMMENDED: { name: string; best?: boolean; desc: string; vram: st
   { name: 'minicpm-v4.5', desc: '8B 경량 비전 — 이미지·영상 이해에 특화', vram: 'VRAM ≈5.5GB' },
   { name: 'muse-glimmer', desc: 'Meta 30B 멀티모달, 상시 로컬 에이전트용', vram: 'VRAM ≈18GB' },
 ]
+// 'best' 추천 모델 — 백엔드 최후 기본값(core/ollama_client.DEFAULT_OLLAMA_MODEL)과 같게 유지한다
+const RECOMMENDED_OLLAMA_MODEL = (OLLAMA_RECOMMENDED.find((rec) => rec.best) || OLLAMA_RECOMMENDED[0]).name
+// 설치 여부는 같은 모델(:latest 무시)만 — gemma4:12b 가 있다고 gemma4:e4b 까지 '설치됨'으로 보지 않는다
 function isOllamaModelInstalled(name: string): boolean {
-  const base = (s: string) => (s || '').split(':')[0].toLowerCase()
-  return ollamaModels.value.some((m) => m === name || base(m) === base(name))
+  return isInstalledOllamaModel(name, ollamaModels.value)
 }
 function pickRecommendedOllamaModel(name: string) {
-  // 설치된 태그가 있으면 그 정확한 이름으로 — 없으면 이름만 적어 두고 pull 안내가 뜬다
-  const base = (s: string) => (s || '').split(':')[0].toLowerCase()
-  const installed = ollamaModels.value.find((m) => m === name) || ollamaModels.value.find((m) => base(m) === base(name))
-  ollamaModel.value = installed || name
-  saveOllamaSettings()
+  // 설치돼 있으면 그 정확한 이름으로 — 없으면 이름만 적어 두고 pull 안내가 뜬다
+  ollamaModel.value = findInstalledModel(name, ollamaModels.value) || name
+  saveOllamaModel()
 }
-const ollamaUrl = ref(window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434')
-const ollamaModel = ref(window.localStorage.getItem('ollamaModel') || 'gemma4:e4b')
+const ollamaUrl = ref(storedOllamaUrl())
+// 저장된 모델이 없으면 '' — 목록을 받으면 설치 모델로 맞추고, 그 전엔 백엔드가 설치 모델로 정한다
+const ollamaModel = ref(storedOllamaModel())
 const ollamaModels = ref<string[]>([])
 const ollamaUnloadOnGen = ref(window.localStorage.getItem('ollamaUnloadOnGen') === 'true')
+// 히스토리 미리보기 품질 (썸네일 폭) — App.vue 의 useHistoryThumbs 가 previewThumbWidthChanged 로 즉시 반영
+const previewThumbWidth = ref(normalizePreviewThumbWidth(window.localStorage.getItem('previewThumbWidth')))
+// CustomSelect 는 값을 그대로 표시하므로 라벨 문자열을 옵션으로 쓰고 라벨 ↔ 폭을 여기서 맞춘다
+const previewThumbOptions: string[] = PREVIEW_THUMB_PRESETS.map(p => p.label)
+const previewThumbLabel = computed(() => PREVIEW_THUMB_PRESETS.find(p => p.value === previewThumbWidth.value)?.label || previewThumbOptions[1])
+function setPreviewThumbByLabel(label: unknown) {
+  const preset = PREVIEW_THUMB_PRESETS.find(p => p.label === String(label))
+  setPreviewThumbWidth(preset ? preset.value : previewThumbWidth.value)
+}
+function setPreviewThumbWidth(value: unknown) {
+  const w = normalizePreviewThumbWidth(value)
+  previewThumbWidth.value = w
+  persistUiPrefs({ previewThumbWidth: w })
+  try { window.dispatchEvent(new CustomEvent('previewThumbWidthChanged', { detail: { value: w } })) } catch {}
+}
+// 생성 후 백엔드 모델 언로드 (기본 off) — Python 이 ui_prefs.unloadModelsAfterGen 을 읽어 결정
+const unloadModelsAfterGen = ref(window.localStorage.getItem('unloadModelsAfterGen') === 'true')
+function saveUnloadModelsAfterGen() {
+  persistUiPrefs({ unloadModelsAfterGen: unloadModelsAfterGen.value })
+}
+// Forge output 폴더에도 저장 (기본 off) — WebUI 백엔드가 POST 직전에 ui_prefs.forgeSaveOutputs 로
+// save_images 를 확정한다(core/forge_output_policy.py). 끄면 앱 저장본만 남는다.
+const forgeSaveOutputs = ref(window.localStorage.getItem('forgeSaveOutputs') === 'true')
+function saveForgeSaveOutputs() {
+  persistUiPrefs({ forgeSaveOutputs: forgeSaveOutputs.value })
+}
+// ComfyUI SAM3 모델 RAM 보관 (기본 on) — ComfyUI 백엔드가 워크플로 컴파일 때 ui_prefs.comfySam3KeepInRam 을
+// 읽어 SAM3 Mask 노드의 cache_model 로 싣는다(core/comfy_sam3_cache_policy.py). Forge 의 sam3_unload_keep_in_ram 대응.
+const comfySam3KeepInRam = ref(window.localStorage.getItem('comfySam3KeepInRam') !== 'false')
+function saveComfySam3KeepInRam() {
+  persistUiPrefs({ comfySam3KeepInRam: comfySam3KeepInRam.value })
+}
 
-function saveOllamaSettings() {
-  window.localStorage.setItem('ollamaUrl', ollamaUrl.value)
-  window.localStorage.setItem('ollamaModel', ollamaModel.value)
-  window.localStorage.setItem('ollamaUnloadOnGen', String(ollamaUnloadOnGen.value))
-  // ui_prefs.json에도 즉시 반영 → Python start_generation이 읽어 언로드 판단
-  requestAction('save_ui_prefs', {
-    ollamaUrl: ollamaUrl.value,
-    ollamaModel: ollamaModel.value,
-    ollamaUnloadOnGen: ollamaUnloadOnGen.value,
-  })
+// Ollama 세 값은 각각 따로 저장한다 — 한 번에 셋을 쓰면 URL 수정이나 '언로드' 체크 하나가 이 화면의
+// 낡은 모델 ref 까지 되써서 대화 탭에서 고른 모델을 되돌렸다(감사 #41). ui_prefs.json 에 즉시 반영 →
+// Python 생성 경로가 읽어 언로드 판단.
+function saveOllamaUrl() {
+  persistUiPrefs({ ollamaUrl: ollamaUrl.value })
+}
+function saveOllamaModel() {
+  persistUiPrefs({ ollamaModel: ollamaModel.value })
+}
+function saveOllamaUnloadOnGen() {
+  persistUiPrefs({ ollamaUnloadOnGen: ollamaUnloadOnGen.value })
 }
 
 async function testOllama() {
   _ollamaRequestMode = 'test'
   const backend: any = await getBackend()
+  // 결과는 ollamaModelsReady → handleOllamaModels (동기 ollamaListModels 는 없앴다)
   if (backend.requestOllamaModels) backend.requestOllamaModels(ollamaUrl.value)
-  else if (backend.ollamaListModels) backend.ollamaListModels(ollamaUrl.value, handleOllamaModels)
 }
 function loadOllamaModels() { testOllama() }
 // 시작 시 조용히 모델 목록 자동 로드 (caption 탭과 동일). 실패하면 Ollama 연결부터 안내.
@@ -2754,7 +2840,6 @@ async function autoLoadOllamaModels() {
   _ollamaRequestMode = 'auto'
   const backend: any = await getBackend()
   if (backend.requestOllamaModels) backend.requestOllamaModels(ollamaUrl.value)
-  else if (backend.ollamaListModels) backend.ollamaListModels(ollamaUrl.value, handleOllamaModels)
 }
 let _ollamaRequestMode: 'test' | 'auto' | null = null
 function handleOllamaModels(json: string) {
@@ -2772,12 +2857,9 @@ function handleOllamaModels(json: string) {
     ollamaModels.value = models
     if (models.length > 0) {
       if (mode === 'test') requestAction('show_toast', { type: 'success', msg: `Ollama 연결 성공! ${models.length}개 모델 발견` })
-      const base = (s: string) => (s || '').split(':')[0].toLowerCase()
-      const match = models.includes(ollamaModel.value)
-        ? ollamaModel.value
-        : models.find((m: string) => ollamaModel.value && base(m) === base(ollamaModel.value))
-      const next = match || models[0]
-      if (next && next !== ollamaModel.value) { ollamaModel.value = next; saveOllamaSettings() }
+      // 백엔드 resolve_model 과 같은 규칙(utils/ollamaPrefs): 같은 모델 → 같은 계열 태그 → 첫 모델
+      const next = resolveInstalledModel(ollamaModel.value, models)
+      if (next && next !== ollamaModel.value) { ollamaModel.value = next; saveOllamaModel() }
     } else {
       const msg = mode === 'test'
         ? 'Ollama 연결됨 — 설치된 모델 없음'
@@ -3415,4 +3497,7 @@ kbd {
   .generation-api-secret { grid-template-columns: 1fr; }
   .generation-api-secret input { grid-column: auto; }
 }
+
+/* 토글 설명 한 줄 (생성 후 모델 언로드) */
+.toggle-row small.hint-inline { display: block; font-size: var(--fs-label); color: var(--text-muted); margin-top: 2px; font-weight: var(--fw-normal); }
 </style>

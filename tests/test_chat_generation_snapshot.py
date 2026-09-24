@@ -41,8 +41,14 @@ class SnapshotHost(GenerationMixin):
         for name, value in values.items():
             setattr(self, name, ReadOnlyWidget(value))
         self.random_resolutions = [(1024, 768, "landscape")]
-        self.settings_tab = SimpleNamespace(chk_wildcard_enabled=ReadOnlyWidget(True))
-        self._vue_lora_text = "<lora:style:0.7>"
+        # 와일드카드 ON/OFF 의 주인(core/prompt_settings_extras) — 예전 숨은 SettingsTab 체크박스 자리
+        from core.prompt_settings_extras import PromptSettingsExtras
+        self.prompt_settings_extras = PromptSettingsExtras(wildcard_enabled=True)
+        # 생성 LoRA 의 단일 소스 — set_lora_stack 과 같은 배율 단위
+        self._vue_lora_entries = [
+            {"name": "style", "weight": 0.7, "enabled": True, "triggerWords": []},
+            {"name": "disabled", "weight": 1.0, "enabled": False, "triggerWords": []},
+        ]
         self.postprocess = {"ADetailer": {"args": [True, {"ad_model": "face.pt"}]} }
 
     def _apply_postprocess_chain(self, payload):
@@ -57,7 +63,7 @@ class ChatSnapshotTests(unittest.TestCase):
              mock.patch("core.standard_hooks.run_pipeline_on_text") as pipeline:
             model, payload = host._chat_generation_snapshot("__subject__")
         self.assertEqual(model, "Anima-3.8B-v1.1.safetensors")
-        self.assertEqual(payload["prompt"], "__subject__, <lora:style:0.7>")
+        self.assertEqual(payload["prompt"], "__subject__, <lora:style:0.70>")
         self.assertEqual(payload["negative_prompt"], "__negative__")
         self.assertEqual((payload["width"], payload["height"]), (1024, 768))
         self.assertEqual(payload["forge_additional_modules"], ["qwen_image_vae.safetensors", "qwen35_4b.safetensors"])
@@ -76,6 +82,18 @@ class ChatSnapshotTests(unittest.TestCase):
     def test_existing_prompt_lora_is_not_duplicated(self):
         _, payload = SnapshotHost()._chat_generation_snapshot("portrait, <lora:style:0.9>")
         self.assertEqual(payload["prompt"].count("<lora:style:"), 1)
+
+    def test_all_disabled_or_empty_stack_sends_no_lora(self):
+        # 감사 #2: 전부 끄거나 지운 스택이 예전 미러(_vue_lora_text) 때문에 계속 붙던 버그
+        host = SnapshotHost()
+        host._vue_lora_text = "<lora:stale:1.00>"   # 옛 미러가 남아 있어도 읽지 않는다
+        for entry in host._vue_lora_entries:
+            entry["enabled"] = False
+        _, payload = host._chat_generation_snapshot("portrait")
+        self.assertEqual(payload["prompt"], "portrait")
+        host._vue_lora_entries = []
+        _, payload = host._chat_generation_snapshot("portrait")
+        self.assertEqual(payload["prompt"], "portrait")
 
     def test_krea_route_keeps_family_and_does_not_add_anima_lora(self):
         host = SnapshotHost()

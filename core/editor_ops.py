@@ -96,7 +96,7 @@ def adv_color(bgr: np.ndarray, black_point=0, white_point=255,
     tint: -100~100 (+ = 마젠타, - = 초록)
     curves: {'rgb'|'r'|'g'|'b': [[x, y], ...]} 0~1 제어점. None 이면 건너뛴다.
 
-    적용 순서는 PyQt 판(`tabs/editor/advanced_color_panel._build_adjusted`)과 같다 —
+    적용 순서는 PyQt 판(`tabs/editor/advanced_color_panel._build_adjusted`, 은퇴해 삭제됨)과 같다 —
     커브 → 레벨/감마 → 색온도. 순서가 바뀌면 같은 설정이 다른 그림을 낸다.
     """
     if curves:

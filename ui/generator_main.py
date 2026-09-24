@@ -10,17 +10,22 @@ import random
 import shutil
 import subprocess
 import threading
-from urllib.parse import unquote
 
 from PyQt6.QtWidgets import QMessageBox, QLineEdit, QTextEdit, QApplication, QHBoxLayout, QWidget, QFileDialog, QMenu
 from PyQt6.QtCore import QTimer, QEvent, Qt, pyqtSignal, pyqtSlot
 
+from core.path_safety import strip_file_url
+
 
 def _clean_path(path: str) -> str:
-    """file:/// 프리픽스 제거 + OS 경로 정규화"""
+    """file:// URL 이면 스킴 제거 + 퍼센트 디코딩, 원시 경로는 글자 그대로 + OS 구분자 정규화.
+
+    예전에는 원시 경로까지 unquote 해, 이름에 ``%20`` 같은 글자가 든 파일의 즐겨찾기·메타데이터·삭제가
+    다른 파일(디코드된 이름의 형제)을 가리켰다. 규칙은 core.path_safety.strip_file_url 하나를 쓴다.
+    """
     if not path:
         return ''
-    clean_path = unquote(str(path)).replace('file:///', '').replace('file://', '')
+    clean_path = strip_file_url(path)
     clean_path = clean_path.replace('/', os.sep)
     return clean_path
 
@@ -30,9 +35,7 @@ from ui.generator_prompts import PromptHandlingMixin
 from ui.generator_generation import GenerationMixin
 from ui.generator_settings import SettingsMixin
 from ui.generator_actions import ActionsMixin
-from ui.generator_gallery import GalleryMixin
 from ui.generator_webui import WebUIMixin
-from ui.generator_search import SearchMixin
 from ui.creator_actions import CreatorActionsMixin
 from ui.chat_actions import ChatActionsMixin
 from ui.model_download_actions import ModelDownloadActionsMixin
@@ -41,6 +44,7 @@ from ui.comfy_workflow_actions import ComfyWorkflowActionsMixin
 from ui.comfy_compatibility_actions import ComfyCompatibilityActionsMixin
 from ui.relight_actions import RelightActionsMixin
 from ui.hand_reconstruction_actions import HandReconstructionActionsMixin
+from ui.event_search_actions import EventSearchActionsMixin
 from widgets.queue_panel import QueuePanel
 from widgets.queue_manager import QueueManager
 from utils.prompt_cleaner import get_prompt_cleaner
@@ -48,6 +52,14 @@ from utils.theme_manager import get_theme_manager, get_color
 from utils.tray_manager import TrayManager
 from utils.atomic_json import atomic_write_json
 from core.file_naming import sanitize_filename
+from core.metadata_actions import apply_block_reason, infotext_ui_fields, prompt_transfer
+from ui.image_metadata_actions import (
+    metadata_for_action as _metadata_for_action,
+    queue_item_from_metadata as _queue_item_from_metadata,
+    start_generation_from_metadata as _start_generation_from_metadata,
+    # 별칭 없이 — tests/test_web_action_policy 의 대화상자 도달 분석이 함수 이름으로 따라간다
+    transplant_metadata_action,
+)
 
 
 def _same_api_endpoint(left: object, right: object) -> bool:
@@ -58,6 +70,8 @@ def _same_api_endpoint(left: object, right: object) -> bool:
     return bool(first and second and first == second)
 
 
+from ui.settings_data_actions import handle_settings_data_action, should_skip_persist_action
+
 class GeneratorMainUI(
     GeneratorBase,
     UISetupMixin,
@@ -65,12 +79,10 @@ class GeneratorMainUI(
     GenerationMixin,
     SettingsMixin,
     ActionsMixin,
-    GalleryMixin,
     WebUIMixin,
-    SearchMixin,
     CreatorActionsMixin, ChatActionsMixin, ModelDownloadActionsMixin, XYZActionsMixin,
     ComfyWorkflowActionsMixin, ComfyCompatibilityActionsMixin, RelightActionsMixin,
-    HandReconstructionActionsMixin,
+    HandReconstructionActionsMixin, EventSearchActionsMixin,
 ):
     _IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
     animaForgeImportReady = pyqtSignal(object)
@@ -82,11 +94,8 @@ class GeneratorMainUI(
             self.setWindowTitle("AI Studio Pro")
             self.setAcceptDrops(True)
 
-            # 1. 필수 속성 초기화
-            self.s1_widgets = {'prompt': type('P',(),{'installEventFilter':lambda *a:None})()}
-            self.s2_widgets = {'prompt': type('P',(),{'installEventFilter':lambda *a:None})()}
+            # 1. 필수 속성 초기화 (ADetailer 슬롯 프록시 s1/s2_widgets 는 _setup_ui 가 만든다)
             self.is_programmatic_change = False
-            self.generation_data = {}
             self.filtered_results = []
 
             # 1-A. UI 상태 영속화 매니저 — 창 크기/위치 자동 저장/복원
@@ -130,11 +139,13 @@ class GeneratorMainUI(
             # 7. 타이머 가동
             # 백엔드 실제 연결 여부 — get_backend()는 항상 객체를 돌려주므로(미설정 시
             # config로 WebUI 기본 생성) 'None 체크'로는 미연결을 구분할 수 없다. 이 플래그로
-            # 미연결/건너뛰기 상태에선 VRAM 폴링·LoRA 프리로드가 헛되이 백엔드를 두드리지
-            # 않게 한다. on_webui_info_loaded에서 True, 실패/건너뛰기에서 False.
+            # 미연결/건너뛰기 상태에선 VRAM 폴링이 헛되이 백엔드를 두드리지 않게 한다.
+            # on_webui_info_loaded에서 True(그 자리에서 LoRA 캐시도 워커로 다시 채운다),
+            # 실패/건너뛰기에서 False.
             self._backend_connected = False
-            # VRAM 은 NVML 로 장치 전체를 직접 잰다(마이크로초) — 5초면 Ollama 가 모델을
+            # VRAM 은 NVML 로 장치 전체를 직접 잰다(마이크로초) — 1초 간격이라 Ollama 가 모델을
             # 올리고 내리는 것이 바로 보인다. 예전 30초 + Forge 자기 메모리는 12.1 에 멈춰 있었다.
+            # 느린 폴백(nvidia-smi·백엔드 HTTP)은 core.gpu_stats 가 5초 캐시로 묶는다.
             self._vram_timer = QTimer()
             self._vram_timer.setInterval(1000)
             self._vram_timer.timeout.connect(self._update_vram_status)
@@ -150,8 +161,11 @@ class GeneratorMainUI(
             # 8. 초기값 강제 업데이트
             QTimer.singleShot(500, self.update_total_prompt_display)
 
-            # 9. 조건식 + 기본값 로드
-            QTimer.singleShot(1000, self._load_saved_configs)
+            # 9. 조건식 + 기본값 + ui_prefs 적용 — 동기로. Vue 는 바인딩 직후 getInitialConfig 로
+            #    같은 파일을 당겨 가므로(bridge.js _requestInitialConfig) 1회 emit 에 기대지 않는다.
+            #    레거시 마이그레이션이 그 pull 보다 먼저 끝나야 하고, 늦은 타이머가 Vue 가 이미 보낸
+            #    값을 덮어서도 안 된다(감사 #107).
+            self._apply_saved_configs()
 
             # 10. UI 상태 복원 (150ms 지연 — 위젯 레이아웃 자리 잡은 후)
             #     showMaximized() 등 다른 main의 호출과 충돌 회피 위해 약간 더 늦춤
@@ -161,8 +175,15 @@ class GeneratorMainUI(
             #     백엔드 전환 시 자동 저장/복원, Vue로 자동 전파
             from core.mode_aware_automation import ModeAwareAutomationSettings
             self.automation_persistence = ModeAwareAutomationSettings(self)
-            # vue_bridge가 준비되고 Vue가 시그널 받을 준비 끝난 후 (1.5초 후) 적용
-            QTimer.singleShot(1500, self.automation_persistence.initialize)
+            # 동기로 파일 값을 호스트에 싣는다. Vue 는 마운트 때 getAutomationSettings 로 이 값을
+            # 당겨 채운 뒤에 동기화를 보낸다 — 예전엔 1.5초 타이머의 1회 emit 보다 Vue 의 하드코딩
+            # 기본값 푸시가 먼저 파일을 덮었다(감사 #42).
+            try:
+                self.automation_persistence.initialize()
+            except Exception as e:   # 설정 파일 문제로 앱 시작이 막히지 않게 — 기본값으로 계속
+                print(f"[Warning] 자동화 설정 복원 실패(기본값 사용): {e}")
+            # 자동완성 데이터(태그 DB 2초 + 한국어 카탈로그) 백그라운드 예열 — 첫 키 입력 공백 제거
+            QTimer.singleShot(2500, self.vue_bridge.warmTagSuggestions)
 
             # 12. PR 1 — PromptPipeline 표준 훅 등록
             #     기존 처리 뒤에 호출되어 비파괴적 — 회귀 위험 없음
@@ -172,6 +193,17 @@ class GeneratorMainUI(
             except Exception as e:
                 print(f"[Warning] 표준 훅 등록 실패: {e}")
 
+            # 13. 옛 썸네일 캐시 폴더(image_cache/thumbs) 은퇴 — 시작 30초 뒤 데몬 스레드에서 한 번.
+            #     현재 형식은 config.THUMB_DIR(thumbs_v2)로 옮기고 레거시 PyQt 갤러리 썸네일은 지운다.
+            #     그 전에 히스토리·카드가 요청한 키는 조회가 먼저 옮겨 온다(ThumbnailPrefetcher·
+            #     aithumb: 핸들러의 legacy_dir) — 여기서는 남은 것을 한꺼번에 치운다.
+            try:
+                from config import LEGACY_THUMB_DIR, THUMB_DIR
+                from core.legacy_thumb_cache import start_legacy_thumb_retirement
+                start_legacy_thumb_retirement(LEGACY_THUMB_DIR, THUMB_DIR)
+            except Exception as e:
+                print(f"[Warning] 옛 썸네일 캐시 정리 예약 실패: {e}")
+
             print("[System] Engine Ready.")
 
         except Exception as e:
@@ -180,24 +212,15 @@ class GeneratorMainUI(
             QMessageBox.critical(None, "Boot Error", f"Fatal initialization error:\n{e}")
             sys.exit(1)
 
-    # ========== XYZ Plot 핸들러 ==========
-    
-    def _on_xyz_add_to_queue(self, payloads: list):
-        if hasattr(self, 'queue_panel'):
-            for p in payloads: self.queue_panel.add_single_item(p)
-            self.show_status(f"Added {len(payloads)} XYZ combinations to queue.")
-
-    def _on_xyz_start_generation(self, payloads: list):
-        if hasattr(self, 'queue_panel'):
-            for p in payloads: self.queue_panel.add_single_item(p)
-            self.show_status("Starting XYZ generation.")
-            if hasattr(self, 'queue_manager'): self.queue_manager.start()
-            
     # ========== Vue Bridge Action Handler (The Core) ==========
 
     def _handle_vue_action(self, action: str, payload: dict):
         """[중요] Vue에서 날아온 모든 액션을 분석하고 백엔드 로직에 주입"""
-        print(f"[Bridge] Action Received: {action} | Payload: {json.dumps(payload)[:100]}...")
+        # 페이로드 전체를 json.dumps 하지 않는다 — update_prompt_deck(수만 행)·chat_save
+        # (base64 이미지) 같은 큰 페이로드에서 로그 100자 때문에 GUI 스레드가 멈췄다.
+        # 로그 줄은 ASCII 이고, 출력 실패(cp949 리다이렉트·닫힌 stdout)도 액션을 막지 않는다.
+        from core.action_log import log_action
+        log_action(action, payload)
 
         # Creator Studio는 별도 deep module에서 처리한다. 이 seam을 먼저
         # 통과시켜 아래의 거대한 레거시 문자열 라우터를 더 키우지 않는다.
@@ -217,7 +240,12 @@ class GeneratorMainUI(
             return
         if self._handle_creator_action(action, payload):
             return
-        
+        # 설정 백업을 가져온 직후(재시작 전)에는 저장 액션이 가져온 파일을 덮어쓰지 않는다.
+        if should_skip_persist_action(self, action):
+            self.vue_bridge.showNotification.emit(
+                'info', '가져온 설정을 적용하려고 재시작 중입니다 — 지금은 저장하지 않습니다')
+            return
+
         try:
             # 1. 워크스페이스 제어
             if action == 'native_tab_switch':
@@ -230,7 +258,7 @@ class GeneratorMainUI(
                     self.backend_ui_tab.ensure_loaded()
                 elif tab_id == 'web' and hasattr(self, 'web_tab'):
                     self.web_tab.ensure_loaded()
-                self.show_status(f"Workspace Switched: {tab_id}")
+                # (탭 전환은 화면 자체가 알린다 — 상태줄에 'Workspace Switched' 를 띄우지 않는다)
 
             elif action == 'vue_tab_switch':
                 # Vue SPA 내부 탭(T2I/I2I/Inpaint/Search 등) 전환 알림.
@@ -241,7 +269,6 @@ class GeneratorMainUI(
                     self._main_stack.setCurrentIndex(0)
                 if hasattr(self, 'vue_bridge'):
                     self.vue_bridge.tabChanged.emit(tab_id)
-                self.show_status(f"Tab: {tab_id}")
 
             # 2. 이미지 생성 엔진
             elif action == 'generate':
@@ -316,133 +343,107 @@ class GeneratorMainUI(
                 path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.webp)")
                 if path: self.vue_bridge.editorImageLoaded.emit(path.replace('\\', '/'))
             
-            elif action == 'editor_save':
-                # FIX: 원래는 다이얼로그 띄웠음. 이제는 원본 경로에 덮어쓰기.
-                # 다른 이름으로 저장은 editor_save_as 따로 있음.
-                path = payload.get('path', '')
-                if path:
-                    src = _clean_path(path)
-                    # src가 임시 작업 파일이면 그 자리에 두고, 사용자에게는 알림만
-                    # (실제로는 editor 작업 결과가 그 path에 이미 저장돼있음)
-                    if os.path.exists(src):
-                        self.vue_bridge.showNotification.emit('success', f'저장됨: {os.path.basename(src)}')
-                    else:
-                        self.vue_bridge.showNotification.emit('error', f'파일 없음: {src}')
-
-            elif action == 'editor_save_as':
-                path = payload.get('path', '')
-                if path:
-                    src = _clean_path(path)
-                    # 기본 파일명 추천
-                    base = os.path.splitext(os.path.basename(src))[0]
-                    ext = os.path.splitext(src)[1].lstrip('.').lower() or 'png'
-                    suggest = f"{base}_edited.{ext}"
-                    dst, _ = QFileDialog.getSaveFileName(
-                        self, "다른 이름으로 저장",
-                        suggest,
-                        "PNG (*.png);;JPEG (*.jpg);;WebP (*.webp);;All Files (*)"
-                    )
-                    if dst:
-                        shutil.copy2(src, dst)
-                        self.vue_bridge.showNotification.emit('success', f'저장됨: {os.path.basename(dst)}')
-                        self.show_status(f"Exported to: {os.path.basename(dst)}")
+            elif action in ('editor_save', 'editor_save_as'):
+                # 저장(비파괴): 원본은 덮어쓰지 않고 원본 옆 <stem>_edited[_N] 사본(임시 원본이면
+                # 기본 출력 폴더)에 메타데이터를 보존해 쓴다 — 그 문서의 다음 저장은 그 사본만 갱신.
+                # 다른 이름으로 저장은 고른 확장자로 다시 인코딩한다. 병합 안 된 드로잉 레이어도
+                # 합성하며, 결과는 editorSaveResult 로 돌려준다.
+                from ui.editor_save_actions import handle_editor_save_action
+                from core.web_action_policy import HOST_DIALOG_MESSAGE, host_dialogs_blocked
+                save_kwargs = {}
+                if host_dialogs_blocked(web_mode=bool(getattr(self, 'web_mode', False)),
+                                        remote=bool(getattr(self, 'web_remote', True))):
+                    # 원격 웹 모드: 저장 위치를 호스트 대화상자로 묻지 않고 editorSaveResult
+                    # 오류로 돌려준다 — 프론트의 '저장 중' 상태가 풀리도록 브리지가 아니라
+                    # 여기서 처리한다(web_action_policy.BRANCH_HANDLED_DIALOG_ACTIONS).
+                    def _refuse_host_dialog(_title, _suggested):
+                        raise RuntimeError(HOST_DIALOG_MESSAGE)
+                    save_kwargs['ask_path'] = _refuse_host_dialog
+                handle_editor_save_action(self, action, payload, **save_kwargs)
 
             elif action == 'editor_add_yolo_model':
                 from PyQt6.QtWidgets import QFileDialog as _QFD
-                from tabs.editor.mosaic_panel import get_editor_models_dir
-                models_dir = get_editor_models_dir()
+                from core import yolo_models
                 paths, _ = _QFD.getOpenFileNames(
-                    self, "YOLO 모델 선택", models_dir,
+                    self, "YOLO 모델 선택", yolo_models.get_editor_models_dir(),
                     "YOLO Model (*.pt *.onnx *.safetensors);;All Files (*)"
                 )
-                if paths and hasattr(self, 'mosaic_editor') and self.mosaic_editor.mosaic_panel:
-                    panel = self.mosaic_editor.mosaic_panel
-                    from tabs.editor.mosaic_panel import _save_yolo_model_paths, get_editor_models_dir
-                    models_dir = get_editor_models_dir()
-                    for p in paths:
-                        # editor_models/ 외부 파일이면 복사
-                        if not p.startswith(models_dir.replace('\\', '/')) and not p.startswith(models_dir):
-                            dst = os.path.join(models_dir, os.path.basename(p))
-                            if not os.path.exists(dst):
-                                shutil.copy2(p, dst)
-                                p = dst
-                        if p not in panel._yolo_model_paths:
-                            panel._yolo_model_paths.append(p)
-                    _save_yolo_model_paths(panel._yolo_model_paths)
-                    panel._update_model_label()
-                    # Vue에 모델 라벨 업데이트 전달
-                    import os as _os2
-                    names = [_os2.path.basename(p) for p in panel._yolo_model_paths]
-                    label = ", ".join(names) if names else "No Model"
+                if paths:
+                    # 외부 파일은 Editor_models 로 복사하고(같은 이름이 있으면 그 파일), 초기화로
+                    # 비활성된 모델이면 다시 켠다. 설정·폴더를 매번 새로 읽는다(core.yolo_models).
+                    try:
+                        model_paths = yolo_models.add_models(paths)
+                    except Exception as e:
+                        self.vue_bridge.showNotification.emit('error', f'YOLO 모델 추가 실패: {e}')
+                        return
+                    label = yolo_models.model_label(model_paths)
                     self.vue_bridge.yoloModelUpdated.emit(label)
                     self.show_status(f"YOLO Model loaded: {label}")
 
             # 6. 기타 스튜디오 도구
             elif action == 'show_prompt_history': self._show_prompt_history()
-            elif action == 'open_lora_manager': self._open_lora_manager()
             elif action == 'save_settings':
-                self.save_settings()
-                # 저장 후 즉시 재로드 (Vue에 반영)
-                QTimer.singleShot(200, self.load_settings)
-                # defaults도 동시 업데이트
+                saved = self.save_settings()
+                # 저장 후 load_settings 로 다시 읽지 않는다 — 방금 쓴 값이 곧 프록시 값이라 얻는 것이
+                # 없고, 재로드는 같은 URL 백엔드 재생성(XYZ 축 초기화)·슬라이더 표류·Vue 정리 토글
+                # 덮어쓰기만 남겼다(감사 #29).
+                # defaults도 동시 업데이트(f90af4319 'Default 연동') — 다섯 키만 병합한다.
+                # Settings 화면은 다시 열릴 때(onActivated)·전역 저장 뒤 이 값을 다시 읽는다.
                 try:
-                    defaults_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'tab_defaults.json')
-                    if os.path.exists(defaults_path):
-                        with open(defaults_path, 'r', encoding='utf-8') as f:
-                            cur = json.load(f)
-                        cur['steps'] = int(self.steps_input.text() or 20)
-                        cur['cfg'] = float(self.cfg_input.text() or 7)
-                        cur['width'] = int(self.width_input.text() or 1024)
-                        cur['height'] = int(self.height_input.text() or 1024)
-                        cur['seed'] = self.seed_input.text() or '-1'
-                        atomic_write_json(defaults_path, cur)
-                except Exception:
-                    pass
-                if hasattr(self, 'vue_bridge'):
-                    self.vue_bridge.showNotification.emit('success', '설정이 저장되었습니다')
+                    from core.tab_defaults import sync_t2i_defaults
+                    sync_t2i_defaults({
+                        'steps': self.steps_input.text(), 'cfg': self.cfg_input.text(),
+                        'width': self.width_input.text(), 'height': self.height_input.text(),
+                        'seed': self.seed_input.text(),
+                    })
+                except Exception as exc:
+                    print(f"[Config] tab_defaults 연동 실패: {exc}")
+                # save_settings 는 실패하면 False — 예전엔 실패해도 '저장되었습니다' 토스트가 떴다.
+                from ui.status_line import notify_user
+                if saved is False:
+                    notify_user(self, 'error', '설정을 저장하지 못했습니다 — 콘솔 로그를 확인하세요')
+                else:
+                    notify_user(self, 'success', '설정이 저장되었습니다')
             elif action == 'import_anima_from_forge':
                 self._start_anima_forge_import()
+            elif action == 'reset_anima_guidance':
+                # 기본값의 단일 출처는 core/anima_guidance 스펙 — Vue 는 사본을 들지 않는다
+                self._reset_anima_guidance()
             elif action == 'swap_resolution': self._swap_resolution()
             elif action == 'set_random_resolutions':
                 lst = payload.get('list', [])
                 self.random_resolutions = [(int(r[0]), int(r[1]), str(r[2])) for r in lst if len(r) >= 3]
             elif action == 'set_rating_filter':
-                self._rating_filter = set(payload.get('ratings', ['g', 's', 'q', 'e']))
-                # 현재 deck을 rating 필터로 재필터링
-                if hasattr(self, 'filtered_results') and self.filtered_results:
-                    self.shuffled_prompt_deck = [
-                        r for r in self.filtered_results
-                        if r.get('rating', 'g') in self._rating_filter
-                    ]
-                    import random as _rnd
-                    _rnd.shuffle(self.shuffled_prompt_deck)
+                # 같은 필터 재전송(마운트·웹 탭마다)은 무시하고, 바뀌면 진행도를 지키며 덱을 맞춘 뒤
+                # 저장·상태 알림(core.search_deck.set_owner_rating_filter).
+                from core.search_deck import set_owner_rating_filter
+                ratings = payload.get('ratings') if isinstance(payload, dict) else None
+                set_owner_rating_filter(
+                    self, ratings if isinstance(ratings, list) else ['g', 's', 'q', 'e'])
             elif action == 'update_prompt_deck':
-                # Vue에서 필터링된 결과로 덱 업데이트
-                deck = payload.get('results', [])
-                if 'results' in payload and isinstance(deck, list):
-                    current_identity = getattr(
-                        self, '_search_dataset_identity', None
-                    )
-                    current_lineage = {
-                        'label': current_identity.get('label'),
-                        'fingerprint': current_identity.get('fingerprint'),
-                        'snapshot_id': getattr(
-                            self, '_search_snapshot_id', None
-                        ),
-                    } if isinstance(current_identity, dict) else None
-                    if payload.get('lineage') != current_lineage:
-                        self.show_status(
-                            '검색 결과 lineage가 현재 결과와 일치하지 않아 '
-                            '지연된 필터 요청을 무시했습니다.'
-                        )
-                        return
-                    import random as _rnd
-                    rating_filter = getattr(self, '_rating_filter', {'g', 's', 'q', 'e'})
+                # Vue에서 필터링된 결과로 덱 업데이트. Vue 는 base 행 인덱스
+                # ({indices, base_size, lineage})를 보내고, 구형 {results} 도 받는다.
+                # lineage 가 현재 스냅숏과 다르면(늦게 도착한 옛 필터) 거부한다.
+                # base 를 아직 모르면(loadFullResults 가 기록 못 함) 같은 규칙으로 한 번 읽어 본다.
+                from core.search_result_store import SearchResultStore
+                from core.search_session import resolve_prompt_deck_update
+                deck_update = resolve_prompt_deck_update(
+                    self, payload, store_factory=SearchResultStore,
+                )
+                if deck_update.error:
+                    # show_status 는 하단 상태줄 한 줄이라 놓치기 쉽다 — Vue 는 이미 '필터 적용'
+                    # 토스트를 띄웠으니, 자동화 덱이 그대로라는 걸 알림(토스트)으로도 알린다.
+                    self.show_status(deck_update.error)
+                    bridge = getattr(self, 'vue_bridge', None)
+                    if bridge is not None:
+                        bridge.showNotification.emit('warning', deck_update.error)
+                    return
+                deck = deck_update.rows
+                if deck is not None:
+                    from core.search_deck import refill_owner_deck
                     self.filtered_results = deck
-                    self.shuffled_prompt_deck = [
-                        r for r in deck if r.get('rating', 'g') in rating_filter
-                    ]
-                    _rnd.shuffle(self.shuffled_prompt_deck)
+                    # 덱 재구성(등급 필터 → 셔플 → 저장 → 상태)의 단일 경로
+                    refill_owner_deck(self)
                     if not deck and getattr(self, 'is_automating', False):
                         self._stop_automation(
                             '검색 필터 결과가 없어 자동화를 중지했습니다.'
@@ -450,19 +451,11 @@ class GeneratorMainUI(
                     # 필터 적용 결과를 디스크에 저장(단일 쓰기 경로) → 재시작 시 '필터링된' 덱 복원.
                     #   full은 갱신 안 함(새 검색 때만) → '필터 해제' 베이스(last_full)는 유지.
                     self._persist_search_results(deck)
-                    if hasattr(self, '_save_deck_state'):
-                        self._save_deck_state()
             elif action == 'reset_prompt_deck':
-                # 덱 초기화 — filtered_results에서 덱을 가득 다시 채우고 셔플 (사용 0으로 리셋)
-                import random as _rnd
-                fr = getattr(self, 'filtered_results', None) or []
-                rating_filter = getattr(self, '_rating_filter', {'g', 's', 'q', 'e'})
-                self.shuffled_prompt_deck = [r for r in fr if r.get('rating', 'g') in rating_filter]
-                _rnd.shuffle(self.shuffled_prompt_deck)
-                if hasattr(self, '_save_deck_state'):
-                    self._save_deck_state()
-                if hasattr(self, '_emit_auto_status'):
-                    self._emit_auto_status()   # 덱 현황(남은/사용) 즉시 갱신
+                # 덱 초기화 — filtered_results에서 덱을 가득 다시 채우고 셔플 (사용 0으로 리셋).
+                # 저장과 덱 현황(남은/사용) 알림까지 core.search_deck 한 곳에서.
+                from core.search_deck import refill_owner_deck
+                refill_owner_deck(self)
             elif action == 'run_adetailer_single':
                 self._run_adetailer_single(payload)
             elif action == 'run_adetailer_batch':
@@ -501,17 +494,9 @@ class GeneratorMainUI(
 
             # 7. 검색 결과 → 프롬프트 적용
             elif action == 'apply_search_result':
-                # Vue 검색 결과 필드명 → Python bundle 필드명 통일
-                bundle = {
-                    'character': payload.get('character', ''),
-                    'copyright': payload.get('copyright', ''),
-                    'artist': payload.get('artist', ''),
-                    'general': payload.get('general', ''),
-                }
-                # nan 문자열 처리
-                for k in bundle:
-                    if str(bundle[k]).lower() == 'nan':
-                        bundle[k] = ''
+                # Vue 검색 결과 행 → 덱과 같은 번들(태그 4종 + rating + 해상도 — 자동 해상도 포함)
+                from core.search_deck import prompt_bundle_from_row
+                bundle = prompt_bundle_from_row(payload)
 
                 self.is_programmatic_change = True
                 try:
@@ -532,15 +517,9 @@ class GeneratorMainUI(
                     self.vue_bridge.showNotification.emit('success', '프롬프트가 적용되었습니다')
 
             elif action == 'add_search_to_queue':
-                # 먼저 프롬프트 적용하여 UI 채우기
-                bundle = {
-                    'character': payload.get('character', ''),
-                    'copyright': payload.get('copyright', ''),
-                    'artist': payload.get('artist', ''),
-                    'general': payload.get('general', ''),
-                }
-                for k in bundle:
-                    if str(bundle[k]).lower() == 'nan': bundle[k] = ''
+                # 먼저 프롬프트 적용하여 UI 채우기 (덱과 같은 번들 — 자동 해상도 포함)
+                from core.search_deck import prompt_bundle_from_row
+                bundle = prompt_bundle_from_row(payload)
                 self.is_programmatic_change = True
                 try:
                     self.apply_prompt_from_data(bundle)
@@ -568,14 +547,26 @@ class GeneratorMainUI(
             elif action == 'add_favorite':
                 path = payload.get('path', '')
                 if path:
-                    clean = _clean_path(path)
-                    self._load_favorites_from_file()
-                    if clean not in self.favorites_list:
-                        self.favorites_list.append(clean)
-                        self._save_favorites_to_file()
-                    self.show_status("Added to favorites.")
-                    if hasattr(self, 'vue_bridge'):
-                        self.vue_bridge.showNotification.emit('success', '즐겨찾기에 추가됨')
+                    # core.favorites — 지금 없는 경로(분리된 드라이브)의 항목을 지우지 않고,
+                    # 경로 표기 차이(/ vs \, 대소문자)는 같은 항목으로 본다.
+                    # 파일을 잠깐 못 읽으면(공유 위반 등) 저장하지 않고 멈춘다 — '추가됨' 도 띄우지 않는다.
+                    from core.favorites import FavoritesUnavailableError, add_favorite
+                    try:
+                        # (저장된 목록은 들고 있지 않는다 — 읽던 숨은 PyQt 즐겨찾기 스트립은 은퇴했고,
+                        #  Vue 는 getFavorites 로 파일을 다시 읽는다)
+                        added, _saved = add_favorite(_clean_path(path))
+                    except (FavoritesUnavailableError, OSError) as fav_err:
+                        from core.error_handler import sanitize_for_ui
+                        if hasattr(self, 'vue_bridge'):
+                            self.vue_bridge.showNotification.emit(
+                                'error', f'즐겨찾기에 추가하지 못했습니다: {sanitize_for_ui(str(fav_err))}')
+                    else:
+                        self.show_status("Added to favorites.")
+                        if hasattr(self, 'vue_bridge'):
+                            if added:
+                                self.vue_bridge.showNotification.emit('success', '즐겨찾기에 추가됨')
+                            else:
+                                self.vue_bridge.showNotification.emit('info', '이미 즐겨찾기에 있습니다')
 
             # artist lock
             elif action == 'set_artist_locked':
@@ -587,84 +578,62 @@ class GeneratorMainUI(
             elif action == 'delete_image':
                 path = payload.get('path', '')
                 if path:
-                    from core.path_safety import safe_input_path
-                    clean_path = safe_input_path(_clean_path(path))
-                    if not clean_path:
-                        if hasattr(self, 'vue_bridge'):
-                            self.vue_bridge.showNotification.emit('error', '허용되지 않은 이미지 경로입니다')
-                    else:
-                        from core.image_utils import move_to_trash
-                        move_to_trash(clean_path)
+                    # 실제로 옮겼을 때만 '휴지통으로 이동됨' — send2trash 가 없거나 실패하면
+                    # 영구 삭제로 넘어가지 않고 오류로 알린다(core.image_utils.move_to_trash).
+                    # 결과는 경로별로 imageDeleteResult 로도 돌려준다 — 프론트는 removed 가
+                    # 참일 때만 갤러리·폴더 캐시·히스토리에서 뺀다(실패하면 목록에 남는다).
+                    # 확장자는 갤러리가 보여 주는 미디어 전부(영상·오디오 포함) — 예전엔 정지
+                    # 이미지만 허용해서 영상 '삭제' 가 목록에서만 사라지고 파일은 남았다.
+                    from core.image_delete import image_delete_result
+                    from ui.vue_bridge import _GALLERY_MEDIA_EXTS
+                    result = image_delete_result(
+                        str(path), _clean_path(path), allowed_exts=_GALLERY_MEDIA_EXTS)
+                    if result['ok']:
                         self.show_status("Moved to trash.")
-                        if hasattr(self, 'vue_bridge'):
-                            self.vue_bridge.showNotification.emit('info', '휴지통으로 이동됨')
+                    if hasattr(self, 'vue_bridge'):
+                        self.vue_bridge.showNotification.emit(result['level'], result['message'])
+                        self.vue_bridge.imageDeleteResult.emit(json.dumps(result, ensure_ascii=False))
 
-            # 10. 프리셋
+            # 10. 프리셋 — 저장·미리보기·불러오기·공유가 같은 PRESET_KEYS(core.generation_presets)
             elif action == 'save_preset_by_name':
+                from core.generation_presets import write_preset
                 try:
-                    name = sanitize_filename(payload.get('name', ''), fallback='')
-                    if name:
-                        preset = self._build_settings_dict()
-                        preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'presets')
-                        atomic_write_json(os.path.join(preset_dir, f"{name}.json"), preset)
-                        self.vue_bridge.showNotification.emit('success', f'프리셋 "{name}" 저장됨')
+                    # 선행/후행/네거티브는 칸의 글이 아닌 base_* 템플릿(SettingsMixin._build_preset_settings)
+                    saved = write_preset(payload.get('name', ''), self._build_preset_settings())
+                    self.vue_bridge.showNotification.emit('success', f'프리셋 "{saved}" 저장됨')
                 except Exception as e:
                     self.vue_bridge.showNotification.emit('error', f'저장 실패: {e}')
 
             elif action == 'load_preset_by_name':
-                try:
-                    name = sanitize_filename(payload.get('name', ''), fallback='')
-                    if name:
-                        fp = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'presets', f"{name}.json")
-                        with open(fp, 'r', encoding='utf-8') as f:
-                            preset = json.load(f)
-                        self._apply_settings_dict(preset)
-                        self.update_total_prompt_display()
-                        self.vue_bridge.showNotification.emit('success', f'프리셋 "{name}" 로드됨')
-                except Exception as e:
-                    self.vue_bridge.showNotification.emit('error', f'로드 실패: {e}')
+                from core.generation_presets import preset_name, read_preset
+                name = preset_name(payload.get('name', ''))
+                preset = read_preset(name) if name else None
+                if not preset:
+                    self.vue_bridge.showNotification.emit('error', f'프리셋 "{name}"을(를) 읽지 못했습니다')
+                    return
+                warnings = self._apply_generation_preset(preset)
+                if warnings:
+                    self.vue_bridge.showNotification.emit(
+                        'warning', f'프리셋 "{name}" 로드됨 — ' + ' · '.join(warnings))
+                else:
+                    self.vue_bridge.showNotification.emit('success', f'프리셋 "{name}" 로드됨')
 
             elif action == 'delete_preset':
+                from core.generation_presets import delete_preset, preset_name
                 try:
-                    name = sanitize_filename(payload.get('name', ''), fallback='')
-                    if name:
-                        fp = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'presets', f"{name}.json")
-                        if os.path.exists(fp): os.remove(fp)
+                    name = preset_name(payload.get('name', ''))
+                    if name and delete_preset(name):
                         self.vue_bridge.showNotification.emit('success', f'프리셋 "{name}" 삭제됨')
+                    else:
+                        self.vue_bridge.showNotification.emit('info', f'프리셋 "{name}"이(가) 없습니다')
                 except Exception as e:
                     self.vue_bridge.showNotification.emit('error', f'삭제 실패: {e}')
 
-            elif action == 'save_preset':
-                try:
-                    from PyQt6.QtWidgets import QInputDialog
-                    name, ok = QInputDialog.getText(self, "프리셋 저장", "프리셋 이름:")
-                    name = sanitize_filename(name, fallback='')
-                    if ok and name:
-                        preset = self._build_settings_dict()
-                        preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'presets')
-                        atomic_write_json(os.path.join(preset_dir, f"{name}.json"), preset)
-                        self.vue_bridge.showNotification.emit('success', f'프리셋 "{name}" 저장됨')
-                except Exception as e:
-                    self.vue_bridge.showNotification.emit('error', f'프리셋 저장 실패: {e}')
-
-            elif action == 'load_preset':
-                try:
-                    from PyQt6.QtWidgets import QInputDialog
-                    preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'presets')
-                    os.makedirs(preset_dir, exist_ok=True)
-                    files = [f.replace('.json', '') for f in os.listdir(preset_dir) if f.endswith('.json')]
-                    if not files:
-                        self.vue_bridge.showNotification.emit('info', '저장된 프리셋이 없습니다')
-                        return
-                    name, ok = QInputDialog.getItem(self, "프리셋 불러오기", "선택:", files, 0, False)
-                    if ok and name:
-                        path = os.path.join(preset_dir, f"{name}.json")
-                        with open(path, 'r', encoding='utf-8') as f:
-                            preset = json.load(f)
-                        self.load_settings_from_dict(preset) if hasattr(self, 'load_settings_from_dict') else self._apply_settings_dict(preset)
-                        self.vue_bridge.showNotification.emit('success', f'프리셋 "{name}" 로드됨')
-                except Exception as e:
-                    self.vue_bridge.showNotification.emit('error', f'프리셋 로드 실패: {e}')
+            # 설정 백업/복원·재시작·프리셋 공유 (Settings '데이터 · 백업' 카드 — ui/settings_data_actions.py)
+            elif action in ('settings_export', 'settings_import', 'restart_app',
+                            'presets_export', 'presets_import',
+                            'character_presets_export', 'character_presets_import'):
+                handle_settings_data_action(self, action, payload)
 
             # 11. I2I/Inpaint 생성 (Vue payload를 탭에 주입 후 실행)
             elif action == 'generate_i2i':
@@ -672,25 +641,24 @@ class GeneratorMainUI(
                     self.i2i_tab.main_window = self
                     self.i2i_tab.generate_from_payload(payload)
             elif action == 'generate_inpaint':
-                if hasattr(self, 'inpaint_tab'):
-                    self.inpaint_tab.main_window = self
-                    self.inpaint_tab.generate_from_payload(payload)
+                # Vue 페이로드만으로 요청을 만든다 — 숨은 레거시 InpaintTab 을 거치지 않는다.
+                from ui.inpaint_actions import start_vue_inpaint
+                start_vue_inpaint(self, payload)
 
-            # 12. 배치/업스케일
+            # 12. 배치/업스케일 — 숨은 레거시 BatchTab/UpscaleTab 을 거치지 않는다.
             elif action == 'start_batch':
-                if hasattr(self, 'batch_tab'):
-                    self.batch_tab.main_window = self
-                    self.batch_tab.start_from_payload(payload)
+                from ui.batch_actions import start_vue_batch
+                start_vue_batch(self, payload)
             elif action == 'start_upscale':
-                if hasattr(self, 'upscale_tab'):
-                    self.upscale_tab.main_window = self
-                    self.upscale_tab.start_from_payload(payload)
+                from ui.upscale_actions import start_vue_upscale
+                start_vue_upscale(self, payload)
 
-            # PNG Info 파일 열기
+            # PNG Info 파일 열기 — PngInfoView 전용 시그널. inpaintImageLoaded 를 쓰면
+            # keep-alive 로 살아 있는 InpaintView 의 원본·마스크·undo 가 초기화된다.
             elif action == 'open_png_info_file':
                 path, _ = QFileDialog.getOpenFileName(self, "PNG Info 이미지 선택", "", "Images (*.png *.jpg *.jpeg *.webp)")
                 if path and hasattr(self, 'vue_bridge'):
-                    self.vue_bridge.inpaintImageLoaded.emit(path.replace('\\', '/'))
+                    self.vue_bridge.pngInfoImageLoaded.emit(path.replace('\\', '/'))
 
             # 13. 에디터 워터마크 이미지 로드
             elif action == 'editor_load_watermark_image':
@@ -715,6 +683,8 @@ class GeneratorMainUI(
                             df = pd.DataFrame(self.filtered_results)
                         else:
                             self.show_status("Export: no results")
+                            from ui.status_line import notify_user
+                            notify_user(self, 'warning', '내보낼 검색 결과가 없습니다')
                             return
                         df.to_parquet(path)
                         self.show_status(f"Exported {len(df)} results")
@@ -730,26 +700,23 @@ class GeneratorMainUI(
                 if path:
                     try:
                         import pandas as pd
+                        from core.search_rows import SEARCH_RESULT_CAP, search_rows_from_frame
+                        from core.search_session import publish_snapshot
                         df = pd.read_parquet(path)
-                        def _idim(v):
-                            try:
-                                iv = int(float(v))
-                                return iv if iv > 0 else None
-                            except (ValueError, TypeError):
-                                return None
-                        out = []
-                        for _, row in df.iterrows():
-                            out.append({
-                                'copyright': str(row.get('tag_string_copyright', row.get('copyright', ''))),
-                                'character': str(row.get('tag_string_character', row.get('character', ''))),
-                                'artist': str(row.get('tag_string_artist', row.get('artist', ''))),
-                                'general': str(row.get('tag_string_general', row.get('general', ''))),
-                                'rating': str(row.get('rating', '')),
-                                # 해상도 보존 — 자동(Parquet) 해상도 + Search 해상도 표기용 (없으면 None)
-                                'image_width': _idim(row.get('image_width')),
-                                'image_height': _idim(row.get('image_height')),
-                            })
-                        self._last_search_results = out
+                        # 검색 결과와 같은 정규화 규칙(core.search_rows) — tag_string_X 우선,
+                        # 결측(NaN/None)은 ''/None(외부 parquet 의 'nan' 문자열 누출 방지),
+                        # 해상도는 양의 int. to_dict('records') 라 iterrows 보다 수 배 빠르다.
+                        # 행 상한도 검색과 같다(무작위 표본) — Search 의 '무제한' 모드면 끈다.
+                        total_rows = len(df)
+                        import_cap = (
+                            None if (isinstance(payload, dict)
+                                     and payload.get('disable_result_cap'))
+                            else SEARCH_RESULT_CAP
+                        )
+                        out = search_rows_from_frame(df, cap=import_cap)
+                        del df
+                        if len(out) < total_rows:
+                            print(f"[Search] import capped {total_rows:,} -> {len(out):,} rows")
                         # 가져온 결과는 기존 Search cache/deck snapshot과 섞지 않는다.
                         # 현재 manifest identity 아래 새 snapshot pair로 저장하면 이후
                         # 필터(active-only)도 같은 full base를 안전하게 유지한다.
@@ -757,24 +724,28 @@ class GeneratorMainUI(
                         from core.search_result_store import SearchResultStore
                         imported_identity = SearchResultStore().dataset_info()
                         imported_snapshot = _uuid.uuid4().hex
-                        self._search_dataset_identity = imported_identity
-                        self._search_snapshot_id = imported_snapshot
 
-                        # Python filtered_results + shuffled_prompt_deck 업데이트
-                        import random as _rnd
-                        self.filtered_results = out
-                        self.shuffled_prompt_deck = out.copy()
-                        _rnd.shuffle(self.shuffled_prompt_deck)
+                        # Python filtered_results(+필터 base) + shuffled_prompt_deck 업데이트
+                        from core.search_deck import refill_owner_deck
+                        publish_snapshot(
+                            self,
+                            active=out,
+                            base=out,
+                            identity=imported_identity,
+                            snapshot_id=imported_snapshot,
+                        )
                         self._persist_search_results(
                             out,
                             full=out,
                             dataset_identity=imported_identity,
                             snapshot_id=imported_snapshot,
                         )
-                        if hasattr(self, '_save_deck_state'):
-                            self._save_deck_state()
+                        # 덱 재구성(등급 필터 → 셔플 → 저장 → 상태)의 단일 경로
+                        refill_owner_deck(self)
                         # Vue로 결과 전달
-                        imported_results_json = json.dumps(out)
+                        imported_results_json = json.dumps(
+                            out, ensure_ascii=False, separators=(',', ':')
+                        )
                         imported_lineage_json = json.dumps({
                             **imported_identity,
                             'snapshot_id': imported_snapshot,
@@ -785,46 +756,34 @@ class GeneratorMainUI(
                         self.vue_bridge.searchResultsReady.emit(
                             imported_results_json
                         )
-                        self.show_status(f"Imported {len(out)} results")
+                        from ui.status_line import notify_user
+                        if len(out) < total_rows:
+                            self.show_status(
+                                f"Imported {len(out):,} of {total_rows:,} results (random sample)"
+                            )
+                            # 표본으로 잘렸다는 건 결과 목록만 봐서는 모른다 — 토스트로 알린다.
+                            notify_user(self, 'info',
+                                        f'{total_rows:,}건 중 무작위 {len(out):,}건을 불러왔습니다')
+                        else:
+                            self.show_status(f"Imported {len(out)} results")
                     except Exception as e:
                         self.show_status(f"Import failed: {e}")
+                        from ui.status_line import notify_user
+                        notify_user(self, 'error', f'검색 결과 불러오기 실패: {e}')
 
             # 16. 자동화 설정/토글
             elif action == 'set_automation_settings':
-                self._vue_automation_settings = {
-                    'mode': str(payload.get('mode', 'count')),
-                    'limit': payload.get('limit', 10),
-                    'repeat': payload.get('repeat', 1),
-                    'delay': payload.get('delay', 1.0),
-                    'allowDupes': bool(payload.get('allowDupes', False)),
-                    'autoResetDeck': bool(payload.get('autoResetDeck', False)),
-                    # PR 3: 재시도 설정 (기본 2회)
-                    'maxRetries': int(payload.get('maxRetries', 2)),
-                    # F2: 정기 cleanup 주기 (LoRA patches 누적 회피용, 0=비활성)
-                    'cleanupEveryN': int(payload.get('cleanupEveryN', 0)),
-                }
-                # 생성 시 태그→자연어 자동 변환 (자동화 루프에서 nl_caption 적용)
-                self._auto_nl_enabled = bool(payload.get('autoNl', False))
-                self._auto_nl_url = str(payload.get('ollamaUrl', '') or 'http://localhost:11434')
-                self._auto_nl_model = str(payload.get('ollamaModel', '') or '')
-                # queue_manager에 즉시 반영
-                try:
-                    if hasattr(self, 'queue_manager'):
-                        self.queue_manager.cleanup_every_n = int(payload.get('cleanupEveryN', 0))
-                        delay_v = float(payload.get('delay', 1.0))
-                        self.queue_manager.delay_seconds = max(0.0, delay_v)
-                except Exception:
-                    pass
-                # PR 9: 모드별로 자동 저장
-                if hasattr(self, 'automation_persistence'):
-                    self.automation_persistence.save_mode_settings()
+                # 보낸 키만 합친다 — 파일 값을 아직 못 받은 Vue 의 동기화가 빠진 키를 기본값으로 덮어
+                # 파일에 쓰지 않게(R2b#1). maxRetries(PR 3)·cleanupEveryN(F2 대기열 정기 정리)·자동 NL·
+                # 대기열 런타임 반영·모드별 저장(PR 9)은 core/mode_aware_automation.apply_automation_payload.
+                from core.mode_aware_automation import apply_automation_payload
+                apply_automation_payload(self, payload)
 
             elif action == 'toggle_automation':
                 checked = payload.get('checked', False)
-                if hasattr(self, 'btn_auto_toggle'):
-                    self.btn_auto_toggle.setChecked(bool(checked))
-                else:
-                    self.toggle_automation_ui(bool(checked))
+                # btn_auto_toggle 은 _init_button_proxies 가 액션 핸들러 등록(set_action_handler)보다
+                # 먼저 만든다 — toggled → toggle_automation_ui 가드(생성 중 켜기 거부)를 늘 거친다.
+                self.btn_auto_toggle.setChecked(bool(checked))
                 # 자동화 모드 ON 시 덱 현황 즉시 전송 → '시작' 전에도 남은/사용 개수 표시
                 # (자동화 종료 후·UI 재시작 후 복원된 덱 진행도를 바로 확인 가능)
                 if checked and hasattr(self, '_emit_auto_status'):
@@ -848,20 +807,37 @@ class GeneratorMainUI(
             elif action == 'workflow_profile_save':
                 name = str(payload.get('name', '')).strip()
                 if name:
-                    from core.workflow_profiles import collect_from_host, save_profile
-                    snap = collect_from_host(self)
-                    ok = save_profile(name, snap['fields'], snap['lora_stack'])
-                    if ok:
+                    from core.workflow_profiles import (
+                        collect_from_host, find_conflicting_profile, profile_saved_name, save_profile,
+                    )
+                    # 덮어쓰기는 Vue 가 사용자에게 확인받은 요청(overwrite: true)만 — 확인 없이 온 이름이
+                    # 규칙상 기존 파일('Flux.' · 'flux' → Flux.json)이면 쓰지 않고 알린 뒤 목록을 다시 보낸다
+                    # (Vue 의 목록이 낡았으면 다음 저장에서 확인을 묻게).
+                    overwrite = payload.get('overwrite') is True
+                    existing = None if overwrite else find_conflicting_profile(name)
+                    if existing is not None:
                         self._send_workflow_profiles_list()
                         if hasattr(self, 'vue_bridge'):
                             self.vue_bridge.showNotification.emit(
-                                'success', f'프로파일 저장: {name}'
+                                'warning',
+                                f"같은 파일 이름의 프로파일 '{existing}'이(가) 이미 있어 저장하지 않았습니다",
                             )
                     else:
-                        if hasattr(self, 'vue_bridge'):
-                            self.vue_bridge.showNotification.emit(
-                                'error', f'프로파일 저장 실패: {name}'
-                            )
+                        # 알림은 실제로 기록되는 이름 — 'Flux?' 를 쳐도 저장되는 건 'Flux'
+                        saved_name = profile_saved_name(name)
+                        snap = collect_from_host(self)
+                        ok = save_profile(name, snap['fields'], snap['lora_stack'], overwrite=overwrite)
+                        if ok:
+                            self._send_workflow_profiles_list()
+                            if hasattr(self, 'vue_bridge'):
+                                self.vue_bridge.showNotification.emit(
+                                    'success', f'프로파일 저장: {saved_name}'
+                                )
+                        else:
+                            if hasattr(self, 'vue_bridge'):
+                                self.vue_bridge.showNotification.emit(
+                                    'error', f'프로파일 저장 실패: {saved_name}'
+                                )
             elif action == 'workflow_profile_load':
                 name = str(payload.get('name', '')).strip()
                 if name:
@@ -940,12 +916,6 @@ class GeneratorMainUI(
             elif action == 'import_event_results':
                 self._import_event_results()
 
-            elif action == 'select_event':
-                # Event selection is owned by EventGenView.  Keep this as a
-                # compatibility no-op for older frontend builds instead of
-                # mutating the hidden legacy PyQt result list.
-                pass
-
             elif action == 'event_add_to_queue':
                 self._handle_event_generation_request(payload, start_immediately=False)
 
@@ -954,31 +924,29 @@ class GeneratorMainUI(
 
             # ═══════ PNG Info 전송/생성 ═══════
             elif action == 'pnginfo_send_prompt':
-                if payload.get('source') == 'comfyui' and payload.get('can_apply') is not True:
-                    self.vue_bridge.showNotification.emit('warning', 'ComfyUI 프롬프트를 확정할 수 없습니다. 메타데이터에서 내용을 확인하세요.')
+                # Gallery 'T2I에서 사용'·History '당겨오기'와 같은 판정(core.metadata_actions.prompt_transfer) —
+                # 파라미터만 있는 이미지(prompt·negative 모두 빈 값)는 T2I 칸을 비우지 않고 알린다.
+                prompt, negative, reason = prompt_transfer(payload)
+                if reason:
+                    self.vue_bridge.showNotification.emit('warning', reason)
                     return
-                prompt = payload.get('prompt', '')
-                negative = payload.get('negative', '')
                 self.handle_prompt_only_transfer(prompt, negative)
 
             elif action == 'pnginfo_generate':
-                # EXIF 데이터에서 payload 구성하여 즉시 생성
-                if payload.get('source') == 'comfyui':
-                    if payload.get('can_apply') is not True:
-                        self.vue_bridge.showNotification.emit('warning', '여러 프롬프트 또는 해석하지 못한 노드가 있습니다. 내용을 확인해 직접 적용하세요.')
-                        return
-                    item = self._build_queue_payload_from_exif(payload, preserve_seed=True)
-                    if item:
-                        # Keep graph JSON and display-only parameter ordering out of
-                        # the WebUI text parser. Do not load metadata model/LoRAs.
-                        self.main_prompt_text.setPlainText(item['prompt'])
-                        self._apply_payload_to_ui(item)
-                        self.start_generation()
+                # PNG Info 가 표시한 core 파싱 결과(prompt/negative/parameters)로 즉시 생성한다.
+                # WebUI·ComfyUI 모두 같은 경로 — 레거시 raw split 은 네거티브 없는 이미지의
+                # Steps 줄을 프롬프트로 넣고 sampler/size 를 버렸다.
+                info = _metadata_for_action(self, payload, _clean_path)
+                reason = apply_block_reason(
+                    info, comfy_message='여러 프롬프트 또는 해석하지 못한 노드가 있습니다. 내용을 확인해 직접 적용하세요.')
+                if reason:
+                    self.vue_bridge.showNotification.emit('warning', reason)
                     return
-                else:
-                    raw = payload.get('raw', payload.get('parameters', ''))
-                if raw:
-                    self._handle_immediate_generation_from_raw(raw)
+                _start_generation_from_metadata(self, info)
+
+            elif action == 'pnginfo_transplant_meta':
+                # 보고 있는 이미지의 메타 → 다른 이미지에 박아 새 PNG (대화상자 2개, 원본은 안 건드림)
+                transplant_metadata_action(self, payload, _clean_path)
 
             # ═══════ History 우클릭 — 프롬프트 당겨오기 ═══════
             elif action == 'pull_prompt_from_image':
@@ -986,16 +954,12 @@ class GeneratorMainUI(
                 if path and os.path.exists(path):
                     try:
                         info = json.loads(self.vue_bridge.getImageExif(path))
-                        if info.get('source') == 'comfyui' and info.get('can_apply') is not True:
-                            self.vue_bridge.showNotification.emit('warning', 'ComfyUI 프롬프트를 확정할 수 없습니다. 메타데이터에서 내용을 확인하세요.')
-                            return
-                        prompt = info.get('prompt', '')
-                        negative = info.get('negative', '')
-                        if prompt or negative:
+                        prompt, negative, reason = prompt_transfer(info)
+                        if reason:
+                            self.vue_bridge.showNotification.emit('warning', reason)
+                        else:
                             self.handle_prompt_only_transfer(prompt, negative)
                             self.vue_bridge.showNotification.emit('success', '프롬프트를 당겨왔습니다')
-                        else:
-                            self.vue_bridge.showNotification.emit('warning', '이 이미지에 프롬프트 정보가 없습니다')
                     except Exception as e:
                         self.vue_bridge.showNotification.emit('error', f'프롬프트 로드 실패: {e}')
 
@@ -1046,7 +1010,16 @@ class GeneratorMainUI(
             elif action == 'caption_pick_outdir':
                 folder = QFileDialog.getExistingDirectory(self, "캡션 저장 폴더 선택")
                 if folder:
-                    self.vue_bridge.captionOutDirSelected.emit(folder.replace('\\', '/'))
+                    # 캡션 슬롯은 서버가 승인한 폴더에만 .txt 를 읽고 쓴다(core/caption_out_dir.py).
+                    # 승인은 이 호스트 대화상자에서만 — 웹 클라이언트가 outDir 로 아무 폴더나 가리키지 못한다.
+                    from core.caption_out_dir import CaptionOutDirError
+                    try:
+                        self.vue_bridge.approve_caption_out_dir(folder)
+                    except CaptionOutDirError as exc:
+                        from ui.status_line import notify_user
+                        notify_user(self, 'warning', str(exc))
+                    else:
+                        self.vue_bridge.captionOutDirSelected.emit(folder.replace('\\', '/'))
             elif action == 'caption_pick_caformer_dir':
                 folder = QFileDialog.getExistingDirectory(self, "CAFormer 모델 폴더 선택")
                 if folder:
@@ -1055,51 +1028,51 @@ class GeneratorMainUI(
             # ═══════ 클립보드 복사 ═══════
             elif action == 'copy_to_clipboard':
                 path = payload.get('path', '')
-                if path:
+                if getattr(self, 'web_mode', False):
+                    # 웹 클라이언트는 호스트 PC 클립보드를 쓰지 않는다 — 브리지 정책
+                    # (core.web_action_policy.WEB_BLOCKED_ACTIONS)이 먼저 막지만, open_url 처럼
+                    # 분기에서도 한 번 더 거른다. 브라우저가 자기 클립보드에 복사한다.
+                    from core.web_action_policy import COPY_IMAGE_MESSAGE
+                    from ui.status_line import notify_user
+                    notify_user(self, 'warning', COPY_IMAGE_MESSAGE)
+                elif path:
                     clean = _clean_path(path)
                     from PyQt6.QtGui import QPixmap
                     pix = QPixmap(clean)
+                    # 버튼만 누르고 끝나는 동작이라 결과를 토스트로 알린다 — 예전엔 성공도 실패도 무음.
+                    from ui.status_line import notify_user
                     if not pix.isNull():
                         QApplication.clipboard().setPixmap(pix)
                         self.show_status("Copied to clipboard.")
+                        notify_user(self, 'success', '이미지를 클립보드에 복사했습니다')
+                    else:
+                        self.show_status("Copy to clipboard failed.")
+                        notify_user(self, 'error', '이미지를 읽지 못해 클립보드에 복사하지 못했습니다')
 
             # ═══════ YOLO 모델 초기화 ═══════
             elif action == 'editor_clear_yolo_models':
-                if hasattr(self, 'mosaic_editor') and self.mosaic_editor.mosaic_panel:
-                    panel = self.mosaic_editor.mosaic_panel
-                    panel._yolo_model_paths.clear()
-                    from tabs.editor.mosaic_panel import _save_yolo_model_paths
-                    _save_yolo_model_paths([])
-                    panel._update_model_label()
-                    self.vue_bridge.yoloModelUpdated.emit("No Model Loaded")
-                    self.show_status("YOLO models cleared.")
+                # 예전엔 config 만 [] 로 비워서 Editor_models 자동 감지분이 그대로 쓰였다 — 지금 감지된
+                # 모델을 비활성으로 기록해야 auto_detect/auto_censor 와 라벨이 실제로 초기화된다.
+                from core import yolo_models
+                try:
+                    model_paths = yolo_models.clear_models()
+                except Exception as e:
+                    self.vue_bridge.showNotification.emit('error', f'YOLO 모델 초기화 실패: {e}')
+                    return
+                self.vue_bridge.yoloModelUpdated.emit(yolo_models.model_label(model_paths))
+                self.show_status("YOLO models cleared.")
 
             # ═══════ Gallery EXIF → T2I ═══════
             elif action == 'gallery_send_exif_to_t2i':
-                metadata = payload.get('metadata', {})
-                path = _clean_path(payload.get('path', ''))
-                if path and os.path.isfile(path) and (not isinstance(metadata, dict) or metadata.get('source') != 'comfyui'):
-                    # Older Gallery payloads carry only path + raw. Recover the
-                    # source before the legacy WebUI text fallback sees JSON.
-                    metadata = json.loads(self.vue_bridge.getImageExif(path))
-                    if metadata.get('error'):
-                        self.vue_bridge.showNotification.emit('warning', '이미지 메타데이터를 읽지 못했습니다.')
-                        return
-                if isinstance(metadata, dict) and metadata.get('source') == 'comfyui':
-                    if metadata.get('can_apply') is not True:
-                        self.vue_bridge.showNotification.emit('warning', 'ComfyUI 프롬프트가 여러 갈래입니다. 메타데이터에서 내용을 확인하세요.')
-                        return
-                    self.handle_prompt_only_transfer(metadata.get('prompt', ''), metadata.get('negative', ''))
+                # 확대 뷰가 보낸 metadata(편집한 프롬프트 포함)를 그대로 쓰고, 경로만 오면
+                # (즐겨찾기·구 페이로드) getImageExif 로 읽는다. raw 를 다시 split 하지 않는다.
+                info = _metadata_for_action(self, payload, _clean_path)
+                prompt, negative, reason = prompt_transfer(
+                    info, comfy_message='ComfyUI 프롬프트가 여러 갈래입니다. 메타데이터에서 내용을 확인하세요.')
+                if reason:
+                    self.vue_bridge.showNotification.emit('warning', reason)
                     return
-                exif_raw = payload.get('exif', '')
-                if exif_raw:
-                    parts = exif_raw.split('\nNegative prompt: ')
-                    prompt = parts[0].strip()
-                    negative = ''
-                    if len(parts) > 1:
-                        sub = parts[1].split('\nSteps: ')
-                        negative = sub[0].strip()
-                    self.handle_prompt_only_transfer(prompt, negative)
+                self.handle_prompt_only_transfer(prompt, negative)
 
             # ═══════ Gallery 폴더 열기 다이얼로그 ═══════
             elif action == 'gallery_open_folder':
@@ -1114,12 +1087,19 @@ class GeneratorMainUI(
             elif action == 'remove_favorite':
                 path = payload.get('path', '')
                 if path:
-                    clean = _clean_path(path)
-                    self._load_favorites_from_file()
-                    if clean in self.favorites_list:
-                        self.favorites_list.remove(clean)
-                        self._save_favorites_to_file()
-                    self.show_status("Removed from favorites.")
+                    # 이미 지운 이미지·분리된 드라이브의 항목도 지울 수 있어야 한다 —
+                    # 예전엔 '존재하는 것만' 걸러 읽어서 깨진 항목이 영영 안 지워졌다.
+                    # 파일을 잠깐 못 읽으면(공유 위반 등) 저장하지 않고 오류로 알린다.
+                    from core.favorites import FavoritesUnavailableError, remove_favorite
+                    try:
+                        _removed, _saved = remove_favorite(_clean_path(path))
+                    except (FavoritesUnavailableError, OSError) as fav_err:
+                        from core.error_handler import sanitize_for_ui
+                        if hasattr(self, 'vue_bridge'):
+                            self.vue_bridge.showNotification.emit(
+                                'error', f'즐겨찾기에서 제거하지 못했습니다: {sanitize_for_ui(str(fav_err))}')
+                    else:
+                        self.show_status("Removed from favorites.")
 
             # ═══════ API 관리자 ═══════
             elif action == 'show_api_manager':
@@ -1155,40 +1135,17 @@ class GeneratorMainUI(
 
             # ═══════ 탭 순서 설정 ═══════
             elif action == 'set_tab_order':
-                order = payload.get('order', [])
-                if order:
-                    self.show_status(f"Tab order updated: {len(order)} tabs")
+                # 저장 자체는 앞서 온 save_ui_prefs(tabOrder)가 한다 — 여기선 하단 상태줄 확인 한 줄만.
+                order = payload.get('order')
+                if isinstance(order, list) and order:
+                    self.show_status(f"탭 순서 저장됨 ({len(order)}개 탭)")
 
             # ═══════ 시드 탐색 (3x3 그리드) ═══════
             elif action == 'explore_seed':
-                base_seed = int(payload.get('seed', -1))
-                if base_seed < 0:
-                    base_seed = random.randint(0, 2**32 - 1)
-                # subseed_strength 0.05 단위로 9개 변형
-                variations = []
-                for i in range(9):
-                    subseed = base_seed + i * 1000
-                    strength = round(0.05 * (i % 5), 2) if i > 0 else 0
-                    p = {
-                        'prompt': self.total_prompt_display.toPlainText(),
-                        'negative_prompt': self.neg_prompt_text.toPlainText(),
-                        'sampler_name': self.sampler_combo.currentText(),
-                        'steps': int(self.steps_input.text() or 20),
-                        'cfg_scale': float(self.cfg_input.text() or 7),
-                        'seed': base_seed,
-                        'subseed': subseed,
-                        'subseed_strength': strength,
-                        'width': int(self.width_input.text() or 1024),
-                        'height': int(self.height_input.text() or 1024),
-                    }
-                    variations.append(p)
-                # 대기열에 추가
-                if hasattr(self, 'queue_panel'):
-                    for p in variations:
-                        self.queue_panel.add_single_item(p)
-                    if hasattr(self, 'queue_manager'):
-                        self.queue_manager.start()
-                self.vue_bridge.showNotification.emit('info', f'시드 탐색: {len(variations)}개 변형 생성 시작')
+                # 완성 payload 를 한 번 동결해 9개 변형(Forge: subseed, Comfy: 이웃 시드)을 넣는다.
+                # 대기열은 그 payload 를 그대로 보낸다(_on_generation_requested) — ui/seed_explore_actions.
+                from ui.seed_explore_actions import start_seed_explore
+                start_seed_explore(self, payload)
 
             # ═══════ 비교 이미지 ═══════
             elif action == 'open_compare_image':
@@ -1198,10 +1155,14 @@ class GeneratorMainUI(
                     self.vue_bridge.compareImageLoaded.emit(json.dumps({'slot': slot, 'path': path.replace('\\', '/')}))
 
             elif action == 'open_url':
-                url = payload.get('url', '')
-                if url:
-                    import webbrowser
-                    webbrowser.open(url)
+                # Windows 의 webbrowser.open 은 os.startfile 이다 — 호스트가 있는 http/https 만
+                # 열고(file:·드라이브·UNC·search-ms: 거부), 웹 모드에선 브라우저가 직접 연다.
+                from core.url_safety import open_external_url
+                opened, message = open_external_url(
+                    payload.get('url', ''), web_mode=bool(getattr(self, 'web_mode', False)),
+                )
+                if not opened and message and hasattr(self, 'vue_bridge'):
+                    self.vue_bridge.showNotification.emit('warning', message)
 
             elif action == 'send_to_compare':
                 path = payload.get('path', '')
@@ -1216,7 +1177,8 @@ class GeneratorMainUI(
             elif action == 'save_ui_prefs':
                 try:
                     from core.config_migration import load_ui_prefs, save_ui_prefs
-                    prefs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'ui_prefs.json')
+                    from core.ui_prefs import ui_prefs_path
+                    prefs_path = ui_prefs_path()
                     prefs = load_ui_prefs(prefs_path)
                     for legacy_key in (
                         'hires_enabled',
@@ -1228,6 +1190,10 @@ class GeneratorMainUI(
                     ):
                         prefs.pop(legacy_key, None)
                         payload.pop(legacy_key, None)
+                    # 캡션 저장 폴더 승인 목록은 서버 전용이라 클라이언트가 쓰지 못하고, captionOutDir 은
+                    # ''(이미지 옆)·승인된 폴더만 받는다(core/caption_out_dir.filter_client_caption_prefs).
+                    from core.caption_out_dir import filter_client_caption_prefs
+                    filter_client_caption_prefs(payload, self.vue_bridge.approved_caption_out_dirs())
                     prefs.update(payload)
                     # Anima Guard 값은 파일에 쓰기 전에 안전 범위/8배수로 정규화.
                     from core.resolution_guard import normalize_anima_guard_prefs
@@ -1238,6 +1204,9 @@ class GeneratorMainUI(
                     self._apply_ui_prefs_to_cleaner(prefs)
                     # 실행 중인 자동화도 다음 생성부터 새 제한값을 사용.
                     self._apply_anima_guard_prefs(prefs)
+                    # Forge 출력 폴더 저장 설정 — 생성 워커는 파일이 아니라 이 메모리 값을 읽는다.
+                    from core.forge_output_policy import update_forge_save_outputs_from_prefs
+                    update_forge_save_outputs_from_prefs(prefs)
                     # 테마는 PyQt 쪽 색표에도 반영 — 다음에 뜨는 다이얼로그/스플래시가
                     # Vue 와 같은 색이어야 한다. (theme 키가 안 왔으면 no-op)
                     if 'theme' in payload or 'themeOverrides' in payload:
@@ -1251,38 +1220,41 @@ class GeneratorMainUI(
             elif action == 'save_global_weights':
                 try:
                     weights = payload.get('weights', [])
-                    wpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'global_weights.json')
-                    atomic_write_json(wpath, weights)
+                    from core.storage_paths import config_file
+                    atomic_write_json(str(config_file('global_weights.json')), weights)
                     self.vue_bridge.showNotification.emit('success', '가중치가 저장되었습니다')
                 except Exception as e:
                     self.vue_bridge.showNotification.emit('error', f'가중치 저장 실패: {e}')
 
-            # ═══════ LoRA 텍스트 설정 ═══════
-            elif action == 'set_lora_text':
-                lora_text = payload.get('lora_text', '')
-                self._vue_lora_text = lora_text
-
+            # ═══════ LoRA 스택 (생성 LoRA 의 단일 소스) ═══════
+            # 예전의 set_lora_text 미러는 '활성 LoRA 가 있을 때만' 갱신돼 전부 끄면 옛 LoRA 가
+            # 계속 붙었다. 이제 생성은 매번 _vue_lora_entries 에서 텍스트를 파생한다
+            # (core/lora_stack.append_lora_stack_to_prompt). Vue 는 빈 스택도 반드시 보낸다.
             elif action == 'set_lora_stack':
+                from core.lora_stack import UNIT_MULTIPLIER, normalize_lora_entries
                 entries = payload.get('entries', [])
-                self._vue_lora_entries = entries if isinstance(entries, list) else []
-                # Python lora_active_panel도 동기화
-                if hasattr(self, 'lora_active_panel') and hasattr(self.lora_active_panel, 'set_entries'):
-                    self.lora_active_panel.set_entries(self._vue_lora_entries)
+                self._vue_lora_entries = normalize_lora_entries(
+                    entries if isinstance(entries, list) else [], unit=UNIT_MULTIPLIER)
 
             # ═══════ 조건부 프롬프트 저장 ═══════
             elif action == 'save_cond_rules':
+                # 제어 플래그 _manual 은 파일에 남기지 않는다(getInitialConfig 로 되돌아간다). 자동저장
+                # (편집 800ms 뒤·복원 동기화)은 조용히 쓰고, '즉시 저장' 버튼만 토스트를 띄운다 —
+                # 예전엔 부팅마다 복원이 자동저장을 불러 거짓 '저장되었습니다' 가 떴다(감사 #108).
                 try:
-                    cond_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'cond_rules.json')
-                    atomic_write_json(cond_path, payload)
-                    self.vue_bridge.showNotification.emit('success', '조건식이 저장되었습니다')
+                    from core.cond_rules_store import save_cond_rules_payload
+                    if save_cond_rules_payload(payload):
+                        self.vue_bridge.showNotification.emit('success', '조건식이 저장되었습니다')
                 except Exception as e:
                     self.vue_bridge.showNotification.emit('error', f'조건식 저장 실패: {e}')
 
             # ═══════ 기본값 저장 ═══════
             elif action == 'save_tab_defaults':
+                # 바뀐 키만 온다 — 기존 파일 위에 병합한다(core.tab_defaults). 통째로 쓰면 keep-alive
+                # Settings 의 옛 값이 '전역 저장'이 갱신한 T2I 기본값을 되덮었다(audit #140).
                 try:
-                    defaults_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'tab_defaults.json')
-                    atomic_write_json(defaults_path, payload)
+                    from core.tab_defaults import save_tab_defaults_patch
+                    save_tab_defaults_patch(payload)
                     self.vue_bridge.showNotification.emit('success', '기본값이 저장되었습니다')
                 except Exception as e:
                     self.vue_bridge.showNotification.emit('error', f'기본값 저장 실패: {e}')
@@ -1290,8 +1262,16 @@ class GeneratorMainUI(
             # ═══════ 대기열 제어 ═══════
             elif action == 'start_queue':
                 if hasattr(self, 'queue_manager'):
-                    self.queue_manager.start()
-                    self.show_status("Queue started.")
+                    started = self.queue_manager.start()
+                    if started is False:
+                        # 눌렀는데 아무 일도 없으면 고장처럼 보인다 — 사유(자동화가 대기열을 먼저 처리 중 ·
+                        # 빈 대기열)를 상태줄과 토스트로 알린다.
+                        from ui.queue_coordination import announce
+                        refusal = getattr(self.queue_manager, 'last_start_refusal', '') or ''
+                        announce(self, refusal or '대기열이 비어 있어 시작할 항목이 없습니다')
+                    elif not self.queue_manager.is_paused:
+                        # 시작하자마자 멈췄으면(워커가 다른 생성 중) 매니저의 notice 가 이미 사유를 알렸다
+                        self.show_status("Queue started.")
                     self._sync_queue_to_vue()
 
             elif action == 'stop_queue':
@@ -1302,30 +1282,25 @@ class GeneratorMainUI(
 
             elif action == 'unload_model_request':
                 # VRAM 게이지 클릭으로 사용자가 수동 unload 요청 — 백엔드에 위임
+                # 앱 프로세스가 직접 쥔 편집기 비전 모델(YOLO/SAM3 유휴 캐시)도 즉시 반납한다.
+                # (백엔드 언로드만으로는 에디터 SAM3 번들 ~3.4GB가 그대로 남았다)
                 try:
-                    # 저장소 표준 관용구 — self.backend/_backend 는 어디에서도 대입되지 않아
-                    # 예전 getattr 방식은 모든 백엔드에서 항상 None 이었다.
-                    try:
-                        from backends import get_backend
-                        backend = get_backend()
-                    except Exception:
-                        backend = None
-                    if backend and hasattr(backend, 'unload_models'):
-                        backend.unload_models()
-                        self.show_status("Model unload requested.")
-                    elif backend and hasattr(backend, 'unload'):
-                        backend.unload()
-                        self.show_status("Model unload requested.")
-                    else:
-                        # 폴백: AppContext를 통한 통보
-                        try:
-                            from core.app_context import get_context
-                            get_context().emit('model_unload_requested', {})
-                        except Exception:
-                            pass
-                        self.show_status("Unload signal sent (no direct backend method).")
+                    from core.model_cache import clear_all as _clear_editor_models
+                    _freed = _clear_editor_models()
+                    if _freed:
+                        print(f"[VRAM] 편집기 비전 모델 {_freed}개 반납")
+                except Exception as e:
+                    print(f"[VRAM] 편집기 비전 모델 반납 실패: {e}")
+                try:
+                    # 백엔드 HTTP(WebUI cleanup 최대 ~60초)는 워커에서, 성공/실패는 메인
+                    # 스레드에서 알린다 — ui/manual_model_unload.py
+                    from backends import get_backend
+                    from ui.manual_model_unload import request_manual_backend_unload
+                    request_manual_backend_unload(self, get_backend())
                 except Exception as e:
                     self.show_status(f"Unload failed: {e}")
+                    from ui.status_line import notify_user
+                    notify_user(self, 'error', f'모델 언로드 요청 실패: {e}')
 
             elif action == 'pause_queue':
                 if hasattr(self, 'queue_manager'):
@@ -1340,53 +1315,52 @@ class GeneratorMainUI(
                     self._sync_queue_to_vue()
 
             elif action == 'remove_queue_items':
-                # payload: { item_ids: [str, ...] }  — 여러 항목 일괄 삭제
+                # payload: { item_ids: [str, ...] }  — 여러 항목 일괄 삭제. 생성 중인 항목은 보호된다.
+                # (Vue 동기화는 queue_changed → _sync_queue_to_vue 가 한 번으로 합쳐 보낸다)
                 if hasattr(self, 'queue_panel'):
+                    from ui.queue_coordination import RUNNING_ITEM_KEPT, announce, running_item_kept
                     ids = payload.get('item_ids', []) or []
                     n = self.queue_panel.remove_items_by_ids(ids)
-                    self.show_status(f"{n}개 항목 삭제")
-                    self._sync_queue_to_vue()
+                    # 중지해도 워커가 만들고 있는 항목은 끝날 때까지 보호된다 — '중지하면 지울 수 있다'가 아니다
+                    if running_item_kept(self.queue_panel, ids):
+                        announce(self, RUNNING_ITEM_KEPT)
+                    else:
+                        self.show_status(f"{n}개 항목 삭제")
 
             elif action == 'move_queue_item':
-                # payload: { item_id: str, direction: 'up' | 'down' }
+                # payload: { item_id: str, direction: 'up' | 'down' } — 생성 중인 항목과는 자리를 바꾸지 않는다
                 if hasattr(self, 'queue_panel'):
                     iid = payload.get('item_id', '')
                     direction = payload.get('direction', 'up')
-                    moved = (self.queue_panel.move_item_up(iid) if direction == 'up'
-                             else self.queue_panel.move_item_down(iid))
-                    if moved:
-                        self._sync_queue_to_vue()
+                    if direction == 'up':
+                        self.queue_panel.move_item_up(iid)
+                    else:
+                        self.queue_panel.move_item_down(iid)
 
             elif action == 'update_queue_item':
                 # payload: { item_id: str, prompt?: str, negative_prompt?: str } — 큐 항목 편집
                 if hasattr(self, 'queue_panel'):
                     iid = payload.get('item_id', '')
-                    found = False
-                    for it in self.queue_panel.queue_items:
-                        if it.get('id') == iid:
-                            if 'prompt' in payload:
-                                it['prompt'] = payload.get('prompt', '')
-                            if 'negative_prompt' in payload:
-                                it['negative_prompt'] = payload.get('negative_prompt', '')
-                            found = True
-                            break
-                    if found:
-                        try:
-                            self.queue_panel._refresh_display()
-                            self.queue_panel._persist_to_disk()
-                        except Exception:
-                            pass
+                    fields = {key: payload.get(key, '') for key in ('prompt', 'negative_prompt')
+                              if key in payload}
+                    if self.queue_panel.update_item(iid, fields):
                         self.show_status("큐 항목 수정됨")
-                        self._sync_queue_to_vue()
 
             elif action == 'clear_queue':
-                # 전체 삭제 — 확인 다이얼로그 우회 (Vue 측에서 이미 확인 받음)
-                if hasattr(self, 'queue_panel') and self.queue_panel.queue_items:
-                    self.queue_panel.queue_items.clear()
-                    self.queue_panel._refresh_display()
-                    self.queue_panel.queue_changed.emit(0)
-                    self.queue_panel._persist_to_disk()
-                    self._sync_queue_to_vue()
+                # 전체 삭제 — 확인 다이얼로그 우회 (Vue 측에서 이미 확인 받음). 생성 중인 항목은 남는다 —
+                # 조용히 한 줄이 남으면 고장처럼 보이므로 선택 삭제와 같은 안내를 띄운다.
+                if hasattr(self, 'queue_panel'):
+                    from ui.queue_coordination import RUNNING_ITEM_KEPT, announce, running_item_kept
+                    removed = self.queue_panel.clear_items()
+                    if running_item_kept(self.queue_panel):
+                        announce(self, RUNNING_ITEM_KEPT)
+                    else:
+                        self.show_status(f"{removed}개 항목 삭제")
+
+            elif action == 'sync_queue_state':
+                # Vue 대기열 패널이 마운트될 때(페이지 로드·웹 재접속) 현재 상태를 요청한다 —
+                # 시작 시 복구된 대기열은 Vue 가 뜨기 전에 알려져 그냥은 보이지 않았다.
+                self._sync_queue_to_vue()
 
             # ═══════ Toast 표시 ═══════
             elif action == 'show_toast':
@@ -1509,11 +1483,7 @@ class GeneratorMainUI(
         startup = bool(event.get('startup', False))
 
         if startup and event_type in {'started', 'progress'}:
-            message = str(event.get('message') or '앱 관리형 백엔드를 시작하는 중입니다…')
-            try:
-                self.viewer_label.setText(f'{message}\n\n설정에서 진행 상태를 확인할 수 있습니다.')
-            except Exception:
-                pass
+            # 진행 문구는 Vue 설정(런타임 · 엔진)이 backendRuntimeEvent 로 직접 받는다.
             return
 
         if event_type == 'completed' and bool(event.get('ok')):
@@ -1525,9 +1495,8 @@ class GeneratorMainUI(
                 # choices and the merged disk LoRA catalog.  Re-query on the GUI
                 # thread so Settings changes are reflected without an app restart.
                 try:
-                    from widgets.lora_manager import LoraManagerDialog
-                    LoraManagerDialog._lora_cache = []
-                    self.vue_bridge._merged_lora_cache = None
+                    from ui.lora_catalog_cache import invalidate as invalidate_lora_cache
+                    invalidate_lora_cache(getattr(self, 'vue_bridge', None))
                 except Exception:
                     pass
                 if getattr(self, '_backend_connected', False):
@@ -1625,9 +1594,6 @@ class GeneratorMainUI(
                     ):
                         self._backend_connected = False
                         self.btn_generate.setEnabled(False)
-                        self.viewer_label.setText(
-                            '앱 관리형 백엔드를 중지했습니다.\n\n설정에서 다시 시작하세요.'
-                        )
                 except Exception:
                     pass
             return
@@ -1646,19 +1612,9 @@ class GeneratorMainUI(
                 self._backend_startup_result = 'managed_failed'
                 self._managed_runtime_startup_error = message
                 self.btn_generate.setEnabled(False)
-                self.viewer_label.setText(
-                    '앱 관리형 백엔드를 자동 시작하지 못했습니다.\n'
-                    '설정에서 다시 시작하거나 기존 API URL을 연결하세요.\n\n'
-                    + message
-                )
             elif error_code == 'BACKEND_SWITCH_ROLLBACK_FAILED':
                 self._backend_connected = False
                 self.btn_generate.setEnabled(False)
-                self.viewer_label.setText(
-                    '새 관리형 백엔드와 이전 백엔드를 모두 시작하지 못했습니다.\n'
-                    '설정에서 사용할 백엔드를 다시 시작하세요.\n\n'
-                    + message
-                )
             self.vue_bridge.showNotification.emit(
                 'error', f'백엔드 {action} 실패: {message}'
             )
@@ -1737,16 +1693,19 @@ class GeneratorMainUI(
         try:
             lora = prefs.get('loraStack')
             if isinstance(lora, list):
-                # 생성이 읽는 런타임 미러 — Vue가 set_lora_stack/set_lora_text를 아직 안 보낸
-                # 시점(재시작 직후 자동화 즉시 시작 등)에도 올바른 LoRA로 생성되도록 한다.
-                self._vue_lora_entries = lora
-                from core.lora_stack import build_lora_text
-                self._vue_lora_text = build_lora_text(lora)  # generator_generation이 읽음
-                if hasattr(self, 'lora_active_panel'):
-                    try:
-                        self.lora_active_panel.set_entries(lora)
-                    except Exception:
-                        pass
+                # 생성 LoRA 의 단일 소스 — Vue가 set_lora_stack 을 아직 안 보낸 시점(재시작 직후
+                # 자동화 즉시 시작 등)에도 올바른 LoRA로 생성되도록 한다. ui_prefs 는 정수 %,
+                # _vue_lora_entries 는 set_lora_stack 과 같은 배율 — 반드시 /100 해서 넣는다
+                # (섞이면 프로파일 저장·적용에서 LoRA 가 100배가 됐다).
+                from core.lora_stack import UNIT_PERCENT, normalize_lora_entries
+                self._vue_lora_entries = normalize_lora_entries(lora, unit=UNIT_PERCENT)
+        except Exception:
+            pass
+        try:
+            # Forge 출력 폴더 저장(save_images) 설정 — 생성 워커는 이 메모리 값만 읽는다
+            # (워커 스레드가 ui_prefs.json 을 열면 GUI 의 os.replace 저장이 Windows 에서 실패).
+            from core.forge_output_policy import update_forge_save_outputs_from_prefs
+            update_forge_save_outputs_from_prefs(prefs)
         except Exception:
             pass
 
@@ -1800,36 +1759,41 @@ class GeneratorMainUI(
             vue = legacy_cond_rules_to_vue(legacy)
             if not (vue.get('positive') or vue.get('negative')):
                 return
+            # updatedAt 은 일부러 찍지 않는다(=0, core/cond_rules_store.py 설명). 옛 cond_rules_json 은
+            # 더 이상 저장되지 않으므로, 시각이 있는 브라우저 캐시는 늘 이 데이터보다 새 편집이다 —
+            # 파일이 지워진 뒤라면 부팅 때 그 캐시가 이겨 최근 규칙이 파일로 복구된다.
             atomic_write_json(cond_path, vue)
             print(f"[Config] Legacy cond rules migrated → cond_rules.json "
                   f"({len(vue['positive'])}P + {len(vue['negative'])}N)")
         except Exception as e:
             print(f"[Config] Legacy cond migration skipped: {e}")
 
-    def _load_saved_configs(self):
-        """앱 시작 시 조건식 + 기본값 로드"""
+    def _apply_saved_configs(self):
+        """앱 시작 시(__init__, 동기) 조건식·기본값·ui_prefs 를 Python 쪽에 적용한다.
+
+        Vue 로 보내는 일은 하지 않는다. Qt·웹 모드 모두 브리지 바인딩 직후 getInitialConfig 로
+        cond_rules·global_weights·ui_prefs 를 당겨 가고(bridge.js _requestInitialConfig), 그 응답이
+        uiPrefsLoaded/condRulesLoaded/globalWeightsLoaded 로 배달된다. 예전엔 __init__ 기준 1초
+        타이머가 한 번 emit 했는데, 스플래시·loadFinished 대기 중에 터지면 JS 가 connect 하기 전이라
+        영구히 유실됐고(iconAnimationStyle·globalWeights 는 폴백도 없음), 늦게 터지면 Vue 가 먼저
+        보낸 값을 덮었다(감사 #107). 레거시 마이그레이션은 그 pull 보다 먼저 끝나야 해서 동기다.
+        """
         try:
-            # 조건식 로드 — config/cond_rules.json 단일 소스
-            cond_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'cond_rules.json')
+            # 조건식 — config/cond_rules.json 단일 소스. 레거시 1회 마이그레이션만 여기서.
+            from core.cond_rules_store import cond_rules_path
+            cond_path = cond_rules_path()
             if not os.path.exists(cond_path):
                 # 레거시 1회 마이그레이션: 옛 prompt_settings.cond_rules_json → cond_rules.json
                 self._migrate_legacy_cond_rules(cond_path)
-            if os.path.exists(cond_path):
-                with open(cond_path, 'r', encoding='utf-8') as f:
-                    rules = json.load(f)
-                if hasattr(self, 'vue_bridge'):
-                    self.vue_bridge.condRulesLoaded.emit(json.dumps(rules))
-                print(f"[Config] Conditional rules loaded: {len(rules.get('positive',[]))}P + {len(rules.get('negative',[]))}N")
         except Exception as e:
-            print(f"[Config] Failed to load cond rules: {e}")
+            print(f"[Config] Failed to migrate cond rules: {e}")
         try:
             # 기본값 로드 + 적용
             # FIX: 이전엔 prompt_settings.json 없을 때만 적용 → 사실상 첫 실행만.
             # 이제 처음 실행이면 모든 필드, 이후엔 빈 위젯만 채우기.
-            defaults_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'tab_defaults.json')
-            if os.path.exists(defaults_path):
-                with open(defaults_path, 'r', encoding='utf-8') as f:
-                    defaults = json.load(f)
+            from core.tab_defaults import default_tab_defaults_path, load_tab_defaults
+            if os.path.exists(default_tab_defaults_path()):
+                defaults = load_tab_defaults()
                 from config import PROMPT_SETTINGS_FILE
                 first_run = not os.path.exists(PROMPT_SETTINGS_FILE)
                 # 첫 실행이면 모든 defaults 적용
@@ -1844,8 +1808,7 @@ class GeneratorMainUI(
                         self.ad_slot1_group.setChecked(bool(defaults.get('ad_s1_enabled')))
                     if 'ad_s2_enabled' in defaults and hasattr(self, 'ad_slot2_group'):
                         self.ad_slot2_group.setChecked(bool(defaults.get('ad_s2_enabled')))
-                    if 'negpip_enabled' in defaults:
-                        self.negpip_group.setChecked(bool(defaults.get('negpip_enabled')))
+                    # NegPiP 은 상시 적용 — 기본값 토글이 없다(audit #97).
 
                 # 첫 실행이든 아니든 — 핵심 생성 파라미터를 위젯이 비어있을 때만 채움
                 # (사용자가 저장한 값을 덮어쓰지 않음)
@@ -1854,205 +1817,115 @@ class GeneratorMainUI(
         except Exception as e:
             print(f"[Config] Failed to load defaults: {e}")
         try:
-            wpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'global_weights.json')
-            if os.path.exists(wpath):
-                with open(wpath, 'r', encoding='utf-8') as f:
-                    weights = json.load(f)
-                if hasattr(self, 'vue_bridge'):
-                    self.vue_bridge.globalWeightsLoaded.emit(json.dumps(weights))
-                print(f"[Config] Global weights loaded: {len(weights)} tags")
-        except Exception as e:
-            print(f"[Config] Failed to load weights: {e}")
-        try:
             from core.config_migration import load_ui_prefs
-            prefs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'ui_prefs.json')
+            from core.ui_prefs import ui_prefs_path
+            prefs_path = ui_prefs_path()
             prefs = load_ui_prefs(prefs_path)
             # 레거시 흡수: ui_prefs에 loraStack이 없고 옛 prompt_settings.active_loras가 있으면 1회 이관
             self._migrate_legacy_lora_stack(prefs, prefs_path)
-            if prefs and hasattr(self, 'vue_bridge'):
-                # prefs 전체를 보낸다 — theme/themeOverrides 처럼 Vue 만 아는 키도
-                # 그대로 실려야 다른 기기에서 바꾼 테마가 이 기기에 반영된다.
-                self.vue_bridge.uiPrefsLoaded.emit(json.dumps(prefs))
-                # FIX: 시작 시점에 LOGIC 토글을 prompt_cleaner에 적용
-                self._apply_ui_prefs_to_cleaner(prefs)
+            # LOGIC 토글(clean*) — 키가 없으면 Vue 화면의 기본값. 저장된 적 없어도 화면과 같게 맞춘다.
+            self._apply_ui_prefs_to_cleaner(prefs)
+            if prefs:
                 # PyQt 색표도 같은 prefs 로 맞춘다(ThemeManager 는 파일을 스스로도
                 # 읽지만, 마이그레이션 후 값이면 여기서 온 게 최신이다).
                 self._apply_theme_prefs(prefs)
                 # 단일 소스(ui_prefs.json)에서 런타임 상태 직접 복원 —
                 #   Vue가 set_rating_filter/set_high_res_factor를 아직 안 보낸 시점(자동화 즉시 시작 등)에도 올바른 값.
                 self._restore_runtime_prefs(prefs)
-                print(f"[Config] UI prefs loaded + LOGIC toggles applied")
+            print("[Config] UI prefs applied (LOGIC toggles · theme · runtime)")
         except Exception as e:
             print(f"[Config] Failed to load UI prefs: {e}")
 
     def _apply_vue_conditional_rules(self, pos_rules: list, neg_rules: list):
-        """Vue에서 전달된 조건부 프롬프트 규칙 적용.
-        - 조건은 '전 필드(=final prompt)' 기준으로 평가 (캐릭터/작품/선행/본문/후행).
-        - 콤마 다중 조건은 AND (모두 있어야).
+        """Vue에서 전달된 조건부 프롬프트 규칙 적용 — 규칙 해석은 utils.condition_block.apply_prompt_rules.
+
+        - 조건은 포지티브 전 칸(캐릭터/작품/선행/본문/후행) 기준, 콤마 다중 조건은 AND.
+        - add/remove/replace 모두 태그(쉼표 토큰) 단위 — 부분문자열 치환이 아니라서
+          'muscular→muscular male' 이 'muscular male' 을 'muscular male male' 로 만들지 않고,
+          여러 번 적용해도 결과가 같다(검색 적용 경로는 파일 규칙 + Vue 규칙을 두 번 적용한다).
         - location='after_condition' → 조건 첫 태그가 있는 '그 칸'에서 바로 뒤에 삽입.
+        - 바뀐 칸만 다시 쓴다. 쓰는 동안 is_programmatic_change 를 세워, 선행/후행/네거티브에
+          붙인 조건부 태그가 on_base_prompts_changed 로 사용자 템플릿(base_*_prompt)에 스며들어
+          다음 프롬프트까지 따라가지 않게 한다.
         """
         try:
-            from utils.condition_block import norm_tag, multi_cond_met, insert_after
+            from utils.condition_block import apply_prompt_rules, split_tags
 
-            # 위치별 위젯 — 조건 평가 + after_condition 삽입 대상 (neg 제외)
-            pos_fields = [
-                self.character_input, self.copyright_input,
-                self.prefix_prompt_text, self.main_prompt_text, self.suffix_prompt_text,
-            ]
+            widgets = {
+                'character': self.character_input,
+                'copyright': self.copyright_input,
+                'prefix': self.prefix_prompt_text,
+                'main': self.main_prompt_text,
+                'suffix': self.suffix_prompt_text,
+                'neg': self.neg_prompt_text,
+            }
             def _get(w):
                 return w.text() if hasattr(w, 'text') else w.toPlainText()
             def _set(w, v):
                 (w.setText if hasattr(w, 'text') else w.setPlainText)(v)
 
-            # 전 필드 태그 집합 (정규화) — 조건 매칭 기준
-            all_tags = set()
-            for w in pos_fields:
-                for t in _get(w).split(','):
-                    n = norm_tag(t)
-                    if n:
-                        all_tags.add(n)
-
-            loc_widget = {
-                'main': self.main_prompt_text,
-                'prefix': self.prefix_prompt_text,
-                'suffix': self.suffix_prompt_text,
-            }
-
-            for rule in pos_rules:
-                cond = rule.get('condition', '')
-                exists = rule.get('exists', True)
-                target = rule.get('target', '').strip()
-                action = rule.get('action', 'add')
-                location = rule.get('location', 'main')
-                if not cond or not target:
-                    continue
-                if not multi_cond_met(cond, all_tags, exists):
-                    continue
-
-                if action == 'add':
-                    if location == 'after_condition':
-                        # 조건의 첫 태그가 있는 칸을 찾아 그 태그 바로 뒤에 삽입
-                        anchor = norm_tag(cond.split(',')[0])
-                        placed = False
-                        for w in pos_fields:
-                            tags = [t.strip() for t in _get(w).split(',') if t.strip()]
-                            newtags = insert_after(tags, anchor, target)
-                            if newtags is not None:
-                                _set(w, ', '.join(newtags))
-                                placed = True
-                                break
-                        if not placed and norm_tag(target) not in all_tags:
-                            mw = self.main_prompt_text
-                            mw.setPlainText((mw.toPlainText() + ', ' + target).strip(', '))
-                    else:
-                        w = loc_widget.get(location, self.main_prompt_text)
-                        if norm_tag(target) not in {norm_tag(t) for t in _get(w).split(',')}:
-                            _set(w, (_get(w) + ', ' + target).strip(', '))
-                elif action == 'remove':
-                    # 전 필드에서 target 제거
-                    tn = norm_tag(target)
-                    for w in pos_fields:
-                        tags = [t.strip() for t in _get(w).split(',') if t.strip()]
-                        filtered = [t for t in tags if norm_tag(t) != tn]
-                        if len(filtered) != len(tags):
-                            _set(w, ', '.join(filtered))
-                elif action == 'replace':
-                    w = loc_widget.get(location, self.main_prompt_text)
-                    _set(w, _get(w).replace(cond, target))
-
-            # NEGATIVE — 조건은 전 필드 기준, 추가/제거는 네거티브 프롬프트
-            for rule in neg_rules:
-                cond = rule.get('condition', '')
-                exists = rule.get('exists', True)
-                target = rule.get('target', '').strip()
-                action = rule.get('action', 'add')
-                if not cond or not target:
-                    continue
-                if not multi_cond_met(cond, all_tags, exists):
-                    continue
-                neg = self.neg_prompt_text
-                if action == 'add':
-                    if norm_tag(target) not in {norm_tag(t) for t in neg.toPlainText().split(',')}:
-                        neg.setPlainText((neg.toPlainText() + ', ' + target).strip(', '))
-                elif action == 'remove':
-                    tn = norm_tag(target)
-                    tags = [t.strip() for t in neg.toPlainText().split(',') if t.strip()]
-                    neg.setPlainText(', '.join(t for t in tags if norm_tag(t) != tn))
+            before = {key: split_tags(_get(w)) for key, w in widgets.items()}
+            after = apply_prompt_rules(before, pos_rules or [], neg_rules or [])
+            changed = [key for key in widgets if after.get(key, before[key]) != before[key]]
+            if not changed:
+                return
+            prev = getattr(self, 'is_programmatic_change', False)
+            self.is_programmatic_change = True
+            try:
+                for key in changed:
+                    _set(widgets[key], ', '.join(after[key]))
+            finally:
+                self.is_programmatic_change = prev
         except Exception as e:
             print(f"[Error] Conditional rules: {e}")
 
-    def _apply_settings_dict(self, settings: dict):
-        """프리셋 딕셔너리를 UI에 적용"""
+    def _apply_generation_preset(self, preset: dict) -> list:
+        """생성 프리셋을 위젯에 적용 — load_settings 와 같은 적용 함수(only_present=True)로
+        파일에 있는 키만 바꾼다. 모델은 match_checkpoint 로 맞추고, 못 맞춘 항목은 경고로 돌려준다.
+        배치 모드는 예외가 나도 반드시 푼다(예전엔 endBatchUpdate 를 건너뛰어 _batch_mode 가 남았다).
+
+        프리셋의 선행/후행/네거티브는 새 ``base_*`` 템플릿이 된다(sync_base_prompts). 이 함수는
+        is_programmatic_change 를 세워 on_base_prompts_changed 가 템플릿을 갱신하지 않으므로, 따로
+        맞추지 않으면 다음 랜덤 프롬프트·자동화 사이클이 프리셋 이전 값으로 되돌렸다."""
+        from ui.generation_settings_apply import (
+            apply_generation_settings, apply_prompt_settings, sync_base_prompts,
+        )
+
+        warnings = []
+        bridge = getattr(self, 'vue_bridge', None)
+        prev = getattr(self, 'is_programmatic_change', False)
+        if bridge is not None:
+            bridge.beginBatchUpdate()
+        self.is_programmatic_change = True
         try:
-            if hasattr(self, 'vue_bridge'):
-                self.vue_bridge.beginBatchUpdate()
-            mapping = {
-                'char_count': self.char_count_input,
-                'character': self.character_input,
-                'copyright': self.copyright_input,
-                'main_prompt': self.main_prompt_text,
-                'prefix_prompt': self.prefix_prompt_text,
-                'suffix_prompt': self.suffix_prompt_text,
-                'negative_prompt': self.neg_prompt_text,
-                'steps': self.steps_input,
-                'cfg': self.cfg_input,
-                'seed': self.seed_input,
-                'width': self.width_input,
-                'height': self.height_input,
-            }
-            for key, widget in mapping.items():
-                if key in settings:
-                    val = str(settings[key])
-                    if hasattr(widget, 'setPlainText'):
-                        widget.setPlainText(val)
-                    elif hasattr(widget, 'setText'):
-                        widget.setText(val)
-            if 'artist' in settings:
-                self.artist_input.setPlainText(str(settings['artist']))
-            if 'model' in settings and settings['model']:
-                self.model_combo.setCurrentText(str(settings['model']))
-            if 'sampler' in settings and settings['sampler']:
-                self.sampler_combo.setCurrentText(str(settings['sampler']))
-            # LoRA 스택: ui_prefs.json(loraStack) 단일 소스로 이관 — 여기서 active_loras를 읽지 않는다.
-            #   (_restore_runtime_prefs가 ui_prefs.loraStack에서 _vue_lora_entries를 채우고 패널/Vue에 복원)
-            if hasattr(self, 'vue_bridge'):
-                self.vue_bridge.endBatchUpdate()
+            apply_prompt_settings(self, preset, only_present=True)
+            # 생성 설정 적용이 실패해도 이미 바꾼 프롬프트 칸과 템플릿은 서로 맞게 — 바로 여기서.
+            sync_base_prompts(self, preset)
+            warnings = apply_generation_settings(self, preset, only_present=True)
+        finally:
+            self.is_programmatic_change = prev
+            if bridge is not None:
+                bridge.endBatchUpdate()
+        try:
             self.update_total_prompt_display()
         except Exception as e:
-            print(f"[Error] Apply settings dict: {e}")
+            print(f"[Preset] 프롬프트 표시 갱신 실패: {e}")
+        return warnings
 
     # ========== PNG Info → 즉시 생성 ==========
 
     def _handle_immediate_generation_from_raw(self, raw: str):
-        """PNG Info raw 텍스트에서 payload 구성하여 즉시 생성"""
-        try:
-            parts = raw.split('\nNegative prompt: ')
-            prompt = parts[0].strip()
-            negative = ''
-            params = {}
-            if len(parts) > 1:
-                sub = parts[1].split('\nSteps: ')
-                negative = sub[0].strip()
-                if len(sub) > 1:
-                    for kv in ('Steps: ' + sub[1]).split(', '):
-                        if ':' in kv:
-                            k, v = kv.split(':', 1)
-                            params[k.strip().lower().replace(' ', '_')] = v.strip()
-            # 프롬프트 설정
-            self.main_prompt_text.setPlainText(prompt)
-            self.neg_prompt_text.setPlainText(negative)
-            if 'steps' in params: self.steps_input.setText(params['steps'])
-            if 'cfg_scale' in params: self.cfg_input.setText(params['cfg_scale'])
-            if 'seed' in params: self.seed_input.setText(params['seed'])
-            if 'size' in params:
-                wh = params['size'].split('x')
-                if len(wh) == 2:
-                    self.width_input.setText(wh[0].strip())
-                    self.height_input.setText(wh[1].strip())
-            self.update_total_prompt_display()
-            self.start_generation()
-        except Exception as e:
-            print(f"[Error] Immediate generation from raw: {e}")
+        """(호환 래퍼) infotext 문자열 → core 파싱 → 'pnginfo_generate' 와 같은 즉시 생성.
+
+        tests/test_comfy_metadata_actions.py 하네스가 이 이름을 클래스 본문에서 바인딩하므로
+        이름은 유지하고, 파싱은 core.image_metadata 에 맡긴다(레거시 split 없음).
+        """
+        info = infotext_ui_fields(raw)
+        reason = apply_block_reason(info)
+        if reason:
+            self.vue_bridge.showNotification.emit('warning', reason)
+            return
+        _start_generation_from_metadata(self, info)
 
     def _build_queue_payload_from_exif(self, info: dict, *, preserve_seed=False):
         """getImageExif 결과(dict)에서 큐 아이템 payload 구성.
@@ -2060,88 +1933,21 @@ class GeneratorMainUI(
         이미지의 프롬프트/샘플러/steps/cfg/해상도는 EXIF에서 그대로 가져오고,
         seed는 -1(새 변형)로 둔다 — 동일 시드 재생성은 같은 이미지라 무의미하므로
         '비슷한 걸 더 생성'이 자연스러운 기본값. 프롬프트 없으면 None 반환.
+        파라미터는 core 가 파싱한 ``parameters`` dict 만 쓴다(core.metadata_actions).
         """
-        is_comfy = info.get('source') == 'comfyui'
-        if info.get('can_apply') is False or (is_comfy and info.get('can_apply') is not True):
-            return None
-        raw = '' if is_comfy else (info.get('raw', '') or '')
-        prompt = info.get('prompt', '') or (raw.split('\nNegative prompt:')[0].strip() if raw else '')
-        negative = info.get('negative', '') or ''
-        if not prompt:
-            return None
-        # raw의 'Steps: ...' 파라미터 라인을 key→value로 파싱
-        params = {str(k).lower().replace(' ', '_'): v for k, v in info.get('parameters', {}).items()} if is_comfy and isinstance(info.get('parameters'), dict) else {}
-        if not is_comfy and 'Steps:' in raw:
-            tail = raw.split('Steps:', 1)[1]
-            for kv in ('Steps:' + tail).split(', '):
-                if ':' in kv:
-                    k, v = kv.split(':', 1)
-                    params[k.strip().lower().replace(' ', '_')] = v.strip()
-
-        def _to_int(v, d):
-            try: return int(v)
-            except (TypeError, ValueError, OverflowError): return d
-        def _to_float(v, d):
-            try: return float(v)
-            except (TypeError, ValueError): return d
-
-        qp = {
-            'prompt': prompt,
-            'negative_prompt': negative,
-            'sampler_name': params.get('sampler') or self.sampler_combo.currentText(),
-            'scheduler': params.get('schedule_type') or self.scheduler_combo.currentText(),
-            'steps': _to_int(params.get('steps'), int(self.steps_input.text() or 20)),
-            'cfg_scale': _to_float(params.get('cfg_scale'), float(self.cfg_input.text() or 7)),
-            'seed': _to_int(params.get('seed'), -1) if preserve_seed else -1,
-            'width': int(self.width_input.text() or 1024),
-            'height': int(self.height_input.text() or 1024),
-        }
-        if 'size' in params:
-            wh = params['size'].split('x')
-            if len(wh) == 2:
-                qp['width'] = _to_int(wh[0], qp['width'])
-                qp['height'] = _to_int(wh[1], qp['height'])
-        return qp
-
-    def _build_xyz_payload(self, combo: dict) -> dict:
-        """XYZ 조합에서 생성 payload 구성"""
-        payload = {
-            'prompt': self.total_prompt_display.toPlainText(),
-            'negative_prompt': self.neg_prompt_text.toPlainText(),
-            'sampler_name': self.sampler_combo.currentText(),
-            'scheduler': self.scheduler_combo.currentText(),
-            'steps': int(self.steps_input.text() or 20),
-            'cfg_scale': float(self.cfg_input.text() or 7),
-            'seed': int(self.seed_input.text() or -1),
-            'width': int(self.width_input.text() or 1024),
-            'height': int(self.height_input.text() or 1024),
-        }
-        # XYZ 축 값 오버라이드
-        for key, val in combo.items():
-            if key == 'Steps': payload['steps'] = int(val)
-            elif key == 'CFG Scale': payload['cfg_scale'] = float(val)
-            elif key == 'Seed': payload['seed'] = int(val)
-            elif key == 'Width': payload['width'] = int(val)
-            elif key == 'Height': payload['height'] = int(val)
-            elif key == 'Sampler': payload['sampler_name'] = val
-            elif key == 'Scheduler': payload['scheduler'] = val
-            elif key == 'Denoising': payload['denoising_strength'] = float(val)
-            elif key == 'Prompt S/R':
-                if ',' in val:
-                    search, replace = val.split(',', 1)
-                    payload['prompt'] = payload['prompt'].replace(search.strip(), replace.strip())
-            elif key == 'Negative S/R':
-                if ',' in val:
-                    search, replace = val.split(',', 1)
-                    payload['negative_prompt'] = payload['negative_prompt'].replace(search.strip(), replace.strip())
-        return payload
+        return _queue_item_from_metadata(self, info, preserve_seed=preserve_seed)
 
     # ========== 유틸리티 메서드 ==========
 
     def show_status(self, message: str, timeout_ms: int = 5000):
-        if hasattr(self, 'status_message_label') and self.status_message_label:
-            self.status_message_label.setText(message.upper())
-            if timeout_ms > 0: QTimer.singleShot(timeout_ms, lambda: self.status_message_label.clear())
+        """상태 한 줄 — 콘솔 + Vue 하단 계기 스트립(statusMessage). timeout_ms=0 이면 다음 문구까지 유지.
+
+        예전엔 더미 라벨(status_message_label = _D())에만 써서 화면에 아무것도 나오지 않았다.
+        토스트가 아니다(스텝마다 오는 진행 문구도 있다) — 놓치면 안 되는 결과는 호출처가
+        ui.status_line.notify_user 로 따로 토스트를 띄운다. 시그니처는 테스트 스텁과 맞춰 둔다.
+        """
+        from ui.status_line import publish_status
+        publish_status(self, message, timeout_ms)
 
     def _setup_realtime_cleaning(self):
         def _schedule():
@@ -2162,20 +1968,27 @@ class GeneratorMainUI(
         finally: self.is_programmatic_change = False
 
     def _setup_queue(self):
+        # 화면 없는 대기열 상태 저장소(widgets/queue_panel.py) — 보이는 대기열은 Vue QueuePanel.vue
         self.queue_panel = QueuePanel()
         self.queue_panel.setParent(None)
         self.queue_manager = QueueManager(self.queue_panel)
         self.queue_manager.generation_requested.connect(self._on_generation_requested)
         self.queue_manager.queue_completed.connect(self._on_queue_completed)
+        # 재개 때 이미 GPU 에 있는 항목을 다시 보내지 않게 — 생성 워커가 결과를 냈는지로 판단
+        self.queue_manager.generation_active = lambda: self._auto_generation_in_flight()
+        # 자동화가 돌면 대기열을 따로 시작하지 않는다(자동화 '큐 우선'이 먼저 처리한다) — ui/queue_coordination.py
+        from ui.queue_coordination import announce, queue_start_refusal
+        self.queue_manager.start_blocker = lambda: queue_start_refusal(self)
+        # 워커가 바빠 보내지 못하고 멈춘 사유(수동 생성 · 자동화) — 상태줄 + 토스트
+        self.queue_manager.notice.connect(lambda message: announce(self, message))
         # 일시정지 상태 변경 시 Vue 동기화 (▶/⏸ 토글)
         if hasattr(self.queue_manager, 'paused_changed'):
             self.queue_manager.paused_changed.connect(lambda _p: self._sync_queue_to_vue())
-        # 대기열 변경 (추가/삭제/순서변경) 시 Vue 동기화
+        # 대기열 변경 (추가/삭제/순서/수정/실행 중 표시) 시 Vue 동기화 — 같은 턴의 변경은 한 번으로 합쳐진다
         if hasattr(self.queue_panel, 'queue_changed'):
             self.queue_panel.queue_changed.connect(lambda _n: self._sync_queue_to_vue())
-        if hasattr(self.queue_panel, 'item_added'):
-            self.queue_panel.item_added.connect(self._sync_queue_to_vue)
-        # add_single_item 래핑으로 Vue 동기화
+        # add_single_item 래핑 — ComfyUI 워크플로 컨트롤 동결 + queueItemAdded(핀 강조).
+        # 일괄 추가(XYZ·시드 탐색·이벤트 시나리오)도 이 래퍼를 한 건씩 거친다(우회 API 없음).
         _orig_add = self.queue_panel.add_single_item
         def _wrapped_add(item):
             # Search/EXIF/automation use the legacy abbreviated payload. Freeze
@@ -2187,56 +2000,48 @@ class GeneratorMainUI(
                 from core.comfy_workflow_controls import snapshot_comfy_payload
                 frozen = snapshot_comfy_payload(get_backend(), {}, 'txt2img')
                 item = {**item, '_comfy_queued_controls': frozen['_comfy_workflow_snapshot']}
-            _orig_add(item)
+            added_id = _orig_add(item)
             # 실제 생성된 항목(id 포함)을 전달 — 원본 item엔 id가 없어 Vue 중복 방지가
             # 동작하지 않던 문제 방지
+            actual = None
             try:
-                actual = self.queue_panel.queue_items[-1] if self.queue_panel.queue_items else item
+                getter = getattr(self.queue_panel, 'get_item_by_id', None)
+                if added_id and callable(getter):
+                    actual = getter(added_id)
+                if actual is None:
+                    actual = self.queue_panel.queue_items[-1] if self.queue_panel.queue_items else item
             except Exception:
                 actual = item
             self._sync_queue_item_added(actual)
+            return added_id
         self.queue_panel.add_single_item = _wrapped_add
 
+    def _queue_vue_sync(self):
+        """대기열 → Vue 전송기(ui/queue_vue_sync.py) — 처음 쓸 때 만든다."""
+        sync = getattr(self, '_queue_vue_sync_obj', None)
+        if sync is None:
+            from ui.queue_vue_sync import QueueVueSync
+            sync = QueueVueSync(self)
+            self._queue_vue_sync_obj = sync
+        return sync
+
     def _sync_queue_item_added(self, item: dict):
-        """대기열에 아이템 추가 시 Vue로 전달"""
+        """대기열에 아이템 추가 시 Vue로 전달 — 같은 턴의 추가는 마지막 항목 한 번으로 합친다."""
         if hasattr(self, 'vue_bridge'):
-            safe = {k: str(v)[:200] for k, v in item.items() if isinstance(v, (str, int, float, bool))}
-            self.vue_bridge.queueItemAdded.emit(json.dumps(safe))
+            self._queue_vue_sync().item_added(item)
 
     def _sync_queue_to_vue(self):
-        """전체 대기열 상태를 Vue로 전달. queue_items(list)를 그대로 직렬화."""
+        """전체 대기열 상태를 Vue로 전달(queueUpdated) — 다음 이벤트 루프 턴에 최신 상태 한 번."""
         if not (hasattr(self, 'vue_bridge') and hasattr(self, 'queue_panel')):
             return
-        try:
-            # 안전 직렬화 — 원시 타입만 통과시키되, prompt는 200자로 제한
-            def _safe(d):
-                out = {}
-                for k, v in d.items():
-                    if isinstance(v, str):
-                        out[k] = v[:4000] if k in ('prompt', 'negative_prompt') else v[:500]
-                    elif isinstance(v, (int, float, bool)):
-                        out[k] = v
-                return out
-            items = [_safe(it) for it in self.queue_panel.queue_items]
-            qm = getattr(self, 'queue_manager', None)
-            running = bool(qm and getattr(qm, 'is_running', False))
-            paused = bool(qm and getattr(qm, 'is_paused', False))
-            # 현재 실행 중 인덱스 — 0번이 실행 중인 항목 (queue_manager는 첫 항목을 꺼내며 처리)
-            current_index = 0 if (running and items) else -1
-            state = {
-                'items': items,
-                'running': running,
-                'paused': paused,
-                'current_index': current_index,
-                # 이번 실행의 '라이브' 완료 수 (이전 실행 종료값이 아니라) — 진행률 정확화
-                'completed': getattr(qm, 'generated_count', 0) if qm else 0,
-            }
-            self.vue_bridge.queueUpdated.emit(json.dumps(state))
-        except Exception as e:
-            try:
-                self.show_status(f"queue sync error: {e}")
-            except Exception:
-                pass
+        self._queue_vue_sync().request_state()
+
+    def _flush_queue_state(self):
+        """모아 둔 대기열 저장을 지금 쓴다 — 앱 종료 직전(_quit_app · 웹 모드 aboutToQuit)."""
+        panel = getattr(self, 'queue_panel', None)
+        flush = getattr(panel, 'flush_to_disk', None)
+        if callable(flush):
+            flush()
 
     def _apply_payload_to_ui(self, item: dict):
         """큐 아이템(payload dict)을 생성 UI에 적용 — 생성 직전 호출.
@@ -2274,56 +2079,25 @@ class GeneratorMainUI(
             self.is_programmatic_change = False
 
     def _on_generation_requested(self, item: dict):
-        if isinstance(item, dict) and item.get('_xyz_backend_id'):
-            try:
-                payload, model, backend = self._xyz_prepare_queue_generation(item)
-                if not self.start_generation(payload_override=payload, model_override=model, backend_override=backend):
+        # 동결 항목(시드 탐색 · XYZ · ComfyUI 스냅숏/컨트롤)은 굳힌 payload 그대로 보낸다 —
+        # 준비 규칙은 ui/queue_item_dispatch 한 곳에 있고 자동화 '큐 우선' 경로도 같이 쓴다.
+        # (UI 에서 다시 만들면 subseed·LoRA·hires 같은 동결 설정이 사라진다)
+        from ui.queue_item_dispatch import prepare_frozen_generation, start_prepared_generation
+        try:
+            prepared = prepare_frozen_generation(self, item)
+            if prepared is not None:
+                if not start_prepared_generation(self, prepared):
                     self.queue_manager.pause()
                 return
-            except Exception as exc:
-                self.queue_manager.pause()
-                self._abort_generation(str(exc))
-                return
-        if isinstance(item, dict) and '_comfy_workflow_snapshot' in item:
-            try:
-                import copy
-                from backends import BackendType, get_backend, get_backend_type
-                if get_backend_type() != BackendType.COMFYUI:
-                    raise ValueError('이 대기열 항목을 만든 ComfyUI 백엔드를 다시 선택하세요.')
-                payload = copy.deepcopy(item)
-                if '_comfy_model_snapshot' not in payload:
-                    raise ValueError('대기열의 모델 스냅샷이 없습니다. 작업을 다시 등록하세요.')
-                model = str(payload.pop('_comfy_model_snapshot', '') or '')
-                for key in ('id', 'group_id', 'group_index', 'group_total', 'is_last_of_group'):
-                    payload.pop(key, None)
-                if not self.start_generation(payload_override=payload, model_override=model, backend_override=get_backend()):
-                    self.queue_manager.pause()
-                return
-            except Exception as exc:
-                self.queue_manager.pause()
-                self._abort_generation(str(exc))
-                return
-        if isinstance(item, dict) and '_comfy_queued_controls' in item:
-            try:
-                from backends import BackendType, get_backend, get_backend_type
-                if get_backend_type() != BackendType.COMFYUI or self._is_krea2_generation():
-                    raise ValueError('이 대기열 항목을 만든 ComfyUI 이미지 생성 경로를 다시 선택하세요.')
-                frozen = item['_comfy_queued_controls']
-                if not isinstance(frozen, dict):
-                    raise ValueError('대기열의 워크플로 설정 스냅샷이 올바르지 않습니다.')
-                self._apply_payload_to_ui(item)
-                payload, error = self._build_generation_payload(comfy_workflow_snapshot=frozen)
-                if payload is None:
-                    raise ValueError(error or '대기열 생성 설정을 확인하세요.')
-                if not self.start_generation(payload_override=payload, backend_override=get_backend()):
-                    self.queue_manager.pause()
-                return
-            except Exception as exc:
-                self.queue_manager.pause()
-                self._abort_generation(str(exc))
-                return
+        except Exception as exc:
+            self.queue_manager.pause()
+            self._abort_generation(str(exc))
+            return
         self._apply_payload_to_ui(item)
-        self.start_generation()
+        if self.start_generation() is False:
+            # 시작하지 못했다(다른 생성 중 · 검증 실패 · 체크포인트 없음) — 항목을 남기고 멈춘다.
+            # 예전엔 '실행 중'으로 남아, 다른 생성이 끝날 때 이 항목이 생성 없이 지워졌다.
+            self.queue_manager.pause()
 
     def _on_queue_completed(self, total_count: int):
         self._queue_completed_count = total_count
@@ -2334,7 +2108,12 @@ class GeneratorMainUI(
             self.vue_bridge.queueCompleted.emit(json.dumps({'total': total_count, 'natural': natural}))
             if natural:
                 self.vue_bridge.showNotification.emit('success', f'{total_count}장 생성 완료')
-        if natural:
+        # 설정 '생성 후 모델 언로드' — 대기열/XYZ 마지막 장 뒤 (큐 stop 이 delay 뒤에 오므로 여기서)
+        if hasattr(self, '_maybe_unload_models_after_generation'):
+            self._maybe_unload_models_after_generation()
+        # 웹 모드엔 호스트 창이 없다 — 위 토스트가 브라우저에 가고, 이 모달은 호스트 데스크톱에
+        # 아무도 닫지 않는 창으로 남을 뿐이다.
+        if natural and not getattr(self, 'web_mode', False):
             QMessageBox.information(self, "Task Complete", f"Successfully generated {total_count} images.")
 
     def _setup_tray(self):
@@ -2490,10 +2269,23 @@ class GeneratorMainUI(
         """검색 결과 덱 디스크 복원 — window 표시 후 1회 지연 실행.
         큰 JSON 파싱이라 __init__ 동기 경로에서 빼내 시작 프리징을 없앴다.
         자동화가 Search 탭 방문 없이도 즉시 사용 가능하게 filtered_results/덱을 미리 채운다.
-        (Vue SearchView onMounted도 별도로 호출하지만, 다른 탭에서 시작해도 준비되게 함)"""
+        (Vue SearchView onMounted도 별도로 호출하지만, 다른 탭에서 시작해도 준비되게 함)
+
+        런타임 상태만 채운다 — 예전처럼 loadLastSearchResults 슬롯을 불러 20MB JSON 을
+        만들어 버리지 않는다. 그 사이 Search 탭이 먼저 복원했거나 새 검색이 끝났으면
+        (스냅숏이 이미 있으면) 디스크를 다시 읽지 않는다."""
         try:
-            if hasattr(self, 'vue_bridge') and hasattr(self.vue_bridge, 'loadLastSearchResults'):
-                self.vue_bridge.loadLastSearchResults()
+            from core.search_result_store import SearchResultStore
+            from core.search_session import restore_runtime_from_disk, runtime_lineage
+            lineage = runtime_lineage(self)
+            if lineage and lineage.get('snapshot_id'):
+                return
+            store = SearchResultStore()
+            restored = restore_runtime_from_disk(self, store)
+            if store.last_error:
+                print(f"[Search] cache ignored: {store.last_error}")
+            elif store.last_snapshot_id is not None:
+                print(f"[Search] restored {len(restored):,} rows from disk → filtered_results")
         except Exception as e:
             print(f"[Search] 시작 시 덱 복원 실패: {e}")
 
@@ -2516,14 +2308,13 @@ class GeneratorMainUI(
 
         def _work():
             try:
-                from core.gpu_stats import read_vram
+                from core.gpu_stats import read_backend_vram, read_vram
                 stats = read_vram()
                 if not stats and getattr(self, '_backend_connected', False):
                     from backends import get_backend
                     backend = get_backend()
-                    stats = backend.get_system_stats() if backend else None
-                    if stats:
-                        stats = dict(stats, source='backend')
+                    # 백엔드 HTTP 는 5초에 한 번만 — 그 사이엔 마지막 값을 다시 보낸다.
+                    stats = read_backend_vram(backend.get_system_stats) if backend else None
                 if stats and stats.get('vram_total', 0) > 0:
                     used = stats['vram_used'] / (1024**3)
                     total = stats['vram_total'] / (1024**3)
@@ -2586,59 +2377,9 @@ class GeneratorMainUI(
             self.queue_manager.start()
         return plan.count
 
-    def _start_event_search(self, payload):
-        """이벤트 검색을 비동기 워커로 실행 (진행도 포함)"""
-        raw_ratings = payload.get('ratings', ['g'])
-        ratings = tuple(
-            rating for rating in raw_ratings
-            if isinstance(rating, str) and rating in {'g', 's', 'q', 'e'}
-        ) if isinstance(raw_ratings, list) else ('g',)
-        if not ratings:
-            ratings = ('g',)
-
-        loader = getattr(self, '_event_loader', None)
-        loaded_ratings = getattr(self, '_event_loader_ratings', ())
-
-        if loader is None or frozenset(loaded_ratings) != frozenset(ratings):
-            # 데이터 자동 로드 후 검색
-            self._pending_event_payload = payload
-            self._pending_event_ratings = ratings
-            self._auto_load_event_data(ratings)
-            return
-
-        self._run_event_search_worker(loader, payload)
-
-    def _auto_load_event_data(self, ratings):
-        """이벤트 데이터 자동 로드 (Vue 진행도 표시)"""
-        from config import EVENT_PARQUET_DIR
-        from workers.event_data_load_worker import EventDataLoadWorker
-
-        self.vue_bridge.searchStatus.emit('데이터 로딩 중...')
-
-        self._event_load_worker = EventDataLoadWorker(EVENT_PARQUET_DIR, ratings)
-        self._event_load_worker.progress.connect(
-            lambda msg: self.vue_bridge.searchStatus.emit(msg))
-        self._event_load_worker.finished.connect(self._on_event_data_loaded)
-        self._event_load_worker.start()
-
-    def _on_event_data_loaded(self, result):
-        """데이터 로드 완료 → 검색 시작"""
-        if isinstance(result, str):
-            self._pending_event_payload = {}
-            self._pending_event_ratings = ()
-            self.vue_bridge.eventSearchResults.emit(json.dumps({'error': result}))
-            return
-
-        self._event_loader = result
-        self._event_loader_ratings = tuple(
-            getattr(self, '_pending_event_ratings', ('g',))
-        )
-
-        payload = getattr(self, '_pending_event_payload', {})
-        if payload:
-            self._run_event_search_worker(result, payload)
-            self._pending_event_payload = {}
-            self._pending_event_ratings = ()
+    # _start_event_search / _auto_load_event_data / _on_event_data_loaded /
+    # _run_event_search_worker 는 ui/event_search_actions.EventSearchActionsMixin 에 있다
+    # (적재·검색 요청 순서, 옛 결과 버리기, eventLoadStatus 채널).
 
     def _export_event_results(self, payload):
         """이벤트 검색 결과를 .parquet로 내보내기"""
@@ -2687,17 +2428,6 @@ class GeneratorMainUI(
             self.vue_bridge.eventImportResults.emit(json.dumps(events, ensure_ascii=False))
         except Exception as e:
             self.vue_bridge.showNotification.emit('error', f'불러오기 실패: {e}')
-
-    def _run_event_search_worker(self, loader, payload):
-        """검색 워커 실행"""
-        from workers.event_search_worker import EventSearchWorker
-        self._event_search_worker = EventSearchWorker(loader, payload, self)
-        self._event_search_worker.progress.connect(
-            lambda cur, total: self.vue_bridge.eventSearchProgress.emit(cur, total))
-        self._event_search_worker.finished.connect(
-            lambda r: self.vue_bridge.eventSearchResults.emit(r))
-        self._event_search_worker.start()
-        self.show_status("이벤트 검색 시작...")
 
     # ── ADetailer 단독 실행 ──
 
@@ -2851,17 +2581,17 @@ class GeneratorMainUI(
         호출 시점:
         - 앱 시작 시 (저장된 ui_prefs.json 적용)
         - save_ui_prefs 액션 받을 때마다 (변경 즉시 반영)
+
+        세 옵션의 주인은 ui_prefs 하나다 — 키가 없으면 Vue 화면의 기본값(켜짐)을 쓴다. 레거시
+        prompt_settings.cleaning_options 는 이 세 키를 더 이상 적용하지 않는다(core/prompt_cleaner_prefs).
         """
         cleaner = getattr(self, "prompt_cleaner", None)
         if cleaner is None:
             return
         try:
-            if "cleanDuplicates" in prefs:
-                cleaner.remove_duplicates = bool(prefs["cleanDuplicates"])
-            if "cleanSpaces" in prefs:
-                cleaner.auto_space = bool(prefs["cleanSpaces"])
-            if "cleanUnderscore" in prefs:
-                cleaner.underscore_to_space = bool(prefs["cleanUnderscore"])
+            from core.prompt_cleaner_prefs import cleaner_options_from_ui_prefs
+            for attr, value in cleaner_options_from_ui_prefs(prefs).items():
+                setattr(cleaner, attr, value)
         except Exception as e:
             print(f"[Warning] LOGIC 토글 적용 실패: {e}")
 
@@ -2906,27 +2636,16 @@ class GeneratorMainUI(
 
     # ── PR 8: Instant Wildcards ────────────────────────────
     def _get_instant_wildcards(self):
-        """싱글톤 InstantWildcards 인스턴스 — 게으른 초기화 + PromptPipeline 훅 등록."""
-        if not hasattr(self, '_instant_wildcards'):
-            from core.instant_wildcards import InstantWildcards
-            from core.storage_paths import user_data_file
-            store = user_data_file(
-                "instant_wildcards.json",
-                legacy_paths="save/instant_wildcards.json",
-            )
-            self._instant_wildcards = InstantWildcards(store_path=store)
-            # PromptPipeline에 자동 등록 — 와일드카드 확장 단계에 추가
-            try:
-                from core.prompt_pipeline import get_pipeline, HookPoint
-                get_pipeline().register(
-                    HookPoint.POST_PROCESSING,
-                    self._instant_wildcards.make_hook(),
-                    priority=80,
-                    name="instant_wildcards",
-                )
-            except Exception:
-                pass
-        return self._instant_wildcards
+        """프로세스 싱글톤 InstantWildcards — 생성 훅(부팅 시 register_standard_hooks 가 등록)과
+        같은 객체라, 여기서 저장한 목록이 다음 생성에 바로 쓰인다. 훅 등록은 이름 기준 멱등이라
+        부팅 등록이 실패했던 경우에만 여기서 채워진다(이중 등록 없음)."""
+        from core.instant_wildcards import ensure_hook_registered, get_instant_wildcards
+        iw = get_instant_wildcards()
+        try:
+            ensure_hook_registered(instance=iw)
+        except Exception as exc:
+            print(f"[Warning] 인스턴트 와일드카드 훅 등록 실패: {exc}")
+        return iw
 
     def _send_instant_wildcards_list(self):
         """현재 인스턴트 와일드카드 목록을 Vue로 푸시."""
@@ -3006,14 +2725,30 @@ class GeneratorMainUI(
 
     def _save_shutdown_state(self) -> bool:
         """Persist live settings unless a just-imported backup must win."""
+        def mark_session_backup_clean():
+            try:
+                from core.session_backup import mark_session_clean
+                mark_session_clean()
+            except Exception as e:
+                print(f"[Warning] 세션 백업 정상 종료 표시 실패: {e}")
+
         if getattr(self, '_preserve_imported_settings_on_quit', False):
             print("[Config] 가져온 설정 보존을 위해 종료 시 자동 저장을 건너뜁니다")
+            # 설정 백업 가져오기는 의도한 교체라 크래시가 아니다 — 세션 백업(가져오기 전 프롬프트)을
+            # 정상 종료로 표시한다. 두면 다음 부팅이 가져온 prompt_settings 와 다른 그 프롬프트를
+            # '크래시 복구'로 제안하고, 누르면 방금 가져온 설정을 가져오기 전 프롬프트로 덮는다.
+            mark_session_backup_clean()
             return False
         else:
             try:
-                self.save_settings()
+                saved = self.save_settings()
             except Exception as e:
+                saved = False
                 print(f"[Warning] 종료 시 설정 저장 실패: {e}")
+            if saved is not False:
+                # 프롬프트가 prompt_settings.json 에 남았으니 크래시 복구 백업은 '정상 종료'로 표시 —
+                # 다음 부팅이 복구를 제안하지 않는다. 저장이 실패했으면 백업이 유일한 사본이라 둔다.
+                mark_session_backup_clean()
             try:
                 # UI 상태 (창 크기/위치/스플리터 등) 저장
                 if hasattr(self, "ui_state"):
@@ -3023,6 +2758,18 @@ class GeneratorMainUI(
         return True
 
     def _quit_app(self):
+        # 덱 진행도는 뽑을 때마다 쓰지 않고 모아 둔다 — 종료 전에 남은 것을 저장한다.
+        try:
+            flush_deck = getattr(self, '_flush_deck_state', None)
+            if callable(flush_deck):
+                flush_deck()
+        except Exception as exc:
+            print(f"[Shutdown] 덱 진행도 저장 실패(계속 종료): {exc}")
+        # 대기열 저장도 모아서 쓴다(widgets/queue_panel.py PERSIST_DELAY_MS) — os._exit 전에 남은 것을 쓴다.
+        try:
+            self._flush_queue_state()
+        except Exception as exc:
+            print(f"[Shutdown] 대기열 저장 실패(계속 종료): {exc}")
         self._save_shutdown_state()
         for stop in (self._shutdown_model_downloads, self._chat_stop,
                      self._shutdown_comfy_compatibility, self._shutdown_comfy_workflow_controls,
@@ -3040,8 +2787,8 @@ class GeneratorMainUI(
             pass
         # QThread 워커들 정지·짧게 대기 — Python 데몬 스레드가 아니므로 그냥 두고 os._exit하면
         # 실행 중 파괴로 Qt 경고/드문 크래시 가능. 각 ~0.5초만 기다리고 안 끝나면 포기(워치독).
-        for _name in ('gen_worker', '_search_worker', 'info_worker',
-                      '_ollama_worker', '_gennl_worker'):
+        # (Ollama 워커는 브리지가 보관하고 취소할 수 없는 HTTP 라 기다려도 이득이 없다 — 대상 아님)
+        for _name in ('gen_worker', '_search_worker', 'info_worker'):
             try:
                 w = getattr(self, _name, None)
                 if w is None or not hasattr(w, 'isRunning') or not w.isRunning():
@@ -3067,12 +2814,6 @@ class GeneratorMainUI(
                     pass
         except Exception:
             pass
-        try:
-            # SQLite 정리 — 쓰기마다 commit이라 미close여도 손상은 없지만 깔끔하게
-            if hasattr(self, 'db') and hasattr(self.db, 'close'):
-                self.db.close()
-        except Exception:
-            pass
         self._stop_owned_backend_runtimes()
         try:
             from core.app_instance import unregister_app_instance
@@ -3082,7 +2823,7 @@ class GeneratorMainUI(
             pass
         # 최종 종료는 os._exit 유지 — QApplication.quit()은 QWebEngineProfile/Page 해체 순서
         # 크래시·행이 재발함(커밋 24d7856d6, e6f964c6f 이력). 위에서 설정 저장 + QThread
-        # 정지·대기 + DB close를 마쳤고, 에디터/캡션/영속 쓰기는 Python 데몬 스레드라 안전.
+        # 정지·대기를 마쳤고, 에디터/캡션/영속 쓰기는 Python 데몬 스레드라 안전.
         os._exit(0)
 
     def _stop_owned_backend_runtimes(self) -> None:

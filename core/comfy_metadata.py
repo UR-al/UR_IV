@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.comfy_node_classes import SAMPLER_NODES
+
 
 MAX_NODES = 4096
 MAX_DEPTH = 96
-_SAMPLERS = {"KSampler", "KSamplerAdvanced", "ForgeNeoKSamplerCNS", "SamplerCustom", "SamplerCustomAdvanced"}
+_SAMPLERS = SAMPLER_NODES  # 선택 화면·컴파일러와 같은 샘플러 분류
 _OUTPUTS = {"SaveImage", "PreviewImage", "SaveAnimatedWEBP", "SaveVideo", "SaveAnimatedPNG"}
 _WIDGETS = {
     "CLIPTextEncode": ("text",),

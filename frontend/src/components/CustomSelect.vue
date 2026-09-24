@@ -9,7 +9,7 @@
       :aria-expanded="isOpen"
       :aria-controls="listboxId"
       :aria-activedescendant="activeDescendant"
-      @click="toggle"
+      @click="onTriggerClick"
       @keydown="onTriggerKeydown"
     >
       <span class="csel-text">{{ displayText }}</span>
@@ -34,7 +34,7 @@
             role="option"
             :aria-selected="modelValue === opt"
             @mouseenter="activeIndex = optionFlatIndex(groupIndex, optionIndex)"
-            @click="select(opt)"
+            @click="select(opt, 'pointer')"
           >{{ opt === '' ? placeholder : opt }}</div>
         </section>
       </template>
@@ -45,7 +45,7 @@
           role="option"
           :aria-selected="modelValue === opt"
           @mouseenter="activeIndex = optionIndex"
-          @click="select(opt)">{{ opt === '' ? placeholder : opt }}</div>
+          @click="select(opt, 'pointer')">{{ opt === '' ? placeholder : opt }}</div>
       </template>
       <div v-if="!hasOptions" class="csel-empty">항목 없음</div>
     </div>
@@ -145,9 +145,21 @@ function schedulePlacement() {
   placementFrame = requestAnimationFrame(() => { placementFrame = 0; updatePlacement() })
 }
 
-function toggle() {
-  if (isOpen.value) isOpen.value = false
-  else open()
+/**
+ * 포커스는 키보드로 다루는 동안만 트리거에 둔다. 트리거에 포커스가 있으면 ↑/↓ 는 이 목록의 몫이다
+ * (onTriggerKeydown 이 preventDefault → utils/appShortcuts 가 히스토리 이동을 비킨다). 마우스로 고르거나
+ * 닫은 뒤에도 포커스가 남으면, 이어서 ↓ 로 히스토리를 넘기려 해도 목록만 다시 열렸다(S2-appvue-split#2-a).
+ * 그래서 마우스로 끝낸 상호작용은 포커스를 놓는다 — 브라우저가 옵션 mousedown 에서 이미 놓았어도 무해하다.
+ */
+function releaseFocus() {
+  trigger.value?.blur()
+}
+
+function onTriggerClick(event: MouseEvent) {
+  if (!isOpen.value) { open(); return }
+  isOpen.value = false
+  // detail = 클릭 수 — 0 이면 키보드·코드가 만든 클릭(그때는 포커스를 그대로 둔다)
+  if (event.detail > 0) releaseFocus()
 }
 
 function moveActive(delta: 1 | -1) {
@@ -175,7 +187,7 @@ function onTriggerKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
     if (!isOpen.value) open()
-    else if (activeIndex.value >= 0) select(flatOptions.value[activeIndex.value])
+    else if (activeIndex.value >= 0) select(flatOptions.value[activeIndex.value], 'keyboard')
     return
   }
   if (event.key === 'Escape' && isOpen.value) {
@@ -186,10 +198,13 @@ function onTriggerKeydown(event: KeyboardEvent) {
   }
 }
 
-function select(opt: SelectValue) {
+/** 항목 고르기 — 키보드(트리거의 Enter/Space)로 골랐으면 포커스를 트리거에 두고(이어서 ↑/↓ 로 다시 연다),
+ *  마우스로 골랐으면 놓는다(이어지는 ↑/↓ 는 히스토리 — releaseFocus 참고). */
+function select(opt: SelectValue, via: 'keyboard' | 'pointer') {
   emit('update:modelValue', opt)
   isOpen.value = false
-  void nextTick(() => trigger.value?.focus())
+  if (via === 'keyboard') void nextTick(() => trigger.value?.focus())
+  else releaseFocus()
 }
 
 function onClickOutside(e: MouseEvent) {

@@ -7,7 +7,10 @@ AI Studio Pro는 별도 머신용 HTTP 서버를 열어 외부 프로그램의 �
 ## 켜기
 
 1. `Settings → NETWORK`를 엽니다.
-2. `BIND HOST`와 `PORT`를 확인합니다. 기본값은 `127.0.0.1:17860`입니다.
+2. `BIND HOST`와 `PORT`를 확인합니다. 기본값은 `127.0.0.1:17990`입니다.
+   (관리형 Forge `17860~`·ComfyUI `18188~` 자동 포트 범위와 겹치지 않게 골랐습니다. 이전 버전의
+   기본값 `17860`을 그대로 둔 채 꺼져 있던 설정은 처음 실행할 때 `17990`으로 옮겨집니다.
+   켜 둔 설정의 포트는 바꾸지 않으며, 그때는 관리형 Forge가 다음 빈 포트를 씁니다.)
 3. 필요하면 원격 target을 추가합니다.
 4. `APPLY CONFIG`를 누른 뒤 `START`를 누릅니다.
 5. 표시된 Bearer token을 복사합니다.
@@ -55,7 +58,7 @@ Authorization: Bearer <Settings에서 복사한 token>
 ### PowerShell T2I 예시
 
 ```powershell
-$base = 'http://127.0.0.1:17860'
+$base = 'http://127.0.0.1:17990'
 $token = '<Settings에서 복사한 token>'
 $headers = @{ Authorization = "Bearer $token" }
 $body = @{

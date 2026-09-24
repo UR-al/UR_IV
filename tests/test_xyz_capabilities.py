@@ -41,7 +41,7 @@ class XYZCapabilityTests(unittest.TestCase):
         from core.xyz_capabilities import build_jobs
         from core.comfy_workflow_compiler import ComfyWorkflowCompiler
         schema = {name: {"input": {"required": {}}} for name in (
-            "KSampler", "ForgeNeoKSamplerCNS", "ForgeNeoLatentInput", "CheckpointLoaderSimple", "CLIPTextEncode", "EmptyLatentImage", "VAEDecode", "SaveImage")}
+            "KSampler", "ForgeNeoKSamplerCNS", "ForgeNeoLatentInput", "CheckpointLoaderSimple", "CLIPTextEncode", "EmptyLatentImage", "VAEDecode", "SaveImage", "PreviewImage")}
         schema["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"] = [["model.safetensors"]]
         schema["KSampler"]["input"]["required"].update({
             "seed": ["INT", {"min": 0, "max": 2**32 - 1}], "steps": ["INT", {"min": 1, "max": 100}],
@@ -111,6 +111,34 @@ class XYZCapabilityTests(unittest.TestCase):
         self.assertEqual(axes["sampler_name"]["choices"], ["euler", "er_sde"])
         self.assertEqual(axes["steps"]["max"], 50)
         self.assertNotIn("denoising_strength", axes)
+
+    def test_krea2_capabilities_skip_every_network_call(self):
+        from unittest import mock
+        from core.xyz_capabilities import KREA2_NOTE, MAX_JOBS, fetch_capabilities
+
+        class _Backend:
+            api_url = "http://127.0.0.1:8188/"
+
+            def get_object_info(self):
+                raise AssertionError("krea2 must not fetch /object_info")
+
+            def _load_configured_workflow(self, _mode):
+                raise AssertionError("krea2 must not load the txt2img workflow")
+
+        with mock.patch("requests.get", side_effect=AssertionError("krea2 must not call Forge")):
+            for kind in ("comfyui", "webui"):
+                with self.subTest(kind=kind):
+                    result = fetch_capabilities(_Backend(), kind, family="krea2")
+                    self.assertEqual(result["axes"], [])
+                    self.assertEqual(result["notes"], [KREA2_NOTE])
+                    self.assertEqual(result["backend"], kind)
+                    self.assertEqual(result["maxJobs"], MAX_JOBS)
+                    self.assertTrue(result["capabilityId"])
+
+    def test_unknown_backend_kind_is_still_rejected_before_krea2_shortcut(self):
+        from core.xyz_capabilities import fetch_capabilities
+        with self.assertRaises(ValueError):
+            fetch_capabilities(object(), "invokeai", family="krea2")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ torch and model work remains behind runtime calls.
 from __future__ import annotations
 
 import importlib
+import json
 from typing import Any, Iterable
 
 
@@ -26,6 +27,21 @@ def require_torch():
         raise RuntimeError(
             "This Forge-parity node needs torch and must run inside ComfyUI."
         ) from exc
+
+
+def json_object(value: Any, feature: str) -> dict[str, Any]:
+    """Parse a node's ``settings_json`` input into a dict (``{}`` when empty)."""
+    if value in (None, ""):
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{feature} settings_json must be a JSON object: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{feature} settings_json must be a JSON object.")
+    return parsed
 
 
 def comfy_nodes():
@@ -210,13 +226,6 @@ def clone_model(model: Any, feature: str) -> Any:
     if not callable(clone):
         raise RuntimeError(f"{feature} requires a ComfyUI MODEL input.")
     return clone()
-
-
-def model_options(model: Any) -> dict[str, Any]:
-    options = getattr(model, "model_options", None)
-    if not isinstance(options, dict):
-        raise RuntimeError("The MODEL has no ComfyUI model_options dictionary.")
-    return options
 
 
 def is_disabled_choice(value: Any) -> bool:

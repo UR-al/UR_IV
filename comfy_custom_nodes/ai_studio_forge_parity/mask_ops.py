@@ -30,12 +30,35 @@ def split_prompt_groups(prompt: str | None) -> list[list[str]]:
     return groups
 
 
-def _torch():
-    try:
-        import torch
-    except ImportError as exc:  # pragma: no cover - Comfy always provides it
-        raise RuntimeError("SAM3 mask operations require PyTorch.") from exc
-    return torch
+# Lazy torch import shared by the whole pack (compat.require_torch).
+from .compat import require_torch as _torch  # noqa: E402
+
+
+# A float IMAGE/MASK above this is on a 0..255 scale, not a [0,1] tensor with
+# resampling overshoot: Comfy's bicubic ImageScale/ImageScaleBy (and this pack's
+# own bicubic resize before its clamp) peak around 1.2 on hard edges.
+_FLOAT_BYTE_SCALE_THRESHOLD = 2.0
+
+
+def _to_unit_float(value: Any):
+    """Convert to float32 in ``[0,1]`` using the dtype, not a max>1 heuristic.
+
+    Integer tensors are byte-scaled (``/255``); bool masks are already 0/1.
+    Float tensors are ``[0,1]`` by Comfy contract, so interpolation overshoot
+    is clamped rather than divided by 255 (which turned a bicubic-resized
+    white-background image almost black).  Only a float tensor far outside the
+    overshoot range is treated as 0..255 data.
+    """
+
+    torch = _torch()
+    if value.dtype == torch.bool:
+        return value.to(dtype=torch.float32)
+    if not value.is_floating_point() and not value.is_complex():
+        return value.to(dtype=torch.float32) / 255.0
+    value = value.to(dtype=torch.float32)
+    if value.numel() and float(value.detach().max()) > _FLOAT_BYTE_SCALE_THRESHOLD:
+        value = value / 255.0
+    return value.clamp(0.0, 1.0)
 
 
 def ensure_image(image: Any):
@@ -52,10 +75,7 @@ def ensure_image(image: Any):
             value = value.permute(0, 2, 3, 1)
         else:
             raise ValueError(f"IMAGE channel dimension is ambiguous: {tuple(value.shape)}")
-    value = value.to(dtype=torch.float32)
-    if value.numel() and float(value.detach().max()) > 1.0:
-        value = value / 255.0
-    return value.clamp(0.0, 1.0)
+    return _to_unit_float(value).clamp(0.0, 1.0)
 
 
 def ensure_mask(mask: Any, *, height: int | None = None, width: int | None = None,
@@ -70,6 +90,9 @@ def ensure_mask(mask: Any, *, height: int | None = None, width: int | None = Non
     import torch.nn.functional as functional
 
     value = mask if torch.is_tensor(mask) else torch.as_tensor(mask)
+    # Scale by dtype before any channel mean: integer/bool tensors cannot be
+    # averaged, and the byte-vs-unit decision must not depend on max().
+    value = _to_unit_float(value)
     if value.ndim == 2:
         value = value.unsqueeze(0)
     elif value.ndim == 3:
@@ -93,9 +116,6 @@ def ensure_mask(mask: Any, *, height: int | None = None, width: int | None = Non
             raise ValueError(f"MASK channel dimension is ambiguous: {tuple(value.shape)}")
     if value.ndim != 3:
         raise ValueError(f"MASK must resolve to [B,H,W], got {tuple(value.shape)}")
-    value = value.to(dtype=torch.float32)
-    if value.numel() and float(value.detach().max()) > 1.0:
-        value = value / 255.0
     value = value.clamp(0.0, 1.0)
     if height is not None and width is not None and tuple(value.shape[-2:]) != (height, width):
         value = functional.interpolate(
@@ -441,3 +461,78 @@ def mask_bounds(mask: Any, padding: int = 0) -> tuple[int, int, int, int] | None
     x1 = max(0, int(points[:, 1].min()) - int(padding))
     x2 = min(width, int(points[:, 1].max()) + 1 + int(padding))
     return x1, y1, x2, y2
+
+
+def expand_crop_region(crop_region: Sequence[int], processing_width: int,
+                       processing_height: int, image_width: int,
+                       image_height: int) -> tuple[int, int, int, int]:
+    """Port of Forge ``modules.masking.expand_crop_region`` (inpaint_full_res).
+
+    Widens the padded mask crop to the processing aspect ratio, shifting it
+    back inside the image and clamping when the image edge is reached, e.g. a
+    128x32 crop processed at 512x512 becomes 128x128.  The integer arithmetic
+    is kept identical to Forge so the Comfy crop lands on the same pixels.
+    """
+
+    x1, y1, x2, y2 = (int(value) for value in crop_region)
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError(f"crop region must be non-empty, got {(x1, y1, x2, y2)}")
+    if int(processing_width) <= 0 or int(processing_height) <= 0:
+        raise ValueError("processing size must be positive")
+    ratio_crop_region = (x2 - x1) / (y2 - y1)
+    ratio_processing = int(processing_width) / int(processing_height)
+    if ratio_crop_region > ratio_processing:
+        desired_height = (x2 - x1) / ratio_processing
+        desired_height_diff = int(desired_height - (y2 - y1))
+        y1 -= desired_height_diff // 2
+        y2 += desired_height_diff - desired_height_diff // 2
+        if y2 >= image_height:
+            diff = y2 - image_height
+            y2 -= diff
+            y1 -= diff
+        if y1 < 0:
+            y2 -= y1
+            y1 -= y1
+        if y2 >= image_height:
+            y2 = image_height
+    else:
+        desired_width = (y2 - y1) * ratio_processing
+        desired_width_diff = int(desired_width - (x2 - x1))
+        x1 -= desired_width_diff // 2
+        x2 += desired_width_diff - desired_width_diff // 2
+        if x2 >= image_width:
+            diff = x2 - image_width
+            x2 -= diff
+            x1 -= diff
+        if x1 < 0:
+            x2 -= x1
+            x1 -= x1
+        if x2 >= image_width:
+            x2 = image_width
+    return x1, y1, x2, y2
+
+
+def fit_sample_size(crop_width: int, crop_height: int, processing_width: int,
+                    processing_height: int) -> tuple[int, int]:
+    """Aspect-preserving sample size for a crop processed at a target size.
+
+    Forge resizes the (already aspect-matched) crop to the processing size
+    with "Resize and Fill" and later scales the result back with "Crop and
+    Resize", i.e. the crop content is effectively sampled at
+    ``min(W/cw, H/ch)``.  Returning that size directly keeps the same scale
+    and never stretches the crop when the image edge prevented a full
+    aspect-ratio expansion.
+
+    Only for the only-masked crop path: a whole-picture pass is "Just
+    Resize"d to exactly the processing size instead.
+    """
+
+    crop_width, crop_height = int(crop_width), int(crop_height)
+    processing_width, processing_height = int(processing_width), int(processing_height)
+    if min(crop_width, crop_height, processing_width, processing_height) <= 0:
+        raise ValueError("crop and processing sizes must be positive")
+    scale = min(processing_width / crop_width, processing_height / crop_height)
+    return (
+        max(1, min(processing_width, int(round(crop_width * scale)))),
+        max(1, min(processing_height, int(round(crop_height * scale)))),
+    )

@@ -739,6 +739,91 @@ class GenerationApiTestCase(unittest.TestCase):
         self.assertEqual(loaded["progress"], 0.0)
         self.assertEqual(loaded["currentStep"], 0)
 
+    def _reload_with_config(self, values):
+        self.manager.shutdown()
+        self.config_path.write_text(json.dumps(values), encoding="utf-8")
+        self.manager = GenerationApiManager(
+            config_path=self.config_path,
+            storage_root=self.results_path,
+            target_factory=lambda profile: FakeBackend(),
+            coordinator=GenerationResourceCoordinator(),
+        )
+        return self.manager.snapshot(True)["config"]
+
+    def test_default_port_stays_outside_managed_runtime_port_ranges(self):
+        from core.backend_runtime import ENGINE_DEFINITIONS
+        from core.generation_api import DEFAULT_PORT
+
+        for engine, definition in ENGINE_DEFINITIONS.items():
+            with self.subTest(engine=engine):
+                self.assertNotIn(DEFAULT_PORT, range(definition.preferred_port, definition.preferred_port + 50))
+        self.assertEqual(self.manager.snapshot(True)["config"]["port"], DEFAULT_PORT)
+
+    def test_schema1_untouched_default_port_moves_off_the_forge_port(self):
+        from core.generation_api import DEFAULT_PORT, SCHEMA_VERSION
+
+        config = self._reload_with_config({
+            "schemaVersion": 1, "enabled": False, "port": 17860, "token": "m" * 24,
+        })
+        self.assertEqual(config["port"], DEFAULT_PORT)
+        self.assertEqual(config["token"], "m" * 24)
+        saved = json.loads(self.config_path.read_text(encoding="utf-8"))
+        self.assertEqual((saved["schemaVersion"], saved["port"]), (SCHEMA_VERSION, DEFAULT_PORT))
+
+    def test_schema1_enabled_or_custom_ports_are_preserved(self):
+        for values in (
+            {"schemaVersion": 1, "enabled": True, "port": 17860, "token": "e" * 24},
+            {"schemaVersion": 1, "enabled": False, "port": 18000, "token": "c" * 24},
+        ):
+            with self.subTest(values=values):
+                config = self._reload_with_config(values)
+                self.assertEqual(config["port"], values["port"])
+                self.assertEqual(config["enabled"], values["enabled"])
+
+    def test_schema2_explicit_legacy_port_is_not_migrated_again(self):
+        from core.generation_api import SCHEMA_VERSION
+
+        config = self._reload_with_config({
+            "schemaVersion": SCHEMA_VERSION, "enabled": False, "port": 17860, "token": "s" * 24,
+        })
+        self.assertEqual(config["port"], 17860)
+
+    def test_recovered_manifests_do_not_resolve_target_hostnames_at_startup(self):
+        config = self.manager.snapshot(True)["config"]
+        config["targets"] = [{
+            "id": "remote-forge", "name": "Remote Forge", "engine": "webui",
+            "url": "http://remote-forge.invalid:7860",
+        }]
+        self.manager.save_config(config)
+        self.manager.shutdown()
+        job_ids = []
+        for index, state in enumerate(("completed", "running", "queued")):
+            job_id = f"{index:x}" * 32
+            job_ids.append((job_id, state))
+            folder = self.results_path / job_id
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "job.json").write_text(json.dumps({
+                "id": job_id, "state": state, "target": "remote-forge",
+            }), encoding="utf-8")
+
+        def no_dns(*_args, **_kwargs):
+            raise AssertionError("manifest recovery must not resolve target hostnames")
+
+        with patch("core.generation_api.socket.getaddrinfo", side_effect=no_dns):
+            self.manager = GenerationApiManager(
+                config_path=self.config_path,
+                storage_root=self.results_path,
+                target_factory=lambda profile: FakeBackend(),
+                coordinator=GenerationResourceCoordinator(),
+            )
+            for job_id, state in job_ids:
+                loaded = self.manager.inspect(job_id)
+                # 비종료 상태는 복구 시 failed 로 닫히므로 직렬화 키가 다시 쓰이지 않는다.
+                self.assertEqual(loaded["state"], "completed" if state == "completed" else "failed")
+                self.assertEqual(loaded["target"], "remote-forge")
+                # 이미 끝난 작업의 취소는 직렬화 키를 읽지 않고 그대로 돌아온다.
+                self.assertEqual(self.manager.cancel(job_id)["state"], loaded["state"])
+
     def test_named_comfy_uses_only_saved_workflow_profile(self):
         workflow = Path(self.temp.name) / "api-workflow.json"
         workflow_data = {"1": {"class_type": "SaveImage", "inputs": {}}}

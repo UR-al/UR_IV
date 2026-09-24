@@ -19,7 +19,6 @@ import copy
 import functools
 import hmac
 import ipaddress
-import inspect
 import json
 import logging
 import math
@@ -42,15 +41,19 @@ from typing import Any, Callable, Mapping, Optional
 from urllib.parse import parse_qs, urlparse
 
 from backends.base import GenerationResult, MediaArtifact
+# 기본 포트·설정 경로는 관리형 엔진 포트 선택(core/backend_runtime._choose_port)도 읽는다.
+# DEFAULT_PORT 는 관리형 Forge(17860~17909)·ComfyUI(18188~18237) 자동 포트 범위 밖이다.
+from core.generation_api_port import DEFAULT_PORT, default_config_path
 from core.resource_coordinator import ResourceBusyError, get_generation_coordinator
 from utils.atomic_json import atomic_write_json, load_json_safe
 
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_BIND_HOST = "127.0.0.1"
-DEFAULT_PORT = 17860
+# schema 1 의 기본 포트 — 관리형 Forge 의 기본 포트와 같아 동시에 켜면 충돌했다.
+LEGACY_DEFAULT_PORT = 17860
 DEFAULT_MAX_QUEUE = 32
 DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024
 MAX_HTTP_CONNECTIONS = 32
@@ -260,7 +263,7 @@ def _bounded_float(payload: Mapping[str, Any], key: str, minimum: float, maximum
     return value
 
 
-def _validate_generation_payload(payload: dict[str, Any]) -> None:
+def _validate_generation_payload(payload: dict[str, Any], *, family: str = "standard") -> None:
     for key in ("prompt", "negative_prompt"):
         if key in payload:
             if not isinstance(payload[key], str):
@@ -283,7 +286,10 @@ def _validate_generation_payload(payload: dict[str, Any]) -> None:
     _bounded_float(payload, "cfg_scale", 0.0, 30.0)
     _bounded_float(payload, "cfg", 0.0, 30.0)
     _bounded_float(payload, "denoising_strength", 0.0, 1.0)
-    _bounded_int(payload, "seed", -1, (1 << 64) - 1)
+    # Krea2 는 앱 replay 범위(32비트)만 실행한다 — 받아 놓고 작업 단계에서 거부하지 않게
+    # 검증 단계에서 family 별 상한을 적용한다(core/generation_family.seed_max_for_family).
+    from core.generation_family import seed_max_for_family
+    _bounded_int(payload, "seed", -1, seed_max_for_family(family))
 
 
 def _sanitise_public_string(raw: Any, *, limit: int = 100_000) -> str:
@@ -480,6 +486,36 @@ def _normalise_target(raw: Mapping[str, Any]) -> dict[str, Any]:
             "ComfyUI I2I img2imgWorkflowPath",
         )
     return result
+
+
+def _migrate_legacy_config(raw: Any) -> tuple[Any, bool]:
+    """schema 1 설정을 현재 기본값으로 올린다. 반환: (설정, 바뀌었는지).
+
+    schema 1 은 기본 포트가 관리형 Forge 기본 포트(17860)와 같았다. 사용자가 포트를 직접
+    고른 적이 없는(=기본값 그대로이고 꺼져 있는) 설정만 새 기본 포트로 옮긴다. 켜 둔 설정은
+    외부 클라이언트가 이미 그 주소를 쓰고 있을 수 있으니 그대로 둔다 — 이 경우 관리형 엔진의
+    포트 선택(BackendRuntimeManager._choose_port)이 켜 둔 API 설정의 포트를 예약으로 보고
+    건너뛴다(core/generation_api_port.reserved_ports). 앱 시작 때는 엔진 자동 시작이 API
+    bind 보다 먼저라 bind 시험(core/port_probe.py)만으로는 못 피한다. schema 2 로 저장된
+    뒤에는 사용자가 17860 을 다시 골라도 건드리지 않는다.
+    """
+    if not isinstance(raw, Mapping) or not raw:
+        return raw, False
+    try:
+        version = int(raw.get("schemaVersion") or 1)
+    except (TypeError, ValueError, OverflowError):
+        version = 1
+    if version >= SCHEMA_VERSION:
+        return raw, False
+    migrated = dict(raw)
+    try:
+        port = int(raw.get("port", LEGACY_DEFAULT_PORT))
+    except (TypeError, ValueError, OverflowError):
+        port = None
+    if port == LEGACY_DEFAULT_PORT and not bool(raw.get("enabled", False)):
+        migrated["port"] = DEFAULT_PORT
+    migrated["schemaVersion"] = SCHEMA_VERSION
+    return migrated, True
 
 
 def _normalise_config(raw: Mapping[str, Any], previous: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
@@ -688,7 +724,7 @@ def _normalise_job_request(raw: Mapping[str, Any], config: Mapping[str, Any]) ->
         if not isinstance(init_images, list) or not init_images:
             raise GenerationValidationError("img2img payload에는 init_images가 필요합니다")
     payload = _normalise_payload_images(payload)
-    _validate_generation_payload(payload)
+    _validate_generation_payload(payload, family=family)
     if family == "krea2":
         batch_size = int(payload.get("batch_size", 1))
         batch_count = max(int(payload.get("n_iter", 1)), int(payload.get("batch_count", 1)))
@@ -782,7 +818,7 @@ class GenerationApiManager:
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
     ) -> None:
         project_root = Path(__file__).resolve().parent.parent
-        self.config_path = Path(config_path or project_root / "user_data" / "generation_api.json")
+        self.config_path = Path(config_path or default_config_path())
         self.storage_root = Path(storage_root or project_root / "user_data" / "generation_api" / "results")
         self.max_body_bytes = max(1024, int(max_body_bytes))
         self._target_factory = target_factory or self._default_target_factory
@@ -804,13 +840,14 @@ class GenerationApiManager:
         self._server: Optional[ThreadingHTTPServer] = None
         self._server_thread: Optional[threading.Thread] = None
 
-        raw = load_json_safe(str(self.config_path), {})
+        raw, migrated = _migrate_legacy_config(load_json_safe(str(self.config_path), {}))
         try:
             self._config = _normalise_config(raw)
         except GenerationValidationError:
             logger.warning("generation_api.json 설정이 올바르지 않아 안전한 기본값을 사용합니다")
             self._config = _normalise_config({})
-        if not self.config_path.exists():
+            migrated = False
+        if migrated or not self.config_path.exists():
             self._persist_config()
         self._load_manifests()
 
@@ -1006,11 +1043,6 @@ class GenerationApiManager:
             if job is None:
                 raise GenerationNotFoundError("생성 작업을 찾을 수 없습니다")
             return self._job_public(job)
-
-    def get(self, job_id: str) -> dict[str, Any]:
-        """Compatibility alias for clients that use ``get`` terminology."""
-
-        return self.inspect(job_id)
 
     def list_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
         try:
@@ -1372,20 +1404,12 @@ class GenerationApiManager:
 
         if cancel_check():
             raise GenerationConflictError("사용자가 작업을 취소했습니다")
-        try:
-            parameters = inspect.signature(method).parameters.values()
-            supports_cancel = any(
-                parameter.name == "cancel_check" or parameter.kind == inspect.Parameter.VAR_KEYWORD
-                for parameter in parameters
-            )
-        except (TypeError, ValueError):
-            supports_cancel = False
-        if supports_cancel:
-            return method(*args, cancel_check=cancel_check)
-        return method(*args)
+        # 시그니처 판정은 GUI 워커·채팅·Krea2 와 공용(core/cancellable_call.py).
+        from core.cancellable_call import call_with_optional_cancel
+        return call_with_optional_cancel(method, *args, cancel_check=cancel_check)
 
     @staticmethod
-    def _load_workflow(path_value: str, backend: Any) -> dict[str, Any]:
+    def _load_workflow(path_value: str) -> dict[str, Any]:
         path = Path(path_value)
         if not path.is_file():
             raise RuntimeError(f"저장된 ComfyUI workflow를 찾을 수 없습니다: {path}")
@@ -1393,14 +1417,10 @@ class GenerationApiManager:
             raise RuntimeError("ComfyUI workflow JSON은 16MB 이하여야 합니다")
         with path.open("r", encoding="utf-8") as handle:
             workflow = json.load(handle)
-        if isinstance(workflow, dict) and isinstance(workflow.get("nodes"), list):
-            converter = getattr(backend, "_convert_web_to_api", None)
-            if not callable(converter):
-                raise RuntimeError("UI 형식 workflow를 변환할 수 없는 ComfyUI adapter입니다")
-            workflow = converter(workflow)
-        if not isinstance(workflow, dict):
-            raise RuntimeError("ComfyUI workflow JSON 루트는 객체여야 합니다")
-        return workflow
+        # 앱과 같은 규칙: ComfyUI API 포맷만 실행한다(웹 포맷은 Export (API) 안내).
+        from core.comfy_workflow_format import require_api_workflow
+
+        return require_api_workflow(workflow)
 
     def _run_named_comfy(
         self,
@@ -1418,56 +1438,25 @@ class GenerationApiManager:
             return GenerationResult(success=False, error=f"대상 프로필에 {path_key}가 설정되지 않았습니다")
         if cancel_check():
             return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
-        workflow = self._load_workflow(path_value, backend)
+        workflow = self._load_workflow(path_value)
         if cancel_check():
             return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
 
-        # Newer adapters expose this deep seam.  The fallback below keeps this
-        # module compatible with earlier ComfyUIBackend builds.
+        # ComfyUI targets are always backends.comfyui_backend.ComfyUIBackend
+        # (_default_target_factory), whose generate_workflow applies the payload
+        # with the app compiler's rules.  Anything else is a wiring error.
         generate_workflow = getattr(backend, "generate_workflow", None)
-        if callable(generate_workflow):
-            return self._invoke_cancellable(
-                generate_workflow,
-                mode,
-                workflow,
-                model,
-                payload,
-                progress,
-                cancel_check=cancel_check,
+        if not callable(generate_workflow):
+            return GenerationResult(
+                success=False,
+                error="이 ComfyUI 대상 adapter는 워크플로 생성(generate_workflow)을 지원하지 않습니다",
             )
-
-        if mode == "img2img":
-            init_images = payload.get("init_images") or []
-            image_data = base64.b64decode(_without_data_uri(init_images[0]), validate=True)
-            uploaded = self._invoke_cancellable(
-                backend.upload_media,
-                image_data,
-                f"api_{uuid.uuid4().hex}.png",
-                "image/png",
-                cancel_check=cancel_check,
-            )
-            finder = getattr(backend, "_find_load_image_node", None)
-            node_id = finder(workflow) if callable(finder) else None
-            if not node_id or node_id not in workflow:
-                return GenerationResult(success=False, error="ComfyUI I2I workflow에 LoadImage 노드가 없습니다")
-            workflow[node_id].setdefault("inputs", {})["image"] = uploaded
-        applier = getattr(backend, "_apply_params", None)
-        if not callable(applier):
-            return GenerationResult(success=False, error="ComfyUI adapter가 workflow 파라미터 적용을 지원하지 않습니다")
-        if cancel_check():
-            return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
-        applier(workflow, model, payload)
-        if mode == "img2img":
-            finder = getattr(backend, "_find_ksampler_node", None)
-            if callable(finder):
-                try:
-                    _node_id, sampler = finder(workflow)
-                    sampler.setdefault("inputs", {})["denoise"] = payload.get("denoising_strength", 0.75)
-                except RuntimeError:
-                    pass
         return self._invoke_cancellable(
-            backend.run_workflow,
+            generate_workflow,
+            mode,
             workflow,
+            model,
+            payload,
             progress,
             cancel_check=cancel_check,
         )
@@ -1732,11 +1721,6 @@ class GenerationApiManager:
                         "metadata": _redact_public_metadata(item.get("metadata") or {}),
                     })
                 target_id = str(raw.get("target") or "active")[:100]
-                try:
-                    serial_profile = self._resolve_profile(target_id)
-                    serial_key = _profile_serial_key(serial_profile)
-                except GenerationApiError:
-                    serial_key = target_id
                 job = {
                     "id": job_id,
                     "state": state,
@@ -1756,7 +1740,11 @@ class GenerationApiManager:
                     "artifacts": safe_artifacts,
                     "request": _bounded_request_summary(raw.get("request") or {}),
                     "_payload": {},
-                    "_serialKey": serial_key,
+                    # 복구된 작업은 위에서 모두 종료 상태가 되므로 직렬화 키를 읽는
+                    # 경로(대기열 실행·취소 인터럽트)에 다시 들어가지 않는다. 여기서
+                    # 프로필 → DNS 해석을 하면 GUI 스레드 시작이 실패한 조회 수만큼
+                    # 멈추므로 대상 ID를 그대로 둔다.
+                    "_serialKey": target_id,
                     "_slotReleased": True,
                 }
                 self._jobs[job_id] = job
@@ -1804,10 +1792,19 @@ class GenerationApiManager:
             port = int(self._config["port"])
         manager = self
 
+        from core.port_probe import apply_exclusive_bind, exclusive_bind_supported
+
         class ApiServer(ThreadingHTTPServer):
             daemon_threads = True
-            allow_reuse_address = True
+            # Windows 의 SO_REUSEADDR 는 다른 SO_REUSEADDR 소켓과 같은 포트를 '공유'시킨다.
+            # 그러면 관리형 Forge/ComfyUI 포트 선택이 이 서버의 포트를 비었다고 보거나,
+            # 다른 프로세스가 같은 포트를 가로챌 수 있으므로 Windows 는 배타 bind 를 쓴다.
+            allow_reuse_address = not exclusive_bind_supported()
             request_slots = threading.BoundedSemaphore(MAX_HTTP_CONNECTIONS)
+
+            def server_bind(self):
+                apply_exclusive_bind(self.socket)
+                super().server_bind()
 
             def process_request(self, request, client_address):
                 if not self.request_slots.acquire(blocking=False):
@@ -1981,6 +1978,10 @@ class GenerationApiManager:
                     return
                 try:
                     if parsed.path in {"/api/v1/generations", "/api/v1/generate"}:
+                        # 본문을 먼저 읽는다. 읽지 않은 본문을 남긴 채 400 을 보내고 소켓을 닫으면
+                        # Windows 가 RST 를 보내 클라이언트가 응답 대신 연결 중단(10053)을 받는다.
+                        # 작업 제출은 아래 검증 뒤라 잘못된 wait 는 여전히 아무 작업도 만들지 않는다.
+                        request = self._read_json()
                         wait_value = parse_qs(parsed.query).get("wait", ["0"])[0]
                         try:
                             wait_seconds = float(wait_value)
@@ -1988,7 +1989,6 @@ class GenerationApiManager:
                             raise GenerationValidationError("wait 쿼리는 0~600초의 유한한 숫자여야 합니다") from exc
                         if not math.isfinite(wait_seconds) or not 0 <= wait_seconds <= 600:
                             raise GenerationValidationError("wait 쿼리는 0~600초의 유한한 숫자여야 합니다")
-                        request = self._read_json()
                         job = manager.submit(request)
                         if wait_seconds:
                             job = manager.wait(job["id"], wait_seconds)

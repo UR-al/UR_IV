@@ -86,14 +86,6 @@ class UIStateManager:
             if restore_now and name in self._cached_state:
                 self._apply_one(name)
 
-    def unregister(self, name: str) -> bool:
-        with self._lock:
-            return self._registrations.pop(name, None) is not None
-
-    def registered_names(self) -> list[str]:
-        with self._lock:
-            return list(self._registrations.keys())
-
     # ────────────────────────────────────────
     # 저장
     # ────────────────────────────────────────
@@ -102,7 +94,7 @@ class UIStateManager:
         """현재 상태 수집.
 
         등록된 항목의 ``get_state()`` 결과를 기존 캐시 위에 덮어씀.
-        ``set_cached()``로 직접 넣은 비등록 키도 보존됨.
+        파일에서 읽었지만 이번 실행에 등록되지 않은 키도 보존됨(다음 실행에서 다시 쓸 수 있게).
         """
         with self._lock:
             result: dict[str, Any] = dict(self._cached_state)
@@ -190,16 +182,3 @@ class UIStateManager:
                 t.daemon = True
                 self._delayed_restore_timer = t
                 t.start()
-
-    def get_cached(self, name: str, default: Any = None) -> Any:
-        """등록 없이 캐시된 상태 조회 (예: 마이그레이션용)."""
-        with self._lock:
-            return self._cached_state.get(name, default)
-
-    def set_cached(self, name: str, value: Any) -> None:
-        """캐시에 직접 쓰기 (등록 안 된 항목도 가능). save_all 시 함께 저장됨.
-
-        주의: 등록된 이름과 충돌하면 등록된 항목의 ``get_state``가 우선.
-        """
-        with self._lock:
-            self._cached_state[name] = value

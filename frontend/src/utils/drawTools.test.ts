@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   floodFillMask,
+  gradientLine,
   hexToRgb,
   isDrawTool,
   normalizedRect,
@@ -113,6 +114,19 @@ describe('normalizedRect', () => {
     const b = normalizedRect(40, 60, 10, 20)
     expect(a).toEqual(b)
     expect(a).toEqual({ x: 10, y: 20, w: 30, h: 40 })
+  })
+})
+
+describe('gradientLine — 그라디언트 도구가 드래그 벡터를 그대로 쓴다', () => {
+  it('드래그 방향 그대로의 시작·끝점', () => {
+    expect(gradientLine(10, 20, 40, 60)).toEqual({ x1: 10, y1: 20, x2: 40, y2: 60 })
+    expect(gradientLine(40, 60, 10, 20)).toEqual({ x1: 40, y1: 60, x2: 10, y2: 20 })
+  })
+
+  it('한 점에 머문 드래그(길이 1 미만)는 그라디언트를 만들지 않는다', () => {
+    expect(gradientLine(5, 5, 5, 5)).toBeNull()
+    expect(gradientLine(5, 5, 5.6, 5.6)).toBeNull()   // hypot ≈ 0.85
+    expect(gradientLine(5, 5, 6, 5)).not.toBeNull()   // 정확히 1 은 그린다
   })
 })
 

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from core.comfy_compatibility import (
-    RECIPES, REFERENCES, ALLOWED_EXTENSION_URLS, check_recipes,
+    RECIPES, REFERENCES, check_recipes,
     compare_references, inspect_compatibility, save_baseline,
 )
 from ui.comfy_compatibility_actions import ComfyCompatibilityActionsMixin
@@ -79,7 +79,24 @@ class CompatibilityTests(unittest.TestCase):
     def test_upstream_reference_difference_is_not_called_incompatible(self):
         refs = compare_references({}, "99.1.0")
         self.assertEqual(refs[0]["status"], "different")
-        self.assertTrue(all(url.startswith("https://github.com/") for url in ALLOWED_EXTENSION_URLS))
+        self.assertTrue(all(item["repoUrl"].startswith("https://github.com/") for item in REFERENCES))
+
+    def test_forge_parity_recipe_checks_nodes_the_default_compiler_builds(self):
+        # 기본 컴파일러의 출력 노드는 save_images 를 따른다 — 메인 생성(True)은 코어
+        # SaveImage, 그 밖의 경로는 코어 PreviewImage. 레시피는 둘 다 확인해야 한다.
+        from core.comfy_workflow_compiler import ComfyWorkflowCompiler
+
+        recipe = next(item for item in RECIPES if item["id"] == "forge-parity")
+        self.assertNotIn("ForgeNeoSaveImage", recipe["nodes"])
+        for save_images, expected in ((True, "SaveImage"), (False, "PreviewImage")):
+            with self.subTest(save_images=save_images):
+                graph = ComfyWorkflowCompiler().compile(
+                    "txt2img", "checkpoint.safetensors",
+                    {"prompt": "portrait", "save_images": save_images},
+                )
+                classes = {node["class_type"] for node in graph.values()}
+                self.assertIn(expected, classes)
+                self.assertIn(expected, recipe["nodes"])
 
     def test_explicit_baseline_round_trip_and_schema_drift(self):
         report = self.report()

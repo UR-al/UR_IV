@@ -2,7 +2,7 @@
   <div class="gallery-workspace">
     <!-- Top Filter & Action Bar -->
     <header class="gallery-toolbar">
-      <div class="folder-info" @click="openFolder">
+      <div class="folder-info" v-host-dialog="'gallery_open_folder'" @click="openFolder">
         <span class="icon"><Icon name="folder" /></span>
         <span class="path">{{ currentFolder || '출력 폴더를 선택하세요' }}</span>
       </div>
@@ -14,16 +14,16 @@
         <input v-model="exifSearch" placeholder="EXIF 검색..." class="search-input"
           @keydown.enter="runExifSearch" />
         <button class="search-go" @click="runExifSearch" :disabled="exifSearching">{{ exifSearching ? '...' : 'GO' }}</button>
-        <button class="search-clear" v-if="exifFiltered" @click="clearExifSearch"><Icon name="close" /></button>
+        <button class="search-clear" v-if="exifFiltered || exifSearching" :title="exifSearching ? '검색 취소' : '검색 해제'" @click="clearExifSearch"><Icon name="close" /></button>
       </div>
 
       <div class="control-group">
-        <button class="icon-btn" @click="loadImages(true)" title="Refresh"><Icon name="refresh" /></button>
+        <button class="icon-btn" @click="loadImages()" title="Refresh"><Icon name="refresh" /></button>
         <div class="sep"></div>
         <div class="sort-chips">
           <button v-for="s in sortOptions" :key="s.val"
             class="mini-chip" :class="{ active: sortBy === s.val }"
-            @click="sortBy = s.val; sortImages()"
+            @click="sortBy = s.val"
           >{{ s.label }}</button>
         </div>
         <div class="sep"></div>
@@ -52,13 +52,13 @@
             <span class="audio-name">{{ filenameOf(img) }}</span>
             <audio :src="mediaUrl(img)" controls preload="metadata" @click.stop />
           </div>
-          <img v-else :src="cardImageUrl(img)" loading="lazy" />
+          <img v-else :src="cardImageUrl(img)" loading="lazy" decoding="async" @error="onCardImageError($event, img)" />
           <span v-if="mediaKind(img) !== 'image' || isAnimated(img)" class="media-kind-badge">
             {{ mediaLabel(img) }}
           </span>
           <div class="card-hover-actions">
             <button class="tiny-btn" @click.stop="quickAction('add_favorite', img)"><Icon name="star" /></button>
-            <button v-if="isImage(img)" class="tiny-btn" @click.stop="quickAction('copy_to_clipboard', img)"><Icon name="clipboard" /></button>
+            <button v-if="isImage(img)" class="tiny-btn" @click.stop="copyImageAndNotify(img)"><Icon name="clipboard" /></button>
           </div>
         </div>
       </div>
@@ -85,7 +85,7 @@
             <span class="large-filename">{{ largeView.filename }}</span>
             <div class="large-actions">
               <button class="lv-btn" @click="editFilename"><Icon name="pencil" /> 이름 변경</button>
-              <button v-if="isImage(largeView.path) && largeView.source !== 'comfyui'" class="lv-btn save" @click="saveExif"><Icon name="save" /> EXIF 저장</button>
+              <button v-if="canSaveExif" class="lv-btn save" :disabled="exifSaving" @click="saveExif"><Icon name="save" /> EXIF 저장</button>
               <button v-if="isImage(largeView.path)" class="lv-btn" @click="action('send_to_i2i', { path: largeView.path })">I2I</button>
               <button v-if="isImage(largeView.path)" class="lv-btn" @click="action('send_to_inpaint', { path: largeView.path })">인페인트</button>
               <button v-if="isImage(largeView.path)" class="lv-btn" @click="action('send_to_editor', { path: largeView.path })">에디터</button>
@@ -106,11 +106,11 @@
               <div class="meta-row path-row"><span>경로</span><p>{{ largeView.path }}</p></div>
               <div v-if="largeView.prompt" class="meta-block">
                 <label>프롬프트</label>
-                <div class="code-box" :class="{ editable: largeView.source !== 'comfyui' }" :contenteditable="largeView.source !== 'comfyui'" @blur="onExifEdit($event, 'prompt')">{{ largeView.prompt }}</div>
+                <div class="code-box" :class="{ editable: largeView.source !== 'comfyui' }" :contenteditable="largeView.source !== 'comfyui' && !exifSaving" @blur="onExifEdit($event, 'prompt')">{{ largeView.prompt }}</div>
               </div>
               <div v-if="largeView.negative" class="meta-block mt-8">
                 <label class="danger">네거티브</label>
-                <div class="code-box">{{ largeView.negative }}</div>
+                <div class="code-box" :class="{ editable: largeView.source !== 'comfyui' }" :contenteditable="largeView.source !== 'comfyui' && !exifSaving" @blur="onExifEdit($event, 'negative')">{{ largeView.negative }}</div>
               </div>
               <div v-if="largeView.raw && !largeView.prompt && !largeView.raw_prompt && !largeView.raw_workflow" class="meta-block">
                 <label>원본</label>
@@ -138,7 +138,7 @@
               <span><Icon name="music" /></span>
               <audio :src="mediaUrl(exifData.path)" controls preload="metadata" @click.stop />
             </div>
-            <img v-else :src="mediaUrl(exifData.path)" />
+            <img v-else :src="versionedMediaUrl(exifData.path)" />
             <div class="click-hint">클릭하여 확대</div>
           </div>
           <div class="exif-meta">
@@ -185,7 +185,7 @@
 
     <!-- Context Menu -->
     <transition name="pop">
-      <div v-if="ctxMenu.show" class="modern-ctx-menu" :style="{ top: ctxMenu.y + 'px', left: ctxMenu.x + 'px' }">
+      <div v-if="ctxMenu.show" ref="ctxMenuEl" class="modern-ctx-menu" :style="ctxMenuStyle">
         <div class="ctx-item" @click="ctx('add_favorite')"><Icon name="star" /> 즐겨찾기 추가</div>
         <div class="ctx-item" @click="ctx('gallery_load_exif')"><Icon name="clipboard" /> 정보 보기</div>
         <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="ctx('send_to_i2i')"><Icon name="image" /> I2I로 보내기</div>
@@ -195,21 +195,35 @@
         <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="sendToCompare('after')"><Icon name="search" /> 비교 (이후)</div>
         <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="ctxAdetailer"><Icon name="target" /> ADetailer</div>
         <div class="ctx-separator"></div>
-        <div class="ctx-item delete" @click="ctx('delete_image')"><Icon name="trash" /> 완전 삭제</div>
+        <div class="ctx-item delete" @click="ctx('delete_image')"><Icon name="trash" /> 휴지통으로 이동</div>
       </div>
     </transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onActivated, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, ref, watch, onActivated, onMounted, onUnmounted } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
-import { mediaUrl, thumbnailUrl } from '../utils/media.js'
-import type { ActionName } from '../types/bridge'
+// 이미지 복사 — 데스크톱은 호스트 Qt 클립보드, 웹은 이 브라우저 클립보드(호스트 PC 클립보드 금지)
+import { copyImageAndNotify } from '../utils/clipboardImageCopy'
+import { vHostDialog } from '../utils/hostDialogs'
+import { isSameImagePath, parseImageDeleteResult, withoutImagePath } from '../utils/imageDeleteResult'
+import { mediaUrl, thumbnailUrl, withUrlVersion } from '../utils/media.js'
+import { bumpMediaVersion, mediaVersion, recordListedMediaVersions } from '../utils/mediaVersions'
+import { fallbackToOriginal } from '../utils/thumbFallback'
+import {
+  filenameOf, isAnimated, isAudio, isImage, isPng, isVideo, mediaKind, mediaLabel,
+  replaceMediaPath, sortMediaPaths, type MediaSortKey,
+} from '../utils/mediaKind'
+import { createSearchTextFetcher } from '../utils/imageSearchTexts'
+import { resolveExifSaveResponse, type ExifSaveRequest } from '../utils/exifSaveResponse'
+import { useExifSearch } from '../composables/useExifSearch'
+import { useGridPaging } from '../composables/useGridPaging'
+import { useContextMenu } from '../composables/useContextMenu'
+import { galleryShowMetadata } from '../composables/uiPrefs'
+import type { ActionName, ActionPayload } from '../types/bridge'
 import ComfyMetadataDetails from '../components/ComfyMetadataDetails.vue'
-
-import { computed } from 'vue'
 
 interface ExifParams {
   generation?: string
@@ -229,57 +243,15 @@ interface ExifData {
   prompt?: string
   negative?: string
   raw?: string
-  params?: ExifParams
+  params?: ExifParams | null
+  params_line?: string
   [k: string]: any
-}
-interface CtxMenu {
-  show: boolean
-  x: number
-  y: number
-  path: string
-}
-interface CacheEntry {
-  images: string[]
-  timestamp: number
 }
 
 const images = ref<string[]>([])
 const currentFolder = ref('')
-const visibleCount = ref(40)
-
-type MediaKind = 'image' | 'video' | 'audio'
-const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi', 'ogv'])
-const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg', 'flac', 'm4a', 'aac', 'opus'])
-const ANIMATED_EXTENSIONS = new Set(['gif', 'apng', 'webp'])
-
-function mediaExtension(path: string): string {
-  const clean = String(path || '').split(/[?#]/, 1)[0]
-  const filename = clean.replace(/\\/g, '/').split('/').pop() || ''
-  const dot = filename.lastIndexOf('.')
-  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : ''
-}
-
-function mediaKind(path: string): MediaKind {
-  const ext = mediaExtension(path)
-  if (VIDEO_EXTENSIONS.has(ext)) return 'video'
-  if (AUDIO_EXTENSIONS.has(ext)) return 'audio'
-  return 'image'
-}
-
-const isVideo = (path: string) => mediaKind(path) === 'video'
-const isAudio = (path: string) => mediaKind(path) === 'audio'
-const isImage = (path: string) => mediaKind(path) === 'image'
-const isAnimated = (path: string) => ANIMATED_EXTENSIONS.has(mediaExtension(path))
-const filenameOf = (path: string) => String(path || '').replace(/\\/g, '/').split('/').pop() || path
-const mediaLabel = (path: string) => {
-  const kind = mediaKind(path)
-  if (kind === 'video') return 'VIDEO'
-  if (kind === 'audio') return 'AUDIO'
-  return isAnimated(path) ? 'ANIMATED' : 'IMAGE'
-}
-const cardImageUrl = (path: string) => isAnimated(path)
-  ? mediaUrl(path)
-  : thumbnailUrl(path, thumbSize.value * thumbPixelRatio)
+const isLoading = ref(false)
+const toast = (type: 'success' | 'error' | 'info' | 'warning', msg: string) => requestAction('show_toast', { type, msg })
 
 // 썸네일 크기 — localStorage 영속, 100~380px
 const thumbSize = ref(parseInt(window.localStorage.getItem('gallery_thumb_size') || '200'))
@@ -287,235 +259,184 @@ const thumbPixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
 watch(thumbSize, (v) => {
   window.localStorage.setItem('gallery_thumb_size', String(v))
 })
-
-const pagedImages = computed(() => images.value.slice(0, visibleCount.value))
-
-// largeView에서 Parameters 라인 추출
-const largeViewParams = computed(() => {
-  if (!largeView.value?.raw) return ''
-  const match = largeView.value.raw.match(/Steps:.*$/m)
-  return match ? match[0] : ''
-})
-const sidebarParams = computed(() => {
-  if (!exifData.value?.raw) return ''
-  const match = exifData.value.raw.match(/Steps:.*$/m)
-  return match ? match[0] : ''
-})
-
-// EXIF 검색
-const exifSearch = ref('')
-const exifFiltered = ref(false)
-const exifSearching = ref(false)
-const filteredImages = ref<string[]>([])
-const exifCache = ref<Record<string, string>>({})  // path → exif text
-
-const displayImages = computed(() => {
-  const source = exifFiltered.value ? filteredImages.value : images.value
-  return source.slice(0, visibleCount.value)
-})
-
-async function runExifSearch() {
-  const query = exifSearch.value.trim().toLowerCase()
-  if (!query) { clearExifSearch(); return }
-  exifSearching.value = true
-
-  const backend: any = await getBackend()
-  // 비이미지는 Pillow EXIF 슬롯에 보내지 않는다. 파일명/미디어 유형만 검색한다.
-  for (const media of images.value.filter(img => !isImage(img))) {
-    exifCache.value[media] = `${filenameOf(media)} ${mediaLabel(media)}`.toLowerCase()
-  }
-  const toCheck = images.value.filter(img => isImage(img) && !(img in exifCache.value))
-
-  // 캐시에 없는 이미지의 EXIF 로드
-  let loaded = 0
-  const batchSize = 20
-  for (let i = 0; i < toCheck.length; i += batchSize) {
-    const batch = toCheck.slice(i, i + batchSize)
-    await Promise.all(batch.map((img: string) => new Promise<void>(resolve => {
-      if (backend.getImageExif) {
-        backend.getImageExif(img, (json: string) => {
-          try {
-            const d = JSON.parse(json)
-            exifCache.value[img] = `${d.prompt || ''} ${d.negative || ''} ${d.raw || ''}`.toLowerCase()
-          } catch { exifCache.value[img] = '' }
-          resolve()
-        })
-      } else resolve()
-    })))
-    loaded += batch.length
-  }
-
-  // 필터
-  filteredImages.value = images.value.filter(img => {
-    const text = exifCache.value[img] || ''
-    return text.includes(query)
-  })
-  exifFiltered.value = true
-  exifSearching.value = false
-  visibleCount.value = 40
-}
-
-function clearExifSearch() {
-  exifSearch.value = ''
-  exifFiltered.value = false
-  filteredImages.value = []
-  visibleCount.value = 40
-}
-const galleryContentRef = ref<HTMLElement | null>(null)
-
 /**
- * 넘칠 때까지 채운다.
- *
- * '더 보기'는 스크롤 이벤트로만 발동한다. 그런데 첫 40장이 화면에 다 들어가면
- * (넓은 모니터 + 작은 썸네일) 컨테이너가 넘치지 않아 스크롤 자체가 생기지 않고,
- * "N / M — 스크롤하여 더 보기" 만 떠 있는 채 영영 안 채워졌다. 목록·크기가 바뀔
- * 때마다 컨테이너가 넘칠 때까지 30장씩 더 보인다. 스크롤이 생기는 순간 멈춘다.
+ * 카드 — 정지 이미지는 썸네일(Qt aithumb: / 웹 /thumbnail), 애니메이션은 원본(움직임 유지).
+ * 둘 다 내용 버전(목록의 원본 서명·앱이 덮어쓴 표시, utils/mediaVersions)을 붙인다 — 덮어쓴 파일의
+ * 카드가 같은 URL 의 옛 그림으로 남지 않게.
  */
-function fillViewport() {
-  const el = galleryContentRef.value
-  const total = exifFiltered.value ? filteredImages.value.length : images.value.length
-  if (!el || visibleCount.value >= total) return
-  // keep-alive 로 떼어졌거나 아직 레이아웃이 없으면 높이가 0 이라 '안 찼다' 로 읽힌다 — 그때 늘리면 전부 펼쳐진다
-  if (!el.isConnected || el.clientHeight === 0) return
-  // 1) 기하 추정 — 썸네일이 뜨기 전엔 카드 높이가 0 이라 scrollHeight 로는 알 수 없다.
-  //    열 수 × (뷰포트를 덮는 행 수 + 1) 만큼은 먼저 보인다.
-  const cell = Math.max(60, thumbSize.value)
-  const need = Math.min(total, Math.max(1, Math.floor(el.clientWidth / cell)) * (Math.ceil(el.clientHeight / cell) + 1))
-  if (need > visibleCount.value) { visibleCount.value = need; return }
-  // 2) 실측 — 썸네일이 다 떴는데도 안 넘치면(가로로 긴 그림들) 한 페이지 더. 그리드가 자라면 관찰자가 다시 부른다.
-  if (el.scrollHeight <= el.clientHeight + 1) visibleCount.value = Math.min(total, visibleCount.value + 30)
-}
-let _fillObserver: ResizeObserver | null = null
-onMounted(() => {
-  const el = galleryContentRef.value
-  if (typeof ResizeObserver === 'undefined' || !el) return
-  // 콜백 안에서 바로 늘리면 같은 프레임에 크기가 또 바뀌어 'ResizeObserver loop' 경고가 난다 — 다음 프레임에
-  _fillObserver = new ResizeObserver(() => { requestAnimationFrame(fillViewport) })
-  _fillObserver.observe(el)                                              // 창 크기
-  if (el.firstElementChild) _fillObserver.observe(el.firstElementChild)  // 그리드 — 썸네일이 뜨며 자란다
+const versionedMediaUrl = (path: string) => withUrlVersion(mediaUrl(path), mediaVersion(path))
+const cardImageUrl = (path: string) => isAnimated(path)
+  ? versionedMediaUrl(path)
+  : thumbnailUrl(path, thumbSize.value * thumbPixelRatio, mediaVersion(path))
+const onCardImageError = (e: Event, path: string) => { fallbackToOriginal(e.target, versionedMediaUrl(path)) }
+
+// 정렬 — 원본(백엔드 날짜순)을 바꾸지 않고 파생한다. 새로고침·탭 재진입·폴더 변경 뒤에도 칩과 순서가 맞는다.
+const sortBy = ref<MediaSortKey>('date')
+const sortOptions: { label: string; val: MediaSortKey }[] = [{ label: '날짜', val: 'date' }, { label: '이름', val: 'name' }]
+
+// EXIF 검색 (composables/useExifSearch — Favorites 와 공용)
+const searchTexts = createSearchTextFetcher({ getBackend, onBackendEvent })
+const exifSearchState = useExifSearch({
+  source: () => images.value,
+  isImage,
+  labelFor: (path) => `${filenameOf(path)} ${mediaLabel(path)}`,
+  fetchTexts: searchTexts.fetch,
+  onChange: () => paging.reset(),
 })
-onUnmounted(() => { _fillObserver?.disconnect(); _fillObserver = null })
-watch([images, filteredImages, exifFiltered, thumbSize], () => { fillViewport() }, { flush: 'post' })
-const sortBy = ref('date')
-const sortOptions = [{label: '날짜', val: 'date'}, {label: '이름', val: 'name'}]
-const ctxMenu = ref<CtxMenu>({ show: false, x: 0, y: 0, path: '' })
+const {
+  query: exifSearch, searching: exifSearching, filtered: exifFiltered, results: filteredImages,
+  run: runExifSearch, clear: clearExifSearch,
+} = exifSearchState
+
+const displaySource = computed(() => sortMediaPaths(exifFiltered.value ? filteredImages.value : images.value, sortBy.value))
+
+// 카드 그리드 페이징 (composables/useGridPaging — Favorites 와 공용)
+const galleryContentRef = ref<HTMLElement | null>(null)
+const paging = useGridPaging({
+  container: galleryContentRef,
+  total: () => displaySource.value.length,
+  cell: () => thumbSize.value,
+  sources: [images, filteredImages, exifFiltered, thumbSize],
+})
+const { visibleCount, fillViewport, onScroll: onGalleryScroll } = paging
+const displayImages = computed(() => displaySource.value.slice(0, visibleCount.value))
+
 const exifData = ref<ExifData | null>(null)
 const largeView = ref<ExifData | null>(null)
-const isLoading = ref(false)
-const showMetadata = ref(window.localStorage.getItem('galleryShowMetadata') !== 'false')
-// Settings에서 변경 시 실시간 반영 — interval ID 보관 후 unmount 시 정리
-const _showMetaTimer = setInterval(() => {
-  const v = window.localStorage.getItem('galleryShowMetadata') !== 'false'
-  if (v !== showMetadata.value) showMetadata.value = v
-}, 500)
+/** 확대 뷰에서 프롬프트/네거티브를 고쳤는가 — 안 고쳤으면 저장하지 않는다 */
+const exifDirty = ref(false)
+const exifSaving = ref(false)
+// 확대 뷰 세대 — 이미지를 열거나 닫으면 오른다. 늦게 온 EXIF 저장 응답이 다른 이미지(또는 다시 연 뷰)의
+// 편집 표시·텍스트를 덮지 않게 한다(utils/exifSaveResponse).
+let exifViewGen = 0
+// Settings 와 같은 모듈 전역 ref(composables/uiPrefs) — 바꾸면 곧바로 반영된다. 예전엔 keep-alive 로
+// 첫 방문 뒤 멈추지 않는 500ms setInterval 로 localStorage 를 폴링했다(감사 #145).
+const showMetadata = galleryShowMetadata
 
-// ── 캐시 시스템 ──
-const _cache = new Map<string, CacheEntry>()  // folder → { images, timestamp }
-const CACHE_TTL = 5 * 60 * 1000  // 5분
+// 파라미터 표시 — core 가 만든 params_line(WebUI 는 원문 꼬리 그대로, 따옴표 보존)
+const largeViewParams = computed(() => largeView.value?.params_line || '')
+const sidebarParams = computed(() => exifData.value?.params_line || '')
+/** 'EXIF 저장' — PNG 의 A1111 parameters 만. ComfyUI 그래프는 읽기 전용. */
+const canSaveExif = computed(() => !!largeView.value && isPng(largeView.value.path) && largeView.value.source === 'webui')
+
+/** 목록에 있는 표기 그대로의 경로(검색 캐시 키) — 확대 뷰 경로와 '/'·대소문자가 달라도 찾는다 */
+const listPathOf = (path: string) => images.value.find(item => isSameImagePath(item, path)) || path
 
 async function editFilename() {
-  if (!largeView.value) return
-  const newName = window.prompt('파일 이름 변경:', largeView.value.filename)
-  if (newName && newName !== largeView.value.filename) {
-    const backend: any = await getBackend()
-    if (backend.renameFile) {
-      backend.renameFile(largeView.value.path, newName, (json: string) => {
-        try {
-          const r = JSON.parse(json)
-          if (r.ok) { largeView.value!.filename = newName; loadImages() }
-          else alert(r.error || '이름 변경 실패')
-        } catch {}
-      })
-    }
-  }
-}
-function onExifEdit(e: FocusEvent, field: string) {
-  if (largeView.value && largeView.value.source !== 'comfyui') largeView.value[field] = (e.target as HTMLElement).textContent
-}
-async function saveExif() {
-  if (!largeView.value || largeView.value.source === 'comfyui') return
+  const view = largeView.value
+  if (!view) return
+  const newName = window.prompt('파일 이름 변경:', view.filename)
+  if (!newName || newName === view.filename) return
   const backend: any = await getBackend()
-  if (!backend.saveImageExif) return
-  // prompt + negative + raw 에서 A1111 형식으로 재구성
-  const parts = []
-  if (largeView.value.prompt) parts.push(largeView.value.prompt)
-  if (largeView.value.negative) parts.push('Negative prompt: ' + largeView.value.negative)
-  // raw에서 Steps: 이후 파라미터 라인 추출
-  const rawMatch = (largeView.value.raw || '').match(/Steps:.*$/m)
-  if (rawMatch) parts.push(rawMatch[0])
-  const newParams = parts.join('\n')
-  backend.saveImageExif(largeView.value.path, newParams, (json: string) => {
-    try {
-      const r = JSON.parse(json)
-      if (r.ok) alert('EXIF 저장 완료')
-      else alert(r.error || '저장 실패')
-    } catch {}
+  if (!backend.renameFile) return
+  const oldPath = view.path
+  backend.renameFile(oldPath, newName, (json: string) => {
+    let r: any = null
+    try { r = JSON.parse(json) } catch { r = null }
+    if (!r?.ok || !r.new_path) { toast('error', r?.error || '이름 변경 실패'); return }
+    applyRename(oldPath, String(r.new_path))
+    toast('success', `이름 변경: ${filenameOf(String(r.new_path))}`)
   })
 }
 
-async function loadImages(forceRefresh = false) {
-  const cacheKey = currentFolder.value || '__default__'
-
-  // 캐시 히트 (5분 이내 + 강제 새로고침 아닌 경우)
-  if (!forceRefresh && _cache.has(cacheKey)) {
-    const cached = _cache.get(cacheKey)!
-    if (Date.now() - cached.timestamp < CACHE_TTL) {
-      images.value = cached.images
-      return
+/**
+ * 백엔드가 돌려준 실제 새 경로(정리·확장자 보정 후)로 목록·검색 캐시·확대 뷰를 옮긴다.
+ * 예전엔 입력한 원문만 제목에 쓰고 옛 경로를 그대로 들고 있어서, 이어서 누른 EXIF 저장과
+ * I2I/인페인트/에디터 보내기가 '파일 없음'으로 실패했다.
+ */
+function applyRename(oldPath: string, newPath: string) {
+  const listed = listPathOf(oldPath)
+  const next = replaceMediaPath(images.value, oldPath, newPath)
+  if (next) images.value = next
+  // 새 이름에는 목록 버전이 없다 — 예전에 같은 이름이던(지운) 파일의 캐시된 카드 URL 과 겹치지 않게
+  bumpMediaVersion(newPath)
+  exifSearchState.rename(listed, newPath)
+  for (const view of [largeView.value, exifData.value]) {
+    if (view && isSameImagePath(view.path, oldPath)) {
+      view.path = newPath
+      view.filename = filenameOf(newPath)
     }
   }
+}
 
-  isLoading.value = true
+function onExifEdit(e: FocusEvent, field: 'prompt' | 'negative') {
+  const view = largeView.value
+  if (!view || view.source === 'comfyui') return
+  const text = (e.target as HTMLElement).textContent || ''
+  if (text !== (view[field] || '')) {
+    view[field] = text
+    exifDirty.value = true
+  }
+}
+
+async function saveExif() {
+  const view = largeView.value
+  if (!view || !canSaveExif.value || exifSaving.value) return
+  if (!exifDirty.value) { toast('info', '바뀐 내용이 없습니다'); return }
+  const gen = exifViewGen
   const backend: any = await getBackend()
+  if (!backend.saveImagePrompt || gen !== exifViewGen) return
+  // 보낸 그대로를 기억한다 — 응답이 오기 전에 또 고친 것은 응답이 덮지 않는다
+  const sent: ExifSaveRequest = {
+    viewGen: gen, path: view.path, prompt: view.prompt || '', negative: view.negative || '',
+  }
+  exifSaving.value = true
+  // 재조립은 백엔드(core.image_metadata)가 한다 — 파라미터 꼬리·Template 줄·eXIf·dpi 보존
+  backend.saveImagePrompt(sent.path, sent.prompt, sent.negative, (json: string) => {
+    // 다른 이미지를 열었거나 닫았으면 저장 중 표시는 그때 이미 풀었다 — 새 뷰의 저장 표시를 건드리지 않는다
+    if (gen === exifViewGen) exifSaving.value = false
+    let r: any = null
+    try { r = JSON.parse(json) } catch { r = null }
+    if (!r?.ok) { toast('error', r?.error || '저장 실패'); return }
+    exifSearchState.invalidate(listPathOf(sent.path))
+    const out = resolveExifSaveResponse({ sent, currentViewGen: exifViewGen, current: largeView.value, info: r.info })
+    if (out.view) {
+      largeView.value = out.view
+      exifData.value = out.view
+    }
+    if (out.dirty !== null) exifDirty.value = out.dirty
+    toast('success', out.editedSince
+      ? 'EXIF 저장 완료 — 저장 뒤에 고친 내용은 아직 저장되지 않았습니다'
+      : 'EXIF 저장 완료')
+  })
+}
+
+async function loadImages() {
+  isLoading.value = true
+  const folder = currentFolder.value
+  const backend: any = await getBackend()
+  // 결과는 galleryImagesReady(워커 스레드 스캔). 목 모드(개발 서버)엔 슬롯이 없어 로딩만 푼다.
   if (backend.requestGalleryImages) {
-    backend.requestGalleryImages(currentFolder.value)
-  } else if (backend.getGalleryImages) {
-    backend.getGalleryImages(currentFolder.value, (json: string) => {
-      try {
-        applyGalleryImages(currentFolder.value, JSON.parse(json))
-      } catch {}
-      isLoading.value = false
-    })
+    backend.requestGalleryImages(folder)
   } else {
     isLoading.value = false
   }
 }
 
-function applyGalleryImages(folder: string, list: unknown) {
+/** `versions` — 목록과 같은 순서의 원본 서명(ui/vue_bridge._gallery_images_payload). */
+function applyGalleryImages(folder: string, list: unknown, versions?: unknown) {
   if (folder !== currentFolder.value || !Array.isArray(list)) return
+  recordListedMediaVersions(list, versions)
   images.value = list as string[]
-  visibleCount.value = Math.min(Math.max(40, visibleCount.value), Math.max(40, images.value.length))
-  const cacheKey = folder || '__default__'
-  _cache.set(cacheKey, { images: images.value, timestamp: Date.now() })
+  paging.keep(images.value.length)
   isLoading.value = false
 }
 
-function sortImages() {
-  if (sortBy.value === 'name') {
-    images.value.sort((a, b) => a.split('/').pop()!.localeCompare(b.split('/').pop()!))
-  } else {
-    loadImages(true)  // DATE 정렬은 서버에서 새로 가져옴
-  }
-}
-
-function onGalleryScroll(e: Event) {
-  const el = e.target as HTMLElement
-  const total = exifFiltered.value ? filteredImages.value.length : images.value.length
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
-    if (visibleCount.value < total) {
-      visibleCount.value = Math.min(visibleCount.value + 30, total)
-    }
-  }
-}
-
 function closeLargeView() {
+  exifViewGen++
   largeView.value = null
+  exifDirty.value = false
+  // 응답이 끝내 안 오면(웹 모드 연결 끊김) 다음 뷰의 저장 버튼이 잠긴 채 남았다
+  exifSaving.value = false
   // metadata OFF면 사이드바도 닫기
   if (!showMetadata.value) exifData.value = null
 }
 
 const openFolder = () => requestAction('gallery_open_folder')
 const viewImage = async (path: string) => {
+  exifViewGen++
+  exifDirty.value = false
+  exifSaving.value = false
   const basic: ExifData = {
     path,
     filename: filenameOf(path),
@@ -536,7 +457,8 @@ const viewImage = async (path: string) => {
   backend.getImageExif(path, (json: string) => {
     try {
       const d = JSON.parse(json)
-      const data = d?.error ? basic : { ...basic, ...d, mediaType: basic.mediaType }
+      // 경로는 목록의 표기를 유지한다(삭제·이름 변경·검색 캐시가 같은 키를 쓴다)
+      const data = d?.error ? basic : { ...basic, ...d, path, filename: basic.filename, mediaType: basic.mediaType }
       largeView.value = data  // 확대 뷰
       exifData.value = data   // 사이드바 데이터 (showMetadata로 표시 여부 제어)
     } catch {
@@ -546,37 +468,60 @@ const viewImage = async (path: string) => {
   })
 }
 
-function showMenu(e: MouseEvent, path: string) { ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, path } }
+// 우클릭 메뉴 — 화면 밖 보정(composables/useContextMenu, Favorites·히스토리와 같은 규칙)
+const { menu: ctxMenu, menuEl: ctxMenuEl, style: ctxMenuStyle, open: showMenu, hide: hideMenu } =
+  useContextMenu({ width: 220, height: 380 })
+
 function ctx(actionName: ActionName | 'gallery_load_exif') {
   const path = ctxMenu.value.path
   if (actionName === 'gallery_load_exif') viewImage(path)
   else requestAction(actionName, { path })
-  // 삭제 시 즉시 목록에서 제거 (스크롤 유지)
-  if (actionName === 'delete_image') {
-    images.value = images.value.filter(img => img !== path)
-    // 캐시도 업데이트
-    const cacheKey = currentFolder.value || '__default__'
-    if (_cache.has(cacheKey)) _cache.get(cacheKey)!.images = images.value
-  }
-  ctxMenu.value.show = false
+  // 삭제는 여기서 목록을 건드리지 않는다 — 휴지통 이동이 실패해도 목록에서 먼저 사라지면
+  // 파일은 남았는데 갤러리에서만 없어진다. imageDeleteResult 가 오면 뺀다.
+  hideMenu()
+}
+
+/** 백엔드 삭제 결과 반영 — 실제로 파일이 없어졌을 때(removed)만 목록·검색·확대 뷰에서 뺀다. */
+function applyImageDeleteResult(raw: unknown) {
+  const result = parseImageDeleteResult(raw)
+  if (!result || !result.removed) return
+  const listed = listPathOf(result.path)
+  const next = withoutImagePath(images.value, result.path)
+  if (next) images.value = next   // EXIF 필터 결과는 현재 목록과의 교집합이라 함께 빠진다
+  exifSearchState.forget(listed)
+  if (isSameImagePath(largeView.value?.path, result.path)) largeView.value = null
+  if (isSameImagePath(exifData.value?.path, result.path)) exifData.value = null
 }
 const quickAction = (name: ActionName, path: string) => requestAction(name, { path })
-const sendToCompare = (slot: string) => { requestAction('send_to_compare', { path: ctxMenu.value.path, slot }); ctxMenu.value.show = false }
-const ctxAdetailer = () => { requestAction('run_adetailer_single', { path: ctxMenu.value.path, settings: { ad_model: 'face_yolov8n.pt', ad_confidence: 0.3, ad_denoise: 0.4 } }); ctxMenu.value.show = false }
+const sendToCompare = (slot: string) => { requestAction('send_to_compare', { path: ctxMenu.value.path, slot }); hideMenu() }
+const ctxAdetailer = () => { requestAction('run_adetailer_single', { path: ctxMenu.value.path, settings: { ad_model: 'face_yolov8n.pt', ad_confidence: 0.3, ad_denoise: 0.4 } }); hideMenu() }
+/** 확대 뷰(편집한 프롬프트 포함)의 core 파싱 결과를 그대로 보낸다 — 백엔드가 raw 를 다시 쪼개지 않는다 */
 const sendExifToT2I = () => {
   const data = largeView.value || exifData.value
-  if (data && data.can_apply !== false) requestAction('gallery_send_exif_to_t2i', { exif: data.raw || '', path: data.path, metadata: data })
+  if (data && data.can_apply !== false) requestAction('gallery_send_exif_to_t2i', { path: data.path, metadata: data })
 }
-const action = (name: ActionName, payload: Record<string, any> = {}) => requestAction(name, payload)
-const hideMenu = () => ctxMenu.value.show = false
+const action = <K extends ActionName>(name: K, payload?: ActionPayload<K>) => requestAction(name, payload)
+
+// onBackendEvent disconnect 핸들 — unmount 시 정리
+let _galleryFolderUnsub: (() => void) | null = null
+let _galleryImagesUnsub: (() => void) | null = null
+let _imageDeleteUnsub: (() => void) | null = null
 
 onMounted(async () => {
-  document.addEventListener('click', hideMenu)
   _galleryImagesUnsub = onBackendEvent('galleryImagesReady', (json: string) => {
     try {
       const payload = JSON.parse(json)
-      applyGalleryImages(payload.folder || '', payload.files)
+      applyGalleryImages(payload.folder || '', payload.files, payload.versions)
     } catch {}
+  })
+  // 삭제 결과는 await 전에 구독한다 — 늦게 붙으면 먼저 온 결과를 놓친다.
+  _imageDeleteUnsub = onBackendEvent('imageDeleteResult', applyImageDeleteResult)
+  // 폴더가 바뀌면 옛 폴더의 검색 결과를 남기지 않는다
+  _galleryFolderUnsub = onBackendEvent('galleryFolderLoaded', (f: string) => {
+    currentFolder.value = f
+    clearExifSearch()
+    paging.reset()
+    loadImages()
   })
   // 마지막 폴더 경로 로드 후 이미지 로드
   const bk: any = await getBackend()
@@ -588,17 +533,14 @@ onMounted(async () => {
   } else {
     loadImages()
   }
-  _galleryFolderUnsub = onBackendEvent('galleryFolderLoaded', (f: string) => { currentFolder.value = f; visibleCount.value = 40; loadImages(true) })
 })
-onActivated(() => { loadImages(true); fillViewport() })
-// onBackendEvent disconnect 핸들 — unmount 시 정리
-let _galleryFolderUnsub: (() => void) | null = null
-let _galleryImagesUnsub: (() => void) | null = null
+// keep-alive 재진입마다 새로 읽는다 — 갤러리 폴더는 생성 이벤트로 무효화할 수 없다(93e2634b6)
+onActivated(() => { loadImages(); fillViewport() })
 onUnmounted(() => {
-  document.removeEventListener('click', hideMenu)
-  if (_showMetaTimer) clearInterval(_showMetaTimer)
   if (_galleryFolderUnsub) _galleryFolderUnsub()
   if (_galleryImagesUnsub) _galleryImagesUnsub()
+  if (_imageDeleteUnsub) _imageDeleteUnsub()
+  searchTexts.dispose()
 })
 </script>
 
@@ -609,19 +551,7 @@ onUnmounted(() => {
 /* 경로는 있는 그대로 — 대문자로 밀면 실제와 다른 문자열이 된다 */
 .folder-info .path { font-size: var(--fs-meta); color: var(--text-muted); max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 
-.gallery-card img, .gallery-card > video { width: 100%; display: block; transition: var(--transition); }
-/* contain 여백(레터박스)은 카드 안의 '파인 면'이라 --bg-primary — 라이트에서도 카드보다 한 단 어둡다 */
-.gallery-card > video { min-height: 120px; max-height: 320px; object-fit: contain; background: var(--bg-primary); }
-
-.gallery-card:hover img, .gallery-card:hover > video { filter: brightness(0.7); }
-/* 원래 푸른기 도는 고정 어두운 그라디언트였다 — 테마를 안 타서 라이트에서 이 카드만 검게 남는다.
-   기울기(밝은 면 → 파인 면)만 살려 토큰으로 옮겼다. */
-.audio-card { min-height: 128px; padding: 20px 12px 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: linear-gradient(145deg, var(--bg-card), var(--bg-primary)); }
-.audio-icon { font-size: 34px; color: var(--accent); }
-.audio-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: var(--fs-label); color: var(--text-muted); }
-.audio-card audio { width: 100%; height: 32px; }
-/* 흰 글자를 그대로 둔다: 배지 바탕이 테마를 안 타는 검정 오버레이라 --text-primary 로 바꾸면 라이트에서 검정 위 검정이 된다 */
-.media-kind-badge { position: absolute; left: 8px; top: 8px; padding: 3px 7px; border-radius: 999px; background: rgba(0,0,0,0.72); color: #fff; font-size: var(--fs-label); font-weight: var(--fw-bold); letter-spacing: 0; pointer-events: none; }
+/* 카드 안 이미지·영상·오디오·종류 배지는 galleryShared.css (즐겨찾기와 공용) */
 
 .exif-close { position: absolute; top: 20px; left: -20px; width: 40px; height: 40px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transform: rotate(0deg); }
 

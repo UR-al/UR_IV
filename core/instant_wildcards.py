@@ -5,13 +5,9 @@ NAIA 2.0 ``modules/instant_wildcard_module.py`` 패턴 참고.
 
 목적
 ----
-``wildcards/*.txt`` 파일 와일드카드(WildcardResolver)와 별도로,
-**JSON 한 곳에 모아 관리**하는 가벼운 와일드카드.
-
-용도:
-- 자주 쓰는 짧은 후보군 (의상, 표정 등)을 매번 파일 만들지 않고 정의
-- 와일드카드 이력 추적 (어떤 슬롯에서 어떤 값이 뽑혔는지)
-- ImageWindow 우클릭 메뉴 "이 와일드카드 결과 복사/고정/제거" 등 고급 UX 기반
+``wildcards/*.txt`` 파일 와일드카드(utils/file_wildcard — ``~/name/~`` · ``__name__``)와
+별도로, **JSON 한 곳에 모아 관리**하는 가벼운 와일드카드.
+자주 쓰는 짧은 후보군(의상, 표정 등)을 매번 파일로 만들지 않고 정의한다.
 
 파일 형식 (``user_data/instant_wildcards.json``):
 ```json
@@ -24,7 +20,11 @@ NAIA 2.0 ``modules/instant_wildcard_module.py`` 패턴 참고.
 }
 ```
 
-가중치 문법은 wildcard_modes와 동일 (``{N}:tag``).
+줄 가중치: ``{N}:tag`` (N 은 양수, 없으면 1 — :func:`parse_weighted_line`).
+
+치환은 PromptPipeline 훅(POST_PROCESSING, priority 80)으로 한다. 훅은 부팅 때
+``core.standard_hooks.register_standard_hooks`` 가 :func:`ensure_hook_registered` 로 한 번
+등록한다 — '즉석 WC' 창을 열지 않아도 모든 생성 경로(run_pipeline_on_text)가 ``$$name$$`` 를 푼다.
 """
 from __future__ import annotations
 
@@ -34,16 +34,43 @@ import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from utils.app_logger import get_logger
-from core.wildcard_modes import parse_weighted_line  # 가중치 파서 재사용
 
 _logger = get_logger("instant_wildcards")
 
 
-# 패턴: $$NAME$$ (파일 와일드카드의 __NAME__와 충돌 안 함)
-_PATTERN_RE = re.compile(r"\$\$(?P<name>[\w\-/.]+)\$\$")
+# 패턴: $$NAME$$ (파일 와일드카드의 ~/NAME/~ · __NAME__ 과 충돌 안 함)
+# 공개 이름은 실시간 프롬프트 정리(utils.prompt_cleaner)가 같은 정규식으로 토큰을 가릴 때 쓴다 —
+# 이름에 공백이 허용되지 않으므로 밑줄→공백이 끼어들면 토큰이 풀리지 않는다.
+INSTANT_WILDCARD_PATTERN = re.compile(r"\$\$(?P<name>[\w\-/.]+)\$\$")
+_PATTERN_RE = INSTANT_WILDCARD_PATTERN
+
+# 줄 가중치 문법: {weight}:line — weight 는 양수(정수/실수)
+_WEIGHT_RE = re.compile(r"^\{(?P<w>[0-9]+(?:\.[0-9]+)?)\}:(?P<line>.*)$")
+
+# PromptPipeline 에 등록할 때 쓰는 이름 — 이 이름으로 중복 등록을 막는다.
+HOOK_NAME = "instant_wildcards"
+HOOK_PRIORITY = 80
+
+
+def parse_weighted_line(line: str) -> tuple[float, str]:
+    """``{100}:tag`` 형태에서 ``(가중치, 텍스트)`` 추출.
+
+    가중치가 없거나 0 이하이면 기본 가중치 1 — ``{0}:x`` 는 ``(1.0, 'x')``.
+    """
+    line = line.strip()
+    m = _WEIGHT_RE.match(line)
+    if not m:
+        return 1.0, line
+    try:
+        w = float(m.group("w"))
+        if w <= 0:
+            return 1.0, m.group("line").strip()
+        return w, m.group("line").strip()
+    except ValueError:
+        return 1.0, line
 
 
 @dataclass
@@ -64,15 +91,6 @@ class InstantWildcardSet:
         )
 
 
-@dataclass
-class PickRecord:
-    """확장 시 이력 기록."""
-    name: str
-    picked: str
-    weight: float
-    index: int  # 후보 리스트에서의 0-based index
-
-
 class InstantWildcards:
     """JSON 와일드카드 매니저.
 
@@ -85,12 +103,6 @@ class InstantWildcards:
         self.store_path = Path(store_path) if store_path else None
         self._rng = rng or random.Random()
         self._set = InstantWildcardSet()
-        # 이력 — 최근 확장에서 뽑힌 항목들 (UI 우클릭 메뉴 기반)
-        self._history: list[PickRecord] = []
-        # 오버라이드 — 강제 값 (디버깅/스코프 처리용)
-        self._overrides: dict[str, str] = {}
-        # 고정 — 다음 확장에서 동일 값 (사용자 "고정" 메뉴 후 재생성용)
-        self._pinned: dict[str, str] = {}
         self._lock = threading.RLock()
 
         if self.store_path and self.store_path.is_file():
@@ -142,41 +154,16 @@ class InstantWildcards:
         with self._lock:
             self._set.wildcards[name] = list(lines)
 
-    def add_line(self, name: str, line: str) -> None:
-        with self._lock:
-            self._set.wildcards.setdefault(name, []).append(line)
-
-    def remove_line(self, name: str, line: str) -> bool:
-        with self._lock:
-            lst = self._set.wildcards.get(name)
-            if not lst or line not in lst:
-                return False
-            lst.remove(line)
-            return True
-
     def delete(self, name: str) -> bool:
         with self._lock:
             return self._set.wildcards.pop(name, None) is not None
 
-    def rename(self, old: str, new: str) -> bool:
-        with self._lock:
-            if old not in self._set.wildcards or new in self._set.wildcards:
-                return False
-            self._set.wildcards[new] = self._set.wildcards.pop(old)
-            return True
-
     # ────────────────────────────────────────
-    # 선택 (스코프 처리: pinned > override > random)
+    # 선택 (가중치 랜덤)
     # ────────────────────────────────────────
 
     def pick(self, name: str) -> str:
         with self._lock:
-            # 고정 우선
-            if name in self._pinned:
-                return self._pinned[name]
-            # 오버라이드
-            if name in self._overrides:
-                return self._overrides[name]
             lines = self._set.wildcards.get(name, [])
             if not lines:
                 return f"$${name}$$"
@@ -187,10 +174,7 @@ class InstantWildcards:
                 weights.append(w)
                 values.append(v)
             idx = self._rng.choices(range(len(values)), weights=weights, k=1)[0]
-            picked = values[idx]
-            self._history.append(PickRecord(name=name, picked=picked,
-                                            weight=weights[idx], index=idx))
-            return picked
+            return values[idx]
 
     def resolve(self, text: str, max_depth: int = 8) -> str:
         """``$$name$$`` 패턴을 치환. 중첩도 처리."""
@@ -210,63 +194,66 @@ class InstantWildcards:
         return result
 
     # ────────────────────────────────────────
-    # 이력 / 고정 / 오버라이드
-    # ────────────────────────────────────────
-
-    def history(self) -> list[PickRecord]:
-        with self._lock:
-            return list(self._history)
-
-    def clear_history(self) -> None:
-        with self._lock:
-            self._history.clear()
-
-    def pin(self, name: str, value: str) -> None:
-        """다음 확장에서 동일 값 강제. ``unpin``으로 해제."""
-        with self._lock:
-            self._pinned[name] = value
-
-    def unpin(self, name: Optional[str] = None) -> None:
-        with self._lock:
-            if name is None:
-                self._pinned.clear()
-            else:
-                self._pinned.pop(name, None)
-
-    def is_pinned(self, name: str) -> bool:
-        with self._lock:
-            return name in self._pinned
-
-    def set_override(self, name: str, value: str) -> None:
-        with self._lock:
-            self._overrides[name] = value
-
-    def clear_override(self, name: Optional[str] = None) -> None:
-        with self._lock:
-            if name is None:
-                self._overrides.clear()
-            else:
-                self._overrides.pop(name, None)
-
-    # ────────────────────────────────────────
     # Pipeline 훅 팩토리
     # ────────────────────────────────────────
 
     def make_hook(self) -> Callable:
         """PromptPipeline 훅 — main_tags를 join → resolve → split.
 
-        wildcard_modes의 ``make_wildcard_hook``과 같은 단계에 등록 가능
-        (서로 다른 패턴이라 충돌 없음).
+        ``$$`` 가 없는 프롬프트는 손대지 않는다(태그 목록을 다시 쪼개지 않는다).
         """
         def hook(ctx) -> None:
             combined = ", ".join(ctx.main_tags)
+            if "$$" not in combined:
+                return
             resolved = self.resolve(combined)
-            ctx.main_tags = [t.strip() for t in resolved.split(",") if t.strip()]
-            # 이력 메타에 보존
-            hist = self.history()
-            if hist:
-                ctx.metadata.setdefault("instant_wildcard_picks", []).extend(
-                    {"name": r.name, "picked": r.picked, "weight": r.weight, "index": r.index}
-                    for r in hist
-                )
+            if resolved != combined:
+                ctx.main_tags = [t.strip() for t in resolved.split(",") if t.strip()]
         return hook
+
+
+# ─────────────────────────────────────────────
+# 프로세스 싱글톤 + 멱등 훅 등록
+# ─────────────────────────────────────────────
+
+_instance_lock = threading.Lock()
+_instance: Optional[InstantWildcards] = None
+
+
+def default_store_path() -> Path:
+    """``user_data/instant_wildcards.json`` (옛 ``save/`` 위치에서 1회 이관)."""
+    from core.storage_paths import user_data_file
+    return user_data_file(
+        "instant_wildcards.json",
+        legacy_paths="save/instant_wildcards.json",
+    )
+
+
+def get_instant_wildcards() -> InstantWildcards:
+    """프로세스 전역 InstantWildcards — 관리 액션과 생성 훅이 같은 객체를 쓴다."""
+    global _instance
+    if _instance is None:
+        with _instance_lock:
+            if _instance is None:
+                _instance = InstantWildcards(store_path=default_store_path())
+    return _instance
+
+
+def ensure_hook_registered(pipeline=None, instance: Optional[InstantWildcards] = None) -> bool:
+    """``$$name$$`` 치환 훅을 pipeline 에 한 번만 등록한다(이름 기준 멱등).
+
+    :return: 이번 호출로 새로 등록했으면 True, 이미 있으면 False.
+    PromptPipeline.register 는 중복을 거르지 않으므로 반드시 이 함수로만 등록한다.
+    """
+    from core.prompt_pipeline import HookPoint, get_pipeline
+    pl = pipeline if pipeline is not None else get_pipeline()
+    if pl.has_hook(HookPoint.POST_PROCESSING, HOOK_NAME):
+        return False
+    iw = instance if instance is not None else get_instant_wildcards()
+    pl.register(
+        HookPoint.POST_PROCESSING,
+        iw.make_hook(),
+        priority=HOOK_PRIORITY,
+        name=HOOK_NAME,
+    )
+    return True

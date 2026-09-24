@@ -65,7 +65,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import InstructionPresets from './InstructionPresets.vue'
-import type { AiAssistFeature, AiAssistInstructions } from '../types/bridge'
+import type { AiAssistFeature, AiAssistInstructions, AiAssistInstructionsResult } from '../types/bridge'
 withDefaults(defineProps<{ idPrefix?: string }>(), { idPrefix: 'ai-assist' })
 const remoteChange = ref('')
 let unsubscribe: (() => void) | undefined
@@ -214,8 +214,9 @@ onMounted(() => {
   unsubscribe = onBackendEvent('aiAssistInstructionsChanged', (raw: string) => {
     if (phase.value === 'saving') return // The save callback owns this acknowledgement.
     try {
-      const reply = JSON.parse(raw)
-      if (!reply.ok || !reply.instructions) return
+      // 이벤트 모양은 bridge.d.ts 계약(AiAssistInstructionsResult). 깊은 검증은 accept() 가 한다.
+      const reply = JSON.parse(raw) as AiAssistInstructionsResult | null
+      if (!reply?.ok || !reply.instructions) return
       const snapshot = JSON.stringify(reply.instructions)
       if (snapshot === saved.value) return
       if (dirty.value && snapshot !== JSON.stringify(draft.value)) remoteChange.value = raw

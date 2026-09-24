@@ -10,6 +10,7 @@ from core.event_generation import (
     EventGenerationPlanError,
     plan_event_generation,
 )
+from ui.event_search_actions import EventSearchActionsMixin, normalize_event_ratings
 from ui.generator_main import GeneratorMainUI
 from ui.model_download_actions import ModelDownloadActionsMixin
 
@@ -25,6 +26,21 @@ class _Signal:
 class _Bridge:
     def __init__(self):
         self.showNotification = _Signal()
+        self.eventSearchResults = _Signal()
+        self.eventSearchProgress = _Signal()
+        self.eventLoadStatus = _Signal()
+        self.searchStatus = _Signal()
+
+
+class _RunningWorker:
+    def __init__(self):
+        self.cancelled = False
+
+    def isRunning(self):
+        return True
+
+    def cancel(self):
+        self.cancelled = True
 
 
 class _QueueManager:
@@ -40,7 +56,7 @@ class _HiddenEventTab:
         raise AssertionError(f"hidden EventGen tab was accessed: {name}")
 
 
-class _Harness(ModelDownloadActionsMixin):
+class _Harness(EventSearchActionsMixin, ModelDownloadActionsMixin):
     _handle_vue_action = GeneratorMainUI._handle_vue_action
     _handle_event_generation_request = (
         GeneratorMainUI._handle_event_generation_request
@@ -175,14 +191,6 @@ class EventGenerationActionTests(unittest.TestCase):
         self.assertEqual(harness.queue_manager.start_count, 0)
         self.assertEqual(harness.vue_bridge.showNotification.calls[0][0], "warning")
 
-    def test_select_event_never_touches_hidden_pyqt_result_list(self):
-        harness = _Harness()
-
-        harness._handle_vue_action("select_event", {"index": 4})
-
-        self.assertEqual(harness.received, [])
-        self.assertEqual(harness.queue_manager.start_count, 0)
-
     def test_event_search_uses_window_owned_loader_not_hidden_tab(self):
         harness = _Harness()
         loader = object()
@@ -206,6 +214,106 @@ class EventGenerationActionTests(unittest.TestCase):
         self.assertEqual(harness.search_runs, [])
         self.assertEqual(harness.load_requests, [("s", "q")])
         self.assertIs(harness._pending_event_payload, payload)
+
+
+class EventSearchOrderingTests(unittest.TestCase):
+    """중복 적재·검색 방지와 옛 결과 버리기 (EventSearchActionsMixin)."""
+
+    def test_ratings_are_normalised(self):
+        self.assertEqual(normalize_event_ratings(["s", "x", 3, "e"]), ("s", "e"))
+        self.assertEqual(normalize_event_ratings([]), ("g",))
+        self.assertEqual(normalize_event_ratings("g"), ("g",))
+        self.assertEqual(normalize_event_ratings(None), ("g",))
+
+    def test_generator_main_uses_the_mixin_implementation(self):
+        self.assertIs(
+            GeneratorMainUI._start_event_search,
+            EventSearchActionsMixin._start_event_search,
+        )
+        self.assertIs(
+            GeneratorMainUI._run_event_search_worker,
+            EventSearchActionsMixin._run_event_search_worker,
+        )
+
+    def test_second_request_while_loading_reuses_the_running_load(self):
+        harness = _Harness()
+        first = {"ratings": ["s"], "prompt": "first"}
+        second = {"ratings": ["s"], "prompt": "second"}
+
+        harness._start_event_search(first)
+        harness._start_event_search(second)
+
+        self.assertEqual(harness.load_requests, [("s",)], "같은 등급을 두 번 읽지 않는다")
+        loader = object()
+        harness._on_event_data_loaded(loader)
+
+        self.assertEqual(harness.search_runs, [(loader, second)], "마지막 요청만 검색한다")
+        self.assertEqual(harness._event_loader_ratings, ("s",))
+        self.assertEqual(harness._pending_event_payload, {})
+
+    def test_rating_change_during_load_triggers_a_reload_of_the_new_rating(self):
+        harness = _Harness()
+        harness._start_event_search({"ratings": ["g"], "prompt": "a"})
+        latest = {"ratings": ["e"], "prompt": "b"}
+        harness._start_event_search(latest)
+        self.assertEqual(harness.load_requests, [("g",)])
+
+        harness._on_event_data_loaded(object())
+
+        # 적재가 끝난 g 가 아니라 마지막 요청의 e 를 다시 적재한다
+        self.assertEqual(harness.load_requests, [("g",), ("e",)])
+        self.assertEqual(harness.search_runs, [])
+        self.assertIs(harness._pending_event_payload, latest)
+        self.assertIsNone(harness._event_loader, "옛 등급 적재본을 들고 새 등급을 읽지 않는다")
+
+    def test_loaded_ratings_come_from_the_load_not_from_a_later_request(self):
+        harness = _Harness()
+        harness._start_event_search({"ratings": ["q"], "prompt": "a"})
+        loader = object()
+        harness._on_event_data_loaded(loader)
+        self.assertEqual(harness._event_loader_ratings, ("q",))
+        self.assertIs(harness._event_loader, loader)
+
+    def test_load_error_is_reported_and_clears_pending_state(self):
+        harness = _Harness()
+        harness._start_event_search({"ratings": ["g"], "prompt": "a"})
+
+        harness._on_event_data_loaded("오류: broken")
+
+        self.assertEqual(harness.vue_bridge.eventSearchResults.calls, [('{"error": "\\uc624\\ub958: broken"}',)])
+        self.assertEqual(harness._pending_event_payload, {})
+        self.assertIsNone(harness._event_loading_ratings)
+        # 다음 요청은 다시 적재를 시작할 수 있다
+        harness._start_event_search({"ratings": ["g"], "prompt": "b"})
+        self.assertEqual(harness.load_requests, [("g",), ("g",)])
+
+    def test_stale_search_results_and_progress_are_dropped(self):
+        harness = _Harness()
+        old_worker = _RunningWorker()
+        harness._event_search_worker = old_worker
+        stale_id = harness._begin_event_search_request()
+        current_id = harness._begin_event_search_request()
+
+        self.assertTrue(old_worker.cancelled, "새 요청은 돌고 있던 검색을 취소한다")
+        harness._on_event_search_progress(stale_id, 5, 10)
+        harness._on_event_search_finished(stale_id, '[{"old": true}]')
+        harness._on_event_search_progress(current_id, 7, 10)
+        harness._on_event_search_finished(current_id, "[]")
+
+        self.assertEqual(harness.vue_bridge.eventSearchProgress.calls, [(7, 10)])
+        self.assertEqual(harness.vue_bridge.eventSearchResults.calls, [("[]",)])
+
+    def test_stale_event_shards_are_announced(self):
+        harness = _Harness()
+        harness._start_event_search({"ratings": ["g"], "prompt": "a"})
+        loader = type("L", (), {"stale_shards": ["danbooru_sorted/danbooru_g.parquet"]})()
+
+        harness._on_event_data_loaded(loader)
+
+        calls = harness.vue_bridge.showNotification.calls
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "warning")
+        self.assertIn("danbooru_sorted/danbooru_g.parquet", calls[0][1])
 
 
 if __name__ == "__main__":

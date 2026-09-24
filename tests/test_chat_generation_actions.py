@@ -60,6 +60,19 @@ class Backend:
         self.release.set()
 
 
+class BlockingUnload:
+    """Forge unload-checkpoint 대역 — release 전까지 공유 리스를 hold(HOLD_PHASE)로 쥔다."""
+
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def unload_checkpoint(self):
+        self.entered.set()
+        self.release.wait(5)
+        return True
+
+
 class ChatGenerationActionsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -103,6 +116,36 @@ class ChatGenerationActionsTests(unittest.TestCase):
                 self.assertEqual(len(host.unload_threads), 1 if enabled else 0)
                 if enabled:
                     self.assertEqual(host.unload_threads[0], backend.worker_thread)
+
+    def test_request_during_a_model_unload_waits_for_it_instead_of_being_rejected(self):
+        # 언로드 hold(HOLD_PHASE)는 생성이 아니다. 예전엔 사전 검사가 phase != 'idle' 을 봐서 생성 후
+        # 언로드·대기열 정기 정리·VRAM 수동 언로드 직후(최대 30초) 채팅 이미지·영상 요청을 '다른 생성
+        # 작업이 실행 중'으로 거절했다. 이제 받아 두고 작업 스레드가 그 언로드를 기다렸다 생성한다.
+        from core import post_generation
+        from core.resource_coordinator import HOLD_PHASE, get_generation_coordinator
+        unload = BlockingUnload()
+        host, backend, events, rejected = Host(), Backend(), [], []
+        host.vue_bridge.chatGenerationEvent.connect(lambda raw: events.append(json.loads(raw)))
+        host.vue_bridge.chatDone.connect(lambda raw: rejected.append(json.loads(raw)))
+        thread = post_generation.start_post_generation_unload(unload)
+        self.assertIsNotNone(thread, '앞선 테스트의 언로드가 남아 있으면 안 된다')
+        try:
+            self.assertTrue(unload.entered.wait(5))
+            self.assertEqual(get_generation_coordinator().state.phase, HOLD_PHASE)
+            with tempfile.TemporaryDirectory() as directory, patch('backends.get_backend', return_value=backend), \
+                    patch('config.OUTPUT_DIR', directory):
+                host._handle_chat_action('chat_send', self.request('during-unload'))
+                self.assertEqual(rejected, [], '언로드 중이라고 거절하지 않는다')
+                time.sleep(0.05)
+                self.assertFalse(backend.started.is_set(), '언로드가 끝나기 전에는 샘플링하지 않는다')
+                unload.release.set()
+                self.wait_for(lambda: any(e.get('done') for e in events))
+                final = next(e for e in events if e.get('done'))
+                self.assertTrue(final['ok'], final.get('error'))
+                self.assertTrue(Path(final['artifacts'][0]['path']).is_file())
+        finally:
+            unload.release.set()
+            thread.join(5)
 
     def test_stop_and_results_are_owned_and_duplicate_request_does_not_replace_job(self):
         host, backend, events, rejected = Host(), Backend(blocked=True), [], []

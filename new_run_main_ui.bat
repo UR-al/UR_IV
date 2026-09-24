@@ -73,7 +73,7 @@ if not "%APP_EXIT%"=="0" (
     echo [run] The app exited unexpectedly. Check the crash log below.
     echo ============================================================
     if exist "%CRASH_LOG%" (
-        type "%CRASH_LOG%"
+        call :type_utf8 "%CRASH_LOG%"
     ) else (
         echo [run] No crash log was created for this run. Use the traceback above.
     )
@@ -83,6 +83,16 @@ if not "%APP_EXIT%"=="0" (
 )
 
 endlocal & exit /b %APP_EXIT%
+
+:type_utf8
+REM The crash log is UTF-8 (Korean messages/paths), but a new console starts in the OEM code page
+REM (cp949 on Korean Windows). Show it under UTF-8 and restore the previous code page afterwards.
+set "TYPE_PREV_CP="
+for /f "tokens=2 delims=:." %%c in ('"%SystemRoot%\System32\chcp.com"') do set /a "TYPE_PREV_CP=%%c" >nul 2>&1
+"%SystemRoot%\System32\chcp.com" 65001 >nul
+type "%~1"
+if defined TYPE_PREV_CP "%SystemRoot%\System32\chcp.com" %TYPE_PREV_CP% >nul
+exit /b 0
 
 :create_venv
 echo [run] Virtual environment not found. Creating: %VENV_DIR%

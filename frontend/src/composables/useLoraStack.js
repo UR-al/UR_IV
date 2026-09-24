@@ -1,10 +1,18 @@
 import { reactive, ref, computed, watch, nextTick } from 'vue'
 import { onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import { fromBridgeLoraEntries, toBridgeLoraEntries } from '../utils/loraUnits'
+import { createTrailingDebounce, flushOnPageHide } from '../utils/trailingDebounce'
+
+/** 가중치 슬라이더 드래그 중 ui_prefs.json 저장을 모으는 간격(ms) — Python 동기화는 즉시 (감사 #130) */
+export const LORA_SAVE_DEBOUNCE_MS = 300
 
 /**
  * LoRA 스택 상태 + 동작 (App.vue에서 추출 — App.vue 분할 ④).
- * 단일 소스: config/ui_prefs.json 의 loraStack (Python _vue_lora_entries/_vue_lora_text로 복원).
+ * 영속 소스: config/ui_prefs.json 의 loraStack(정수 %). 생성 LoRA 의 단일 소스는 Python
+ * _vue_lora_entries(배율) — 부팅 시 ui_prefs 에서 복원되고, 여기 syncLoraStack(set_lora_stack)이
+ * ui_prefs 복원 직후·변경마다·생성 직전마다 갱신한다(빈 스택도 전송). 마운트 시점의 localStorage
+ * 스택은 보내지 않는다(restoreFromPrefs 주석 참고). 단위 변환은 utils/loraUnits.ts 에서만.
  *
  * @param {object} deps
  * @param {object} deps.storeWidgets  위젯 스토어 reactive (main_prompt_text 등)
@@ -24,26 +32,29 @@ export function useLoraStack({ storeWidgets, addToast, saveUiPrefs }) {
   let _loraInitialized = false
   let _loraRestoring = false
 
+  // 파일 저장만 모은다 — 슬라이더 드래그(input 이벤트마다)가 틱마다 GUI 스레드의 ui_prefs.json
+  // 읽기-수정-쓰기를 부르지 않게. Python 생성 스택(set_lora_stack)은 syncLoraStack 이 즉시 보낸다.
+  const _persistLoraStack = createTrailingDebounce(
+    (stack) => saveUiPrefs({ loraStack: stack }),
+    LORA_SAVE_DEBOUNCE_MS,
+  )
+  flushOnPageHide(() => _persistLoraStack.flush())
+
   function _saveLoraStack() {
     try { window.localStorage.setItem('loraStack', JSON.stringify(loraStack)) } catch {}
     // 초기화 완료 전 빈 배열로 덮어쓰기 방지, 이후에는 빈 배열도 정상 저장
     if (!_loraInitialized && loraStack.length === 0) return
     _loraInitialized = true
-    saveUiPrefs({ loraStack: loraStack.map(l => ({ ...l })) })
+    _persistLoraStack(loraStack.map(l => ({ ...l })))
   }
 
   function syncLoraStack() {
-    requestAction('set_lora_stack', {
-      entries: loraStack.map(l => ({
-        name: l.name || '',
-        weight: Number.isFinite(Number(l.weight)) ? Number(l.weight) / 100 : 0.8,
-        enabled: l.enabled !== false,
-        triggerWords: Array.isArray(l.triggerWords) ? l.triggerWords : [],
-      })),
-    })
+    // 빈 스택·전부 꺼짐도 그대로 보낸다 — Python 이 옛 LoRA 를 계속 붙이지 않게.
+    requestAction('set_lora_stack', { entries: toBridgeLoraEntries(loraStack) })
   }
 
-  // LoRA 추가 (Python loraInserted 등에서 호출)
+  // LoRA 추가 (LoRA 매니저 모달의 onLoraAdd) — 저장·Python 동기는 아래 deep watch 한 곳에서
+  // (예전엔 여기서도 직접 저장해 한 번 추가에 save_ui_prefs 가 두 번 나갔다)
   function addLoraToStack(name, weight, triggerWords = []) {
     const existing = loraStack.find(l => l.name === name)
     if (existing) {
@@ -52,10 +63,9 @@ export function useLoraStack({ storeWidgets, addToast, saveUiPrefs }) {
     } else {
       loraStack.push({ name, weight: Math.round(weight * 100), enabled: true, triggerWords })
     }
-    _saveLoraStack()
   }
 
-  // 변경 감시 → 자동 저장 + Python 동기 (복원 중에는 무시)
+  // 변경 감시 → 자동 저장(디바운스) + Python 동기(즉시) (복원 중에는 무시)
   watch(loraStack, () => {
     if (_loraRestoring) return
     _saveLoraStack()
@@ -115,8 +125,7 @@ export function useLoraStack({ storeWidgets, addToast, saveUiPrefs }) {
   function loadLoraSet() {
     const set = loraSets.value[loraSetSel.value]
     if (!Array.isArray(set)) return
-    loraStack.splice(0, loraStack.length, ...set.map(l => ({ ...l })))
-    _saveLoraStack(); syncLoraStack()
+    loraStack.splice(0, loraStack.length, ...set.map(l => ({ ...l })))   // 저장·동기는 deep watch
     addToast('success', `세트 적용: ${loraSetSel.value} (${set.length}개)`)
   }
   function deleteLoraSet() {
@@ -147,40 +156,44 @@ export function useLoraStack({ storeWidgets, addToast, saveUiPrefs }) {
     if (to > from) to -= 1          // 앞쪽 제거로 인덱스 보정
     if (to === from) return          // 제자리 → 무동작
     const moved = loraStack.splice(from, 1)[0]
-    loraStack.splice(to, 0, moved)
-    _saveLoraStack(); syncLoraStack()
+    loraStack.splice(to, 0, moved)   // 저장·동기는 deep watch
   }
 
-  // 단일 소스(ui_prefs) 복원 — App.vue uiPrefsLoaded 핸들러에서 호출
+  // 단일 소스(ui_prefs) 복원 — App.vue uiPrefsLoaded 핸들러에서 호출.
+  // 복원 뒤 반드시 Python 에도 보낸다(useRatingFilter.restoreFromPrefs → pushRatingFilter 와 같은 계약).
+  // 마운트 시점엔 보내지 않는다 — 웹 모드는 ui_prefs 가 getInitialConfig 응답으로 늦게 오고 Python
+  // 호스트는 새 클라이언트마다 _restore_runtime_prefs 를 돌리지 않아서, 이 브라우저의 낡은(또는 빈)
+  // localStorage 스택이 공유 _vue_lora_entries 를 덮으면 채팅·XYZ·대기열·자동화가 그 스택으로 생성됐다.
+  // ui_prefs 에 loraStack 이 없으면(한 번도 저장된 적 없음) 화면의 localStorage 스택이 곧 사용자가
+  // 보는 값이므로 그대로 보낸다.
   function restoreFromPrefs(prefs) {
-    if (!prefs || !Array.isArray(prefs.loraStack)) return
-    _loraRestoring = true
-    loraStack.splice(0, loraStack.length, ...prefs.loraStack.map(l => ({ ...l })))
-    try { window.localStorage.setItem('loraStack', JSON.stringify(prefs.loraStack)) } catch {}
-    nextTick(() => { _loraRestoring = false; _loraInitialized = true })
-  }
-
-  // 생성용 <lora:name:weight> 텍스트 (doGenerate에서 호출) — Python build_lora_text와 동일 포맷
-  function buildActiveLoraText() {
-    return loraStack.filter(l => l.enabled)
-      .map(l => `<lora:${l.name}:${(l.weight / 100).toFixed(2)}>`).join(', ')
+    if (!prefs || typeof prefs !== 'object') return
+    const hasStack = Array.isArray(prefs.loraStack)
+    if (hasStack) {
+      _loraRestoring = true
+      _persistLoraStack.cancel()   // 파일 값이 이긴다 — 복원 전 화면 스택의 늦은 저장이 덮지 않게
+      loraStack.splice(0, loraStack.length, ...prefs.loraStack.map(l => ({ ...l })))
+      try { window.localStorage.setItem('loraStack', JSON.stringify(prefs.loraStack)) } catch {}
+    }
+    nextTick(() => {
+      if (hasStack) { _loraRestoring = false; _loraInitialized = true }
+      syncLoraStack()
+    })
   }
 
   // Python → Vue: loraStackLoaded (워크플로 프로파일 적용 등). 시작 1회 active_loras emit은
-  // 단일 소스 통합으로 제거됨 → 평소엔 프로파일 적용 때만 발생.
+  // 단일 소스 통합으로 제거됨 → 평소엔 프로파일 적용 때만 발생. 항목은 배율 단위(Python 이 옛
+  // 퍼센트 프로파일까지 정규화해서 보낸다). Python _vue_lora_entries 는 이미 같은 값이라 되돌려
+  // 보내지 않고, ui_prefs 에만 영속한다 — 안 하면 재시작 시 옛 스택으로 돌아갔다.
   onBackendEvent('loraStackLoaded', (json) => {
     try {
-      const entries = JSON.parse(json)
-      if (!Array.isArray(entries)) return
+      const entries = fromBridgeLoraEntries(JSON.parse(json))
+      if (!entries) return
       _loraRestoring = true
-      loraStack.splice(0, loraStack.length, ...entries.map(entry => ({
-        name: entry.name || '',
-        weight: Number.isFinite(Number(entry.weight)) ? Math.round(Number(entry.weight) * 100) : 80,
-        enabled: entry.enabled !== false,
-        triggerWords: Array.isArray(entry.triggerWords) ? entry.triggerWords : [],
-      })))
-      try { window.localStorage.setItem('loraStack', JSON.stringify(loraStack)) } catch {}
-      nextTick(() => { _loraRestoring = false; _loraInitialized = true })
+      loraStack.splice(0, loraStack.length, ...entries)
+      _loraInitialized = true   // 프로파일의 빈 스택도 사용자의 선택 — 그대로 저장
+      _saveLoraStack()
+      nextTick(() => { _loraRestoring = false })
     } catch {}
   })
 
@@ -190,6 +203,6 @@ export function useLoraStack({ storeWidgets, addToast, saveUiPrefs }) {
     showLoraModal, onLoraAdd,
     loraSetName, loraSetSel, loraSetNames, saveLoraSet, loadLoraSet, deleteLoraSet,
     loraDragIdx, loraDropIdx, loraDragStart, loraDragOver, loraDragEnd, loraDrop,
-    restoreFromPrefs, buildActiveLoraText,
+    restoreFromPrefs,
   }
 }

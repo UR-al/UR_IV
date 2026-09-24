@@ -1,4 +1,4 @@
-import { getBackend, getStudioTransport, onBackendEvent } from '../bridge.js'
+import { getStudioTransport } from '../bridge.js'
 import {
   CursorRecoveryController,
   MonotonicEventCursor,
@@ -31,21 +31,6 @@ type BootstrapRecovery = {
     modelPaths: unknown
   }
 }
-
-const ALL_OPERATIONS: StudioOperation[] = [
-  'sync.bootstrap',
-  'runtime.snapshot',
-  'runtime.execute',
-  'generation_api.snapshot',
-  'generation_api.execute',
-  'app_update.snapshot',
-  'app_update.execute',
-  'model_paths.snapshot',
-  'model_paths.save',
-  'model_paths.reset',
-  'model_paths.refresh',
-  'native.pick_directory',
-]
 
 let fallbackRequestSequence = 0
 
@@ -293,7 +278,7 @@ function isRecoveryCancelled(error: unknown): boolean {
 }
 
 export interface StudioClient {
-  readonly kind: 'v1' | 'legacy'
+  readonly kind: 'v1' | 'unavailable'
   readonly description: StudioDescription
   supports(operation: StudioOperation): boolean
   invoke<O extends StudioOperation, T = unknown>(
@@ -634,102 +619,37 @@ class NativeStudioClient implements StudioClient {
   }
 }
 
-type LegacyMethodCall = { method: string; args: unknown[] }
-
-function legacyCall(operation: StudioOperation, input: StudioOperationInputMap[StudioOperation]): LegacyMethodCall {
-  const values = input as Record<string, any>
-  switch (operation) {
-    case 'sync.bootstrap': throw unavailableError('legacy backend은 sync.bootstrap을 지원하지 않습니다.')
-    case 'runtime.snapshot': return { method: 'getBackendRuntimeState', args: [] }
-    case 'runtime.execute': return {
-      method: 'runBackendRuntimeOperation',
-      args: [values.engine, values.action, JSON.stringify(values.payload || {})],
-    }
-    case 'generation_api.snapshot': return { method: 'getGenerationApiState', args: [] }
-    case 'generation_api.execute': return {
-      method: 'runGenerationApiOperation',
-      args: [values.action, JSON.stringify(values.payload || {})],
-    }
-    case 'app_update.snapshot': throw unavailableError('legacy backend은 앱 업데이트 조회를 지원하지 않습니다.')
-    case 'app_update.execute': throw unavailableError('legacy backend은 앱 업데이트 작업을 지원하지 않습니다.')
-    case 'model_paths.snapshot': return { method: 'getForgeModelPaths', args: [] }
-    case 'model_paths.save': return { method: 'saveForgeModelPaths', args: [JSON.stringify(values.paths || {})] }
-    case 'model_paths.reset': return { method: 'resetForgeModelPaths', args: [] }
-    case 'model_paths.refresh': return { method: 'refreshForgeModelPaths', args: [] }
-    case 'native.pick_directory': {
-      if (values.purpose === 'runtime_install') return { method: 'selectBackendInstallDirectory', args: [values.engine] }
-      if (values.purpose === 'runtime_extension') return { method: 'selectBackendExtensionDirectory', args: [values.engine] }
-      return { method: 'selectForgeModelDirectory', args: [values.key] }
-    }
+/**
+ * studio transport 가 없는 경우(vite 목 모드 등)의 클라이언트 — 아무 작업도 지원하지 않는다.
+ *
+ * 데스크톱·웹 호스트는 'studio' 객체를 항상 등록하므로 운영에서는 선택되지 않는다. 예전엔 여기서
+ * 레거시 VueBridge 설정 슬롯으로 폴백했지만 그 슬롯들은 도달 불가라 제거했다(audit #176).
+ */
+class UnavailableStudioClient implements StudioClient {
+  readonly kind = 'unavailable' as const
+  readonly description: StudioDescription = {
+    version: STUDIO_PROTOCOL_VERSION,
+    eventEpoch: 'unavailable',
+    operations: [],
+    topics: [],
   }
-}
 
-class LegacyStudioClient implements StudioClient {
-  readonly kind = 'legacy' as const
-  private legacySeq = 0
-  private readonly disconnectors = new Set<() => void>()
-
-  constructor(
-    private readonly backend: any,
-    readonly description: StudioDescription,
-  ) {}
-
-  supports(operation: StudioOperation): boolean {
-    return this.description.operations.includes(operation)
+  supports(_operation: StudioOperation): boolean {
+    return false
   }
 
   async invoke<O extends StudioOperation, T = unknown>(
     operation: O,
-    input: StudioOperationInputMap[O],
+    _input: StudioOperationInputMap[O],
   ): Promise<StudioReply<T>> {
-    if (!this.supports(operation)) throw unavailableError(`현재 백엔드가 ${operation}을(를) 지원하지 않습니다.`)
-    const id = requestId()
-    const call = legacyCall(operation, input as StudioOperationInputMap[StudioOperation])
-    const fn = this.backend?.[call.method]
-    if (typeof fn !== 'function') throw unavailableError(`백엔드가 ${call.method}을(를) 지원하지 않습니다.`)
-    const raw = await new Promise<unknown>((resolve, reject) => {
-      try { fn(...call.args, (value: unknown) => resolve(value)) }
-      catch (error) { reject(unavailableError(error instanceof Error ? error.message : String(error))) }
-    })
-    return {
-      version: STUDIO_PROTOCOL_VERSION,
-      requestId: id,
-      status: 'ok',
-      data: parseJsonValue(raw) as T,
-    }
+    throw unavailableError(`Studio 연결이 없어 ${operation}을(를) 실행할 수 없습니다.`)
   }
 
-  subscribe(topic: StudioTopic, handler: EventHandler): () => void {
-    const legacyName = topic === 'runtime'
-      ? 'backendRuntimeEvent'
-      : topic === 'generation_api'
-        ? 'generationApiEvent'
-        : ''
-    if (!legacyName) return () => {}
-    const disconnect = onBackendEvent(legacyName, (raw: unknown) => {
-      const payload = parseJsonValue(raw)
-      this.legacySeq += 1
-      handler({
-        version: STUDIO_PROTOCOL_VERSION,
-        eventEpoch: 'legacy',
-        seq: this.legacySeq,
-        topic: `${topic}.event`,
-        type: String((payload as any)?.type || 'legacy'),
-        jobId: (payload as any)?.operationId == null ? undefined : String((payload as any).operationId),
-        data: payload,
-      })
-    })
-    this.disconnectors.add(disconnect)
-    return () => {
-      disconnect()
-      this.disconnectors.delete(disconnect)
-    }
+  subscribe(_topic: StudioTopic, _handler: EventHandler): () => void {
+    return () => {}
   }
 
-  dispose(): void {
-    for (const disconnect of this.disconnectors) disconnect()
-    this.disconnectors.clear()
-  }
+  dispose(): void {}
 }
 
 async function createNativeClient(transport: StudioTransport): Promise<StudioClient> {
@@ -748,27 +668,8 @@ async function createNativeClient(transport: StudioTransport): Promise<StudioCli
   }
 }
 
-async function createLegacyClient(): Promise<StudioClient> {
-  const backend: any = await getBackend()
-  const operations: StudioOperation[] = []
-  const has = (name: string) => typeof backend?.[name] === 'function'
-  if (has('getBackendRuntimeState')) operations.push('runtime.snapshot')
-  if (has('runBackendRuntimeOperation')) operations.push('runtime.execute')
-  if (has('getGenerationApiState')) operations.push('generation_api.snapshot')
-  if (has('runGenerationApiOperation')) operations.push('generation_api.execute')
-  if (has('getForgeModelPaths')) operations.push('model_paths.snapshot')
-  if (has('saveForgeModelPaths')) operations.push('model_paths.save')
-  if (has('resetForgeModelPaths')) operations.push('model_paths.reset')
-  if (has('refreshForgeModelPaths')) operations.push('model_paths.refresh')
-  if (has('selectBackendInstallDirectory') || has('selectBackendExtensionDirectory') || has('selectForgeModelDirectory')) {
-    operations.push('native.pick_directory')
-  }
-  return new LegacyStudioClient(backend, {
-    version: STUDIO_PROTOCOL_VERSION,
-    eventEpoch: 'legacy',
-    operations,
-    topics: ['runtime', 'generation_api'],
-  })
+async function createUnavailableClient(): Promise<StudioClient> {
+  return new UnavailableStudioClient()
 }
 
 let studioClientPromise: Promise<StudioClient> | null = null
@@ -777,7 +678,7 @@ export function getStudioClient(): Promise<StudioClient> {
   if (!studioClientPromise) {
     studioClientPromise = getStudioTransport()
       .then((transport: StudioTransport | null) => (
-        selectStudioClient(transport, createNativeClient, createLegacyClient)
+        selectStudioClient(transport, createNativeClient, createUnavailableClient)
       ))
       .catch((error) => {
         studioClientPromise = null
@@ -801,4 +702,3 @@ export function replyData<T>(reply: StudioReply<T>): T | Record<string, unknown>
   return reply.data
 }
 
-export { ALL_OPERATIONS }

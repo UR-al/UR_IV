@@ -6,6 +6,7 @@ Comfy's NestedTensor instances are accepted by the weights-only cache format.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -14,11 +15,26 @@ from pathlib import Path
 import re
 import threading
 import sys
+import time
 import uuid
 
 
 CACHE_SCHEMA = 1
 _KEY = re.compile(r"[0-9a-f]{64}")
+# 재시작 후 첫 H3 작업이 수십 GB 모델을 다시 해시하지 않도록 모델·엔진 digest 를
+# 캐시 루트에 남긴다. 미디어 digest 는 넣지 않는다(업로드 이름은 내용이 아니다).
+DIGEST_SIDECAR = "model_digests.json"
+_DIGEST_SIDECAR_SCHEMA = 1
+_DIGEST_SIDECAR_LIMIT = 256
+# put() 의 임시 파일 '{key}.{uuid4 hex}.tmp' / '{key}.{uuid4 hex}.json.tmp' 와
+# 사이드카 교체 중의 '{DIGEST_SIDECAR}.{uuid4 hex}.part'.
+# 강제 종료(taskkill /F)로 남은 것만 이 엄격한 패턴으로 골라 지운다.
+_ORPHAN = re.compile(
+    r"[0-9a-f]{64}\.[0-9a-f]{32}\.(?:json\.)?tmp"
+    r"|" + re.escape(DIGEST_SIDECAR) + r"\.[0-9a-f]{32}\.part"
+)
+# 다른 프로세스가 같은 폴더에 쓰는 중일 수 있는 최근 임시 파일은 put 시작 정리에서 제외한다.
+_ORPHAN_MIN_AGE_SECONDS = 600
 _LOCK = threading.RLock()
 _FINGERPRINTS = {}
 _MODEL_IDENTITIES = {}
@@ -91,6 +107,33 @@ class ConditioningCache:
         for suffix in (".pt", ".json"):
             self._path(key, suffix).unlink(missing_ok=True)
 
+    def _orphans(self, *, min_age_seconds=0.0):
+        """Temporary files an interrupted put() left behind (never live entries)."""
+        if not self.root.is_dir():
+            return []
+        cutoff = time.time() - float(min_age_seconds)
+        found = []
+        for path in self.root.iterdir():
+            if not _ORPHAN.fullmatch(path.name) or path.is_symlink() or not path.is_file():
+                continue
+            try:
+                if min_age_seconds and path.stat().st_mtime > cutoff:
+                    continue
+            except OSError:
+                continue
+            found.append(path)
+        return found
+
+    def _remove_orphans(self, *, min_age_seconds=0.0):
+        removed = 0
+        for path in self._orphans(min_age_seconds=min_age_seconds):
+            try:
+                removed += path.stat().st_size
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return removed
+
     def _prune(self, keep):
         files = self._files()
         total, count = sum(p.stat().st_size for p in files), len(files)
@@ -113,7 +156,11 @@ class ConditioningCache:
             before = self.stats()
             for path in self._files():
                 self._remove(path.stem)
-            return {**self.stats(), "removedEntries": before["entries"], "removedBytes": before["bytes"]}
+            # _LOCK 안에서는 이 프로세스의 put 이 진행 중일 수 없으므로 임시 파일은
+            # 전부 강제 종료가 남긴 고아다.
+            orphan_bytes = self._remove_orphans()
+            return {**self.stats(), "removedEntries": before["entries"],
+                    "removedBytes": before["bytes"] + orphan_bytes}
 
     def get(self, key, *, cancelled=lambda: False):
         import torch
@@ -152,6 +199,9 @@ class ConditioningCache:
             if cancelled():
                 raise ConditioningCacheCancelled("H3 캐시 작업이 취소되었습니다")
             self.root.mkdir(parents=True, exist_ok=True)
+            # 자기 임시 파일을 만들기 전에, 오래된 고아만 치운다(다른 프로세스가
+            # 막 쓰는 중일 수 있는 최근 파일은 남긴다).
+            self._remove_orphans(min_age_seconds=_ORPHAN_MIN_AGE_SECONDS)
             nonce = uuid.uuid4().hex
             temporary = self.root / f"{key}.{nonce}.tmp"
             temporary_manifest = self.root / f"{key}.{nonce}.json.tmp"
@@ -179,11 +229,55 @@ class ConditioningCache:
                 temporary_manifest.unlink(missing_ok=True)
 
 
-def content_identity(path, *, memoize=False, cancelled=lambda: False):
+def _read_digest_sidecar(sidecar):
+    """Persisted model digests; any unreadable/foreign content is ignored."""
+    try:
+        data = json.loads(Path(sidecar).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict) or data.get("schema") != _DIGEST_SIDECAR_SCHEMA:
+        return {}
+    entries = data.get("entries")
+    return entries if isinstance(entries, dict) else {}
+
+
+def _sidecar_entry_matches(entry, stamp):
+    return (isinstance(entry, dict)
+            and [entry.get("size"), entry.get("mtime_ns"), entry.get("ctime_ns"),
+                 entry.get("ino")] == list(stamp)
+            and isinstance(entry.get("sha256"), str) and _KEY.fullmatch(entry["sha256"]))
+
+
+def _write_digest_sidecar(sidecar, resolved, stamp, digest):
+    """Best-effort atomic update; a failure only costs a re-hash next restart."""
+    sidecar = Path(sidecar)
+    with _LOCK:
+        try:
+            entries = _read_digest_sidecar(sidecar)
+            entries.pop(resolved, None)
+            entries[resolved] = {"size": stamp[0], "mtime_ns": stamp[1],
+                                 "ctime_ns": stamp[2], "ino": stamp[3], "sha256": digest}
+            while len(entries) > _DIGEST_SIDECAR_LIMIT:
+                entries.pop(next(iter(entries)))
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            temporary = sidecar.with_name(f"{sidecar.name}.{uuid.uuid4().hex}.part")
+            try:
+                temporary.write_text(json.dumps(
+                    {"schema": _DIGEST_SIDECAR_SCHEMA, "entries": entries},
+                    ensure_ascii=False), encoding="utf-8")
+                os.replace(temporary, sidecar)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def content_identity(path, *, memoize=False, cancelled=lambda: False, sidecar=None):
     """Hash actual server-side bytes, rejecting files modified during hashing.
 
-    Large model digests are reused only while path/size/mtime/ctime/inode match.
-    Media are always hashed; upload filenames are not their content identity.
+    Large model digests are reused only while path/size/mtime/ctime/inode match,
+    in memory and — with ``sidecar`` — across ComfyUI restarts.  Media are
+    always hashed; upload filenames are not their content identity.
     """
     path = Path(path).resolve()
     stat = path.stat()
@@ -191,9 +285,15 @@ def content_identity(path, *, memoize=False, cancelled=lambda: False):
     memo_key = (str(path), stamp)
     if cancelled():
         raise ConditioningCacheCancelled("H3 캐시 작업이 취소되었습니다")
-    if memoize and memo_key in _FINGERPRINTS:
-        digest = _FINGERPRINTS[memo_key]
-    else:
+    digest = _FINGERPRINTS.get(memo_key) if memoize else None
+    if digest is None and memoize and sidecar is not None:
+        entry = _read_digest_sidecar(sidecar).get(str(path))
+        if _sidecar_entry_matches(entry, stamp):
+            digest = entry["sha256"]
+            if len(_FINGERPRINTS) >= 256:
+                _FINGERPRINTS.clear()
+            _FINGERPRINTS[memo_key] = digest
+    if digest is None:
         digest = _digest_file(path, cancelled)
         after = path.stat()
         if stamp != (after.st_size, after.st_mtime_ns, after.st_ctime_ns, after.st_ino):
@@ -202,11 +302,13 @@ def content_identity(path, *, memoize=False, cancelled=lambda: False):
             if len(_FINGERPRINTS) >= 256:
                 _FINGERPRINTS.clear()
             _FINGERPRINTS[memo_key] = digest
+            if sidecar is not None:
+                _write_digest_sidecar(sidecar, str(path), stamp, digest)
     return {"sha256": digest, "bytes": stat.st_size}
 
 
 def conditioning_identity(descriptor, resolve_model, resolve_input, *, engine_files=(),
-                          cancelled=lambda: False):
+                          cancelled=lambda: False, sidecar=None):
     """Resolve graph filenames at the Comfy host, including remote installations."""
     if not isinstance(descriptor, str) or len(descriptor) > 1024 * 1024:
         raise ValueError("Invalid H3 cache descriptor")
@@ -220,11 +322,13 @@ def conditioning_identity(descriptor, resolve_model, resolve_input, *, engine_fi
         if kind in models:
             category, field = models[kind]
             inputs[field] = content_identity(resolve_model(category, inputs[field]),
-                                              memoize=True, cancelled=cancelled)
+                                              memoize=True, cancelled=cancelled,
+                                              sidecar=sidecar)
         elif kind in {"LoadImage", "GemmaVideoReferencePreprocessor"}:
             field = "image" if kind == "LoadImage" else "file"
             inputs[field] = content_identity(resolve_input(inputs[field]), cancelled=cancelled)
-    value["implementation"] = [content_identity(path, memoize=True, cancelled=cancelled)
+    value["implementation"] = [content_identity(path, memoize=True, cancelled=cancelled,
+                                                sidecar=sidecar)
                                 for path in engine_files]
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
                                      ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -235,21 +339,60 @@ def _cancelled():
     return bool(manager and manager.processing_interrupted())
 
 
-def _unload_encoder_models():
-    """Synchronous execution-worker barrier, not the asynchronous /free flag."""
+def _loaded_diffusion_models(manager):
+    """Loaded entries whose patcher wraps a Comfy ``BaseModel`` (UNET/DiT)."""
+    base_model = getattr(sys.modules.get("comfy.model_base"), "BaseModel", None)
+    if not isinstance(base_model, type):
+        return None
+    loaded = getattr(manager, "current_loaded_models", None)
+    if not isinstance(loaded, list):
+        return None
+    kept = []
+    for entry in list(loaded):
+        patcher = getattr(entry, "model", None)
+        if isinstance(getattr(patcher, "model", None), base_model):
+            kept.append(entry)
+    return kept
+
+
+def _unload_encoder_models(*, keep_diffusion=False):
+    """Synchronous execution-worker barrier, not the asynchronous /free flag.
+
+    A cache miss just ran the text encoder, so everything is unloaded before
+    the sample stage.  A cache hit ran no encoder: only non-diffusion models
+    (TE/CLIP/VAE) are released and a resident diffusion model — usually the
+    previous H3 sample stage's UNET — stays loaded instead of a 2-5 s reload.
+    Returns whether a diffusion model was deliberately kept.
+    """
     manager = sys.modules.get("comfy.model_management")
     if manager is None:
         raise RuntimeError("ComfyUI model management is unavailable for H3 cache unloading")
     if _cancelled():
         raise ConditioningCacheCancelled("H3 캐시 작업이 취소되었습니다")
-    manager.unload_all_models()
+    kept = _loaded_diffusion_models(manager) if keep_diffusion else None
+    devices = getattr(manager, "get_all_torch_devices", None)
+    free_memory = getattr(manager, "free_memory", None)
+    if kept is not None and callable(devices) and callable(free_memory):
+        for device in devices():
+            free_memory(1e30, device, keep_loaded=kept)
+    else:
+        kept = None
+        manager.unload_all_models()
     manager.soft_empty_cache()
     if _cancelled():
         raise ConditioningCacheCancelled("H3 캐시 작업이 취소되었습니다")
+    return bool(kept)
+
+
+def _cache_root(folder_paths):
+    return Path(folder_paths.get_output_directory()) / "aistudio_cache" / "h3_conditioning"
 
 
 def _runtime(descriptor, max_bytes, max_entries):
     import folder_paths
+
+    root = _cache_root(folder_paths)
+    sidecar = root / DIGEST_SIDECAR
 
     def relative(name):
         name = str(name).replace("\\", "/")
@@ -264,7 +407,7 @@ def _runtime(descriptor, max_bytes, max_entries):
         # Native Comfy loaders cache model objects by filename, independently
         # of this disk cache. Never pair a new on-disk identity with an already
         # loaded, old model after an in-place replacement in this process.
-        identity = content_identity(path, memoize=True, cancelled=_cancelled)
+        identity = content_identity(path, memoize=True, cancelled=_cancelled, sidecar=sidecar)
         resolved = str(Path(path).resolve())
         with _LOCK:
             previous = _MODEL_IDENTITIES.get(resolved)
@@ -282,7 +425,6 @@ def _runtime(descriptor, max_bytes, max_entries):
             raise ValueError("H3 cache input is outside the Comfy input directory")
         return path
 
-    root = Path(folder_paths.get_output_directory()) / "aistudio_cache" / "h3_conditioning"
     base = Path(getattr(folder_paths, "base_path", ""))
     engine_files = [Path(__file__)]
     for name in ("comfyui_version.py", "comfy_extras/nodes_minimax_h3.py",
@@ -297,7 +439,8 @@ def _runtime(descriptor, max_bytes, max_entries):
         source = getattr(module, "__file__", "")
         if source and Path(source).is_file() and Path(source) not in engine_files:
             engine_files.append(Path(source))
-    key = conditioning_identity(descriptor, model, media, engine_files=engine_files, cancelled=_cancelled)
+    key = conditioning_identity(descriptor, model, media, engine_files=engine_files,
+                                cancelled=_cancelled, sidecar=sidecar)
     return ConditioningCache(root, max_bytes=max_bytes, max_entries=max_entries), key
 
 
@@ -350,7 +493,11 @@ class ForgeNeoH3ConditioningCachePrepare:
             receipt = store.put(key, conditioning, cancelled=_cancelled)
         else:
             raise RuntimeError("H3 conditioning cache miss: encoder input is required")
-        _unload_encoder_models()
+        # The encoder barrier runs on hit and miss alike; a hit keeps the
+        # resident diffusion model that the following sample stage reuses.
+        receipt["diffusion_model_kept"] = _unload_encoder_models(
+            keep_diffusion=bool(receipt.get("hit")),
+        )
         receipt["models_unloaded"] = True
         return {"ui": {"h3_conditioning_cache": [{**receipt, **store.stats()}]}, "result": ()}
 
@@ -391,21 +538,30 @@ def _register_routes():
     import folder_paths
 
     def store():
-        return ConditioningCache(Path(folder_paths.get_output_directory()) / "aistudio_cache" / "h3_conditioning")
+        return ConditioningCache(_cache_root(folder_paths))
 
+    # The prompt worker holds _LOCK through torch.save/SHA-256/torch.load.
+    # Waiting for it on the aiohttp loop thread would stall every request, so
+    # the locked work runs on a worker thread and the loop only awaits it.
     @instance.routes.get("/aistudio/h3-cache/status")
     async def status(_request):
-        return web.json_response(store().stats())
+        return web.json_response(await asyncio.to_thread(lambda: store().stats()))
 
-    @instance.routes.post("/aistudio/h3-cache/clear")
-    async def clear(_request):
+    def clear_when_idle():
         # Queue can change after this check; the disk lock still prevents a
         # partial write/delete overlap, and sample loads fail closed if evicted.
         with _LOCK:
             current, pending = instance.prompt_queue.get_current_queue()
             if current or pending:
-                return web.json_response({"error": "ComfyUI is busy"}, status=409)
-            return web.json_response(store().clear())
+                return None
+            return store().clear()
+
+    @instance.routes.post("/aistudio/h3-cache/clear")
+    async def clear(_request):
+        result = await asyncio.to_thread(clear_when_idle)
+        if result is None:
+            return web.json_response({"error": "ComfyUI is busy"}, status=409)
+        return web.json_response(result)
 
     instance._aistudio_h3_cache_routes = True
 

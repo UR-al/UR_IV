@@ -18,6 +18,8 @@ import threading
 import time
 import uuid
 
+from utils.atomic_json import atomic_write_bytes
+
 
 MAX_PANELS = 6
 MAX_BUBBLES = 24
@@ -531,13 +533,8 @@ class ComicStudio:
         encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         if len(encoded) > MAX_DOCUMENT_BYTES:
             raise ComicDocumentError("Comic 문서가 저장 한도를 초과했습니다")
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.state_path.with_suffix(self.state_path.suffix + ".writing")
-        with temporary.open("wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, self.state_path)
+        # 공용 원자 쓰기(fsync + 실패 시 tmp 정리). 크기 검사를 위해 미리 인코딩한 바이트 그대로.
+        atomic_write_bytes(self.state_path, encoded, tmp_suffix=".writing")
 
     def _preserve_conflict_unlocked(self, document: ComicDocument, source: str) -> Path:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -552,12 +549,7 @@ class ComicStudio:
             "document": document.to_dict(),
         }
         encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-        temporary = path.with_suffix(path.suffix + ".writing")
-        with temporary.open("wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        atomic_write_bytes(path, encoded, tmp_suffix=".writing")
         return path
 
     def _preserve_raw_recovery_unlocked(self, recovery: Any, source: str) -> Path:
@@ -575,12 +567,7 @@ class ComicStudio:
         encoded = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         if len(encoded) > MAX_DOCUMENT_BYTES + 64 * 1024:
             raise ComicDocumentError("손상된 Comic 복구본이 보관 한도를 초과했습니다")
-        temporary = path.with_suffix(path.suffix + ".writing")
-        with temporary.open("wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        atomic_write_bytes(path, encoded, tmp_suffix=".writing")
         return path
 
     @staticmethod

@@ -267,22 +267,6 @@ def resolve(preset_name: str | None = None,
     return colors
 
 
-def preset_options() -> list[dict[str, str]]:
-    """설정 화면에 보여줄 프리셋 목록 — 이름·라벨·미리보기 색."""
-    return [
-        {
-            'id': key,
-            'label': value['label'],
-            'mode': value['mode'],
-            'bg': value['bg-primary'],
-            'surface': value['bg-card'],
-            'accent': value['accent'],
-            'text': value['text-primary'],
-        }
-        for key, value in PRESETS.items()
-    ]
-
-
 def css_variables(colors: dict[str, str]) -> str:
     """색 표 → CSS 커스텀 속성 선언 (``mode``/``label`` 은 색이 아니라 제외)."""
     return '\n'.join(

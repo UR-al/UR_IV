@@ -30,7 +30,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequenc
 import numpy as np
 from PIL import Image, ImageOps
 
-from core.ollama_client import OllamaClient
+from core.ollama_client import DEFAULT_OLLAMA_URL, OllamaClient
 
 
 CAFORMER_REPO_ID = "animetimm/caformer_s18.dbv4-full"
@@ -544,11 +544,6 @@ class CAFormerTagger:
         self._records: tuple[_TagRecord, ...] | None = None
         self._session: _OnnxSession | None = None
 
-    @classmethod
-    def clear_session_cache(cls) -> None:
-        with cls._SESSION_LOCK:
-            cls._SESSION_CACHE.clear()
-
     @property
     def model_dir(self) -> Path:
         if self._model_dir is None:
@@ -639,13 +634,6 @@ class CAFormerTagger:
                 selected.append(TagPrediction(record.name, score, record.category))
         selected.sort(key=lambda item: item.score, reverse=True)
         return selected
-
-    def tag_text(
-        self,
-        image_path: str | os.PathLike[str],
-        options: CAFormerOptions | Mapping[str, Any] | None = None,
-    ) -> str:
-        return ", ".join(item.name for item in self.tag_image(image_path, options))
 
 
 def select_toriigate_model(models: Iterable[str]) -> str:
@@ -771,22 +759,33 @@ def _limited_image_path(
     image_path: str | os.PathLike[str],
     max_pixels: int,
 ) -> Iterator[Path]:
-    """Yield the source or a short-lived, aspect-preserving <= max_pixels JPEG."""
+    """Yield the source or a short-lived, aspect-preserving <= max_pixels JPEG.
+
+    The ``yield`` must stay outside both the ``Image.open`` block and the
+    ``except OSError`` guard: the caller runs the Ollama request inside this
+    context, and its ConnectionError/TimeoutError are OSError subclasses that
+    would otherwise be reported as "unable to open image"; an open handle would
+    also lock a JPEG/WebP source (WinError 32 on move/delete) for the whole request.
+    """
 
     source_path = Path(image_path)
     if max_pixels <= 0:
         raise ValueError("max_caption_pixels must be positive")
+    image = None
     try:
         with Image.open(source_path) as source:
             width, height = source.size
             orientation = source.getexif().get(274, 1)
             needs_normalization = orientation not in (None, 1) or source.mode != "RGB"
-            if width * height <= max_pixels and not needs_normalization:
-                yield source_path
-                return
-            image = _rgb_on_white(ImageOps.exif_transpose(source))
+            if width * height > max_pixels or needs_normalization:
+                image = _rgb_on_white(ImageOps.exif_transpose(source))
     except OSError as exc:
         raise ImageCaptioningError(f"Unable to open image for captioning: {source_path}: {exc}") from exc
+
+    if image is None:
+        # Already small, upright RGB: send the original bytes (file handle closed).
+        yield source_path
+        return
 
     if image.width * image.height > max_pixels:
         scale = math.sqrt(max_pixels / float(image.width * image.height))
@@ -814,7 +813,7 @@ class ImageCaptioningEngine:
         caformer_session_factory: Callable[[Path], _OnnxSession] | None = None,
         ollama_client: _VisionClient | None = None,
         ollama_client_factory: Callable[..., _VisionClient] = OllamaClient,
-        ollama_base_url: str = "http://localhost:11434",
+        ollama_base_url: str = DEFAULT_OLLAMA_URL,
         ollama_model: str | None = None,
         torii_model: str | None = None,
         max_caption_pixels: int = 1_000_000,

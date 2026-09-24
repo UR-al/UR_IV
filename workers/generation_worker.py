@@ -1,5 +1,4 @@
 # workers/generation_worker.py
-import base64
 import copy
 import json
 import logging
@@ -10,7 +9,9 @@ from contextlib import contextmanager
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from backends import get_backend
+from core.cancellable_call import call_with_optional_cancel
 from core.error_handler import sanitize_for_ui
+from core.post_generation import reserve_generation_lease, wait_for_pending_unload
 from core.resource_coordinator import ResourceBusyError, get_generation_coordinator
 
 logger = logging.getLogger(__name__)
@@ -67,43 +68,14 @@ class _CancellableMixin:
     def is_cancelled(self) -> bool:
         return self._cancelled
 
+    def _cancel_check(self) -> bool:
+        """백엔드에 넘기는 cancel_check — 모델 전환 중·큐 투입 직후의 취소도 잡는다.
 
-def _run_postprocess_chain(backend, image_data: bytes, chain: list[dict],
-                           *, cancelled_cb=None) -> tuple[bytes, list[str]]:
-    """후처리 체인을 실행하되 한 단계 실패해도 이전 결과를 보존.
-
-    Returns:
-        (final_bytes, errors) — errors는 사람이 읽을 수 있는 실패 메시지 리스트.
-    """
-    if not chain:
-        return image_data, []
-
-    errors: list[str] = []
-    last_good_b64 = base64.b64encode(image_data).decode("utf-8")
-    current_b64 = last_good_b64
-
-    for step in chain:
-        if cancelled_cb and cancelled_cb():
-            errors.append("후처리 취소됨")
-            break
-        step_type = step.get("type")
-        settings = dict(step.get("settings", {}))
-        try:
-            if step_type == "adetailer":
-                current_b64 = backend.adetailer(current_b64, settings)
-            elif step_type == "sam3":
-                current_b64 = backend.sam3(current_b64, settings)
-            else:
-                errors.append(f"알 수 없는 후처리 타입: {step_type}")
-                continue
-            last_good_b64 = current_b64  # 이 단계 성공 확정
-        except Exception as e:
-            logger.exception("postprocess step '%s' failed", step_type)
-            errors.append(f"{step_type}: {sanitize_for_ui(e)}")
-            # 실패 시 이전 성공 결과로 롤백하여 다음 단계는 그것을 기반으로 시도
-            current_b64 = last_good_b64
-
-    return base64.b64decode(last_good_b64), errors
+        전역 interrupt 한 번은 WebUI 가 아직 inflight 가 아닐 때(체크포인트 전환 중) 버려지고,
+        Forge 가 state.begin() 하기 전에 도착하면 플래그가 지워진다. 백엔드는 이 콜백으로
+        발송 전·전환 후에 다시 확인하고, 우리 작업이 실제로 돌기 시작한 뒤에만 중단한다.
+        """
+        return self._cancelled
 
 
 class _GenerationDeferred(RuntimeError):
@@ -134,12 +106,6 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
         self._result_emitted = True
         self.finished.emit(result, info)
 
-    # 기존 호출부 호환용 static wrapper
-    @staticmethod
-    def _run_postprocess_chain(backend, image_data: bytes, chain: list[dict]) -> bytes:
-        final, _errors = _run_postprocess_chain(backend, image_data, chain)
-        return final
-
     def _interrupt_owned_backend(self):
         # Hold only this worker's lease lock, never a GUI lock, during HTTP.
         with self._backend_lock:
@@ -148,7 +114,9 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
 
     @contextmanager
     def _backend_lease(self, backend):
-        with get_generation_coordinator().reserve("txt2img", unload_llm=False, timeout=0):
+        # run() 초입의 기다림 뒤에 막 시작된 '생성 후 언로드'가 리스를 쥐었으면 그걸 기다렸다 다시 잡는다
+        with reserve_generation_lease("txt2img", coordinator=get_generation_coordinator(),
+                                      cancelled=lambda: self.is_cancelled):
             with self._backend_lock:
                 if self._backend_snapshot is not None and get_backend() is not self._backend_snapshot:
                     raise _GenerationDeferred("XYZ 작업의 백엔드가 변경되었습니다. 원래 백엔드를 선택하고 대기열을 재개하세요.")
@@ -169,7 +137,6 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
                 from core.chat_generation import prepare_prompt_payload
                 payload = prepare_prompt_payload(payload)
             xyz_info = payload.pop("_xyz_info", None)
-            postprocess_chain = list(payload.pop("_postprocess_chain", []) or [])
             generation_family = str(payload.pop("_generation_family", "standard") or "standard").lower()
 
             def on_progress(step: int, total: int, preview):
@@ -177,6 +144,9 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
                     return
                 self.progress.emit(step, total, preview)
 
+            # '생성 후 언로드' 요청이 아직 날아가는 중이면 여기(워커 스레드)서 기다린다 —
+            # 샘플링이 언로드 위에 겹치지 않게. 기다리는 동안의 취소는 바로 아래에서 다시 본다.
+            wait_for_pending_unload(cancelled=lambda: self.is_cancelled)
             if self.is_cancelled:
                 self._emit_result("생성 취소됨", {'cancelled': True})
                 return
@@ -186,18 +156,19 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
                     self._emit_result("생성 취소됨", {'cancelled': True})
                     return
                 dispatched = True
+                # cancel_check 를 넘겨야 모델 전환 중·발송 직후의 취소가 사라지지 않는다
+                # (받지 못하는 옛 어댑터·fake 에는 넘기지 않는다 — core/cancellable_call.py).
                 if generation_family == "krea2":
                     from core.krea2_generation import run_krea2_generation
 
-                    # Forge-specific post-process steps are not part of the Krea
-                    # Comfy graph contract and must not leak into this branch.
-                    postprocess_chain = []
-                    result = run_krea2_generation(
-                        backend, "t2i", payload, progress_callback=on_progress,
+                    result = call_with_optional_cancel(
+                        run_krea2_generation, backend, "t2i", payload,
+                        progress_callback=on_progress, cancel_check=self._cancel_check,
                     )
                 else:
-                    result = backend.txt2img(
-                        self.model_name, payload, progress_callback=on_progress,
+                    result = call_with_optional_cancel(
+                        backend.txt2img, self.model_name, payload,
+                        progress_callback=on_progress, cancel_check=self._cancel_check,
                     )
 
                 # 취소 후 도착한 결과(interrupt의 부분 이미지 포함)는 성공으로 emit하지 않음
@@ -210,18 +181,15 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
                     self._emit_result(result.error, {})
                     return
 
-                final_image, pp_errors = _run_postprocess_chain(
-                    backend, result.image_data, postprocess_chain,
-                    cancelled_cb=lambda: self.is_cancelled,
-                )
+                # ADetailer/SAM3 는 요청 안의 alwayson_scripts 로 이미 적용돼 돌아온다
+                # (ui/generator_generation._apply_postprocess_chain) — 별도 후처리 단계 없음.
+                final_image = result.image_data
             if self.is_cancelled:
                 self._emit_result("생성 취소됨", {'cancelled': True})
                 return
             info = dict(result.info or {})
             if xyz_info:
                 info['_xyz_info'] = xyz_info
-            if pp_errors:
-                info['postprocess_errors'] = pp_errors
             self._emit_result(final_image, info)
 
         except Exception as e:
@@ -252,7 +220,6 @@ class Img2ImgFlowWorker(QThread, _CancellableMixin):
         try:
             backend = get_backend()
             payload = dict(self.payload)
-            postprocess_chain = list(payload.pop("_postprocess_chain", []) or [])
             generation_family = str(payload.pop("_generation_family", "standard") or "standard").lower()
 
             def on_progress(step: int, total: int, preview):
@@ -260,23 +227,27 @@ class Img2ImgFlowWorker(QThread, _CancellableMixin):
                     return
                 self.progress.emit(step, total, preview)
 
+            # T2I 와 같은 이유로 진행 중인 '생성 후 언로드'를 먼저 기다린다(예전엔 이 경로에 대기가 없었다)
+            wait_for_pending_unload(cancelled=lambda: self.is_cancelled)
             if self.is_cancelled:
                 self.finished.emit("생성 취소됨", {'cancelled': True})
                 return
 
-            with get_generation_coordinator().reserve(
-                "img2img", unload_llm=False, timeout=0
-            ):
+            # 리스는 '생성 후 언로드'와 서로 배타 — 기다림 뒤 막 시작된 언로드면 끝나길 기다려 다시 잡는다
+            with reserve_generation_lease("img2img", coordinator=get_generation_coordinator(),
+                                          cancelled=lambda: self.is_cancelled):
+                # T2I 와 같은 이유로 cancel_check 를 넘긴다(모델 전환 중·발송 직후 취소)
                 if generation_family == "krea2":
                     from core.krea2_generation import run_krea2_generation
 
-                    postprocess_chain = []
-                    result = run_krea2_generation(
-                        backend, "i2i", payload, progress_callback=on_progress,
+                    result = call_with_optional_cancel(
+                        run_krea2_generation, backend, "i2i", payload,
+                        progress_callback=on_progress, cancel_check=self._cancel_check,
                     )
                 else:
-                    result = backend.img2img(
-                        self.model_name, payload, progress_callback=on_progress,
+                    result = call_with_optional_cancel(
+                        backend.img2img, self.model_name, payload,
+                        progress_callback=on_progress, cancel_check=self._cancel_check,
                     )
 
                 if self.is_cancelled:
@@ -287,16 +258,11 @@ class Img2ImgFlowWorker(QThread, _CancellableMixin):
                     self.finished.emit(result.error, {})
                     return
 
-                final_image, pp_errors = _run_postprocess_chain(
-                    backend, result.image_data, postprocess_chain,
-                    cancelled_cb=lambda: self.is_cancelled,
-                )
+                final_image = result.image_data
             if self.is_cancelled:
                 self.finished.emit("생성 취소됨", {'cancelled': True})
                 return
             info = dict(result.info or {})
-            if pp_errors:
-                info['postprocess_errors'] = pp_errors
             self.finished.emit(final_image, info)
 
         except Exception as e:

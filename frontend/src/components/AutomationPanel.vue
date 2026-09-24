@@ -74,13 +74,13 @@
 
         <div class="ap-adv-item">
           <div class="ap-adv-line">
-            <span class="ap-adv-lab">LoRA 캐시 정리 주기</span>
+            <span class="ap-adv-lab">대기열 VRAM 정리 주기</span>
             <input class="ap-num narrow" type="number" min="0" max="100" :value="settings.cleanupEveryN"
               @input="patch({ cleanupEveryN: Math.max(0, toNum(($event.target as HTMLInputElement).value, 0)) })" />
             <span class="ap-suffix">장</span>
           </div>
-          <p class="ap-why" title="정리 한 번에 1초쯤 걸린다. LoRA 4개 이상 + SAM3 를 함께 쓰면 5, 가벼운 워크플로우면 10 쯤이 무난하다. 메모리 부족이 난 뒤 재시도할 땐 이 설정과 무관하게 전체 reload 를 한 번 한다.">
-            Forge 는 API 로 생성할 때 LoRA patches 를 쌓아 둔다. 몇 장마다 그걸 비울지 — 0 이면 안 비운다.
+          <p class="ap-why" title="Forge 는 체크포인트 언로드(unload-checkpoint), ComfyUI 는 /free 로 VRAM 을 비운다. 다음 장이 모델을 다시 올리므로 정리할 때마다 모델 로딩 시간이 한 번 더 든다. 대기열의 마지막 장 뒤에는 정리하지 않는다 — 끝난 뒤 비우려면 설정의 '생성 후 모델 언로드'를 켠다.">
+            대기열을 돌릴 때 몇 장마다 모델을 VRAM 에서 내렸다 다시 올릴지 — 긴 대기열의 메모리 부족을 막는다. 0 이면 끈다.
           </p>
         </div>
 
@@ -129,31 +129,39 @@
 
       <!-- ★ 다음에 나갈 프롬프트. 덱·와일드카드·조건식이 매번 바꾸는데도
            지금까지는 보이지 않았다 — 이 화면의 존재 이유다. -->
-      <div class="ap-next">
+      <!-- promptIsNext=false: 보이는 건 지금 장(생성 중이거나 방금 생성한) 프롬프트이고 다음 장은
+           새로 뽑는다 — 여기 건 편집은 뽑는 순간 버려지므로 받지 않는다. 멈추면 다음 프롬프트를
+           뽑아 보여 준 뒤 서므로 그때 손본다(core/automation_prompt_state). -->
+      <div class="ap-next" :class="{ locked: !promptIsNext }">
         <div class="ap-next-head">
-          <span class="ap-next-title">다음 프롬프트</span>
-          <span class="ap-next-deck" v-if="deckTotal > 0">덱 #{{ deckUsed + 1 }}</span>
-          <span class="ap-next-hint">{{ edits ? '이번 한 장에만' : '누르면 빠짐' }}</span>
+          <span class="ap-next-title">{{ promptIsNext ? '다음 프롬프트' : '지금 장 프롬프트' }}</span>
+          <!-- 보이는 프롬프트는 덱에서 이미 뽑은 deckUsed 번째다 -->
+          <span class="ap-next-deck" v-if="deckTotal > 0 && deckUsed > 0 && !deckAllowDup">덱 #{{ deckUsed }}</span>
+          <span class="ap-next-hint">{{ !promptIsNext ? '다음 장은 새로 뽑는다' : edits ? '이번 한 장에만' : '누르면 빠짐' }}</span>
         </div>
 
         <div class="ap-tags" v-if="baseTags.length || added.length">
           <button v-for="(t, i) in baseTags" :key="`b${i}`" type="button"
             class="ap-tag" :class="[`k-${tagKind(t)}`, { off: isRemoved(i) }]"
-            :title="isRemoved(i) ? '되돌린다' : '이번 한 장에서 뺀다'"
+            :disabled="!promptIsNext"
+            :title="!promptIsNext ? '지금 장 프롬프트는 고칠 수 없다' : isRemoved(i) ? '되돌린다' : '이번 한 장에서 뺀다'"
             @click="toggleTag(i)">{{ t }}</button>
           <button v-for="(t, i) in added" :key="`a${i}`" type="button"
             class="ap-tag added" title="내가 더한 태그 — 누르면 지운다"
+            :disabled="!promptIsNext"
             @click="dropAdded(i)">{{ t }}<Icon name="close" size="0.85em" /></button>
         </div>
         <div class="ap-next-empty" v-else>백엔드가 아직 다음 프롬프트를 보내지 않았다</div>
 
-        <div class="ap-add">
+        <div class="ap-add" v-if="promptIsNext">
           <Icon name="plus" />
           <input class="ap-add-input" v-model="draft" placeholder="태그를 치고 Enter"
-            @keydown.enter.prevent="addTag" />
+            @keydown.enter="onDraftEnter" />
         </div>
 
-        <p class="ap-once" v-if="edits">이 편집은 <b>다음 한 장</b>에만 — 그 뒤 사라진다</p>
+        <p class="ap-once" v-if="missedEdit">편집을 보내기 전에 이 장 생성이 시작돼 <b>들어가지 않았다</b> — 끝나면 다음 프롬프트를 뽑는다</p>
+        <p class="ap-once" v-else-if="!promptIsNext">이 장이 끝나면 다음 프롬프트를 뽑는다 — 그 전에 손보려면 <b>일시정지</b></p>
+        <p class="ap-once" v-else-if="edits">이 편집은 <b>다음 한 장</b>에만 — 그 뒤 사라진다</p>
       </div>
 
       <div class="ap-deck" v-if="deckTotal > 0">
@@ -193,9 +201,11 @@ import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import CustomSelect from './CustomSelect.vue'
 import ToggleSwitch from './ToggleSwitch.vue'
 import { getBackend } from '../bridge.js'
+import { composeEditedPrompt, isOverrideEcho, splitPrompt } from '../utils/automationPromptEdit'
+import { isImeComposing } from '../utils/imeComposition'
 import type { AutomationSettings } from '../types/bridge'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   settings: AutomationSettings
   /** 자동화 루프가 도는 중인가 — 이 값 하나가 설정/조종석을 가른다. */
   running: boolean
@@ -210,7 +220,9 @@ const props = defineProps<{
   deckAllowDup: boolean
   /** automationStatus.prompt — 다음 생성에 나갈 프롬프트 전문. 없으면 빈 문자열. */
   nextPrompt: string
-}>()
+  /** automationStatus.prompt_is_next — false 면 nextPrompt 는 지금 장 프롬프트라 편집을 받지 않는다. */
+  promptIsNext?: boolean
+}>(), { promptIsNext: true })
 
 const emit = defineEmits<{
   /** 바뀐 항목만 담은 조각. 부모가 자기 reactive 에 합쳐 백엔드로 보낸다. */
@@ -341,36 +353,21 @@ const headTail = computed(() => {
 const waitSec = computed(() => (props.waitRemainingMs / 1000).toFixed(1))
 
 // ── 다음 프롬프트 편집 ────────────────────────────────────────────────────
-/** 괄호·꺾쇠 안의 쉼표는 태그 구분자가 아니다 — `(a, b:1.2)` · `<lora:x:1>` 을 안 쪼갠다. */
-function splitPrompt(text: string): string[] {
-  const out: string[] = []
-  let depth = 0
-  let cur = ''
-  for (const ch of text) {
-    if (ch === '(' || ch === '[' || ch === '{' || ch === '<') depth += 1
-    else if (ch === ')' || ch === ']' || ch === '}' || ch === '>') depth = Math.max(0, depth - 1)
-    if (ch === ',' && depth === 0) {
-      const t = cur.trim()
-      if (t) out.push(t)
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  const tail = cur.trim()
-  if (tail) out.push(tail)
-  return out
-}
-
-const baseTags = computed(() => splitPrompt(props.nextPrompt || ''))
+// 편집의 기준(basePrompt)은 nextPrompt 를 그대로 따라가지 않는다. 덮어쓰기를 보내면 백엔드가
+// 그 편집본을 nextPrompt 로 되돌려 주는데, 그걸 기준으로 삼으면 뺀 인덱스·더한 태그가 한 번 더
+// 적용돼 고르지 않은 프롬프트가 나갔다('a, b, c' 에서 b 빼고 d 더하면 'a, d, d').
+// 기준은 메아리가 아닌 새 프롬프트가 올 때(와 resetEdits)만 바꾼다 — utils/automationPromptEdit.
+const basePrompt = ref(props.nextPrompt || '')
+const baseTags = computed(() => splitPrompt(basePrompt.value))
 const removed = ref<number[]>([])
 const added = ref<string[]>([])
 const draft = ref('')
+// 보내기 전에(모으는 400ms 동안) 그 장 생성이 시작돼 버려진 편집이 있었는가 — 다음 프롬프트가 오면 지운다
+const missedEdit = ref(false)
 const edits = computed(() => removed.value.length + added.value.length > 0)
 const isRemoved = (i: number) => removed.value.includes(i)
 
-const finalPrompt = computed(() =>
-  [...baseTags.value.filter((_, i) => !isRemoved(i)), ...added.value].join(', '))
+const finalPrompt = computed(() => composeEditedPrompt(baseTags.value, removed.value, added.value))
 
 // 글자마다 보내면 백엔드가 매번 덮어쓰기를 다시 세운다 — 손이 멈춘 뒤 한 번만 보낸다.
 let sendTimer: ReturnType<typeof setTimeout> | undefined
@@ -390,19 +387,31 @@ function resetEdits() {
   added.value = []
   draft.value = ''
   lastSent.value = ''
+  missedEdit.value = false
+  // 편집이 사라지면 기준도 지금 백엔드가 보여 주는 프롬프트로 맞춘다(장 넘김·멈춤 경로 포함)
+  basePrompt.value = props.nextPrompt || ''
 }
 
 const keptCount = computed(() =>
   baseTags.value.filter((_, i) => !isRemoved(i)).length + added.value.length)
 
+// 지금 장 프롬프트(promptIsNext=false)는 고치지 않는다 — 다음 장은 새로 뽑아 그 편집이 버려진다.
 function toggleTag(i: number) {
+  if (!props.promptIsNext) return
   // 전부 빼면 보낼 문자열이 빈다. 빈 문자열은 계약상 '덮어쓰기 취소' 라, 취소선은
   // 그어졌는데 원래 프롬프트가 나가는 앞뒤 안 맞는 상태가 된다 — 마지막 하나는 남긴다.
   if (!isRemoved(i) && keptCount.value <= 1) return
   removed.value = isRemoved(i) ? removed.value.filter(x => x !== i) : [...removed.value, i]
   scheduleOverride()
 }
+/** 태그 입력 Enter — IME 조합 확정 Enter 는 추가가 아니다(마지막 음절이 잘린 태그가 들어간다) */
+function onDraftEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  e.preventDefault()
+  addTag()
+}
 function addTag() {
+  if (!props.promptIsNext) return
   const t = draft.value.trim().replace(/,+$/, '').trim()
   if (!t) return
   added.value = [...added.value, t]
@@ -410,6 +419,7 @@ function addTag() {
   scheduleOverride()
 }
 function dropAdded(i: number) {
+  if (!props.promptIsNext) return
   if (keptCount.value <= 1) return
   added.value = added.value.filter((_, k) => k !== i)
   scheduleOverride()
@@ -441,10 +451,21 @@ watch(() => props.paused, (held) => {
 })
 
 // 다음 장이 나가면 편집은 사라진다 — 백엔드도 덮어쓰기를 한 번 쓰고 버린다.
-watch(() => props.count, () => resetEdits())
+// 단 반복(repeat≥2) 중 생성 도중에 건 편집은 아직 안 쓰였다: 장이 끝나 count 가 올라도 백엔드는
+// 그 덮어쓰기를 그대로 되돌려 준다(메아리). 그때 초기화하면 취소선이 사라지고 기준이 편집본이
+// 되어, 태그 하나를 껐다 켜면 '' 가 나가 덮어쓰기가 취소되고 뺀 태그가 몰래 돌아왔다.
+// 덮어쓰기를 쓴 장이 끝나면 백엔드가 원래 프롬프트를 보내므로 그때 초기화된다.
+watch(() => props.count, () => { if (!isOverrideEcho(props.nextPrompt || '', lastSent.value)) resetEdits() })
+// 편집을 보내기 전에(400ms 모으는 중) 그 장 생성이 시작돼 보이는 프롬프트가 '지금 장'이 됐다 —
+// 다음 장은 새로 뽑으므로 이 편집은 쓸 곳이 없다. 보내지 않고 버리되 그 사실을 패널에 남긴다.
+watch(() => props.promptIsNext, (next) => {
+  if (next || !sendTimer) return
+  resetEdits()
+  missedEdit.value = true
+})
 // 프롬프트가 바뀌면 편집의 기준이 달라졌다는 뜻이다. 단, 백엔드가 우리가 보낸
-// 덮어쓰기를 그대로 되돌려준 경우는 **같은 장**이라 취소선을 지우면 안 된다.
-watch(() => props.nextPrompt, (v) => { if (v !== lastSent.value) resetEdits() })
+// 덮어쓰기를 그대로 되돌려준 경우는 **같은 장**이라 취소선도 기준도 그대로 둔다.
+watch(() => props.nextPrompt, (v) => { if (!isOverrideEcho(v || '', lastSent.value)) resetEdits() })
 
 onUnmounted(() => {
   if (ticker) clearInterval(ticker)
@@ -644,6 +665,10 @@ watch(baseTags, (tags) => { if (props.running && tags.length) classify(tags) }, 
   background: var(--bg-input); text-decoration: line-through;
 }
 .ap-tag.added { --k: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+/* 지금 장 프롬프트 — 읽기만 한다(편집해도 다음 장을 새로 뽑을 때 버려진다) */
+.ap-next.locked .ap-tag { cursor: default; }
+.ap-next.locked .ap-tag:hover { border-color: transparent; }
+.ap-next.locked .ap-tag.added:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 
 .ap-add { display: flex; align-items: center; gap: var(--sp-1); color: var(--text-muted); }
 .ap-add-input {

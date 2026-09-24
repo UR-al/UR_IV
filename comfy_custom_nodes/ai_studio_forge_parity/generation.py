@@ -13,6 +13,7 @@ from .compat import (
     folder_paths_module,
     invoke_provider,
     is_disabled_choice,
+    json_object as _json_object,
     node_result,
     provider,
     require_torch,
@@ -31,20 +32,6 @@ CATEGORY = "AI Studio/Forge Neo parity/Generation"
 LOGGER = logging.getLogger("ai_studio_forge_parity")
 
 
-def _json_object(value: Any, feature: str) -> dict[str, Any]:
-    if value in (None, ""):
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    try:
-        parsed = json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{feature} settings_json must be a JSON object: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise ValueError(f"{feature} settings_json must be a JSON object.")
-    return parsed
-
-
 def _image_tensor(value: Any, name: str = "image"):
     torch = require_torch()
     if not torch.is_tensor(value) or value.ndim != 4 or value.shape[-1] < 1:
@@ -53,7 +40,12 @@ def _image_tensor(value: Any, name: str = "image"):
 
 
 def resize_image(image: Any, width: int, height: int, fit: str = "crop", background: float = 0.0, *, interpolation: str = "bicubic"):
-    """Resize a BHWC Comfy image without changing its batch/channel layout."""
+    """Resize a BHWC Comfy image without changing its batch/channel layout.
+
+    Bicubic resampling overshoots hard edges (white line art peaks near 1.2);
+    the result is clamped back into Comfy's ``[0,1]`` IMAGE range so no
+    downstream node mistakes it for 0..255 data.
+    """
 
     torch = require_torch()
     image = _image_tensor(image)
@@ -64,7 +56,7 @@ def resize_image(image: Any, width: int, height: int, fit: str = "crop", backgro
     if mode in {"stretch", "resize", "just resize"}:
         result = torch.nn.functional.interpolate(
             nchw, size=(height, width), mode=interpolation, align_corners=False, antialias=True
-        )
+        ).clamp(0.0, 1.0)
         return result.movedim(1, -1).contiguous()
 
     scale = max(width / source_w, height / source_h) if mode in {"crop", "cover", "crop and resize"} else min(width / source_w, height / source_h)
@@ -72,7 +64,7 @@ def resize_image(image: Any, width: int, height: int, fit: str = "crop", backgro
     resized_h = max(1, int(round(source_h * scale)))
     resized = torch.nn.functional.interpolate(
         nchw, size=(resized_h, resized_w), mode=interpolation, align_corners=False, antialias=True
-    )
+    ).clamp(0.0, 1.0)
     if mode in {"crop", "cover", "crop and resize"}:
         left, top = max(0, (resized_w - width) // 2), max(0, (resized_h - height) // 2)
         return resized[:, :, top : top + height, left : left + width].movedim(1, -1).contiguous()
@@ -362,10 +354,11 @@ class ForgeNeoKSamplerCNS:
                 args=(model, int(seed), int(steps), float(cfg), sampler_name, scheduler, positive, negative, latent_image, speed_split_mode, float(speed_spd_scale), float(speed_spd_sigma), float(denoise), float(speed_adaptive_smc_alpha)),
             )[:1]
         if spectrum_enabled:
-            from .spectrum_isolation import isolated_sampler_model
             # A new provider/model-options state for each sampling invocation.
-            # Do not deepcopy GPU handles or modify the upstream cached MODEL.
-            model = isolated_sampler_model(model)
+            # ModelPatcher.clone() already copies model_options dict/list
+            # containers (comfy.utils.deepcopy_list_dict) while sharing tensors
+            # and GPU handles, so the upstream cached MODEL is never modified.
+            model = model.clone()
             model = invoke_provider(
                 "DiTSpectrumPatch", method="patch", feature="Spectrum sampler",
                 args=(model, int(steps), float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps), float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size), True, bool(spectrum_one_sampler_only), bool(spectrum_verbose)),
@@ -916,33 +909,45 @@ class ForgeNeoAnimaPiD:
         return (result.movedim(1, -1).clamp(0, 1).contiguous(),)
 
 
+# Forge/A1111 sampler labels -> ComfyUI names.  This pack runs inside ComfyUI
+# and cannot import the app, so these tables mirror the app compiler's
+# (core/comfy_workflow_compiler._FORGE_SAMPLER_ALIASES & co.);
+# tests/test_comfy_sampler_aliases.py pins both to the same results.
 _AD_SAMPLER_ALIASES = {
-    "euler": "euler", "euler a": "euler_ancestral",
-    "lms": "lms", "heun": "heun", "dpm2": "dpm_2",
-    "dpm2 a": "dpm_2_ancestral", "dpm++ 2s a": "dpmpp_2s_ancestral",
-    "dpm++ 2m": "dpmpp_2m", "dpm++ sde": "dpmpp_sde",
-    "dpm++ 2m sde": "dpmpp_2m_sde", "dpm fast": "dpm_fast",
-    "dpm adaptive": "dpm_adaptive", "uni pc": "uni_pc",
-    "unipc": "uni_pc", "lcm": "lcm",
+    "euler": "euler", "euler a": "euler_ancestral", "euler ancestral": "euler_ancestral",
+    "lms": "lms", "heun": "heun", "dpm2": "dpm_2", "dpm2 a": "dpm_2_ancestral",
+    "dpm++ 2s a": "dpmpp_2s_ancestral", "dpm++ 2m": "dpmpp_2m",
+    "dpm++ sde": "dpmpp_sde", "dpm++ 2m sde": "dpmpp_2m_sde",
+    "dpm++ 2m sde heun": "dpmpp_2m_sde_heun", "dpm++ 3m sde": "dpmpp_3m_sde",
+    "dpm fast": "dpm_fast", "dpm adaptive": "dpm_adaptive",
+    "unipc": "uni_pc", "uni pc": "uni_pc", "uni_pc": "uni_pc",
+    "lcm": "lcm", "ddim": "ddim", "er sde": "er_sde", "er-sde": "er_sde",
 }
 
+_AD_SAMPLER_SCHEDULER_SUFFIXES = (
+    (" karras", "karras"), (" exponential", "exponential"),
+    (" sgm uniform", "sgm_uniform"), (" beta", "beta"),
+)
+
 _AD_SCHEDULER_ALIASES = {
-    "normal": "normal", "simple": "simple", "karras": "karras",
-    "exponential": "exponential", "sgm uniform": "sgm_uniform",
-    "sgm_uniform": "sgm_uniform", "ddim uniform": "ddim_uniform",
-    "ddim_uniform": "ddim_uniform", "beta": "beta",
+    "karras": "karras", "exponential": "exponential",
+    "sgm uniform": "sgm_uniform", "sgm_uniform": "sgm_uniform",
+    "simple": "simple", "normal": "normal",
+    "ddim uniform": "ddim_uniform", "ddim_uniform": "ddim_uniform",
+    "beta": "beta",
+    "beta57": "beta57", "beta 57": "beta57",
+    "beta57 (res4lyf)": "beta57", "beta 57 (res4lyf)": "beta57",
 }
+
+_AD_SAME_SCHEDULER = frozenset({"use same scheduler", "same", "automatic", "auto", ""})
 
 
 def _normalize_ad_sampler(sampler: Any, scheduler: Any) -> tuple[str, str]:
     sampler_text = str(sampler or "euler").strip()
     scheduler_text = str(scheduler or "normal").strip()
-    lowered = sampler_text.casefold()
+    lowered = " ".join(sampler_text.split()).casefold()
     inferred_scheduler = None
-    for suffix, resolved in (
-        (" karras", "karras"), (" exponential", "exponential"),
-        (" sgm uniform", "sgm_uniform"), (" beta", "beta"),
-    ):
+    for suffix, resolved in _AD_SAMPLER_SCHEDULER_SUFFIXES:
         if lowered.endswith(suffix):
             lowered = lowered[: -len(suffix)].strip()
             inferred_scheduler = resolved
@@ -950,8 +955,8 @@ def _normalize_ad_sampler(sampler: Any, scheduler: Any) -> tuple[str, str]:
     if lowered == "plms":
         raise RuntimeError("ADetailer sampler PLMS has no equivalent in ComfyUI's KSampler.")
     normalized_sampler = _AD_SAMPLER_ALIASES.get(lowered, lowered.replace(" ", "_"))
-    scheduler_lower = scheduler_text.casefold()
-    if scheduler_lower in {"use same scheduler", "same", ""}:
+    scheduler_lower = " ".join(scheduler_text.split()).casefold()
+    if scheduler_lower in _AD_SAME_SCHEDULER:
         normalized_scheduler = inferred_scheduler or "normal"
     else:
         normalized_scheduler = _AD_SCHEDULER_ALIASES.get(

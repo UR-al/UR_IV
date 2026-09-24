@@ -1,3 +1,11 @@
 danbooru_optimized/legacy_search_tags_before_2026_07.csv text eol=lf
 # Preserve the pinned upstream license verbatim, including its trailing blanks.
 comfy_custom_nodes/ai_studio_forge_parity/LICENSES/comfyui-anima-3-8B-MIT.txt text eol=lf whitespace=-blank-at-eof
+# Windows batch files must be pure CRLF in the working tree: cmd.exe's label search
+# (`call :label`, `goto`) misreads LF-only lines at some byte offsets, and the launcher
+# is also started by the in-app updater. The index already stores them as LF, so this
+# rule needs no renormalization; it only fixes what checkout writes (autocrlf=false
+# clones and source zips included). tests/test_line_ending_policy.py guards the bytes
+# (CRLF, BOM-less UTF-8, chcp 65001 before any non-ASCII byte and before `type`ing the UTF-8 crash log).
+*.bat text eol=crlf
+*.cmd text eol=crlf

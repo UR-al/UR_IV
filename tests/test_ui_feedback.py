@@ -1,7 +1,6 @@
 """Offline regressions for visible UI feedback; no GPU jobs or real clipboard writes."""
 import json
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -10,30 +9,9 @@ from ui.vue_bridge import VueBridge
 
 
 class UIFeedbackTests(unittest.TestCase):
-    def test_existing_runtime_paths_open_picker_and_cancel_without_mutation(self):
-        snapshot = {'engines': {
-            'forge': {'existingRoot': 'C:/existing-forge', 'extensionDir': 'C:/existing-forge/extensions'},
-            'comfyui': {'existingRoot': 'C:/existing-comfy', 'extensionDir': 'C:/existing-comfy/custom_nodes'},
-        }}
-        host = SimpleNamespace(_backend_runtime_is_web_mode=lambda: False,
-                               _backend_runtime_engine=lambda engine: (engine, engine),
-                               _backend_runtime_public_snapshot=lambda: snapshot, parent=lambda: None)
-        for engine in snapshot['engines']:
-            for method, key in ((VueBridge.selectBackendInstallDirectory, 'existingRoot'),
-                                (VueBridge.selectBackendExtensionDirectory, 'extensionDir')):
-                with self.subTest(engine=engine, key=key), patch('ui.native_dialogs.select_directory', return_value=None) as picker:
-                    reply = json.loads(method(host, engine))
-                    self.assertTrue(reply['cancelled'])
-                    self.assertFalse(reply['ok'])
-                    self.assertEqual(picker.call_args.args[2], snapshot['engines'][engine][key])
-
-    def test_forge_model_picker_uses_configured_path_and_returns_selection(self):
-        host = SimpleNamespace(_backend_runtime_is_web_mode=lambda: False, parent=lambda: None)
-        with patch('core.forge_modules.get_forge_paths', return_value={'checkpoint_dir': Path('C:/existing-models')}), \
-             patch('ui.native_dialogs.select_directory', return_value='C:/chosen-models') as picker:
-            reply = json.loads(VueBridge.selectForgeModelDirectory(host, 'checkpoint_dir'))
-        self.assertEqual(reply, {'ok': True, 'key': 'checkpoint_dir', 'path': 'C:/chosen-models'})
-        self.assertEqual(picker.call_args.args[2], str(Path('C:/existing-models')))
+    # 런타임 설치/확장·Forge 모델 폴더 선택기는 Studio native.pick_directory 로만 연다 —
+    # 현재 경로 전달·취소 계약은 tests/test_studio_application.py
+    # test_directory_picker_uses_exact_purpose_selector_and_current_contract 가 검증한다.
 
     def test_vram_poll_does_not_overlap_slow_reads_and_recovers_after_error(self):
         started = []

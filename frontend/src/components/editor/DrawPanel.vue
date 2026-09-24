@@ -92,28 +92,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+/**
+ * 그리기 도구 옵션 — **표시만** 한다(제어 컴포넌트).
+ *
+ * 예전에는 도구·색·크기·투명도를 이 패널이 로컬 ref 로 들고 있었다. 마스크 도구에서
+ * 그리기 도구로 넘어갈 때마다 v-if 로 새로 마운트되는데, 부모가 같은 tick 에 부른
+ * `setTool` 은 ref 가 아직 null 이라 무시됐다. 그래서 J(복원)·D(그라디언트)로 들어가도
+ * 패널은 '펜'으로 떠서 '복원 적용' 버튼과 끝 색 행이 숨었고, 색을 누르면 tool:'pen' 이
+ * 실려 가 도구가 펜으로 바뀌었다. 표시(#000000/3)와 실제 값(#ffffff/10)도 달랐다.
+ *
+ * 이제 값은 전부 부모(EditorView)가 props 로 내려주고, 패널은 바뀐 값만 올려 보낸다.
+ * 도구는 올려 보내지 않는다 — 도구의 주인은 세로 툴바다.
+ */
+import { computed } from 'vue'
 import { toolById } from '../../utils/editorTools'
 import PanelSection from './PanelSection.vue'
 
-interface DrawTool {
-  id: number
-  name: string
-  label: string
-}
-
 interface ToolParams {
-  tool: string
   color: string
   size: number
+  /** 0~1 */
   opacity: number
   filled: boolean
 }
 
 const emit = defineEmits<{
-  'tool-changed': [params: ToolParams]
-  'color-changed': [payload: { color: string }]
-  'params-changed': [params: ToolParams]
+  'params-changed': [params: Partial<ToolParams>]
   'pick-custom-color': []
   'pick-gradient-end-color': []
   'heal-apply': []
@@ -124,8 +128,17 @@ const emit = defineEmits<{
 }>()
 
 const props = withDefaults(defineProps<{
+  /** 현재 그리기 도구 id (세로 툴바가 고른 것) */
+  tool?: string
+  /** 현재 그리기 파라미터 — 부모가 단일 출처다 */
+  params?: ToolParams
+  /** 드로잉 레이어 표시 투명도 0~100 */
+  layerOpacity?: number
   gradientEndColor?: string
 }>(), {
+  tool: 'pen',
+  params: () => ({ color: '#ffffff', size: 10, opacity: 1, filled: false }),
+  layerOpacity: 100,
   gradientEndColor: '#000000',
 })
 
@@ -137,78 +150,34 @@ const paletteColors: string[] = [
   '#FF8800', '#8800FF', '#888888', '#FF4488',
 ]
 
-const drawTools: DrawTool[] = [
-  { id: 0, name: 'pen', label: '펜 (자유 그리기)' },
-  { id: 1, name: 'line', label: '직선' },
-  { id: 2, name: 'rect', label: '사각형' },
-  { id: 3, name: 'ellipse', label: '원/타원' },
-  { id: 4, name: 'fill', label: '채우기' },
-  { id: 5, name: 'eyedropper', label: '스포이트' },
-  { id: 6, name: 'clone_stamp', label: '클론 스탬프' },
-  { id: 7, name: 'text_overlay', label: '텍스트' },
-  { id: 8, name: 'gradient', label: '그라디언트' },
-  { id: 9, name: 'heal', label: '복원 브러시' },
-]
-
-const toolNameMap: Record<number, string> = Object.fromEntries(drawTools.map(t => [t.id, t.name]))
-
-const selectedTool = ref(0)
-const currentColor = ref('#000000')
-const brushSize = ref(3)
-const brushOpacity = ref(100)
-const isFilled = ref(false)
-const layerOpacity = ref(100)
-
-const currentToolName = computed(() => toolNameMap[selectedTool.value] || 'pen')
+const currentToolName = computed(() => props.tool || 'pen')
 const currentToolLabel = computed(() => toolById(currentToolName.value)?.label ?? '그리기')
 const currentToolKey = computed(() => toolById(currentToolName.value)?.shortcut ?? '')
 
+const currentColor = computed(() => props.params.color)
+
+// 슬라이더·토글은 부모 값을 보여 주고, 바뀐 필드만 올려 보낸다.
+const brushSize = computed({
+  get: () => props.params.size,
+  set: (size: number) => emit('params-changed', { size }),
+})
+/** 화면은 1~100, 부모는 0~1 */
+const brushOpacity = computed({
+  get: () => Math.round((props.params.opacity ?? 1) * 100),
+  set: (value: number) => emit('params-changed', { opacity: value / 100 }),
+})
+const isFilled = computed({
+  get: () => !!props.params.filled,
+  set: (filled: boolean) => emit('params-changed', { filled }),
+})
+const layerOpacity = computed({
+  get: () => props.layerOpacity,
+  set: (value: number) => emit('layer-opacity-changed', value),
+})
+
 function onPaletteClick(color: string) {
-  currentColor.value = color
-  emit('color-changed', { color })
-  emitParamsChanged()
+  emit('params-changed', { color })
 }
-
-function emitToolChanged() {
-  emit('tool-changed', {
-    tool: currentToolName.value,
-    color: currentColor.value,
-    size: brushSize.value,
-    opacity: brushOpacity.value / 100.0,
-    filled: isFilled.value,
-  })
-}
-
-function emitParamsChanged() {
-  emit('params-changed', {
-    tool: currentToolName.value,
-    color: currentColor.value,
-    size: brushSize.value,
-    opacity: brushOpacity.value / 100.0,
-    filled: isFilled.value,
-  })
-}
-
-watch([brushSize, brushOpacity, isFilled, selectedTool], () => {
-  emitParamsChanged()
-})
-
-watch(layerOpacity, (val) => {
-  emit('layer-opacity-changed', val)
-})
-
-/** Called by parent to set color from eyedropper */
-function setColor(hexColor: string) {
-  currentColor.value = hexColor
-}
-
-/** 세로 툴바에서 고른 도구를 패널 하이라이트에 반영한다 (emit 은 하지 않는다). */
-function setTool(name: string) {
-  const found = drawTools.find(t => t.name === name)
-  if (found) selectedTool.value = found.id
-}
-
-defineExpose({ setColor, setTool })
 </script>
 
 <style scoped>

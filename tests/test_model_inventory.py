@@ -324,10 +324,10 @@ class ModelInventoryTests(unittest.TestCase):
                     return fresh
 
             from ui.vue_bridge import VueBridge
-            from widgets.lora_manager import LoraManagerDialog
+            from ui import lora_catalog_cache
 
-            previous_cache = LoraManagerDialog._lora_cache
-            LoraManagerDialog._lora_cache = [{"name": "stale"}]
+            previous_cache = lora_catalog_cache.raw_loras()
+            lora_catalog_cache._raw_loras = [{"name": "stale"}]
             try:
                 with (
                     patch("backends.get_backend", return_value=Backend()),
@@ -336,8 +336,8 @@ class ModelInventoryTests(unittest.TestCase):
                 ):
                     result = json.loads(VueBridge.getLoras(None, "force"))
             finally:
-                cached_after = LoraManagerDialog._lora_cache
-                LoraManagerDialog._lora_cache = previous_cache
+                cached_after = lora_catalog_cache.raw_loras()
+                lora_catalog_cache._raw_loras = previous_cache
 
             self.assertEqual(cached_after, fresh)
             self.assertNotIn("source", cached_after[0])
@@ -360,10 +360,10 @@ class ModelInventoryTests(unittest.TestCase):
                     return []
 
             from ui.vue_bridge import VueBridge
-            from widgets.lora_manager import LoraManagerDialog
+            from ui import lora_catalog_cache
 
-            previous_cache = LoraManagerDialog._lora_cache
-            LoraManagerDialog._lora_cache = [{"name": "removed-lora"}]
+            previous_cache = lora_catalog_cache.raw_loras()
+            lora_catalog_cache._raw_loras = [{"name": "removed-lora"}]
             try:
                 with (
                     patch("backends.get_backend", return_value=Backend()),
@@ -372,11 +372,214 @@ class ModelInventoryTests(unittest.TestCase):
                 ):
                     result = json.loads(VueBridge.getLoras(None, "force"))
             finally:
-                cached_after = LoraManagerDialog._lora_cache
-                LoraManagerDialog._lora_cache = previous_cache
+                cached_after = lora_catalog_cache.raw_loras()
+                lora_catalog_cache._raw_loras = previous_cache
 
             self.assertEqual(cached_after, [])
             self.assertEqual(result, [])
+
+    def test_catalog_and_matcher_touch_each_file_once(self):
+        """파일당 resolve·stat 을 한 번으로 — 예전엔 LoRA 하나에 resolve 5.6회, stat 9.4회."""
+        import os
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            snapshot = self._snapshot(root / "forge", root / "comfy")
+            forge_loras = Path(snapshot["engines"]["forge"]["modelPaths"]["loras"][0])
+            comfy_loras = Path(snapshot["engines"]["comfyui"]["modelPaths"]["loras"][0])
+            count = 12
+            for index in range(count):
+                (forge_loras / f"style_{index}.safetensors").write_bytes(b"f" * (index + 1))
+                (comfy_loras / f"comfy_{index}.safetensors").write_bytes(b"c" * (index + 1))
+
+            real_realpath = os.path.realpath
+            real_stat = os.stat
+            resolved, stats = [], []
+
+            def counting_realpath(path, *args, **kwargs):
+                # Path.resolve 도 내부에서 os.path.realpath 를 부르므로 둘 다 잡힌다.
+                resolved.append(str(path))
+                return real_realpath(path, *args, **kwargs)
+
+            def counting_stat(path, *args, **kwargs):
+                stats.append(str(path))
+                return real_stat(path, *args, **kwargs)
+
+            inventory = ModelInventory(snapshot)
+            api = [{"name": f"style_{index}", "alias": f"style_{index}"} for index in range(count)]
+            with patch("core.model_inventory.os.path.realpath", side_effect=counting_realpath), \
+                    patch("core.model_inventory.os.stat", side_effect=counting_stat):
+                merged = inventory.merge_loras(api)
+
+            files = 2 * count
+            self.assertEqual(len(merged), files)
+            model_resolves = [p for p in resolved if p.endswith(".safetensors")]
+            model_stats = [p for p in stats if str(p).endswith(".safetensors")]
+            self.assertLessEqual(len(model_resolves), files, model_resolves)
+            self.assertLessEqual(len(model_stats), files, model_stats)
+            self.assertTrue(all(item["backendAvailable"] for item in merged[:count]))
+
+    def test_matcher_reuses_catalog_physical_keys_for_absolute_api_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            snapshot = self._snapshot(root / "forge", root / "comfy", active="forge")
+            forge_loras = Path(snapshot["engines"]["forge"]["modelPaths"]["loras"][0])
+            target = forge_loras / "sub" / "Deep.safetensors"
+            target.parent.mkdir()
+            target.write_bytes(b"deep")
+            inventory = ModelInventory(snapshot)
+            merged = inventory.merge_loras([{"name": "renamed", "path": str(target)}])
+            self.assertEqual(1, len(merged))
+            self.assertEqual("renamed", merged[0]["runtimeName"])
+            self.assertEqual(str(target.resolve()), merged[0]["path"])
+            self.assertNotIn("physical", json.dumps(merged))
+
+
+class LoraCatalogPrewarmTests(unittest.TestCase):
+    def setUp(self):
+        from ui import lora_catalog_cache
+
+        self.cache = lora_catalog_cache
+        self.previous = lora_catalog_cache.raw_loras()
+        self.addCleanup(setattr, lora_catalog_cache, "_raw_loras", self.previous)
+
+    def _patches(self, backend, merged=None):
+        merged = merged if merged is not None else [{"name": "x"}]
+        return (
+            patch("backends.get_backend", return_value=backend),
+            patch("backends.get_backend_type", return_value=SimpleNamespace(value="forge")),
+            patch("ui.lora_catalog_cache.merged_json", side_effect=lambda loras, engine: json.dumps(
+                {"engine": engine, "count": len(loras)})),
+        )
+
+    def test_prewarmed_cache_is_served_by_get_loras_without_http(self):
+        from ui.lora_catalog_cache import warm_once
+        from ui.vue_bridge import VueBridge
+
+        class Backend:
+            calls = 0
+
+            def get_loras(self):
+                Backend.calls += 1
+                return [{"name": "a"}, {"name": "b"}]
+
+        bridge = SimpleNamespace(_merged_lora_cache=None)
+        self.cache._raw_loras = []
+        backend = Backend()
+        p1, p2, p3 = self._patches(backend)
+        with p1, p2, p3:
+            self.assertTrue(warm_once(bridge))
+            self.assertEqual(1, Backend.calls)
+            served = json.loads(VueBridge.getLoras(bridge, ""))
+            self.assertEqual({"engine": "forge", "count": 2}, served)
+            self.assertEqual(1, Backend.calls, "프리워밍된 캐시는 GUI 스레드 HTTP 없이 적중한다")
+            self.assertFalse(warm_once(bridge, only_if_cold=True), "이미 따뜻하면 다시 받지 않는다")
+            self.assertEqual(1, Backend.calls)
+
+    def test_prewarm_does_not_clobber_a_newer_force_refresh(self):
+        from ui.lora_catalog_cache import warm_once
+        from ui.vue_bridge import VueBridge
+
+        cache = self.cache
+        bridge = SimpleNamespace(_merged_lora_cache=None)
+
+        class Backend:
+            calls = 0
+
+            def get_loras(self):
+                Backend.calls += 1
+                if Backend.calls == 1:
+                    # 프리워밍이 HTTP 를 기다리는 사이 사용자가 강제 새로고침했다(GUI 스레드)
+                    VueBridge.getLoras(bridge, "force")
+                    return [{"name": "older-1"}, {"name": "older-2"}]
+                return [{"name": "newer"}]
+
+        cache._raw_loras = []
+        p1, p2, p3 = self._patches(Backend())
+        with p1, p2, p3:
+            self.assertFalse(warm_once(bridge), "늦게 끝난 프리워밍은 아무것도 쓰지 않는다")
+            self.assertEqual([{"name": "newer"}], cache.raw_loras())
+            cached = bridge._merged_lora_cache
+            self.assertIs(cache.raw_loras(), cached["raw"])
+            self.assertEqual({"engine": "forge", "count": 1}, json.loads(cached["json"]))
+            served = json.loads(VueBridge.getLoras(bridge, ""))
+        self.assertEqual({"engine": "forge", "count": 1}, served)
+        self.assertEqual(2, Backend.calls, "강제 새로고침 결과가 그대로 적중한다")
+
+    def test_invalidation_during_prewarm_fetch_is_not_cached(self):
+        """받는 사이 모델 경로 저장(_refresh_forge_module_widgets)이 캐시를 비웠으면,
+        무효화 뒤의 빈 목록을 병합해 캐시하지 않는다 — 다음 getLoras 가 백엔드를 다시 읽는다."""
+        from ui.lora_catalog_cache import invalidate, warm_once
+        from ui.vue_bridge import VueBridge
+
+        bridge = SimpleNamespace(_merged_lora_cache=None)
+
+        class Backend:
+            calls = 0
+
+            def get_loras(self):
+                Backend.calls += 1
+                if Backend.calls == 1:
+                    invalidate(bridge)
+                return [{"name": "api-lora", "path": "api.safetensors"}]
+
+        self.cache._raw_loras = [{"name": "stale"}]
+        p1, p2, p3 = self._patches(Backend())
+        with p1, p2, p3:
+            self.assertFalse(warm_once(bridge))
+            self.assertIsNone(bridge._merged_lora_cache, "빈 목록으로 만든 병합 결과를 남기지 않는다")
+            self.assertEqual([], self.cache.raw_loras())
+            served = json.loads(VueBridge.getLoras(bridge, ""))
+        self.assertEqual(2, Backend.calls, "무효화 뒤 첫 getLoras 는 백엔드를 다시 읽는다")
+        self.assertEqual({"engine": "forge", "count": 1}, served)
+        self.assertEqual([{"name": "api-lora", "path": "api.safetensors"}], self.cache.raw_loras())
+
+    def test_invalidation_during_prewarm_merge_discards_result(self):
+        from ui.lora_catalog_cache import invalidate, warm_once
+
+        bridge = SimpleNamespace(_merged_lora_cache=None)
+
+        class Backend:
+            def get_loras(self):
+                return [{"name": "a"}]
+
+        def merge_then_invalidate(loras, engine):
+            invalidate(bridge)   # 디스크 병합 중에 무효화가 끼었다
+            return json.dumps({"count": len(loras)})
+
+        self.cache._raw_loras = []
+        with (
+            patch("backends.get_backend", return_value=Backend()),
+            patch("backends.get_backend_type", return_value=SimpleNamespace(value="forge")),
+            patch("ui.lora_catalog_cache.merged_json", side_effect=merge_then_invalidate),
+        ):
+            self.assertFalse(warm_once(bridge))
+        self.assertIsNone(bridge._merged_lora_cache)
+        self.assertEqual([], self.cache.raw_loras())
+
+    def test_cache_hit_requires_the_same_raw_list_object(self):
+        """무효화가 넣은 새 [] 는 내용이 같아도 다른 객체다 — 예전 [] 로 만든 병합 결과가 적중하면
+        백엔드 LoRA 가 모두 '사용 불가'로 보이는 디스크 전용 카탈로그가 나간다."""
+        from ui.lora_catalog_cache import cache_entry, cached_json, raw_signature
+
+        fetched_empty = []
+        entry = cache_entry("forge", raw_signature(fetched_empty), "[]", raw=fetched_empty)
+        self.assertEqual("[]", cached_json(entry, "forge", raw_signature([]), raw=fetched_empty))
+        self.assertIsNone(cached_json(entry, "forge", raw_signature([]), raw=[]))
+        self.assertIsNone(cached_json(entry, "comfyui", raw_signature([]), raw=fetched_empty))
+
+    def test_invalidate_clears_both_caches(self):
+        from ui.lora_catalog_cache import invalidate
+
+        bridge = SimpleNamespace(_merged_lora_cache={"json": "[]"})
+        old = [{"name": "a"}]
+        self.cache._raw_loras = old
+        invalidate(bridge)
+        self.assertEqual([], self.cache.raw_loras())
+        self.assertIsNot(old, self.cache.raw_loras())
+        self.assertIsNone(bridge._merged_lora_cache)
+        invalidate(None)   # 브리지가 아직 없어도 raw 캐시는 비운다
+        self.assertEqual([], self.cache.raw_loras())
 
 
 if __name__ == "__main__":

@@ -13,6 +13,8 @@ import os
 import shutil
 from typing import Callable
 
+from utils.atomic_json import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 # 각 설정 파일별 마이그레이션 맵을 이 모듈에 중앙화.
@@ -110,11 +112,8 @@ def save_with_version(path: str, data: dict, schema_version: int) -> None:
     """schema_version 필드를 주입하고 저장."""
     out = dict(data)
     out['schema_version'] = schema_version
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    # 원자적 쓰기는 공용 구현 한 벌(fsync + 실패 시 tmp 정리)을 쓴다.
+    atomic_write_json(path, out, indent=2)
 
 
 def load_ui_prefs(path: str) -> dict:
@@ -128,3 +127,18 @@ def save_ui_prefs(path: str, data: dict) -> None:
         _normalize_ui_prefs(data),
         UI_PREFS_CURRENT_VERSION,
     )
+
+
+def read_legacy_gallery_folder(txt_path: str) -> str:
+    """옛 config/gallery_last_folder.txt 의 Gallery 폴더 — 이 PC 에 실제로 있을 때만.
+
+    이 파일은 .gitignore 규칙보다 먼저 추적돼 저장소에 다른 PC 경로가 남아 있다. 새 클론은
+    ui_prefs.galleryFolder 가 비어 있어 이 값을 흡수하는데, 존재 확인 없이 옮기면 갤러리가
+    없는 폴더에 고정돼 빈 목록으로 남았다. generator_settings 의 레거시 흡수와 같이 isdir 만 받는다.
+    """
+    try:
+        with open(txt_path, 'r', encoding='utf-8-sig') as f:
+            folder = f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return ''
+    return folder if folder and os.path.isdir(folder) else ''

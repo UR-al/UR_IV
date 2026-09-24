@@ -13,7 +13,7 @@
       <div class="info-panel">
         <div class="info-header">
           <h3>PNG Info</h3>
-          <button class="btn" @click="openFile"><Icon name="folder-open" /> 열기</button>
+          <button class="btn" v-host-dialog="'open_png_info_file'" @click="openFile"><Icon name="folder-open" /> 열기</button>
           <button class="btn" @click="copyAll" v-if="exif.raw"><Icon name="clipboard" /> 전체 복사</button>
           <button class="btn" @click="sendToCompare" v-if="imagePath"><Icon name="search" /> 비교로</button>
         </div>
@@ -94,6 +94,19 @@
               </button>
             </div>
           </div>
+          <!-- 메타 이식 — 이 이미지의 생성 메타를 다른 이미지(외부 편집으로 메타가 지워진 사본 등)에 박아 새 PNG 로 -->
+          <div class="action-section">
+            <label class="action-label">메타 이식</label>
+            <div class="transplant-row">
+              <button class="btn" v-host-dialog="'pnginfo_transplant_meta'" :disabled="!imagePath" @click="transplantMeta"
+                title="이 이미지의 프롬프트·파라미터(ComfyUI 워크플로 포함)를 다른 이미지에 넣어 새 PNG 로 저장합니다. 대상 픽셀은 그대로입니다.">
+                <Icon name="layers" /> 다른 이미지에 이식…
+              </button>
+              <label v-if="exif.raw_prompt || exif.raw_workflow" class="transplant-opt">
+                <input type="checkbox" v-model="transplantIncludeWorkflow" /> ComfyUI 워크플로 포함
+              </label>
+            </div>
+          </div>
         </div>
         <div v-else class="info-empty">이미지를 선택하면 메타데이터가 표시됩니다</div>
       </div>
@@ -104,12 +117,12 @@
       <div class="compare-controls">
         <div class="cmp-slot">
           <span class="cmp-label">이전</span>
-          <button class="btn" @click="loadCompareImage('before')"><Icon name="folder-open" /> 열기</button>
+          <button class="btn" v-host-dialog="'open_compare_image'" @click="loadCompareImage('before')"><Icon name="folder-open" /> 열기</button>
           <span class="cmp-name">{{ beforeName || '없음' }}</span>
         </div>
         <div class="cmp-slot">
           <span class="cmp-label">이후</span>
-          <button class="btn" @click="loadCompareImage('after')"><Icon name="folder-open" /> 열기</button>
+          <button class="btn" v-host-dialog="'open_compare_image'" @click="loadCompareImage('after')"><Icon name="folder-open" /> 열기</button>
           <span class="cmp-name">{{ afterName || '없음' }}</span>
         </div>
       </div>
@@ -174,13 +187,16 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import { vHostDialog } from '../utils/hostDialogs'
 import { useViewMode } from '../composables/useViewMode'
 import { mediaUrl } from '../utils/media.js'
 import CompareSlider from '../components/CompareSlider.vue'
 import CustomSelect from '../components/CustomSelect.vue'
 import ComfyMetadataDetails from '../components/ComfyMetadataDetails.vue'
 import { copyTextToClipboard } from '../utils/clipboard'
-import type { ActionName } from '../types/bridge'
+import { diffParameters } from '../utils/paramDiff'
+import type { ActionName, ActionPayload, CompareGifReadyPayload } from '../types/bridge'
+import { createLatestRequest, wasAbandoned } from '../utils/bridgeRequest'
 
 interface ExifParams {
   generation?: string
@@ -196,8 +212,11 @@ interface ExifData {
   raw?: string
   prompt?: string
   negative?: string
-  params?: ExifParams
+  /** 표시 그룹 — 파라미터가 없으면 null */
+  params?: ExifParams | null
   params_line?: string
+  /** core 가 파싱한 원 파라미터(따옴표를 푼 값) — 비교에 쓴다 */
+  parameters?: Record<string, unknown>
   [k: string]: any
 }
 
@@ -229,31 +248,9 @@ async function loadCompareExif(path: string, target: string) {
   }
 }
 
-// 파라미터 라인을 key:value 파싱
-function _parseParamsLine(raw: string): Record<string, string> {
-  if (!raw) return {}
-  const params: Record<string, string> = {}
-  // "Steps: 28, Sampler: Euler, ..." 형식
-  const matches = raw.matchAll(/([A-Za-z][A-Za-z0-9_ ]*?):\s*([^,]+?)(?:,\s*|$)/g)
-  for (const m of matches) params[m[1].trim()] = m[2].trim()
-  return params
-}
-
-// 파라미터 diff 계산
-const paramDiffRows = computed(() => {
-  const bParams = _parseParamsLine(beforeExif.value.params_line || '')
-  const aParams = _parseParamsLine(afterExif.value.params_line || '')
-  const allKeys = new Set([...Object.keys(bParams), ...Object.keys(aParams)])
-  const rows: { key: string; before: string; after: string; changed: boolean }[] = []
-  for (const key of allKeys) {
-    const bv = bParams[key] || ''
-    const av = aParams[key] || ''
-    rows.push({ key, before: bv, after: av, changed: bv !== av })
-  }
-  // 변경된 것을 상단에
-  rows.sort((a, b) => (b.changed ? 1 : 0) - (a.changed ? 1 : 0))
-  return rows
-})
+// 파라미터 diff — core 가 따옴표를 풀어 파싱한 parameters dict 를 그대로 비교한다
+// (표시용 params_line 을 다시 정규식으로 쪼개지 않는다 — utils/paramDiff.ts)
+const paramDiffRows = computed(() => diffParameters(beforeExif.value.parameters, afterExif.value.parameters))
 
 // 프롬프트 diff (태그 단위)
 const promptDiff = computed(() => {
@@ -299,7 +296,14 @@ async function copySection(text: string, label: string) {
 }
 function sendPrompt() { if (exif.value.can_apply !== false) requestAction('pnginfo_send_prompt', { prompt: exif.value.prompt || '', negative: exif.value.negative || '', source: exif.value.source, can_apply: exif.value.can_apply, path: exif.value.path }) }
 function sendGenerate() { if (exif.value.can_apply !== false) requestAction('pnginfo_generate', exif.value) }
-function action(name: ActionName, payload: Record<string, any> = {}) { requestAction(name, payload) }
+function action<K extends ActionName>(name: K, payload?: ActionPayload<K>) { requestAction(name, payload) }
+
+// 메타 이식 — 대상 이미지·저장 위치는 호스트 대화상자(원격 웹 모드에선 v-host-dialog 가 버튼을 끈다)
+const transplantIncludeWorkflow = ref(true)
+function transplantMeta() {
+  if (!imagePath.value) return
+  requestAction('pnginfo_transplant_meta', { path: imagePath.value, include_workflow: transplantIncludeWorkflow.value })
+}
 
 function sendToCompare() {
   if (!compareBefore.value) {
@@ -327,27 +331,43 @@ const gifDurationStr = computed({
 })
 const gifExporting = ref(false)
 const gifResult = ref('')
+// GIF 는 워커에서 만든다(requestCompareGif → compareGifReady). 예전 동기 슬롯은 풀해상도 블렌드·
+// 저장을 GUI 스레드에서 해 창이 수 초 멈췄다. 마지막 요청만 유효, 1분 안에 답이 없으면 푼다.
+const gifRequest = createLatestRequest<CompareGifReadyPayload>({ timeoutMs: 60_000, prefix: 'gif' })
 
 async function exportGif() {
   if (!compareBefore.value || !compareAfter.value) return
   gifExporting.value = true; gifResult.value = ''
+  const { id, done, outcome } = gifRequest.begin()
   const backend: any = await getBackend()
-  if (backend.exportCompareGif) {
-    backend.exportCompareGif(compareBefore.value, compareAfter.value, gifDuration.value, 0, (json: string) => {
-      try {
-        const d = JSON.parse(json)
-        if (d.path) { gifResult.value = d.path; requestAction('show_toast', { type: 'success', msg: `GIF 생성 완료 (${d.frames} frames)` }) }
-        else if (d.error) requestAction('show_toast', { type: 'error', msg: d.error })
-      } catch {}
-      gifExporting.value = false
-    })
+  if (wasAbandoned(outcome())) return   // 백엔드를 기다리는 사이 화면이 닫혔거나 새 내보내기가 시작됐다
+  if (!backend?.requestCompareGif) {
+    gifRequest.cancel()
+    gifExporting.value = false
+    requestAction('show_toast', { type: 'error', msg: 'GIF 생성 실패: 백엔드 연결 없음' })
+    return
+  }
+  backend.requestCompareGif(compareBefore.value, compareAfter.value, gifDuration.value, 0, id)
+  const d = await done
+  // 더 새 내보내기가 이어받았거나(그쪽이 마무리한다) 화면이 닫혀 버린 요청 — '응답 없음'을 띄우지 않는다.
+  if (wasAbandoned(outcome())) return
+  gifExporting.value = false
+  if (d?.path) {
+    gifResult.value = d.path
+    requestAction('show_toast', { type: 'success', msg: `GIF 생성 완료 (${d.frames} frames)` })
+  } else {
+    requestAction('show_toast', { type: 'error', msg: `GIF 생성 실패: ${d?.error || '응답 없음'}` })
   }
 }
 
 // 이벤트 disconnect 핸들 — keep-alive로 재마운트되어도 누적 등록 방지
 const _eventUnsubs: Array<() => void> = []
 onMounted(() => {
-  _eventUnsubs.push(onBackendEvent('inpaintImageLoaded', (path: string) => loadImage(path)))
+  // '열기' 대화상자 결과 — PNG Info 전용 시그널. 예전엔 inpaintImageLoaded 를 같이 들어서
+  // 여기서 파일을 열면 keep-alive 로 살아 있는 인페인트의 원본·마스크·undo 가 날아갔고,
+  // 인페인트로 보낼 때마다 이 화면도 바뀌었다.
+  _eventUnsubs.push(onBackendEvent('pngInfoImageLoaded', (path: string) => loadImage(path)))
+  _eventUnsubs.push(onBackendEvent('compareGifReady', (json: string) => { gifRequest.receive(json) }))
   // 비교 이미지 수신 (우클릭 메뉴 "비교로 보내기" 또는 파일 다이얼로그)
   _eventUnsubs.push(onBackendEvent('compareImageLoaded', (json: string) => {
     try {
@@ -366,6 +386,7 @@ onMounted(() => {
 onUnmounted(() => {
   for (const off of _eventUnsubs) { try { off() } catch {} }
   _eventUnsubs.length = 0
+  gifRequest.cancel()
 })
 </script>
 
@@ -419,6 +440,8 @@ onUnmounted(() => {
   display: grid; grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
+.transplant-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.transplant-opt { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-label); color: var(--text-secondary); cursor: pointer; }
 .send-card {
   display: flex; flex-direction: column; align-items: center;
   gap: 4px; padding: 10px 6px;

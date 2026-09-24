@@ -13,13 +13,6 @@
         <button class="cp-close" @click="close"><Icon name="close" /></button>
       </div>
 
-      <div class="cp-optbar">
-        <label class="cp-opt">
-          <ToggleSwitch :model-value="preventDupe" size="sm" @update:modelValue="emit('update:preventDupe', $event)" />
-          <span>중복 방지 <em>이미 있는 태그는 다시 추가하지 않음</em></span>
-        </label>
-      </div>
-
       <div class="cp-body" :class="{ disabled: !condEnabled }">
         <div class="cp-grid">
           <!-- POSITIVE -->
@@ -82,11 +75,17 @@
 import { onMounted, onUnmounted } from 'vue'
 import { condPositive, condNegative, condEnabled, addCondRule, removeCondRule, saveCondRules, loadCondRules } from '../composables/condRules.js'
 import ToggleSwitch from './ToggleSwitch.vue'
+import { useModalLayer } from '../composables/useModalLayer'
 
-withDefaults(defineProps<{ preventDupe?: boolean }>(), { preventDupe: true })
-const emit = defineEmits<{ close: []; 'update:preventDupe': [value: boolean] }>()
+// '중복 방지' 스위치는 없앴다 — 규칙 엔진(utils/condition_block.apply_prompt_rules)은 두 번 적용해도
+// 같은 결과여야 해서(검색 적용 경로가 파일 규칙 + Vue 규칙을 두 번 돌린다) 이미 있는 태그를 늘 건너뛴다.
+// 끌 수 있는 값이 아니었고 어디에도 연결되지 않은 채 보이기만 했다(audit #97).
+const emit = defineEmits<{ close: [] }>()
 function close() { emit('close') }
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); close() } }
+// 열려 있는 동안 앱 모달 스택에 올라간다 — App 의 ↑/↓ 히스토리 이동이 이 모달 뒤에서 넘어가지 않게.
+// ESC 는 위 onKey 가 직접 처리한다(window capture + stopPropagation, utils/modalStack).
+useModalLayer()
 onMounted(() => { loadCondRules(); window.addEventListener('keydown', onKey, true) })
 onUnmounted(() => window.removeEventListener('keydown', onKey, true))
 </script>
@@ -101,9 +100,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey, true))
 .cp-master.on { color: var(--state-ok-fg); border-color: var(--state-ok-fg); }
 .cp-close { width: 30px; height: 30px; background: var(--bg-button); border: 1px solid var(--border); border-radius: var(--radius-base); color: var(--text-secondary); cursor: pointer; }
 .cp-close:hover { color: var(--text-primary); border-color: var(--accent); }
-.cp-optbar { padding: 8px 20px; border-bottom: 1px solid var(--border); }
-.cp-opt { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: var(--fw-bold); color: var(--text-secondary); cursor: pointer; }
-.cp-opt em { font-style: normal; font-weight: var(--fw-normal); color: var(--text-muted); margin-left: 4px; }
 .cp-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
 .cp-body.disabled { opacity: 0.45; pointer-events: none; }
 .cp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }

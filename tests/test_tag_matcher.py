@@ -64,5 +64,81 @@ class TestTagMatcherOrGroup(unittest.TestCase):
         self.assertEqual(list(mask), [True, False, True])
 
 
+@unittest.skipUnless(_HAS_PANDAS, "pandas/tag_matcher 미설치")
+class TestPlainTermSingleScan(unittest.TestCase):
+    """plain(연산자 없는) 텀은 공백형·밑줄형을 한 번의 컬럼 스캔으로 찾는다."""
+
+    def _series(self):
+        return pd.Series([
+            'long_hair smile',
+            'letter long hair ornament',
+            'short_hair',
+            None,
+            'kafka_(honkai:_star_rail) solo',
+            'c++ programming',
+        ], dtype='str')
+
+    def _count_contains(self, series, fn):
+        from unittest.mock import patch
+        calls = []
+        real = type(series.str).contains
+
+        def counting(accessor, *args, **kwargs):
+            calls.append(args[0] if args else kwargs.get('pat'))
+            return real(accessor, *args, **kwargs)
+
+        with patch.object(type(series.str), 'contains', counting):
+            mask = fn()
+        return mask, calls
+
+    def test_default_and_explicit_contains_scan_once(self):
+        from core.tag_matcher import _apply_pattern
+
+        series = self._series()
+        for pattern in ('long hair', 'long_hair', '_long hair_', 'smile'):
+            with self.subTest(pattern=pattern):
+                mask, calls = self._count_contains(
+                    series, lambda p=pattern: _apply_pattern(series, p)
+                )
+                self.assertEqual(len(calls), 1, calls)
+                # 'long_hair smile' 은 두 텀 모두, 'letter long hair ornament' 는 hair 텀만 잡힌다
+                expected_second = pattern != 'smile'
+                self.assertEqual(
+                    list(mask),
+                    [True, expected_second, False, False, False, False],
+                )
+
+    def test_mask_is_identical_to_the_old_two_scan_or(self):
+        from core.tag_matcher import contains_tag_text
+
+        series = self._series()
+        for term in ('long hair', 'hair', 'star rail', 'honkai:', 'LONG_HAIR'):
+            t = term.lower()
+            old = (
+                series.str.contains(t.replace('_', ' '), regex=False, na=False)
+                | series.str.contains(t.replace(' ', '_'), regex=False, na=False)
+            )
+            with self.subTest(term=term):
+                self.assertEqual(list(contains_tag_text(series, term)), list(old))
+
+    def test_regex_metacharacters_are_matched_literally(self):
+        from core.tag_matcher import contains_tag_text
+
+        series = self._series()
+        self.assertEqual(
+            list(contains_tag_text(series, 'kafka (honkai: star rail)')),
+            [False, False, False, False, True, False],
+        )
+        self.assertEqual(
+            list(contains_tag_text(series, 'c++')),
+            [False, False, False, False, False, True],
+        )
+
+    def test_filter_dataframe_keeps_space_and_underscore_semantics(self):
+        df = pd.DataFrame({'general': list(self._series())})
+        mask = filter_dataframe(df, 'general', 'long hair', col_lower=df['general'])
+        self.assertEqual(list(mask), [True, True, False, False, False, False])
+
+
 if __name__ == "__main__":
     unittest.main()

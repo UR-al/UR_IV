@@ -5,74 +5,19 @@ import logging
 from PyQt6.QtCore import QThread, pyqtSignal
 from backends import get_backend
 from core.path_safety import safe_input_path, safe_output_dir, UnsafePathError
+from core.resource_coordinator import backend_job_guard, release_before_backend_job
+from core.error_handler import sanitize_for_ui
+from core.output_files import write_new_file
+# ADetailer 슬롯 본문은 Qt 의존 없는 core/adetailer_args 한 벌이다(WebUIBackend 폴백은
+# core.adetailer_args.slot_from_settings 를 직접 부른다). 옛 _build_adetailer_slot 별칭은 두지 않는다.
 
 logger = logging.getLogger(__name__)
-
-
-def _build_adetailer_slot(model: str, confidence: float = 0.3, denoise: float = 0.4, prompt: str = '') -> dict:
-    """ADetailer 슬롯 딕셔너리 (공식 REST API 스펙)"""
-    return {
-        "ad_model": model,
-        "ad_model_classes": "",
-        "ad_tab_enable": True,
-        "ad_prompt": prompt,
-        "ad_negative_prompt": "",
-        "ad_confidence": confidence,
-        "ad_mask_filter_method": "Area",
-        "ad_mask_k": 0,
-        "ad_mask_min_ratio": 0.0,
-        "ad_mask_max_ratio": 1.0,
-        "ad_dilate_erode": 4,
-        "ad_x_offset": 0,
-        "ad_y_offset": 0,
-        "ad_mask_merge_invert": "None",
-        "ad_mask_blur": 4,
-        "ad_denoising_strength": denoise,
-        "ad_inpaint_only_masked": True,
-        "ad_inpaint_only_masked_padding": 32,
-        "ad_use_inpaint_width_height": False,
-        "ad_inpaint_width": 512,
-        "ad_inpaint_height": 512,
-        "ad_use_steps": False,
-        "ad_steps": 28,
-        "ad_use_cfg_scale": False,
-        "ad_cfg_scale": 7.0,
-        "ad_use_checkpoint": False,
-        "ad_checkpoint": None,
-        "ad_use_vae": False,
-        "ad_vae": None,
-        "ad_use_sampler": False,
-        "ad_sampler": "DPM++ 2M Karras",
-        "ad_scheduler": "Use same scheduler",
-        "ad_use_noise_multiplier": False,
-        "ad_noise_multiplier": 1.0,
-        "ad_use_clip_skip": False,
-        "ad_clip_skip": 1,
-        "ad_restore_face": False,
-        "ad_controlnet_model": "None",
-        "ad_controlnet_module": "None",
-        "ad_controlnet_weight": 1.0,
-        "ad_controlnet_guidance_start": 0.0,
-        "ad_controlnet_guidance_end": 1.0,
-    }
-
-
-def _build_empty_adetailer_slot() -> dict:
-    """빈 ADetailer 슬롯 (하위 호환)"""
-    return _build_adetailer_slot(model="None")
 
 
 def _image_to_base64(image_path: str) -> str:
     """이미지 파일을 base64 문자열로 변환"""
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
-
-
-def _save_base64_image(b64_data: str, output_path: str):
-    """base64 데이터를 이미지 파일로 저장"""
-    img_bytes = base64.b64decode(b64_data)
-    with open(output_path, "wb") as f:
-        f.write(img_bytes)
 
 
 class BatchUpscaleWorker(QThread):
@@ -131,32 +76,43 @@ class BatchUpscaleWorker(QThread):
                 backend = get_backend()
                 applied_steps = []
 
-                # 업스케일
-                if mode in ('upscale_only', 'both'):
-                    result_b64 = backend.upscale(result_b64, self.settings)
-                    applied_steps.append('upscaled')
+                # 항목마다 Forge 작업(업스케일·ADetailer·SAM3) 전에 앱 프로세스의
+                # 편집기 SAM3 번들(~3.4GB)을 반납 — 배치 도중 편집기에서 다시 올렸어도 겹치지 않게
+                release_before_backend_job('batch-upscale')
 
-                # ADetailer
-                if mode in ('adetailer_only', 'both') and self.settings.get('ad_enabled', True):
-                    result_b64 = backend.adetailer(result_b64, self.settings)
-                    applied_steps.append('ad')
+                # 항목의 Forge 작업 전체를 모델 언로드(생성 후·대기열 정리·수동)와 배타로 —
+                # 진행 중인 언로드는 기다리고, 도는 동안엔 언로드가 건너뛴다
+                with backend_job_guard('batch-upscale'):
+                    # 업스케일
+                    if mode in ('upscale_only', 'both'):
+                        result_b64 = backend.upscale(result_b64, self.settings)
+                        applied_steps.append('upscaled')
 
-                # SAM3
-                if mode in ('sam3_only', 'both') and self.settings.get('sam3_enabled', True):
-                    result_b64 = backend.sam3(result_b64, self.settings)
-                    applied_steps.append('sam3')
+                    # ADetailer
+                    if mode in ('adetailer_only', 'both') and self.settings.get('ad_enabled', True):
+                        result_b64 = backend.adetailer(result_b64, self.settings)
+                        applied_steps.append('ad')
 
-                # 저장 (output_folder 아래로만 허용)
+                    # SAM3
+                    if mode in ('sam3_only', 'both') and self.settings.get('sam3_enabled', True):
+                        result_b64 = backend.sam3(result_b64, self.settings)
+                        applied_steps.append('sam3')
+
+                # 저장 (output_folder 아래로만 허용). 같은 이름의 이전 결과·원본을
+                # 덮어쓰지 않고 _2, _3 … 새 파일로 쓴다.
                 basename = os.path.splitext(os.path.basename(safe_src))[0]
                 suffix = "_" + "_".join(applied_steps) if applied_steps else "_result"
-                output_path = os.path.join(output_folder, f"{basename}{suffix}.png")
-                _save_base64_image(result_b64, output_path)
+                output_path = write_new_file(
+                    os.path.join(output_folder, f"{basename}{suffix}.png"),
+                    base64.b64decode(result_b64),
+                )
 
                 self.single_finished.emit(i, True, os.path.basename(output_path))
 
             except Exception as e:
                 logger.warning("upscale failed for %s: %s", path, e)
-                self.single_finished.emit(i, False, "처리 실패 (로그 참조)")
+                # 사용자에게 실제 원인을 보여 준다(경로·토큰은 sanitize_for_ui 가 가린다).
+                self.single_finished.emit(i, False, sanitize_for_ui(str(e)) or "처리 실패 (로그 참조)")
 
         self.progress.emit(total, total)
         self.all_finished.emit()

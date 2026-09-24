@@ -78,11 +78,11 @@ class FrontendContrastTests(unittest.TestCase):
         self.assertIn("w._guid_smc_preset === 'Custom'", ANIMA_PANEL)
 
     def test_anima_panel_exposes_current_forge_rdc_controls(self) -> None:
-        for widget_id in (
-            '_guid_rdc_enabled', '_guid_rdc_tau',
-            '_guid_rdc_alpha_ll', '_guid_rdc_alpha_hh',
-        ):
-            self.assertIn(widget_id, ANIMA_PANEL)
+        # 실제 컨트롤 바인딩을 본다 — 예전엔 패널의 기본값 사본(DEFAULTS)에 있는 키 문자열만으로도
+        # 통과했다. 기본값은 이제 Python 스펙이 단일 출처다(reset_anima_guidance).
+        self.assertIn("b('guid_rdc_enabled')", ANIMA_PANEL)
+        for widget_id in ('_guid_rdc_tau', '_guid_rdc_alpha_ll', '_guid_rdc_alpha_hh'):
+            self.assertIn(f'v-model="w.{widget_id}"', ANIMA_PANEL)
 
 
 if __name__ == "__main__":

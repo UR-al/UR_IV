@@ -116,6 +116,10 @@ config/comfy_quality_preset.json
 config/comfy_compatibility_baselines.json
 config/automation/
 config/state/
+# 사용자가 작성한 대화/보조/스키마 지침 프리셋과 글로벌 태그 가중치 — 개인 프롬프트가
+# 공개 원격으로 올라가지 않게 (백업은 settings_backup.CONFIG_EXPORT_FILES 가 담당)
+config/instruction_presets.json
+config/global_weights.json
 
 # 디자인 캔버스 시드 산출물 — .dc.html 소스에서 다시 만들 수 있고 2.5MB 다
 design/**/*.html

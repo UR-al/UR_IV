@@ -154,6 +154,13 @@ class _Response:
 
 
 class InstructionHttpTests(unittest.TestCase):
+    def setUp(self):
+        # 지침 합성만 본다 — /api/show 능력 조회(think 제어)는 tests/test_ollama_think.py 가 검증.
+        # 조회 요청이 끼면 side_effect 응답 순서가 밀리므로 '능력 모름'으로 고정한다.
+        thinking = patch.object(OllamaClient, "thinking_mode", return_value="unknown")
+        thinking.start()
+        self.addCleanup(thinking.stop)
+
     def test_all_three_enhance_fallbacks_receive_the_same_composed_system_once(self):
         value = {"common": "COMMON_SENTINEL", "features": {
             "nl_caption": "CAPTION_SENTINEL", "auto_nl": "AUTO_SENTINEL", "negative": "OTHER_SENTINEL",

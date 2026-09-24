@@ -5,7 +5,11 @@
     @pointerleave="onMouseUp" @pointercancel="onMouseUp" @contextmenu.prevent
     @dblclick="onDblClick"
   >
-    <canvas ref="canvasEl" :style="canvasStyle" />
+    <canvas ref="canvasEl" :style="baseCanvasStyle" />
+    <!-- 실시간 프리뷰 표시 전용. 백엔드 축소본(긴 변 1024)을 원본 크기로 늘려 그린다.
+         예전에는 프리뷰를 이미지 자체로 갈아 끼워서, 큰 이미지에서 마스크·드로잉 레이어·
+         복원 스냅숏이 전부 초기화됐다. 원본(base) 캔버스는 프리뷰 동안에도 그대로다. -->
+    <canvas v-show="previewShown" ref="previewCanvasEl" :style="previewLayerStyle" class="preview-layer" />
     <canvas ref="drawCanvasEl" :style="drawLayerStyle" class="draw-layer" />
     <canvas ref="maskCanvasEl" :style="canvasStyle" class="mask-overlay" />
 
@@ -35,12 +39,27 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useDrawLayer, type DrawParams } from '../../composables/useDrawLayer'
 import { isDrawTool } from '../../utils/drawTools'
+import { downscaleMaskNearest, previewDims, shouldDeferPreviewHide } from '../../utils/editorPreview'
+import { buildMoveBackground, composeMoveFrame, holeColorFor, type PixelRect } from '../../utils/movePreview'
+// 마스크 픽셀 연산·undo 기록·엣지맵은 InpaintView 와 같은 코드를 쓴다(예전엔 복사본이 갈라졌다)
+import {
+  MaskHistory, appendLassoPoint, dragRect, encodeMaskPng, fillPolygon, fillRect, paintMaskOverlay,
+  rectIsApplicable, snapshotsOnPress, stampCircle, strokeLine, type MaskEdit, type Point,
+} from '../../utils/maskOps'
+import { decodeEdgeMap, snapToEdge as snapToEdgeMap, type EdgeMap } from '../../utils/edgeMap'
+import { PristineSource, restoreStrokeMode } from '../../utils/pristineSnapshot'
 
-interface Point { x: number; y: number }
 interface SelectionBounds { x: number; y: number; w: number; h: number }
 
 const props = withDefaults(defineProps<{
   imageSrc?: string
+  /** 실시간 프리뷰(data URL). 원본을 바꾸지 않고 그 위에 겹쳐 보여 준다. 빈 문자열이면 숨긴다. */
+  previewSrc?: string
+  /**
+   * 모자이크 지우개의 '적용 전' 그림 — 부모의 pristinePath(복원 커밋이 픽셀을 가져오는 파일) URL.
+   * 스냅숏은 이 파일에서만 뜬다(화면과 커밋이 같은 그림을 본다). 빈 문자열이면 되돌릴 그림이 없다.
+   */
+  pristineSrc?: string
   tool?: string
   brushSize?: number
   eraserMode?: string
@@ -57,6 +76,8 @@ const props = withDefaults(defineProps<{
   layerOpacity?: number
 }>(), {
   imageSrc: '',
+  previewSrc: '',
+  pristineSrc: '',
   tool: 'box',
   brushSize: 20,
   eraserMode: 'brush',
@@ -84,8 +105,11 @@ const emit = defineEmits<{
 
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
+const previewCanvasEl = ref<HTMLCanvasElement | null>(null)
 const drawCanvasEl = ref<HTMLCanvasElement | null>(null)
 const maskCanvasEl = ref<HTMLCanvasElement | null>(null)
+/** 프리뷰 레이어가 보이는지 — 프리뷰 이미지가 실제로 그려진 뒤에만 true */
+const previewShown = ref(false)
 const textInputEl = ref<HTMLInputElement | null>(null)
 const textDraft = ref('')
 const imgWidth = ref(0)
@@ -106,18 +130,18 @@ let panStartX = 0, panStartY = 0
 let lastBrushX = -1, lastBrushY = -1
 let lassoPoints: Point[] = []
 let maskData: Uint8Array | null = null
-let lastAltClick = 0  // Alt 더블클릭 감지
 let stampAccum = 0
-let maskUndoStack: Uint8Array[] = []
-let maskRedoStack: Uint8Array[] = []
 const MAX_MASK_UNDO = 10
+const maskHistory = new MaskHistory(MAX_MASK_UNDO)
 const maskUndoCount = ref(0)   // 버튼 disabled 반응형 (마스크 undo/redo 가능 여부)
 const maskRedoCount = ref(0)
 let savedZoom = 1, savedRotation = 0, savedPanX = 0, savedPanY = 0
-let pristineImg: HTMLCanvasElement | null = null  // 원본 이미지 (모자이크 지우개용)
+let pristineImg: HTMLCanvasElement | null = null  // '적용 전' 그림 (모자이크 지우개용, props.pristineSrc 에서 뜬다)
 let pristineCtx: CanvasRenderingContext2D | null = null   // getContext 반복 호출 방지
-let edgeMapData: Uint8Array | null = null  // Canny edge map (자석 올가미용) — Uint8Array
-let edgeMapW = 0, edgeMapH = 0
+let edgeMap: EdgeMap | null = null   // Canny edge map (자석 올가미용)
+let edgeMapToken = 0                 // 늦게 디코드된 옛 엣지맵이 새것(또는 비우기)을 덮지 못하게
+// 늦게 디코드된 자동 감지 마스크가 새 문서(또는 비운 뒤·교체된 이미지)에 앉지 못하게
+let maskLoadToken = 0
 
 // ── 마스크 오버레이 렌더링 상태 (성능 핵심) ──────────────────────────────────
 // 예전에는 pointermove 마다 createImageData(w*h*4) 를 새로 할당하고 maskData 전체를
@@ -147,10 +171,20 @@ let boundsDirty = true          // 지우개로 줄어들 수 있으므로 필�
 let maskPixelCount = 0
 
 // ── 영역 이동(MovePanel) 상태 ──
+// 드래그 중에는 마스크·스냅숏이 바뀌지 않으므로, 배경과 출력 버퍼는 시작 때 한 번만 만들고
+// 프레임마다 바뀐 사각형만 다시 칠한다 (utils/movePreview.ts).
 let moveActive = false
 let moveDX = 0, moveDY = 0
 let moveStartX = 0, moveStartY = 0
 let moveSnapshot: ImageData | null = null   // 이동 시작 시점의 화면 픽셀
+let moveSrc32: Uint32Array | null = null    // moveSnapshot 의 32비트 뷰
+let moveBg32: Uint32Array | null = null     // 원래 자리를 구멍으로 비운 배경
+let moveOut: ImageData | null = null        // 재사용하는 출력 버퍼
+let moveOut32: Uint32Array | null = null
+let moveBBox: PixelRect | null = null       // 옮길 조각의 경계 상자
+let moveDest: PixelRect | null = null       // 직전 프레임에 조각이 놓인 자리
+let moveNeedsFullPut = false                // 첫 프레임은 구멍까지 통째로 올려야 한다
+let moveLastDX = NaN, moveLastDY = NaN
 
 // ── 원근 보정 상태 ──
 // 꼭짓점 4개를 드래그해 '원본에서 직사각형이어야 할 영역'을 지정하면
@@ -203,6 +237,88 @@ const drawLayerStyle = computed(() => ({
   // 포인터는 컨테이너가 받는다 — 레이어가 가로채면 마스크 도구가 죽는다
   pointerEvents: 'none' as const,
 }))
+
+/** 원본 캔버스 — 프리뷰가 떠 있는 동안에는 가린다. 반투명 이미지에서 프리뷰 밑으로
+ *  원본이 비쳐 두 번 겹쳐 보이지 않게. (visibility 라 레이아웃·좌표 변환은 그대로다) */
+const baseCanvasStyle = computed(() => ({
+  ...canvasStyle.value,
+  visibility: previewShown.value ? 'hidden' as const : 'visible' as const,
+}))
+
+const previewLayerStyle = computed(() => ({
+  ...canvasStyle.value,
+  pointerEvents: 'none' as const,
+}))
+
+// ── 실시간 프리뷰 레이어 ──────────────────────────────────────────────────────
+// 프리뷰는 '보여주기'일 뿐이다. 원본(sourceImg·base 캔버스·마스크·드로잉 레이어·
+// pristine 스냅숏)은 건드리지 않고, 축소본을 원본 크기 캔버스에 늘려 그린다.
+let previewImg: HTMLImageElement | null = null
+let previewToken = 0   // 늦게 디코드된 옛 프리뷰가 새 프리뷰나 '걷기'를 덮지 못하게
+
+function releasePreviewCanvas() {
+  const pc = previewCanvasEl.value
+  // 4K 캔버스 한 장이 33MB — 숨길 때는 버퍼를 놓아 준다
+  if (pc && (pc.width > 1 || pc.height > 1)) { pc.width = 1; pc.height = 1 }
+}
+
+function paintPreview() {
+  const pc = previewCanvasEl.value
+  if (!pc || !sourceImg || !previewImg) { previewShown.value = false; return }
+  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
+  if (pc.width !== w || pc.height !== h) { pc.width = w; pc.height = h }
+  const pctx = pc.getContext('2d')
+  if (!pctx) { previewShown.value = false; return }
+  pctx.clearRect(0, 0, w, h)
+  pctx.imageSmoothingEnabled = true
+  pctx.imageSmoothingQuality = 'high'
+  pctx.drawImage(previewImg, 0, 0, w, h)
+  previewShown.value = true
+}
+
+// 원본 로드 상태 — 프리뷰를 걷을 때 '새 원본이 오는 중인가'를 판단한다(loadNewImage 가 갱신)
+let requestedImageSrc = ''     // 마지막으로 로드를 시작한 원본 src
+let baseLoadPending = false    // 그 원본이 아직 디코드 중인지
+let hidePreviewOnBaseLoad = false   // 걷기를 새 원본이 그려질 때까지 미뤄 둔 상태
+
+function hidePreviewNow() {
+  hidePreviewOnBaseLoad = false
+  previewImg = null
+  previewShown.value = false
+  releasePreviewCanvas()
+}
+
+function showPreview(src: string) {
+  const token = ++previewToken   // 디코드 중인 옛 프리뷰는 어느 쪽이든 버린다
+  if (!src) {
+    // 확정 결과로 원본이 바뀌는 중이면 새 원본이 그려질 때까지 프리뷰(= 결과와 거의 같은
+    // 그림)를 남긴다. 바로 숨기면 base 캔버스의 '적용 전' 원본이 잠깐 비친다.
+    if (shouldDeferPreviewHide({
+      previewShown: previewShown.value, baseLoadPending,
+      imageSrc: props.imageSrc || '', requestedImageSrc,
+    })) {
+      hidePreviewOnBaseLoad = true
+      return
+    }
+    hidePreviewNow()
+    return
+  }
+  hidePreviewOnBaseLoad = false
+  const img = new Image()
+  img.onload = () => {
+    if (token !== previewToken) return   // 그사이 더 새 프리뷰가 왔거나 걷혔다
+    previewImg = img
+    paintPreview()
+  }
+  img.onerror = () => {
+    if (token !== previewToken) return
+    previewImg = null
+    previewShown.value = false
+  }
+  img.src = src
+}
+
+watch(() => props.previewSrc, (src: string) => showPreview(src || ''))
 
 /** 이미지 좌표 → 컨테이너 안의 화면 좌표. `getImagePos` 의 역변환. */
 function imageToContainer(x: number, y: number): Point {
@@ -258,6 +374,8 @@ watch(() => props.layerOpacity, () => drawLayer.render())
 // ── 이미지 로드 (zoom/rotation 보존 옵션) ──
 function loadNewImage(src: string, preserveTransform = false) {
   if (!src) return
+  // 교체 전 이미지에 대해 요청한 자동 감지 마스크가 아직 디코드 중이면 버린다(새 이미지에 앉지 않게)
+  maskLoadToken++
   if (!preserveTransform) {
     savedZoom = 1; savedRotation = 0; savedPanX = 0; savedPanY = 0
   } else {
@@ -265,7 +383,23 @@ function loadNewImage(src: string, preserveTransform = false) {
     savedPanX = panX.value; savedPanY = panY.value
   }
   const img = new Image()
+  const token = ++imageLoadToken
+  requestedImageSrc = src
+  baseLoadPending = true
+  img.onerror = () => {
+    if (token !== imageLoadToken) return
+    baseLoadPending = false
+    // 원본을 못 읽었다 — 미뤄 둔 프리뷰 걷기를 더 기다릴 이유가 없다
+    if (hidePreviewOnBaseLoad) hidePreviewNow()
+  }
   img.onload = () => {
+    // undo 를 빠르게 두 번 누르는 식으로 교체가 겹치면, 먼저 요청한 쪽이 늦게 디코드돼
+    // 나중 이미지를 덮을 수 있다 — 마지막 요청만 반영한다.
+    if (token !== imageLoadToken) return
+    baseLoadPending = false
+    // 확정 결과가 그려지는 바로 이 순간에 미뤄 둔 프리뷰를 걷는다(같은 작업 안이라 번쩍임 없음).
+    // drawAll 이 옛 프리뷰를 새 크기로 다시 늘려 그리지 않게 먼저 걷는다.
+    if (hidePreviewOnBaseLoad) hidePreviewNow()
     const prevW = sourceImg?.naturalWidth ?? 0
     const prevH = sourceImg?.naturalHeight ?? 0
     sourceImg = img
@@ -288,31 +422,59 @@ function loadNewImage(src: string, preserveTransform = false) {
       restoreDirty = false
     }
 
-    // ★ pristine(원본) 스냅샷은 '이미지가 실제로 교체될 때마다' 갱신해야 한다.
-    // 예전에는 최초 1회만 만들어서 —
-    //   · 다른 이미지를 열면 모자이크 지우개가 이전 이미지 픽셀을 칠했고
-    //   · 회전/크롭 뒤에는 크기가 안 맞아 어긋난 픽셀이나 검은색을 칠했다.
-    // 모자이크를 막 적용한 직후에는 '적용 전 그림'이 있어야 지우개가 의미가 있으므로
-    // 호출자가 keepPristine 으로 유지 여부를 지정한다.
-    if (!preserveTransform || sizeChanged || !pristineImg || !keepPristineOnce) {
-      const pc = document.createElement('canvas')
-      pc.width = img.naturalWidth; pc.height = img.naturalHeight
-      const pctx = pc.getContext('2d', { willReadFrequently: true })!
-      pctx.drawImage(img, 0, 0)
-      pristineImg = pc
-      pristineCtx = pctx
-    }
-    keepPristineOnce = false
+    // pristine('적용 전') 스냅숏은 여기서 뜨지 않는다 — 복원 커밋이 픽셀을 가져오는 pristinePath
+    // 파일(props.pristineSrc)에서만 뜬다(loadPristine). 예전에는 로드한 이미지에서 뜨고 효과 직후
+    // 한 번만 유지해, 효과를 두 번 적용하면 화면(첫 효과 전 원본)과 커밋(첫 효과 결과)이 갈렸다.
 
     drawAll()
   }
   img.src = src
 }
 
-// 다음 이미지 교체 1회에 한해 pristine 스냅샷을 유지한다.
-// (모자이크/블러를 적용한 직후 — 지우개가 '적용 전' 픽셀을 되살릴 수 있어야 함)
-let keepPristineOnce = false
-function keepPristineForNextLoad() { keepPristineOnce = true }
+let imageLoadToken = 0
+
+// ── 모자이크 지우개의 '적용 전' 그림 ──
+// 부모의 pristinePath(복원 커밋의 source_path) 파일을 그대로 디코드해 스냅숏으로 쓴다.
+// 순서 판정(늦게 끝난 옛 디코드·문서 전환 뒤의 디코드 버리기)은 utils/pristineSnapshot.
+const pristineSource = new PristineSource()
+
+function loadPristine(src: string) {
+  const token = pristineSource.request(src)
+  // 출처가 바뀌었다 — 새 그림이 디코드될 때까지 옛 스냅숏으로 칠하지 않는다(그사이 커밋은 새 출처로 간다)
+  pristineImg = null
+  pristineCtx = null
+  if (!src) return
+  const img = new Image()
+  img.onload = () => {
+    if (!pristineSource.accepts(token)) return   // 더 새 출처가 왔거나 문서가 바뀌었다
+    const pc = document.createElement('canvas')
+    pc.width = img.naturalWidth; pc.height = img.naturalHeight
+    const pctx = pc.getContext('2d', { willReadFrequently: true })
+    if (!pctx) { pristineSource.fail(token); return }
+    pctx.drawImage(img, 0, 0)
+    pristineImg = pc
+    pristineCtx = pctx
+  }
+  // 못 읽으면(문서를 연 채 파일이 지워짐·잠김) 실패로 기록한다 — 지우개는 칠하지 않고 영역만 기록해
+  // 커밋을 보내고, 백엔드가 파일을 직접 읽어 복원하거나 '찾을 수 없습니다'를 알린다(restoreStrokeMode 'mark').
+  // 예전엔 아무것도 하지 않아 스냅숏을 영영 기다리며('skip') 지우개가 조용히 멈췄다.
+  img.onerror = () => { pristineSource.fail(token) }
+  img.src = src
+}
+
+watch(() => props.pristineSrc, (src: string) => loadPristine(src || ''))
+
+/**
+ * 문서가 바뀌었다(열기·닫기) — 옛 문서의 '적용 전' 스냅숏·디코드 중인 출처·커밋 안 한 복원 영역을
+ * 버린다. 부모(EditorView._resetDocTransients)가 부른다(부모의 pristinePath 도 함께 비워진다).
+ * A 의 pristinePath 디코드가 B 를 연 뒤에 끝나도 받아들이지 않는다 — B 위에 A 의 픽셀을 칠하지 않게.
+ */
+function resetPristine() {
+  pristineSource.reset()
+  pristineImg = null
+  pristineCtx = null
+  clearRestoreMask()
+}
 
 watch(() => props.imageSrc, (src: string) => {
   // 효과 적용 후 이미지 교체 시 transform 유지
@@ -410,13 +572,7 @@ function flushMaskOverlay() {
 
   const hasDirty = x2 > x1 && y2 > y1
   if (hasDirty) {
-    for (let y = y1; y < y2; y++) {
-      const row = y * w
-      for (let x = x1; x < x2; x++) {
-        const i = row + x
-        maskPixels[i] = maskData[i] > 0 ? MASK_RGBA32 : 0
-      }
-    }
+    paintMaskOverlay(maskPixels, maskData, w, x1, y1, x2, y2, MASK_RGBA32)
     // 마스크 레이어는 전체를 다시 올리지 않고 변경 영역만 갱신
     maskCtx.putImageData(maskImageData, 0, 0, x1, y1, x2 - x1, y2 - y1)
   }
@@ -488,14 +644,18 @@ function drawAll() {
     markDirtyAll()
     flushMaskOverlay()
   }
-  // 이미지 크기가 바뀌면 레이어도 다시 잡는다. 크기가 같으면 그린 것을 지키기 위해
-  // 건드리지 않는다 — 색보정 프리뷰도 여기를 지나가기 때문이다.
+  // 이미지 크기가 바뀌면(회전·자르기·리사이즈·다른 이미지) 레이어도 다시 잡는다.
+  // 크기가 같으면 그린 것을 지키기 위해 건드리지 않는다. 실시간 프리뷰는 여기를 지나가지
+  // 않는다 — 별도 프리뷰 레이어에만 그려진다(예전에는 축소 프리뷰가 이 경로로 들어와
+  // 레이어·마스크·pristine 을 초기화했다).
   if (drawCanvasEl.value
       && (drawCanvasEl.value.width !== c.width || drawCanvasEl.value.height !== c.height)) {
     drawLayer.resize(c.width, c.height)
   } else {
     drawLayer.render()
   }
+  // 프리뷰가 떠 있는 채로 원본이 바뀌면 새 크기에 맞춰 다시 늘려 그린다
+  if (previewImg) paintPreview()
 }
 
 /** 화면 1px이 이미지 좌표로 몇 px인지 — 핸들/선 두께를 줌과 무관하게 유지 */
@@ -652,7 +812,7 @@ function hitPerspectiveHandle(x: number, y: number): number {
 }
 
 /** 원근 보정 시작 — 이미지 모서리에서 5% 안쪽으로 꼭짓점 4개 배치
- *  (PyQt판 perspective_dialog.py 와 동일한 초기값) */
+ *  (PyQt판 tabs/editor/perspective_dialog.py(은퇴해 삭제됨)와 동일한 초기값) */
 function beginPerspective() {
   if (!sourceImg) return
   const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
@@ -741,46 +901,33 @@ function onDblClick(e: MouseEvent) {
   if (e.altKey) resetTransform()
 }
 
+function syncMaskHistoryCounts() {
+  maskUndoCount.value = maskHistory.undoCount
+  maskRedoCount.value = maskHistory.redoCount
+}
 function saveMaskState() {
   if (maskData) {
-    maskUndoStack.push(new Uint8Array(maskData))
-    while (maskUndoStack.length > MAX_MASK_UNDO) maskUndoStack.shift()
-    maskRedoStack = []
-    maskUndoCount.value = maskUndoStack.length
-    maskRedoCount.value = 0
+    maskHistory.save(maskData)
+    syncMaskHistoryCounts()
   }
 }
 // 마스크를 한 단계 되돌림. 되돌렸으면 true(이미지 undo로 안 넘어가도록), 없으면 false.
+// 크기가 다른 스냅샷(이미지가 바뀐 뒤 남은 stale 항목)은 MaskHistory 가 버린다.
 function undoMask(): boolean {
-  if (maskUndoStack.length === 0 || !maskData) return false
-  const snapshot = maskUndoStack.pop()!
-  // 크기가 다른 스냅샷(이미지가 바뀐 뒤 남은 stale 항목)은 버린다
-  if (snapshot.length !== maskData.length) {
-    maskUndoStack = []; maskRedoStack = []
-    maskUndoCount.value = 0; maskRedoCount.value = 0
-    return false
-  }
-  maskRedoStack.push(new Uint8Array(maskData))
-  maskData.set(snapshot)
-  maskUndoCount.value = maskUndoStack.length
-  maskRedoCount.value = maskRedoStack.length
+  if (!maskData) return false
+  const applied = maskHistory.undo(maskData)
+  syncMaskHistoryCounts()
+  if (!applied) return false
   boundsDirty = true
   recomputeBounds()
   markDirtyAll(); flushMaskOverlay(); emitMaskBounds()
   return true
 }
 function redoMask(): boolean {
-  if (maskRedoStack.length === 0 || !maskData) return false
-  const snapshot = maskRedoStack.pop()!
-  if (snapshot.length !== maskData.length) {
-    maskRedoStack = []
-    maskRedoCount.value = 0
-    return false
-  }
-  maskUndoStack.push(new Uint8Array(maskData))
-  maskData.set(snapshot)
-  maskUndoCount.value = maskUndoStack.length
-  maskRedoCount.value = maskRedoStack.length
+  if (!maskData) return false
+  const applied = maskHistory.redo(maskData)
+  syncMaskHistoryCounts()
+  if (!applied) return false
   boundsDirty = true
   recomputeBounds()
   markDirtyAll(); flushMaskOverlay(); emitMaskBounds()
@@ -841,9 +988,8 @@ function onMouseDown(e: PointerEvent) {
   const brushR = sizeFor(props.brushSize)
 
   // maskData가 즉시 바뀌는 도구만 undo 스냅샷 저장 (box/lasso는 mouseup 적용 시 저장 —
-  //  빈 클릭/미세 드래그가 빈 undo 단계로 쌓이거나 redo를 날리는 것 방지)
-  if (props.tool === 'brush' || props.tool === 'stamp'
-      || (props.tool === 'eraser' && (props.eraserRestore || props.eraserMode === 'brush'))) {
+  //  빈 클릭/미세 드래그가 빈 undo 단계로 쌓이거나 redo를 날리는 것 방지) — InpaintView 와 같은 정책
+  if (snapshotsOnPress(props.tool, props.eraserMode, props.eraserRestore)) {
     saveMaskState()
   }
   if (props.tool === 'lasso') {
@@ -929,9 +1075,9 @@ function onMouseMove(e: PointerEvent) {
     lastBrushX = pos.x; lastBrushY = pos.y
     markGuideDirty()
   } else if (props.tool === 'lasso') {
+    // 직전 점과 1px 미만이면 버린다 — 제자리 이벤트(특히 같은 엣지에 붙는 자석)가 꼭짓점을 불리지 않게
     const sp = props.magneticLasso ? snapToEdge(pos.x, pos.y) : pos
-    lassoPoints.push({ x: sp.x, y: sp.y })
-    markGuideDirty()
+    if (appendLassoPoint(lassoPoints, sp)) markGuideDirty()
   } else if (props.tool === 'brush') {
     // 펜 압력에 따라 브러시 반경 동적 조정 (마우스는 props.brushSize 그대로)
     let brushR = props.brushSize
@@ -961,8 +1107,7 @@ function onMouseMove(e: PointerEvent) {
       lastBrushX = pos.x; lastBrushY = pos.y
       markGuideDirty()
     } else if (props.eraserMode === 'lasso') {
-      lassoPoints.push({ x: pos.x, y: pos.y })
-      markGuideDirty()
+      if (appendLassoPoint(lassoPoints, pos)) markGuideDirty()
     }
   }
 }
@@ -995,17 +1140,15 @@ function onMouseUp(e: PointerEvent) {
   const pos = getImagePos(e)
 
   if (props.tool === 'box') {
-    const x1 = Math.round(Math.min(startX, pos.x)), y1 = Math.round(Math.min(startY, pos.y))
-    const x2 = Math.round(Math.max(startX, pos.x)), y2 = Math.round(Math.max(startY, pos.y))
-    if (x2 - x1 > 3 && y2 - y1 > 3) { saveMaskState(); fillMaskRect(x1, y1, x2, y2) }
+    const r = dragRect(startX, startY, pos.x, pos.y)
+    if (rectIsApplicable(r)) { saveMaskState(); fillMaskRect(r.x1, r.y1, r.x2, r.y2) }
   } else if (props.tool === 'lasso') {
     if (lassoPoints.length > 2) { saveMaskState(); fillMaskPolygon(lassoPoints) }
     lassoPoints = []
   } else if (props.tool === 'eraser') {
     if (props.eraserMode === 'box') {
-      const x1 = Math.round(Math.min(startX, pos.x)), y1 = Math.round(Math.min(startY, pos.y))
-      const x2 = Math.round(Math.max(startX, pos.x)), y2 = Math.round(Math.max(startY, pos.y))
-      if (x2 - x1 > 3 && y2 - y1 > 3) { saveMaskState(); eraseMaskRect(x1, y1, x2, y2) }
+      const r = dragRect(startX, startY, pos.x, pos.y)
+      if (rectIsApplicable(r)) { saveMaskState(); eraseMaskRect(r.x1, r.y1, r.x2, r.y2) }
     } else if (props.eraserMode === 'lasso') {
       if (lassoPoints.length > 2) { saveMaskState(); eraseMaskPolygon(lassoPoints) }
       lassoPoints = []
@@ -1019,21 +1162,26 @@ function onMouseUp(e: PointerEvent) {
 }
 
 // ── 마스크 조작 ──
+// 픽셀 연산은 utils/maskOps(InpaintView 와 공용)가 하고, 여기서는 결과(건드린 사각형·켜진 픽셀 수
+// 변화)로 경계 상자·dirty 영역·픽셀 카운터만 맞춘다.
+function maskBuffer() {
+  return maskData && sourceImg ? { data: maskData, w: sourceImg.naturalWidth, h: sourceImg.naturalHeight } : null
+}
+/** 칠한 결과 반영 — 켜기는 경계 상자를 넓힌다 */
+function commitPaint(edit: MaskEdit) {
+  maskPixelCount += edit.delta
+  growBounds(edit.x1, edit.y1, edit.x2, edit.y2)
+  markDirty(edit.x1, edit.y1, edit.x2, edit.y2)
+}
+/** 지운 결과 반영 — 경계가 줄어들 수 있으니 정확한 경계는 mouseup 때 한 번만 재계산 */
+function commitErase(edit: MaskEdit) {
+  maskPixelCount += edit.delta
+  boundsDirty = true
+  markDirty(edit.x1, edit.y1, edit.x2, edit.y2)
+}
 function paintMaskBar(cx: number, cy: number, bw: number, bh: number) {
-  if (!maskData || !sourceImg) return
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const x1 = Math.max(0, Math.round(cx - bw / 2))
-  const y1 = Math.max(0, Math.round(cy - bh / 2))
-  const x2 = Math.min(w, Math.round(cx + bw / 2))
-  const y2 = Math.min(h, Math.round(cy + bh / 2))
-  for (let y = y1; y < y2; y++) {
-    const row = y * w
-    for (let x = x1; x < x2; x++) {
-      if (maskData[row + x] === 0) { maskData[row + x] = 255; maskPixelCount++ }
-    }
-  }
-  growBounds(x1, y1, x2, y2)
-  markDirty(x1, y1, x2, y2)
+  const mask = maskBuffer(); if (!mask) return
+  commitPaint(fillRect(mask, cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2, true))
 }
 
 function paintStamp(cx: number, cy: number) {
@@ -1043,140 +1191,38 @@ function paintStamp(cx: number, cy: number) {
 }
 
 function paintMaskCircle(cx: number, cy: number, r: number) {
-  if (!maskData || !sourceImg) return
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const radius = Math.max(1, r)
-  const rr = radius * radius
-  const x1 = Math.max(0, Math.floor(cx - radius)), x2 = Math.min(w, Math.ceil(cx + radius))
-  const y1 = Math.max(0, Math.floor(cy - radius)), y2 = Math.min(h, Math.ceil(cy + radius))
-  for (let y = y1; y < y2; y++) {
-    const row = y * w
-    const dy = y - cy
-    const dy2 = dy * dy
-    for (let x = x1; x < x2; x++) {
-      const dx = x - cx
-      if (dx * dx + dy2 <= rr && maskData[row + x] === 0) {
-        maskData[row + x] = 255
-        maskPixelCount++
-      }
-    }
-  }
-  growBounds(x1, y1, x2, y2)
-  markDirty(x1, y1, x2, y2)
+  const mask = maskBuffer(); if (!mask) return
+  commitPaint(stampCircle(mask, cx, cy, r, true))
 }
 function paintMaskLine(x0: number, y0: number, x1: number, y1: number, r: number) {
-  const dist = Math.hypot(x1 - x0, y1 - y0)
-  const steps = Math.max(1, Math.ceil(dist / Math.max(1, r * 0.3)))
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
-    paintMaskCircle(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, r)
-  }
+  const mask = maskBuffer(); if (!mask) return
+  commitPaint(strokeLine(mask, x0, y0, x1, y1, r, true))
 }
 function eraseMaskCircle(cx: number, cy: number, r: number) {
-  if (!maskData || !sourceImg) return
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const radius = Math.max(1, r)
-  const rr = radius * radius
-  const x1 = Math.max(0, Math.floor(cx - radius)), x2 = Math.min(w, Math.ceil(cx + radius))
-  const y1 = Math.max(0, Math.floor(cy - radius)), y2 = Math.min(h, Math.ceil(cy + radius))
-  for (let y = y1; y < y2; y++) {
-    const row = y * w
-    const dy = y - cy
-    const dy2 = dy * dy
-    for (let x = x1; x < x2; x++) {
-      const dx = x - cx
-      if (dx * dx + dy2 <= rr && maskData[row + x] !== 0) {
-        maskData[row + x] = 0
-        maskPixelCount--
-      }
-    }
-  }
-  // 지우면 경계가 줄어들 수 있다 — 정확한 경계는 mouseup 때 한 번만 재계산
-  boundsDirty = true
-  markDirty(x1, y1, x2, y2)
+  const mask = maskBuffer(); if (!mask) return
+  commitErase(stampCircle(mask, cx, cy, r, false))
 }
 function eraseMaskLine(x0: number, y0: number, x1: number, y1: number, r: number) {
-  const dist = Math.hypot(x1 - x0, y1 - y0)
-  const steps = Math.max(1, Math.ceil(dist / Math.max(1, r * 0.3)))
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
-    eraseMaskCircle(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, r)
-  }
+  const mask = maskBuffer(); if (!mask) return
+  commitErase(strokeLine(mask, x0, y0, x1, y1, r, false))
 }
 function fillMaskRect(x1: number, y1: number, x2: number, y2: number) {
-  if (!maskData || !sourceImg) return
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const cx1 = Math.max(0, x1), cx2 = Math.min(w, x2)
-  const cy1 = Math.max(0, y1), cy2 = Math.min(h, y2)
-  for (let y = cy1; y < cy2; y++) {
-    const row = y * w
-    for (let x = cx1; x < cx2; x++) {
-      if (maskData[row + x] === 0) { maskData[row + x] = 255; maskPixelCount++ }
-    }
-  }
-  growBounds(cx1, cy1, cx2, cy2)
-  markDirty(cx1, cy1, cx2, cy2)
+  const mask = maskBuffer(); if (!mask) return
+  commitPaint(fillRect(mask, x1, y1, x2, y2, true))
 }
 function eraseMaskRect(x1: number, y1: number, x2: number, y2: number) {
-  if (!maskData || !sourceImg) return
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const cx1 = Math.max(0, x1), cx2 = Math.min(w, x2)
-  const cy1 = Math.max(0, y1), cy2 = Math.min(h, y2)
-  for (let y = cy1; y < cy2; y++) {
-    const row = y * w
-    for (let x = cx1; x < cx2; x++) {
-      if (maskData[row + x] !== 0) { maskData[row + x] = 0; maskPixelCount-- }
-    }
-  }
-  boundsDirty = true
-  markDirty(cx1, cy1, cx2, cy2)
+  const mask = maskBuffer(); if (!mask) return
+  commitErase(fillRect(mask, x1, y1, x2, y2, false))
 }
-function _polygonBBox(pts: Point[], w: number, h: number) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const p of pts) {
-    if (p.x < minX) minX = p.x
-    if (p.y < minY) minY = p.y
-    if (p.x > maxX) maxX = p.x
-    if (p.y > maxY) maxY = p.y
-  }
-  return {
-    x1: Math.max(0, Math.floor(minX)), y1: Math.max(0, Math.floor(minY)),
-    x2: Math.min(w, Math.ceil(maxX)), y2: Math.min(h, Math.ceil(maxY)),
-  }
-}
+// 올가미 채우기는 스캔라인(maskOps.fillPolygon) — 예전 bbox 전 픽셀 × 꼭짓점 point-in-polygon 은
+// 긴 올가미(수백 점)·큰 이미지에서 mouseup 한 번에 수 초씩 멈췄다. 결과는 픽셀 단위로 같다.
 function fillMaskPolygon(pts: Point[]) {
-  if (!maskData || !sourceImg || pts.length < 3) return
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const { x1, y1, x2, y2 } = _polygonBBox(pts, w, h)
-  for (let y = y1; y < y2; y++) {
-    const row = y * w
-    for (let x = x1; x < x2; x++) {
-      if (pip(x, y, pts) && maskData[row + x] === 0) { maskData[row + x] = 255; maskPixelCount++ }
-    }
-  }
-  growBounds(x1, y1, x2, y2)
-  markDirty(x1, y1, x2, y2)
+  const mask = maskBuffer(); if (!mask || pts.length < 3) return
+  commitPaint(fillPolygon(mask, pts, true))
 }
 function eraseMaskPolygon(pts: Point[]) {
-  if (!maskData || !sourceImg || pts.length < 3) return
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const { x1, y1, x2, y2 } = _polygonBBox(pts, w, h)
-  for (let y = y1; y < y2; y++) {
-    const row = y * w
-    for (let x = x1; x < x2; x++) {
-      if (pip(x, y, pts) && maskData[row + x] !== 0) { maskData[row + x] = 0; maskPixelCount-- }
-    }
-  }
-  boundsDirty = true
-  markDirty(x1, y1, x2, y2)
-}
-function pip(x: number, y: number, poly: Point[]) {
-  let inside = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside
-  }
-  return inside
+  const mask = maskBuffer(); if (!mask || pts.length < 3) return
+  commitErase(fillPolygon(mask, pts, false))
 }
 
 // ── 모자이크 지우개 (원본 복원) ──────────────────────────────────────────────
@@ -1195,11 +1241,16 @@ function ensureRestoreMask() {
 /** 한 스트로크 구간을 한 번의 getImageData/putImageData 로 처리.
  *  예전에는 보간 스텝마다(수십 회) 리드백을 해서 지우개가 가장 느린 도구였다. */
 function restoreLine(x0: number, y0: number, x1: number, y1: number, r: number) {
-  if (!ctx || !pristineImg || !pristineCtx || !sourceImg) return
+  if (!ctx || !sourceImg) return
   const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
   const radius = Math.max(1, r)
-  // pristine 이 현재 이미지와 크기가 다르면(회전/크롭 후) 복원은 무의미하다
-  if (pristineImg.width !== w || pristineImg.height !== h) return
+  // 'paint': pristinePath 의 그림을 칠한다. 'mark': 칠하지 않고 영역만 기록해 커밋을 부모에 맡긴다 —
+  // 되돌릴 그림이 아예 없으면 부모가 '되돌릴 이전 상태가 없습니다'를, pristinePath 디코드가 실패했으면
+  // 백엔드가 직접 읽어 복원하거나 '찾을 수 없습니다'를 알린다. 'skip': 스냅숏 디코드 중이거나 크기가
+  // 다르다(회전/크롭 후 — 백엔드도 거절한다).
+  const mode = restoreStrokeMode(pristineSource.requested, pristineImg, { width: w, height: h },
+    pristineSource.failed)
+  if (mode === 'skip') return
 
   const bx1 = Math.max(0, Math.floor(Math.min(x0, x1) - radius))
   const by1 = Math.max(0, Math.floor(Math.min(y0, y1) - radius))
@@ -1209,8 +1260,8 @@ function restoreLine(x0: number, y0: number, x1: number, y1: number, r: number) 
   if (sw <= 0 || sh <= 0) return
 
   ensureRestoreMask()
-  const src = pristineCtx.getImageData(bx1, by1, sw, sh)
-  const dst = ctx.getImageData(bx1, by1, sw, sh)
+  const src = mode === 'paint' && pristineCtx ? pristineCtx.getImageData(bx1, by1, sw, sh) : null
+  const dst = src ? ctx.getImageData(bx1, by1, sw, sh) : null
 
   const dist = Math.hypot(x1 - x0, y1 - y0)
   const steps = Math.max(1, Math.ceil(dist / Math.max(1, radius * 0.3)))
@@ -1231,16 +1282,18 @@ function restoreLine(x0: number, y0: number, x1: number, y1: number, r: number) 
       for (let px = px1; px < px2; px++) {
         const dx = px - cx
         if (dx * dx + dy2 > rr) continue
-        const i = (rowOff + (px - bx1)) * 4
-        dst.data[i] = src.data[i]
-        dst.data[i + 1] = src.data[i + 1]
-        dst.data[i + 2] = src.data[i + 2]
-        dst.data[i + 3] = src.data[i + 3]
+        if (src && dst) {
+          const i = (rowOff + (px - bx1)) * 4
+          dst.data[i] = src.data[i]
+          dst.data[i + 1] = src.data[i + 1]
+          dst.data[i + 2] = src.data[i + 2]
+          dst.data[i + 3] = src.data[i + 3]
+        }
         if (restoreMask) restoreMask[py * w + px] = 255
       }
     }
   }
-  ctx.putImageData(dst, bx1, by1)
+  if (dst) ctx.putImageData(dst, bx1, by1)
   restoreDirty = true
 }
 
@@ -1251,16 +1304,7 @@ function restoreCircle(cx: number, cy: number, r: number) {
 /** 복원 영역을 흑백 PNG 마스크로 — 백엔드가 pristine 픽셀을 되돌리는 데 쓴다 */
 function getRestoreMaskBase64(): string | null {
   if (!restoreDirty || !restoreMask || !sourceImg) return null
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const tc = document.createElement('canvas'); tc.width = w; tc.height = h
-  const tctx = tc.getContext('2d')!
-  const id = tctx.createImageData(w, h)
-  const px = new Uint32Array(id.data.buffer)
-  for (let i = 0; i < restoreMask.length; i++) {
-    px[i] = restoreMask[i] > 0 ? 0xffffffff : 0xff000000
-  }
-  tctx.putImageData(id, 0, 0)
-  return tc.toDataURL('image/png')
+  return encodeMaskPng(restoreMask, sourceImg.naturalWidth, sourceImg.naturalHeight)
 }
 
 function hasPendingRestore(): boolean { return restoreDirty }
@@ -1270,38 +1314,23 @@ function clearRestoreMask() {
   restoreDirty = false
 }
 
-// ── 자석 올가미: edge map 로드 + snap ──
+// ── 자석 올가미: edge map 로드 + snap (디코드·스냅은 utils/edgeMap — InpaintView 와 공용) ──
 function loadEdgeMap(b64: string) {
   if (!b64) return
-  const img = new Image()
-  img.onload = () => {
-    const tc = document.createElement('canvas')
-    tc.width = img.naturalWidth; tc.height = img.naturalHeight
-    const tctx = tc.getContext('2d')!
-    tctx.drawImage(img, 0, 0)
-    const id = tctx.getImageData(0, 0, tc.width, tc.height)
-    edgeMapW = tc.width; edgeMapH = tc.height
-    edgeMapData = new Uint8Array(edgeMapW * edgeMapH)
-    for (let i = 0; i < edgeMapData.length; i++) edgeMapData[i] = id.data[i * 4]
-  }
-  img.src = b64
+  const token = ++edgeMapToken
+  void decodeEdgeMap(b64).then((decoded) => {
+    if (token === edgeMapToken && decoded) edgeMap = decoded
+  })
+}
+
+/** 엣지맵을 버린다 — 이미지가 바뀌면 부모가 부른다(옛 이미지 윤곽에 붙지 않게). */
+function clearEdgeMap() {
+  edgeMapToken++
+  edgeMap = null
 }
 
 function snapToEdge(x: number, y: number): Point {
-  if (!edgeMapData || !props.magneticLasso) return { x, y }
-  const r = props.snapRadius
-  let bestDist = Infinity, bx = x, by = y
-  const x0 = Math.max(0, Math.floor(x - r)), y0 = Math.max(0, Math.floor(y - r))
-  const x1 = Math.min(edgeMapW, Math.ceil(x + r)), y1 = Math.min(edgeMapH, Math.ceil(y + r))
-  for (let py = y0; py < y1; py++) {
-    for (let px = x0; px < x1; px++) {
-      if (edgeMapData[py * edgeMapW + px] > 127) {
-        const d = (px - x) ** 2 + (py - y) ** 2
-        if (d < bestDist) { bestDist = d; bx = px; by = py }
-      }
-    }
-  }
-  return { x: bx, y: by }
+  return snapToEdgeMap(props.magneticLasso ? edgeMap : null, x, y, props.snapRadius)
 }
 
 function emitMaskBounds() {
@@ -1316,14 +1345,16 @@ function onWheel(e: WheelEvent) {
 }
 
 function clearSelection(resetHistory = false) {
+  // 디코드 중인 자동 감지 마스크도 버린다 — 비운 직후(새 문서·이미지 작업·Esc) 늦게 앉지 않게
+  maskLoadToken++
   if (maskData) maskData.fill(0)
   resetMaskBounds()
   hasMask.value = false; lassoPoints = []
   // 이미지 작업/새 이미지 로드 후에만(resetHistory=true) 마스크 히스토리 리셋 — stale 마스크
   // undo가 이미지 undo를 가리지 않게. Esc/취소(기본 false)는 보존 → Ctrl+Z로 마스크 복구 가능.
   if (resetHistory) {
-    maskUndoStack = []; maskRedoStack = []
-    maskUndoCount.value = 0; maskRedoCount.value = 0
+    maskHistory.clear()
+    syncMaskHistoryCounts()
   }
   markDirtyAll()
   flushMaskOverlay()
@@ -1341,27 +1372,42 @@ function getSelection(): SelectionBounds | null {
   }
 }
 
-function getMaskBase64() {
+/**
+ * 마스크를 흑백 PNG 로. 칠한 곳이 없으면 null — 예전에는 이미지를 열기만 해도 maskData 가
+ * 있어서 전면 검은 PNG 를 돌려줬고, '마스크 있음' 가드가 늘 참이었다.
+ *
+ * `maxEdge` 를 주면 백엔드 프리뷰와 같은 크기로 먼저 줄인다(최근접). 프리뷰는 백엔드가
+ * 어차피 그 크기로 줄여 쓰므로, 원본 해상도 PNG 인코딩(4K 에서 틱마다 수십 ms)이 낭비다.
+ */
+function getMaskBase64(opts: { maxEdge?: number } = {}): string | null {
   if (!maskData || !sourceImg) return null
-  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const tc = document.createElement('canvas'); tc.width = w; tc.height = h
-  const tctx = tc.getContext('2d')!
-  const id = tctx.createImageData(w, h)
-  // 32bit 뷰로 픽셀당 1회 대입 (0xAABBGGRR, little-endian)
-  const px = new Uint32Array(id.data.buffer)
-  for (let i = 0; i < maskData.length; i++) {
-    px[i] = maskData[i] > 0 ? 0xffffffff : 0xff000000
+  if (!getSelection()) return null
+  let w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
+  let data = maskData
+  if (opts.maxEdge) {
+    const d = previewDims(w, h, opts.maxEdge)
+    if (d.w !== w || d.h !== h) {
+      data = downscaleMaskNearest(maskData, w, h, d.w, d.h)
+      w = d.w; h = d.h
+    }
   }
-  tctx.putImageData(id, 0, 0)
-  return tc.toDataURL('image/png')
+  // 32bit 뷰로 픽셀당 1회 대입 (0xAABBGGRR, little-endian) — InpaintView 와 같은 인코더
+  return encodeMaskPng(data, w, h)
 }
 
 // 외부에서 마스크 로드 (YOLO/SAM3 auto-detect 결과)
+// data URL 디코드는 비동기다. 결과가 도착한 뒤(부모의 문서 세대 게이트를 통과한 뒤) 디코드가 끝나기
+// 전에 다른 문서를 열거나 이미지가 바뀌면, 예전에는 onload 가 그 새 이미지 위에 옛 문서의 마스크를
+// 썼다(같은 크기면 그대로, 다르면 늘려서). 요청 시점의 토큰·원본과 다르면 버린다.
 function loadMaskFromBase64(b64: string) {
   if (!sourceImg) return
+  const token = ++maskLoadToken          // 더 새 마스크 요청·비우기·이미지 교체가 오면 무효
+  const imgToken = imageLoadToken        // 이 뒤에 시작한 원본 로드(새 문서·작업 결과·undo)가 있으면 무효
+  const forImg = sourceImg               // 원본 자체가 바뀌었으면 무효
+  const stale = () => token !== maskLoadToken || imgToken !== imageLoadToken || sourceImg !== forImg
   const img = new Image()
   img.onload = () => {
-    if (!sourceImg) return
+    if (stale() || !sourceImg) return
     const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
     const tc = document.createElement('canvas'); tc.width = w; tc.height = h
     const tctx = tc.getContext('2d', { willReadFrequently: true })!
@@ -1388,73 +1434,81 @@ function loadMaskFromBase64(b64: string) {
   img.src = b64
 }
 
+/** 디코드 중인 자동 감지 마스크를 버린다 — 문서가 바뀔 때(열기·닫기) 부모가 부른다. */
+function cancelMaskLoad() {
+  maskLoadToken++
+}
+
 // ── 영역 이동 미리보기 ──────────────────────────────────────────────────────
 // 확정 전까지는 화면에서만 옮겨 보여주고, 실제 픽셀 연산은 백엔드 move_region이 한다.
-function beginMove() {
-  if (!ctx || !sourceImg) return
+// 배경(구멍 뚫린 스냅숏)과 출력 버퍼는 여기서 한 번만 만든다 — 드래그 중엔 안 바뀐다.
+/** @param fillColor 구멍 채우기 색('black'|'white') — 확정 결과(move_region)와 같은 색으로 보여 준다 */
+function beginMove(fillColor = 'black') {
+  if (!ctx || !sourceImg || !maskData) return
   const sel = getSelection()
   if (!sel) return
+  const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
   moveActive = true
   moveDX = 0; moveDY = 0
-  moveSnapshot = ctx.getImageData(0, 0, sourceImg.naturalWidth, sourceImg.naturalHeight)
+  moveSnapshot = ctx.getImageData(0, 0, w, h)
+  moveSrc32 = new Uint32Array(moveSnapshot.data.buffer)
+  moveBBox = { x: sel.x, y: sel.y, w: sel.w, h: sel.h }
+  moveBg32 = buildMoveBackground(moveSrc32, maskData, w, h, moveBBox, holeColorFor(fillColor))
+  moveOut = new ImageData(w, h)
+  moveOut32 = new Uint32Array(moveOut.data.buffer)
+  moveOut32.set(moveBg32)
+  moveDest = null
+  moveNeedsFullPut = true
+  moveLastDX = NaN; moveLastDY = NaN
 }
 
 function renderMovePreview() {
-  if (!ctx || !moveSnapshot || !maskData || !sourceImg) return
+  if (!ctx || !moveOut || !moveOut32 || !moveBg32 || !moveSrc32 || !moveBBox || !maskData || !sourceImg) return
   const w = sourceImg.naturalWidth, h = sourceImg.naturalHeight
-  const out = ctx.createImageData(w, h)
-  const src = moveSnapshot.data
-  const dst = out.data
-  // 배경: 마스크 밖은 그대로, 마스크 안(원래 자리)은 검게 비움
-  for (let i = 0; i < w * h; i++) {
-    const o = i * 4
-    if (maskData[i] > 0) {
-      dst[o] = 0; dst[o + 1] = 0; dst[o + 2] = 0; dst[o + 3] = 255
-    } else {
-      dst[o] = src[o]; dst[o + 1] = src[o + 1]; dst[o + 2] = src[o + 2]; dst[o + 3] = src[o + 3]
-    }
-  }
-  // 옮겨진 조각을 덧그린다
   const dx = Math.round(moveDX), dy = Math.round(moveDY)
-  for (let y = 0; y < h; y++) {
-    const ty = y + dy
-    if (ty < 0 || ty >= h) continue
-    for (let x = 0; x < w; x++) {
-      if (maskData[y * w + x] === 0) continue
-      const tx = x + dx
-      if (tx < 0 || tx >= w) continue
-      const so = (y * w + x) * 4
-      const to = (ty * w + tx) * 4
-      dst[to] = src[so]; dst[to + 1] = src[so + 1]
-      dst[to + 2] = src[so + 2]; dst[to + 3] = src[so + 3]
-    }
+  if (!moveNeedsFullPut && dx === moveLastDX && dy === moveLastDY) return   // 같은 자리 — 할 일 없음
+  const frame = composeMoveFrame(moveOut32, moveBg32, moveSrc32, maskData, w, h, moveBBox, moveDest, dx, dy)
+  moveDest = frame.dest
+  moveLastDX = dx; moveLastDY = dy
+  if (moveNeedsFullPut) {
+    // 첫 프레임 — 원래 자리의 구멍까지 캔버스에 올라가야 한다
+    ctx.putImageData(moveOut, 0, 0)
+    moveNeedsFullPut = false
+    return
   }
-  ctx.putImageData(out, 0, 0)
+  // 바뀐 사각형(직전 조각 자리 + 새 조각 자리)만 올린다
+  for (const r of frame.dirty) ctx.putImageData(moveOut, 0, 0, r.x, r.y, r.w, r.h)
+}
+
+function resetMoveBuffers() {
+  moveActive = false
+  moveSnapshot = null
+  moveSrc32 = null; moveBg32 = null
+  moveOut = null; moveOut32 = null
+  moveBBox = null; moveDest = null
+  moveNeedsFullPut = false
+  moveDX = 0; moveDY = 0
 }
 
 function endMove(): { dx: number; dy: number } {
   const result = { dx: Math.round(moveDX), dy: Math.round(moveDY) }
-  moveActive = false
-  moveSnapshot = null
-  moveDX = 0; moveDY = 0
+  resetMoveBuffers()
   return result
 }
 
 function cancelMove() {
   if (ctx && moveSnapshot) ctx.putImageData(moveSnapshot, 0, 0)
-  moveActive = false
-  moveSnapshot = null
-  moveDX = 0; moveDY = 0
+  resetMoveBuffers()
 }
 
 // zoom/rotation 초기화
 function resetView() { resetTransform() }  // 하위 호환 alias
 
 defineExpose({
-  clearSelection, getSelection, getMaskBase64, loadMaskFromBase64, loadEdgeMap,
+  clearSelection, getSelection, getMaskBase64, loadMaskFromBase64, cancelMaskLoad, loadEdgeMap, clearEdgeMap,
   drawAll, resetView, resetTransform, undoMask, redoMask, maskUndoCount, maskRedoCount,
   // 모자이크 지우개 커밋용 — 화면에만 있던 복원을 백엔드에 반영하기 위해
-  getRestoreMaskBase64, hasPendingRestore, clearRestoreMask, keepPristineForNextLoad,
+  getRestoreMaskBase64, hasPendingRestore, clearRestoreMask, resetPristine,
   // 영역 이동
   beginMove, endMove, cancelMove,
   // 원근 보정
@@ -1468,10 +1522,13 @@ defineExpose({
   drawUndoCount: drawLayer.undoCount,
   hasDrawContent: drawLayer.hasContent,
   hasHealMask: drawLayer.hasHeal,
+  // 레이어 내용 리비전 — 부모가 '저장 뒤 레이어가 바뀌었는지'(미저장 변경)를 판단한다
+  drawRevision: drawLayer.revision,
 })
 
 onMounted(() => {
   if (props.imageSrc) loadNewImage(props.imageSrc, false)
+  if (props.pristineSrc) loadPristine(props.pristineSrc)
 })
 
 onBeforeUnmount(() => {
@@ -1490,6 +1547,7 @@ onBeforeUnmount(() => {
    baseScale(=clientWidth/width)이 실측값을 읽으므로 좌표 변환은 그대로 성립한다. */
 canvas { max-width: 100%; max-height: 100%; position: absolute; }
 .mask-overlay { pointer-events: none; }
+.preview-layer { pointer-events: none; }
 .draw-layer { pointer-events: none; }
 /* 텍스트 도구 입력칸 — 찍힐 자리에 그대로 뜬다 */
 .text-entry {

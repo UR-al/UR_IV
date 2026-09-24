@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
 import * as Vue from 'vue'
 import { createRenderer, h, nextTick, type App } from 'vue'
 import { parse, compileScript } from '@vue/compiler-sfc'
@@ -16,6 +16,9 @@ import * as chatStructuredOutput from '../utils/chatStructuredOutput'
 import * as chatGeneration from '../utils/chatGeneration'
 import * as schemaAutosave from '../composables/useSchemaAutosave'
 import * as dropdownPlacement from '../utils/dropdownPlacement'
+import * as ollamaPrefs from '../utils/ollamaPrefs'
+import * as hostDialogs from '../utils/hostDialogs'
+import * as imeComposition from '../utils/imeComposition'
 
 const bridge = vi.hoisted(() => ({
   handlers: new Map<string, (raw: string) => void>(),
@@ -48,11 +51,15 @@ function compileClient(source: string, modules: Record<string, unknown>) {
 }
 const CustomSelect = compileClient(selectSource, { vue: Vue, '../utils/dropdownPlacement': dropdownPlacement })
 const InstructionPresets = compileClient(presetSource, { vue: Vue, '../bridge.js': chatBridge })
+// 바꿔 끼울 수 있는 사본 — 마크다운 캐시 테스트가 렌더 횟수를 세려고 createMarkdownMemo 만 교체한다
+const markdownModule: Record<string, any> = { ...chatMarkdown }
 const ChatView = compileClient(chatSource, {
   vue: Vue, '../bridge.js': chatBridge, '../stores/widgetStore.js': widgetStore,
-  '../utils/media.js': media, '../utils/chatMarkdown': chatMarkdown, '../utils/clipboard': clipboard,
+  '../utils/media.js': media, '../utils/chatMarkdown': markdownModule, '../utils/clipboard': clipboard,
+  '../utils/ollamaPrefs': ollamaPrefs, '../utils/hostDialogs': hostDialogs,
   '../utils/chatSettings': chatSettings, '../utils/chatGeneration': chatGeneration,
   '../composables/useSchemaAutosave': schemaAutosave,
+  '../utils/imeComposition': imeComposition,
   '../components/CustomSelect.vue': { __esModule: true, default: CustomSelect },
   '../utils/chatStructuredOutput': chatStructuredOutput,
   '../components/AiAssistInstructionsSettings.vue': { __esModule: true, default: { render: () => null } },
@@ -396,4 +403,69 @@ it('recovers an unacknowledged schema draft even if a stale disk read arrives af
   await nextTick()
   expect(find(root, n => n.props.id === 'chat-json-schema')!.value).toBe('{recover me')
   expect(find(root, n => n.props.id === 'chat-system-prompt')!.value).toBe('복구된 지침')
+})
+
+it('does not rewrite the thread file it just loaded and flushes a pending save on unmount', async () => {
+  const root = new Node('root')
+  app = renderer.createApp(ChatView)
+  app.component('Icon', { render: () => h('span') })
+  app.mount(root)
+  await nextTick()
+  const saved = { id: 'loaded', title: '저장된 대화', model: 'selected-model', createdAt: 1, updatedAt: 2,
+    messages: [{ id: 'a1', role: 'assistant', content: '**이전 답**', createdAt: 1 }] }
+  bridge.handlers.get('chatThreads')!(JSON.stringify([saved]))
+  await nextTick()
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(bridge.action.mock.calls.filter(call => call[0] === 'chat_save')).toHaveLength(0)
+
+  find(root, n => n.props.class === 'cmp-input')!.props['onUpdate:modelValue']('저장될 질문')
+  await nextTick()
+  find(root, n => n.props.title === '보내기 (Enter)')!.props.onClick()
+  await nextTick()
+  await vi.advanceTimersByTimeAsync(100)   // 600ms 디바운스가 끝나기 전에 닫는다
+  expect(bridge.action.mock.calls.filter(call => call[0] === 'chat_save')).toHaveLength(0)
+  app!.unmount(); app = undefined
+  const saves = bridge.action.mock.calls.filter(call => call[0] === 'chat_save')
+  expect(saves).toHaveLength(1)
+  const threads = saves[0][1].threads
+  expect(JSON.stringify(threads)).toContain('저장될 질문')
+  expect(threads.some((t: any) => t.id === 'loaded')).toBe(true)
+})
+
+it('re-renders only the streaming answer while token packets arrive', async () => {
+  const render = vi.fn(chatMarkdown.renderMarkdown)
+  markdownModule.createMarkdownMemo = () => chatMarkdown.createMarkdownMemo(render)
+  onTestFinished(() => { markdownModule.createMarkdownMemo = chatMarkdown.createMarkdownMemo })
+  const root = new Node('root')
+  app = renderer.createApp(ChatView)
+  app.component('Icon', { render: () => h('span') })
+  app.mount(root)
+  await nextTick()
+  bridge.handlers.get('chatThreads')!('[]')
+  await nextTick()
+  const ask = async (text: string) => {
+    find(root, n => n.props.class === 'cmp-input')!.props['onUpdate:modelValue'](text)
+    await nextTick()
+    find(root, n => n.props.title === '보내기 (Enter)')!.props.onClick()
+    await nextTick()
+    const sends = bridge.action.mock.calls.filter(call => call[0] === 'chat_send')
+    return sends[sends.length - 1][1]
+  }
+  const OLD = '# 긴 이전 답\n\n- 항목 하나\n- 항목 둘'
+  const first = await ask('첫 질문')
+  bridge.handlers.get('chatDone')!(JSON.stringify({ id: first.id, ok: true, content: OLD }))
+  await nextTick()
+  const second = await ask('두 번째 질문')
+  for (let packet = 0; packet < 5; packet++) {
+    bridge.handlers.get('chatToken')!(JSON.stringify({ id: second.id, text: `조각${packet} ` }))
+    await nextTick()
+  }
+  const answers: Node[] = []
+  const collect = (node: Node) => { if (String(node.props.class).includes('msg-content md')) answers.push(node); node.children.forEach(collect) }
+  collect(root)
+  expect(answers.map(node => String(node.props.innerHTML))).toEqual([
+    chatMarkdown.renderMarkdown(OLD), chatMarkdown.renderMarkdown('조각0 조각1 조각2 조각3 조각4 '),
+  ])
+  expect(render.mock.calls.filter(([source]) => source === OLD)).toHaveLength(1)
+  expect(render.mock.calls.filter(([source]) => String(source).startsWith('조각0')).length).toBeGreaterThanOrEqual(5)
 })

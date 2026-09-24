@@ -3,6 +3,13 @@
 import requests
 import json
 import re
+import threading
+
+#: Ollama 서버 기본 주소 — 백엔드의 모든 폴백이 이 하나를 쓴다(프론트는 utils/ollamaPrefs.ts).
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
+#: 설치 목록을 받지 못했고 요청 모델도 비었을 때만 쓰는 최후 기본값.
+#: Settings 의 추천 모델(SettingsView 'best')과 같아야 'ollama pull' 안내와 오류 메시지가 맞는다.
+DEFAULT_OLLAMA_MODEL = "gemma4:e4b"
 
 
 SYSTEM_PROMPTS = {
@@ -378,13 +385,267 @@ def summarize_model_info(data: dict) -> dict:
             'vision': None if capabilities is None else 'vision' in capabilities}
 
 
+# ── 설치 모델 대조 (네트워크 없는 순수 로직) ──
+
+def _split_model_tag(name: str) -> tuple[str, str]:
+    """'repo:tag' → (repo, tag), 소문자. 태그가 없으면 Ollama 규칙대로 'latest'.
+
+    레지스트리 포트('host:5000/model')의 콜론은 태그가 아니다 — 마지막 콜론 뒤에 '/' 가 있으면 무시.
+    """
+    text = (name or '').strip().lower()
+    base, sep, tag = text.rpartition(':')
+    if not sep or not base or not tag or '/' in tag:
+        return text, 'latest'
+    return base, tag
+
+
+def resolve_model(requested: str, installed, default: str = DEFAULT_OLLAMA_MODEL) -> str:
+    """요청 모델을 설치 목록에 맞춘다.
+
+    우선순위: 1) 정확히 같은 이름 2) 같은 모델(``name`` ≡ ``name:latest``, 대소문자 무시)
+    3) 같은 계열의 설치된 다른 태그(gemma3:4b 요청인데 gemma3:12b 만 있으면 gemma3:12b —
+    예전엔 계열만 같으면 요청 이름을 그대로 보내 404 '빈 응답'이 났다) 4) 첫 설치 모델.
+    설치 목록이 비면(서버 꺼짐·조회 실패) 판단할 근거가 없으므로 요청 그대로, 그것도 비면 ``default``.
+    """
+    want = (requested or '').strip()
+    names = [m.strip() for m in (installed or []) if isinstance(m, str) and m.strip()]
+    if not names:
+        return want or default
+    if want:
+        if want in names:
+            return want
+        key = _split_model_tag(want)
+        same = next((m for m in names if _split_model_tag(m) == key), None)
+        if same:
+            return same
+        family = next((m for m in names if _split_model_tag(m)[0] == key[0]), None)
+        if family:
+            return family
+    return names[0]
+
+
+def resolve_installed_model(base_url: str, requested: str, default: str = DEFAULT_OLLAMA_MODEL) -> str:
+    """``/api/tags`` 로 설치 목록을 받아 :func:`resolve_model` — HTTP 이므로 워커 스레드에서만 부른다."""
+    installed = OllamaClient(base_url=base_url or DEFAULT_OLLAMA_URL).list_models()
+    return resolve_model(requested, installed, default)
+
+
+def unload_configured_model(base_url: str, model: str) -> bool:
+    """설정(ui_prefs.ollamaModel)의 모델을 VRAM 에서 내린다 — HTTP 이므로 워커 스레드에서만 부른다.
+
+    설정 이름이 설치되지 않은 태그일 수 있다(Settings 추천 카드는 pull 안내를 위해 이름만 저장 —
+    gemma4:e4b 인데 gemma4:26b 만 설치). 태그 강화·NL 변환(OllamaWorker)과 Comic 은
+    :func:`resolve_model` 로 실제 설치 모델을 올리므로, 같은 규칙으로 골라 내려야 VRAM 이 비워진다
+    (설정 이름으로 keep_alive=0 을 보내면 404 로 아무 일도 없다).
+    설치 목록이 비면(서버 꺼짐·모델 없음) 점유한 VRAM 도 없으므로 언로드할 것 없이 성공(True).
+    """
+    wanted = (model or '').strip()
+    if not wanted:
+        return True
+    try:
+        installed = OllamaClient(base_url=base_url or DEFAULT_OLLAMA_URL).list_models()
+        if not installed:
+            return True
+        return bool(OllamaClient(base_url or DEFAULT_OLLAMA_URL, resolve_model(wanted, installed)).unload())
+    except Exception:
+        return False
+
+
+# ── 추론(thinking) 모델 제어 ──
+# Gemma 4·Qwen3 같은 추론형 모델은 기본으로 먼저 '생각'한다. 태그·자연어·캡션처럼 짧은 답에
+# 그러면 num_predict 를 사고에 다 써 빈 답이 오거나, 사고 원문이 답 자리로 새어 태그에 섞인다.
+# 그래서 /api/show 의 능력(thinkingMode)을 (서버, 모델)별로 한 번 읽어 think 를 맞춰 보낸다.
+# think:False 를 무조건 보내면 일부 모델이 빈 응답을 낸다(d923c5c04 롤백) — 능력이 확인된
+# 모델에만 보내고, 거부(400)·빈 답이면 think 없이 **호출당 한 번만** 다시 보낸다.
+# 그 모델에 think 를 영영 안 보내는 건(THINK_REJECTED) 근거가 확실할 때뿐이다:
+#   - 400 'does not support thinking' (모델 능력이 없다는 명시적 거부)
+#   - 'think 로는 빈 답, 빼면 답' 이 연속 THINK_EMPTY_STRIKE_LIMIT 번 (한 번은 샘플링 우연일 수 있다)
+# 캐시는 Settings/캡션/대화에서 모델 목록을 다시 읽을 때(= 재연결·pull 뒤) 그 서버 몫이 비워진다.
+
+_THINK_MODES: dict[tuple[str, str], str] = {}
+_THINK_MODES_LOCK = threading.Lock()
+#: think 를 보냈다가 확실히 거부된 모델 — 이후엔 필드를 생략한다(예전 동작).
+THINK_REJECTED = 'rejected'
+#: 'think 로 빈 답 → think 없이 답' 이 이만큼 연속되면 그 모델을 THINK_REJECTED 로 기억한다.
+THINK_EMPTY_STRIKE_LIMIT = 2
+_THINK_EMPTY_STRIKES: dict[tuple[str, str], int] = {}
+#: 모델에 추론 능력이 없다는 Ollama 의 명시적 거부 — 모델의 성질로 기억해도 되는 유일한 400.
+#: 그 밖의 400(think 값·format 조합 검증 등)은 요청 모양 탓일 수 있어 다른 요청까지 끄지 않는다.
+_THINK_UNSUPPORTED_RE = re.compile(r'(?:"[^"\r\n]+"|\S+) does not support thinking\.?', re.IGNORECASE)
+
+
+def _error_detail(response) -> str:
+    """오류 응답의 ``error`` 문구(JSON 이 아니면 본문 앞부분)."""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            return str(data.get('error', '') or '')
+    except Exception:
+        pass
+    try:
+        return str(getattr(response, 'text', '') or '')[:200]
+    except Exception:
+        return ''
+
+
+def is_think_unsupported_error(detail: str) -> bool:
+    """``detail`` 이 '<모델> does not support thinking' 인가(Ollama 의 명시적 능력 거부)."""
+    return bool(_THINK_UNSUPPORTED_RE.fullmatch((detail or '').strip()))
+
+
+class _ThinkPlan:
+    """한 번의 호출(enhance 의 폴백 단계들, 캡션·Comic 의 단일 요청) 동안의 think 결정.
+
+    ``value``      — 이번 단계에 보낼 think(None 이면 생략). think 탓인 400 이 나면 남은 단계는 생략.
+    ``retry_left`` — think 없이 다시 보내는 재시도는 호출당 한 번 — 폴백 단계마다 요청이 두 배가 되지 않게.
+    '200 빈 답'은 think 를 뺀 재시도도 비면 think 탓이 아니므로 남은 단계에도 think 를 계속 보낸다.
+    """
+    __slots__ = ('value', 'retry_left')
+
+    def __init__(self, value):
+        self.value = value
+        self.retry_left = True
+
+
+def think_value_for(mode: str):
+    """thinkingMode → 요청의 think 값. ``None`` 이면 필드를 아예 보내지 않는다.
+
+    boolean → False(바로 답하게), levels(gpt-oss: 끌 수 없음) → 'low',
+    none/unknown/rejected → 생략(비추론 모델은 think 를 400 으로 거부할 수 있다).
+    """
+    if mode == 'boolean':
+        return False
+    if mode == 'levels':
+        return 'low'
+    return None
+
+
+def clear_thinking_mode_cache(base_url: str | None = None) -> None:
+    """능력·거부 기억 비우기 — 모델 목록을 다시 읽을 때(재연결·``ollama pull`` 로 능력이 바뀜)와 테스트 격리용.
+
+    ``base_url`` 을 주면 그 서버 몫만 비운다(다른 서버의 기억은 그대로).
+    """
+    server = None if base_url is None else (base_url or DEFAULT_OLLAMA_URL).rstrip('/')
+    with _THINK_MODES_LOCK:
+        for cache in (_THINK_MODES, _THINK_EMPTY_STRIKES):
+            if server is None:
+                cache.clear()
+            else:
+                for key in [k for k in cache if k[0] == server]:
+                    del cache[key]
+
+
+def _chat_content(data) -> str:
+    return (((data.get('message') or {}) if isinstance(data, dict) else {}).get('content') or '').strip()
+
+
+def _generate_response(data) -> str:
+    return ((data.get('response') if isinstance(data, dict) else '') or '').strip()
+
+
 class OllamaClient:
     """Ollama REST API 래퍼"""
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "gemma3:4b"):
-        self.base_url = base_url.rstrip('/')
+    def __init__(self, base_url: str = DEFAULT_OLLAMA_URL, model: str = DEFAULT_OLLAMA_MODEL):
+        self.base_url = (base_url or DEFAULT_OLLAMA_URL).rstrip('/')
         self.model = model
         self.timeout = 60
+
+    def thinking_mode(self) -> str:
+        """이 모델의 thinkingMode('boolean'|'levels'|'none'|'unknown'|'rejected') — (서버, 모델)별 캐시.
+
+        조회 실패(서버 꺼짐 등)는 캐시하지 않는다 — 서버가 늦게 뜨면 다음 요청에서 다시 읽는다.
+        """
+        key = (self.base_url, str(self.model or ''))
+        with _THINK_MODES_LOCK:
+            cached = _THINK_MODES.get(key)
+        if cached is not None:
+            return cached
+        try:
+            mode = str(self.get_model_info().get('thinkingMode') or 'unknown')
+        except Exception:
+            return 'unknown'
+        with _THINK_MODES_LOCK:
+            return _THINK_MODES.setdefault(key, mode)
+
+    def _think_key(self) -> tuple[str, str]:
+        return (self.base_url, str(self.model or ''))
+
+    def _mark_think_rejected(self) -> None:
+        key = self._think_key()
+        with _THINK_MODES_LOCK:
+            _THINK_MODES[key] = THINK_REJECTED
+            _THINK_EMPTY_STRIKES.pop(key, None)
+
+    def _note_think_answered(self) -> None:
+        """think 를 붙인 요청이 답을 냈다 — '빈 답' 연속 횟수를 끊는다."""
+        key = self._think_key()
+        with _THINK_MODES_LOCK:
+            _THINK_EMPTY_STRIKES.pop(key, None)
+
+    def _note_think_empty_strike(self) -> None:
+        """'think 로 빈 답 → think 없이 답' 한 번. 연속 THINK_EMPTY_STRIKE_LIMIT 번이면 거부로 기억한다."""
+        key = self._think_key()
+        with _THINK_MODES_LOCK:
+            strikes = _THINK_EMPTY_STRIKES.get(key, 0) + 1
+            if strikes >= THINK_EMPTY_STRIKE_LIMIT:
+                _THINK_MODES[key] = THINK_REJECTED
+                _THINK_EMPTY_STRIKES.pop(key, None)
+            else:
+                _THINK_EMPTY_STRIKES[key] = strikes
+
+    def _post_json(self, endpoint: str, body: dict, *, plan: _ThinkPlan, answer_of, timeout):
+        """``body`` 를 POST 하고 JSON 을 돌려준다. ``plan`` (:class:`_ThinkPlan`) 을 이 호출 동안 갱신한다.
+
+        ``plan.value`` 가 있으면 think 를 붙여 먼저 보낸다.
+        - 400: think 없이 다시 보낸다. 재시도가 400 이 아니면 think 탓이므로 이 호출의 남은 단계는
+          think 를 생략한다. '<모델> does not support thinking' 이면 모델 성질이라 영구히 기억한다.
+        - 200 인데 ``answer_of(data)`` 가 빔: 호출당 한 번만 think 없이 다시 보낸다. 재시도가 답하면
+          '빈 답 1회'로 세고(연속되면 영구 기억), 재시도도 비면 think 탓이 아니므로 남은 단계에도
+          think 를 계속 보낸다(재시도는 이미 썼으니 더 늘지 않는다).
+        상태 코드가 없는 응답 객체(테스트 대역 등)는 200 으로 본다.
+        """
+        url = f"{self.base_url}{endpoint}"
+        think = plan.value
+        if think is None:
+            response = requests.post(url, json=body, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+
+        first = requests.post(url, json={**body, 'think': think}, timeout=timeout)
+        if getattr(first, 'status_code', 200) == 400:
+            explicit = is_think_unsupported_error(_error_detail(first))
+            if explicit:
+                # 모델에 추론 능력이 없다 — 남은 단계도, 앞으로의 요청도 think 없이
+                plan.value = None
+                self._mark_think_rejected()
+            elif not plan.retry_left:
+                # 재시도를 이미 썼고 think 탓이라는 근거도 없다 — 이 단계는 실패로 둔다
+                first.raise_for_status()
+            plan.retry_left = False
+            retry = requests.post(url, json=body, timeout=timeout)
+            if getattr(retry, 'status_code', 200) != 400:
+                # think 를 빼자 400 이 사라졌다 → think 탓. 이 호출의 남은 단계는 생략한다
+                # (명시적 거부가 아니면 기억하지는 않는다 — format 등 요청 조합 탓일 수 있다)
+                plan.value = None
+            retry.raise_for_status()
+            return retry.json()
+
+        first.raise_for_status()
+        data = first.json()
+        if answer_of(data):
+            self._note_think_answered()
+            return data
+        if not plan.retry_left:
+            return data
+        plan.retry_left = False
+        retry = requests.post(url, json=body, timeout=timeout)
+        retry.raise_for_status()
+        retry_data = retry.json()
+        if answer_of(retry_data):
+            # 한 번의 빈 답은 샘플링 우연일 수 있다 — 연속될 때만 이 모델을 '거부'로 기억한다
+            self._note_think_empty_strike()
+        return retry_data
 
     def enhance(self, tags: str, mode: str = 'expand', extra_prompt: str = '', *,
                 instructions=None, instruction_feature=None) -> str:
@@ -409,27 +670,31 @@ class OllamaClient:
 
         import json as _json
         self._last_raw = ''
+        # 추론형 모델은 think 로 사고를 끈다(모델 능력 확인 후). 세 폴백 단계가 한 계획(_ThinkPlan)을
+        # 공유한다: think 탓인 400 이면 남은 단계는 think 없이, '200 빈 답'이면 think 는 유지하되
+        # think 없는 재시도는 호출당 한 번만 — 단계마다 요청이 두 배가 되지 않게.
+        plan = _ThinkPlan(think_value_for(self.thinking_mode()))
+
+        def _post(endpoint, body, answer_of):
+            d = self._post_json(endpoint, body, plan=plan, answer_of=answer_of, timeout=self.timeout)
+            self._last_raw = _json.dumps(d, ensure_ascii=False)[:300]
+            return d
 
         def _chat(messages):
-            r = requests.post(f"{self.base_url}/api/chat",
-                              json={"model": self.model, "messages": messages,
-                                    "stream": False, "options": opts},
-                              timeout=self.timeout)
-            r.raise_for_status()
-            d = r.json()
-            self._last_raw = _json.dumps(d, ensure_ascii=False)[:300]
-            m = d.get('message') or {}
-            return ((m.get('content') or '') or (m.get('thinking') or '')).strip()
+            d = _post("/api/chat", {"model": self.model, "messages": messages,
+                                    "stream": False, "options": opts}, _chat_content)
+            m = (d.get('message') or {}) if isinstance(d, dict) else {}
+            content = (m.get('content') or '').strip()
+            if content or not is_nl:
+                # 태그 모드에서 사고 원문을 답으로 쓰면 콤마로 쪼개져 사고 문장이 태그로 섞인다
+                return content
+            # 자연어 모드만: 본문이 비면 사고에서 최종 캡션을 건진다(_extract_final_nl 이 사고를 걷어냄)
+            return (m.get('thinking') or '').strip()
 
         def _gen():
-            r = requests.post(f"{self.base_url}/api/generate",
-                              json={"model": self.model, "system": system, "prompt": user_msg,
-                                    "stream": False, "options": opts},
-                              timeout=self.timeout)
-            r.raise_for_status()
-            d = r.json()
-            self._last_raw = _json.dumps(d, ensure_ascii=False)[:300]
-            return (d.get('response') or '').strip()
+            d = _post("/api/generate", {"model": self.model, "system": system, "prompt": user_msg,
+                                        "stream": False, "options": opts}, _generate_response)
+            return _generate_response(d)
 
         def _attempt(fn):
             try:
@@ -524,10 +789,12 @@ class OllamaClient:
             "stream": False,
             "options": {"temperature": 0.2, "num_predict": 512},
         }
+        # 추론형 비전 모델(Qwen3-VL 등)이 num_predict 512 를 사고에 쓰지 않게 — 능력 확인 후 think 제어
+        plan = _ThinkPlan(think_value_for(self.thinking_mode()))
         try:
-            r = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=timeout)
-            r.raise_for_status()
-            text = (r.json().get('response', '') or '').strip()
+            data = self._post_json("/api/generate", payload, plan=plan,
+                                   answer_of=_generate_response, timeout=timeout)
+            text = _generate_response(data)
             text = _strip_channels(text)
             text = _extract_final_nl(text)   # 추론/체크리스트/리비전 누출 제거 (콤마는 보존)
             return text
@@ -537,6 +804,23 @@ class OllamaClient:
             raise TimeoutError(f"캡션 응답 시간 초과 ({timeout}초)")
         except Exception as e:
             raise RuntimeError(f"캡션 오류: {e}")
+
+    def complete_chat(self, messages, *, options=None, response_format=None, timeout=300) -> str:
+        """비스트리밍 ``/api/chat`` 한 번 — 답 본문을 돌려준다(Comic Director 처럼 JSON 을 받는 곳).
+
+        추론형 모델이 num_predict 를 사고에 다 써 본문이 비지 않도록 think 를 능력에 맞춰 끈다.
+        HTTP 오류는 그대로 올린다(호출자가 사용자에게 보여 준다).
+        """
+        body = {"model": self.model, "messages": list(messages or []), "stream": False}
+        if options:
+            body["options"] = dict(options)
+        if response_format is not None:
+            body["format"] = response_format
+        data = self._post_json("/api/chat", body, plan=_ThinkPlan(think_value_for(self.thinking_mode())),
+                               answer_of=_chat_content, timeout=timeout)
+        if not isinstance(data, dict):
+            return ''
+        return str((data.get("message") or {}).get("content") or data.get("response") or "")
 
     def chat_stream(self, messages, *, model=None, options=None, think=None, schema=None,
                     on_token=None, on_thinking=None, should_stop=None, timeout=600):
@@ -575,7 +859,7 @@ class OllamaClient:
             # Only a model explicitly lacking thinking can safely omit OFF.
             # Generic think/level validation failures must not silently restore
             # the model's default (which may enable thinking).
-            if re.fullmatch(r'(?:"[^"\r\n]+"|\S+) does not support thinking\.?', detail.strip(), re.IGNORECASE):
+            if is_think_unsupported_error(detail):
                 resp.close()
                 payload.pop("think", None)
                 resp = requests.post(f"{self.base_url}/api/chat", json=payload, stream=True, timeout=(10, timeout))

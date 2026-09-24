@@ -25,8 +25,7 @@
       <!-- Left Panel -->
       <aside class="side-panel left" v-show="showLeftPanel">
         <div class="panel-scroll" v-show="panelMode === 'prompt'" v-scroll-memory="'leftPanel'">
-          <PromptPanel @toggle-extend="showExtendPanel = !showExtendPanel"
-            @open-wildcard="openWildcardByName" />
+          <PromptPanel @open-wildcard="openWildcardByName" />
           <!-- 워크플로우 프로파일 -->
           <div class="tool-card profile-card">
             <div class="profile-row">
@@ -35,21 +34,22 @@
                 :options="profileNames"
                 :placeholder="profileNames.length === 0 ? '(저장된 프로파일 없음)' : '선택하여 적용...'" />
               <button class="profile-mini-btn" @click="saveCurrentAsProfile" title="현재 세팅을 새 프로파일로 저장">+</button>
-              <button class="profile-mini-btn" @click="showProfileManager = true; loadWorkflowProfilesList()" title="프로파일 관리 (삭제/이름변경)"><Icon name="settings" /></button>
+              <button class="profile-mini-btn" @click="openProfileManager" title="프로파일 관리 (삭제/이름변경)"><Icon name="settings" /></button>
             </div>
           </div>
 
+          <!-- 스튜디오 도구 — 매니저 모달의 상태·동작은 composables/use*Manager 등(모듈 싱글턴), 모달은 표시만 -->
           <div class="tool-card">
             <label>스튜디오 도구</label>
             <div class="tool-grid">
               <button class="tool-btn" @click="syncLoraStack(); action('save_settings')">저장</button>
-              <button class="tool-btn" @click="showPresetManager = true; loadPresetList()">프리셋</button>
-              <button class="tool-btn" @click="showWeightManager = true">가중치</button>
-              <button class="tool-btn" @click="showWcManager = true">와일드카드</button>
-              <button class="tool-btn" @click="showInstantWcManager = true; loadInstantWcList()" title="JSON 기반 인라인 와일드카드 ($$name$$)">즉석 WC</button>
-              <button class="tool-btn" @click="showOrderManager = true; loadPromptOrder()" title="최종 프롬프트의 섹션 순서를 직접 지정">순서</button>
+              <button class="tool-btn" @click="openPresetManager">프리셋</button>
+              <button class="tool-btn" @click="openWeightManager">가중치</button>
+              <button class="tool-btn" @click="openWcManager">와일드카드</button>
+              <button class="tool-btn" @click="openInstantWcManager" title="JSON 기반 인라인 와일드카드 ($$name$$)">즉석 WC</button>
+              <button class="tool-btn" @click="openOrderManager" title="최종 프롬프트의 섹션 순서를 직접 지정">순서</button>
               <button class="tool-btn" @click="openAbTestModal()">A/B 테스트</button>
-              <button class="tool-btn" @click="showStatsModal = true; loadGenStats()">통계</button>
+              <button class="tool-btn" @click="openStatsModal">통계</button>
               <button class="tool-btn" :class="{ 'tool-btn-on': condEnabled }" @click="showCondModal = true" :title="`태그 조건부 프롬프트 (IF→THEN) 관리 — 현재 ${condEnabled ? 'ON' : 'OFF'}`">조건부<span v-if="condEnabled" class="tool-dot"></span></button>
             </div>
           </div>
@@ -64,318 +64,13 @@
             <button class="close-btn" @click="showExtendPanel = false" title="프롬프트로 (ESC)"><Icon name="close" /></button>
           </div>
           <div class="extend-scroll" v-scroll-memory="'extendPanel'">
-            <!-- Parameters (기본) -->
-            <div id="sec-params" class="ext-card">
-              <div class="ext-title">파라미터</div>
-              <div class="ext-field">
-                <label>Resolution</label>
-                <div class="ext-res-row">
-                  <input type="number" v-model="storeWidgets.width_input" />
-                  <span>×</span>
-                  <input type="number" v-model="storeWidgets.height_input" />
-                  <button class="ext-mini-btn" @click="action('swap_resolution')"><Icon name="arrows-horizontal" /></button>
-                </div>
-                <div class="ext-res-opts">
-                  <label class="ext-check-sm"><ToggleSwitch v-model="randomResEnabled" size="sm" /><span>랜덤</span></label>
-                  <label class="ext-check-sm"><ToggleSwitch v-model="autoResEnabled" size="sm" /><span>자동(Parquet)</span></label>
-                  <label class="ext-check-sm hr-toggle" :class="{ active: highResEnabled }"
-                    title="입력 해상도 × 배율로 처음부터 더 크게 생성 (hires.fix와 다른 단일 패스)&#10;&#10;⚠ SAM3 자동 검열과 동시 사용 시 VRAM OOM 위험&#10;⚠ 16GB GPU + 1.5× + SAM3 = inpaint 단계에서 메모리 부족&#10;⚠ 모델 학습 해상도(보통 1024±)를 크게 넘으면 이중 캐릭터/왜곡 가능&#10;&#10;권장: 1.5× 단독 사용 또는 SAM3 단독 사용 (둘 중 하나)">
-                    <ToggleSwitch v-model="highResEnabled" size="sm" />
-                    <span>고해상도 {{ highResFactor.toFixed(2) }}×<span v-if="highResEnabled" class="hr-warn"><Icon name="alert" /></span></span>
-                  </label>
-                </div>
-                <!-- 고해상도 미리보기 + 배율 슬라이더 -->
-                <div v-if="highResEnabled" class="hr-preview">
-                  <div class="hr-row">
-                    <span class="hr-label">배율</span>
-                    <input type="range" min="1.1" max="2.5" step="0.05" v-model.number="highResFactor"
-                      class="hr-slider" />
-                    <span class="hr-val">{{ highResFactor.toFixed(2) }}×</span>
-                  </div>
-                  <div class="hr-result">
-                    실제 생성: <strong>{{ hrActualW }}×{{ hrActualH }}</strong>
-                    <span class="hr-note">(8 배수 정렬)</span>
-                  </div>
-                  <div class="hr-warn-banner"><Icon name="alert" /> SAM3·ADetailer 등 후처리 동시 사용 시 VRAM OOM 위험.
-                    16GB GPU + 1.5× = 한계.
-                  </div>
-                </div>
-                <!-- 랜덤 해상도 편집기 -->
-                <div v-if="randomResEnabled" class="rand-res-editor">
-                  <div class="rand-res-list">
-                    <div v-for="(r, i) in randomResList" :key="i" class="rand-res-item">
-                      <span class="rand-res-val">{{ r[0] }}×{{ r[1] }}</span>
-                      <span class="rand-res-desc">{{ r[2] }}</span>
-                      <button class="rand-res-del" @click="removeRandomRes(i)"><Icon name="close" /></button>
-                    </div>
-                    <div v-if="!randomResList.length" class="rand-res-empty">해상도를 추가하세요</div>
-                  </div>
-                  <div class="rand-res-add">
-                    <input type="number" v-model.number="newResW" placeholder="W" class="rand-res-input" />
-                    <span>×</span>
-                    <input type="number" v-model.number="newResH" placeholder="H" class="rand-res-input" />
-                    <button class="rand-res-btn" @click="addRandomRes">+</button>
-                  </div>
-                </div>
-              </div>
-              <div class="ext-row">
-                <div class="ext-field"><label>Sampler</label>
-                  <CustomSelect v-model="storeWidgets.sampler_combo" :options="samplerItems" placeholder="Sampler..." />
-                </div>
-                <div class="ext-field"><label>Scheduler</label>
-                  <CustomSelect v-model="storeWidgets.scheduler_combo" :options="schedulerItems" placeholder="Scheduler..." />
-                </div>
-              </div>
-              <div class="ext-row">
-                <div class="ext-field"><label>스텝</label><input type="number" v-model="storeWidgets.steps_input" min="1" max="150" /></div>
-                <div class="ext-field"><label>CFG</label><input type="number" v-model="storeWidgets.cfg_input" step="0.5" /></div>
-                <div class="ext-field"><label>Shift</label><input type="number" v-model="storeWidgets.shift_input" step="0.5" min="0" max="24" title="0이면 미사용 (Distilled CFG Scale)" /></div>
-                <div class="ext-field"><label>Seed</label><input type="text" v-model="storeWidgets.seed_input" /></div>
-              </div>
-            </div>
-
-            <!-- Hires.fix -->
-            <details class="ext-card">
-              <summary class="ext-title">Hires.fix</summary>
-              <label class="ext-check-row"><ToggleSwitch v-model="hires_enabled" size="sm" /><span>Hires.fix 활성화</span></label>
-              <div class="ext-field">
-                <label>Upscaler</label>
-                <CustomSelect v-model="storeWidgets.upscaler_combo" :options="upscalerItems" placeholder="Upscaler..." />
-              </div>
-              <div class="ext-row">
-                <div class="ext-field"><label>스텝</label><input type="number" v-model="storeWidgets.hires_steps_input" /></div>
-                <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets.hires_denoising_input" step="0.05" /></div>
-              </div>
-              <div class="ext-row">
-                <div class="ext-field"><label>Scale</label><input type="number" v-model="storeWidgets.hires_scale_input" step="0.1" min="1" /></div>
-                <div class="ext-field"><label>CFG (0=off)</label><input type="number" v-model="storeWidgets.hires_cfg_input" step="0.5" /></div>
-              </div>
-              <div class="ext-field"><label>Checkpoint</label>
-                <CustomSelect v-model="storeWidgets.hires_checkpoint_combo" :options="hiresCheckpointItems" placeholder="Use same checkpoint" /></div>
-              <div class="ext-row">
-                <div class="ext-field"><label>Sampler</label>
-                  <CustomSelect v-model="storeWidgets.hires_sampler_combo" :options="hiresSamplerItems" placeholder="Use same sampler" /></div>
-                <div class="ext-field"><label>Scheduler</label>
-                  <CustomSelect v-model="storeWidgets.hires_scheduler_combo" :options="hiresSchedulerItems" placeholder="Use same scheduler" /></div>
-              </div>
-              <div class="ext-field"><label>Hires Prompt (비우면 메인 사용)</label>
-                <input type="text" v-model="storeWidgets.hires_prompt_text" placeholder="비워두면 메인 프롬프트 사용" /></div>
-              <div class="ext-field"><label>Hires Negative Prompt</label>
-                <input type="text" v-model="storeWidgets.hires_neg_prompt_text" placeholder="비워두면 메인 네거티브 사용" /></div>
-            </details>
-
-            <details class="ext-card" open>
-              <summary class="ext-title">프롬프트 필터</summary>
-              <!-- Rating 토글 -->
-              <div class="ext-sub-title">등급 필터</div>
-              <div class="rating-toggle-row">
-                <button v-for="r in ratingFilters" :key="r.key" class="rating-toggle"
-                  :class="{ active: r.on }" @click="r.on = !r.on; saveRatingFilter()">{{ r.label }}</button>
-              </div>
-              <div class="ext-toggle-grid">
-                <label class="ext-check-row"><ToggleSwitch v-model="removeCharacter" size="sm" /><span>캐릭터 제거</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="removeCharacterFeatures" size="sm" /><span>캐릭터 특징 제거</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="removeCopyright" size="sm" /><span>작품 제거</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="removeArtist" size="sm" /><span>작가 제거</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="removeMeta" size="sm" /><span>메타 제거</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="removeCensorship" size="sm" /><span>검열 제거</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="removeText" size="sm" /><span>텍스트 제거</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="promptFocus" size="sm" /><span title="muscular male이 있으면 muscular처럼, 더 구체적인 태그에 포함되는 광범위 태그를 제거해 집중 태그만 남김">프롬프트 집중</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="autoCharFeatures" size="sm" /><span>특징 자동 추가</span></label>
-                <label class="ext-check-row"><ToggleSwitch v-model="autoRemoveCharFeatures" size="sm" /><span title="closed eyes 있으면 눈색 특징 생략, 머리 길이 충돌 시 생략">특징 auto remove</span></label>
-              </div>
-              <div v-if="autoRemoveCharFeatures" class="char-ovr-row">
-                <button class="char-ovr-btn" @click="openCharOverrideModal()"><Icon name="settings" /> override 설정 (머리길이 / 눈색)</button>
-              </div>
-            </details>
-
-            <!-- ADetailer -->
-            <details class="ext-card">
-              <summary class="ext-title">ADetailer</summary>
-              <label class="ext-check-row"><ToggleSwitch v-model="ad_enabled" size="sm" /><span>ADetailer 활성화</span></label>
-              <!-- Slot 1 -->
-              <div class="ext-sub-title">Slot 1</div>
-              <label class="ext-check-row"><ToggleSwitch v-model="ad_s1_enabled" size="sm" /><span>Slot 1 활성화</span></label>
-              <div class="ext-field"><label>Model</label>
-                <CustomSelect v-model="storeWidgets._ad_s1_model" :options="adModelItems" placeholder="AD Model..." /></div>
-              <div class="ext-field"><label>Prompt</label>
-                <input type="text" v-model="storeWidgets._ad_s1_prompt" placeholder="ADetailer prompt..." /></div>
-              <div class="ext-field"><label>Negative Prompt</label>
-                <input type="text" v-model="storeWidgets._ad_s1_neg" placeholder="AD negative..." /></div>
-              <div class="ext-row">
-                <div class="ext-field"><label>Confidence</label><input type="number" v-model="storeWidgets._ad_s1_confidence" step="0.05" min="0" max="1" /></div>
-                <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets._ad_s1_denoise" step="0.05" min="0" max="1" /></div>
-              </div>
-              <div class="ext-row">
-                <div class="ext-field"><label>Mask Blur</label><input type="number" v-model="storeWidgets._ad_s1_mask_blur" min="0" /></div>
-                <div class="ext-field"><label>Padding</label><input type="number" v-model="storeWidgets._ad_s1_padding" min="0" /></div>
-                <div class="ext-field"><label>Dilate/Erode</label><input type="number" v-model="storeWidgets._ad_s1_dilate_erode" /></div>
-              </div>
-              <div class="ext-field"><label>마스크 병합</label>
-                <CustomSelect v-model="storeWidgets._ad_s1_mask_merge" :options="['None', 'Merge', 'Merge and Invert']" placeholder="None" /></div>
-              <!-- Separate settings -->
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s1_use_inp_size === 'true'" @update:model-value="storeWidgets._ad_s1_use_inp_size = $event ? 'true' : 'false'" size="sm" /><span>별도 Inpaint 크기</span></label>
-              <div class="ext-row" v-if="storeWidgets._ad_s1_use_inp_size === 'true'">
-                <div class="ext-field"><label>너비</label><input type="number" v-model="storeWidgets._ad_s1_inp_w" /></div>
-                <div class="ext-field"><label>높이</label><input type="number" v-model="storeWidgets._ad_s1_inp_h" /></div>
-              </div>
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s1_use_steps === 'true'" @update:model-value="storeWidgets._ad_s1_use_steps = $event ? 'true' : 'false'" size="sm" /><span>별도 Steps</span></label>
-              <div class="ext-row" v-if="storeWidgets._ad_s1_use_steps === 'true'">
-                <div class="ext-field"><label>스텝</label><input type="number" v-model="storeWidgets._ad_s1_steps" min="1" /></div>
-              </div>
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s1_use_cfg === 'true'" @update:model-value="storeWidgets._ad_s1_use_cfg = $event ? 'true' : 'false'" size="sm" /><span>별도 CFG</span></label>
-              <div class="ext-row" v-if="storeWidgets._ad_s1_use_cfg === 'true'">
-                <div class="ext-field"><label>CFG</label><input type="number" v-model="storeWidgets._ad_s1_cfg" step="0.5" /></div>
-              </div>
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s1_use_sampler === 'true'" @update:model-value="storeWidgets._ad_s1_use_sampler = $event ? 'true' : 'false'" size="sm" /><span>별도 Sampler</span></label>
-              <div class="ext-row" v-if="storeWidgets._ad_s1_use_sampler === 'true'">
-                <div class="ext-field"><label>Sampler</label>
-                  <CustomSelect v-model="storeWidgets._ad_s1_sampler" :options="samplerItems" placeholder="Sampler" /></div>
-                <div class="ext-field"><label>Scheduler</label>
-                  <CustomSelect v-model="storeWidgets._ad_s1_scheduler" :options="schedulerItems" placeholder="Scheduler" /></div>
-              </div>
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s1_use_ckpt === 'true'" @update:model-value="storeWidgets._ad_s1_use_ckpt = $event ? 'true' : 'false'" size="sm" /><span>별도 Checkpoint</span></label>
-              <div class="ext-field" v-if="storeWidgets._ad_s1_use_ckpt === 'true'"><label>Checkpoint</label>
-                <CustomSelect v-model="storeWidgets._ad_s1_ckpt" :options="adCheckpointItems" placeholder="Use same checkpoint" /></div>
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s1_use_vae === 'true'" @update:model-value="storeWidgets._ad_s1_use_vae = $event ? 'true' : 'false'" size="sm" /><span>별도 VAE</span></label>
-              <div class="ext-field" v-if="storeWidgets._ad_s1_use_vae === 'true'"><label>VAE</label>
-                <CustomSelect v-model="storeWidgets._ad_s1_vae" :options="adVaeItems" placeholder="Use same VAE" /></div>
-
-              <!-- Slot 2 -->
-              <details class="ext-sub">
-                <summary>Slot 2</summary>
-                <label class="ext-check-row"><ToggleSwitch v-model="ad_s2_enabled" size="sm" /><span>Slot 2 활성화</span></label>
-                <div class="ext-field"><label>Model</label>
-                  <CustomSelect v-model="storeWidgets._ad_s2_model" :options="adModelItems" placeholder="AD Model..." /></div>
-                <div class="ext-field"><label>Prompt</label>
-                  <input type="text" v-model="storeWidgets._ad_s2_prompt" placeholder="Slot 2 prompt..." /></div>
-                <div class="ext-field"><label>Negative Prompt</label>
-                  <input type="text" v-model="storeWidgets._ad_s2_neg" placeholder="AD negative..." /></div>
-                <div class="ext-row">
-                  <div class="ext-field"><label>Confidence</label><input type="number" v-model="storeWidgets._ad_s2_confidence" step="0.05" min="0" max="1" /></div>
-                  <div class="ext-field"><label>Denoise</label><input type="number" v-model="storeWidgets._ad_s2_denoise" step="0.05" min="0" max="1" /></div>
-                </div>
-                <div class="ext-row">
-                  <div class="ext-field"><label>Mask Blur</label><input type="number" v-model="storeWidgets._ad_s2_mask_blur" min="0" /></div>
-                  <div class="ext-field"><label>Padding</label><input type="number" v-model="storeWidgets._ad_s2_padding" min="0" /></div>
-                  <div class="ext-field"><label>Dilate/Erode</label><input type="number" v-model="storeWidgets._ad_s2_dilate_erode" /></div>
-                </div>
-                <div class="ext-field"><label>마스크 병합</label>
-                  <CustomSelect v-model="storeWidgets._ad_s2_mask_merge" :options="['None', 'Merge', 'Merge and Invert']" placeholder="None" /></div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s2_use_inp_size === 'true'" @update:model-value="storeWidgets._ad_s2_use_inp_size = $event ? 'true' : 'false'" size="sm" /><span>별도 Inpaint 크기</span></label>
-                <div class="ext-row" v-if="storeWidgets._ad_s2_use_inp_size === 'true'">
-                  <div class="ext-field"><label>너비</label><input type="number" v-model="storeWidgets._ad_s2_inp_w" /></div>
-                  <div class="ext-field"><label>높이</label><input type="number" v-model="storeWidgets._ad_s2_inp_h" /></div>
-                </div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s2_use_steps === 'true'" @update:model-value="storeWidgets._ad_s2_use_steps = $event ? 'true' : 'false'" size="sm" /><span>별도 Steps</span></label>
-                <div class="ext-row" v-if="storeWidgets._ad_s2_use_steps === 'true'">
-                  <div class="ext-field"><label>스텝</label><input type="number" v-model="storeWidgets._ad_s2_steps" min="1" /></div>
-                </div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s2_use_cfg === 'true'" @update:model-value="storeWidgets._ad_s2_use_cfg = $event ? 'true' : 'false'" size="sm" /><span>별도 CFG</span></label>
-                <div class="ext-row" v-if="storeWidgets._ad_s2_use_cfg === 'true'">
-                  <div class="ext-field"><label>CFG</label><input type="number" v-model="storeWidgets._ad_s2_cfg" step="0.5" /></div>
-                </div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s2_use_sampler === 'true'" @update:model-value="storeWidgets._ad_s2_use_sampler = $event ? 'true' : 'false'" size="sm" /><span>별도 Sampler</span></label>
-                <div class="ext-row" v-if="storeWidgets._ad_s2_use_sampler === 'true'">
-                  <div class="ext-field"><label>Sampler</label>
-                    <CustomSelect v-model="storeWidgets._ad_s2_sampler" :options="samplerItems" placeholder="Sampler" /></div>
-                  <div class="ext-field"><label>Scheduler</label>
-                    <CustomSelect v-model="storeWidgets._ad_s2_scheduler" :options="schedulerItems" placeholder="Scheduler" /></div>
-                </div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s2_use_ckpt === 'true'" @update:model-value="storeWidgets._ad_s2_use_ckpt = $event ? 'true' : 'false'" size="sm" /><span>별도 Checkpoint</span></label>
-                <div class="ext-field" v-if="storeWidgets._ad_s2_use_ckpt === 'true'"><label>Checkpoint</label>
-                  <CustomSelect v-model="storeWidgets._ad_s2_ckpt" :options="adCheckpointItems" placeholder="Use same checkpoint" /></div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._ad_s2_use_vae === 'true'" @update:model-value="storeWidgets._ad_s2_use_vae = $event ? 'true' : 'false'" size="sm" /><span>별도 VAE</span></label>
-                <div class="ext-field" v-if="storeWidgets._ad_s2_use_vae === 'true'"><label>VAE</label>
-                  <CustomSelect v-model="storeWidgets._ad_s2_vae" :options="adVaeItems" placeholder="Use same VAE" /></div>
-              </details>
-            </details>
-
-            <!-- SAM3 Mask — Forge Neo SAM3 확장과 1:1 -->
-            <details class="ext-card">
-              <summary class="ext-title">SAM3 Mask</summary>
-              <label class="ext-check-row"><ToggleSwitch v-model="sam3_enabled" size="sm" /><span>Enable SAM3</span></label>
-
-              <div class="ext-field"><label>SAM3 Detect Prompt</label>
-                <input type="text" v-model="storeWidgets._sam3_detect_prompt" placeholder="face" /></div>
-              <div class="ext-field"><label>SAM3 Exclude Prompt</label>
-                <input type="text" v-model="storeWidgets._sam3_exclude_prompt" placeholder="메인 마스크에서 검출+제외. 예: 'face, eyes' 보호" /></div>
-              <div class="ext-field"><label>SAM3 Inpaint Prompt</label>
-                <input type="text" v-model="storeWidgets._sam3_inpaint_prompt" placeholder="비워두면 메인 프롬프트 사용" /></div>
-              <div class="ext-field"><label>SAM3 Negative Prompt</label>
-                <input type="text" v-model="storeWidgets._sam3_neg_prompt" placeholder="비워두면 메인 네거티브 사용" /></div>
-
-              <div class="ext-row">
-                <div class="ext-field"><label>SAM3 Mode</label>
-                  <CustomSelect v-model="storeWidgets._sam3_mode" :options="['Inpaint', 'Mask only']" placeholder="Inpaint" /></div>
-                <div class="ext-field"><label>마스크 처리</label>
-                  <CustomSelect v-model="storeWidgets._sam3_mask_mode" :options="['Individual', 'Combined']" placeholder="Individual" /></div>
-              </div>
-              <div class="ext-row">
-                <div class="ext-field"><label>SAM3 Threshold</label><input type="number" v-model="storeWidgets._sam3_threshold" step="0.01" min="0" max="1" /></div>
-                <div class="ext-field"><label>Mask Dilation (px)</label><input type="number" v-model="storeWidgets._sam3_mask_dilation" min="0" /></div>
-              </div>
-              <div class="ext-row">
-                <label class="ext-check-row" style="flex:1" title="머리카락 가닥 등을 감싸 마스크를 채움"><ToggleSwitch :model-value="storeWidgets._sam3_mask_hull === 'true'" @update:model-value="storeWidgets._sam3_mask_hull = $event ? 'true' : 'false'" size="sm" /><span>볼록 껍질 (가닥 감싸기)</span></label>
-                <div class="ext-field"><label>Outline expand (edge-aware, px)</label><input type="number" v-model="storeWidgets._sam3_mask_outline_px" min="0" /></div>
-              </div>
-              <div class="ext-field"><label>SAM3 Checkpoint</label>
-                <CustomSelect v-model="storeWidgets._sam3_checkpoint" :options="sam3CheckpointItems" placeholder="sam3.pt" /></div>
-              <div class="ext-field">
-                <label>SAM3 Device (검출 연산 장치)</label>
-                <CustomSelect v-model="storeWidgets._sam3_device" :options="sam3DeviceItems" placeholder="cuda" />
-                <div class="ext-note">cuda 권장 — auto는 CPU로 떨어져 검출이 느려질 수 있음</div>
-              </div>
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_preview_overlay === 'true'" @update:model-value="storeWidgets._sam3_preview_overlay = $event ? 'true' : 'false'" size="sm" /><span>Replace output with overlay preview</span></label>
-              <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_save_artifacts === 'true'" @update:model-value="storeWidgets._sam3_save_artifacts = $event ? 'true' : 'false'" size="sm" /><span>Save mask/overlay artifacts</span></label>
-              <label class="ext-check-row" title="검출 직후 SAM3(~3.5GB) VRAM 회수 — 16GB GPU 권장"><ToggleSwitch :model-value="storeWidgets._sam3_unload_after === 'true'" @update:model-value="storeWidgets._sam3_unload_after = $event ? 'true' : 'false'" size="sm" /><span>Unload SAM3 from VRAM after detection (~3.5GB)</span></label>
-
-              <!-- 인페인트 하위 섹션 -->
-              <details class="ext-card" open style="margin-top:8px">
-                <summary class="ext-title">인페인트</summary>
-                <div class="ext-row">
-                  <div class="ext-field"><label>디노이즈 강도</label><input type="number" v-model="storeWidgets._sam3_denoise" step="0.01" min="0" max="1" /></div>
-                  <div class="ext-field"><label>Mask Blur</label><input type="number" v-model="storeWidgets._sam3_mask_blur" min="0" /></div>
-                </div>
-                <div class="ext-row">
-                  <div class="ext-field"><label>Masked content (init for masked area)</label>
-                    <CustomSelect v-model="storeWidgets._sam3_inpainting_fill" :options="sam3FillItems" placeholder="original" /></div>
-                  <div class="ext-field"><label>Inpaint padding</label><input type="number" v-model="storeWidgets._sam3_padding" min="0" /></div>
-                </div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_inpaint_only_masked === 'true'" @update:model-value="storeWidgets._sam3_inpaint_only_masked = $event ? 'true' : 'false'" size="sm" /><span>마스크된 영역만</span></label>
-
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_use_inp_size === 'true'" @update:model-value="storeWidgets._sam3_use_inp_size = $event ? 'true' : 'false'" size="sm" /><span>Use separate inpaint width/height</span></label>
-                <div class="ext-row" v-if="storeWidgets._sam3_use_inp_size === 'true'">
-                  <div class="ext-field"><label>Inpaint Width</label><input type="number" v-model="storeWidgets._sam3_inp_w" /></div>
-                  <div class="ext-field"><label>Inpaint Height</label><input type="number" v-model="storeWidgets._sam3_inp_h" /></div>
-                </div>
-
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_use_steps === 'true'" @update:model-value="storeWidgets._sam3_use_steps = $event ? 'true' : 'false'" size="sm" /><span>별도의 단계 사용</span></label>
-                <div class="ext-row" v-if="storeWidgets._sam3_use_steps === 'true'">
-                  <div class="ext-field"><label>단계</label><input type="number" v-model="storeWidgets._sam3_steps" min="1" /></div>
-                </div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_use_cfg === 'true'" @update:model-value="storeWidgets._sam3_use_cfg = $event ? 'true' : 'false'" size="sm" /><span>별도의 CFG 스케일 사용</span></label>
-                <div class="ext-row" v-if="storeWidgets._sam3_use_cfg === 'true'">
-                  <div class="ext-field"><label>CFG 스케일</label><input type="number" v-model="storeWidgets._sam3_cfg" step="0.5" /></div>
-                </div>
-                <label class="ext-check-row" title="OFF면 base 생성의 sampler 상속&#10;ON이고 'Use same sampler' 이외면 SAM3 단계에서 override"><ToggleSwitch :model-value="storeWidgets._sam3_use_sampler === 'true'" @update:model-value="storeWidgets._sam3_use_sampler = $event ? 'true' : 'false'" size="sm" /><span>별도의 샘플러 사용</span></label>
-                <div class="ext-field" v-if="storeWidgets._sam3_use_sampler === 'true'"><label>샘플러</label>
-                  <CustomSelect v-model="storeWidgets._sam3_sampler" :options="['Use same sampler', ...samplerItems]" placeholder="Use same sampler" /></div>
-                <label class="ext-check-row" title="OFF면 base 생성의 scheduler 상속"><ToggleSwitch :model-value="storeWidgets._sam3_use_scheduler === 'true'" @update:model-value="storeWidgets._sam3_use_scheduler = $event ? 'true' : 'false'" size="sm" /><span>Use separate scheduler</span></label>
-                <div class="ext-field" v-if="storeWidgets._sam3_use_scheduler === 'true'"><label>Scheduler</label>
-                  <CustomSelect v-model="storeWidgets._sam3_scheduler" :options="['Use same scheduler', ...schedulerItems]" placeholder="Use same scheduler" /></div>
-
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_use_seed === 'true'" @update:model-value="storeWidgets._sam3_use_seed = $event ? 'true' : 'false'" size="sm" /><span>Use specified seed (instead of parent's)</span></label>
-                <div class="ext-field" v-if="storeWidgets._sam3_use_seed === 'true'"><label>Seed (-1 = random)</label>
-                  <input type="number" v-model="storeWidgets._sam3_seed" /></div>
-
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_use_noise_mul === 'true'" @update:model-value="storeWidgets._sam3_use_noise_mul = $event ? 'true' : 'false'" size="sm" /><span>Use noise multiplier</span></label>
-                <div class="ext-row" v-if="storeWidgets._sam3_use_noise_mul === 'true'">
-                  <div class="ext-field"><label>Noise Multiplier</label><input type="number" v-model="storeWidgets._sam3_noise_mul" step="0.01" min="0" max="2" /></div>
-                </div>
-                <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_restore_face === 'true'" @update:model-value="storeWidgets._sam3_restore_face = $event ? 'true' : 'false'" size="sm" /><span>Restore face</span></label>
-              </details>
-            </details>
+            <!-- 카드마다 components/params/*.vue — 위젯 키·클래스·문구는 예전 그대로 옮겼다(App.vue 분할 ④).
+                 .ext-* 카드 모양은 styles/panels.css 의 `:where(.extend-overlay)` 규칙이 이 열 안에서만 입힌다. -->
+            <ParamsBasicCard :high-res="highRes" :random-res="randomRes" />
+            <HiresFixCard />
+            <PromptFilterCard :rating="rating" />
+            <AdetailerCard :model-items="adModelItems" />
+            <Sam3MaskCard />
 
             <!-- Anima Guidance Suite — SAM3와 완전히 분리된 독립 기능.
                  인자 계약(위치 기반 62/7/13개)은 core/anima_guidance.py 참조. -->
@@ -383,51 +78,7 @@
 
             <!-- NegPiP 상시 적용 / 조건부 프롬프트는 STUDIO TOOLS '조건부' 모달로 이동 -->
 
-            <!-- LoRA Stack -->
-            <div id="sec-lora" class="ext-card">
-              <div class="ext-title">LoRA 스택
-                <span v-if="loraStack.length" class="lora-tools">
-                  <button class="lora-tool-btn" @click="toggleAllLoras(!allLorasOn)" :title="allLorasOn ? '전체 끄기' : '전체 켜기'">{{ allLorasOn ? '전체 OFF' : '전체 ON' }}</button>
-                  <button class="lora-tool-btn" @click="insertAllTriggers" title="활성 LoRA 트리거 워드를 메인 프롬프트에 일괄 삽입">트리거 삽입</button>
-                </span>
-              </div>
-              <div class="lora-empty" v-if="loraStack.length === 0">
-                LoRA 매니저에서 추가하세요
-              </div>
-              <template v-for="(lora, i) in loraStack" :key="lora.name">
-              <div class="lora-drop-marker" v-if="loraDragIdx >= 0 && loraDropIdx === i && i !== loraDragIdx && i !== loraDragIdx + 1"></div>
-              <div class="lora-block" :class="{ 'lora-dragging': loraDragIdx === i }"
-                @dragover.prevent="loraDragOver($event, i)" @drop.prevent="loraDrop">
-                <span class="lora-grip" title="여기(⠿)를 잡아 순서 변경" draggable="true"
-                  @dragstart.stop="loraDragStart(i)" @dragend="loraDragEnd">⠿</span>
-                <label class="lora-check"><input type="checkbox" v-model="lora.enabled" /></label>
-                <div class="lora-info-col">
-                  <div class="lora-name">{{ lora.name }}</div>
-                  <div class="lora-triggers" v-if="lora.triggerWords && lora.triggerWords.length">
-                    <button v-for="tw in lora.triggerWords" :key="tw" class="trigger-chip"
-                      @click="insertTriggerWord(tw)" :title="'클릭하여 프롬프트에 삽입'">{{ tw }}</button>
-                  </div>
-                </div>
-                <input type="range" min="-100" max="200" v-model.number="lora.weight" class="lora-slider" />
-                <input type="number" class="lora-weight-input" :value="(lora.weight / 100).toFixed(2)" step="0.05" min="-1" max="3"
-                  title="가중치 직접 입력" @change="lora.weight = Math.round((parseFloat(($event.target as HTMLInputElement).value) || 0) * 100)" @mousedown.stop />
-                <button class="lora-remove" @click="loraStack.splice(i, 1)"><Icon name="close" /></button>
-              </div>
-              </template>
-              <div class="lora-drop-marker" v-if="loraDragIdx >= 0 && loraDropIdx === loraStack.length && loraStack.length !== loraDragIdx + 1"></div>
-              <button class="ext-add-btn" @click="showLoraModal = true">+ ADD LoRA</button>
-              <!-- LoRA 세트 저장/불러오기 -->
-              <div class="lora-sets">
-                <input v-model="loraSetName" class="lora-set-input" placeholder="세트 이름" />
-                <button class="lora-tool-btn" @click="saveLoraSet" :disabled="!loraStack.length || !loraSetName.trim()" title="현재 스택을 세트로 저장">저장</button>
-                <select v-model="loraSetSel" class="lora-set-sel">
-                  <option value="">불러오기…</option>
-                  <option v-for="n in loraSetNames" :key="n" :value="n">{{ n }}</option>
-                </select>
-                <button class="lora-tool-btn" @click="loadLoraSet" :disabled="!loraSetSel" title="선택 세트를 스택에 적용">적용</button>
-                <button class="lora-tool-btn" @click="deleteLoraSet" :disabled="!loraSetSel" title="세트 삭제"><Icon name="close" /></button>
-              </div>
-            </div>
+            <LoraStackCard :lora="lora" />
           </div>
         </div>
         <div class="gen-footer">
@@ -453,6 +104,7 @@
             :deck-used="deckUsed"
             :deck-allow-dup="deckAllowDup"
             :next-prompt="autoNextPrompt"
+            :prompt-is-next="autoPromptIsNext"
             @update:settings="applyAutoSettings"
             @reset-deck="resetDeck"
             @pause="pauseAutomation"
@@ -534,7 +186,7 @@
             :class="{ selected: currentImage === img, blink: historyBlink && currentImage === img }"
             draggable="true" @dragstart="onDragStart($event, img)"
           >
-            <img :key="historyImageSrc(img)" :src="historyImageSrc(img)" loading="lazy" />
+            <img :key="historyImageSrc(img)" :src="historyImageSrc(img)" decoding="async" />
           </div>
         </div>
         <button class="hist-nav-btn" @click="histPage++" :disabled="(histPage + 1) * histPerPage >= historyImages.length"><Icon name="chevron-down" /></button>
@@ -553,7 +205,7 @@
             <div class="ctx-item" @click="ctxAddToQueue"><Icon name="plus" /> 다음 큐에 추가</div>
             <div class="ctx-separator"></div>
             <div class="ctx-item" @click="ctxCopyPath"><Icon name="clipboard" /> 경로 복사</div>
-            <div class="ctx-item delete" @click="ctxDelete"><Icon name="trash" /> 삭제</div>
+            <div class="ctx-item delete" @click="ctxDelete"><Icon name="trash" /> 휴지통으로 이동</div>
           </div>
         </transition>
       </aside>
@@ -571,40 +223,11 @@
     <StatusStrip :backend="backendStatus" :vram="vramInfo" :vram-level="vramClass"
       :vram-tooltip="vramTooltip" @vram-click="onVramClick" />
 
-    <!-- Preset Manager Modal -->
+    <!-- 스튜디오 도구 매니저 모달 7종 — components/managers/*.vue 는 표시만 한다. 상태와 백엔드 리스너는
+         composables(모듈 싱글턴)에 있어 닫혀 있는 동안에도 목록·가중치·프로파일을 받는다.
+         `<transition name="fade">` 은 여기 두어 예전과 같은 fade 규칙(이 파일의 scoped)이 모달 루트에 걸린다. -->
     <transition name="fade">
-      <div v-if="showPresetManager" class="pm-overlay" @mousedown.self="showPresetManager = false">
-        <div class="pm-modal">
-          <div class="pm-header">
-            <h3>프리셋 관리</h3>
-            <button class="close-btn" @click="showPresetManager = false"><Icon name="close" /></button>
-          </div>
-          <div class="pm-body">
-            <div class="pm-list">
-              <div v-for="p in presetList" :key="p" class="pm-item"
-                :class="{ active: selectedPreset === p }" @click="selectedPreset = p; loadPresetPreview(p)">
-                {{ p }}
-              </div>
-              <div v-if="presetList.length === 0" class="pm-empty">저장된 프리셋 없음</div>
-            </div>
-            <div class="pm-preview">
-              <div v-if="presetPreview" class="pm-detail">
-                <div class="pm-field" v-for="(val, key) in presetPreview" :key="key">
-                  <span class="pm-key">{{ key }}</span>
-                  <span class="pm-val">{{ typeof val === 'string' ? val.substring(0, 100) : val }}</span>
-                </div>
-              </div>
-              <div v-else class="pm-empty">프리셋을 선택하세요</div>
-            </div>
-          </div>
-          <div class="pm-footer">
-            <button class="pm-btn" @click="loadSelectedPreset" :disabled="!selectedPreset"><Icon name="folder-open" /> 불러오기</button>
-            <button class="pm-btn" @click="deleteSelectedPreset" :disabled="!selectedPreset"><Icon name="trash" /> 삭제</button>
-            <div class="pm-spacer"></div>
-            <button class="pm-btn accent" @click="saveNewPreset"><Icon name="save" /> 현재 상태 저장</button>
-          </div>
-        </div>
-      </div>
+      <PresetManagerModal v-if="showPresetManager" />
     </transition>
 
     <!-- 캐릭터 특징 프리셋 / A/B 테스트 / override 모달 (Vue) -->
@@ -612,7 +235,7 @@
     <ABTestModal v-if="uiModals.abTest" @close="closeAbTestModal" />
     <CharFeatureOverrideModal v-if="uiModals.charOverride" @close="closeCharOverrideModal" />
     <LoraManagerModal v-if="showLoraModal" @close="showLoraModal = false" @add="onLoraAdd" />
-    <CondPromptModal v-if="showCondModal" v-model:preventDupe="extWidgets.cond_prevent_dupe" @close="showCondModal = false" />
+    <CondPromptModal v-if="showCondModal" @close="showCondModal = false" />
 
     <!-- 세션 복구 배너 (크래시/OOM 후) -->
     <!-- z-index 9999 라 게이트(900) 위로 뜬다. 시작 직후 1.2초 뒤에 나타나므로
@@ -623,327 +246,32 @@
       <button class="sr-dismiss" @click="dismissSessionRestore">닫기</button>
     </div>
 
-    <!-- Weight Manager Modal -->
     <transition name="fade">
-      <div v-if="showWeightManager" class="wm-overlay" @mousedown.self="showWeightManager = false">
-        <div class="wm-modal">
-          <div class="wm-header">
-            <h3>글로벌 태그 가중치</h3>
-            <span class="wm-desc">등록된 태그는 어디서든 자동으로 지정 가중치가 적용됩니다</span>
-            <button class="close-btn" @click="showWeightManager = false"><Icon name="close" /></button>
-          </div>
-          <div class="wm-body">
-            <div v-for="(w, i) in globalWeights" :key="w.tag || i" class="wm-row">
-              <input v-model="w.tag" placeholder="태그명..." class="wm-tag-input" />
-              <input type="range" min="50" max="200" v-model.number="w.weight" class="wm-slider" />
-              <span class="wm-val">{{ (w.weight / 100).toFixed(2) }}</span>
-              <button class="wm-rm" @click="globalWeights.splice(i, 1)"><Icon name="close" /></button>
-            </div>
-            <button class="wm-add" @click="globalWeights.push({ tag: '', weight: 100 })">+ ADD TAG WEIGHT</button>
-          </div>
-          <div class="wm-footer">
-            <button class="wm-save" @click="saveGlobalWeights"><Icon name="save" /> 저장</button>
-          </div>
-        </div>
-      </div>
+      <WeightManagerModal v-if="showWeightManager" />
+    </transition>
+    <transition name="fade">
+      <WildcardManagerModal v-if="showWcManager" />
+    </transition>
+    <transition name="fade">
+      <WorkflowProfileModal v-if="showProfileManager" />
+    </transition>
+    <transition name="fade">
+      <PromptOrderModal v-if="showOrderManager" />
+    </transition>
+    <transition name="fade">
+      <InstantWildcardModal v-if="showInstantWcManager" />
+    </transition>
+    <transition name="fade">
+      <GenStatsModal v-if="showStatsModal" />
     </transition>
 
-    <!-- Wildcard Manager Modal -->
-    <transition name="fade">
-      <div v-if="showWcManager" class="wc-overlay" @mousedown.self="showWcManager = false">
-        <div class="wc-modal">
-          <div class="wc-modal-header">
-            <h3>와일드카드 관리</h3>
-            <span class="wc-path">wildcards/</span>
-            <button class="wc-new-btn" @click="createNewWildcard">+ NEW</button>
-            <button class="close-btn" @click="showWcManager = false"><Icon name="close" /></button>
-          </div>
-          <div class="wc-modal-body">
-            <!-- 파일 목록 -->
-            <div class="wc-sidebar">
-              <div v-for="wc in wildcards" :key="wc.name" class="wc-file-item"
-                :class="{ active: selectedWc === wc.name }" @click="selectWildcard(wc.name)">
-                <span class="wc-fname" @dblclick.stop="renameWildcard(wc.name)">{{ wc.name }}</span>
-                <span class="wc-file-count">{{ wc.tags.length }}</span>
-                <button class="wc-del" @click.stop="deleteWildcard(wc.name)"><Icon name="close" /></button>
-              </div>
-            </div>
-            <!-- 편집 영역 -->
-            <div class="wc-content">
-              <template v-if="selectedWcData">
-                <div class="wc-content-header">
-                  <!-- 파일명 인라인 편집 -->
-                  <h4 v-if="!wcRenaming" @dblclick="startWcRename">{{ selectedWc }}</h4>
-                  <input v-else v-model="wcNewName" class="wc-rename-input" @blur="finishWcRename" @keydown.enter="finishWcRename" ref="wcRenameRef" />
-                  <span class="wc-syntax">문법: <code>{{'__' + selectedWc + '__'}}</code></span>
-                </div>
-                <!-- 블록 편집 -->
-                <div class="wc-blocks">
-                  <div v-for="(line, li) in wcEditLines" :key="li" class="wc-block-row">
-                    <span class="wc-block-idx">{{ li + 1 }}</span>
-                    <input v-model="wcEditLines[li]" class="wc-block-input" @keydown.enter="addWcLine(li)" />
-                    <button class="wc-block-rm" @click="wcEditLines.splice(li, 1)"><Icon name="close" /></button>
-                  </div>
-                  <button class="wc-add-line" @click="wcEditLines.push('')">+ 줄 추가</button>
-                </div>
-                <!-- 하단: 삽입 + 저장 -->
-                <div class="wc-bottom-bar">
-                  <CustomSelect v-model="wcInsertTarget" :options="['main', 'prefix', 'suffix', 'clipboard']" placeholder="삽입 위치" class="wc-insert-sel" />
-                  <button class="wc-use-btn" @click="useWcSyntax">사용</button>
-                  <div class="wc-spacer"></div>
-                  <button class="wc-save-btn" @click="saveCurrentWildcard"><Icon name="save" /> 저장</button>
-                </div>
-              </template>
-              <div v-else class="wc-empty">좌측에서 와일드카드를 선택하거나 NEW를 클릭하세요</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- 워크플로우 프로파일 관리 모달 -->
-    <transition name="fade">
-      <div v-if="showProfileManager" class="wc-overlay" @mousedown.self="showProfileManager = false">
-        <div class="wc-modal" style="max-width: 640px;">
-          <div class="wc-modal-header">
-            <h3>워크플로우 프로파일</h3>
-            <span class="wc-path">config/profiles/*.json</span>
-            <button class="close-btn" @click="showProfileManager = false"><Icon name="close" /></button>
-          </div>
-          <div class="order-modal-body">
-            <div v-if="workflowProfiles.length === 0" class="wc-empty" style="padding: 20px;">
-              저장된 프로파일이 없습니다.<br/>
-              <small style="color: var(--text-muted)">상단의 + 버튼으로 현재 세팅을 저장하세요.</small>
-            </div>
-            <div v-else class="order-list">
-              <div v-for="prof in workflowProfiles" :key="prof.name" class="profile-item">
-                <div class="profile-info">
-                  <div class="profile-name">{{ prof.name }}</div>
-                  <div class="profile-meta">{{ prof.model || '모델 미지정' }}{{ prof.vae ? ' · VAE: ' + prof.vae : '' }}</div>
-                </div>
-                <button class="order-btn" @click="loadWorkflowProfile(prof.name)" title="적용"><Icon name="play" /></button>
-                <button class="order-btn" @click="renameWorkflowProfile(prof.name)" title="이름 변경"><Icon name="pencil" /></button>
-                <button class="order-btn" @click="deleteWorkflowProfile(prof.name)" title="삭제" style="color: var(--state-alert-fg);"><Icon name="close" /></button>
-              </div>
-            </div>
-            <div class="order-actions">
-              <button class="order-save" @click="saveCurrentAsProfile">+ 현재 세팅 저장</button>
-              <div style="flex: 1;"></div>
-              <button class="order-cancel" @click="showProfileManager = false">닫기</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- 프롬프트 섹션 순서 매니저 모달 -->
-    <transition name="fade">
-      <div v-if="showOrderManager" class="wc-overlay" @mousedown.self="showOrderManager = false">
-        <div class="wc-modal" style="max-width: 680px;">
-          <div class="wc-modal-header">
-            <h3>프롬프트 섹션 순서</h3>
-            <span class="wc-path">생성 시 합쳐지는 순서를 ↑/↓로 조정. 저장 시 즉시 반영</span>
-            <button class="close-btn" @click="showOrderManager = false"><Icon name="close" /></button>
-          </div>
-          <div class="order-modal-body">
-            <div class="order-list">
-              <div v-for="(sec, i) in promptOrderList" :key="sec.key" class="order-item">
-                <span class="order-num">{{ i + 1 }}</span>
-                <span class="order-label">{{ sec.label }}</span>
-                <button class="order-btn" :disabled="i === 0" @click="moveOrderUp(i)" title="위로"><Icon name="arrow-up" /></button>
-                <button class="order-btn" :disabled="i === promptOrderList.length - 1" @click="moveOrderDown(i)" title="아래로"><Icon name="arrow-down" /></button>
-              </div>
-            </div>
-            <div class="order-preview">
-              <span class="order-preview-label">미리보기:</span>
-              <code class="order-preview-text">{{ promptOrderList.map(s => s.label).join(' → ') }}</code>
-            </div>
-            <div class="order-actions">
-              <button class="order-reset" @click="resetPromptOrder"><Icon name="rotate-ccw" /> 기본값 복원</button>
-              <div style="flex: 1;"></div>
-              <button class="order-cancel" @click="showOrderManager = false">취소</button>
-              <button class="order-save" @click="saveOrderAndClose"><Icon name="save" /> 저장 & 적용</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- PR 8: INSTANT WILDCARD Manager Modal -->
-    <transition name="fade">
-      <div v-if="showInstantWcManager" class="wc-overlay" @mousedown.self="showInstantWcManager = false">
-        <div class="wc-modal">
-          <div class="wc-modal-header">
-            <h3>즉석 와일드카드 관리</h3>
-            <span class="wc-path">user_data/instant_wildcards.json &nbsp;·&nbsp; 문법: <code>$$name$$</code></span>
-            <button class="wc-new-btn" @click="createNewInstantWc">+ NEW</button>
-            <button class="close-btn" @click="showInstantWcManager = false"><Icon name="close" /></button>
-          </div>
-          <div class="wc-modal-body">
-            <!-- 이름 목록 -->
-            <div class="wc-sidebar">
-              <div v-for="iw in instantWildcards" :key="iw.name" class="wc-file-item"
-                :class="{ active: selectedInstantWc === iw.name }" @click="selectInstantWc(iw.name)">
-                <span class="wc-fname">{{ iw.name }}</span>
-                <span class="wc-file-count">{{ iw.lines.length }}</span>
-                <button class="wc-del" @click.stop="deleteInstantWc(iw.name)"><Icon name="close" /></button>
-              </div>
-              <div v-if="instantWildcards.length === 0" class="wc-empty" style="padding: 12px; font-size: 11px;">
-                와일드카드가 없습니다. + NEW로 추가하세요.
-              </div>
-            </div>
-            <!-- 편집 영역 -->
-            <div class="wc-content">
-              <template v-if="selectedInstantWcData">
-                <div class="wc-content-header">
-                  <h4>{{ selectedInstantWc }}</h4>
-                  <span class="wc-syntax">사용: <code>{{'$$' + selectedInstantWc + '$$'}}</code> ·
-                    가중치: <code>{100}:tag</code></span>
-                </div>
-                <div class="wc-blocks">
-                  <div v-for="(line, li) in iwEditLines" :key="li" class="wc-block-row">
-                    <span class="wc-block-idx">{{ li + 1 }}</span>
-                    <input v-model="iwEditLines[li]" class="wc-block-input"
-                      :placeholder="li === 0 ? '예: happy 또는 {100}:happy (가중치)' : ''"
-                      @keydown.enter="iwEditLines.push('')" />
-                    <button class="wc-block-rm" @click="iwEditLines.splice(li, 1)"><Icon name="close" /></button>
-                  </div>
-                  <button class="wc-add-line" @click="iwEditLines.push('')">+ 줄 추가</button>
-                </div>
-                <div class="wc-bottom-bar">
-                  <span style="font-size: 11px; color: var(--text-muted); margin-right: auto;"><Icon name="bulb" /><b>$$name$$</b>을 프롬프트에 넣으면 생성 시 라인 중 하나를 뽑아 치환합니다.
-                  </span>
-                  <button class="wc-save-btn" @click="saveCurrentInstantWc"><Icon name="save" /> 저장</button>
-                </div>
-              </template>
-              <div v-else class="wc-empty">좌측에서 선택하거나 NEW를 클릭하세요</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- Generation Stats Modal -->
-    <transition name="fade">
-      <div v-if="showStatsModal" class="stats-overlay" @mousedown.self="showStatsModal = false">
-        <div class="stats-modal">
-          <div class="stats-header">
-            <h3>생성 통계</h3>
-            <button class="close-btn" @click="showStatsModal = false">X</button>
-          </div>
-          <div class="stats-body" v-if="genStats.total > 0">
-            <div class="stats-cards">
-              <div class="stat-card">
-                <div class="stat-val">{{ genStats.total }}</div>
-                <div class="stat-label">Total</div>
-              </div>
-              <div class="stat-card accent">
-                <div class="stat-val">{{ genStats.success_rate }}%</div>
-                <div class="stat-label">Success</div>
-              </div>
-              <div class="stat-card">
-                <div class="stat-val">{{ genStats.avg_time }}s</div>
-                <div class="stat-label">Avg Time</div>
-              </div>
-              <div class="stat-card">
-                <div class="stat-val">{{ formatTime(genStats.total_time) }}</div>
-                <div class="stat-label">총 시간</div>
-              </div>
-            </div>
-
-            <div class="stats-section" v-if="genStats.daily && genStats.daily.length">
-              <h4>일별 생성 (최근 30일)</h4>
-              <div class="daily-chart">
-                <div v-for="d in genStats.daily" :key="d.date" class="daily-bar-wrap"
-                  :title="d.date + ': ' + d.count + '장'">
-                  <div class="daily-bar" :style="{ height: genStats.daily_max ? (d.count / genStats.daily_max * 100) + '%' : '0%' }"></div>
-                </div>
-              </div>
-              <div class="daily-labels">
-                <span>30일 전</span><span>오늘</span>
-              </div>
-            </div>
-
-            <div class="stats-two-col">
-              <div class="stats-section" v-if="genStats.top_models && genStats.top_models.length">
-                <h4>많이 쓴 모델</h4>
-                <div v-for="m in genStats.top_models" :key="m.name" class="stats-bar-row">
-                  <span class="bar-name">{{ m.name }}</span>
-                  <div class="bar-track"><div class="bar-fill" :style="{ width: (m.count / genStats.total * 100) + '%' }"></div></div>
-                  <span class="bar-count">{{ m.count }}</span>
-                </div>
-              </div>
-              <div class="stats-section" v-if="genStats.top_resolutions && genStats.top_resolutions.length">
-                <h4>많이 쓴 해상도</h4>
-                <div v-for="r in genStats.top_resolutions" :key="r.res" class="stats-bar-row">
-                  <span class="bar-name">{{ r.res }}</span>
-                  <div class="bar-track"><div class="bar-fill" :style="{ width: (r.count / genStats.total * 100) + '%' }"></div></div>
-                  <span class="bar-count">{{ r.count }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="stats-section" v-if="genStats.recent && genStats.recent.length">
-              <h4>최근 생성</h4>
-              <div class="recent-table">
-                <div v-for="r in genStats.recent" :key="r.timestamp" class="recent-row">
-                  <span class="r-time">{{ r.timestamp?.slice(5, 16).replace('T', ' ') }}</span>
-                  <span class="r-status" :class="r.success ? 'ok' : 'fail'">{{ r.success ? 'OK' : 'FAIL' }}</span>
-                  <span class="r-dur">{{ r.duration_sec }}s</span>
-                  <span class="r-res">{{ r.width }}x{{ r.height }}</span>
-                  <span class="r-model">{{ (r.model || '').split('/').pop()?.slice(0, 20) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="stats-body stats-empty" v-else>
-            <div class="stats-empty-msg">아직 생성 기록이 없습니다</div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- Global Toast Notifications -->
-    <!-- 알림 벨 + 히스토리 패널 -->
-    <!-- 알림 벨도 z-index 2003 이라 게이트를 뚫고 뜬다. 게이트 동안엔 숨긴다 —
-         고를 것이 하나뿐인 화면에 눌러도 뒤가 안 보이는 버튼이 떠 있으면 안 된다. -->
-    <button v-if="!gateOpen" class="notif-bell" @click.stop="toggleNotifPanel" title="알림 기록"><Icon name="bell" /><span v-if="unread > 0" class="notif-badge">{{ unread > 9 ? '9+' : unread }}</span>
-    </button>
-    <div v-if="showNotifPanel" class="notif-overlay" @click="showNotifPanel = false"></div>
-    <transition name="fade">
-      <div v-if="showNotifPanel" class="notif-panel" @click.stop>
-        <div class="notif-head">
-          <span>알림 기록</span>
-          <button v-if="toastHistory.length" class="notif-clear" @click="clearNotifHistory">모두 지우기</button>
-        </div>
-        <div class="notif-list">
-          <div v-for="n in toastHistory" :key="n.id" class="notif-item" :class="n.type">
-            <span class="notif-ico"><Icon :name="n.type === 'error' || n.type === 'warning' ? 'alert' : n.type === 'success' ? 'check' : 'info'" /></span>
-            <span class="notif-msg">{{ n.msg }}</span>
-            <span class="notif-time">{{ relTime(n.ts) }}</span>
-          </div>
-          <div v-if="toastHistory.length === 0" class="notif-empty">알림 없음</div>
-        </div>
-      </div>
-    </transition>
+    <!-- 알림 벨 + 기록 패널(components/NotificationCenter.vue) — 벨은 게이트 동안 숨긴다(z-index 2003 이라 게이트를 뚫고 뜬다) -->
+    <NotificationCenter :show-bell="!gateOpen" />
 
     <AppTooltip />
 
-    <Teleport to="body">
-      <div class="toast-container" :class="{ 'toast-multi': toasts.length > 1 }">
-        <button v-if="toasts.length > 1" class="toast-clear-all" @click="clearAllToasts" title="모두 닫기">
-          모두 닫기 ({{ toasts.length }})
-        </button>
-        <transition-group name="toast" tag="div" class="toast-stack">
-          <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">
-            <span class="toast-icon"><Icon :name="t.type === 'error' ? 'alert' : t.type === 'success' ? 'check' : 'info'" /></span>
-            <span class="toast-msg">{{ t.msg }}</span>
-            <span v-if="t.count > 1" class="toast-count">×{{ t.count }}</span>
-            <button class="toast-close" @click.stop="removeToast(t.id)" title="닫기"><Icon name="close" /></button>
-          </div>
-        </transition-group>
-      </div>
-    </Teleport>
+    <!-- 전역 토스트(components/ToastLayer.vue, body 로 Teleport) — 목록은 composables/useToasts.ts -->
+    <ToastLayer />
   </div>
 </template>
 
@@ -953,78 +281,71 @@ import { initBridge, onBackendEvent, getBackend } from './bridge.js'
 import { requestAction, useWidgetStore } from './stores/widgetStore.js'
 import { initialiseAppUpdates } from './stores/appUpdateStore'
 import { mediaUrl } from './utils/media.js'
+import { bumpMediaVersion, recordListedMediaVersions } from './utils/mediaVersions'
 import { useLoraStack } from './composables/useLoraStack.js'
 import { useHighRes } from './composables/useHighRes.js'
 import { useRatingFilter } from './composables/useRatingFilter.js'
+import { useRandomResolutions } from './composables/useRandomResolutions'
+import { useToasts } from './composables/useToasts'
+import { usePresetManager } from './composables/usePresetManager'
+import { useGlobalWeights } from './composables/useGlobalWeights'
+import { useWildcardManager } from './composables/useWildcardManager'
+import { useWorkflowProfiles } from './composables/useWorkflowProfiles'
+import { usePromptOrder } from './composables/usePromptOrder'
+import { useInstantWildcards } from './composables/useInstantWildcards'
+import { useGenStats } from './composables/useGenStats'
+import { vScrollMemory } from './directives/vScrollMemory'
+import { appModalStack } from './utils/modalStack'
+import { createAppKeydownHandler } from './utils/appShortcuts'
+import { vramLevel, vramTooltipText, type VramInfo } from './utils/vramStatus'
+import { formatEta, previewDataUrl, progressPercent } from './utils/generationProgress'
+import { exifFromPayload, exifTabContent, type ExifData } from './utils/exifPayload'
+import { edgeHistoryIndex, historyPageOf, historyPageSlice, stepHistoryIndex } from './utils/historyNav'
+import { normalizeUiScale } from './utils/uiScale'
+import { useHistoryThumbs, normalizePreviewThumbWidth } from './composables/useHistoryThumbs'
 import { useBackendGate } from './composables/useBackendGate'
 import { reconcileTheme } from './theme/applyTheme'
-import type { ActionName, AutomationSettings } from './types/bridge'
+import { resolveInstalledModel, storedOllamaModel, storedOllamaUrl } from './utils/ollamaPrefs'
+import {
+  AUTOMATION_KEYS, automationPatchFromServer, automationSyncPayload, hydrateAutomationSettings, markAutomationKeys,
+  type AutomationKey,
+} from './utils/automationSettings'
+import { mirrorPrefsToStorage } from './utils/uiPrefMirror'
+import { persistUiPrefs, restoreUiFlagsFromPrefs } from './composables/uiPrefs'
+import { useSessionRestore } from './composables/useSessionRestore'
+import { createPendingRequest } from './utils/pendingRequest'
+import { applyDeleteToHistory, parseImageDeleteResult } from './utils/imageDeleteResult'
+import type { ActionName, ActionPayload, AutomationSettings, AutomationStatusEvent } from './types/bridge'
 
 const wStore = useWidgetStore()
 const storeWidgets = wStore.widgets
-const samplerItems = computed(() => wStore.getProperty('sampler_combo', 'items') || [])
-const schedulerItems = computed(() => wStore.getProperty('scheduler_combo', 'items') || [])
-const upscalerItems = computed(() => wStore.getProperty('upscaler_combo', 'items') || [])
-const sam3CheckpointItems = computed(() => wStore.getProperty('_sam3_checkpoint', 'items') || ['sam3.pt'])
-const sam3DeviceItems = ['cuda', 'auto', 'cpu']
-const sam3FillItems = ['fill', 'original', 'latent noise', 'latent nothing']
+// 전역 토스트 — composables/useToasts.ts(모듈 싱글턴). 화면은 ToastLayer · NotificationCenter 가 그린다.
+// composable 들(useLoraStack · useSessionRestore …)에도 이 addToast 를 주입한다.
+const { addToast } = useToasts()
+// ADetailer 모델 목록 — adetailerModelsReady(부팅 때 requestADetailerModels 로 요청)가 채우고 AdetailerCard 가 그린다
 const adModelItems = ref<string[]>([])
-// ADetailer 슬롯 별도 Checkpoint/VAE 목록 (s1/s2 동일하게 Python이 채움)
-const adCheckpointItems = computed(() => wStore.getProperty('_ad_s1_ckpt', 'items') || ['Use same checkpoint'])
-const adVaeItems = computed(() => wStore.getProperty('_ad_s1_vae', 'items') || ['Use same VAE'])
-// Hires 전용 Checkpoint/Sampler/Scheduler (Python이 'Use same ...' 접두 포함해 채움)
-const hiresCheckpointItems = computed(() => wStore.getProperty('hires_checkpoint_combo', 'items') || ['Use same checkpoint'])
-const hiresSamplerItems = computed(() => wStore.getProperty('hires_sampler_combo', 'items') || ['Use same sampler'])
-const hiresSchedulerItems = computed(() => wStore.getProperty('hires_scheduler_combo', 'items') || ['Use same scheduler'])
 
-// Hires/ADetailer 체크박스 (proxy 연동)
-const randomResEnabled = computed({ get: () => storeWidgets.random_res_check === 'true', set: v => { storeWidgets.random_res_check = v ? 'true' : 'false'; if (v) loadRandomResList() } })
-const autoResEnabled = computed({ get: () => storeWidgets.auto_res_check === 'true', set: v => { storeWidgets.auto_res_check = v ? 'true' : 'false' } })
+// ── 파라미터 열(components/params/*) — 상태의 주인은 App 이다: 부팅 복원(uiPrefsLoaded)·로드 시점을
+//    여기서 정하고, 카드는 composable 결과 객체를 prop 으로 받아 그린다(App.vue 분할 ④).
+// 고해상도(단일 패스) 모드 — composables/useHighRes.js
+const highRes = useHighRes({ storeWidgets, saveUiPrefs })
+const { restoreFromPrefs: restoreHighResFromPrefs } = highRes
+// 랜덤 해상도 — composables/useRandomResolutions.ts (목록은 onMounted 에서 받는다)
+const randomRes = useRandomResolutions({ storeWidgets, getBackend, requestAction })
 
-// 고해상도(단일 패스) 모드 — composables/useHighRes.js로 추출 (App.vue 분할 ④)
-const {
-  highResEnabled, highResFactor, hrActualW, hrActualH,
-  restoreFromPrefs: restoreHighResFromPrefs,
-} = useHighRes({ storeWidgets, saveUiPrefs })
-
-// 랜덤 해상도 관리
-const randomResList = ref<Array<[number, number, string]>>([])
-const newResW = ref(832)
-const newResH = ref(1216)
-async function loadRandomResList() {
-  const bk = await getBackend()
-  if (bk.getRandomResolutions) {
-    bk.getRandomResolutions((json: string) => {
-      try { randomResList.value = JSON.parse(json) } catch {}
-    })
-  }
-}
-function addRandomRes() {
-  const w = Math.round((newResW.value || 832) / 8) * 8
-  const h = Math.round((newResH.value || 1216) / 8) * 8
-  if (w < 256 || h < 256) return
-  randomResList.value.push([w, h, `${w}x${h}`])
-  requestAction('set_random_resolutions', { list: randomResList.value })
-}
-function removeRandomRes(i: number) {
-  randomResList.value.splice(i, 1)
-  requestAction('set_random_resolutions', { list: randomResList.value })
-}
-const negpipEnabled = computed({ get: () => storeWidgets.negpip_group === 'true', set: v => { storeWidgets.negpip_group = v ? 'true' : 'false' } })
-
-const hires_enabled = computed({ get: () => storeWidgets.hires_options_group === 'true', set: v => { storeWidgets.hires_options_group = v ? 'true' : 'false' } })
-// 공유 헬퍼 — 여러 composable이 주입받아 사용(함수 선언이라 hoisting으로 위에서도 호출됨)
+// 공유 헬퍼 — 여러 composable이 주입받아 사용(함수 선언이라 hoisting으로 위에서도 호출됨).
+// 파일(save_ui_prefs)과 localStorage 캐시(utils/uiPrefMirror 표)를 한 경로로 쓴다. 즉시 전송 —
+// 고빈도 발생원(LoRA·고해상도 슬라이더)은 각 composable 이 스스로 디바운스한다.
 function saveUiPrefs(payload: any) {
-  requestAction('save_ui_prefs', payload)
+  persistUiPrefs(payload)
 }
-// Rating 필터 — composables/useRatingFilter.js로 추출 (App.vue 분할 ④)
-const {
-  ratingFilters, saveRatingFilter, pushRatingFilter,
-  restoreFromPrefs: restoreRatingFromPrefs,
-} = useRatingFilter({ saveUiPrefs })
+// Rating 필터 — composables/useRatingFilter.js (PromptFilterCard 가 그린다)
+const rating = useRatingFilter({ saveUiPrefs })
+const { restoreFromPrefs: restoreRatingFromPrefs } = rating
 
 // 시작 백엔드 게이트 — composables/useBackendGate.ts (App.vue 분할 ④)
-// 템플릿이 쓰는 이름은 하나도 빠짐없이 여기서 꺼내야 한다(누락 시 빌드는 통과해도 런타임에 깨짐).
+// 템플릿이 쓰는 이름은 하나도 빠짐없이 여기서 꺼내야 한다(누락 시 빌드는 통과해도 런타임에 깨짐 —
+// App.templateBindings.test.ts 가 정적으로 막는다).
 const {
   gateOpen, gateWebuiUrl, gateComfyUrl, gateWorkflowPath,
   gateProbe, gateWorkflowInfo, gateBusy, gateError, gateDismissible,
@@ -1032,20 +353,6 @@ const {
   onGateProbe, onGateSelect, onGatePickWorkflow, onGateDismiss,
 } = useBackendGate()
 
-const removeArtist = computed({ get: () => storeWidgets.chk_remove_artist === 'true', set: v => { storeWidgets.chk_remove_artist = v ? 'true' : 'false' } })
-const removeCopyright = computed({ get: () => storeWidgets.chk_remove_copyright === 'true', set: v => { storeWidgets.chk_remove_copyright = v ? 'true' : 'false' } })
-const removeCharacter = computed({ get: () => storeWidgets.chk_remove_character === 'true', set: v => { storeWidgets.chk_remove_character = v ? 'true' : 'false' } })
-const removeCharacterFeatures = computed({ get: () => storeWidgets.chk_remove_character_features === 'true', set: v => { storeWidgets.chk_remove_character_features = v ? 'true' : 'false' } })
-const removeMeta = computed({ get: () => storeWidgets.chk_remove_meta === 'true', set: v => { storeWidgets.chk_remove_meta = v ? 'true' : 'false' } })
-const removeCensorship = computed({ get: () => storeWidgets.chk_remove_censorship === 'true', set: v => { storeWidgets.chk_remove_censorship = v ? 'true' : 'false' } })
-const removeText = computed({ get: () => storeWidgets.chk_remove_text === 'true', set: v => { storeWidgets.chk_remove_text = v ? 'true' : 'false' } })
-const promptFocus = computed({ get: () => storeWidgets.chk_prompt_focus === 'true', set: v => { storeWidgets.chk_prompt_focus = v ? 'true' : 'false' } })
-const autoCharFeatures = computed({ get: () => storeWidgets.chk_auto_char_features === 'true', set: v => { storeWidgets.chk_auto_char_features = v ? 'true' : 'false' } })
-const autoRemoveCharFeatures = computed({ get: () => storeWidgets.chk_auto_remove_char_features === 'true', set: v => { storeWidgets.chk_auto_remove_char_features = v ? 'true' : 'false' } })
-const ad_enabled = computed({ get: () => storeWidgets.adetailer_group === 'true', set: v => { storeWidgets.adetailer_group = v ? 'true' : 'false' } })
-const sam3_enabled = computed({ get: () => storeWidgets.sam3_group === 'true', set: v => { storeWidgets.sam3_group = v ? 'true' : 'false' } })
-const ad_s1_enabled = computed({ get: () => storeWidgets.ad_slot1_group === 'true', set: v => { storeWidgets.ad_slot1_group = v ? 'true' : 'false' } })
-const ad_s2_enabled = computed({ get: () => storeWidgets.ad_slot2_group === 'true', set: v => { storeWidgets.ad_slot2_group = v ? 'true' : 'false' } })
 import PromptPanel from './components/PromptPanel.vue'
 import CustomSelect from './components/CustomSelect.vue'
 import NavRail from './components/NavRail.vue'
@@ -1062,9 +369,25 @@ import ToggleSwitch from './components/ToggleSwitch.vue'
 import AutomationPanel from './components/AutomationPanel.vue'
 import AnimaGuidancePanel from './components/AnimaGuidancePanel.vue'
 import AppTooltip from './components/AppTooltip.vue'
+import NotificationCenter from './components/NotificationCenter.vue'
+import ToastLayer from './components/ToastLayer.vue'
+import ParamsBasicCard from './components/params/ParamsBasicCard.vue'
+import HiresFixCard from './components/params/HiresFixCard.vue'
+import PromptFilterCard from './components/params/PromptFilterCard.vue'
+import AdetailerCard from './components/params/AdetailerCard.vue'
+import Sam3MaskCard from './components/params/Sam3MaskCard.vue'
+import LoraStackCard from './components/params/LoraStackCard.vue'
+import PresetManagerModal from './components/managers/PresetManagerModal.vue'
+import WeightManagerModal from './components/managers/WeightManagerModal.vue'
+import WildcardManagerModal from './components/managers/WildcardManagerModal.vue'
+import WorkflowProfileModal from './components/managers/WorkflowProfileModal.vue'
+import PromptOrderModal from './components/managers/PromptOrderModal.vue'
+import InstantWildcardModal from './components/managers/InstantWildcardModal.vue'
+import GenStatsModal from './components/managers/GenStatsModal.vue'
 import { loadCondRules, condEnabled } from './composables/condRules.js'
+import { clampMenuPosition, menuPositionStyle } from './utils/ctxMenuPosition'
 import { uiModals, closeCharPresetModal, openAbTestModal, closeAbTestModal,
-         openCharOverrideModal, closeCharOverrideModal } from './composables/uiModals.js'
+         closeCharOverrideModal } from './composables/uiModals.js'
 
 const currentImage = ref('')
 const imageVersions = reactive<Record<string, number>>({})
@@ -1081,35 +404,11 @@ const genStartTime = ref(0)
 const genEta = ref('')
 const showLeftPanel = ref(true)
 
-// 스크롤 위치 기억 — 탭 전환/버튼으로 패널이 언마운트→재마운트돼도 위치 복원.
-// 모듈 스코프 객체에 key별 scrollTop 저장 (세션 동안 유지).
-const _scrollMem: Record<string, number> = {}
-const vScrollMemory = {
-  mounted(el: any, binding: any) {
-    const key = binding.value
-    el.__sk = key
-    el.__onScroll = () => { _scrollMem[key] = el.scrollTop }
-    el.addEventListener('scroll', el.__onScroll, { passive: true })
-    const restore = () => { if (key in _scrollMem) el.scrollTop = _scrollMem[key] }
-    nextTick(restore)
-    setTimeout(restore, 80)   // 콘텐츠가 늦게 채워지는 경우 한 번 더
-  },
-  updated(el: any) {
-    // 같은 탭에서 콘텐츠가 갱신돼 scrollTop이 0으로 튀면 복원
-    const key = el.__sk
-    if (key && (key in _scrollMem) && el.scrollTop === 0 && _scrollMem[key] > 0) {
-      nextTick(() => { el.scrollTop = _scrollMem[key] })
-    }
-  },
-  beforeUnmount(el: any) {
-    if (el.__sk) _scrollMem[el.__sk] = el.scrollTop
-    if (el.__onScroll) el.removeEventListener('scroll', el.__onScroll)
-  },
-}
+// 스크롤 위치 기억(v-scroll-memory) — directives/vScrollMemory.ts
 /**
  * 왼쪽 열의 모드 — 프롬프트 / 파라미터. 레일 서랍이 정하고 여기선 같은 ref 를 본다.
- * `showExtendPanel` 은 옛 이름을 지키는 **쓰기 가능한 computed** — ESC · 닫기 버튼 ·
- * loraInserted 같은 기존 호출부가 `showExtendPanel.value = …` 그대로 산다.
+ * `showExtendPanel` 은 옛 이름을 지키는 **쓰기 가능한 computed** — ESC · 닫기 버튼 같은
+ * 기존 호출부가 `showExtendPanel.value = …` 그대로 산다.
  */
 const panelMode = viewMode('panel')
 const showExtendPanel = computed({
@@ -1119,6 +418,18 @@ const showExtendPanel = computed({
 const historyImages = ref<string[]>([])
 const histPage = ref(0)
 const histPerPage = 5
+// 히스토리 카드 썸네일 — 목록 전체를 백엔드 캐시로 미리 만들어 위아래 페이지 넘김에 로딩이 없게 (useHistoryThumbs)
+const {
+  srcFor: historyThumbSrc, ensure: ensureHistoryThumbs, setWidth: setPreviewThumbWidth,
+  invalidate: invalidateHistoryThumb,
+  bind: bindHistoryThumbs,
+} = useHistoryThumbs({ getBackend, onBackendEvent, mediaUrl })
+// deep: 1 — 배열 교체뿐 아니라 unshift/splice(새 생성 결과) 같은 변이도 잡는다(deep:false 는 못 잡았다).
+// 요소가 문자열이라 한 단계만 훑는다.
+watch(historyImages, (list) => { void ensureHistoryThumbs(list) }, { deep: 1 })
+function onPreviewThumbWidthChanged(e: Event) {
+  setPreviewThumbWidth((e as CustomEvent).detail?.value, historyImages.value)
+}
 
 // EXIF
 const activeExifTab = ref('positive')
@@ -1127,14 +438,8 @@ const exifTabs = [
   { id: 'negative', label: 'Negative' },
   { id: 'params', label: 'Parameters' },
 ]
-interface ExifParams { generation?: string; core?: string; model?: string; hires?: string; extensions?: string; other?: string; [k: string]: any }
-interface ExifData { prompt: string; negative: string; raw: string; params?: ExifParams | null; params_line?: string; [k: string]: any }
 const currentExif = ref<ExifData>({ prompt: '', negative: '', raw: '' })
-const exifContent = computed(() => {
-  if (activeExifTab.value === 'positive') return currentExif.value.prompt || 'No EXIF data'
-  if (activeExifTab.value === 'negative') return currentExif.value.negative || ''
-  return currentExif.value.raw || ''
-})
+const exifContent = computed(() => exifTabContent(currentExif.value, activeExifTab.value))
 
 const autoMode = ref(false)
 const isAutomating = ref(false)
@@ -1148,10 +453,14 @@ function onAutoModeClick() {
 const autoNlGen = ref(window.localStorage.getItem('autoNlGen') === 'true')
 const nlConverting = ref(false)
 const _lastAutoNl = ref('')   // 마지막 변환 결과(NL→NL 재변환 방지)
-let _nlGenResolve: ((value: any) => void) | null = null
+// 변환 한 건의 대기 — 자기 타이머를 소유하고 끝날 때 해제한다(utils/pendingRequest)
+const _nlGen = createPendingRequest<string>({
+  timeoutMs: 65000,
+  onPendingChange: (pending) => { nlConverting.value = pending },
+  onTimeout: () => requestAction('show_toast', { type: 'error', msg: 'AI 자연어 변환 시간 초과 — 태그 그대로 생성' }),
+})
 watch(autoNlGen, (v) => {
-  try { window.localStorage.setItem('autoNlGen', v ? 'true' : 'false') } catch {}
-  saveUiPrefs({ autoNlGen: v })
+  saveUiPrefs({ autoNlGen: v })   // 파일 + localStorage 캐시(uiPrefMirror)
   syncAutomationSettings()   // 자동화 백엔드에도 즉시 반영 (실행 중 토글 대비)
 })
 const autoGenCount = ref(0)
@@ -1161,6 +470,8 @@ const autoPaused = ref(false)
 // 다음 생성에 나갈 프롬프트 전문. 덱·와일드카드·조건식이 매번 바꾸는데
 // 지금까지는 화면에 나올 자리가 없었다 — 조종석이 이걸 태그 칩으로 그린다.
 const autoNextPrompt = ref('')
+// 그 프롬프트가 다음 덱 장에 그대로 쓰이는가 — false 면 생성 중인 프롬프트라 조종석이 편집을 막는다
+const autoPromptIsNext = ref(true)
 const deckRemaining = ref(0)
 const deckTotal = ref(0)
 const deckUsed = ref(0)
@@ -1175,7 +486,10 @@ const waitTotalMs = ref(0)
 
 // 패널은 바뀐 항목만 올려보낸다. 여기서 합치면 기존 deep watch 가 그대로
 // syncAutomationSettings 를 태워, 백엔드 계약(set_automation_settings)은 안 바뀐다.
+// 고친 키는 기록한다 — 부팅 hydrate 응답이 늦게 와도 그 키는 되돌리지 않고, 동기화는 아는 키만 보낸다.
 function applyAutoSettings(patch: Partial<typeof autoSettings>) {
+  markAutomationKeys(_autoEditedKeys, patch)
+  markAutomationKeys(_autoKnownKeys, patch)
   Object.assign(autoSettings, patch)
 }
 function pauseAutomation() {
@@ -1200,19 +514,9 @@ function overrideNextPrompt(prompt: string) {
 // 파이썬이 backendStatus 를 짧게 몇 번 되풀이 보내므로 늦게 붙어도 곧 채워진다.
 const backendStatus = ref<{ kind?: string; label?: string; url?: string; connected?: boolean; error?: string } | null>(null)
 // source: 'nvml' | 'nvidia-smi' = GPU 전체(모든 프로세스, 작업 관리자와 같은 숫자) / 'backend' = 백엔드 자기 메모리만
-const vramInfo = ref({ used: 0, total: 0, pct: 0, source: '' })
-const vramClass = computed(() => vramInfo.value.pct > 90 ? 'critical' : vramInfo.value.pct > 70 ? 'warn' : 'ok')
-const vramTooltip = computed(() => {
-  const v = vramInfo.value
-  if (!v.total) return ''
-  const free = (v.total - v.used).toFixed(1)
-  let msg = `사용: ${v.used}GB / 전체: ${v.total}GB (여유: ${free}GB)`
-  msg += v.source === 'backend' ? '\n백엔드가 잡은 메모리만 — Ollama 등 다른 프로세스는 빠짐' : '\nGPU 전체 (모든 프로세스 · 5초마다 갱신)'
-  if (vramClass.value === 'critical') msg += '\n⚠ VRAM 부족 — 해상도/배치 크기를 줄이거나 모델 unload 권장'
-  else if (vramClass.value === 'warn') msg += '\n▲ 70% 초과 — 추가 작업 시 OOM 가능성'
-  msg += '\n\n클릭하여 백엔드 모델 unload 요청'
-  return msg
-})
+const vramInfo = ref<VramInfo>({ used: 0, total: 0, pct: 0, source: '' })
+const vramClass = computed(() => vramLevel(vramInfo.value.pct))
+const vramTooltip = computed(() => vramTooltipText(vramInfo.value))   // utils/vramStatus
 function onVramClick() {
   // 백엔드에 unload 요청 — 사용자가 명시적으로 메모리 정리하고 싶을 때
   if (vramClass.value === 'critical') {
@@ -1222,27 +526,19 @@ function onVramClick() {
   requestAction('show_toast', { type: 'info', msg: '백엔드에 모델 unload 요청 전송됨' })
 }
 const autoSettings = reactive<AutomationSettings>({ mode: 'count', limit: 10, repeat: 1, delay: 1.0, allowDupes: false, autoResetDeck: false, maxRetries: 2, cleanupEveryN: 0 })
+// 화면이 실제로 아는 자동화 키(서버=파일에서 받았거나 사용자가 고친 것) — 동기화는 이 키만 보낸다.
+// 파일 값을 받기 전의 하드코딩 기본값이 Python 에서 파일로 저장되지 않게(R2b#1, utils/automationSettings).
+const _autoKnownKeys = new Set<AutomationKey>()
+// 사용자가 고친 키 — 부팅 hydrate 응답이 늦게 와도 이 키들은 파일 값으로 되돌리지 않는다
+const _autoEditedKeys = new Set<AutomationKey>()
 
 function syncAutomationSettings() {
-  const limit = Number(autoSettings.limit)
-  const repeat = Number(autoSettings.repeat)
-  const delay = Number(autoSettings.delay)
-  const maxRetries = Number(autoSettings.maxRetries)
-  const cleanupEveryN = Number(autoSettings.cleanupEveryN)
-
   action('set_automation_settings', {
-    mode: autoSettings.mode,
-    limit: Number.isFinite(limit) && limit > 0 ? limit : 10,
-    repeat: Number.isFinite(repeat) && repeat > 0 ? repeat : 1,
-    delay: Number.isFinite(delay) && delay >= 0 ? delay : 1,
-    allowDupes: !!autoSettings.allowDupes,
-    autoResetDeck: !!autoSettings.autoResetDeck,
-    maxRetries: Number.isFinite(maxRetries) && maxRetries >= 0 ? maxRetries : 2,
-    cleanupEveryN: Number.isFinite(cleanupEveryN) && cleanupEveryN >= 0 ? cleanupEveryN : 0,
+    ...automationSyncPayload(autoSettings, _autoKnownKeys),
     // 자동화 중 태그→자연어 자동 변환 (백엔드 루프가 nl_caption 적용)
     autoNl: autoNlGen.value,
-    ollamaUrl: window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434',
-    ollamaModel: window.localStorage.getItem('ollamaModel') || 'gemma3:4b',
+    ollamaUrl: storedOllamaUrl(),
+    ollamaModel: storedOllamaModel(),   // 비면 백엔드 워커가 설치 모델로 정한다
   })
 }
 
@@ -1254,103 +550,41 @@ watch(autoSettings, () => {
   syncAutomationSettings()
 }, { deep: true })
 
-// Toast 알림 시스템
-interface Toast { id: number; type: string; msg: string; count: number; _ts: number; _timer?: ReturnType<typeof setTimeout>; [k: string]: any }
-interface ToastHistoryItem { id: number; type: string; msg: string; ts: number; [k: string]: any }
-const toasts = ref<Toast[]>([])
-let toastId = 0
-const MAX_TOASTS = 5
-
-// 알림(토스트) 히스토리 — 🔔 버튼으로 사라진 토스트 다시 보기
-const toastHistory = ref<ToastHistoryItem[]>([])
-const showNotifPanel = ref(false)
-const unread = ref(0)
-const MAX_HISTORY = 40
-function toggleNotifPanel() { showNotifPanel.value = !showNotifPanel.value; if (showNotifPanel.value) unread.value = 0 }
-function clearNotifHistory() { toastHistory.value = [] }
-function relTime(ts: number) {
-  const s = Math.floor((Date.now() - ts) / 1000)
-  if (s < 60) return `${s}초 전`
-  const m = Math.floor(s / 60); if (m < 60) return `${m}분 전`
-  const h = Math.floor(m / 60); if (h < 24) return `${h}시간 전`
-  return `${Math.floor(h / 24)}일 전`
+/** 서버(파일) 값 → 화면. watch 가 되돌려 보내지 않게 가드한다(같은 값이면 Python 도 다시 쓰지 않는다). */
+function applyAutomationSettingsFromServer(patch: Partial<AutomationSettings>) {
+  markAutomationKeys(_autoKnownKeys, patch)
+  _applyingAutoFromServer = true
+  Object.assign(autoSettings, patch)
+  // watch 콜백이 큐잉 처리되도록 microtask 끝난 후 가드 해제
+  Promise.resolve().then(() => { _applyingAutoFromServer = false })
 }
 
-function addToast(type: string, msg: string) {
-  const id = toastId++
-  // 같은 메시지가 직전에 있으면 카운터만 증가 (스팸 방지)
-  const last = toasts.value[toasts.value.length - 1]
-  if (last && last.type === type && last.msg === msg) {
-    last.count = (last.count || 1) + 1
-    last._ts = Date.now()  // 타이머 리셋
-    // 기존 타이머 취소 + 새로 설정
-    if (last._timer) clearTimeout(last._timer)
-    last._timer = setTimeout(() => removeToast(last.id), 3000)
-    return
-  }
-  const toast: Toast = { id, type, msg, count: 1, _ts: Date.now() }
-  toasts.value.push(toast)
-  toast._timer = setTimeout(() => removeToast(id), 3000)
-  // 스택 초과분 — 가장 오래된 것부터 제거 (화면엔 최대 5개)
-  while (toasts.value.length > MAX_TOASTS) {
-    const oldest = toasts.value.shift()!
-    if (oldest._timer) clearTimeout(oldest._timer)
-  }
-  // 알림 기록에 누적 (사라진 토스트도 🔔에서 다시 볼 수 있게)
-  toastHistory.value.unshift({ id, type, msg, ts: Date.now() })
-  if (toastHistory.value.length > MAX_HISTORY) toastHistory.value.length = MAX_HISTORY
-  if (!showNotifPanel.value) unread.value++
-}
-function removeToast(id: number) {
-  const t = toasts.value.find(x => x.id === id)
-  if (t && t._timer) clearTimeout(t._timer)
-  toasts.value = toasts.value.filter(t => t.id !== id)
-}
-function clearAllToasts() {
-  toasts.value.forEach(t => { if (t._timer) clearTimeout(t._timer) })
-  toasts.value = []
-}
-
-// Extended panel state (NegPiP/조건부만 로컬)
-const extWidgets = reactive({
-  negpip_enabled: false,
-  cond_prevent_dupe: true,
-  cond_pos_on: false, cond_neg_on: false,
-  cond_pos_rules: '', cond_neg_rules: '',
-})
-// ── LoRA 스택 — composables/useLoraStack.js로 추출 (App.vue 분할 ④) ──
-//    템플릿이 쓰는 이름 전부 destructure(누락 시 런타임 깨짐 → 목록 완전 일치 필수).
-const {
-  loraStack, syncLoraStack, addLoraToStack,
-  allLorasOn, toggleAllLoras, insertTriggerWord, insertAllTriggers,
-  showLoraModal, onLoraAdd,
-  loraSetName, loraSetSel, loraSetNames, saveLoraSet, loadLoraSet, deleteLoraSet,
-  loraDragIdx, loraDropIdx, loraDragStart, loraDragOver, loraDragEnd, loraDrop,
-  restoreFromPrefs: restoreLoraFromPrefs, buildActiveLoraText,
-} = useLoraStack({ storeWidgets, addToast, saveUiPrefs })
+// ── LoRA 스택 — composables/useLoraStack.js (App.vue 분할 ④). 카드(LoraStackCard)는 이 객체를 prop 으로 받고,
+//    App 은 생성 직전 전송·LoRA 매니저 모달·부팅 복원에 쓰는 이름만 꺼낸다.
+const lora = useLoraStack({ storeWidgets, addToast, saveUiPrefs })
+const { syncLoraStack, showLoraModal, onLoraAdd, restoreFromPrefs: restoreLoraFromPrefs } = lora
 // 시작 시 Ollama 모델 검증 — 저장된 모델이 설치 목록에 없으면(또는 비어있으면)
 // 첫 번째 설치 모델로 자동 교체 + 영속. Settings를 열어 모델을 바꾸지 않아도
 // 프롬프트 강화/자연어가 바로 동작하게 한다. (실패해도 조용히 무시)
 async function ensureOllamaModel() {
   try {
     const bk = await getBackend()
-    const url = window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
+    const url = storedOllamaUrl()
+    // 결과는 ollamaModelsReady → applyOllamaModels. (GUI 스레드를 막던 동기 ollamaListModels 는 없앴다)
     if (bk?.requestOllamaModels) bk.requestOllamaModels(url)
-    else if (bk?.ollamaListModels) bk.ollamaListModels(url, applyOllamaModels)
   } catch {}
 }
 function applyOllamaModels(json: string) {
   try {
     const payload = JSON.parse(json)
     const models = Array.isArray(payload) ? payload : payload.models
-    const url = window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
+    const url = storedOllamaUrl()
     if (!Array.isArray(payload) && payload.url && payload.url !== url) return
     if (!Array.isArray(models) || models.length === 0) return
-    const cur = window.localStorage.getItem('ollamaModel') || ''
-    // 태그(:latest 등) 차이를 허용하는 관대한 매칭 — 직접 추가한 커스텀 모델도 유지.
-    const base = (s: string) => (s || '').split(':')[0].toLowerCase()
-    const match = models.includes(cur) ? cur : models.find((m: string) => cur && base(m) === base(cur))
-    const next = match || models[0]
+    const cur = storedOllamaModel()
+    // 백엔드 resolve_model 과 같은 규칙(utils/ollamaPrefs): 같은 모델(:latest 무시) →
+    // 같은 계열의 설치된 태그 → 첫 설치 모델. 직접 추가한 커스텀 모델도 설치돼 있으면 유지.
+    const next = resolveInstalledModel(cur, models)
     if (next && next !== cur) {
       window.localStorage.setItem('ollamaModel', next)
       requestAction('save_ui_prefs', { ollamaModel: next, ollamaUrl: url })
@@ -1361,366 +595,58 @@ function applyOllamaModels(json: string) {
 const showCondModal = ref(false)   // 조건부 프롬프트 모달 (showLoraModal/onLoraAdd/세트/드래그는 useLoraStack)
 
 // History pagination
-const visibleHistory = computed(() => {
-  const start = histPage.value * histPerPage
-  return historyImages.value.slice(start, start + histPerPage)
-})
+const visibleHistory = computed(() => historyPageSlice(historyImages.value, histPage.value, histPerPage))
 
 // Context menu (화면 밖 방지)
 const ctxMenu = ref({ show: false, x: 0, y: 0, path: '' })
 const ctxMenuStyle = computed(() => {
   // menuH는 실제 메뉴 높이(항목 13행 ≈ 400px) 이상으로 잡아야 하단 flip이
   // 충분히 동작. 250이면 항목 추가 후 실제 높이보다 작아 하단 잘림 발생했음.
-  const menuW = 210, menuH = 420
-  let x = ctxMenu.value.x, y = ctxMenu.value.y
-  if (x + menuW > window.innerWidth) x = window.innerWidth - menuW - 10
-  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 10
-  if (x < 0) x = 10
-  if (y < 8) y = 8
-  return { top: y + 'px', left: x + 'px' }
+  // 보정 규칙은 Gallery·Favorites 와 같은 utils/ctxMenuPosition 한 곳.
+  return menuPositionStyle(clampMenuPosition(
+    { x: ctxMenu.value.x, y: ctxMenu.value.y },
+    { width: 210, height: 420 },
+    { width: window.innerWidth, height: window.innerHeight },
+  ))
 })
 
-interface Wildcard { name: string; file: string; tags: string[]; [k: string]: any }
-const wildcards = ref<Wildcard[]>([])
-const showPresetManager = ref(false)
-const presetList = ref<string[]>([])
-const selectedPreset = ref('')
-const presetPreview = ref<any>(null)
+// ── 스튜디오 도구 매니저 — 상태·동작·백엔드 리스너는 composables(모듈 싱글턴), 모달(components/managers)은 표시만.
+//    모달은 v-if 로 여닫지만 목록은 닫혀 있어도 받아야 한다: 글로벌 가중치(생성 경로), 프로파일 드롭다운(헤더),
+//    와일드카드 열기(PromptPanel). 리스너는 onMounted 의 예전 자리에서 bind*() 로 붙인다.
+const { showPresetManager, openPresetManager } = usePresetManager()
+const { showWeightManager, openWeightManager, bind: bindGlobalWeights, weightedPrompt } = useGlobalWeights()
+const { showWcManager, openWcManager, openWildcardByName, loadWildcardTree } = useWildcardManager()
+const {
+  showProfileManager, profileNames, openProfileManager,
+  loadWorkflowProfilesList, loadWorkflowProfile, saveCurrentAsProfile, bind: bindWorkflowProfiles,
+} = useWorkflowProfiles()
+const { showOrderManager, openOrderManager, bind: bindPromptOrder } = usePromptOrder()
+const { showInstantWcManager, openInstantWcManager, bind: bindInstantWildcards } = useInstantWildcards()
+const { showStatsModal, openStatsModal } = useGenStats()
 
-async function loadPresetList() {
-  const bk = await getBackend()
-  if (bk.getPresetList) bk.getPresetList((json: string) => { try { presetList.value = JSON.parse(json) } catch {} })
-}
-async function loadPresetPreview(name: string) {
-  const bk = await getBackend()
-  if (bk.getPresetData) bk.getPresetData(name, (json: string) => { try { presetPreview.value = JSON.parse(json) } catch {} })
-}
-function loadSelectedPreset() {
-  if (!selectedPreset.value) return
-  action('load_preset_by_name', { name: selectedPreset.value })
-  showPresetManager.value = false
-}
-function deleteSelectedPreset() {
-  if (!selectedPreset.value || !confirm(`"${selectedPreset.value}" 삭제?`)) return
-  action('delete_preset', { name: selectedPreset.value })
-  presetList.value = presetList.value.filter(p => p !== selectedPreset.value)
-  selectedPreset.value = ''; presetPreview.value = null
-}
-function saveNewPreset() {
-  const name = prompt('프리셋 이름:')
-  if (!name) return
-  action('save_preset_by_name', { name })
-  addToast('success', `프리셋 "${name}" 저장됨`)
-  // 원본 이름을 낙관적으로 넣지 않음 — 백엔드가 정규화해 저장하므로 실제 목록을 재조회
-  setTimeout(loadPresetList, 200)
-}
-
-const showWeightManager = ref(false)
-interface GlobalWeight { tag: string; weight: number; [k: string]: any }
-const globalWeights = reactive<GlobalWeight[]>([])  // [{tag, weight}]
-
-function saveGlobalWeights() {
-  const valid = globalWeights.filter(w => w.tag.trim())
-  action('save_global_weights', { weights: valid })
-  showWeightManager.value = false
-}
-
-// 프롬프트에 글로벌 가중치 적용
-function applyGlobalWeights(text: string) {
-  if (!globalWeights.length) return text
-  let result = text
-  for (const w of globalWeights) {
-    if (!w.tag.trim()) continue
-    const tag = w.tag.trim()
-    const weight = (w.weight / 100).toFixed(2)
-    if (weight === '1.00') continue
-    // 이미 가중치가 있으면 교체, 없으면 추가
-    const regex = new RegExp(`\\(${tag.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}:[\\d.]+\\)`, 'gi')
-    if (regex.test(result)) {
-      result = result.replace(regex, `(${tag}:${weight})`)
-    } else {
-      const plain = new RegExp(`(?<![:(])\\b${tag.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b(?![:\\)])`, 'gi')
-      result = result.replace(plain, `(${tag}:${weight})`)
-    }
-  }
-  return result
-}
-// Generation Stats
-const showStatsModal = ref(false)
-interface DailyStat { date: string; count: number; [k: string]: any }
-interface ModelStat { name: string; count: number; [k: string]: any }
-interface ResStat { res: string; count: number; [k: string]: any }
-interface RecentStat { timestamp: string; success: boolean; duration_sec: number; width: number; height: number; model: string; [k: string]: any }
-interface GenStats {
-  total: number; success: number; fail: number; success_rate: number; avg_time: number; total_time: number;
-  daily: DailyStat[]; daily_max: number; top_models: ModelStat[]; top_resolutions: ResStat[]; recent: RecentStat[];
-  [k: string]: any
-}
-const genStats = reactive<GenStats>({ total: 0, success: 0, fail: 0, success_rate: 0, avg_time: 0, total_time: 0, daily: [], daily_max: 0, top_models: [], top_resolutions: [], recent: [] })
-async function loadGenStats() {
-  const bk = await getBackend()
-  if (bk.getGenStats) {
-    bk.getGenStats((json: string) => {
-      try { Object.assign(genStats, JSON.parse(json)) } catch {}
-    })
-  }
-}
-function formatTime(sec: number) {
-  if (!sec) return '0s'
-  if (sec < 60) return sec + 's'
-  if (sec < 3600) return Math.floor(sec / 60) + 'm ' + Math.round(sec % 60) + 's'
-  return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm'
-}
-
-const showWcManager = ref(false)
-const selectedWc = ref('')
-const selectedWcData = computed(() => wildcards.value.find(w => w.name === selectedWc.value) || null)
-const wcEditLines = ref<string[]>([])
-const wcInsertTarget = ref('main')
-
-// 워크플로우 프로파일
-const showProfileManager = ref(false)
-interface WorkflowProfile { name: string; created_at?: string; model?: string; vae?: string; [k: string]: any }
-const workflowProfiles = ref<WorkflowProfile[]>([])  // [{name, created_at, model, vae}]
-const profileNames = computed(() => workflowProfiles.value.map(p => p.name))
-
-function loadWorkflowProfilesList() {
-  action('workflow_profile_list', {})
-}
-function loadWorkflowProfile(name: string | number) {
-  if (!name) return
-  action('workflow_profile_load', { name })
-}
-function saveCurrentAsProfile() {
-  const name = window.prompt('프로파일 이름 (예: ANIMA Pony, Flux 표준):', '')
-  if (!name || !name.trim()) return
-  // 이미 있으면 덮어쓰기 확인
-  const existing = workflowProfiles.value.find(p => p.name === name.trim())
-  if (existing && !window.confirm(`'${name}' 이미 존재합니다. 덮어쓸까요?`)) return
-  action('workflow_profile_save', { name: name.trim() })
-}
-function deleteWorkflowProfile(name: string) {
-  if (!window.confirm(`'${name}' 삭제할까요?`)) return
-  action('workflow_profile_delete', { name })
-  workflowProfiles.value = workflowProfiles.value.filter(p => p.name !== name)
-}
-function renameWorkflowProfile(oldName: string) {
-  const newName = window.prompt(`'${oldName}' → 새 이름:`, oldName)
-  if (!newName || !newName.trim() || newName.trim() === oldName) return
-  action('workflow_profile_rename', { old: oldName, new: newName.trim() })
-}
-
-// 프롬프트 섹션 순서 매니저
-const showOrderManager = ref(false)
-interface PromptOrderSection { key: string; label: string; [k: string]: any }
-const promptOrderList = ref<PromptOrderSection[]>([])  // [{key, label}, ...]
-
-function loadPromptOrder() {
-  action('prompt_order_list', {})
-}
-function moveOrderUp(i: number) {
-  if (i <= 0) return
-  const arr = [...promptOrderList.value]
-  ;[arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]
-  promptOrderList.value = arr
-}
-function moveOrderDown(i: number) {
-  if (i >= promptOrderList.value.length - 1) return
-  const arr = [...promptOrderList.value]
-  ;[arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]
-  promptOrderList.value = arr
-}
-function saveOrderAndClose() {
-  const order = promptOrderList.value.map(s => s.key)
-  action('prompt_order_save', { order })
-  showOrderManager.value = false
-  addToast('success', '프롬프트 순서 저장됨')
-}
-function resetPromptOrder() {
-  if (!window.confirm('기본 순서(인물수 → 캐릭터 → 작품 → 작가 → 선행 → 메인 → 후행)로 복원할까요?')) return
-  action('prompt_order_reset', {})
-  addToast('info', '기본 순서로 복원')
-}
-
-// PR 8: Instant Wildcards 상태
-const showInstantWcManager = ref(false)
-interface InstantWildcard { name: string; lines: string[]; [k: string]: any }
-const instantWildcards = ref<InstantWildcard[]>([])  // [{name, lines}]
-const selectedInstantWc = ref('')
-const selectedInstantWcData = computed(() =>
-  instantWildcards.value.find(w => w.name === selectedInstantWc.value) || null
-)
-const iwEditLines = ref<string[]>([])
-
-function selectInstantWc(name: string) {
-  selectedInstantWc.value = name
-  const iw = instantWildcards.value.find(w => w.name === name)
-  iwEditLines.value = iw ? [...iw.lines] : []
-}
-
-function loadInstantWcList() {
-  action('instant_wildcards_list', {})
-}
-
-function createNewInstantWc() {
-  const name = window.prompt('새 인스턴트 와일드카드 이름 (영숫자/_/.만):', '')
-  if (!name || !/^[\w./]+$/.test(name)) return
-  if (instantWildcards.value.find(w => w.name === name)) {
-    addToast('error', '이미 존재함')
-    return
-  }
-  instantWildcards.value.push({ name, lines: [''] })
-  selectedInstantWc.value = name
-  iwEditLines.value = ['']
-  action('instant_wildcards_save', { name, lines: [''] })
-}
-
-function saveCurrentInstantWc() {
-  if (!selectedInstantWc.value) return
-  const lines = iwEditLines.value.filter(l => l !== undefined)
-  action('instant_wildcards_save', { name: selectedInstantWc.value, lines })
-  // 로컬 미러
-  const iw = instantWildcards.value.find(w => w.name === selectedInstantWc.value)
-  if (iw) iw.lines = lines
-  addToast('success', `인스턴트 와일드카드 저장: $$${selectedInstantWc.value}$$`)
-}
-
-function deleteInstantWc(name: string) {
-  if (!window.confirm(`'${name}' 삭제할까요?`)) return
-  action('instant_wildcards_delete', { name })
-  instantWildcards.value = instantWildcards.value.filter(w => w.name !== name)
-  if (selectedInstantWc.value === name) {
-    selectedInstantWc.value = ''
-    iwEditLines.value = []
-  }
-}
-
-function selectWildcard(name: string) {
-  selectedWc.value = name
-  const wc = wildcards.value.find(w => w.name === name)
-  wcEditLines.value = wc ? [...wc.tags] : []
-}
-
-async function saveCurrentWildcard() {
-  if (!selectedWc.value) return
-  const bk = await getBackend()
-  const content = wcEditLines.value.join('\n')
-  bk.saveWildcard(selectedWc.value + '.txt', content, (json: string) => {
-    try { const r = JSON.parse(json); if (r.ok) addToast('success', '와일드카드 저장됨') } catch {}
-  })
-  // 로컬 업데이트
-  const wc = wildcards.value.find(w => w.name === selectedWc.value)
-  if (wc) wc.tags = wcEditLines.value.filter(l => l.trim())
-}
-
-async function createNewWildcard() {
-  const name = prompt('새 와일드카드 이름:')
-  if (!name) return
-  const bk = await getBackend()
-  bk.saveWildcard(name + '.txt', '', () => {
-    wildcards.value.push({ name, file: name + '.txt', tags: [] })
-    selectedWc.value = name; wcEditLines.value = []
-  })
-}
-
-async function deleteWildcard(name: string) {
-  if (!confirm(`"${name}" 와일드카드를 삭제할까요?`)) return
-  const bk = await getBackend()
-  bk.deleteWildcard(name, () => {
-    wildcards.value = wildcards.value.filter(w => w.name !== name)
-    if (selectedWc.value === name) { selectedWc.value = ''; wcEditLines.value = [] }
-  })
-}
-
-async function renameWildcard(oldName: string) {
-  const newName = prompt('새 이름:', oldName)
-  if (!newName || newName === oldName) return
-  const bk = await getBackend()
-  bk.renameWildcard(oldName, newName, () => {
-    const wc = wildcards.value.find(w => w.name === oldName)
-    if (wc) { wc.name = newName; wc.file = newName + '.txt' }
-    if (selectedWc.value === oldName) selectedWc.value = newName
-  })
-}
-
-const wcRenaming = ref(false)
-const wcNewName = ref('')
-const wcRenameRef = ref<HTMLInputElement | null>(null)
-
-function startWcRename() {
-  wcRenaming.value = true
-  wcNewName.value = selectedWc.value
-  nextTick(() => { if (wcRenameRef.value) wcRenameRef.value.focus() })
-}
-
-async function finishWcRename() {
-  wcRenaming.value = false
-  const newName = wcNewName.value.trim()
-  if (!newName || newName === selectedWc.value) return
-  const bk = await getBackend()
-  bk.renameWildcard(selectedWc.value, newName, () => {
-    const wc = wildcards.value.find(w => w.name === selectedWc.value)
-    if (wc) { wc.name = newName; wc.file = newName + '.txt' }
-    selectedWc.value = newName
-    addToast('success', '이름 변경됨')
-  })
-}
-
-// USE = 와일드카드 사용 문법 삽입 (__name__)
-function useWcSyntax() {
-  if (!selectedWc.value) return
-  const syntax = `__${selectedWc.value}__`
-  if (wcInsertTarget.value === 'clipboard') {
-    navigator.clipboard?.writeText(syntax)
-    addToast('info', '문법 복사됨: ' + syntax)
-  } else {
-    const targetMap: Record<string, string> = { main: 'main_prompt_text', prefix: 'prefix_prompt_text', suffix: 'suffix_prompt_text' }
-    const key = targetMap[wcInsertTarget.value] || 'main_prompt_text'
-    const cur = storeWidgets[key] || ''
-    storeWidgets[key] = cur ? cur.replace(/,?\s*$/, '') + ', ' + syntax + ', ' : syntax + ', '
-    addToast('success', syntax + ' 삽입됨')
-  }
-}
-
-function addWcLine(afterIdx: number) { wcEditLines.value.splice(afterIdx + 1, 0, '') }
-
-function openWildcardByName(name: string) {
-  showWcManager.value = true
-  selectWildcard(name)
-}
-
-function action(name: ActionName, payload: any = {}) { requestAction(name, payload) }
-
-function insertWildcardTag(tag: string) {
-  const cur = storeWidgets.main_prompt_text || ''
-  storeWidgets.main_prompt_text = cur ? cur.replace(/,?\s*$/, '') + ', ' + tag + ', ' : tag + ', '
-}
+// 제네릭 — bridge.d.ts ActionPayloads 에 적힌 액션은 페이로드 모양까지 type-check 된다.
+function action<K extends ActionName>(name: K, payload?: ActionPayload<K>) { requestAction(name, payload) }
 
 // 태그→자연어 변환 (전용 채널 genNlResult로 결과 수신 — PromptPanel 리스너와 분리)
 function _convertTagsToNl(tags: string) {
-  return new Promise<any>((resolve) => {
-    _nlGenResolve = resolve
-    nlConverting.value = true
-    const url = window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
-    const model = window.localStorage.getItem('ollamaModel') || 'gemma3:4b'
-    getBackend().then(b => {
-      if (!b || !b.convertPromptToNl) { requestAction('show_toast', { type: 'error', msg: 'AI 변환 불가 — 태그 그대로 생성' }); _finishNlGen(null); return }
-      b.convertPromptToNl(tags, JSON.stringify({ url, model }))
-    }).catch(() => _finishNlGen(null))
-    setTimeout(() => {
-      if (_nlGenResolve) { requestAction('show_toast', { type: 'error', msg: 'AI 자연어 변환 시간 초과 — 태그 그대로 생성' }); _finishNlGen(null) }
-    }, 65000)
-  })
+  const waiting = _nlGen.start()
+  const url = storedOllamaUrl()
+  const model = storedOllamaModel()   // 비면 백엔드가 설치 모델로 정한다
+  getBackend().then(b => {
+    if (!b || !b.convertPromptToNl) { requestAction('show_toast', { type: 'error', msg: 'AI 변환 불가 — 태그 그대로 생성' }); _finishNlGen(null); return }
+    b.convertPromptToNl(tags, JSON.stringify({ url, model }))
+  }).catch(() => _finishNlGen(null))
+  return waiting
 }
 function _finishNlGen(result: any) {
-  if (!_nlGenResolve) return
-  const r = _nlGenResolve; _nlGenResolve = null; nlConverting.value = false
-  r(result)
+  _nlGen.finish(result)
 }
 
 async function doGenerate() {
   // 자동화 중이면 중지 (버튼은 조종석으로 옮겼지만 단축키·외부 호출 경로가 남아 있다)
   if (isAutomating.value) { stopAutomation(); return }
+  // Ctrl+G 도 버튼의 disabled(isGenerating || nlConverting) 조건을 따른다
+  if (isGenerating.value) return
   if (nlConverting.value) return
   // 생성 시 태그→자연어 자동 변환 (단일 생성에서만 — 자동화는 프롬프트마다 변환하면 너무 느림)
   if (autoNlGen.value && !autoMode.value) {
@@ -1741,15 +667,18 @@ async function doGenerate() {
 }
 
 function _doGenerateNow() {
-  // 글로벌 가중치 적용
-  if (globalWeights.length > 0) {
-    const cur = storeWidgets.main_prompt_text || ''
-    const weighted = applyGlobalWeights(cur)
-    if (weighted !== cur) storeWidgets.main_prompt_text = weighted
+  // 글로벌 가중치 적용(composables/useGlobalWeights) — 실패해도 생성은 원문으로 진행한다
+  // (예전엔 예외가 생성 자체를 막았다). 가중치가 없거나 바뀐 게 없으면 null.
+  try {
+    const weighted = weightedPrompt(storeWidgets.main_prompt_text || '')
+    if (weighted !== null) storeWidgets.main_prompt_text = weighted
+  } catch (e) {
+    console.error('[GlobalWeights] apply failed:', e)
+    addToast('error', '글로벌 가중치를 적용하지 못해 원래 프롬프트로 생성합니다')
   }
-  // LoRA Stack — 활성 LoRA를 <lora:name:weight> 텍스트로 (useLoraStack)
-  const loraText = buildActiveLoraText()
-  if (loraText) requestAction('set_lora_text', { lora_text: loraText })
+  // LoRA Stack — 생성 직전에 스택 전체를 다시 보낸다(빈 스택·전부 꺼짐도 반드시 전송).
+  // Python 은 이 _vue_lora_entries 하나에서 LoRA 텍스트를 파생한다 (useLoraStack / core/lora_stack.py).
+  syncLoraStack()
   syncAutomationSettings()
   genStartTime.value = Date.now()
   genEta.value = ''
@@ -1775,62 +704,68 @@ const ctxCopyPath = () => { navigator.clipboard?.writeText(ctxMenu.value.path); 
 const ctxPullPrompt = () => { action('pull_prompt_from_image', { path: ctxMenu.value.path }); hideCtxMenu() }
 const ctxAddToQueue = () => { action('add_image_to_queue', { path: ctxMenu.value.path }); hideCtxMenu() }
 const ctxDelete = () => {
-  const path = ctxMenu.value.path
-  action('delete_image', { path })
-  // 히스토리에서 즉시 제거
-  const idx = historyImages.value.indexOf(path)
-  if (idx >= 0) historyImages.value.splice(idx, 1)
-  // 현재 보고 있는 이미지였으면 다음 이미지로
-  if (currentImage.value === path) {
-    currentImage.value = historyImages.value[0] || ''
-  }
+  // 히스토리에서 바로 지우지 않는다 — 휴지통 이동이 실패하면 파일은 남는데 목록에서만
+  // 사라진다. 백엔드의 imageDeleteResult(removed) 를 받은 뒤 applyImageDeleteToHistory 가 뺀다.
+  action('delete_image', { path: ctxMenu.value.path })
   hideCtxMenu()
+}
+/** 삭제 결과 반영 — 파일이 실제로 없어졌을 때만 히스토리에서 빼고, 보던 그림이면 첫 장으로. */
+function applyImageDeleteToHistory(raw: unknown) {
+  const next = applyDeleteToHistory(historyImages.value, currentImage.value, parseImageDeleteResult(raw))
+  if (!next) return
+  historyImages.value = next.history
+  if (next.current !== currentImage.value) currentImage.value = next.current
 }
 
 async function selectHistoryImage(path: string) {
   // (선택 시엔 이미지 내용이 안 바뀌므로 cache-bust 하지 않음 — 매 선택마다 썸네일이
   //  재로드되어 점멸하던 버그 수정. 재생성 시 cache-bust는 imageGenerated 핸들러가 처리.)
   currentImage.value = path
-  const img = new Image()
-  img.onload = () => { resolution.value = `${img.naturalWidth} × ${img.naturalHeight}` }
-  img.src = historyImageSrc(path)
+  // 해상도는 원본 픽셀 기준이어야 한다. 스트립은 썸네일을 쓰므로(historyImageSrc)
+  // 거기서 재면 '175 × 256' 같은 썸네일 크기가 뜬다 — 메타데이터의 실제 크기를 쓴다.
+  const measureOriginal = () => {
+    const img = new Image()
+    img.onload = () => {
+      if (currentImage.value === path) resolution.value = `${img.naturalWidth} × ${img.naturalHeight}`
+    }
+    img.src = mediaUrl(path)
+  }
   // EXIF 로드
   const backend = await getBackend()
   if (backend.getImageExif) {
     backend.getImageExif(path, (json: string) => {
+      if (currentImage.value !== path) return  // 방향키로 빠르게 넘길 때 늦은 응답 무시
       try {
         const d = JSON.parse(json)
-        currentExif.value = { prompt: d.prompt || '', negative: d.negative || '', raw: d.raw || '', params: d.params || null, params_line: d.params_line || '' }
-      } catch {}
+        currentExif.value = exifFromPayload(d)
+        if (d.size) resolution.value = d.size
+        else measureOriginal()
+      } catch { measureOriginal() }
     })
+  } else {
+    measureOriginal()
   }
 }
 
 function historyImageSrc(path: string) {
-  if (!path) return ''
-  const base = mediaUrl(path)
-  return base + (base.includes('?') ? '&' : '?') + 't=' + (imageVersions[path] || 0)
+  // 썸네일이 준비됐으면 썸네일, 아니면 원본. 편집돼 버전이 오른 이미지는 원본(캐시 무효화).
+  return historyThumbSrc(path, imageVersions[path] || 0)
 }
 
-// History 키보드 상하 네비게이션 — 전역 ↑/↓로 이전/다음 이미지 선택.
+// History 키보드 상하 네비게이션 — 전역 ↑/↓로 이전/다음 이미지 선택(인덱스 계산은 utils/historyNav).
 // 선택이 없으면 첫 이미지부터. 페이지 경계를 넘으면 histPage도 따라 이동.
+function goToHistoryIndex(idx: number | null) {
+  if (idx === null) return
+  histPage.value = historyPageOf(idx, histPerPage)
+  selectHistoryImage(historyImages.value[idx])
+}
 function navigateHistory(dir: number) {
-  const list = historyImages.value
-  if (!list.length) return
-  let idx = list.indexOf(currentImage.value)
-  if (idx < 0) idx = 0
-  else idx = Math.min(list.length - 1, Math.max(0, idx + dir))
-  histPage.value = Math.floor(idx / histPerPage)
-  selectHistoryImage(list[idx])
+  goToHistoryIndex(stepHistoryIndex(historyImages.value, currentImage.value, dir))
 }
 
 // 최상단(top=최신)/최하단(bottom=가장 오래됨)으로 바로 이동 (Shift+화살표 등)
 function navigateHistoryEdge(edge: string) {
-  const list = historyImages.value
-  if (!list.length) return
-  const idx = edge === 'top' ? 0 : list.length - 1
-  histPage.value = Math.floor(idx / histPerPage)
-  selectHistoryImage(list[idx])
+  goToHistoryIndex(edgeHistoryIndex(historyImages.value, edge))
 }
 
 // 드래그 앤 드롭 지원
@@ -1852,83 +787,47 @@ function onTabChanged(tabName: string) {
 
 async function loadHistory() {
   const backend = await getBackend()
-  if (backend.requestGalleryImages) {
-    backend.requestGalleryImages('')
-  } else if (backend.getGalleryImages) {
-    backend.getGalleryImages('', (json: string) => {
-      try {
-        applyHistoryImages(JSON.parse(json))
-      } catch {}
-    })
-  }
+  // 결과는 galleryImagesReady → applyHistoryImages. 목 모드(개발 서버)엔 슬롯이 없어 건너뛴다.
+  if (backend.requestGalleryImages) backend.requestGalleryImages('')
 }
 function applyHistoryImages(arr: unknown) {
   if (!Array.isArray(arr)) return
-  historyImages.value = arr as string[]
-  try { localStorage.setItem('historyImagesCache', JSON.stringify(arr.slice(0, 50))) } catch {}
+  historyImages.value = arr as string[]   // 캐시 저장은 아래 watch 한 곳에서
 }
-// 생성된 이미지 추가될 때마다 캐시 동기화
+// 목록 교체·생성 결과 추가(unshift)·삭제(splice) 때마다 부팅용 캐시 동기화 — deep: 1 이라 변이도 잡는다
 watch(historyImages, (arr) => {
   try { localStorage.setItem('historyImagesCache', JSON.stringify(arr.slice(0, 50))) } catch {}
-}, { deep: false })
+}, { deep: 1 })
 
 import { useRouter, useRoute } from 'vue-router'
 const router = useRouter()
 const route = useRoute()
 
-// ── 세션 복구 (크래시/VRAM OOM 후 작업 이어가기) ──
-interface SessionData { tab?: string; prompt?: string; negative?: string; [k: string]: any }
-const sessionRestore = ref<SessionData | null>(null)   // {tab, prompt, negative} | null
-let _sessionSaveTimer: ReturnType<typeof setTimeout> | null = null
-function _saveSessionNow() {
-  getBackend().then((bk) => {
-    if (!bk || !bk.saveSession) return
-    const data = {
-      tab: (route && route.name) || 't2i',
-      prompt: storeWidgets.main_prompt_text || '',
-      negative: storeWidgets.neg_prompt_text || '',
-    }
-    bk.saveSession(JSON.stringify(data), () => {})
-  }).catch(() => {})
-}
-function _scheduleSessionSave() {
-  if (_sessionSaveTimer) clearTimeout(_sessionSaveTimer)
-  _sessionSaveTimer = setTimeout(_saveSessionNow, 2500)
-}
-async function _checkSessionRestore() {
-  const bk = await getBackend()
-  if (!bk || !bk.getSession) return
-  bk.getSession((json: string) => {
-    try {
-      const d = JSON.parse(json)
-      // 현재 메인이 비어 있는데 저장된 프롬프트가 있으면 복원 제안 (정상 시작 땐 안 띄움)
-      if (d && d.prompt && !(storeWidgets.main_prompt_text || '').trim()) {
-        sessionRestore.value = d
-      }
-    } catch {}
-  })
-}
-function applySessionRestore() {
-  const d = sessionRestore.value
-  if (!d) { return }
-  if (d.prompt) storeWidgets.main_prompt_text = d.prompt
-  if (d.negative) storeWidgets.neg_prompt_text = d.negative
-  if (d.tab) { try { router.push({ name: d.tab }) } catch {} }
-  sessionRestore.value = null
-  addToast('success', '이전 세션을 복원했습니다')
-}
-function dismissSessionRestore() { sessionRestore.value = null }
+// ── 세션 복구 (크래시/VRAM OOM 후 작업 이어가기) — composables/useSessionRestore.ts ──
+// 템플릿이 쓰는 이름(sessionRestore·applySessionRestore·dismissSessionRestore)은 전부 여기서 꺼낸다.
+const {
+  sessionRestore, applySessionRestore, dismissSessionRestore, startSessionBackup,
+} = useSessionRestore({
+  storeWidgets,
+  currentTab: () => (route && route.name) || 't2i',
+  goToTab: (tab: string) => { void router.push({ name: tab }) },
+  getBackend,
+  addToast,
+})
 
 // UI 크기 — Chromium zoom 으로 전역 확대 (폰트/아이콘/패딩 비례)
 // 변경 시 즉시 반영, localStorage 영속, 다른 탭(Settings)에서 변경하면 storage event로 동기화
 const _applyUiScale = (val: any) => {
-  const n = parseFloat(val)
-  const scale = (!isNaN(n) && n >= 0.7 && n <= 2.0) ? n : 1.0
+  const scale = normalizeUiScale(val)   // 0.7~2.0 밖·숫자 아님 → 1.0 (utils/uiScale)
   try { document.documentElement.style.zoom = String(scale) } catch {}
 }
 _applyUiScale(localStorage.getItem('ui.scale') || '1.0')
 
 onMounted(async () => {
+  // 히스토리 썸네일: thumbnailReady 수신 + 부팅 폴백 폭(localStorage; uiPrefsLoaded 가 override) + 설정 즉시 반영
+  bindHistoryThumbs()
+  setPreviewThumbWidth(normalizePreviewThumbWidth(window.localStorage.getItem('previewThumbWidth')), historyImages.value)
+  window.addEventListener('previewThumbWidthChanged', onPreviewThumbWidthChanged)
   await initBridge()
   // 게이트를 가장 먼저 붙인다. 파이썬은 Vue 로드 직후 backendSelectionRequired 를
   // 보내기 시작하므로(0.3초 뒤 첫 재전송), 다른 구독보다 늦으면 첫 신호를 흘린다.
@@ -1940,12 +839,11 @@ onMounted(async () => {
   })
   onBackendEvent('ollamaModelsReady', applyOllamaModels)
   onBackendEvent('adetailerModelsReady', (json: string) => { try { adModelItems.value = JSON.parse(json) } catch {} })
-  storeWidgets.negpip_group = 'true'   // NegPiP 상시 적용 (UI 토글 제거)
+  storeWidgets.negpip_group = 'true'   // NegPiP 상시 적용 (UI 토글 제거) — Python 도 켠 채로 유지한다(generator_ui_setup)
   loadCondRules()                      // 조건부 프롬프트 규칙 로드 (모달/Search 공유)
   setTimeout(ensureOllamaModel, 3000)  // 폴백: uiPrefsLoaded가 안 와도 AI 모델 검증
-  setTimeout(_checkSessionRestore, 1200)   // 세션 복구 제안 (프롬프트 로드된 뒤)
-  watch(() => [storeWidgets.main_prompt_text, storeWidgets.neg_prompt_text, route.name], _scheduleSessionSave)
-  setInterval(_saveSessionNow, 30000)      // 30초 주기 백업 (root는 언마운트 안 됨)
+  // 세션 복구 제안(1.2초 뒤, 프롬프트 로드된 뒤) + 편집 2.5초 뒤·30초 주기 백업 — 결정 전엔 백업을 덮지 않는다
+  startSessionBackup()
   // Settings 등 다른 곳에서 ui.scale 변경 시 즉시 반영
   window.addEventListener('storage', (e) => {
     if (e.key === 'ui.scale') _applyUiScale(e.newValue)
@@ -1966,7 +864,11 @@ onMounted(async () => {
   onBackendEvent('galleryImagesReady', (json: string) => {
     try {
       const payload = JSON.parse(json)
-      if (payload.folder === '') applyHistoryImages(payload.files)
+      if (payload.folder === '') {
+        applyHistoryImages(payload.files)
+        // 출력 폴더의 원본 서명 — 즐겨찾기 카드도 같은 파일의 버전을 쓴다(utils/mediaVersions)
+        recordListedMediaVersions(payload.files, payload.versions)
+      }
     } catch {}
   })
   loadHistory()
@@ -1974,55 +876,29 @@ onMounted(async () => {
   document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault() }, { passive: false })
   // 브라우저 기본 우클릭 메뉴 전역 차단
   document.addEventListener('contextmenu', (e) => { e.preventDefault() })
-  document.addEventListener('keydown', (e) => {
-    // 게이트가 떠 있는 동안 전역 단축키는 전부 죽는다. 백엔드를 아직 안 골랐는데
-    // Ctrl+G 로 생성이 나가거나 F5 로 히스토리가 도는 건 보이지 않는 곳의 오작동이다.
-    // (게이트 안의 ESC·Tab 은 게이트가 직접 stopPropagation 으로 막는다.)
-    if (gateOpen.value) return
-    if (e.ctrlKey && e.key === 'g') { e.preventDefault(); doGenerate() }
-    if (e.ctrlKey && e.key === 's') { e.preventDefault(); action('save_settings') }
-    if (e.key === 'F5') { e.preventDefault(); loadHistory() }
-    // Ctrl+Tab / Ctrl+Shift+Tab — 다음/이전 탭 탐색
-    if (e.ctrlKey && e.key === 'Tab') {
-      e.preventDefault()
-      try { window.dispatchEvent(new CustomEvent('navRailNavigate', { detail: { direction: e.shiftKey ? -1 : 1 } })) } catch {}
-    }
-    // ESC — 열려있는 오버레이/모달을 최상위 우선순위로 닫기
-    if (e.key === 'Escape') {
-      // 1) 최상위 모달이 있으면 그것부터 (z-index 2000)
-      if (showPresetManager.value)    { showPresetManager.value = false; return }
-      if (showWeightManager.value)    { showWeightManager.value = false; return }
-      if (showWcManager.value)        { showWcManager.value = false; return }
-      if (showOrderManager.value)     { showOrderManager.value = false; return }
-      if (showProfileManager.value)   { showProfileManager.value = false; return }
-      if (showInstantWcManager.value) { showInstantWcManager.value = false; return }
-      if (showStatsModal.value)       { showStatsModal.value = false; return }
-      // 2) 파라미터 열 → 프롬프트로
-      if (showExtendPanel.value)      { showExtendPanel.value = false; return }
-    }
-    // History ↑/↓ 네비게이션 — 입력 필드/모달 포커스 중이 아닐 때만
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const ae = document.activeElement as HTMLElement | null
-      const tag = (ae?.tagName || '').toLowerCase()
-      const editable = tag === 'input' || tag === 'textarea' || tag === 'select' || ae?.isContentEditable
-      const anyModal = showPresetManager.value || showWeightManager.value
-        || showWcManager.value || showOrderManager.value || showProfileManager.value
-        || showInstantWcManager.value || showStatsModal.value
-      if (!editable && !anyModal && historyImages.value.length) {
-        e.preventDefault()
-        // 설정된 보조키(기본 Shift) + 화살표 → 최상단/최하단으로 바로 점프
-        const mod = localStorage.getItem('historyJumpModifier') || 'shiftKey'
-        if ((e as any)[mod]) {
-          navigateHistoryEdge(e.key === 'ArrowDown' ? 'bottom' : 'top')
-        } else {
-          navigateHistory(e.key === 'ArrowDown' ? 1 : -1)
-        }
-      }
-    }
-  })
+  // 전역 단축키 — 판단(게이트 · ESC 는 모달 스택 맨 위부터 · 모달이 떠 있으면 ↑/↓ 히스토리 이동 금지)은
+  // utils/appShortcuts 에 있고, 여기선 ref 와 동작만 잇는다. 모달은 열릴 때 스스로 appModalStack 에
+  // 오른다(composables/useModalLayer) — App.modalLayer.test.ts 가 이 배선을 지킨다.
+  document.addEventListener('keydown', createAppKeydownHandler({
+    modalStack: appModalStack,
+    isGateOpen: () => gateOpen.value,
+    generate: () => { void doGenerate() },
+    saveSettings: () => action('save_settings'),
+    reloadHistory: () => { void loadHistory() },
+    navigateTabs: (direction) => {
+      try { window.dispatchEvent(new CustomEvent('navRailNavigate', { detail: { direction } })) } catch {}
+    },
+    isParamsPanelOpen: () => showExtendPanel.value,
+    closeParamsPanel: () => { showExtendPanel.value = false },
+    hasHistory: () => historyImages.value.length > 0,
+    navigateHistory,
+    navigateHistoryEdge,
+    activeElement: () => document.activeElement as HTMLElement | null,
+    jumpModifier: () => localStorage.getItem('historyJumpModifier'),
+  }))
 
-  // 초기 rating 필터 전달
-  pushRatingFilter()
+  // rating 필터는 마운트 때 보내지 않는다 — uiPrefsLoaded → restoreRatingFromPrefs 가 파일 값을 적용한
+  // 직후 보낸다(localStorage 캐시가 파일·공유 필터를 덮지 않게, 감사 #107).
 
   // 워크플로우 프로파일 목록 미리 로드 (드롭다운에 즉시 보이도록)
   setTimeout(loadWorkflowProfilesList, 800)
@@ -2035,7 +911,14 @@ onMounted(async () => {
 
   onBackendEvent('imageGenerated', async (data: string) => {
     const parsed = JSON.parse(data)
-    if (parsed.path) imageVersions[parsed.path] = Date.now()
+    // 이미 목록에 있는 경로 = 같은 파일에 덮어쓴 결과 — 그 카드의 옛 썸네일·원본 캐시만 버린다.
+    // (새 경로는 캐시가 없으니 버전을 올리지 않는다 — 올리면 세션 내 생성분이 늘 원본을 읽었다.)
+    const overwritten = !!parsed.path && historyImages.value.includes(parsed.path)
+    if (overwritten) {
+      imageVersions[parsed.path] = Date.now()
+      invalidateHistoryThumb(parsed.path)
+      bumpMediaVersion(parsed.path)   // 갤러리·즐겨찾기 카드도 새로 읽게
+    }
     isGenerating.value = false
     livePreview.value = ''
     genEta.value = ''
@@ -2045,6 +928,8 @@ onMounted(async () => {
     // 추가되어 t2i 결과 목록에 표시됨. (선택 중이던 이미지/위치는 그대로 유지)
     const wasViewingLatest = !currentImage.value || currentImage.value === historyImages.value[0]
     if (parsed.path) {
+      // 덮어쓴 경로는 맨 앞으로 옮긴다(같은 경로가 두 번 있으면 v-for key 가 겹친다)
+      if (overwritten) historyImages.value = historyImages.value.filter(p => p !== parsed.path)
       historyImages.value.unshift(parsed.path)  // 무제한 — 갯수 캡 제거
       if (wasViewingLatest) {
         histPage.value = 0
@@ -2062,29 +947,28 @@ onMounted(async () => {
       const bk = await getBackend()
       if (bk.getImageExif) {
         bk.getImageExif(parsed.path, (json: string) => {
-          try {
-            const d = JSON.parse(json)
-            currentExif.value = { prompt: d.prompt || '', negative: d.negative || '', raw: d.raw || '', params: d.params || null, params_line: d.params_line || '' }
-          } catch {}
+          try { currentExif.value = exifFromPayload(JSON.parse(json)) } catch {}
         })
       }
     }
   })
   onBackendEvent('generationStarted', () => { isGenerating.value = true; autoWaiting.value = false; progressVal.value = 0; genStartTime.value = Date.now(); genEta.value = ''; livePreview.value = '' })
   onBackendEvent('generationPreview', (b64: string) => {
-    if (!isGenerating.value || typeof b64 !== 'string' || !b64) return
-    const mime = b64.startsWith('/9j/') ? 'image/jpeg' : b64.startsWith('UklGR') ? 'image/webp' : 'image/png'
-    livePreview.value = `data:${mime};base64,${b64}`
+    if (!isGenerating.value) return
+    const url = previewDataUrl(b64)   // JPEG/WebP/PNG 를 머리 바이트로 고른다(utils/generationProgress)
+    if (url) livePreview.value = url
   })
   onBackendEvent('automationStatus', (json: string) => {
     try {
-      const d = JSON.parse(json)
+      // 필드 이름은 bridge.d.ts AutomationStatusEvent 계약 — Partial 인 이유: 옛 백엔드가 일부를 빠뜨린다.
+      const d = JSON.parse(json) as Partial<AutomationStatusEvent>
       isAutomating.value = d.running || false
       autoPaused.value = d.paused || false
       autoGenCount.value = d.count || 0
       autoWaiting.value = d.waiting || false
       // 다음에 나갈 프롬프트 전문 — 조종석의 태그 칩이 이걸 그린다.
       autoNextPrompt.value = typeof d.prompt === 'string' ? d.prompt : ''
+      autoPromptIsNext.value = d.prompt_is_next !== false   // 옛 백엔드는 안 보낸다 — 편집 가능으로 본다
       deckRemaining.value = d.deck_remaining || 0
       deckTotal.value = d.deck_total || 0
       deckUsed.value = d.deck_used || 0
@@ -2094,128 +978,102 @@ onMounted(async () => {
       if (!d.running) { isGenerating.value = false }
     } catch {}
   })
-  // 워크플로우 프로파일 목록 수신
-  onBackendEvent('workflowProfilesList', (json: string) => {
-    try {
-      const arr = JSON.parse(json)
-      if (Array.isArray(arr)) workflowProfiles.value = arr
-    } catch {}
-  })
-  // 프롬프트 섹션 순서 수신
-  onBackendEvent('promptOrderLoaded', (json: string) => {
-    try {
-      const arr = JSON.parse(json)
-      if (Array.isArray(arr)) promptOrderList.value = arr
-    } catch {}
-  })
-  // PR 8: 인스턴트 와일드카드 목록 수신
-  onBackendEvent('instantWildcardsList', (json: string) => {
-    try {
-      const arr = JSON.parse(json)
-      if (Array.isArray(arr)) instantWildcards.value = arr
-    } catch {}
-  })
-  // PR 9: 백엔드가 모드별 자동화 설정을 푸시 (시작 시 + 백엔드 모드 전환 시)
+  // 워크플로우 프로파일 목록 수신(workflowProfilesList → useWorkflowProfiles)
+  bindWorkflowProfiles()
+  // 프롬프트 섹션 순서 수신(promptOrderLoaded → usePromptOrder)
+  bindPromptOrder()
+  // PR 8: 인스턴트 와일드카드 목록 수신(instantWildcardsList → useInstantWildcards)
+  bindInstantWildcards()
+  // PR 9: 백엔드가 모드별 자동화 설정을 푸시 (백엔드 모드 전환 시). 부팅 값은 아래 hydrate 가 당겨 온다.
   onBackendEvent('automationSettingsLoaded', (json: string) => {
-    try {
-      const d = JSON.parse(json)
-      _applyingAutoFromServer = true  // watch에서 다시 서버로 보내는 루프 방지
-      if (typeof d.mode === 'string') autoSettings.mode = d.mode
-      if (typeof d.limit === 'number') autoSettings.limit = d.limit
-      if (typeof d.repeat === 'number') autoSettings.repeat = d.repeat
-      if (typeof d.delay === 'number') autoSettings.delay = d.delay
-      if (typeof d.allowDupes === 'boolean') autoSettings.allowDupes = d.allowDupes
-      if (typeof d.autoResetDeck === 'boolean') autoSettings.autoResetDeck = d.autoResetDeck
-      if (typeof d.maxRetries === 'number') autoSettings.maxRetries = d.maxRetries
-      // watch 콜백이 큐잉 처리되도록 microtask 끝난 후 가드 해제
-      Promise.resolve().then(() => { _applyingAutoFromServer = false })
-    } catch {}
+    const patch = automationPatchFromServer(json)
+    if (Object.keys(patch).length) applyAutomationSettingsFromServer(patch)
   })
   onBackendEvent('generationProgress', (step: number, total: number) => {
-    progressVal.value = Math.round(step / total * 100)
+    progressVal.value = progressPercent(step, total)
     status.value = `Generating... ${step}/${total}`
-    // 간단 ETA: 시작 시각 기준
+    // 간단 ETA: 시작 시각 기준(utils/generationProgress.formatEta)
     if (step > 0 && genStartTime.value) {
-      const elapsed = (Date.now() - genStartTime.value) / 1000
-      const remaining = Math.max(0, elapsed / step * (total - step))
-      genEta.value = remaining >= 60
-        ? `ETA ${Math.floor(remaining / 60)}m${String(Math.floor(remaining % 60)).padStart(2, '0')}s`
-        : `ETA ${remaining.toFixed(0)}s`
+      const eta = formatEta((Date.now() - genStartTime.value) / 1000, step, total)
+      if (eta !== null) genEta.value = eta
     }
   })
-  onBackendEvent('generationError', (msg: string) => { isGenerating.value = false; livePreview.value = ''; genEta.value = ''; status.value = `Error: ${msg}` })
-
-  // 글로벌 가중치 로드
-  onBackendEvent('globalWeightsLoaded', (json: string) => {
-    try { const d = JSON.parse(json); globalWeights.splice(0); d.forEach((w: GlobalWeight) => globalWeights.push(w)) } catch {}
+  // 생성 실패 — 진행 상태를 되돌리고 같은 메시지를 토스트로도 알린다(예전엔 두 번 구독했다).
+  onBackendEvent('generationError', (msg: string) => {
+    isGenerating.value = false; livePreview.value = ''; genEta.value = ''; status.value = `Error: ${msg}`
+    addToast('error', msg)
   })
 
+  // 글로벌 가중치 로드(globalWeightsLoaded → useGlobalWeights — 생성 경로가 모달 없이도 쓴다)
+  bindGlobalWeights()
+
   // 랜덤 해상도 로드
-  loadRandomResList()
+  randomRes.loadRandomResList()
 
   // ADetailer 모델 로드
   const _bk = await getBackend()
-  syncAutomationSettings()
+  // 자동화 설정: 파일(현재 모드) 값으로 먼저 채우고 그 뒤에 동기화한다 — 하드코딩 기본값이 파일을
+  // 덮지 않게(감사 #42). 응답이 없어도 시간 초과 뒤 동기화는 한다(autoNl·Ollama 전달 경로) — 그때도
+  // 모르는 키는 보내지 않고(_autoKnownKeys), 늦게 온 응답은 고치지 않은 키에 적용된다(R2b#1).
+  // 서버가 답하면 모든 키가 '아는 값'이다(파일에서 빠졌거나 잘못된 키는 화면의 안전값이 기준).
+  hydrateAutomationSettings({
+    request: typeof _bk.getAutomationSettings === 'function' ? (cb) => _bk.getAutomationSettings(cb) : null,
+    editedKeys: () => _autoEditedKeys,
+    apply: applyAutomationSettingsFromServer,
+    onSettled: (hydrated) => {
+      if (hydrated) for (const key of AUTOMATION_KEYS) _autoKnownKeys.add(key)
+      syncAutomationSettings()
+    },
+  })
+  // 결과는 adetailerModelsReady(위 구독). 동기 getADetailerModels 는 GUI 스레드를 막아 없앴다.
   if (_bk.requestADetailerModels) _bk.requestADetailerModels()
-  else if (_bk.getADetailerModels) _bk.getADetailerModels((json: string) => { try { adModelItems.value = JSON.parse(json) } catch {} })
 
-  // 와일드카드 로드
-  if (_bk.getWildcardTree) _bk.getWildcardTree((json: string) => { try { wildcards.value = JSON.parse(json) } catch {} })
+  // 와일드카드 로드(useWildcardManager — PromptPanel 의 와일드카드 칩이 모달 밖에서도 연다)
+  loadWildcardTree(_bk)
 
   // VRAM 실시간 업데이트
   onBackendEvent('vramUpdated', (json: string) => { try { vramInfo.value = JSON.parse(json) } catch {} })
 
   // Global Toast 알림 (Python → Vue)
   onBackendEvent('showNotification', (type: string, msg: string) => { addToast(type, msg) })
+  // 삭제 결과(경로별) — 실제로 파일이 없어졌을 때만 히스토리에서 뺀다(갤러리 삭제도 여기 반영).
+  onBackendEvent('imageDeleteResult', applyImageDeleteToHistory)
   // 업데이트 알림도 같은 전역 토스트를 사용하므로 listener 등록 뒤 시작한다.
   void initialiseAppUpdates(true)
 
   onBackendEvent('uiPrefsLoaded', (json: string) => {
     try {
       const prefs = JSON.parse(json)
+      // 파일 값 → localStorage 캐시: 미러는 여기 한 곳(utils/uiPrefMirror 표). 부팅 때 동기로 읽는 곳
+      // (UI 배율·탭 순서·블록 모드·Ollama 등)의 첫 렌더 캐시일 뿐이고 파일 값이 이긴다.
+      const mirrored = new Set(mirrorPrefsToStorage(prefs))
       // 테마: 디스크가 단일 소스 — 다른 기기/프로필에서 바꾼 값이 부팅 캐시
       // (localStorage)보다 우선한다. 부팅 값과 같으면 다시 칠하지 않는다.
       reconcileTheme(prefs)
-      // AI Assistant 모델/URL을 영속 prefs → localStorage 복원 (PromptPanel이 localStorage를 읽음)
-      // 그 후 설치 목록과 대조해 유효하지 않으면 자동 교체 → Settings를 안 열어도 바로 동작.
-      if (prefs.ollamaUrl) window.localStorage.setItem('ollamaUrl', prefs.ollamaUrl)
-      if (prefs.ollamaModel) window.localStorage.setItem('ollamaModel', prefs.ollamaModel)
+      // AI Assistant 모델/URL — 캐시(위)를 설치 목록과 대조해 유효하지 않으면 자동 교체 →
+      // Settings를 안 열어도 바로 동작.
       ensureOllamaModel()
       restoreRatingFromPrefs(prefs)   // rating 필터 단일 소스(ui_prefs) 복원 (useRatingFilter)
       restoreHighResFromPrefs(prefs)   // 고해상도: 단일 소스(ui_prefs)가 localStorage override (useHighRes)
       restoreLoraFromPrefs(prefs)   // 단일 소스(ui_prefs.loraStack) 복원 (useLoraStack)
-      // tabOrder 복원 (Settings 탭 미방문 시에도 적용)
-      if (Array.isArray(prefs.tabOrder) && prefs.tabOrder.length > 0) {
-        window.localStorage.setItem('tabOrder', JSON.stringify(prefs.tabOrder))
-        // 항상 마운트돼 있는 NavRail은 같은 창 setItem을 못 받으므로 커스텀 이벤트로 재읽기 유도
+      restoreUiFlagsFromPrefs(prefs)   // 블록 모드·갤러리 메타 — PromptPanel·Gallery 가 같은 ref 를 본다
+      // tabOrder 복원 (Settings 탭 미방문 시에도 적용) — 항상 마운트돼 있는 NavRail은 같은 창
+      // setItem을 못 받으므로 커스텀 이벤트로 재읽기 유도
+      if (mirrored.has('tabOrder')) {
         try { window.dispatchEvent(new CustomEvent('tabOrderChanged')) } catch {}
       }
-      if (['shiftKey', 'ctrlKey', 'altKey'].includes(prefs.historyJumpModifier)) {
-        window.localStorage.setItem('historyJumpModifier', prefs.historyJumpModifier)
+      if (typeof prefs.historyBlinkSelected === 'boolean') historyBlink.value = prefs.historyBlinkSelected
+      // 히스토리 미리보기 품질(썸네일 폭) — 단일 소스 ui_prefs, localStorage 는 부팅 폴백
+      if (mirrored.has('previewThumbWidth')) {
+        setPreviewThumbWidth(normalizePreviewThumbWidth(prefs.previewThumbWidth), historyImages.value)
       }
-      if (typeof prefs.historyBlinkSelected === 'boolean') {
-        historyBlink.value = prefs.historyBlinkSelected
-        window.localStorage.setItem('historyBlinkSelected', String(prefs.historyBlinkSelected))
-      }
-      const restoredScale = Number(prefs.uiScale)
-      if (Number.isFinite(restoredScale) && restoredScale >= 0.8 && restoredScale <= 1.5) {
-        window.localStorage.setItem('ui.scale', String(restoredScale))
-        _applyUiScale(restoredScale)
-      }
-      const restoredPanelWidth = Number(prefs.editorSidePanelWidth)
-      if (Number.isInteger(restoredPanelWidth) && restoredPanelWidth >= 200 && restoredPanelWidth <= 500) {
-        window.localStorage.setItem('editorSidePanelWidth', String(restoredPanelWidth))
+      if (mirrored.has('uiScale')) _applyUiScale(Number(prefs.uiScale))
+      if (mirrored.has('editorSidePanelWidth')) {
         try { window.dispatchEvent(new CustomEvent('editorSidePanelWidthChanged')) } catch {}
       }
-      if (typeof prefs.autoNlGen === 'boolean') {
-        autoNlGen.value = prefs.autoNlGen
-        try { window.localStorage.setItem('autoNlGen', prefs.autoNlGen ? 'true' : 'false') } catch {}
-      }
+      if (typeof prefs.autoNlGen === 'boolean') autoNlGen.value = prefs.autoNlGen
     } catch {}
   })
-
-  // 에러도 Toast로 표시
-  onBackendEvent('generationError', (msg: string) => { addToast('error', msg) })
 
   // 생성용 태그→자연어 변환 결과 (전용 채널 — PromptPanel의 ollamaResult와 분리)
   onBackendEvent('genNlResult', (json: string) => {
@@ -2226,17 +1084,10 @@ onMounted(async () => {
     } catch { _finishNlGen(null) }
   })
 
-  // LoRA 추가 이벤트 (Python lora_manager → Vue)
-  onBackendEvent('loraInserted', (json: string) => {
-    try {
-      const d = JSON.parse(json)
-      addLoraToStack(d.name, d.weight || 0.8, d.trigger_words || [])
-      showExtendPanel.value = true
-    } catch {}
-  })
-
   // loraStackLoaded 핸들러는 useLoraStack 내부에서 등록됨 (App.vue 분할 ④)
-  syncLoraStack()
+  // 마운트 시점엔 LoRA 스택을 Python 에 보내지 않는다 — 이 시점 스택은 이 브라우저의 localStorage
+  // 폴백이라, 웹 모드(ui_prefs 가 늦게 옴)에선 낡은/빈 스택이 공유 _vue_lora_entries 를 덮었다.
+  // 전송은 uiPrefsLoaded → restoreLoraFromPrefs 가 ui_prefs 스택을 적용한 직후에 한다.
 })
 </script>
 
@@ -2267,124 +1118,11 @@ onMounted(async () => {
 .close-btn:hover { border-color: var(--state-alert-fg); color: var(--state-alert-fg); background: rgba(248, 113, 113, 0.08); }
 .extend-scroll { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 
-.ext-card { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 12px; }
-.ext-title { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--text-muted); letter-spacing: 0; margin-bottom: 10px; cursor: pointer; }
-.ext-field { margin-bottom: 8px; }
-.ext-field label { font-size: var(--fs-label); color: var(--text-muted); font-weight: var(--fw-bold); display: block; margin-bottom: 3px; }
-.ext-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.rating-toggle-row { display: flex; gap: 4px; margin-bottom: 8px; }
-.rating-toggle {
-  flex: 1; padding: 4px; background: var(--bg-button); border: 1px solid var(--border);
-  border-radius: 4px; color: var(--text-muted); font-size: var(--fs-label); font-weight: var(--fw-bold);
-  cursor: pointer; text-align: center; transition: var(--transition);
-}
-.rating-toggle.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-.ext-toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
-.char-ovr-row { margin-top: 6px; }
-.char-ovr-btn { width: 100%; padding: 6px 10px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--radius-base); color: var(--accent); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.char-ovr-btn:hover { background: rgba(250,204,21,0.18); }
-.ext-sub { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
-.ext-sub summary { font-size: var(--fs-label); color: var(--text-secondary); cursor: pointer; }
-.ext-sub-title { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--accent); letter-spacing: 0; margin: 8px 0 4px; }
-
-/* LoRA block */
-.lora-block { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg-button); border-radius: 6px; margin-bottom: 4px; }
-.lora-info-col { flex: 1; min-width: 0; }
-.lora-name { font-size: 11px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lora-triggers { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
-.trigger-chip {
-  padding: 1px 6px; font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--accent);
-  background: var(--accent-dim); border: 1px solid rgba(250, 204, 21, 0.15);
-  border-radius: 4px; cursor: pointer; transition: var(--transition);
-}
-.trigger-chip:hover { background: rgba(250, 204, 21, 0.2); border-color: var(--accent); }
-.lora-slider { width: 60px; accent-color: var(--accent); }
-.lora-weight { font-size: var(--fs-label); color: var(--accent); min-width: 30px; text-align: right; font-family: monospace; }
-.lora-grip { cursor: grab; color: var(--text-muted); font-size: 12px; user-select: none; flex-shrink: 0; }
-.lora-grip:active { cursor: grabbing; }
-.lora-grip:hover { color: var(--accent); }
-.lora-drag-over { outline: 1px dashed var(--accent); outline-offset: -1px; }
-.lora-dragging { opacity: 0.4; }
-/* 드롭(삽입) 위치 — 블록 사이 가로선 (태그블록 마커와 동일 콘셉트) */
-.lora-drop-marker { height: 3px; background: var(--accent); border-radius: 2px; margin: 1px 2px; pointer-events: none; box-shadow: 0 0 4px var(--accent); }
-.lora-weight-input { width: 48px; flex-shrink: 0; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; color: var(--accent); font-size: var(--fs-label); text-align: center; font-family: monospace; }
-.lora-weight-input:focus { outline: none; border-color: var(--accent); }
-.lora-remove { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: 12px; }
-.lora-tools { float: right; display: inline-flex; gap: 4px; }
-.lora-tool-btn { background: var(--bg-button); border: 1px solid var(--border); border-radius: 5px; color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); padding: 2px 7px; cursor: pointer; }
-.lora-tool-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
-.lora-tool-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.lora-sets { display: flex; gap: 4px; margin-top: 6px; align-items: center; }
-.lora-set-input { width: 70px; flex-shrink: 0; background: var(--bg-input); border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px; color: var(--text-primary); font-size: var(--fs-label); }
-.lora-set-sel { flex: 1; min-width: 0; background: var(--bg-input); border: 1px solid var(--border); border-radius: 5px; padding: 4px; color: var(--text-primary); font-size: var(--fs-label); }
-.ext-add-btn { width: 100%; padding: 8px; background: var(--bg-button); border: 1px dashed var(--border); border-radius: 6px; color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; margin-top: 4px; }
-.ext-res-row { display: flex; align-items: center; gap: 6px; }
-.ext-res-row input { text-align: center; flex: 1; }
-.ext-res-row span { color: var(--text-muted); }
-.ext-mini-btn { width: 32px; height: 32px; background: var(--bg-button); border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-primary); cursor: pointer; flex-shrink: 0; }
-.ext-res-opts { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
-.ext-check-sm { display: flex; align-items: center; gap: 3px; font-size: var(--fs-label); color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
-.ext-check-sm input { width: 12px; height: 12px; margin: 0; }
-/* 고해상도 토글 — 활성 시 골드 강조 */
-.hr-toggle.active { color: var(--accent); font-weight: var(--fw-bold); }
-.hr-toggle.active span { text-shadow: 0 0 4px rgba(250, 204, 21, 0.3); }
-
-/* 고해상도 미리보기 박스 */
-.hr-preview {
-  margin-top: 8px; padding: 8px 10px;
-  background: var(--accent-dim); border: 1px solid rgba(250, 204, 21, 0.3);
-  border-radius: 6px; display: flex; flex-direction: column; gap: 6px;
-}
-.hr-row { display: flex; align-items: center; gap: 8px; }
-.hr-label { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--accent); letter-spacing: 0; min-width: 26px; }
-.hr-slider { flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px; }
-.hr-val {
-  font-family: 'Consolas', monospace; font-size: var(--fs-label); font-weight: var(--fw-bold);
-  color: var(--accent); min-width: 36px; text-align: right;
-}
-.hr-result {
-  font-size: var(--fs-label); color: var(--text-secondary);
-  font-family: 'Consolas', monospace;
-}
-.hr-result strong { color: var(--accent); font-weight: var(--fw-bold); font-size: 11px; }
-.hr-note { color: var(--text-muted); font-size: var(--fs-label); margin-left: 4px; }
-.hr-warn { color: var(--state-warn-fg); margin-left: 4px; font-weight: var(--fw-bold); }
-.hr-warn-banner {
-  margin-top: 4px; padding: 6px 8px;
-  background: rgba(251, 146, 60, 0.08);
-  border: 1px solid rgba(251, 146, 60, 0.3);
-  border-radius: 4px;
-  font-size: 9.5px; line-height: 1.5;
-  color: var(--state-warn-fg);
-}
-
-/* 랜덤 해상도 편집기 */
-.rand-res-editor { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 6px; background: rgba(0,0,0,0.15); }
-.rand-res-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
-.rand-res-item { display: flex; align-items: center; gap: 4px; padding: 2px 6px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 4px; font-size: var(--fs-label); }
-.rand-res-val { color: var(--text-primary); font-weight: var(--fw-bold); font-family: monospace; }
-.rand-res-desc { color: var(--text-muted); font-size: var(--fs-label); }
-.rand-res-del { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: var(--fs-label); padding: 0 2px; }
-.rand-res-empty { font-size: var(--fs-label); color: var(--text-muted); padding: 4px; }
-.rand-res-add { display: flex; align-items: center; gap: 4px; }
-.rand-res-add span { color: var(--text-muted); font-size: var(--fs-label); }
-.rand-res-input { width: 50px; padding: 3px 4px; font-size: var(--fs-label); text-align: center; }
-.rand-res-btn { width: 24px; height: 24px; background: var(--accent-fill); border: none; border-radius: 4px; color: var(--on-accent); font-weight: var(--fw-bold); cursor: pointer; font-size: 14px; }
-.ext-check-row { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; font-size: var(--fs-label); color: var(--text-secondary); cursor: pointer; margin-bottom: 5px; white-space: nowrap; }
-/* 네이티브 체크박스(초록 강조) — appearance:none 토글이 왕복 위젯에서 반응이
-   불안정해(한 박자 늦게 켜짐) 안정적인 네이티브로 복귀. accent-color로 색만 입힘. */
-.ext-check-row input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--state-ok); cursor: pointer; flex-shrink: 0; margin: 0; }
-.ext-check-row span { overflow: hidden; text-overflow: ellipsis; }
-.ext-check-row input[type="checkbox"] { accent-color: var(--accent); }
-.ext-hint { font-size: var(--fs-label); color: var(--text-muted); margin-top: 4px; }
-.cond-textarea { min-height: 60px; font-size: 11px; line-height: 1.6; font-family: 'Consolas', monospace; }
-.cond-block { margin-top: 6px; }
-.cond-toggle-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.cond-toggle { padding: 2px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-button); color: var(--text-muted); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.cond-toggle.on { background: rgba(74,222,128,0.15); border-color: var(--state-ok-fg); color: var(--state-ok-fg); }
-.lora-check { flex-shrink: 0; }
-.lora-check input { accent-color: var(--accent); }
-.lora-empty { font-size: 11px; color: var(--text-muted); text-align: center; padding: 12px; }
+/* .ext-card · .ext-title · .ext-field · .ext-row · .ext-check-row · .ext-sub · .ext-sub-title · .ext-toggle-grid 는
+   styles/panels.css(전역)에 있다 — scoped 로 두면 자식 패널(AnimaGuidancePanel 등) 안쪽에 닿지 않는다.
+   그 규칙은 `:where(.extend-overlay)` 안의 카드에만 걸리므로 카드는 이 파라미터 열 안에 둔다
+   (RefinePanel·BatchView 의 Sam3ControlNetPanel 은 카드 모양을 받지 않는다 — tests/test_ext_card_styles.py).
+   카드마다 제 모양(해상도·고해상도·랜덤 해상도·등급 필터·LoRA 블록)은 components/params/*.vue 의 scoped 에 있다. */
 
 /* 무대 전환 — 탭이 바뀌면 새 화면이 살짝 떠오른다. 길면 매번 기다리게 되고 없으면 못 알아챈다.
    나가는 쪽 규칙은 일부러 없다 (위 주석). */
@@ -2408,124 +1146,9 @@ onMounted(async () => {
 .tool-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
 .tool-btn.highlight { color: var(--accent); border-color: var(--accent-dim); }
 
-/* Preset Manager */
-.pm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-.pm-modal { width: min(860px, 94vw); height: min(640px, 90vh); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
-.pm-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-.pm-header h3 { font-size: 12px; letter-spacing: 0; color: var(--text-muted); flex: 1; }
-.pm-body { flex: 1; display: flex; overflow: hidden; }
-.pm-list { width: 180px; overflow-y: auto; border-right: 1px solid var(--border); padding: 8px; }
-.pm-item { padding: 7px 10px; font-size: 11px; color: var(--text-secondary); cursor: pointer; border-radius: 4px; margin-bottom: 2px; }
-.pm-item:hover { background: var(--bg-input); }
-.pm-item.active { background: var(--accent-dim); color: var(--accent); }
-.pm-preview { flex: 1; overflow-y: auto; padding: 12px; }
-.pm-detail { display: flex; flex-direction: column; gap: 4px; }
-.pm-field { display: flex; gap: 8px; font-size: var(--fs-label); border-bottom: 1px solid rgba(255,255,255,0.03); padding: 3px 0; }
-.pm-key { color: var(--accent); font-weight: var(--fw-bold); min-width: 100px; }
-.pm-val { color: var(--text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pm-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); }
-.pm-footer { display: flex; align-items: center; gap: 6px; padding: 10px 16px; border-top: 1px solid var(--border); }
-.pm-btn { padding: 6px 14px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.pm-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.pm-btn:disabled { opacity: 0.3; }
-.pm-btn.accent { background: var(--accent-fill); color: var(--on-accent); border: none; }
-.pm-spacer { flex: 1; }
-
-/* Weight Manager */
-.wm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-.wm-modal { width: min(680px, 92vw); max-height: 86vh; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
-.wm-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.wm-header h3 { font-size: 12px; letter-spacing: 0; color: var(--text-muted); }
-.wm-desc { font-size: var(--fs-label); color: var(--text-muted); flex: 1; }
-.wm-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
-.wm-row { display: flex; align-items: center; gap: 6px; }
-.wm-tag-input { flex: 1; padding: 5px 8px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); }
-.wm-slider { width: 100px; accent-color: var(--accent); }
-.wm-val { font-size: 11px; color: var(--accent); min-width: 35px; text-align: right; font-family: monospace; }
-.wm-rm { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: 14px; }
-.wm-add { width: 100%; padding: 6px; background: var(--bg-button); border: 1px dashed var(--border); border-radius: 4px; color: var(--text-muted); font-size: var(--fs-label); cursor: pointer; }
-.wm-footer { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
-.wm-save { padding: 7px 20px; background: var(--accent-fill); border: none; border-radius: 6px; color: var(--on-accent); font-size: 11px; font-weight: var(--fw-bold); cursor: pointer; }
-
-/* Generation Stats Modal */
-.stats-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-.stats-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; width: min(860px, 94vw); max-height: 88vh; overflow-y: auto; }
-.stats-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--border); }
-.stats-header h3 { font-size: 13px; font-weight: var(--fw-bold); letter-spacing: 0; color: var(--text-primary); }
-.stats-body { padding: 24px; display: flex; flex-direction: column; gap: 24px; }
-.stats-empty { display: flex; align-items: center; justify-content: center; min-height: 200px; }
-.stats-empty-msg { color: var(--text-muted); font-size: 14px; }
-
-.stats-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-.stat-card { background: var(--bg-input); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
-.stat-card.accent { border-color: var(--accent-dim); }
-.stat-val { font-size: 28px; font-weight: var(--fw-bold); color: var(--text-primary); font-family: monospace; }
-.stat-card.accent .stat-val { color: var(--accent); }
-.stat-label { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--text-muted); letter-spacing: 0; margin-top: 4px; }
-
-.stats-section h4 { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--text-muted); letter-spacing: 0; margin-bottom: 12px; }
-.stats-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-
-.daily-chart { display: flex; align-items: flex-end; gap: 2px; height: 80px; padding: 0 2px; }
-.daily-bar-wrap { flex: 1; height: 100%; display: flex; align-items: flex-end; }
-.daily-bar { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 1px; transition: height 0.3s; }
-.daily-labels { display: flex; justify-content: space-between; margin-top: 4px; font-size: var(--fs-label); color: var(--text-muted); }
-
-.stats-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.bar-name { font-size: 11px; color: var(--text-secondary); min-width: 80px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar-track { flex: 1; height: 6px; background: var(--bg-button); border-radius: 3px; overflow: hidden; }
-.bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
-.bar-count { font-size: var(--fs-label); color: var(--text-muted); min-width: 30px; text-align: right; font-family: monospace; }
-
-.recent-table { display: flex; flex-direction: column; gap: 4px; }
-.recent-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-input); border-radius: 6px; font-size: 11px; }
-.r-time { color: var(--text-muted); min-width: 80px; font-family: monospace; }
-.r-status { font-weight: var(--fw-bold); font-size: var(--fs-label); min-width: 30px; }
-.r-status.ok { color: var(--state-ok-fg); }
-.r-status.fail { color: var(--state-alert-fg); }
-.r-dur { color: var(--accent); min-width: 40px; font-family: monospace; }
-.r-res { color: var(--text-secondary); min-width: 70px; }
-.r-model { color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Wildcard Manager Modal */
-.wc-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-.wc-modal { width: min(980px, 95vw); height: min(740px, 90vh); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
-.wc-modal-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-.wc-modal-header h3 { font-size: 12px; letter-spacing: 0; color: var(--text-muted); }
-.wc-path { font-size: var(--fs-label); color: var(--text-muted); font-family: monospace; flex: 1; }
-.wc-modal-body { flex: 1; display: flex; overflow: hidden; }
-.wc-sidebar { width: 180px; overflow-y: auto; border-right: 1px solid var(--border); padding: 8px; }
-.wc-file-item { padding: 6px 10px; font-size: 11px; color: var(--text-secondary); cursor: pointer; border-radius: 4px; display: flex; justify-content: space-between; }
-.wc-file-item:hover { background: var(--bg-input); }
-.wc-file-item.active { background: var(--accent-dim); color: var(--accent); }
-.wc-file-count { font-size: var(--fs-label); color: var(--text-muted); }
-.wc-content { flex: 1; overflow-y: auto; padding: 16px; }
-.wc-content-header { margin-bottom: 12px; }
-.wc-content-header h4 { font-size: 14px; color: var(--text-primary); }
-.wc-content-header span { font-size: var(--fs-label); color: var(--text-muted); }
-.wc-content-header code { background: var(--bg-input); padding: 2px 6px; border-radius: 3px; font-size: var(--fs-label); color: var(--accent); }
-.wc-new-btn { padding: 4px 12px; background: var(--accent-fill); border: none; border-radius: 4px; color: var(--on-accent); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.wc-fname { flex: 1; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-.wc-del { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: 11px; opacity: 0; transition: 0.15s; }
-.wc-file-item:hover .wc-del { opacity: 1; }
-.wc-syntax { font-size: var(--fs-label); color: var(--text-muted); }
-.wc-syntax code { background: var(--bg-input); padding: 1px 6px; border-radius: 3px; color: var(--accent); }
-.wc-copy-btn { padding: 2px 8px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); font-size: var(--fs-label); cursor: pointer; }
-.wc-blocks { display: flex; flex-direction: column; gap: 3px; max-height: 300px; overflow-y: auto; }
-.wc-block-row { display: flex; align-items: center; gap: 4px; }
-.wc-block-idx { font-size: var(--fs-label); color: var(--text-muted); min-width: 20px; text-align: right; font-family: monospace; }
-.wc-block-input { flex: 1; padding: 4px 8px; font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); }
-.wc-block-use { padding: 2px 6px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.wc-block-rm { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: 12px; }
-.wc-add-line { width: 100%; padding: 4px; background: var(--bg-button); border: 1px dashed var(--border); border-radius: 3px; color: var(--text-muted); font-size: var(--fs-label); cursor: pointer; margin-top: 4px; }
-.wc-rename-input { font-size: 14px; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 4px; color: var(--text-primary); padding: 2px 8px; width: 200px; }
-.wc-bottom-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
-.wc-insert-sel { padding: 4px 8px; font-size: var(--fs-label); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); }
-.wc-use-btn { padding: 5px 16px; background: var(--accent-fill); border: none; border-radius: 4px; color: var(--on-accent); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.wc-spacer { flex: 1; }
-.wc-save-btn { padding: 5px 14px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.wc-save-btn:hover { border-color: var(--accent); color: var(--accent); }
-.wc-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-size: 13px; }
+/* 매니저 모달(프리셋·가중치·통계·와일드카드·프로파일·순서·즉석 WC)의 모양은 components/managers/ 로 옮겼다.
+   fade 는 여기 남는다 — 모달의 `<transition name="fade">` 가 이 파일 템플릿에 있고, 이 규칙이 자식 모달의
+   루트(오버레이)에 걸린다. */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
@@ -2550,49 +1173,7 @@ onMounted(async () => {
   background: rgba(96,165,250,0.15); color: var(--state-info-fg);
   border: 1px solid rgba(96,165,250,0.3); border-radius: 4px; font-weight: var(--fw-bold); }
 .profile-mini-btn:hover { background: rgba(96,165,250,0.3); border-color: var(--state-info-fg); color: var(--text-primary); }
-.profile-item { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
-  background: rgba(255,255,255,0.04); border-radius: 4px;
-  border: 1px solid rgba(255,255,255,0.08); }
-.profile-item:hover { background: rgba(96,165,250,0.08); }
-.profile-info { flex: 1; min-width: 0; }
-.profile-name { font-size: 13px; font-weight: var(--fw-bold); color: var(--text-primary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.profile-meta { font-size: var(--fs-label); color: var(--text-muted); margin-top: 2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* 프롬프트 순서 모달 */
-.order-modal-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.order-list { display: flex; flex-direction: column; gap: 4px;
-  background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 6px; padding: 8px; }
-.order-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
-  background: rgba(255,255,255,0.04); border-radius: 4px;
-  transition: background 0.15s; }
-.order-item:hover { background: rgba(96,165,250,0.08); }
-.order-num { width: 22px; height: 22px; display: inline-flex; align-items: center;
-  justify-content: center; background: rgba(96,165,250,0.2); color: var(--state-info-fg);
-  border-radius: 50%; font-size: 11px; font-weight: var(--fw-bold); }
-.order-label { flex: 1; font-size: 13px; color: var(--text-primary); }
-.order-btn { width: 28px; height: 28px; font-size: 13px; cursor: pointer;
-  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 4px; color: var(--text-primary); }
-.order-btn:hover:not(:disabled) { background: rgba(96,165,250,0.15);
-  border-color: var(--state-info-fg); color: var(--state-info-fg); }
-.order-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.order-preview { padding: 8px 10px; background: rgba(255,255,255,0.03);
-  border-left: 2px solid var(--state-info-fg); border-radius: 0 4px 4px 0; }
-.order-preview-label { font-size: var(--fs-label); color: var(--text-muted); margin-right: 6px; }
-.order-preview-text { font-size: 11px; color: var(--state-info-fg); font-family: Consolas, monospace; }
-.order-actions { display: flex; gap: 8px; align-items: center; padding-top: 6px;
-  border-top: 1px solid rgba(255,255,255,0.08); }
-.order-reset, .order-cancel, .order-save { padding: 6px 14px; border-radius: 4px;
-  font-size: 12px; cursor: pointer; font-weight: var(--fw-bold); }
-.order-reset { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-  color: var(--text-muted); }
-.order-cancel { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-  color: var(--text-primary); }
-.order-save { background: var(--state-info); border: 1px solid var(--state-info); color: white; }
-.order-save:hover { filter: brightness(1.15); }
 .generate-row { display: flex; gap: 6px; align-items: stretch; }
 .btn-cancel { width: 50px; height: 50px; background: transparent; border: 2px solid var(--state-alert-fg); border-radius: var(--radius-pill); color: var(--state-alert-fg); font-size: 18px; font-weight: var(--fw-bold); cursor: pointer; transition: var(--transition); }
 /* 채움 위의 흰 글자는 토큰이 아니다 — --state-alert 는 "흰 글자와 4.5:1"
@@ -2662,67 +1243,5 @@ onMounted(async () => {
 .global-progress { position: fixed; top: 0; left: 0; width: 100%; height: 3px; background: transparent; z-index: 1000; }
 .progress-fill { height: 100%; background: var(--accent); transition: width 0.3s ease; }
 
-/* Toast Notifications */
-/* 토스트의 #fff/#000 은 토큰으로 못 바꾼다 — 면이 rgba 고정색(초록·빨강·파랑·노랑)
-   이라 테마와 무관하다. --text-primary 를 쓰면 라이트에서 검은 글자가 빨간
-   토스트에 얹혀 읽히지 않는다. .toast-clear-all 도 면이 rgba(0,0,0,.6) 고정이다. */
-.toast-container {
-  position: fixed; top: 70px; right: 20px; z-index: 99999;
-  display: flex; flex-direction: column; gap: 6px; pointer-events: none;
-  max-width: 400px;
-}
-.toast-stack { display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
-.toast-clear-all {
-  align-self: flex-end; padding: 3px 10px; font-size: var(--fs-label); font-weight: var(--fw-bold);
-  background: rgba(0,0,0,0.6); color: #fff; border: 1px solid rgba(255,255,255,0.2);
-  border-radius: 4px; cursor: pointer; pointer-events: auto; backdrop-filter: blur(8px);
-}
-.toast-clear-all:hover { background: rgba(248,113,113,0.5); border-color: var(--state-alert-fg); }
-.toast {
-  display: flex; align-items: center; gap: 8px;
-  padding: 11px 13px 11px 15px; border-radius: 9px; font-size: 13px; font-weight: var(--fw-bold);
-  color: #FFF; pointer-events: auto; min-width: 240px; max-width: 400px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4); backdrop-filter: blur(8px);
-  word-break: break-word; line-height: 1.45;
-}
-.toast.success { background: rgba(74, 222, 128, 0.92); color: #000; }
-.toast.error { background: rgba(248, 113, 113, 0.92); color: #FFF; }
-.toast.info { background: rgba(96, 165, 250, 0.92); color: #FFF; }
-.toast.warning { background: rgba(251, 191, 36, 0.92); color: #000; }
-.toast-icon { font-size: 16px; flex-shrink: 0; }
-
-/* 알림 벨 + 히스토리 패널 */
-.notif-bell { position: fixed; top: 14px; right: 18px; z-index: 2003; width: 34px; height: 34px; border-radius: 50%; background: var(--bg-button); border: 1px solid var(--border); color: var(--text-secondary); font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.notif-bell:hover { border-color: var(--accent); color: var(--accent); }
-.notif-badge { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--state-alert); color: #fff; font-size: var(--fs-label); font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; }
-.notif-overlay { position: fixed; inset: 0; z-index: 2002; }
-.notif-panel { position: fixed; top: 54px; right: 18px; z-index: 2003; width: 330px; max-height: 60vh; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); display: flex; flex-direction: column; overflow: hidden; }
-.notif-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: var(--fw-bold); color: var(--text-secondary); letter-spacing: 0; }
-.notif-clear { background: none; border: none; color: var(--state-alert-fg); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
-.notif-list { overflow-y: auto; padding: 6px; }
-.notif-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 6px; font-size: 12px; color: var(--text-primary); }
-.notif-item:hover { background: var(--bg-button); }
-.notif-ico { flex-shrink: 0; }
-.notif-item.error .notif-ico { color: var(--state-alert-fg); }
-.notif-item.success .notif-ico { color: var(--state-ok-fg); }
-.notif-item.info .notif-ico { color: var(--state-info-fg); }
-.notif-item.warning .notif-ico { color: var(--state-warn-fg); }
-.notif-msg { flex: 1; word-break: break-word; line-height: 1.4; }
-.notif-time { flex-shrink: 0; font-size: var(--fs-label); color: var(--text-muted); white-space: nowrap; }
-.notif-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; }
-.toast-msg { flex: 1; }
-.toast-count {
-  background: rgba(0,0,0,0.25); padding: 1px 6px; border-radius: 8px;
-  font-size: var(--fs-label); flex-shrink: 0;
-}
-.toast-close {
-  width: 18px; height: 18px; padding: 0; flex-shrink: 0;
-  background: rgba(0,0,0,0.2); border: none; border-radius: 50%;
-  color: inherit; font-size: var(--fs-label); cursor: pointer; opacity: 0.7;
-}
-.toast-close:hover { opacity: 1; background: rgba(0,0,0,0.4); }
-.toast-enter-active { animation: slideIn 0.25s ease; }
-.toast-leave-active { animation: slideOut 0.25s ease; }
-@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-@keyframes slideOut { from { opacity: 1; max-height: 60px; } to { transform: translateX(100%); opacity: 0; max-height: 0; padding: 0; margin: 0; } }
+/* 토스트 · 알림 벨/기록 패널은 components/ToastLayer.vue · NotificationCenter.vue 로 옮겼다. */
 </style>

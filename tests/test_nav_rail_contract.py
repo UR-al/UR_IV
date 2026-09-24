@@ -268,10 +268,24 @@ class PanelModeTests(unittest.TestCase):
         cls.left = cls.app.split('<aside class="side-panel left"', 1)[1].split("</aside>", 1)[0]
 
     def test_params_live_inside_the_left_column(self):
-        """오버레이 시절의 `#sec-params` 가 왼쪽 열 밖에 남으면 서랍을 눌러도 무대만 가린다."""
-        self.assertIn('id="sec-params"', self.left, "파라미터 카드가 왼쪽 열 안에 없다")
+        """오버레이 시절의 `#sec-params` 가 왼쪽 열 밖에 남으면 서랍을 눌러도 무대만 가린다.
+
+        파라미터 카드는 App.vue 분할(④)로 `components/params/*.vue` 로 나갔다 — `#sec-params` 는
+        ParamsBasicCard 의 루트이고, App 은 그 카드를 왼쪽 열의 `.extend-overlay` 안에 놓는다.
+        """
         self.assertIn('class="extend-overlay" v-show="panelMode === \'params\'"', self.left)
         self.assertIn('class="panel-scroll" v-show="panelMode === \'prompt\'"', self.left)
+        overlay = self.left.split('class="extend-overlay"', 1)[1]
+        self.assertIn("<ParamsBasicCard", overlay, "파라미터 카드가 왼쪽 열의 파라미터 모드 안에 없다")
+        card = _read(SRC / "components" / "params" / "ParamsBasicCard.vue")
+        template = card.split("<template>", 1)[1].split("<script", 1)[0]
+        self.assertRegex(template, r'^\s*<div id="sec-params" class="ext-card">', "#sec-params 는 카드의 루트여야 한다")
+        # id 는 문서에 하나 — 다른 파일이 같은 id 를 다시 만들거나 카드를 다른 자리에 또 놓으면 안 된다
+        owners = [p.name for p in SRC.rglob("*.vue") if 'id="sec-params"' in _read(p)]
+        self.assertEqual(owners, ["ParamsBasicCard.vue"])
+        users = [p.name for p in SRC.rglob("*.vue") if "<ParamsBasicCard" in _read(p)]
+        self.assertEqual(users, ["App.vue"])
+        self.assertEqual(self.app.count("<ParamsBasicCard"), 1)
 
     def test_mode_comes_from_the_shared_ref(self):
         """`showExtendPanel` 은 옛 이름을 지키는 computed 다 — 따로 ref 로 되살리면 레일과 갈라진다."""

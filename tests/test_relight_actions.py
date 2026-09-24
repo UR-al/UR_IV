@@ -77,9 +77,50 @@ class RelightActionTests(unittest.TestCase):
                       "data:image/svg+xml;base64,AAAA", "data:image/png;base64,???", None):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 decode_relight_image(value, "원본")
+        with self.assertRaisesRegex(ValueError, "16 MP"):
+            decode_relight_image(image_url((4097, 4097), mode="L"), "원본")   # 헤더에서 거부(픽셀 디코드 전)
         with mock.patch("ui.relight_actions.MAX_PIXELS", 100):
-            with self.assertRaisesRegex(ValueError, "16 MP"):
+            # 문구는 실제 적용 중인 한도를 보여 준다 (예전에는 한도와 무관하게 '16 MP' 고정)
+            with self.assertRaisesRegex(ValueError, "최대 100 px"):
                 decode_relight_image(image_url(), "원본")
+        with mock.patch("ui.relight_actions.MAX_FILE_BYTES", 16):
+            with self.assertRaises(ValueError):
+                decode_relight_image(image_url(), "원본")
+
+    def test_validation_matches_hand_reconstruction_policy(self):
+        """relight가 hand와 갈라졌던 네 가지 검증이 공용 정책(core.local_image_io)으로 통일됐다."""
+        spoofed = image_url().replace("image/png", "image/jpeg")
+        with self.assertRaisesRegex(ValueError, "MIME"):
+            decode_relight_image(spoofed, "원본")
+        with self.assertRaisesRegex(ValueError, "원본: 이미지를 읽을 수 없습니다"):
+            decode_relight_image("data:image/png;base64,YQ==", "원본")   # PIL 원문 오류를 노출하지 않는다
+        info = PngImagePlugin.PngInfo()
+        info.add_text("parameters", "p")
+        info.add_text("workflow", "x" * (1024 * 1024 + 10))
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8)).save(buffer, format="PNG", pnginfo=info)
+        oversized = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+        with self.assertRaisesRegex(ValueError, "1 MB"):
+            decode_relight_image(oversized, "원본")   # 예전: workflow만 조용히 버림
+        with mock.patch("ui.relight_actions.MAX_METADATA_BYTES", 1):
+            with self.assertRaises(ValueError):
+                decode_relight_image(image_url(metadata=True), "원본")
+
+    def test_maps_ignore_metadata_they_never_write(self):
+        info = PngImagePlugin.PngInfo()
+        info.add_text("workflow", "x" * (1024 * 1024 + 10))
+        buffer = io.BytesIO()
+        Image.new("L", (24, 16), 128).save(buffer, format="PNG", pnginfo=info)
+        depth = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+        result = render_relight_preview({"image": image_url(), "depth": depth})
+        self.assertEqual(result["geometry"], "depth")
+
+    def test_grayscale_icc_is_not_attached_to_rgb_output(self):
+        buffer = io.BytesIO()
+        Image.new("L", (24, 16), 128).save(buffer, format="PNG", icc_profile=b"gray-profile")
+        source = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+        _pixels, metadata = decode_relight_image(source, "원본")
+        self.assertIsNone(metadata["icc"])
 
     def test_wrong_map_shape_and_non_rgb_normal_fail_without_resizing(self):
         with self.assertRaisesRegex(ValueError, "같은 해상도"):
@@ -182,6 +223,19 @@ class RelightActionTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "총 전송 크기"):
                     render_relight_preview({"image": image_url()})
                 decode.assert_not_called()
+
+    def test_broken_node_pack_ends_as_a_relight_error_event(self):
+        """노드 팩은 render_relight_preview 안에서만 import 한다 — 예전 최상단 import 는 노드 팩 한 파일의
+        SyntaxError·ImportError 로 앱 기동 자체를 막았다. 지금은 미리보기 한 건의 오류 이벤트로 끝난다."""
+        with mock.patch.dict(sys.modules, {"comfy_custom_nodes.ai_studio_forge_parity.relight": None}):
+            with self.assertRaises(ImportError):
+                render_relight_preview({"image": image_url()})
+            self.host._handle_relight_action("relight_preview", {"requestId": "broken_pack", "image": image_url()})
+            event = self.wait()
+        self.assertEqual(event["requestId"], "broken_pack")
+        self.assertFalse(event["ok"])
+        self.assertTrue(event["error"])
+        self.assertIsNone(self.host._relight_job, "실패한 작업이 다음 미리보기를 막지 않는다")
 
 
 if __name__ == "__main__":

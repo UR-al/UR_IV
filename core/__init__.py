@@ -1,19 +1,8 @@
 # core/__init__.py
-"""Core 모듈"""
-from .database import MetadataManager
-from .image_utils import (
-    normalize_path, normalize_windows_path, move_to_trash,
-    get_thumb_path, read_exif, exif_for_display
-)
-from .tag_classifier import TagClassifier
+"""Core 모듈 — Qt 에 의존하지 않는 순수 로직.
 
-__all__ = [
-    'MetadataManager',
-    'normalize_path',
-    'normalize_windows_path', 
-    'move_to_trash',
-    'get_thumb_path',
-    'read_exif',
-    'exif_for_display',
-    'TagClassifier',     
-]
+재수출하지 않는다: 사용처는 모두 ``from core.<모듈> import ...`` 로 서브모듈을 직접
+가져온다. 여기서 서브모듈을 미리 import 하면 ``core.*`` 하나만 쓰는 단독 프로세스
+(업데이트 설치기 등)까지 DB·이미지·태그 분류기를 끌어온다. 파일 자체는 지우지 않는다 —
+없으면 core 가 namespace package 가 된다.
+"""

@@ -4,8 +4,25 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
+from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage, QWebEngineProfile
 from ui.native_dialogs import ThemedWebDialogs
+
+#: Web 탭 전용 Chromium 프로필 이름 — 이름이 있어야 디스크에 남는다(빈 이름 = off-the-record).
+WEB_TAB_PROFILE_NAME = "web_tab"
+
+
+def web_tab_profile_paths():
+    """(영속 저장소, HTTP 캐시) 경로.
+
+    쿠키·localStorage·로그인은 사용자 데이터(user_data/web_tab_profile)에, 다시 받을 수 있는
+    HTTP 캐시는 cache/web_tab 에 둔다 — core.storage_paths 의 저장 경계를 따른다.
+    """
+    from core.storage_paths import storage_paths
+
+    return (
+        str(storage_paths.user_data_dir / "web_tab_profile"),
+        str(storage_paths.cache_dir / "web_tab"),
+    )
 
 
 class _QuietPage(ThemedWebDialogs, QWebEnginePage):
@@ -56,21 +73,26 @@ class BrowserTab(QWidget):
         nav_bar.addWidget(btn_go)
         layout.addLayout(nav_bar)
         
-        # 웹뷰
-        self.web_view = QWebEngineView()
-        self.web_view.setPage(_QuietPage(self.web_view))
-
-        page = self.web_view.page()
-        profile = page.profile()
-        
-        # User Agent 설정
-        new_user_agent = (
+        # 웹뷰 — 전용 영속 프로필을 쓴다. 프로필 없이 만든 페이지는 Qt 6 의 off-the-record
+        # 기본 프로필을 써서 캐시/저장 경로 설정이 무시되고, 쿠키·localStorage(로그인)가
+        # 메모리에만 남아 재시작마다 사라졌다.
+        storage_path, cache_path = web_tab_profile_paths()
+        profile = QWebEngineProfile(WEB_TAB_PROFILE_NAME, self)
+        profile.setHttpUserAgent(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/120.0.0.0 Safari/537.36"
         )
-        profile.setHttpUserAgent(new_user_agent)
-        
+        profile.setPersistentStoragePath(storage_path)
+        profile.setCachePath(cache_path)
+        profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
+        self._profile = profile
+
+        self.web_view = QWebEngineView()
+        self.web_view.setPage(_QuietPage(profile, self.web_view))
+
         # 웹 설정
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
@@ -83,14 +105,7 @@ class BrowserTab(QWidget):
             QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True
         )
         settings.setAttribute(QWebEngineSettings.WebAttribute.AutoLoadImages, True)
-        
-        # 캐시 경로 설정
-        import os
-        from config import CURRENT_DIR
-        cache_path = os.path.join(CURRENT_DIR, 'web_cache')
-        profile.setCachePath(cache_path)
-        profile.setPersistentStoragePath(cache_path)
-        
+
         # 첫 URL 은 탭을 열 때 싣는다 — 앱을 켤 때마다 외부 사이트가 뒤에서 뜨면
         # 백엔드를 켠 것과 무관하게 '웹이 따로 켜진' 것처럼 보인다.
         self._loaded_once = False

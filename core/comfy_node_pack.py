@@ -14,52 +14,20 @@ import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 
 PACK_ID = "ai_studio_forge_parity"
-PACK_VERSION = "1.2.0"
+# Must equal ``comfy_custom_nodes/ai_studio_forge_parity/__init__.__version__``
+# (tests/test_comfy_node_pack.py guards the pair).
+PACK_VERSION = "1.3.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 
-REQUIRED_NODE_TYPES = frozenset(
-    {
-        "ForgeNeoAnimaQwen35Loader",
-        "ForgeNeoAnimaQwen35Prompt",
-        "ForgeNeoAnima38V2Loader",
-        "ForgeNeoAnima38V2Prompt",
-        "ForgeNeoAnimaLoraLoader",
-        "ForgeNeoAnimaLoraLoaderModelOnly",
-        "ForgeNeoModelSamplingShift",
-        "ForgeNeoNegPip",
-        "ForgeNeoAnimaDAVE",
-        "ForgeNeoAnimaModGuidance",
-        "ForgeNeoSkimmedCFG",
-        "ForgeNeoAnimaSafePAG",
-        "ForgeNeoDCWCWMSMC",
-        "ForgeNeoAnimaGuidanceSuite",
-        "ForgeNeoAnimaDetailDaemon",
-        "ForgeNeoKSamplerCNS",
-        "ForgeNeoLatentInput",
-        "ForgeNeoHiresFix",
-        "ForgeNeoMaskSelector",
-        "ForgeNeoLoraBlockWeight",
-        "ForgeNeoCharacterReference",
-        "ForgeNeoReferencePrompt",
-        "ForgeNeoReferenceOutput",
-        "ForgeNeoAnimaPiD",
-        "ForgeNeoAnimaVAE2x",
-        "ForgeNeoSAM3Mask",
-        "ForgeNeoSAM3Detailer",
-        "ForgeNeoSAM3Refine",
-        "ForgeNeoSAM3TileRepair",
-        "ForgeNeoADetailer",
-        "ForgeNeoSaveImage",
-        "ForgeNeoH3ConditioningCachePrepare",
-        "ForgeNeoH3ConditioningCacheLoad",
-        "AIStudioRelight",
-    }
-)
+# Everything copied/verified as part of the pack (tamper detection covers docs
+# and licenses too) versus what ComfyUI actually imports or reads at runtime.
+_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt"})
+_RUNTIME_SUFFIXES = frozenset({".py", ".json"})
 
 
 class ComfyNodePackError(RuntimeError):
@@ -71,6 +39,9 @@ class NodePackInstallResult:
     target: Path
     fingerprint: str
     changed: bool
+    # False when only documentation/licence files differed: the files are
+    # refreshed, but the running ComfyUI already executes identical code.
+    restart_required: bool = True
 
 
 def bundled_node_pack_path(project_root: Path | str | None = None) -> Path:
@@ -82,29 +53,50 @@ def bundled_node_pack_path(project_root: Path | str | None = None) -> Path:
     return root / "comfy_custom_nodes" / PACK_ID
 
 
-def _pack_files(source: Path) -> list[Path]:
+def pack_files(source: Path | str, *, runtime_only: bool = False) -> list[Path]:
+    """Return the fingerprinted pack files in a stable, platform-neutral order."""
+
+    source_path = Path(source)
+    suffixes = _RUNTIME_SUFFIXES if runtime_only else _PACK_SUFFIXES
     return sorted(
         (
             path
-            for path in source.rglob("*")
+            for path in source_path.rglob("*")
             if path.is_file()
             and "__pycache__" not in path.parts
             and path.name != OWNER_MARKER
-            and path.suffix.casefold() in {".py", ".json", ".md", ".txt"}
+            and path.suffix.casefold() in suffixes
         ),
-        key=lambda path: path.relative_to(source).as_posix(),
+        key=lambda path: path.relative_to(source_path).as_posix(),
     )
 
 
-def node_pack_fingerprint(source: Path | str) -> str:
+def node_pack_fingerprint(
+    source: Path | str,
+    *,
+    runtime_only: bool = False,
+    max_files: int | None = None,
+    max_file_bytes: int | None = None,
+) -> str:
+    """The single pack digest used by the installer and the compatibility UI.
+
+    ``runtime_only`` restricts it to the files ComfyUI imports/reads, which
+    decides whether a refreshed pack needs a ComfyUI restart.  The optional
+    limits bound a read of an arbitrary installed directory.
+    """
+
     source_path = Path(source).resolve()
     if not source_path.is_dir():
         raise ComfyNodePackError(f"번들 ComfyUI 노드 폴더가 없습니다: {source_path}")
     digest = hashlib.sha256()
-    files = _pack_files(source_path)
+    files = pack_files(source_path, runtime_only=runtime_only)
     if not files:
         raise ComfyNodePackError(f"번들 ComfyUI 노드가 비어 있습니다: {source_path}")
+    if max_files is not None and len(files) > int(max_files):
+        raise ComfyNodePackError(f"ComfyUI 노드 파일이 너무 많습니다: {len(files)}개")
     for path in files:
+        if max_file_bytes is not None and path.stat().st_size > int(max_file_bytes):
+            raise ComfyNodePackError(f"ComfyUI 노드 파일이 너무 큽니다: {path.name}")
         relative = path.relative_to(source_path).as_posix().encode("utf-8")
         digest.update(len(relative).to_bytes(4, "big"))
         digest.update(relative)
@@ -112,6 +104,13 @@ def node_pack_fingerprint(source: Path | str) -> str:
         digest.update(len(data).to_bytes(8, "big"))
         digest.update(data)
     return digest.hexdigest()
+
+
+def _installed_runtime_fingerprint(target: Path) -> str:
+    try:
+        return node_pack_fingerprint(target, runtime_only=True)
+    except (ComfyNodePackError, OSError):
+        return ""
 
 
 def _read_marker(target: Path) -> dict[str, Any] | None:
@@ -136,7 +135,9 @@ def install_bundled_node_pack(
 
     The root itself must already exist.  Existing third-party content at the
     reserved pack name is treated as a conflict.  A previous app-owned copy is
-    refreshed only when its content fingerprint changes.
+    refreshed only when its content fingerprint changes.  ``restart_required``
+    is False only when the replaced copy already had byte-identical runtime
+    (``.py``/``.json``) files, i.e. a documentation-only refresh.
     """
 
     root = Path(custom_nodes_root).expanduser().resolve()
@@ -148,6 +149,7 @@ def install_bundled_node_pack(
             f"번들 ComfyUI 노드 진입점을 찾을 수 없습니다: {source_path / '__init__.py'}"
         )
     fingerprint = node_pack_fingerprint(source_path)
+    runtime_fingerprint = node_pack_fingerprint(source_path, runtime_only=True)
     target = root / PACK_ID
     existing = _read_marker(target) if target.exists() else None
     if target.exists() and existing is None:
@@ -160,7 +162,16 @@ def install_bundled_node_pack(
         except ComfyNodePackError:
             installed_fingerprint = ""
         if installed_fingerprint == fingerprint:
-            return NodePackInstallResult(target=target, fingerprint=fingerprint, changed=False)
+            return NodePackInstallResult(
+                target=target, fingerprint=fingerprint, changed=False,
+                restart_required=False,
+            )
+    # Measured on disk, not trusted from the marker: a tampered .py must
+    # still force the restart that reloads the repaired code.
+    restart_required = (
+        existing is None
+        or _installed_runtime_fingerprint(target) != runtime_fingerprint
+    )
 
     suffix = uuid.uuid4().hex[:10]
     staging = root / f".{PACK_ID}.staging-{suffix}"
@@ -176,6 +187,7 @@ def install_bundled_node_pack(
             "packId": PACK_ID,
             "version": PACK_VERSION,
             "fingerprint": fingerprint,
+            "runtimeFingerprint": runtime_fingerprint,
         }
         (staging / OWNER_MARKER).write_text(
             json.dumps(marker, ensure_ascii=False, indent=2) + "\n",
@@ -194,25 +206,7 @@ def install_bundled_node_pack(
     finally:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
-    return NodePackInstallResult(target=target, fingerprint=fingerprint, changed=True)
-
-
-def missing_required_nodes(object_info: Mapping[str, Any]) -> list[str]:
-    """Return stable, sorted node IDs absent from a Comfy ``/object_info`` map."""
-
-    available = {str(key) for key in object_info}
-    return sorted(REQUIRED_NODE_TYPES - available)
-
-
-def capability_manifest() -> dict[str, Any]:
-    return {
-        "id": PACK_ID,
-        "version": PACK_VERSION,
-        "owner": OWNER_ID,
-        "nodes": sorted(REQUIRED_NODE_TYPES),
-        "forgeSam3Source": "forge_sam3_extension@0.21.2",
-        "anima38Source": (
-            "GumGum10/comfyui-anima-3-8B@"
-            "381c13af328b958febf86c155d2f4b007cd0f55b"
-        ),
-    }
+    return NodePackInstallResult(
+        target=target, fingerprint=fingerprint, changed=True,
+        restart_required=restart_required,
+    )

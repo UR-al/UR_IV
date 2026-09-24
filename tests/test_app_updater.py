@@ -404,5 +404,124 @@ class AppUpdaterTests(unittest.TestCase):
         self.assertEqual({"config/설정.json"}, found)
 
 
+class _DescribeOnlyRunner:
+    """git 프로세스 대역 — describe 만 답하고 나머지 호출은 기록만 한다."""
+
+    def __init__(self, describe: str | None = "v2.9.0-0-gaaaaaaaaa") -> None:
+        self.describe = describe
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, argv, **_kwargs):
+        args = tuple(argv[1:])
+        self.calls.append(args)
+        if args and args[0] == "describe":
+            if self.describe is None:
+                raise OSError("git not installed")
+            return subprocess.CompletedProcess(argv, 0, stdout=self.describe + "\n", stderr="")
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="unexpected git call")
+
+
+class FileBasedSourceIdentityTests(unittest.TestCase):
+    """표시용 정체성은 .git 파일에서 읽고, git 은 describe 1회만 실행한다."""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name).resolve()
+        (self.root / "VERSION").write_text("2.9.0\n", encoding="utf-8")
+
+    def _git_layout(self, *, packed: bool = False, remotes=None) -> None:
+        git = self.root / ".git"
+        (git / "refs" / "heads").mkdir(parents=True)
+        (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="ascii")
+        if packed:
+            (git / "packed-refs").write_text(
+                "# pack-refs with: peeled fully-peeled sorted\n"
+                + "a" * 40 + " refs/heads/main\n", encoding="ascii")
+        else:
+            (git / "refs" / "heads" / "main").write_text("A" * 40 + "\n", encoding="ascii")
+        remotes = remotes if remotes is not None else {
+            "fork": "https://github.com/someone/UR_IV.git",
+            "upstream": "https://github.com/UR-al/UR_IV.git",
+        }
+        config = "[core]\n\trepositoryformatversion = 0\n"
+        for name, url in remotes.items():
+            config += f'[remote "{name}"]\n\turl = {url}\n\tfetch = +refs/heads/*:refs/remotes/{name}/*\n'
+        (git / "config").write_text(config, encoding="utf-8")
+
+    def _manager(self, runner) -> AppUpdateManager:
+        return AppUpdateManager(
+            project_root=self.root,
+            settings_path=self.root / "config" / "app_update.json",
+            plan_dir=self.root / "cache" / "updates",
+            result_path=self.root / "logs" / "updates" / "last_result.json",
+            release_client=_FakeReleaseClient(_github_release("2.10.0")),
+            git_source=GitSource(self.root, runner=runner),
+            process_launcher=lambda _path: 1,
+            clock=lambda: datetime(2026, 9, 2, tzinfo=timezone.utc),
+            current_pid=lambda: 4242,
+            instance_scanner=lambda *_args, **_kwargs: [],
+            update_lock_probe=lambda: False,
+        )
+
+    def test_local_identity_reads_head_branch_and_trusted_remote_without_git(self) -> None:
+        for packed in (False, True):
+            with self.subTest(packed=packed):
+                shutil.rmtree(self.root / ".git", ignore_errors=True)
+                self._git_layout(packed=packed)
+                runner = _DescribeOnlyRunner()
+                identity = GitSource(self.root, runner=runner).local_identity()
+                self.assertEqual(
+                    {"checkout": True, "head": "a" * 40, "branch": "main", "trustedRemote": "upstream"},
+                    identity,
+                )
+                self.assertEqual([], runner.calls)
+
+    def test_snapshot_runs_git_only_for_describe(self) -> None:
+        self._git_layout()
+        runner = _DescribeOnlyRunner("v2.6.0-41-gabcdef123-dirty")
+        manager = self._manager(runner)
+        snapshot = manager.snapshot()
+        self.assertEqual("git", snapshot["mode"])
+        self.assertEqual(["describe"], [call[0] for call in runner.calls])
+        self.assertEqual("main", snapshot["branch"])
+        self.assertEqual("2.6.0", snapshot["currentVersion"])
+        self.assertTrue(snapshot["developmentBuild"])
+        state = manager._current_source_state()
+        self.assertEqual("upstream", state["trustedRemote"])
+        self.assertEqual("a" * 9, state["revision"])
+
+    def test_missing_dot_git_is_a_manual_copy_without_any_git_process(self) -> None:
+        runner = _DescribeOnlyRunner()
+        snapshot = self._manager(runner).snapshot()
+        self.assertEqual("manual", snapshot["mode"])
+        self.assertEqual([], runner.calls)
+
+    def test_checkout_without_a_working_git_stays_manual(self) -> None:
+        self._git_layout()
+        snapshot = self._manager(_DescribeOnlyRunner(describe=None)).snapshot()
+        self.assertEqual("manual", snapshot["mode"])
+        self.assertTrue(snapshot["identityKnown"])
+
+    def test_worktree_gitdir_file_uses_common_dir_refs_and_config(self) -> None:
+        common = self.root / "main-repo" / ".git"
+        worktree_git = common / "worktrees" / "feature"
+        worktree_git.mkdir(parents=True)
+        (common / "refs" / "heads").mkdir(parents=True)
+        (common / "refs" / "heads" / "feature").write_text("b" * 40 + "\n", encoding="ascii")
+        (common / "config").write_text(
+            '[remote "origin"]\n\turl = git@github.com:UR-al/UR_IV.git\n', encoding="utf-8")
+        (worktree_git / "HEAD").write_text("ref: refs/heads/feature\n", encoding="ascii")
+        (worktree_git / "commondir").write_text("../..\n", encoding="ascii")
+        (self.root / ".git").write_text(f"gitdir: {worktree_git}\n", encoding="utf-8")
+        runner = _DescribeOnlyRunner()
+        identity = GitSource(self.root, runner=runner).local_identity()
+        self.assertEqual(
+            {"checkout": True, "head": "b" * 40, "branch": "feature", "trustedRemote": "origin"},
+            identity,
+        )
+        self.assertEqual([], runner.calls)
+
+
 if __name__ == "__main__":
     unittest.main()

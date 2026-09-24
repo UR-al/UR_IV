@@ -14,7 +14,7 @@
         <input v-model="exifSearch" placeholder="EXIF 검색..." class="search-input"
           @keydown.enter="runExifSearch" />
         <button class="search-go" @click="runExifSearch" :disabled="exifSearching">{{ exifSearching ? '...' : 'GO' }}</button>
-        <button class="search-clear" v-if="exifFiltered" @click="clearExifSearch"><Icon name="close" /></button>
+        <button class="search-clear" v-if="exifFiltered || exifSearching" :title="exifSearching ? '검색 취소' : '검색 해제'" @click="clearExifSearch"><Icon name="close" /></button>
       </div>
 
       <div class="control-group">
@@ -23,7 +23,7 @@
         <div class="sort-chips">
           <button v-for="s in sortOptions" :key="s.val"
             class="mini-chip" :class="{ active: sortBy === s.val }"
-            @click="sortBy = s.val; sortImages()"
+            @click="sortBy = s.val"
           >{{ s.label }}</button>
         </div>
         <div class="sep"></div>
@@ -45,10 +45,20 @@
           @click="viewImage(img)"
           @contextmenu.prevent="showMenu($event, img)"
         >
-          <img :src="thumbnailUrl(img, thumbSize * thumbPixelRatio)" loading="lazy" />
+          <video v-if="isVideo(img)" class="gallery-media" :src="mediaUrl(img)"
+            muted preload="metadata" playsinline />
+          <div v-else-if="isAudio(img)" class="audio-card">
+            <span class="audio-icon"><Icon name="music" /></span>
+            <span class="audio-name">{{ filenameOf(img) }}</span>
+            <audio :src="mediaUrl(img)" controls preload="metadata" @click.stop />
+          </div>
+          <img v-else :src="cardImageUrl(img)" loading="lazy" decoding="async" @error="onCardImageError($event, img)" />
+          <span v-if="mediaKind(img) !== 'image' || isAnimated(img)" class="media-kind-badge">
+            {{ mediaLabel(img) }}
+          </span>
           <div class="card-hover-actions">
             <button class="tiny-btn" @click.stop="removeFav(img)" title="즐겨찾기 제거"><Icon name="star" /></button>
-            <button class="tiny-btn" @click.stop="quickAction('copy_to_clipboard', img)" title="복사"><Icon name="clipboard" /></button>
+            <button v-if="isImage(img)" class="tiny-btn" @click.stop="copyImageAndNotify(img)" title="복사"><Icon name="clipboard" /></button>
           </div>
         </div>
       </div>
@@ -73,10 +83,12 @@
           </div>
           <div class="viewer-body">
             <div class="viewer-img">
-              <img :src="mediaUrl(viewerData.path)" />
+              <video v-if="isVideo(viewerData.path)" :src="mediaUrl(viewerData.path)" controls autoplay playsinline />
+              <audio v-else-if="isAudio(viewerData.path)" :src="mediaUrl(viewerData.path)" controls autoplay />
+              <img v-else :src="versionedMediaUrl(viewerData.path)" />
             </div>
             <div class="viewer-info">
-              <div class="vi-size">{{ viewerData.size }}</div>
+              <div class="vi-size">{{ viewerData.mediaType }} · {{ viewerData.size }}</div>
               <div v-if="viewerData.prompt" class="vi-section">
                 <div class="vi-head"><label>프롬프트</label></div>
                 <div class="vi-pre-wrap">
@@ -105,10 +117,10 @@
                   <pre>{{ viewerParams }}</pre>
                 </div>
               </div>
-              <div class="vi-actions-section">
+              <div v-if="isImage(viewerData.path)" class="vi-actions-section">
                 <label class="vi-actions-label">보내기</label>
                 <div class="vi-send-grid">
-                  <button class="send-card primary" @click="action('gallery_send_exif_to_t2i', { exif: viewerData.raw, path: viewerData.path })" title="EXIF + 이미지를 T2I 탭에 전송">
+                  <button class="send-card primary" :disabled="viewerData.can_apply === false" @click="sendExifToT2I" title="이미지의 프롬프트를 T2I 탭에 전송">
                     <span class="send-ico"><Icon name="upload" /></span>
                     <span class="send-name">T2I</span>
                   </button>
@@ -134,14 +146,14 @@
 
     <!-- Context Menu -->
     <transition name="pop">
-      <div v-if="ctxMenu.show" class="modern-ctx-menu" :style="ctxMenuStyle">
-        <div class="ctx-item" @click="ctx('gallery_load_exif')"><Icon name="clipboard" /> EXIF 보기</div>
-        <div class="ctx-item" @click="ctx('send_to_i2i')"><Icon name="image" /> I2I로 보내기</div>
-        <div class="ctx-item" @click="ctx('send_to_inpaint')"><Icon name="palette" /> 인페인트로 보내기</div>
-        <div class="ctx-item" @click="ctx('send_to_editor')"><Icon name="pencil" /> 에디터로 보내기</div>
-        <div class="ctx-item" @click="ctx('copy_to_clipboard')"><Icon name="clipboard" /> 복사</div>
-        <div class="ctx-item" @click="sendToCompare('before')"><Icon name="search" /> 비교 (이전)</div>
-        <div class="ctx-item" @click="sendToCompare('after')"><Icon name="search" /> 비교 (이후)</div>
+      <div v-if="ctxMenu.show" ref="ctxMenuEl" class="modern-ctx-menu" :style="ctxMenuStyle">
+        <div class="ctx-item" @click="ctx('gallery_load_exif')"><Icon name="clipboard" /> {{ isImage(ctxMenu.path) ? 'EXIF 보기' : '정보 보기' }}</div>
+        <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="ctx('send_to_i2i')"><Icon name="image" /> I2I로 보내기</div>
+        <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="ctx('send_to_inpaint')"><Icon name="palette" /> 인페인트로 보내기</div>
+        <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="ctx('send_to_editor')"><Icon name="pencil" /> 에디터로 보내기</div>
+        <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="ctxCopyImage"><Icon name="clipboard" /> 복사</div>
+        <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="sendToCompare('before')"><Icon name="search" /> 비교 (이전)</div>
+        <div v-if="isImage(ctxMenu.path)" class="ctx-item" @click="sendToCompare('after')"><Icon name="search" /> 비교 (이후)</div>
         <div class="ctx-separator"></div>
         <div class="ctx-item unfav" @click="ctxRemoveFav"><Icon name="star" /> 즐겨찾기 해제</div>
       </div>
@@ -150,127 +162,92 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick, onActivated, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onActivated, onMounted, onUnmounted } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
-import { mediaUrl, thumbnailUrl } from '../utils/media.js'
-import type { ActionName } from '../types/bridge'
+import { mediaUrl, thumbnailUrl, withUrlVersion } from '../utils/media.js'
+import { mediaVersion } from '../utils/mediaVersions'
+import { copyTextToClipboard } from '../utils/clipboard'
+// 이미지 복사 — 데스크톱은 호스트 Qt 클립보드, 웹은 이 브라우저 클립보드(호스트 PC 클립보드 금지)
+import { copyImageAndNotify } from '../utils/clipboardImageCopy'
+import { isSameImagePath } from '../utils/imageDeleteResult'
+import { fallbackToOriginal } from '../utils/thumbFallback'
+import {
+  filenameOf, isAnimated, isAudio, isImage, isVideo, mediaKind, mediaLabel,
+  sortMediaPaths, type MediaSortKey,
+} from '../utils/mediaKind'
+import { createSearchTextFetcher } from '../utils/imageSearchTexts'
+import { useExifSearch } from '../composables/useExifSearch'
+import { useGridPaging } from '../composables/useGridPaging'
+import { useContextMenu } from '../composables/useContextMenu'
+import type { ActionName, ActionPayload } from '../types/bridge'
 
 interface ViewerData {
   filename?: string
-  path?: string
+  path: string
+  mediaType?: string
   size?: string
   prompt?: string
   negative?: string
   raw?: string
+  params_line?: string
+  can_apply?: boolean
   [k: string]: any
 }
 
 const images = ref<string[]>([])
-const visibleCount = ref(40)
 
 // 썸네일 크기 — localStorage 영속 (gallery와 공유)
 const thumbSize = ref(parseInt(window.localStorage.getItem('gallery_thumb_size') || '200'))
 const thumbPixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
 watch(thumbSize, (v) => window.localStorage.setItem('gallery_thumb_size', String(v)))
-
-// ── 썸네일 캐싱 (백그라운드 생성 + thumbnailReady 시그널) ──
-const BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='
-const THUMB_W = 384
-const thumbCache = reactive<Record<string, string>>({})
-const _thumbRequested = new Set<string>()
-let _thumbOff: (() => void) | null = null
-async function requestThumbs(list: string[]) {
-  const need = list.filter(p => !_thumbRequested.has(p))
-  if (!need.length) return
-  need.forEach(p => _thumbRequested.add(p))
-  const backend: any = await getBackend()
-  if (backend.generateThumbnails) backend.generateThumbnails(JSON.stringify(need), THUMB_W)
-}
-
-// EXIF 검색
-const exifSearch = ref('')
-const exifFiltered = ref(false)
-const exifSearching = ref(false)
-const filteredImages = ref<string[]>([])
-const exifCache = ref<Record<string, string>>({})
-
-const displayImages = computed(() => {
-  const source = exifFiltered.value ? filteredImages.value : images.value
-  return source.slice(0, visibleCount.value)
-})
-// 보이는 카드의 썸네일만 요청
-// 썸네일 캐싱 비활성화 — Gallery처럼 원본을 직접 표시(저화질 썸네일 회피)
-// watch(displayImages, (list) => requestThumbs(list), { immediate: true })
-
-const largeViewParams = computed(() => {
-  if (!largeView.value?.raw) return ''
-  const m = largeView.value.raw.match(/Steps:.*$/m); return m ? m[0] : ''
-})
-const sidebarParams = computed(() => {
-  if (!exifData.value?.raw) return ''
-  const m = exifData.value.raw.match(/Steps:.*$/m); return m ? m[0] : ''
-})
-// 이전 Favorites 방식: 중앙 모달 뷰어
-const viewerData = ref<ViewerData | null>(null)
-const viewerParams = computed(() => {
-  if (!viewerData.value?.raw) return ''
-  const m = viewerData.value.raw.match(/Steps:.*$/m); return m ? m[0] : ''
-})
-
-const galleryContentRef = ref<HTMLElement | null>(null)
-
 /**
- * 넘칠 때까지 채운다.
- *
- * '더 보기'는 스크롤 이벤트로만 발동한다. 그런데 첫 40장이 화면에 다 들어가면
- * (넓은 모니터 + 작은 썸네일) 컨테이너가 넘치지 않아 스크롤 자체가 생기지 않고,
- * "N / M — 스크롤하여 더 보기" 만 떠 있는 채 영영 안 채워졌다. 목록·크기가 바뀔
- * 때마다 컨테이너가 넘칠 때까지 30장씩 더 보인다. 스크롤이 생기는 순간 멈춘다.
+ * 카드 — 정지 이미지는 공용 썸네일 캐시(Qt aithumb: / 웹 /thumbnail). 폭 버킷이 380px × DPR 2 까지
+ * 올라가(768px) 예전 '저화질 썸네일'(고정 384px) 문제 없이 원본 풀디코드를 피한다. 애니메이션은 원본.
+ * 둘 다 내용 버전(utils/mediaVersions — 갤러리·히스토리 목록의 원본 서명, 앱이 덮어쓴 표시)을 붙인다.
+ * 즐겨찾기 목록은 원본 서명을 싣지 않는다(getFavorites 는 파일을 stat 하지 않는 동기 슬롯이다).
  */
-function fillViewport() {
-  const el = galleryContentRef.value
-  const total = exifFiltered.value ? filteredImages.value.length : images.value.length
-  if (!el || visibleCount.value >= total) return
-  // keep-alive 로 떼어졌거나 아직 레이아웃이 없으면 높이가 0 이라 '안 찼다' 로 읽힌다 — 그때 늘리면 전부 펼쳐진다
-  if (!el.isConnected || el.clientHeight === 0) return
-  // 1) 기하 추정 — 썸네일이 뜨기 전엔 카드 높이가 0 이라 scrollHeight 로는 알 수 없다.
-  //    열 수 × (뷰포트를 덮는 행 수 + 1) 만큼은 먼저 보인다.
-  const cell = Math.max(60, thumbSize.value)
-  const need = Math.min(total, Math.max(1, Math.floor(el.clientWidth / cell)) * (Math.ceil(el.clientHeight / cell) + 1))
-  if (need > visibleCount.value) { visibleCount.value = need; return }
-  // 2) 실측 — 썸네일이 다 떴는데도 안 넘치면(가로로 긴 그림들) 한 페이지 더. 그리드가 자라면 관찰자가 다시 부른다.
-  if (el.scrollHeight <= el.clientHeight + 1) visibleCount.value = Math.min(total, visibleCount.value + 30)
-}
-let _fillObserver: ResizeObserver | null = null
-onMounted(() => {
-  const el = galleryContentRef.value
-  if (typeof ResizeObserver === 'undefined' || !el) return
-  // 콜백 안에서 바로 늘리면 같은 프레임에 크기가 또 바뀌어 'ResizeObserver loop' 경고가 난다 — 다음 프레임에
-  _fillObserver = new ResizeObserver(() => { requestAnimationFrame(fillViewport) })
-  _fillObserver.observe(el)                                              // 창 크기
-  if (el.firstElementChild) _fillObserver.observe(el.firstElementChild)  // 그리드 — 썸네일이 뜨며 자란다
-})
-onUnmounted(() => { _fillObserver?.disconnect(); _fillObserver = null })
-watch([images, filteredImages, exifFiltered, thumbSize], () => { fillViewport() }, { flush: 'post' })
-const sortBy = ref('date')
-const sortOptions = [{ label: '날짜', val: 'date' }, { label: '이름', val: 'name' }]
-const ctxMenu = ref({ show: false, x: 0, y: 0, path: '' })
-const exifData = ref<any>(null)
-const largeView = ref<any>(null)
-const showMetadata = ref(window.localStorage.getItem('galleryShowMetadata') !== 'false')
-const _showMetaTimer = setInterval(() => {
-  const v = window.localStorage.getItem('galleryShowMetadata') !== 'false'
-  if (v !== showMetadata.value) showMetadata.value = v
-}, 500)
+const versionedMediaUrl = (path: string) => withUrlVersion(mediaUrl(path), mediaVersion(path))
+const cardImageUrl = (path: string) => isAnimated(path)
+  ? versionedMediaUrl(path)
+  : thumbnailUrl(path, thumbSize.value * thumbPixelRatio, mediaVersion(path))
+const onCardImageError = (e: Event, path: string) => { fallbackToOriginal(e.target, versionedMediaUrl(path)) }
 
-const ctxMenuStyle = computed(() => {
-  const w = 220, h = 320
-  let x = ctxMenu.value.x, y = ctxMenu.value.y
-  if (x + w > window.innerWidth) x = window.innerWidth - w - 10
-  if (y + h > window.innerHeight) y = window.innerHeight - h - 10
-  return { top: y + 'px', left: x + 'px' }
+// 정렬 — 원본(추가 순서)을 바꾸지 않고 파생
+const sortBy = ref<MediaSortKey>('date')
+const sortOptions: { label: string; val: MediaSortKey }[] = [{ label: '날짜', val: 'date' }, { label: '이름', val: 'name' }]
+
+// EXIF 검색 (composables/useExifSearch — Gallery 와 공용)
+const searchTexts = createSearchTextFetcher({ getBackend, onBackendEvent })
+const exifSearchState = useExifSearch({
+  source: () => images.value,
+  isImage,
+  labelFor: (path) => `${filenameOf(path)} ${mediaLabel(path)}`,
+  fetchTexts: searchTexts.fetch,
+  onChange: () => paging.reset(),
 })
+const {
+  query: exifSearch, searching: exifSearching, filtered: exifFiltered, results: filteredImages,
+  run: runExifSearch, clear: clearExifSearch,
+} = exifSearchState
+
+const displaySource = computed(() => sortMediaPaths(exifFiltered.value ? filteredImages.value : images.value, sortBy.value))
+
+// 카드 그리드 페이징 (composables/useGridPaging — Gallery 와 공용)
+const galleryContentRef = ref<HTMLElement | null>(null)
+const paging = useGridPaging({
+  container: galleryContentRef,
+  total: () => displaySource.value.length,
+  cell: () => thumbSize.value,
+  sources: [images, filteredImages, exifFiltered, thumbSize],
+})
+const { visibleCount, fillViewport, onScroll: onGalleryScroll } = paging
+const displayImages = computed(() => displaySource.value.slice(0, visibleCount.value))
+
+// 중앙 모달 뷰어 (이전 Favorites 방식)
+const viewerData = ref<ViewerData | null>(null)
+// 파라미터 표시 — core 가 만든 params_line(WebUI 는 원문 꼬리 그대로, 따옴표 보존)
+const viewerParams = computed(() => viewerData.value?.params_line || '')
 
 async function loadFavorites() {
   const backend: any = await getBackend()
@@ -279,105 +256,66 @@ async function loadFavorites() {
       try {
         const list = JSON.parse(json)
         images.value = Array.isArray(list) ? list : []
-        if (sortBy.value === 'name') sortImages()
+        paging.keep(images.value.length)
       } catch {}
     })
   }
 }
 
-function sortImages() {
-  if (sortBy.value === 'name') {
-    images.value = [...images.value].sort((a, b) => (a.split('/').pop() || '').localeCompare(b.split('/').pop() || ''))
-  } else {
-    loadFavorites()
-  }
-}
-
-function onGalleryScroll(e: Event) {
-  const el = e.target as HTMLElement
-  const total = exifFiltered.value ? filteredImages.value.length : images.value.length
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && visibleCount.value < total) {
-    visibleCount.value = Math.min(visibleCount.value + 30, total)
-  }
-}
-
-async function runExifSearch() {
-  const query = exifSearch.value.trim().toLowerCase()
-  if (!query) { clearExifSearch(); return }
-  exifSearching.value = true
-  const backend: any = await getBackend()
-  const toCheck = images.value.filter(img => !(img in exifCache.value))
-  const batchSize = 20
-  for (let i = 0; i < toCheck.length; i += batchSize) {
-    const batch = toCheck.slice(i, i + batchSize)
-    await Promise.all(batch.map(img => new Promise<void>(resolve => {
-      if (backend.getImageExif) {
-        backend.getImageExif(img, (json: string) => {
-          try {
-            const d = JSON.parse(json)
-            exifCache.value[img] = `${d.prompt || ''} ${d.negative || ''} ${d.raw || ''}`.toLowerCase()
-          } catch { exifCache.value[img] = '' }
-          resolve()
-        })
-      } else resolve()
-    })))
-    if (!exifSearch.value.trim()) { exifSearching.value = false; return }
-  }
-  filteredImages.value = images.value.filter(img => (exifCache.value[img] || '').includes(query))
-  exifFiltered.value = true
-  exifSearching.value = false
-  visibleCount.value = 40
-}
-function clearExifSearch() {
-  exifSearch.value = ''; exifFiltered.value = false; filteredImages.value = []; visibleCount.value = 40
-}
-
-function closeLargeView() {
-  largeView.value = null
-  if (!showMetadata.value) exifData.value = null
-}
-
 const viewImage = async (path: string) => {
+  const basic: ViewerData = { path, filename: filenameOf(path), mediaType: mediaLabel(path), size: '—' }
+  // 영상·오디오는 Pillow 메타 슬롯으로 보내지 않는다
+  if (!isImage(path)) { viewerData.value = basic; return }
   const backend: any = await getBackend()
-  if (backend.getImageExif) backend.getImageExif(path, (json: string) => {
-    try { const d = JSON.parse(json); viewerData.value = d } catch {}
+  if (!backend.getImageExif) { viewerData.value = basic; return }
+  backend.getImageExif(path, (json: string) => {
+    try {
+      const d = JSON.parse(json)
+      viewerData.value = d?.error ? basic : { ...basic, ...d, path, filename: basic.filename, mediaType: basic.mediaType }
+    } catch {
+      viewerData.value = basic
+    }
   })
 }
 
-function showMenu(e: MouseEvent, path: string) { ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, path } }
+// 우클릭 메뉴 — 화면 밖 보정(composables/useContextMenu, Gallery·히스토리와 같은 규칙)
+const { menu: ctxMenu, menuEl: ctxMenuEl, style: ctxMenuStyle, open: showMenu, hide: hideMenu } =
+  useContextMenu({ width: 220, height: 320 })
+
 function ctx(actionName: ActionName | 'gallery_load_exif') {
   const path = ctxMenu.value.path
   if (actionName === 'gallery_load_exif') viewImage(path)
   else requestAction(actionName, { path })
-  ctxMenu.value.show = false
+  hideMenu()
 }
 function removeFav(path: string) {
   requestAction('remove_favorite', { path })
-  images.value = images.value.filter(i => i !== path)
-  filteredImages.value = filteredImages.value.filter(i => i !== path)
-  if (viewerData.value?.path === path) viewerData.value = null
+  images.value = images.value.filter(i => i !== path)   // EXIF 필터 결과도 현재 목록과의 교집합이라 함께 빠진다
+  exifSearchState.forget(path)
+  if (isSameImagePath(viewerData.value?.path, path)) viewerData.value = null
 }
-function ctxRemoveFav() { removeFav(ctxMenu.value.path); ctxMenu.value.show = false }
+function ctxRemoveFav() { removeFav(ctxMenu.value.path); hideMenu() }
+/** 복사는 클릭 처리 안에서 바로 시작한다(웹 브라우저 클립보드는 사용자 동작 안에서만 쓸 수 있다). */
+function ctxCopyImage() { const path = ctxMenu.value.path; hideMenu(); void copyImageAndNotify(path) }
 
-const quickAction = (name: ActionName, path: string) => requestAction(name, { path })
-const sendToCompare = (slot: string) => { requestAction('send_to_compare', { path: ctxMenu.value.path, slot }); ctxMenu.value.show = false }
-const sendExifToT2I = () => { if (exifData.value) requestAction('gallery_send_exif_to_t2i', { exif: exifData.value.raw || '', path: exifData.value.path }) }
-const action = (name: ActionName, payload: Record<string, any> = {}) => requestAction(name, payload)
-const hideMenu = () => ctxMenu.value.show = false
+const sendToCompare =(slot: string) => { requestAction('send_to_compare', { path: ctxMenu.value.path, slot }); hideMenu() }
+/** 뷰어가 이미 읽은 core 파싱 결과를 그대로 보낸다 — 백엔드가 raw 를 다시 쪼개지 않는다 */
+const sendExifToT2I = () => {
+  const data = viewerData.value
+  if (data && isImage(data.path) && data.can_apply !== false) {
+    requestAction('gallery_send_exif_to_t2i', { path: data.path, metadata: data })
+  }
+}
+const action = <K extends ActionName>(name: K, payload?: ActionPayload<K>) => requestAction(name, payload)
 
+// Qt 데스크톱·웹 단말 공통 클립보드(실제 성공일 때만 성공 알림)
 async function copySection(text: string, label: string) {
   if (!text) return
-  try { await navigator.clipboard.writeText(text); requestAction('show_toast', { type: 'success', msg: `${label} 복사됨` }) }
-  catch (e) { requestAction('show_toast', { type: 'error', msg: `복사 실패` }) }
+  const ok = await copyTextToClipboard(text)
+  requestAction('show_toast', { type: ok ? 'success' : 'error', msg: ok ? `${label} 복사됨` : '클립보드에 복사하지 못했습니다' })
 }
 
-onMounted(() => {
-  document.addEventListener('click', hideMenu)
-  _thumbOff = onBackendEvent('thumbnailReady', (json: string) => {
-    try { const d = JSON.parse(json); thumbCache[d.path] = d.thumb || mediaUrl(d.path) } catch {}
-  })
-  loadFavorites()
-})
+onMounted(() => { loadFavorites() })
 
 // 라우터가 <keep-alive> 로 감싸므로 탭을 다시 열어도 onMounted 는 안 돈다.
 // 갤러리에서 즐겨찾기를 더하고 이 탭으로 오면 옛 목록이 그대로 보였다 —
@@ -385,11 +323,7 @@ onMounted(() => {
 // (GalleryView 가 같은 이유로 onActivated 에서 loadImages 를 부른다.)
 onActivated(() => { loadFavorites(); fillViewport() })
 
-onUnmounted(() => {
-  document.removeEventListener('click', hideMenu)
-  if (_showMetaTimer) clearInterval(_showMetaTimer)
-  if (_thumbOff) _thumbOff()
-})
+onUnmounted(() => { searchTexts.dispose() })
 </script>
 
 <style scoped>
@@ -400,26 +334,7 @@ onUnmounted(() => {
 /* 경로는 있는 그대로 — 대문자로 밀면 실제와 다른 문자열이 된다 */
 .folder-info .path { font-size: var(--fs-meta); color: var(--text-muted); }
 
-
-.gallery-card img { width: 100%; display: block; transition: var(--transition); }
-
-.gallery-card:hover img { filter: brightness(0.7); }
-
-
-.exif-close { position: absolute; top: 20px; left: -20px; width: 40px; height: 40px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-
-.exif-preview { width: 100%; aspect-ratio: 1; overflow: hidden; position: relative; cursor: pointer; }
-/* contain 여백은 이미지가 아니라 그 뒤의 UI 면이다 — 토큰이어야 라이트에서 검은 상자로 남지 않는다 */
-.exif-preview img { width: 100%; height: 100%; object-fit: contain; background: var(--bg-primary); }
-
-.meta-row p { font-size: 12px; font-weight: var(--fw-bold); color: var(--text-primary); word-break: break-all; }
-.meta-head { display: flex; align-items: center; justify-content: space-between; min-height: 18px; margin-bottom: 6px; }
-.meta-block label { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--accent); }
-.meta-block label.danger { color: var(--state-alert-fg); }
-.copy-btn { opacity: 0; background: none; border: 1px solid transparent; color: var(--text-muted); width: 22px; height: 22px; border-radius: 4px; cursor: pointer; font-size: 11px; }
-.meta-block:hover .copy-btn { opacity: 0.7; }
-.copy-btn:hover { opacity: 1; background: var(--bg-button); border-color: var(--border); color: var(--accent); }
-.code-box { background: var(--bg-input); padding: 12px; border-radius: 8px; font-family: 'Consolas', monospace; font-size: 11px; line-height: 1.6; color: var(--text-secondary); word-break: break-all; max-height: 240px; overflow-y: auto; }
+/* 카드 안 이미지·영상·오디오·종류 배지는 galleryShared.css (갤러리와 공용) */
 
 /* 이전 Favorites 중앙 모달 뷰어 복원 */
 .viewer-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: center; justify-content: center; }
@@ -430,7 +345,8 @@ onUnmounted(() => {
 .viewer-close { background: none; border: none; color: var(--state-alert-fg); font-size: 18px; cursor: pointer; }
 .viewer-body { flex: 1; display: flex; overflow: hidden; }
 .viewer-img { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--bg-primary); padding: 16px; }
-.viewer-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-img img, .viewer-img video { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-img audio { width: min(620px, 90%); }
 .viewer-info { width: 460px; max-width: 46vw; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; border-left: 1px solid var(--rule); }
 .vi-size { color: var(--text-muted); font-size: 12px; }
 .vi-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; min-height: 18px; }
@@ -451,15 +367,9 @@ onUnmounted(() => {
 .send-ico { font-size: 18px; line-height: 1; }
 .send-name { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--text-secondary); letter-spacing: 0; }
 .send-card.primary .send-name { color: var(--accent); }
-
-.mini-action { height: 36px; background: var(--bg-button); border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
+.send-card:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 
 .ctx-item.unfav { color: var(--accent); }
-
-.lv-btn.unfav { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
-
-.large-img-area img { max-width: 100%; max-height: 100%; object-fit: contain; }
-
 
 .pop-enter-active { transition: all 0.12s; }
 .pop-enter-from { opacity: 0; transform: scale(0.95); }

@@ -36,6 +36,7 @@ import requests
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE)
 from core.tag_database import TagAsset, get_tag_database
+from utils.atomic_json import atomic_write_json
 
 CHAR_JSON = str(get_tag_database().path(TagAsset.CHARACTER_PROFILES))
 STATE_DIR = os.path.join(BASE, "user_data", "tag_refresh")
@@ -200,13 +201,10 @@ def fetch_features(tag, keep, limiter, auth, method):
 def _save(data, done, dry):
     if dry:
         return
-    os.makedirs(STATE_DIR, exist_ok=True)
-    tmp = CHAR_JSON + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-    os.replace(tmp, CHAR_JSON)   # 원자적 교체 (부분 쓰기 손상 방지)
-    with open(PROGRESS, "w", encoding="utf-8") as f:
-        json.dump(sorted(done), f)
+    # 원자적 교체 (부분 쓰기 손상 방지) — 공용 구현 한 벌(fsync + 실패 시 tmp 정리).
+    # 진행 파일도 같은 방식: 중단 시 절단된 progress.json 이 재개를 막지 않게.
+    atomic_write_json(CHAR_JSON, data, indent=None, separators=(",", ":"))
+    atomic_write_json(PROGRESS, sorted(done), indent=None, ensure_ascii=True)
 
 
 def main():

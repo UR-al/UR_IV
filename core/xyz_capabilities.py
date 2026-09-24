@@ -8,6 +8,9 @@ import json
 import math
 from concurrent.futures import ThreadPoolExecutor
 
+# 샘플러 클래스 목록은 선택 화면·컴파일러와 한 곳에서 공유한다.
+from core.comfy_node_classes import SAMPLER_NODES
+
 
 LABELS = {"steps": "Steps", "cfg_scale": "CFG Scale", "seed": "Seed", "width": "Width",
           "height": "Height", "sampler_name": "Sampler", "scheduler": "Scheduler", "model": "Model",
@@ -19,6 +22,11 @@ BOUNDS = {"steps": (1, 150, "integer"), "cfg_scale": (1, 30, "number"),
           "height": (64, 4096, "integer"), "distilled_cfg_scale": (0, 100, "number"),
           "denoising_strength": (0, 1, "number")}
 MAX_JOBS = 256
+KREA2_NOTE = "Krea2 전용 생성은 일반 XYZ 샘플링 축을 사용하지 않습니다."
+
+
+def _krea2_result():
+    return {"axes": [], "unsupported": [], "notes": [KREA2_NOTE]}
 
 
 def backend_identity(kind, backend):
@@ -57,12 +65,12 @@ def comfy_capabilities(schema, *, workflow=None, hires=False, family="standard")
     if not isinstance(schema, dict):
         raise ValueError("ComfyUI 기능 응답이 올바르지 않습니다")
     if family == "krea2":
-        return {"axes": [], "unsupported": [], "notes": ["Krea2 전용 생성은 일반 XYZ 샘플링 축을 사용하지 않습니다."]}
+        return _krea2_result()
     used = set(schema)
     custom_sampler = None
     if workflow:
-        candidates = [(str(key), node) for key, node in workflow.items() if node.get("class_type") in {
-            "KSampler", "KSamplerAdvanced", "ForgeNeoKSamplerCNS", "SamplerCustom", "SamplerCustomAdvanced"}]
+        candidates = [(str(key), node) for key, node in workflow.items()
+                      if node.get("class_type") in SAMPLER_NODES]
         if len(candidates) == 1:
             node_id, node = candidates[0]
             custom_sampler = node["class_type"]
@@ -128,7 +136,7 @@ def forge_capabilities(openapi, *, scripts=(), samplers=(), schedulers=(), model
     if not isinstance(openapi, dict):
         raise ValueError("Forge API schema 응답이 올바르지 않습니다")
     if family == "krea2":
-        return {"axes": [], "unsupported": [], "notes": ["Krea2 전용 생성은 일반 XYZ 샘플링 축을 사용하지 않습니다."]}
+        return _krea2_result()
     try:
         body = openapi["paths"]["/sdapi/v1/txt2img"]["post"]["requestBody"]["content"]["application/json"]["schema"]
         if "$ref" in body:
@@ -167,7 +175,12 @@ def forge_capabilities(openapi, *, scripts=(), samplers=(), schedulers=(), model
 
 
 def fetch_capabilities(backend, kind, *, hires=False, family="standard"):
-    if kind == "comfyui":
+    if kind not in {"comfyui", "webui"}:
+        raise ValueError("지원하지 않는 XYZ 백엔드입니다")
+    if family == "krea2":
+        # Krea2는 어차피 빈 축이므로 서버 스키마를 받으러 네트워크를 타지 않는다.
+        result = _krea2_result()
+    elif kind == "comfyui":
         workflow = backend._load_configured_workflow("txt2img")
         result = comfy_capabilities(backend.get_object_info(), workflow=workflow, hires=hires, family=family)
     elif kind == "webui":
@@ -188,8 +201,6 @@ def fetch_capabilities(backend, kind, *, hires=False, family="standard"):
         with ThreadPoolExecutor(max_workers=5) as executor:
             data = dict(executor.map(read, endpoints.items()))
         result = forge_capabilities(data.pop("openapi"), **data, hires=hires, family=family)
-    else:
-        raise ValueError("지원하지 않는 XYZ 백엔드입니다")
     result.update(backend=kind, backendId=backend_identity(kind, backend), maxJobs=MAX_JOBS)
     result["capabilityId"] = hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
     return result

@@ -73,7 +73,7 @@
                 </div>
                 <div class="cpm-global-words">
                   <span class="cpm-global-sub">단어 OFF</span>
-                  <input v-model="newGlobalWord" @keydown.enter="addGlobalWord" placeholder="전역 제외 단어 (Enter)" class="cpm-gword-in" />
+                  <input v-model="newGlobalWord" @keydown.enter="!isImeComposing($event) && addGlobalWord()" placeholder="전역 제외 단어 (Enter)" class="cpm-gword-in" />
                   <button class="cpm-gword-add" @click="addGlobalWord" title="추가">＋</button>
                   <button v-for="w in globalWordOff" :key="w" class="cpm-gword-chip" @click="removeGlobalWord(w)" title="클릭하여 해제">{{ w }} <Icon name="close" size="11" /></button>
                 </div>
@@ -143,7 +143,7 @@
 
             <!-- Add custom -->
             <div class="cpm-addrow">
-              <input v-model="newCustom" class="cpm-addinput" placeholder="프롬프트 추가 (쉼표로 여러 개)" @keydown.enter="addCustom" />
+              <input v-model="newCustom" class="cpm-addinput" placeholder="프롬프트 추가 (쉼표로 여러 개)" @keydown.enter="!isImeComposing($event) && addCustom()" />
               <button class="cpm-add" @click="addCustom">+ 추가</button>
             </div>
 
@@ -198,9 +198,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
-import { getBackend } from '../bridge.js'
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import type { CharacterTagsOnlinePayload } from '../types/bridge'
+import { createLatestRequest, wasAbandoned } from '../utils/bridgeRequest'
+import { diffCharState, loadCharState, restoreCharState, storeCharState, type ChipGroup } from '../utils/charPresetState'
+// IME 조합 확정 Enter 로 추가하면 마지막 음절이 잘린 단어가 들어간다 — 두 Enter 입력이 먼저 거른다
+import { isImeComposing } from '../utils/imeComposition'
+import { useModalLayer } from '../composables/useModalLayer'
 
 interface SearchResult { key: string; count: number; hasPreset: boolean; [k: string]: any }
 interface TagItem { tag: string; existing?: boolean; costume?: boolean; checked?: boolean; region?: string; regionLabel?: string; [k: string]: any }
@@ -233,6 +239,11 @@ const copyright = ref('')         // ③ 캐릭터→copyright(시리즈)
 const addCopyright = ref(true)    // copyright 함께 추가 여부
 const groupByRegion = ref(true)   // ④ 의상 부위별 그룹 보기
 const dbLoading = ref(false)
+// danbooru 조회는 비동기(requestCharacterTagsOnline → characterTagsOnlineReady). 예전 동기 슬롯은
+// GUI 스레드에서 HTTPS 를 최대 2번 보내 앱 전체가 멈췄다. 마지막 요청만 유효 — 백엔드는 두 질의
+// 각각 (연결 5초, 읽기 10초) 안에 끝내므로 넉넉히 40초 뒤엔 '응답 없음'으로 푼다.
+const danbooruRequest = createLatestRequest<CharacterTagsOnlinePayload>({ timeoutMs: 40_000, prefix: 'danbooru' })
+let disconnectDanbooruReady: (() => void) | null = null
 const deckOnly = ref(false)
 const deckChars = ref<string[] | null>(null)      // array of normalized names | null
 const searchEl = ref<HTMLInputElement | null>(null)
@@ -312,38 +323,34 @@ async function toggleDeckOnly() {
 
 // ── per-캐릭터 작업 상태(체크 ON/OFF + 커스텀) 영속 ──
 // 닫아도 유지: 사용자가 ON 한 칩은 직접 OFF 하기 전까지 ON으로 고정(반대도 동일).
-const CPM_STATE_KEY = 'cpmCharState'
+// 기본값과 다른 것만 저장한다(utils/charPresetState) — 전체 스냅샷은 전역 설정을 가리고
+// existing 칩의 false 를 굳혀 '특징 적용' 뒤 칩이 전부 OFF 로 복원됐다.
 let _loadingChar = false
-function _loadCharState(key: string): any {
-  try { return (JSON.parse(window.localStorage.getItem(CPM_STATE_KEY) || '{}'))[key] || null } catch { return null }
+let _loadSeq = 0                       // selectChar 요청 토큰 — 늦게 온 이전 캐릭터 응답을 버린다
+// 저장된 작업 상태를 화면 칩에 실제로 덮어쓴(_applyCharState) 캐릭터 키. 특징 조회가 실패하면 저장값을
+// 올리지 못한 빈 화면이 남는데, 그 화면으로 저장하면 diff 가 저장된 커스텀 태그를 통째로 지운다
+// (닫기·이후 편집의 자동 저장). 저장값을 올린 캐릭터에서만 작업 상태를 저장한다.
+let _stateReadyKey = ''
+let _baseCustom: string[] = []         // 캐릭터 프리셋이 준 기본 커스텀 태그(기본 ON)
+function _chipGroups(): ChipGroup<TagItem>[] {
+  return [
+    { cat: 'core', tags: coreTags.value }, { cat: 'aux', tags: auxTags.value },
+    { cat: 'costume', tags: costumeTags.value }, { cat: 'etc', tags: etcTags.value },
+  ]
 }
 function _saveCharState() {
-  if (_loadingChar || !selectedChar.value) return
-  try {
-    const m = JSON.parse(window.localStorage.getItem(CPM_STATE_KEY) || '{}')
-    const checked: Record<string, boolean> = {}
-    for (const arr of [coreTags, auxTags, costumeTags, etcTags])
-      for (const t of arr.value) checked[norm(t.tag)] = !!t.checked
-    m[selectedChar.value] = { checked, custom: customTags.value.map(t => ({ tag: t.tag, checked: !!t.checked })) }
-    window.localStorage.setItem(CPM_STATE_KEY, JSON.stringify(m))
-  } catch {}
+  if (_loadingChar || !selectedChar.value || _stateReadyKey !== selectedChar.value) return
+  const key = selectedChar.value
+  const next = diffCharState(_chipGroups(), customTags.value, _defChecked, _baseCustom, loadCharState(key))
+  storeCharState(key, next)
 }
 function _applyCharState(key: string) {
-  const saved = _loadCharState(key)
-  if (!saved) return
-  const ck = saved.checked || {}
-  // 저장된 ON/OFF가 기본값(_defChecked)을 덮어씀 — existing(이미 프롬프트에 있음)은 건드리지 않음
-  for (const arr of [coreTags, auxTags, costumeTags, etcTags])
-    for (const t of arr.value) { const n = norm(t.tag); if (!t.existing && n in ck) t.checked = !!ck[n] }
-  if (Array.isArray(saved.custom)) {
-    for (const c of saved.custom) {
-      const found = customTags.value.find(t => norm(t.tag) === norm(c.tag))
-      if (found) found.checked = c.checked !== false
-      else customTags.value.push({ tag: c.tag, checked: c.checked !== false })
-    }
-  }
+  // 저장된 ON/OFF가 기본값(_defChecked)을 덮어씀 — existing(이미 프롬프트에 있음)은 건드리지 않음.
+  // 옛 스냅샷에서 옮겨 온 커스텀은 지금 프리셋 기본 커스텀(_baseCustom) 기준으로 여기서 정리·저장된다.
+  restoreCharState(key, _chipGroups(), customTags.value, _defChecked, _baseCustom)
 }
-// 체크/커스텀 변경 시 자동 저장 (로드 중엔 무시)
+// 체크/커스텀 변경 시 자동 저장 (로드 중엔 무시). 변경 경로가 많아(칩·전체선택·전역 토글·커스텀·danbooru)
+// 명시 저장 대신 deep watch 를 유지한다 — 로드 중 대입은 selectChar 가 nextTick 뒤에 가드를 푼다.
 watch([coreTags, auxTags, costumeTags, etcTags, customTags], () => {
   if (_loadingChar || !selectedChar.value) return
   _saveCharState()
@@ -351,7 +358,10 @@ watch([coreTags, auxTags, costumeTags, etcTags, customTags], () => {
 
 async function selectChar(key: string) {
   // 비동기 로드 전에 이전 캐릭터 상태를 먼저 비운다 (로드 실패 시 이전 태그 잔존 방지)
+  const seq = ++_loadSeq
   _loadingChar = true
+  _stateReadyKey = ''
+  _baseCustom = []
   selectedChar.value = key
   presetStatus.value = ''
   status.value = ''
@@ -364,7 +374,9 @@ async function selectChar(key: string) {
   condRules.value = []
   copyright.value = ''
   const data = await callBk('getCharacterFeatures', key)
-  if (!data || data.error) { status.value = '특징 조회 실패'; _loadingChar = false; return }
+  if (seq !== _loadSeq) return   // 그새 다른 캐릭터를 골랐다 — 이 응답을 그 캐릭터 키로 저장하지 않는다
+  // 실패: 저장된 작업 상태를 올리지 못했다 — _stateReadyKey 를 비워 둬 이 화면으로는 저장하지 않는다
+  if (!data || data.error) { status.value = '특징 조회 실패 — 작업 상태 저장 안 함'; await _finishLoad(seq); return }
   charCount.value = data.count || 0
   copyright.value = data.copyright || ''
   addCopyright.value = data.autoAddCopyright !== false
@@ -373,6 +385,7 @@ async function selectChar(key: string) {
   etcTags.value = (data.etc || []).map((t: TagItem) => ({ ...t, checked: _defChecked('etc', t) }))
   auxTags.value = (data.aux || []).map((t: TagItem) => ({ ...t, checked: _defChecked('aux', t) }))
   customTags.value = (data.custom || []).map((tag: string) => ({ tag, checked: true }))
+  _baseCustom = (data.custom || []).filter((tag: unknown) => typeof tag === 'string')
   // 조건부 규칙 파싱
   condRules.value = []
   if (data.condRulesJson) {
@@ -387,7 +400,15 @@ async function selectChar(key: string) {
   }
   if (data.hasPreset) presetStatus.value = '★ 저장된 프리셋'
   _applyCharState(key)    // 저장된 작업 상태(ON/OFF + 커스텀) 복원 — 기본값 위에 덮어씀
-  _loadingChar = false
+  _stateReadyKey = key
+  await _finishLoad(seq)
+}
+
+// deep watch 는 pre-flush 로 microtask 에 돈다 — 대입 직후 동기로 가드를 풀면 콜백이 풀린 가드를 보고
+// 기본값을 저장해 버린다. flush(nextTick) 이후, 아직 최신 요청일 때만 가드를 푼다.
+async function _finishLoad(seq: number) {
+  await nextTick()
+  if (seq === _loadSeq) _loadingChar = false
 }
 
 function chipClass(t: TagItem) { return { off: !t.checked, existing: t.existing } }
@@ -451,12 +472,28 @@ function excludeCostume() {
 }
 
 async function fetchDanbooru() {
-  if (!selectedChar.value) return
+  const requested = selectedChar.value
+  if (!requested) return
   dbLoading.value = true
-  const res = await callBk('fetchCharacterTagsOnline', selectedChar.value)
+  const { id, done, outcome } = danbooruRequest.begin()
+  const bk: any = await getBackend()
+  if (wasAbandoned(outcome())) return   // 백엔드를 기다리는 사이 모달이 닫혔거나 새 조회가 시작됐다
+  if (!bk?.requestCharacterTagsOnline) {
+    danbooruRequest.cancel()
+    dbLoading.value = false
+    requestAction('show_toast', { type: 'error', msg: 'danbooru 조회 실패: 백엔드 연결 없음' })
+    return
+  }
+  bk.requestCharacterTagsOnline(requested, id)
+  const res = await done
+  // 더 새 조회가 이어받았거나(그쪽이 마무리한다) 모달이 닫혀 버린 조회 — 결과도 '응답 없음'도 띄우지 않는다.
+  // 시간 초과(outcome 'timeout')만 아래에서 실패로 알린다.
+  if (wasAbandoned(outcome())) return
   dbLoading.value = false
+  // 기다리는 사이 다른 캐릭터를 골랐으면 옛 캐릭터 태그로 새 캐릭터 칩을 덮지 않는다
+  if (selectedChar.value !== requested || (res && res.name !== requested)) return
   if (!res || res.error || !Array.isArray(res.tags) || !res.tags.length) {
-    requestAction('show_toast', { type: 'error', msg: 'danbooru 조회 실패: ' + ((res && res.error) || '결과 없음') })
+    requestAction('show_toast', { type: 'error', msg: 'danbooru 조회 실패: ' + ((res && res.error) || (res ? '결과 없음' : '응답 없음')) })
     return
   }
   // 기존(틀릴 수 있는) 핵심/의상 칩을 danbooru 실제 태그로 교체. 이미 프롬프트에 있는 태그는 제외.
@@ -574,9 +611,13 @@ async function apply(includeName: boolean) {
 function close() { emit('close') }
 
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); close() } }
+// 열려 있는 동안 앱 모달 스택에 올라간다 — App 의 ↑/↓ 히스토리 이동이 이 모달 뒤에서 넘어가지 않게.
+// ESC 는 위 onKey 가 직접 처리한다(window capture + stopPropagation, utils/modalStack).
+useModalLayer()
 
 onMounted(async () => {
   window.addEventListener('keydown', onKey, true)
+  disconnectDanbooruReady = onBackendEvent('characterTagsOnlineReady', (json: string) => { danbooruRequest.receive(json) })
   await loadGlobals()   // 전역(모든 캐릭터) 설정 로드 — 캐릭터 load 전에 적용되도록
   // 현재 프롬프트의 캐릭터로 검색 프리필
   const bk: any = await getBackend()
@@ -590,7 +631,11 @@ onMounted(async () => {
     searchEl.value.focus()
   }
 })
-onUnmounted(() => { _saveCharState(); window.removeEventListener('keydown', onKey, true) })
+onUnmounted(() => {
+  _saveCharState(); window.removeEventListener('keydown', onKey, true)
+  disconnectDanbooruReady?.(); disconnectDanbooruReady = null
+  danbooruRequest.cancel()
+})
 </script>
 
 <style scoped>

@@ -17,7 +17,8 @@ export type StudioOperation =
 export type StudioTopic = 'runtime' | 'generation_api' | 'app_update' | 'model_paths'
 
 export interface StudioOperationInputMap {
-  'sync.bootstrap': Record<string, never>
+  /** includeAppUpdate=false 면 git 을 실행하는 앱 업데이트 스냅샷을 빼고 돌려준다. */
+  'sync.bootstrap': { includeAppUpdate?: boolean }
   'runtime.snapshot': Record<string, never>
   'runtime.execute': {
     engine: string

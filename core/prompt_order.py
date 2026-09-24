@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.app_logger import get_logger
+from utils.atomic_json import atomic_write_json
 
 _logger = get_logger("prompt_order")
 
@@ -41,10 +42,9 @@ DEFAULT_ORDER: list[str] = [
 
 
 def _config_path() -> Path:
+    # 읽기 경로에서 폴더를 만들지 않는다 — 폴더 생성은 저장(atomic_write_json)이 맡는다.
     project_root = Path(__file__).resolve().parent.parent
-    cfg_dir = project_root / "config"
-    cfg_dir.mkdir(parents=True, exist_ok=True)
-    return cfg_dir / "prompt_order.json"
+    return project_root / "config" / "prompt_order.json"
 
 
 def load_order() -> list[str]:
@@ -57,7 +57,7 @@ def load_order() -> list[str]:
     except (OSError, json.JSONDecodeError):
         _logger.warning(f"prompt_order.json 파손 — 기본값 사용")
         return list(DEFAULT_ORDER)
-    raw = data.get("order")
+    raw = data.get("order") if isinstance(data, dict) else None
     if not isinstance(raw, list):
         return list(DEFAULT_ORDER)
     # 정제: 미지원 키 제외 + 누락 섹션은 끝에 추가
@@ -82,11 +82,8 @@ def save_order(order: list[str]) -> bool:
         if k not in seen:
             cleaned.append(k)
     try:
-        _config_path().write_text(
-            json.dumps({"order": cleaned, "version": 1},
-                       ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        # 예전엔 write_text 로 제자리 덮어써서 쓰는 도중 종료되면 파일이 절단됐다.
+        atomic_write_json(str(_config_path()), {"order": cleaned, "version": 1}, indent=2)
         return True
     except Exception:
         _logger.exception("prompt_order 저장 실패")

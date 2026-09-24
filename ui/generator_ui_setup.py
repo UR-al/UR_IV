@@ -5,22 +5,8 @@ GeneratorMainUI의 UI 구성 부분 (전체)
 from enum import Enum, auto
 from pathlib import Path
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QLineEdit, QGroupBox, QCheckBox, QTabWidget,
-    QSplitter, QScrollArea, QListWidget, QMenu, QMessageBox,
-    QSizePolicy, QListWidgetItem, QFrame, QStackedWidget
-)
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QPixmap
-from widgets.common_widgets import (
-    NoScrollComboBox, AutomationWidget, ResolutionItemWidget, FlowLayout
-)
-from widgets.sliders import NumericSlider
-from widgets.favorite_tags import FavoriteTagsBar
-from widgets.common_widgets import NoScrollComboBox, AutomationWidget, ResolutionItemWidget
-from config import OUTPUT_DIR
-from widgets.tag_input import TagInputWidget
+from PyQt6.QtWidgets import QMenu, QMessageBox
+from core.url_safety import is_safe_external_url
 from utils.theme_manager import get_color
 
 
@@ -40,8 +26,6 @@ class _VueNavigationPolicy:
     QWebChannel이 실제 SPA 문서 외의 origin에 노출되지 않게 한다.
     """
 
-    _EXTERNAL_SCHEMES = frozenset({"http", "https", "mailto"})
-
     def __init__(self, frontend_index: str | Path):
         self._frontend_index = Path(frontend_index).resolve(strict=False)
 
@@ -56,16 +40,26 @@ class _VueNavigationPolicy:
                     return _VueNavigationDecision.ALLOW
                 return _VueNavigationDecision.BLOCK
 
-            scheme = str(url.scheme()).lower()
-            if url.isValid() and scheme in self._EXTERNAL_SCHEMES:
-                if scheme in {"http", "https"} and not url.host():
-                    return _VueNavigationDecision.BLOCK
+            # 외부로 넘기는 기준은 open_url 액션과 같은 core.url_safety — 호스트 있는
+            # http/https 와 mailto 만. 퍼센트 인코딩한 표기로 검사한다(공백 등 포함 URL).
+            encoded = bytes(url.toEncoded()).decode("ascii", errors="replace")
+            if url.isValid() and is_safe_external_url(encoded, allow_mailto=True):
                 return _VueNavigationDecision.OPEN_EXTERNALLY
         except (OSError, RuntimeError, TypeError, ValueError):
             # 잘못된 URL/파일 경로는 fail closed.
             pass
 
         return _VueNavigationDecision.BLOCK
+
+
+class _VueAutomationSettings:
+    """자동화 설정 읽기 창구 — Vue 자동화 패널이 보낸 값(``_vue_automation_settings``)을 정규화해 준다."""
+
+    def __init__(self, read):
+        self._read = read
+
+    def get_settings(self) -> dict:
+        return self._read()
 
 
 class UISetupMixin:
@@ -97,13 +91,16 @@ class UISetupMixin:
         # ``studio``의 단일 invoke/event 계약을 사용한다.
         self.studio_native_host = DesktopNativeHost(self, self.vue_bridge)
         self.studio_application = StudioApplication(host=self.studio_native_host)
+        # 데스크톱 native 권한 컨텍스트 — Vue 어댑터와 Python 내부 호출(시작 자동기동,
+        # generator_webui._try_managed_backend_autostart)이 같은 Studio 경로를 쓴다.
+        self.studio_native_context = CallContext(
+            principal_id="desktop-ui",
+            transport="qwebchannel",
+            capabilities=frozenset({"native"}),
+        )
         self.studio_transport = StudioQWebChannelAdapter(
             self.studio_application,
-            CallContext(
-                principal_id="desktop-ui",
-                transport="qwebchannel",
-                capabilities=frozenset({"native"}),
-            ),
+            self.studio_native_context,
             self,
         )
 
@@ -151,7 +148,15 @@ class UISetupMixin:
         self.web_profile.setPersistentStoragePath(os.path.join(base_cache_path, "Storage"))
         self.web_profile.setCachePath(os.path.join(base_cache_path, "Cache"))
         self.web_profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
-        
+        # 갤러리·즐겨찾기 카드 썸네일(aithumb:) — 원본 PNG 를 카드마다 풀해상도로 디코드하지 않게.
+        # 스킴은 new_main_ui 가 QApplication 전에 등록한다. 등록 안 된 실행 경로면 None(원본 폴백).
+        # 캐시 폴더는 config.THUMB_DIR 한 곳(히스토리 generateThumbnails 와 같은 캐시). 옛 폴더
+        # (LEGACY_THUMB_DIR)의 같은 키는 렌더 전에 옮겨 온다 — 배경 정리(시작 30초 뒤)를 기다리지 않게.
+        from config import LEGACY_THUMB_DIR, THUMB_DIR
+        from ui.thumb_scheme import install_thumb_scheme_handler
+        self._thumb_scheme_handler = install_thumb_scheme_handler(
+            self.web_profile, THUMB_DIR, legacy_dir=LEGACY_THUMB_DIR)
+
         from PyQt6.QtGui import QColor
         # First paint and native chrome use the same current theme as Vue.
         background = get_color('bg_primary')
@@ -208,122 +213,43 @@ class UISetupMixin:
         self._init_prompt_proxies()
         self._init_settings_proxies()
         self._init_button_proxies()
-        self._preload_loras()   # LoRA 목록 백그라운드 프리로드 (매니저 첫 오픈 대기 제거)
+        # LoRA 목록 프리로드는 여기서 하지 않는다 — 이 시점엔 백엔드가 아직 연결 전이다(예전
+        # _preload_loras 는 2초 자고 미연결을 보고 늘 그냥 끝났다). 연결 성공 경계
+        # (generator_webui.on_webui_info_loaded)가 캐시를 비운 직후 워커로 다시 채운다
+        # (ui/lora_catalog_cache.prewarm_async).
 
-        # ── 호환성 더미 (Python 백엔드 코드에서 참조하는 속성들) ──
         self.vue_bridge.set_action_handler(self._handle_vue_action)
 
-        _D = type('D', (), {
-            '__getattr__': lambda s, n: lambda *a, **k: None
-        })
-
-        self.viewer_panel = self.vue_viewer
-        self.center_tabs = _D()
-        self.left_stack = _D()
-        self._left_panel_container = _D()
-        self.left_panel_scroll = _D()
-        self.generator_panel = _D()
-        self.editor_tools_scroll = _D()
-        self._native_tab_bar = _D()
-        self._native_tab_btns = {}
-        self.history_panel = _D()
-        self._tools_bar = _D()
-        self._bottom_container = _D()
-        self._bottom_layout = _D()
-        self.status_message_label = _D()
-        self.vram_label = _D()
-        self.gallery_items = []
-        self.gallery_layout = _D()
-
-        # viewer_label 프록시
-        class _VLP:
-            def __getattr__(self, n): return lambda *a, **k: None
-            def size(self):
-                from PyQt6.QtCore import QSize
-                return QSize(800, 600)
-            class _Sig:
-                def connect(self, *a): pass
-            customContextMenuRequested = _Sig()
-        self.viewer_label = _VLP()
-
-        self.gen_progress_bar = _D()
-        self.exif_display = _D()
-
-        # 히스토리/갤러리 프록시
-        from ui.widget_proxies import ButtonProxy
-        b = self.vue_bridge
-        self.btn_add_favorite = ButtonProxy(b, 'btn_add_favorite')
+        # 예전 PyQt 화면의 자리 채움 더미(어떤 속성이든 no-op 을 돌려주는 _D·_VLP 와 center_tabs·
+        # viewer_label·gen_progress_bar 등)는 없앴다 — hasattr 가드를 늘 참으로 만들어 죽은 분기를
+        # 숨겼다(audit #175). 상태 문구는 show_status(Vue 계기 스트립: ui/status_line.py), 진행률·
+        # 결과는 vue_bridge 시그널로 간다. 히스토리·갤러리·즐겨찾기는 Vue 가 맡는다.
+        # tests/test_legacy_dummies_retirement.py 가 __getattr__ 더미의 재등장을 막는다.
 
         # 기존 PyQt 탭 인스턴스 (Python 백엔드에서 참조)
-        from tabs.settings_tab import SettingsTab
-        from tabs.event_gen_tab import EventGenTab
-        from tabs.editor_tab import MosaicEditor
+        # (EventGen·XYZ Plot·PNG Info·Gallery 탭은 Vue 뷰로 대체돼 은퇴했다 —
+        #  tests/test_legacy_gallery_tabs_retirement.py)
         from tabs.i2i_tab import Img2ImgTab
         from tabs.inpaint_tab import InpaintTab
         from tabs.upscale_tab import UpscaleTab
-        from tabs.gallery_tab import GalleryTab
-        from tabs.xyz_plot_tab import XYZPlotTab
-        from tabs.pnginfo_tab import PngInfoTab
-        from tabs.batch_tab import BatchTab
         from tabs.browser_tab import BrowserTab
         from tabs.backend_ui_tab import BackendUITab
 
-        self.settings_tab = SettingsTab(self)
-        self.settings_tab.setParent(None)
-        self.event_gen_tab = EventGenTab(self)
-        self.event_gen_tab.setParent(None)
-        self.mosaic_editor = MosaicEditor()
-        self.mosaic_editor.setParent(None)
         self.i2i_tab = Img2ImgTab(self)
         self.i2i_tab.setParent(None)
         self.inpaint_tab = InpaintTab(self)
         self.inpaint_tab.setParent(None)
         self.upscale_tab = UpscaleTab(self)
         self.upscale_tab.setParent(None)
-        self.gallery_tab = GalleryTab(self)
-        self.gallery_tab.setParent(None)
-        self.xyz_plot_tab = XYZPlotTab(self)
-        self.xyz_plot_tab.setParent(None)
-        self.png_info_tab = PngInfoTab()
-        self.png_info_tab.setParent(None)
-        self.batch_tab = BatchTab(self)
-        self.batch_tab.setParent(None)
         # web_tab/backend_ui_tab은 위에서 _main_stack에 넣은 인스턴스를 그대로 사용한다.
         # 여기서 다시 만들면 표시 중인 뷰와 설정/백엔드 로드 대상이 달라지고 Chromium
         # 프로필도 불필요하게 두 벌 생성된다.
-        self._batch_upscale_tabs = _D()
-        self.fav_tab = _D()
 
-        # 설정 위젯 링크
-        self.cond_prompt_check = self.settings_tab.cond_prompt_check
-        self.cond_prevent_dupe_check = self.settings_tab.cond_prevent_dupe_check
-        self.cond_block_editor_pos = self.settings_tab.cond_block_editor_pos
-        self.cond_block_editor_neg = self.settings_tab.cond_block_editor_neg
-        self.exclude_artist_checkbox = _D()
-        self.exclude_copyright_checkbox = _D()
-
-    def _get_tab_title(self, key: str) -> str:
-        """테마에 따른 동적 탭 이름 반환"""
-        from utils.theme_manager import get_theme_manager
-        theme = get_theme_manager().current_theme_name
-        use_minimal = theme == '모던'
-
-        titles_minimal = {
-            't2i': "T2I", 'i2i': "I2I", 'inpaint': "Inpaint",
-            'event': "Event Gen", 'search': "Search", 'web': "Web",
-            'editor': "Editor", 'batch': "Batch / Upscale",
-            'gallery': "Gallery", 'xyz': "XYZ Plot", 'png': "PNG Info",
-            'fav': "Favorites", 'backend': "Backend UI", 'settings': "Settings",
-        }
-        titles_emoji = {
-            't2i': "🖼️ T2I", 'i2i': "🖼️ I2I", 'inpaint': "🎨 Inpaint",
-            'event': "🎬 이벤트 생성", 'search': "🔍 Search", 'web': "🌐 Web",
-            'editor': "🎨 Editor", 'batch': "📦 배치/업스케일",
-            'gallery': "🖼️ Gallery", 'xyz': "📊 XYZ Plot", 'png': "ℹ️ PNG Info",
-            'fav': "⭐ Favorites", 'backend': "🖥️ Backend UI", 'settings': "⚙️ Setting",
-        }
-        titles = titles_minimal if use_minimal else titles_emoji
-        return titles.get(key, key)
+        # prompt_settings.json 에서 Vue 위젯이 주인이 아닌 키(와일드카드 ON/OFF·레거시 클리너 두 옵션·
+        # 글꼴) — 예전 숨은 SettingsTab 의 위젯 대신 순수 값 객체가 든다(audit #178).
+        from core.prompt_settings_extras import PromptSettingsExtras
+        self.prompt_settings_extras = PromptSettingsExtras()
+        self._bind_wildcard_enabled_proxy()
 
     # ──────────────────────────────────────
     #  프록시 위젯 초기화 (Vue SPA 연동)
@@ -345,39 +271,39 @@ class UISetupMixin:
         self.neg_prompt_text = TextEditProxy(b, 'neg_prompt_text')
         self.exclude_prompt_local_input = TextEditProxy(b, 'exclude_prompt_local_input')
         self.total_prompt_display = TextEditProxy(b, 'total_prompt_display')
-        self.token_count_label = type('LabelProxy', (), {
-            'setText': lambda self, t: None,
-            'setAlignment': lambda self, a: None,
-            'setStyleSheet': lambda self, s: None,
-            'hide': lambda self: None,
-            'show': lambda self: None,
-            'setVisible': lambda self, v: None,
-            'setFixedHeight': lambda self, h: None,
-        })()
 
-        # 즐겨찾기 태그 바 (Vue에서 렌더링 — 더미)
-        self.fav_tags_bar = type('DummyFavBar', (), {
-            'tag_insert_requested': type('Sig', (), {'connect': lambda *a: None})(),
-            'hide': lambda self: None,
-            'show': lambda self: None,
-        })()
+    def _bind_wildcard_enabled_proxy(self):
+        """와일드카드 시스템 ON/OFF 를 Vue 에 노출 — CheckBoxProxy 'wildcard_enabled'.
 
-        # 호환성: 토글 버튼 더미
-        class _AlwaysOn:
-            def isChecked(self): return True
-            def setChecked(self, v): pass
-            toggled = type('', (), {'connect': lambda *a: None})()
-        _d = _AlwaysOn()
-        self.prefix_toggle_button = _d
-        self.suffix_toggle_button = _d
-        self.neg_toggle_button = _d
-        self.exclude_toggle_button = _d
+        값의 주인은 ``self.prompt_settings_extras.wildcard_enabled``(core/prompt_settings_extras,
+        prompt_settings.json 영속)이고 생성 경로는 utils.file_wildcard.wildcards_enabled 가 그것을
+        읽는다. Vue 에서 끄고 켜면 프록시 toggled 가 곧바로 그 값을 바꾼다. 설정 불러오기
+        (generator_settings._apply_prompt_settings_extras)는 값을 바꾼 뒤 프록시를 맞춘다 —
+        setChecked 는 값이 바뀔 때만 신호를 내므로 되먹임하지 않는다.
+        """
+        if not hasattr(self, 'vue_bridge'):
+            return
+        from core.prompt_settings_extras import extras_of
+        from ui.widget_proxies import CheckBoxProxy
+        proxy = CheckBoxProxy(self.vue_bridge, 'wildcard_enabled')
+        proxy.setChecked(extras_of(self).wildcard_enabled)
+        proxy.toggled.connect(self._set_wildcards_enabled)
+        self.wildcard_enabled_check = proxy
+
+    def _set_wildcards_enabled(self, enabled) -> None:
+        """Vue 와일드카드 토글(프록시 toggled) → 값 보관함. 다음 저장이 prompt_settings 에 쓴다."""
+        from core.prompt_settings_extras import PromptSettingsExtras
+        extras = getattr(self, 'prompt_settings_extras', None)
+        if not isinstance(extras, PromptSettingsExtras):
+            extras = PromptSettingsExtras()
+            self.prompt_settings_extras = extras
+        extras.wildcard_enabled = bool(enabled)
 
     def _init_settings_proxies(self):
         """설정 영역 프록시 위젯 초기화"""
         from ui.widget_proxies import (
             LineEditProxy, TextEditProxy, ComboBoxProxy, CheckBoxProxy,
-            SliderProxy, GroupBoxProxy, ButtonProxy
+            SliderProxy, GroupBoxProxy,
         )
 
         b = self.vue_bridge
@@ -394,8 +320,11 @@ class UISetupMixin:
 
         # 서버 종류와 별개인 생성 family. Krea2는 ComfyUI 위에서 전용
         # 워크플로를 실행하므로 checkpoint 콤보와 분리해 관리한다.
+        # 항목은 Vue 라벨(PromptPanel generationFamilyItems)과 글자 그대로 같아야 한다 —
+        # ComboBoxProxy 는 대소문자를 구분해 맞지 않는 값을 버린다 (core/generation_family.py).
+        from core.generation_family import GENERATION_FAMILY_ITEMS
         self.generation_family_combo = ComboBoxProxy(b, 'generation_family_combo')
-        self.generation_family_combo.addItems(["STANDARD", "KREA2"])
+        self.generation_family_combo.addItems(list(GENERATION_FAMILY_ITEMS))
         self.model_combo = ComboBoxProxy(b, 'model_combo')
         self.vae_main_combo = ComboBoxProxy(b, 'vae_main_combo')
         self.te_main_input = LineEditProxy(b, 'te_main_input')
@@ -419,26 +348,7 @@ class UISetupMixin:
         # 해상도 관련
         self.random_res_check = CheckBoxProxy(b, 'random_res_check')
         self.auto_res_check = CheckBoxProxy(b, 'auto_res_check')
-        self.random_res_label = type('LblProxy', (), {
-            'setText': lambda s, t: None, 'hide': lambda s: None, 'show': lambda s: None,
-        })()
-        self.resolution_editor_container = type('WProxy', (), {
-            'hide': lambda s: None, 'show': lambda s: None,
-        })()
-        self.resolution_list_widget = type('LWProxy', (), {
-            'clear': lambda s: None, 'addItem': lambda s, i: None,
-            'count': lambda s: 0, 'item': lambda s, i: None,
-            'setFixedHeight': lambda s, h: None,
-        })()
-        self.res_width_input = LineEditProxy(b, 'res_width_input')
-        self.res_height_input = LineEditProxy(b, 'res_height_input')
-        self.btn_add_res = ButtonProxy(b, 'btn_add_res')
-        self._res_presets = [
-            ["512 × 512", 512, 512], ["512 × 768", 512, 768], ["768 × 512", 768, 512],
-            ["1024 × 1024", 1024, 1024], ["832 × 1216", 832, 1216], ["1216 × 832", 1216, 832],
-        ]
-        self._DEFAULT_RES_PRESETS = self._res_presets[:]
-        self._res_preset_btns = []
+        # 랜덤 해상도 목록(random_resolutions)은 Vue 편집기가 set_random_resolutions 액션으로 보낸다.
 
         # Hires.fix
         self.hires_options_group = GroupBoxProxy(b, 'hires_options_group')
@@ -457,20 +367,15 @@ class UISetupMixin:
 
         # NegPiP / ADetailer
         self.negpip_group = GroupBoxProxy(b, 'negpip_group')
+        # NegPiP 은 상시 적용(b8ef7901a 'NegPiP 토글 제거') — Python 이 단일 출처로 켠다.
+        # 설정 복원(load_settings)도 저장값을 읽지 않고 True 를 유지한다(audit #97).
+        self.negpip_group.setChecked(True)
         self.adetailer_group = GroupBoxProxy(b, 'adetailer_group')
-        self.ad_toggle_button = ButtonProxy(b, 'ad_toggle_button')
-        self.ad_settings_container = type('WProxy', (), {
-            'hide': lambda s: None, 'show': lambda s: None, 'setVisible': lambda s, v: None,
-        })()
         # ADetailer 슬롯 체크박스 (Vue 연동)
         self.ad_slot1_group = CheckBoxProxy(b, 'ad_slot1_group')
         self.ad_slot2_group = CheckBoxProxy(b, 'ad_slot2_group')
         # ADetailer 슬롯 위젯 더미 (전체 키)
         def _ad_slot(prefix):
-            _W = type('WProxy', (), {
-                'setVisible': lambda s, v: None, 'hide': lambda s: None,
-                'show': lambda s: None, 'isVisible': lambda s: False,
-            })
             # SliderProxy 생성 후 기본값 설정 (Vue에도 push)
             confidence = SliderProxy(b, f'{prefix}_confidence')
             confidence.setText('0.3')
@@ -504,14 +409,12 @@ class UISetupMixin:
                 'use_checkpoint_check': CheckBoxProxy(b, f'{prefix}_use_ckpt'),
                 'use_vae_check': CheckBoxProxy(b, f'{prefix}_use_vae'),
                 'use_sampler_check': CheckBoxProxy(b, f'{prefix}_use_sampler'),
-                'inpaint_size_container': _W(),
                 'inpaint_width': LineEditProxy(b, f'{prefix}_inp_w'),
                 'inpaint_height': LineEditProxy(b, f'{prefix}_inp_h'),
                 'checkpoint_combo': ComboBoxProxy(b, f'{prefix}_ckpt'),
                 'vae_combo': ComboBoxProxy(b, f'{prefix}_vae'),
                 'sampler_combo': ComboBoxProxy(b, f'{prefix}_sampler'),
                 'scheduler_combo': ComboBoxProxy(b, f'{prefix}_scheduler'),
-                'sampler_container': _W(),
             }
         self.s1_widgets = _ad_slot('_ad_s1')
         self.s1_widgets['model'].setText('face_yolov8n.pt')
@@ -519,10 +422,6 @@ class UISetupMixin:
         self.s2_widgets['model'].setText('hand_yolov8n.pt')
 
         self.sam3_group = GroupBoxProxy(b, 'sam3_group')
-        self.sam3_toggle_button = ButtonProxy(b, 'sam3_toggle_button')
-        self.sam3_settings_container = type('WProxy', (), {
-            'hide': lambda s: None, 'show': lambda s: None, 'setVisible': lambda s, v: None,
-        })()
         self.sam3_widgets = {
             'detect_prompt': TextEditProxy(b, '_sam3_detect_prompt'),
             'exclude_prompt': TextEditProxy(b, '_sam3_exclude_prompt'),
@@ -545,10 +444,6 @@ class UISetupMixin:
             'save_artifacts': CheckBoxProxy(b, '_sam3_save_artifacts'),
             'unload_after': CheckBoxProxy(b, '_sam3_unload_after'),
             'use_inpaint_size_check': CheckBoxProxy(b, '_sam3_use_inp_size'),
-            'inpaint_size_container': type('WProxy', (), {
-                'setVisible': lambda s, v: None, 'hide': lambda s: None, 'show': lambda s: None,
-                'isVisible': lambda s: False,
-            })(),
             'inpaint_width': LineEditProxy(b, '_sam3_inp_w'),
             'inpaint_height': LineEditProxy(b, '_sam3_inp_h'),
             'use_steps_check': CheckBoxProxy(b, '_sam3_use_steps'),
@@ -564,14 +459,13 @@ class UISetupMixin:
             'use_noise_multiplier_check': CheckBoxProxy(b, '_sam3_use_noise_mul'),
             'noise_multiplier': SliderProxy(b, '_sam3_noise_mul', multiplier=100),
             'restore_face': CheckBoxProxy(b, '_sam3_restore_face'),
-            'sampler_container': type('WProxy', (), {
-                'setVisible': lambda s, v: None, 'hide': lambda s: None, 'show': lambda s: None,
-            })(),
             # ── ControlNet 주입 (Forge 확장의 SAM3 > ControlNet 아코디언과 1:1)
             # sam3_mode == 'Inpaint' + sd_forge_controlnet 로드 시에만 실제로 동작.
             'cn_enable': CheckBoxProxy(b, '_sam3_cn_enable'),
             'cn_override_external': CheckBoxProxy(b, '_sam3_cn_override_external'),
-            'cn_model': ComboBoxProxy(b, '_sam3_cn_model'),
+            # Model 은 선택지 없는 자유 입력 — ComboBoxProxy 는 빈 값('None' 으로 되돌리기)을
+            # 무시하고 숫자만인 이름을 인덱스로 읽어 버려서 LineEditProxy 로 둔다.
+            'cn_model': LineEditProxy(b, '_sam3_cn_model'),
             'cn_module': ComboBoxProxy(b, '_sam3_cn_module'),
             'cn_weight': SliderProxy(b, '_sam3_cn_weight', multiplier=100),
             'cn_guidance_start': SliderProxy(b, '_sam3_cn_guidance_start', multiplier=100),
@@ -600,18 +494,11 @@ class UISetupMixin:
         # 16GB GPU 권장 기본값 (Forge 확장 v0.6.1+ 디폴트와 동일)
         self.sam3_widgets['inpaint_only_masked'].setChecked(True)
         self.sam3_widgets['unload_after'].setChecked(True)
-        # ControlNet 기본값 — 확장 Sam3Args 디폴트와 동일
-        self.sam3_widgets['cn_model'].setText('None')
-        self.sam3_widgets['cn_module'].setText('inpaint_only')
-        self.sam3_widgets['cn_weight'].setText('1.0')
-        self.sam3_widgets['cn_guidance_start'].setText('0.0')
-        self.sam3_widgets['cn_guidance_end'].setText('1.0')
-        self.sam3_widgets['cn_control_mode'].setText('Balanced')
-        self.sam3_widgets['cn_resize_mode'].setText('Crop and Resize')
-        self.sam3_widgets['cn_processor_res'].setText('512')
-        self.sam3_widgets['cn_threshold_a'].setText('-1')
-        self.sam3_widgets['cn_threshold_b'].setText('-1')
-        self.sam3_widgets['cn_pixel_perfect'].setChecked(True)
+        # ControlNet 13필드 — 선택지(전처리기·control/resize mode)와 기본값은 확장 Sam3Args
+        # 스펙 한 벌에서(core/sam3_controlnet → core/sam3_args). Vue Sam3ControlNetPanel 이
+        # 선택지를 getProperty(id, 'items') 로 읽는다.
+        from core.sam3_controlnet import init_widgets as _init_sam3_cn_widgets
+        _init_sam3_cn_widgets(self.sam3_widgets)
 
         # ── Anima Guidance Suite (PAG/SEG/SLG · APG/CWM/SMC · Skimmed · DCW/RDC/DAVE/CNS
         #    · Detail Daemon · Modulation). 위치 인자 계약은 core/anima_guidance.py 참조.
@@ -669,7 +556,6 @@ class UISetupMixin:
         self.btn_auto_toggle.toggled.connect(self.toggle_automation_ui)
 
         self.btn_save_settings = ButtonProxy(b, 'btn_save_settings')
-        self.btn_api_manager = None
 
         self._vue_automation_settings = {
             'mode': 'count',
@@ -729,25 +615,8 @@ class UISetupMixin:
                 'max_retries': max_retries,
             }
 
-        # 자동화 위젯 (더미)
-        self.automation_widget = type('AutoProxy', (), {
-            'hide': lambda s: None, 'show': lambda s: None,
-            'get_settings': lambda s: _get_vue_automation_settings(),
-            'setVisible': lambda s, v: None,
-        })()
-
-        # LoRA 패널 (더미)
-        from ui.widget_proxies import ButtonProxy as BP
-        self.lora_active_panel = type('LoraProxy', (), {
-            'hide': lambda s: None, 'show': lambda s: None,
-            'get_active_loras': lambda s: [],
-            'get_active_lora_text': lambda s: '',
-            'clear_all': lambda s: None,
-            'get_entries': lambda s: [],
-            'set_entries': lambda s, e: None,
-            'add_lora': lambda s, n, w: None,
-            'parse_and_add_loras': lambda s, t: None,
-        })()
+        # 자동화 설정 창구 — 자동화 시작(generator_actions)이 get_settings() 로 읽는다.
+        self.automation_widget = _VueAutomationSettings(_get_vue_automation_settings)
 
     def _show_prompt_history(self):
         """최근 프롬프트 히스토리 팝업"""
@@ -789,45 +658,6 @@ class UISetupMixin:
         self.width_input.setText(h)
         self.height_input.setText(w)
 
-    def _open_lora_manager(self):
-        """LoRA 매니저 다이얼로그 열기"""
-        from widgets.lora_manager import LoraManagerDialog
-        from backends import get_backend
-        try:
-            backend = get_backend()
-        except Exception:
-            backend = None
-        dlg = LoraManagerDialog(backend=backend, parent=self)
-        dlg.lora_inserted.connect(self._on_lora_inserted)
-        dlg.loras_batch_inserted.connect(self._on_lora_batch_inserted)
-        dlg.exec()
-
-    def _preload_loras(self):
-        """앱 시작 시 LoRA 목록을 백그라운드로 미리 로드 → 매니저 첫 오픈 시 대기 없음.
-        LoraManagerDialog._lora_cache(클래스 캐시)를 워밍한다."""
-        import threading
-
-        def _do():
-            try:
-                import time as _t
-                _t.sleep(2.0)   # 백엔드 연결 대기
-                # 미연결(건너뛰기/연결 실패)이면 프리로드 생략 — get_backend()는 항상
-                # 객체라 None 체크론 못 거른다. 매니저 첫 오픈 시 어차피 로드되므로 무해.
-                if not getattr(self, '_backend_connected', False):
-                    return
-                from backends import get_backend
-                from widgets.lora_manager import LoraManagerDialog
-                backend = get_backend()
-                if backend is None:
-                    return
-                loras = backend.get_loras()
-                if loras:
-                    LoraManagerDialog._lora_cache = loras
-                    print(f"[LoRA] 프리로드 완료: {len(loras)}개")
-            except Exception as e:
-                print(f"[LoRA] 프리로드 건너뜀: {e}")
-        threading.Thread(target=_do, daemon=True).start()
-
     def _load_vue_ui(self):
         """백엔드 선택 완료 후 Vue SPA 로드 시작 (지연 로드).
         _setup_ui에서 미뤄둔 setUrl을 여기서 호출 — 선택 다이얼로그가 떠 있는 동안
@@ -836,39 +666,6 @@ class UISetupMixin:
         if url is not None and hasattr(self, 'vue_viewer'):
             self.vue_viewer.setUrl(url)
             self._pending_vue_url = None
-
-    def _on_lora_inserted(self, lora_text: str):
-        """LoRA를 활성 패널에 추가 + Vue로 전달"""
-        import re, json as _json
-        # 트리거 워드 분리 (||TRIGGER:[...] 포맷)
-        trigger_words = []
-        if '||TRIGGER:' in lora_text:
-            parts = lora_text.split('||TRIGGER:', 1)
-            lora_text = parts[0]
-            try:
-                trigger_words = _json.loads(parts[1])
-            except Exception:
-                pass
-        m = re.match(r'<lora:(.+?):([-\d.]+)>', lora_text)
-        if m:
-            name, weight = m.group(1), float(m.group(2))
-            self.lora_active_panel.add_lora(name, weight)
-            # Vue LoRA Stack으로 전달 (트리거 워드 포함)
-            if hasattr(self, 'vue_bridge'):
-                payload = {'name': name, 'weight': weight}
-                if trigger_words:
-                    payload['trigger_words'] = trigger_words
-                self.vue_bridge.loraInserted.emit(_json.dumps(payload))
-
-    def _on_lora_batch_inserted(self, text: str):
-        """다이얼로그에서 일괄 붙여넣기된 LoRA 텍스트를 패널에 추가"""
-        import re
-        self.lora_active_panel.parse_and_add_loras(text)
-        # Vue로도 전달
-        if hasattr(self, 'vue_bridge'):
-            import json as _json
-            for m in re.finditer(r'<lora:(.+?):([-\d.]+)>', text):
-                self.vue_bridge.loraInserted.emit(_json.dumps({'name': m.group(1), 'weight': float(m.group(2))}))
 
     def _apply_character_features_result(self, char_name: str, tags: list, add_copyright=None):
         """캐릭터 이름 + 특징 태그를 프롬프트 위젯에 삽입 (Vue 모달 / 레거시 다이얼로그 공용).
@@ -931,18 +728,12 @@ class UISetupMixin:
             self.update_total_prompt_display()
 
     def _get_ui_pref(self, key, default=None):
-        """config/ui_prefs.json 에서 단일 설정 읽기 (best-effort). os 는 함수-로컬 import."""
+        """config/ui_prefs.json 에서 단일 설정 읽기 (best-effort) — 경로·로더는 core.ui_prefs 한 곳."""
         try:
-            import os as _os
-            import json as _json
-            p = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                              'config', 'ui_prefs.json')
-            if _os.path.exists(p):
-                with open(p, 'r', encoding='utf-8') as f:
-                    return _json.load(f).get(key, default)
+            from core.ui_prefs import read_ui_prefs
+            return read_ui_prefs().get(key, default)
         except Exception:
-            pass
-        return default
+            return default
 
     def _add_copyright_tag(self, cp: str):
         """copyright_input 에 시리즈 태그 추가 (중복 방지 + 괄호 이스케이프)."""

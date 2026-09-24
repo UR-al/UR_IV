@@ -15,6 +15,7 @@ import os
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.error_handler import sanitize_for_ui
+from core.resource_coordinator import backend_job_guard, release_before_backend_job
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,11 @@ class RefineWorker(QThread):
             with open(self._path, 'rb') as fh:
                 image_b64 = base64.b64encode(fh.read()).decode()
 
-            result_b64 = backend.refine(image_b64, self._settings)
+            # Forge img2img + SAM3 Mask 전에 앱 프로세스의 편집기 SAM3 번들(~3.4GB)을 반납
+            release_before_backend_job('refine')
+            # 모델 언로드(생성 후·대기열 정리·수동)와 배타 — 진행 중이면 기다리고, 도는 동안엔 언로드가 건너뛴다
+            with backend_job_guard('refine'):
+                result_b64 = backend.refine(image_b64, self._settings)
 
             out_path = _output_path(self._path, self._settings.get('output_folder', ''))
             with open(out_path, 'wb') as fh:

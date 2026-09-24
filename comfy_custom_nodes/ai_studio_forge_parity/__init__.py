@@ -13,10 +13,16 @@ from .relight import NODE_CLASS_MAPPINGS as _RELIGHT_NODES
 from .sam3_nodes import (
     NODE_CLASS_MAPPINGS as _SAM3_NODES,
     NODE_DISPLAY_NAME_MAPPINGS as _SAM3_DISPLAY_NAMES,
+    install_unload_release_hook as _install_sam3_unload_release_hook,
 )
 
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
+
+# ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
+# also releases the SAM3 bundle this pack keeps between runs. No-op outside
+# ComfyUI (the app imports the relight module from this package).
+_install_sam3_unload_release_hook()
 
 
 def _merge_node_maps(*maps):

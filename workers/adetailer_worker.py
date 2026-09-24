@@ -6,24 +6,8 @@ import base64
 import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 
-
-def _read_exif_prompts(image_path: str):
-    """PNG EXIF에서 positive/negative prompt 추출"""
-    try:
-        from PIL import Image
-        img = Image.open(image_path)
-        raw = img.info.get('parameters', '')
-        if raw and 'Steps:' in raw:
-            parts = raw.split('\nNegative prompt: ')
-            prompt = parts[0].strip()
-            negative = ''
-            if len(parts) > 1:
-                sub = parts[1].split('\nSteps: ')
-                negative = sub[0].strip()
-            return prompt, negative
-    except Exception as e:
-        print(f"[AD Worker] EXIF 읽기 실패 ({os.path.basename(image_path)}): {e}")
-    return '', ''
+from core.image_metadata import read_applicable_prompts
+from core.resource_coordinator import backend_job_guard, release_before_backend_job
 
 
 def _get_output_path(src_path: str, output_folder: str = '') -> str:
@@ -39,14 +23,26 @@ def _to_posix(path: str) -> str:
     return path.replace('\\', '/')
 
 
-def _prepare_settings(settings: dict, image_path: str) -> dict:
-    """EXIF 프롬프트 적용"""
+def _prepare_settings(settings: dict, image_path: str) -> tuple[dict, str]:
+    """EXIF 프롬프트 적용 → (settings, exif_warning).
+
+    프롬프트는 core.image_metadata 한 곳에서 읽는다(네거티브 없는 A1111, JPEG/WebP
+    UserComment, IDAT 뒤 텍스트, ComfyUI 그래프). 못 읽거나 모호하면 빈 프롬프트로 돌되
+    경고를 결과 JSON 에 실어 BatchView 가 토스트로 알린다.
+    """
     settings = dict(settings)
+    warning = ''
     if settings.get('use_exif_prompt'):
-        prompt, negative = _read_exif_prompts(image_path)
+        prompt, negative, warning = read_applicable_prompts(image_path)
         settings['ad_prompt'] = prompt
         settings['ad_negative'] = negative
-    return settings
+    return settings, warning
+
+
+def _with_exif_warning(result: dict, warning: str) -> dict:
+    if warning:
+        result['exif_warning'] = warning
+    return result
 
 
 class ADetailerSingleWorker(QThread):
@@ -66,22 +62,26 @@ class ADetailerSingleWorker(QThread):
                 self.finished.emit(json.dumps({'error': '백엔드 연결 없음'}))
                 return
 
-            settings = _prepare_settings(self._settings, self._path)
+            settings, exif_warning = _prepare_settings(self._settings, self._path)
 
             with open(self._path, 'rb') as f:
                 image_b64 = base64.b64encode(f.read()).decode()
 
-            result_b64 = backend.adetailer(image_b64, settings)
+            # Forge가 ADetailer 모델을 올리기 전에 앱 프로세스의 편집기 SAM3 번들(~3.4GB)을 반납
+            release_before_backend_job('adetailer')
+            # 모델 언로드(생성 후·대기열 정리·수동)와 배타 — 진행 중이면 기다리고, 도는 동안엔 언로드가 건너뛴다
+            with backend_job_guard('adetailer'):
+                result_b64 = backend.adetailer(image_b64, settings)
 
             output_path = _get_output_path(self._path, settings.get('output_folder', ''))
             with open(output_path, 'wb') as f:
                 f.write(base64.b64decode(result_b64))
 
-            self.finished.emit(json.dumps({
+            self.finished.emit(json.dumps(_with_exif_warning({
                 'before': _to_posix(self._path),
                 'after': _to_posix(output_path),
                 'output_path': _to_posix(output_path),
-            }))
+            }, exif_warning), ensure_ascii=False))
         except Exception as e:
             self.finished.emit(json.dumps({'error': str(e)}))
 
@@ -113,22 +113,25 @@ class ADetailerBatchWorker(QThread):
             if self._stop_event.is_set():
                 break
             try:
-                settings = _prepare_settings(self._settings, path)
+                settings, exif_warning = _prepare_settings(self._settings, path)
 
                 with open(path, 'rb') as f:
                     image_b64 = base64.b64encode(f.read()).decode()
 
-                result_b64 = backend.adetailer(image_b64, settings)
+                # 항목마다 — 배치 도중 편집기에서 SAM3를 다시 올렸어도 Forge 작업과 겹치지 않게
+                release_before_backend_job('adetailer-batch')
+                with backend_job_guard('adetailer-batch'):     # 모델 언로드와 배타(항목마다)
+                    result_b64 = backend.adetailer(image_b64, settings)
                 output_path = _get_output_path(path, settings.get('output_folder', ''))
                 with open(output_path, 'wb') as f:
                     f.write(base64.b64decode(result_b64))
 
-                self.single_done.emit(json.dumps({
+                self.single_done.emit(json.dumps(_with_exif_warning({
                     'before': _to_posix(path),
                     'after': _to_posix(output_path),
                     'output_path': _to_posix(output_path),
                     'index': i,
-                }))
+                }, exif_warning), ensure_ascii=False))
             except Exception as e:
                 self.single_done.emit(json.dumps({
                     'error': str(e),

@@ -97,20 +97,24 @@ const methods = {
   },
   getSession: reply(() => json(session)), saveSession: (raw, callback) => { session = JSON.parse(raw); callback?.('{}') },
   getRandomResolutions: reply('[]'), getPresetList: reply('["오프라인 샘플"]'), getPresetData: reply(json({ prompt: metadata.prompt, negative: metadata.negative })),
-  getGenStats: reply('{}'), getWildcardTree: reply('[]'), getLoras: reply('[]'), getCharFeatureOverride: reply('{}'),
-  getTagSuggestions: reply('[]'), getCharacterInsight: reply('{}'), getExcludeMatches: reply('[]'),
+  getGenStats: reply('{}'), getWildcardTree: reply('[]'), getCharFeatureOverride: reply('{}'),
+  // 비동기 조회(request* → *Ready) — 응답 id 를 되돌려 줘야 화면이 '불러오는 중'에서 풀린다
+  requestLoras: (mode, requestId) => emit('lorasReady', json({ requestId, mode, loras: [] })),
+  requestCharacterTagsOnline: (name, requestId) => emit('characterTagsOnlineReady', json({ requestId, name, error: offlineMessage })),
+  requestCompareGif: (_before, _after, _duration, _loops, requestId) => emit('compareGifReady', json({ requestId, error: offlineMessage })),
+  getStatusMessage: reply(() => json({ text: '오프라인 테마 점검 — 상태줄 예시', level: 'info', timeoutMs: 0, at: Date.now() })),
+  getTagSuggestionsRich: reply('[]'), getCharacterInsight: reply('{}'), getExcludeMatches: reply('[]'),
   classifyTags: reply(raw => json(Object.fromEntries(JSON.parse(raw).map(tag => [tag, categories[tag] || 'general'])))),
   getActiveSearchDataset: reply(json({ label: '오프라인 샘플', id: 'offline' })),
   loadLastSearchResults: reply(() => json(sampleRows)), loadFullResults: reply(() => json(sampleRows)),
   searchDanbooru: () => { emit('searchResultsReady', json(sampleRows)); record('Search: 샘플 태그만 표시') },
   getFavorites: reply(json([sampleImage])), getImageExif: reply(json(metadata)),
-  getLastGalleryFolder: reply('오프라인 샘플'), getGalleryImages: reply(json([sampleImage])),
+  getLastGalleryFolder: reply('오프라인 샘플'),
   requestGalleryImages: folder => emit('galleryImagesReady', json({ folder, files: [sampleImage] })),
-  generateThumbnails: raw => JSON.parse(raw).forEach(path => emit('thumbnailReady', json({ path, thumb: sampleImage }))),
+  generateThumbnails: (raw, width) => emit('thumbnailReady', json({ width, items: JSON.parse(raw).map(path => ({ path, thumb: sampleImage })) })),
   requestOllamaModels: () => emit('ollamaModelsReady', json(['offline-preview:8b'])),
-  ollamaListModels: reply('["offline-preview:8b"]'),
-  getADetailerModels: reply('[]'), requestADetailerModels: () => emit('adetailerModelsReady', '[]'),
-  getUpscalers: reply('["Lanczos"]'), requestUpscalers: () => emit('upscalersReady', '["Lanczos"]'),
+  requestADetailerModels: () => emit('adetailerModelsReady', '[]'),
+  requestUpscalers: () => emit('upscalersReady', '["Lanczos"]'),
   editorCheckAutoSave: reply('{}'), getYoloModelLabel: reply('오프라인: 모델 없음'),
   getFileInfo: reply(json({ width: 640, height: 768, size: 0 })),
   copyTextToClipboard: async (value, callback) => { await navigator.clipboard.writeText(value); record('복사: 메모리 클립보드만 사용'); callback?.(true) },
@@ -145,8 +149,9 @@ methods.onAction = (name, raw) => {
     if (name === 'hand_reconstruction_generate') {
       // Copy the input only. This fixture verifies comparison/export UI, NOT
       // Python image preparation, GPU sampling or anatomical repair quality.
+      // No 'source': like the real backend, the panel compares against the image it sent.
       emit('handReconstructionEvent', json({ action: name, requestId: payload.requestId, phase: 'complete', ok: true,
-        source: payload.image, prepared: payload.image,
+        prepared: payload.image,
         candidates: Array.from({ length: payload.settings.candidates }, (_, index) => ({ index, seed: index + 100, image: payload.image })),
         warning: '오프라인 UI 모의 후보입니다. 원본 복제이며 실제 손 재구성·입력 제거·파일 저장은 하지 않습니다.' }))
     } else if (name === 'hand_reconstruction_export') {
@@ -243,13 +248,13 @@ for (const [label, text] of [['프리셋 모달', '프리셋'], ['가중치 모�
   })
 }
 button('샘플 이미지', () => {
-  for (const event of ['inpaintImageLoaded', 'i2iImageLoaded', 'editorImageLoaded']) emit(event, sampleImage)
+  for (const event of ['inpaintImageLoaded', 'pngInfoImageLoaded', 'i2iImageLoaded', 'editorImageLoaded']) emit(event, sampleImage)
   emit('imageGenerated', json({ path: sampleImage, prompt: metadata.prompt, negative: metadata.negative }))
 })
 button('Search 샘플', async () => { await navigate('search'); emit('searchResultsReady', json(sampleRows)) })
 button('Favorites 샘플', () => navigate('fav'))
 button('Gallery 샘플', async () => { await navigate('gallery'); emit('galleryImagesReady', json({ folder: '오프라인 샘플', files: [sampleImage] })) })
-button('PNG Info 샘플', async () => { await navigate('png'); emit('inpaintImageLoaded', sampleImage) })
+button('PNG Info 샘플', async () => { await navigate('png'); emit('pngInfoImageLoaded', sampleImage) })
 button('샘플 알림', () => { for (const type of ['success', 'info', 'error']) emit('showNotification', type, `${type} 테마 점검용 알림`) })
 const label = document.createElement('label')
 label.htmlFor = 'preview-filter'

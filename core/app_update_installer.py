@@ -15,6 +15,9 @@ from typing import Any, Callable, Mapping
 
 from utils.atomic_json import atomic_write_json
 
+# wait_for_exit 의 기본 인자로 쓰이므로 모듈 수준 import 여야 한다(구현은 한 벌만 둔다).
+from core.app_instance import process_exists
+
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
@@ -79,30 +82,6 @@ def load_plan(plan_path: str | os.PathLike[str]) -> dict[str, Any]:
         "targetCommit": target,
         "parentPid": parent_pid,
     }
-
-
-def process_exists(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        kernel32.OpenProcess.restype = ctypes.c_void_p
-        kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_bool, ctypes.c_ulong)
-        kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-        process = kernel32.OpenProcess(0x00100000, False, pid)
-        if not process:
-            return False
-        kernel32.CloseHandle(process)
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def wait_for_exit(

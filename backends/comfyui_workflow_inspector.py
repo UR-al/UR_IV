@@ -37,38 +37,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from core import comfy_node_classes as _classes
 from utils.app_logger import get_logger
 
 _logger = get_logger("workflow_inspector")
 
+# 노드 분류는 생성 컴파일러와 한 곳(core/comfy_node_classes.py)에서 공유한다 —
+# 선택 화면이 '정상'이라 한 워크플로를 생성이 모르는 로더/샘플러로 거부하지 않도록.
 
 # 표준 체크포인트 로더 (단일 노드에서 model+clip+vae 전부 반환)
-NATIVE_CHECKPOINT_LOADERS: set[str] = {
-    "CheckpointLoaderSimple",
-    "CheckpointLoader",
-}
+NATIVE_CHECKPOINT_LOADERS: set[str] = set(_classes.CHECKPOINT_LOADER_NODES)
 
-# UNet/모델만 반환 (clip/vae는 별도 노드)
-NATIVE_UNET_LOADERS: set[str] = {
-    "UNETLoader",
-    "DiffusionModelLoaderKJ",  # KJNodes
-    "ForgeNeoAnima38V2Loader",
-}
+# UNet/모델만 반환 (clip/vae는 별도 노드) — KJNodes DiffusionModelLoaderKJ 포함
+NATIVE_UNET_LOADERS: set[str] = set(_classes.UNET_LOADER_NODES)
 
 # Sampler 노드 — 메인 모델 노드 역추적 시작점
-SAMPLER_NODES: set[str] = {
-    "KSampler",
-    "KSamplerAdvanced",
-    "SamplerCustomAdvanced",
-    "SamplerCustom",
-    "ForgeNeoKSamplerCNS",
-}
+SAMPLER_NODES: set[str] = set(_classes.SAMPLER_NODES)
 
-TEXT_ENCODER_NODES = {
-    "CLIPTextEncode", "CLIPTextEncodeSDXL",
-    "ForgeNeoAnimaQwen35Prompt", "ForgeNeoAnima38V2Prompt",
-}
-SAVE_NODES = {"SaveImage", "PreviewImage", "ForgeNeoSaveImage"}
+TEXT_ENCODER_NODES = set(_classes.TEXT_ENCODER_NODES)
+SAVE_NODES = set(_classes.IMAGE_SAVE_NODES)
 
 # 모델 라인을 통과시키는 패치 노드 (model 입력이 있고 model 출력도 있음)
 PATCH_NODES: set[str] = {
@@ -126,19 +113,6 @@ class InspectionResult:
     def is_locked(self) -> bool:
         """UI 모델 콤보를 비활성화해야 하는가."""
         return self.classification == WorkflowClassification.LOCKED_UNKNOWN
-
-    def to_dict(self) -> dict:
-        return {
-            "classification": self.classification.value,
-            "sampler_node_id": self.sampler_node_id,
-            "sampler_class": self.sampler_class,
-            "model_node_id": self.model_node_id,
-            "model_class": self.model_class,
-            "model_param": self.model_param,
-            "patch_chain": list(self.patch_chain),
-            "notes": list(self.notes),
-            "is_locked": self.is_locked,
-        }
 
 
 class WorkflowInspector:

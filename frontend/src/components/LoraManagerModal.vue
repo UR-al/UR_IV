@@ -35,9 +35,12 @@
 
       <div class="lm-list">
         <div v-if="loading" class="lm-empty">로딩 중...</div>
+        <div v-else-if="loadError && !loras.length" class="lm-empty lm-error">{{ loadError }}</div>
         <div v-else-if="!filtered.length" class="lm-empty">
           {{ loras.length ? '검색 결과 없음' : '설치된 LoRA가 없습니다 (백엔드 연결 확인)' }}
         </div>
+        <!-- 다시 스캔이 실패해도 이전 목록은 남긴다 — 대신 실패를 알린다 -->
+        <div v-if="!loading && loadError && loras.length" class="lm-availability-note lm-load-error">{{ loadError }}</div>
         <div v-if="unavailableCount" class="lm-availability-note">
           현재 실행 백엔드에서 보이지 않는 {{ unavailableCount }}개 항목은 확인만 가능하며 추가할 수 없습니다.
         </div>
@@ -96,6 +99,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
+import type { LorasReadyPayload } from '../types/bridge'
+import { createLatestRequest, wasAbandoned } from '../utils/bridgeRequest'
+import { useModalLayer } from '../composables/useModalLayer'
 
 interface LoraItem {
   name: string
@@ -127,7 +133,13 @@ const emit = defineEmits<{
 const loras = ref<LoraItem[]>([])
 const query = ref('')
 const loading = ref(false)
+const loadError = ref('')
 const batchText = ref('')
+// 목록은 비동기로 받는다(requestLoras → lorasReady). 예전 동기 getLoras 는 첫 열기·다시 스캔마다
+// GUI 스레드에서 백엔드 HTTP 와 디스크 카탈로그 병합을 해 앱 전체가 수 초 멈췄다.
+// 마지막 요청만 유효 — '다시 스캔'을 연달아 눌러도 늦게 온 옛 목록이 새 목록을 덮지 않는다.
+const loraRequest = createLatestRequest<LorasReadyPayload>({ timeoutMs: 120_000, prefix: 'loras' })
+let disconnectLorasReady: (() => void) | null = null
 const searchEl = ref<HTMLInputElement | null>(null)
 
 // ── sam-extra 임베드 LoRA Manager (워크플로 4) ──────────────────────────────
@@ -225,15 +237,24 @@ const unavailableCount = computed(() => filtered.value.filter(lora => lora.backe
 
 async function load(mode = '') {
   loading.value = true
+  loadError.value = ''
+  const { id, done, outcome } = loraRequest.begin()
   const backend: any = await getBackend()   // QWebChannel 백엔드 — 동적 타입
-  if (!backend || !backend.getLoras) { loading.value = false; return }
-  backend.getLoras(mode, (json: string) => {
+  if (wasAbandoned(outcome())) return   // 백엔드를 기다리는 사이 모달이 닫혔거나 새 요청이 시작됐다
+  if (!backend?.requestLoras) {
+    loraRequest.cancel()
     loading.value = false
-    try {
-      const d = JSON.parse(json)
-      if (Array.isArray(d)) loras.value = d.map((l: any) => ({ ...l, _w: 1.0 }))
-    } catch {}
-  })
+    loadError.value = 'LoRA 목록을 불러올 수 없습니다 (백엔드 연결 확인)'
+    return
+  }
+  backend.requestLoras(mode, id)
+  const reply = await done
+  // 더 새 요청이 이어받았거나(그쪽이 마무리한다) 모달이 닫혀 버린 요청 — '응답 없음'으로 보이지 않는다.
+  if (wasAbandoned(outcome())) return
+  loading.value = false
+  if (!reply) { loadError.value = 'LoRA 목록 응답이 없습니다 — 잠시 뒤 다시 스캔해 보세요'; return }
+  if (reply.error) { loadError.value = `LoRA 목록을 불러오지 못했습니다: ${reply.error}`; return }
+  if (Array.isArray(reply.loras)) loras.value = reply.loras.map((l: any) => ({ ...l, _w: 1.0 }))
 }
 
 function add(l: LoraItem) {
@@ -255,10 +276,15 @@ function applyBatch() {
 
 function close() { emit('close') }
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); close() } }
+// 열려 있는 동안 앱 모달 스택에 올라간다 — App 의 ↑/↓ 히스토리 이동이 이 모달 뒤에서 넘어가지 않게.
+// ESC 는 위 onKey 가 직접 처리한다(window capture + stopPropagation, utils/modalStack).
+useModalLayer()
 
 onMounted(() => {
   window.addEventListener('keydown', onKey, true)
   disconnectExtUrlReady = onBackendEvent('loraManagerUrlReady', onExtUrlReady)
+  // 요청을 보내기 전에 붙는다 — 캐시 적중이면 응답이 곧바로 온다.
+  disconnectLorasReady = onBackendEvent('lorasReady', (json: string) => { loraRequest.receive(json) })
   load()
   if (searchEl.value) searchEl.value.focus()
 })
@@ -266,6 +292,9 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey, true)
   disconnectExtUrlReady?.()
   disconnectExtUrlReady = null
+  disconnectLorasReady?.()
+  disconnectLorasReady = null
+  loraRequest.cancel()
 })
 </script>
 
@@ -290,6 +319,7 @@ onUnmounted(() => {
    그리기 전까지의 받침이므로 토큰화하지 않는다 */
 .lm-iframe { flex: 1; width: 100%; height: 100%; border: none; background: #fff; }
 .lm-error { color: var(--state-alert-fg); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.lm-availability-note.lm-load-error { color: var(--state-alert-fg); }
 .mt-8 { margin-top: 8px; }
 .lm-searchbar { display: flex; gap: 8px; padding: 12px 20px; }
 .lm-search { flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-base); padding: 9px 12px; color: var(--text-primary); font-size: 13px; }

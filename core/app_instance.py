@@ -9,6 +9,10 @@ from pathlib import Path
 from core.storage_paths import PROJECT_ROOT
 from utils.atomic_json import atomic_write_json, load_json_safe
 
+#: Windows 작업 표시줄 그룹/고정용 AppUserModelID — 두 엔트리포인트(new_main_ui/web_main_ui)가
+#: 같은 값을 써야 한 앱으로 묶인다. (예전 예제 문자열 'mycompany.myproduct...'를 대체)
+APP_USER_MODEL_ID = "URIV.AIStudioPro"
+
 
 def process_exists(pid: int) -> bool:
     if pid <= 0:
@@ -81,19 +85,6 @@ def process_start_identity(pid: int) -> str:
 
 def _registry_dir(project_root: str | os.PathLike[str]) -> Path:
     return Path(project_root).resolve() / "cache" / "app_instances"
-
-
-def wait_for_update_lock(
-    project_root: str | os.PathLike[str] = PROJECT_ROOT,
-    *,
-    timeout: float = 120.0,
-) -> None:
-    # The updater lock is process-owned (a named kernel mutex on Windows), so
-    # it is released automatically after a crash or power loss.  Never infer
-    # ownership from a file timestamp: that can strand every future startup.
-    from core.app_update_lock import wait_until_update_complete
-
-    wait_until_update_complete(project_root, timeout=timeout)
 
 
 def register_app_instance(
@@ -169,10 +160,10 @@ def live_app_instance_pids(
 
 
 __all__ = [
+    "APP_USER_MODEL_ID",
     "live_app_instance_pids",
     "process_exists",
     "process_start_identity",
     "register_app_instance",
     "unregister_app_instance",
-    "wait_for_update_lock",
 ]

@@ -30,7 +30,11 @@ _MANAGED = {
     "EmptyLatentImage": {"width", "height", "batch_size"},
     "ForgeNeoLatentInput": {"width", "height", "batch_size", "mode"},
     "CheckpointLoaderSimple": {"ckpt_name"},
+    # Every loader the compiler writes the selected model into
+    # (core/comfy_node_classes.MODEL_LOADER_INPUTS) is app-managed.
+    "CheckpointLoader": {"ckpt_name"},
     "UNETLoader": {"unet_name"},
+    "DiffusionModelLoaderKJ": {"model_name"},
     "ForgeNeoAnima38V2Loader": {"model_name"},
     "CLIPTextEncode": {"text"},
     "VAELoader": {"vae_name"},

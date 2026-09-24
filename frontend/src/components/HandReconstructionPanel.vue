@@ -97,6 +97,9 @@ const comparisonDialog = ref<HTMLDialogElement | null>(null)
 const comparisonOpen = ref(false)
 let pending = ''
 let previewId = ''
+/** 이 요청에 실제로 보낸 원본 — 비교 화면의 '원본'은 이것이다. 백엔드는 원본을 다시 보내지
+ *  않는다(표시 전용 재인코딩이 완료 이벤트를 최대 ~49 MB까지 키웠다). requestId로 짝지어 둔다. */
+let sentSource: { requestId: string; image: string } | null = null
 let sequence = 0
 let disposed = false
 let disconnect: (() => void) | undefined
@@ -121,6 +124,7 @@ function invalidate() {
   clearTimeout(timer)
   closeComparison()
   pending = previewId = ''
+  sentSource = null
   pendingAction.value = ''
   result.value = null
   canvasSource.value = false
@@ -182,6 +186,7 @@ async function generate() {
     if (!isRaster(input.image) || !isRaster(input.mask)) throw Error('원본과 마스크를 PNG/JPEG/WebP 이미지로 읽지 못했습니다. 원본을 다시 올려주세요.')
     canvasSource.value = input.sourceKind === 'canvas'
     notice.value = '후보 생성 요청을 보냈습니다. 모델 로드에는 시간이 걸릴 수 있습니다.'
+    sentSource = { requestId, image: input.image }
     requestAction('hand_reconstruction_generate', { requestId, image: input.image, mask: input.mask, settings: { enabled: true, ...settings }, prompt: prompt.value })
   } catch (exc) {
     if (pending !== requestId) return
@@ -220,6 +225,9 @@ function receive(raw: string) {
   }
   if (event.ok && event.phase !== 'complete') return
   const requestId = pending
+  // 요청이 끝났으니 보관한 원본(수십 MB 문자열일 수 있음)은 결과로 옮기거나 버린다.
+  const source = sentSource?.requestId === requestId ? sentSource.image : ''
+  sentSource = null
   clearTimeout(timer)
   pending = ''
   pendingAction.value = ''
@@ -227,14 +235,14 @@ function receive(raw: string) {
   if (!event.ok) { error.value = String(event.error || '손 재구성 작업에 실패했습니다.'); notice.value = ''; return }
   if (event.action === 'hand_reconstruction_generate') {
     const candidates = event.candidates
-    if (!isRaster(event.source) || !isRaster(event.prepared) || !Array.isArray(candidates) || candidates.length === 0 || candidates.length > 4 ||
+    if (!isRaster(source) || !isRaster(event.prepared) || !Array.isArray(candidates) || candidates.length === 0 || candidates.length > 4 ||
       !candidates.every(candidate => Number.isInteger(candidate.index) && candidate.index >= 0 && candidate.index < 4 && Number.isFinite(candidate.seed) && isRaster(candidate.image)) ||
       new Set(candidates.map(candidate => candidate.index)).size !== candidates.length) {
       error.value = '비교할 수 있는 올바른 후보 결과를 받지 못했습니다.'
       notice.value = ''
       return
     }
-    result.value = { source: event.source, prepared: event.prepared, candidates }
+    result.value = { source, prepared: event.prepared, candidates }
     selectedIndex.value = candidates[0].index
     previewId = requestId
     notice.value = `${event.canceled ? '후속 생성을 취소했습니다. ' : ''}${candidates.length}개 후보가 준비되었습니다. 원본은 변경하지 않았습니다. 직접 비교하고 저장하세요.`

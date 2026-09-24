@@ -39,7 +39,8 @@ PyQt6 + Vue 3 SPA 하이브리드 AI 이미지 생성 스튜디오. **무거운 
 | **Web** | 내장 웹브라우저 (참고용) |
 | **Backend** | 백엔드 자체 UI 임베드 (디버그) |
 
-상단 알약 탭바는 **드래그 정렬** + **Ctrl+Tab** 이동. **VRAM 게이지**(하단 고정) 클릭으로 모델 unload 요청.
+탭은 왼쪽 세로 **탭 레일**(NavRail)에 있고 **Ctrl+Tab / Ctrl+Shift+Tab** 으로 이동한다. 탭 순서는 Settings 에서
+드래그로 바꾼다. **VRAM 게이지**(하단 고정) 클릭으로 모델 unload 요청.
 
 ---
 
@@ -55,9 +56,11 @@ QMainWindow
 Vue SPA
 ├── App.vue  (좌측 패널 + 확장 오버레이 + 모달 매니저들)
 ├── PromptPanel.vue (블록 모드 / 텍스트 모드 / Undo·Redo)
-├── views/{T2I, I2I, Inpaint, Editor, Search, EventGen, XYZPlot, Batch, Gallery, Favorites, PngInfo, Settings, Web, Backend}
-├── components/{TabBar, QueuePanel, ImageViewer, CompareSlider, CustomSelect, TagBlockField, SettingsPanel, HistoryPanel}
+├── router.js  (T2I = components/ImageViewer, 나머지 탭 = views/*View.vue 지연 로드)
+├── views/{I2I, Inpaint, Editor, Search, EventGen, XYZPlot, Batch, Gallery, Favorites, PngInfo, Settings, CreatorStudio, Chat}
+├── components/{NavRail, QueuePanel, ImageViewer, CompareSlider, CustomSelect, TagBlockField, ...}
 └── stores/widgetStore.js  (state + requestAction IPC)
+(Web·Backend 탭은 Vue 뷰가 아니라 위 QStackedWidget 의 네이티브 위젯이다.)
 
 Python ↔ Vue
 └── ui/vue_bridge.py (QWebChannel) — signals: imageGenerated, queueUpdated, searchResultsReady, vramUpdated, showNotification...
@@ -70,25 +73,24 @@ Python ↔ Vue
 
 ## 📦 요구 사항
 
-- Python **3.11+**
+- Python **3.10–3.11** (런처 `new_run_main_ui.bat` 가 둘 다 허용, 검증 venv 3.11.9)
 - Node.js 20+ (프론트엔드 빌드용)
 - Windows 10/11 권장 (PyQt6 + QWebEngineView)
 - 백엔드: Stable Diffusion WebUI / Forge 또는 ComfyUI (별도 실행)
 
 ### Python 패키지
-```
-PyQt6, PyQt6-WebEngine, requests, pandas, pyarrow, Pillow,
-opencv-python, numpy, exifread, websocket-client, send2trash,
-ultralytics, timm, rembg, pymatting
-```
+목록의 단일 출처는 [`requirements.txt`](requirements.txt) 다(앱 시작 시 `core/check_requirements.py` 가 누락분을 자동 설치).
+CUDA torch/torchvision 은 별도 인덱스라 `core/check_requirements.py` 가 설치한다.
+SAM3(`sam3` + Windows 용 `triton-windows`)와 VRAM 표시용 `nvidia-ml-py` 도 여기에 포함된다.
 
 ### 선택 (자동 검열)
 ```bash
-# MobileSAM (bbox 기반, 가볍고 빠름)
+# MobileSAM (bbox 기반, 가볍고 빠름) — requirements.txt 밖의 선택 설치
 pip install git+https://github.com/ChaoningZhang/MobileSAM.git
 
-# SAM3 (텍스트 프롬프트 기반, GPU 권장)
-pip install sam3 timm einops huggingface_hub iopath
+# SAM3 를 수동으로 다시 깔 때 (timm/einops/iopath/huggingface_hub 는 sam3 가 끌어온다.
+# triton 은 sam3 가 선언하지 않았지만 sam3/model/edt.py 가 무조건 import 한다)
+pip install sam3 triton-windows
 ```
 
 YOLO 모델 (`.pt`)과 SAM/SAM3 체크포인트는 `editor_models/` 디렉토리에 넣으면 자동 감지.
@@ -108,8 +110,8 @@ cd frontend && npm install && npm run build && cd ..
 
 # 3) 앱 실행 (venv 활성화 + 의존성 체크 + 데이터 준비 포함)
 new_run_main_ui.bat
-# 또는 수동 실행:
-python core\check_requirements.py && python core\fetch_data.py && python new_main_ui.py
+# 또는 수동 실행 (venv 활성화 후 — `venv\Scripts\activate`):
+python core\check_requirements.py && python -m core.fetch_data && python new_main_ui.py
 ```
 
 설정 → RUNTIMES / ENGINES에서 앱 관리형 또는 기존 설치 백엔드를 연결할 수 있습니다.
@@ -177,7 +179,8 @@ danbooru_optimized/
 | `단어_` 접두 제외 | `~_단어_` 포함 유지 |
 | `_단어_` 포함 제외 |  |
 
-총 9종. `config/default_excludes.txt`에 카테고리별 기본 세트 포함.
+총 9종. `config/default_excludes.txt`는 카테고리별로 정리한 **참고용 목록**이다 — 앱이 자동으로
+읽거나 적용하지 않으니, 필요한 줄을 제외 칸에 직접 붙여 넣어 쓴다.
 
 ---
 
@@ -231,10 +234,12 @@ danbooru_optimized/
 ## 🔧 개발 규칙
 
 - **Vue 수정 후**: `cd frontend && npm run build` 필수
+- **검증**: 백엔드 `venv\Scripts\python.exe run_tests.py`(시스템 python 이면 venv 로 재실행),
+  프론트 `cd frontend && npm run test && npm run test:node && npm run type-check`(0 errors 유지)
 - **PyQt 위젯 직접 사용 금지** — `WidgetProxy` 시스템 사용
 - **Vue v-model 키 = Python widget_id**: 예) `widgets.character_input` ↔ `LineEditProxy(b, 'character_input')`
 - **탭 간 이미지 전송**: `tabChanged` 먼저 emit → 100ms 후 이미지 시그널
-- **에러 처리**: `core/error_handler.py` 전역 코드 시스템 (E001~E999)
+- **에러 처리**: `core/error_handler.py` 전역 코드 시스템 (`ERROR_CODES` 표 — 사용 중인 코드는 E010·E020·E030·E040·E050·E100). 콘솔에는 원문, UI 로 가는 문구는 `sanitize_for_ui` 로 절대 경로를 가린다
 - **커밋 메시지**: 한국어 `feat:` / `fix:` / `refactor:` / `docs:` / `chore:`
 
 ---

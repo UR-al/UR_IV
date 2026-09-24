@@ -696,15 +696,10 @@ class InpaintTab(QWidget):
         self._vue_mask = None   # Vue 마스크 1회용 — 다음 생성에 재사용 방지
 
         if isinstance(result, bytes):
-            pixmap = QPixmap()
-            pixmap.loadFromData(result)
-            self.result_label.setPixmap(
-                pixmap.scaled(
-                    self.result_label.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-            )
+            info = gen_info if isinstance(gen_info, dict) else {}
+            # 이 탭은 화면에 없다(결과는 Vue 히스토리가 보여 준다) — 예전처럼 GUI 스레드에서 결과를
+            # 풀 디코드·스무스 축소해 보이지 않는 result_label 에 그리지 않는다.
+            self.result_label.setText("✅ 인페인트 생성 완료")
 
             filename = f"inpaint_{int(time.time())}_{random.randint(100, 999)}.png"
             filepath = os.path.join(OUTPUT_DIR, filename)
@@ -714,16 +709,17 @@ class InpaintTab(QWidget):
 
             self.info_text.setPlainText(
                 f"저장: {filepath}\n"
-                f"Seed: {gen_info.get('seed', '?')}"
+                f"Seed: {info.get('seed', '?')}"
             )
 
-            if self.main_window and hasattr(self.main_window, 'add_image_to_gallery'):
-                self.main_window.add_image_to_gallery(filepath)
+            # Vue 히스토리로만 보낸다 — 해상도는 결과 헤더(요청 크기는 폴백, core.result_image).
+            # (숨은 PyQt 갤러리 add_image_to_gallery 는 은퇴했다 — 풀해상도 QPixmap 을 최대 100장 들고 있었다)
             if self.main_window and hasattr(self.main_window, 'vue_bridge'):
                 try:
+                    from core.result_image import result_image_size
+                    width, height = result_image_size(result, info)
                     self.main_window.vue_bridge.send_image(
-                        filepath, int(gen_info.get('width', 0) or 0),
-                        int(gen_info.get('height', 0) or 0), gen_info.get('seed', -1))
+                        filepath, width, height, info.get('seed', -1))
                     self.main_window.vue_bridge.showNotification.emit('success', '인페인트 생성 완료')
                 except Exception:
                     pass

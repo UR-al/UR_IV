@@ -61,20 +61,8 @@ os.environ.setdefault("QT_LOGGING_RULES", "qt.webenginecontext.debug=false")
 
 from config import *
 from ui.generator_main import GeneratorMainUI
-from PyQt6.QtWidgets import QApplication, QPushButton
-from PyQt6.QtCore import Qt, QEvent, QObject
-from PyQt6.QtGui import QPalette, QColor, QCursor
-
-
-class ButtonCursorFilter(QObject):
-    """QPushButton에 마우스 올리면 포인터 커서로 변경"""
-    def eventFilter(self, obj, event):
-        if isinstance(obj, QPushButton) and obj.isEnabled():
-            if event.type() == QEvent.Type.Enter:
-                obj.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            elif event.type() == QEvent.Type.Leave:
-                obj.unsetCursor()
-        return False
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
 
 
 def main():
@@ -82,13 +70,17 @@ def main():
     # 윈도우 작업 표시줄 아이콘 해결 (AppUserModelID 설정)
     if sys.platform == 'win32':
         import ctypes
-        myappid = 'mycompany.myproduct.subproduct.version' # 임의의 고유 ID
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        from core.app_instance import APP_USER_MODEL_ID
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
-    
+
+    # 갤러리 카드 썸네일 스킴(aithumb:) — QWebEngineUrlScheme 는 QApplication 전에 등록해야 한다.
+    from ui.thumb_scheme import register_thumb_scheme
+    register_thumb_scheme()
+
     app = QApplication(sys.argv)
     app.setApplicationName("AI Studio Pro")
     app.setOrganizationName("AI Studio")
@@ -103,46 +95,28 @@ def main():
     icon_path = os.path.join(os.path.dirname(__file__), 'assets', 'icons', 'app_icon.svg')
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
-    
-    # PyQt 스타일 완전 제거 — Vue가 모든 UI 스타일링 담당
-    app.setStyleSheet("")
+
+    # PyQt 전역 스타일시트는 두지 않는다 — Vue가 모든 UI 스타일링 담당
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # 예외 핸들러 — 크래시 원인 로깅 (콘솔 + 파일).
     # Python 예외와 네이티브 크래시(SIGSEGV/abort/0x80000003)를 모두
     # logs/last_crash.log 에 기록해, 콘솔 창이 닫혀도 사후 확인 가능.
-    import traceback, faulthandler
-    from core.storage_paths import log_file
-    _crash_log = str(log_file('last_crash.log', legacy_paths='config/last_crash.log'))
-    _crash_fp = None
-    try:
-        os.makedirs(os.path.dirname(_crash_log), exist_ok=True)
-        _crash_fp = open(_crash_log, 'w', encoding='utf-8', buffering=1)
-        # 네이티브 크래시 시 전체 스레드 스택 자동 덤프
-        faulthandler.enable(_crash_fp)
-    except Exception:
-        _crash_fp = None
-
-    def _excepthook(exc_type, exc_value, exc_tb):
-        print("=" * 60)
-        print("UNHANDLED EXCEPTION:")
-        traceback.print_exception(exc_type, exc_value, exc_tb)
-        print("=" * 60)
-        if _crash_fp is not None:
-            try:
-                _crash_fp.write("\n=== UNHANDLED PYTHON EXCEPTION ===\n")
-                traceback.print_exception(exc_type, exc_value, exc_tb, file=_crash_fp)
-                _crash_fp.flush()
-            except Exception:
-                pass
-    sys.excepthook = _excepthook
+    # 슬롯 예외가 PyQt 기본 동작(qFatal)으로 앱을 끝내지 않게도 한다 — 웹 모드와 공용(core/crash_hooks.py).
+    from core.crash_hooks import install_crash_handlers
+    _crash_fp = install_crash_handlers()  # noqa: F841 — 앱 수명 동안 파일을 열어 둔다(faulthandler)
 
     window = GeneratorMainUI()
+    # 캡션 저장 폴더 승인 1회 이식 — 승인 규칙(core/caption_out_dir.py) 전에 대화상자로 고른 폴더를
+    # 계속 쓰게 한다. 데스크톱 진입점에서만(웹 모드는 이 값을 클라이언트가 썼을 수 있다).
+    try:
+        window.vue_bridge.seed_caption_out_dir_approval_from_prefs()
+    except Exception as exc:
+        print(f"[Caption] 저장 폴더 승인 이식 건너뜀: {exc}")
     # 스플래시 로딩 시퀀스: 백엔드 선택 → 로딩창 → 데이터 준비 → 완성된 UI.
     # (실패해도 내부 폴백으로 앱은 뜸. 시작 다이얼로그 X면 SystemExit로 종료.)
-    if hasattr(window, '_run_startup_sequence'):
-        window._run_startup_sequence(app)
+    window._run_startup_sequence(app)
 
     # 생성 API는 설정에서 명시적으로 켜 둔 경우에만 로컬 서버를 연다.
     # 위젯에 참조를 보관해 앱 수명과 gateway 수명을 일치시킨다.
@@ -157,7 +131,10 @@ def main():
         print(f"[Generation API] startup skipped: {exc}")
     window.showMaximized()
 
-    sys.exit(app.exec())
+    # run_main_loop = app.exec() + 메인 루프 표시 — 슬롯 안 Ctrl+C(KeyboardInterrupt)를 크래시 훅이
+    # 앱 종료 요청으로 넘길 때, 메인 루프면 창 닫기 확인·저장을 타는 quit() 을 쓴다(core/console_interrupt).
+    from core.console_interrupt import run_main_loop
+    sys.exit(run_main_loop(app))
 
 
 if __name__ == "__main__":

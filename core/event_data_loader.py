@@ -7,9 +7,17 @@ Step 0 = Parent (베이스), Step 1+ = Children (변형)
 - 유사도 기반 프롬프트 검색 (Jaccard similarity)
 - Children ID순 정렬 (스토리 순서 보장)
 - 이전 스텝 기준 diff (스토리 진행감)
+
+pandas 는 쓰는 메서드 안에서 import 한다 — 숨은 레거시 EventGenTab 이 창 표시 전에 이
+모듈을 import 하므로, 모듈 최상단 import 는 기동 임계 경로에 pandas(+pyarrow)를 얹었다.
 """
-import pandas as pd
 from pathlib import Path
+
+from core.tag_matcher import contains_tag_text
+
+
+class EventSearchCancelled(Exception):
+    """search_by_prompt 가 cancel_check 로 중단됐다 (새 요청이 이전 검색을 대체)."""
 
 
 class EventDataLoader:
@@ -29,11 +37,35 @@ class EventDataLoader:
         self.parents_df = None
         self.children_df = None
         self.parent_child_map = {}
+        # parent_id → children_df 행 위치 배열 (_build_parent_child_index 가 채운다)
+        self._child_positions = {}
+        # 불러온 shard 중 dataset_manifest 와 크기가 다른 것(상대 경로) — 옛 데이터를 조용히
+        # 쓰지 않도록 호출자(UI)가 알린다. manifest 가 없으면 판단하지 않는다(빈 목록).
+        self.stale_shards: list[str] = []
+
+    def _find_stale_shards(self, loaded_files: list) -> list:
+        """불러온 파일 중 manifest(parquet_dir 또는 그 부모)의 size_bytes 와 다른 것."""
+        if not loaded_files or not self.parquet_dir:
+            return []
+        try:
+            from core.dataset_artifacts import read_manifest, stale_among
+
+            base = Path(self.parquet_dir)
+            for root in (base, base.parent):
+                manifest = read_manifest(root)
+                if manifest is not None:
+                    return stale_among(manifest, root, loaded_files, kind='event_graph')
+        except Exception as exc:
+            print(f"[EventData] manifest 확인 실패(무시): {exc}")
+        return []
 
     def load_parquets_by_rating(self, ratings: list = None, progress_callback=None):
         """Rating별 parquet 파일 로드 (고속 버전)"""
+        import pandas as pd
+
         if ratings is None:
             ratings = ['e']
+        loaded_files = []
 
         rating_files = {
             'g': 'danbooru_g.parquet',
@@ -78,6 +110,7 @@ class EventDataLoader:
                     df['id'] = df['id'].astype(int)
 
                 dfs.append(df)
+                loaded_files.append(filepath)
                 print(f"✅ {filename}: {len(df)}개 로드")
 
                 if progress_callback:
@@ -103,6 +136,7 @@ class EventDataLoader:
                         df['id'] = df['id'].astype(int)
 
                     dfs.append(df)
+                    loaded_files.append(filepath)
                     print(f"✅ {filename}: {len(df)}개 로드 (폴백)")
                     if progress_callback:
                         progress_callback(i + 1, len(ratings), filename)
@@ -110,6 +144,13 @@ class EventDataLoader:
                     print(f"⚠️ {filename} 로드 실패: {e2}")
                     import traceback
                     traceback.print_exc()
+
+        self.stale_shards = self._find_stale_shards(loaded_files)
+        if self.stale_shards:
+            print(
+                "[EventData] dataset_manifest 와 크기가 다른 shard(구버전일 수 있음): "
+                + ", ".join(self.stale_shards)
+            )
 
         if dfs:
             self.df = pd.concat(dfs, ignore_index=True)
@@ -137,6 +178,7 @@ class EventDataLoader:
         """Parent-Child 인덱스 구축 (고속 버전)"""
         if self.df is None:
             return
+        import pandas as pd
 
         if progress_callback:
             progress_callback('Children 필터링...')
@@ -157,11 +199,21 @@ class EventDataLoader:
         if progress_callback:
             progress_callback(f'Parents: {len(self.parents_df)}개 발견')
 
-        # ★ Parent -> Children 매핑 생성 (groupby로 고속화)
+        # ★ Parent -> Children 매핑 생성 (groupby 한 번으로)
+        # _child_positions 는 children_df 의 행 위치(iloc) 배열이다. 검색이 후보 parent
+        # 마다 children_df 전체를 isin 으로 다시 훑던 것(q 28만 행 × 후보 6만 개 ≈ 2분)을
+        # O(자식 수) 조회로 바꾼다. 위치는 원래 행 순서 그대로라 isin 결과와 같은 행·순서다.
         if progress_callback:
             progress_callback('Parent-Child 매핑 구축...')
-        grouped = self.children_df.groupby('parent_id')['id'].apply(list)
-        self.parent_child_map = {int(k): v for k, v in grouped.items()}
+        child_ids = self.children_df['id'].to_numpy()
+        self._child_positions = {
+            int(k): positions
+            for k, positions in self.children_df.groupby('parent_id').indices.items()
+        }
+        self.parent_child_map = {
+            parent_id: child_ids[positions].tolist()
+            for parent_id, positions in self._child_positions.items()
+        }
 
         # ★ Parents에 미리 태그 세트를 캐싱 (유사도 검색 고속화)
         if progress_callback:
@@ -184,6 +236,16 @@ class EventDataLoader:
     @staticmethod
     def _parse_tags(text: str) -> set:
         """쉼표/공백 구분 태그 문자열을 정규화된 set으로 변환"""
+        if not isinstance(text, str):
+            # parquet 결측(NaN/None/pd.NA)은 빈 태그다 — `',' in nan` 이 TypeError 로 검색 전체를 죽였다
+            import pandas as pd
+
+            try:
+                if text is None or pd.isna(text):
+                    return set()
+            except (TypeError, ValueError):
+                pass
+            text = str(text)
         if not text:
             return set()
         # 쉼표로 먼저 분리, 없으면 공백
@@ -196,54 +258,163 @@ class EventDataLoader:
             for t in parts if t.strip()
         )
 
-    @staticmethod
-    def _overlap_ratio(query: set, target: set) -> float:
-        """쿼리 태그 중 target에 포함된 비율 (0.0 ~ 1.0), 부분 문자열 매칭 지원"""
-        if not query:
-            return 0.0
-        matched = 0
-        for q_tag in query:
-            # 정확히 일치하면 바로 카운트
-            if q_tag in target:
-                matched += 1
-            else:
-                # 부분 문자열 매칭 (boy -> 2boys, 3boys 등)
-                for t_tag in target:
-                    if q_tag in t_tag:
-                        matched += 1
-                        break
-        return matched / len(query)
+    # ── 유사도 단위 — 사전 필터(core.tag_matcher)와 같은 문법으로 질의를 읽는다 ──
+    # 예전에는 유사도를 _parse_tags 토큰으로 셌다. 그 토큰엔 '[1girl|1boy]'·'*1girl' 처럼 연산자가
+    # 그대로 남고, OR/AND 그룹은 쉼표·공백에서 쪼개져 어떤 태그와도 맞지 않았다 — 매처가 통과시킨
+    # 부모가 '최소 1개 일치' 단계에서 모두 탈락해 [A|B]·*x·_x_ 만 쓴 검색은 늘 0건이었고, 일반
+    # 태그와 섞으면 연산자 토큰이 '안 맞은 태그'로 세어져 순위가 틀어졌다.
 
     @staticmethod
-    def _jaccard_fuzzy(query: set, target: set) -> float:
-        """부분 문자열 매칭을 포함한 Jaccard 유사도"""
-        if not query or not target:
-            return 0.0
-        matched_target = set()
-        for q_tag in query:
-            if q_tag in target:
-                matched_target.add(q_tag)
-            else:
-                for t_tag in target:
-                    if q_tag in t_tag:
-                        matched_target.add(t_tag)
-                        break
-        intersection = len(matched_target)
-        union = len(query | target)
-        return intersection / union if union > 0 else 0.0
+    def _term_alternative(term: str):
+        """매처 텀 하나 → (방식, 정규화 텍스트). 방식은 tag_matcher._apply_pattern 과 같은 순서로 정한다."""
+        from core.tag_matcher import _normalize
+
+        text = (term or '').strip()
+        if not text:
+            return None
+        if text.startswith('*'):
+            mode, body = 'exact', text[1:]
+        elif text.startswith('_') and text.endswith('_') and len(text) > 2:
+            mode, body = 'contains', text[1:-1]
+        elif text.startswith('_') and not text.endswith('_'):
+            mode, body = 'suffix', text[1:]
+        elif text.endswith('_') and not text.startswith('_'):
+            mode, body = 'prefix', text[:-1]
+        else:
+            mode, body = 'contains', text
+        body = _normalize(body)
+        return (mode, body) if body else None
+
+    @classmethod
+    def _query_units(cls, prompt) -> list:
+        """일반 태그 질의 → 유사도 단위 목록. 단위 = (대안, …), 대안 = (방식, 텍스트).
+
+        방식: exact(``*x``) · suffix(``_x``) · prefix(``x_``) · contains(``_x_``·일반 태그).
+        ``[A|B]`` 는 대안이 여럿인 단위 하나, ``[A, B]`` 는 텀마다 단위, 빈 대안이 붙은 ``[A|B|]``
+        (항상 통과)는 빼고 센다. 쉼표도 대괄호도 없고 연산자도 없으면 예전처럼 공백으로 나눈다
+        (danbooru 식 ``1girl smile``). 연산자가 붙은 텀이 있으면(``*school uniform``) 매처처럼 통째로
+        한 텀으로 읽는다 — 공백으로 나누면 정확 ``school`` + 부분 ``uniform`` 두 단위가 되어, 매처가
+        ``school uniform`` 태그로 통과시킨 부모가 늘 1/2 로 세어졌다. 같은 단위는 한 번만 센다.
+        """
+        from core.tag_matcher import parse_query
+
+        text = prompt if isinstance(prompt, str) else ''
+        if not text.strip():
+            return []
+        units: list = []
+        parts = text.split()
+        # 연산자 판정은 매처(tag_matcher._eval_condition)와 같다 — 앞의 * · _, 뒤의 _
+        has_operator = any(part[0] in '*_' or part[-1] == '_' for part in parts)
+        if ',' not in text and '[' not in text and not has_operator:
+            candidates = [(cls._term_alternative(part),) for part in parts]
+        else:
+            candidates = []
+            for cond in parse_query(text):
+                terms = cond.get('terms') or []
+                if cond['type'] == 'or':
+                    if cond.get('has_wildcard'):
+                        continue
+                    candidates.append(tuple(cls._term_alternative(t) for t in terms))
+                else:
+                    candidates.extend((cls._term_alternative(t),) for t in terms)
+        for unit in candidates:
+            unit = tuple(dict.fromkeys(alt for alt in unit if alt))
+            if unit and unit not in units:
+                units.append(unit)
+        return units
+
+    @staticmethod
+    def _unit_match(unit, tags):
+        """단위가 맞은 부모 태그(없으면 None). 같은 글자 태그가 있으면 그것을 먼저 고른다."""
+        for mode, text in unit:
+            if text in tags:
+                return text
+            if mode == 'exact':
+                continue
+            for tag in tags:
+                if mode == 'suffix':
+                    hit = tag.endswith(text)
+                elif mode == 'prefix':
+                    hit = tag.startswith(text)
+                else:
+                    hit = text in tag
+                if hit:
+                    return tag
+        return None
+
+    @classmethod
+    def _unit_similarity(cls, units, tags) -> tuple:
+        """(맞은 단위 수, 유사도). 유사도 = 0.6·overlap + 0.4·jaccard (소수 셋째 자리 반올림).
+
+        overlap = 맞은 단위 / 단위 수. jaccard = |맞은 부모 태그| / (단위 수 + |부모 태그| − 글자가
+        같은 태그로 맞은 단위 수) — 연산자 없는 일반 태그만 쓰면 예전 _overlap_ratio·_jaccard_fuzzy
+        (부분 문자열 일치 포함)와 같은 값이다.
+        """
+        count = len(units)
+        if not count:
+            return 0, 0.0
+        tags = tags or set()
+        matched = 0
+        shared = 0
+        hit_tags = set()
+        for unit in units:
+            tag = cls._unit_match(unit, tags)
+            if tag is None:
+                continue
+            matched += 1
+            hit_tags.add(tag)
+            if any(text == tag for _mode, text in unit):
+                shared += 1
+        union = count + len(tags) - shared
+        jaccard = len(hit_tags) / union if tags and union > 0 else 0.0
+        return matched, round(0.6 * (matched / count) + 0.4 * jaccard, 3)
+
+    @staticmethod
+    def _query_mask(frame, col: str, query: str):
+        """통합 태그 매처(core.tag_matcher) 마스크. 매처를 못 쓰면 None."""
+        try:
+            from core.tag_matcher import filter_dataframe
+            return filter_dataframe(frame, col, query)
+        except Exception:
+            return None
+
+    @classmethod
+    def _contains_all_mask(cls, frame, col: str, query: str):
+        """매처 폴백 — 쉼표로 나눈 태그가 모두 (공백/밑줄 양쪽) 부분 일치해야 참."""
+        import pandas as pd
+
+        mask = pd.Series(True, index=frame.index)
+        lowered = frame[col].fillna('').astype(str).str.lower()
+        for tag in cls._parse_tags(query):
+            tag_u = tag.replace(' ', '_')
+            mask &= (
+                lowered.str.contains(tag_u, na=False, regex=False)
+                | lowered.str.contains(tag, na=False, regex=False)
+            )
+        return mask
+
+    def _ensure_child_positions(self):
+        """parent_id → children_df 행 위치 색인. 외부에서 df 를 직접 채운 경우 여기서 만든다."""
+        if self._child_positions or self.children_df is None or not len(self.children_df):
+            return self._child_positions
+        self._child_positions = {
+            int(k): positions
+            for k, positions in self.children_df.groupby('parent_id').indices.items()
+        }
+        return self._child_positions
 
     def search_by_prompt(
         self,
         prompt: str,
         exclude_tags: str = "",
-        child_include: str = "",
-        child_exclude: str = "",
         min_children: int = 2,
         max_children: int = 20,
-        min_score: int = 0,
-        require_variant_set: bool = False,
         limit: int = 100,
         progress_callback=None,
+        character: str = "",
+        copyright: str = "",
+        artist: str = "",
+        cancel_check=None,
     ) -> list:
         """
         ★ 프롬프트 기반 유사도 검색 (핵심 개선)
@@ -253,372 +424,172 @@ class EventDataLoader:
 
         유사도 = 0.6 * overlap_ratio + 0.4 * jaccard
         (overlap_ratio: 내 태그가 얼마나 포함되었는지 중시)
+
+        character / copyright / artist 는 각 tag_string_* 열에 거는 필수 필터다
+        (문법은 일반 태그와 같다: 쉼표=AND, [A|B]=OR, *정확 …). 일반 태그 없이
+        이 필터만 줘도 검색되며, 그때는 유사도 1.0 으로 보고 score 순으로 줄 세운다.
+
+        cancel_check: 인자 없는 호출이 True 를 돌려주면 EventSearchCancelled 를 던진다.
+
+        순서는 예전 구현(후보마다 자식 구성 → 전부 모은 뒤 (유사도, score) 안정 정렬 →
+        상위 limit) 과 같다. 다만 자식 수·유사도만으로 먼저 후보를 줄 세운 뒤
+        그 순서대로 상위 limit 개만 자식을 꺼낸다.
+
+        (숨은 레거시 EventGenTab 만 쓰던 child_include/child_exclude·min_score·require_variant_set
+        인자와 그 분기는 탭과 함께 지웠다 — Vue 이벤트 검색(EventSearchWorker)은 넘긴 적이 없다.)
         """
         if self.parents_df is None or len(self.parents_df) == 0:
             return []
 
-        query_tags = self._parse_tags(prompt)
+        prompt = prompt if isinstance(prompt, str) else ''
+        exclude_tags = exclude_tags if isinstance(exclude_tags, str) else ''
+        name_filters = [
+            (column, query.strip())
+            for column, query in (
+                ('tag_string_character', character),
+                ('tag_string_copyright', copyright),
+                ('tag_string_artist', artist),
+            )
+            if isinstance(query, str) and query.strip()
+        ]
+
+        # 유사도 단위 — 사전 필터와 같은 문법([A|B]·[A, B]·*x·_x·x_·_x_)으로 읽는다(_query_units).
+        # 단위가 없는 고급 문법(예: 항상 통과하는 [A|B|])은 사전 필터만 거르고 유사도 1.0 으로 본다.
+        query_units = self._query_units(prompt)
         exclude_set = self._parse_tags(exclude_tags)
-        child_inc_set = self._parse_tags(child_include)
-        child_exc_set = self._parse_tags(child_exclude)
 
-        if not query_tags and not prompt.strip():
+        if not prompt.strip() and not name_filters:
             return []
-        # query_tags가 비어있어도 고급 문법이면 사전 필터로 처리
-        if not query_tags and prompt.strip():
-            query_tags = {prompt.strip().lower().replace('_', ' ')}
 
-        filtered = self.parents_df.copy()
+        def _cancelled() -> bool:
+            return bool(cancel_check is not None and cancel_check())
 
-        # variant_set 필터
-        if require_variant_set and 'tag_string_meta' in filtered.columns:
-            filtered = filtered[
-                filtered['tag_string_meta'].str.contains(
-                    'variant_set|large_variant_set', na=False, regex=True
-                )
-            ]
+        # ── 사전 필터: 전체 복사 없이 조건마다 부분집합만 남긴다 ──
+        filtered = self.parents_df
 
-        # 점수 필터
-        if min_score > 0 and 'score' in filtered.columns:
-            filtered = filtered[filtered['score'] >= min_score]
+        # 캐릭터·작품·작가 필수 필터 (열이 없으면 확인할 수 없으므로 통과시키지 않는다)
+        for column, query in name_filters:
+            if column not in filtered.columns:
+                filtered = filtered.iloc[0:0]
+                break
+            mask = self._query_mask(filtered, column, query)
+            if mask is None:
+                mask = self._contains_all_mask(filtered, column, query)
+            filtered = filtered[mask]
 
-        # 통합 태그 매처로 사전 필터링
-        try:
-            from core.tag_matcher import filter_dataframe
-            # 프롬프트 사전 필터 (고급 문법: [], |, *, _ 지원)
-            if prompt.strip():
-                inc_mask = filter_dataframe(filtered, 'tag_string_general', prompt)
+        # 프롬프트 사전 필터 (고급 문법: [], |, *, _ 지원). 매처를 못 쓰면 유사도만으로 거른다.
+        prompt_prefiltered = False
+        if prompt.strip() and 'tag_string_general' in filtered.columns:
+            inc_mask = self._query_mask(filtered, 'tag_string_general', prompt)
+            if inc_mask is not None:
                 filtered = filtered[inc_mask]
-            # 제외 태그 필터
-            if exclude_tags.strip():
-                exc_mask = filter_dataframe(filtered, 'tag_string_general', exclude_tags)
+                prompt_prefiltered = True
+
+        # 제외 태그 필터
+        if exclude_tags.strip() and 'tag_string_general' in filtered.columns:
+            exc_mask = self._query_mask(filtered, 'tag_string_general', exclude_tags)
+            if exc_mask is not None:
                 filtered = filtered[~exc_mask]
-        except Exception:
-            # 폴백: 기존 방식
-            if exclude_set:
+            elif exclude_set:
+                # 폴백: 기존 방식 (공백/밑줄 양쪽 부분일치, 한 번의 스캔)
                 for tag in exclude_set:
-                    tag_u = tag.replace(' ', '_')
-                    tag_s = tag.replace('_', ' ')
-                    mask = ~(
-                        filtered['tag_string_general'].str.lower().str.contains(tag_u, na=False) |
-                        filtered['tag_string_general'].str.lower().str.contains(tag_s, na=False)
+                    mask = ~contains_tag_text(
+                        filtered['tag_string_general'].str.lower(), tag
                     )
                     filtered = filtered[mask]
 
         total_candidates = len(filtered)
-        print(f"🔍 사전 필터링 후 Parent 후보: {total_candidates}개")
+        print(f"[EventSearch] 사전 필터링 후 Parent 후보: {total_candidates}개")
 
-        # ★ 유사도 계산
-        scored_results = []
+        # ── 1단계: 자식 수 + 유사도만으로 후보 줄 세우기 (DataFrame 행 객체를 만들지 않는다) ──
+        child_positions = self._ensure_child_positions()
+        count = len(filtered)
+        ids = filtered['id'].tolist() if 'id' in filtered.columns else []
+        tag_sets = (
+            filtered['_tag_set'].tolist() if '_tag_set' in filtered.columns else [None] * count
+        )
+        generals = (
+            filtered['tag_string_general'].tolist()
+            if 'tag_string_general' in filtered.columns else [''] * count
+        )
+        scores = filtered['score'].tolist() if 'score' in filtered.columns else [0] * count
+        progress_step = max(50, count // 100)
+        n_query = len(query_units)
 
-        for row_idx, (_, parent) in enumerate(filtered.iterrows()):
-            if progress_callback and row_idx % 50 == 0:
-                progress_callback(row_idx, total_candidates)
-            parent_id = int(parent['id'])
-            if parent_id not in self.parent_child_map:
+        candidates = []   # (similarity, score, row_pos, parent_id, matched_count)
+        for row_pos, raw_id in enumerate(ids):
+            if row_pos % progress_step == 0:
+                if _cancelled():
+                    raise EventSearchCancelled()
+                if progress_callback:
+                    progress_callback(row_pos, total_candidates)
+            try:
+                parent_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            positions = child_positions.get(parent_id)
+            if positions is None:
+                continue
+            # 자식 id 는 유일하다(로드 시 id 중복 제거) — 위치 개수 = isin 으로 고른 자식 수
+            if len(positions) < min_children or len(positions) > max_children:
                 continue
 
-            parent_tag_set = parent.get('_tag_set', set())
-            if not parent_tag_set:
-                parent_tag_set = self._parse_tags(parent.get('tag_string_general', ''))
-
-            # 유사도 계산 (부분 문자열 매칭 포함)
-            overlap = self._overlap_ratio(query_tags, parent_tag_set)
-            jaccard = self._jaccard_fuzzy(query_tags, parent_tag_set)
-            similarity = 0.6 * overlap + 0.4 * jaccard
-
-            # 최소 1개 태그는 일치해야 함
-            if overlap == 0:
-                continue
-
-            # Children 확인
-            child_ids = self.parent_child_map[parent_id]
-            children = self.children_df[self.children_df['id'].isin(child_ids)].copy()
-
-            if len(children) < min_children or len(children) > max_children:
-                continue
-
-            # Child 포함 조건 (부분 문자열 매칭 지원)
-            if child_inc_set:
-                all_child_tags = set()
-                for _, c in children.iterrows():
-                    all_child_tags.update(self._parse_tags(c.get('tag_string_general', '')))
-                # 정확 매칭 또는 부분 문자열 매칭
-                found_any = False
-                for inc_tag in child_inc_set:
-                    if inc_tag in all_child_tags:
-                        found_any = True
-                        break
-                    for ct in all_child_tags:
-                        if inc_tag in ct:
-                            found_any = True
-                            break
-                    if found_any:
-                        break
-                if not found_any:
+            if n_query:
+                parent_tag_set = tag_sets[row_pos]
+                if not parent_tag_set:
+                    parent_tag_set = self._parse_tags(generals[row_pos])
+                # 유사도 계산 (단위마다 매처와 같은 방식: 정확·접미·접두·부분 문자열)
+                matched_count, similarity = self._unit_similarity(query_units, parent_tag_set)
+                # 사전 필터를 못 쓴 경우에만 '최소 1개 일치'로 거른다 — 매처가 통과시킨 부모는 이미
+                # 질의를 만족하므로 유사도는 순위만 정한다(예전엔 여기서 [A|B]·*x 결과가 모두 빠졌다).
+                if matched_count == 0 and not prompt_prefiltered:
                     continue
+            else:
+                # 캐릭터/작품/작가 필터만 준 검색, 또는 단위가 없는 고급 문법(사전 필터만) —
+                # 필터를 모두 만족했으니 유사도 1.0
+                matched_count = 0
+                similarity = 1.0
 
-            # Child 제외 조건
-            if child_exc_set:
-                for tag in child_exc_set:
-                    tag_u = tag.replace(' ', '_')
-                    tag_s = tag.replace('_', ' ')
-                    mask = ~(
-                        children['tag_string_general'].str.lower().str.contains(tag_u, na=False) |
-                        children['tag_string_general'].str.lower().str.contains(tag_s, na=False)
-                    )
-                    children = children[mask]
-                if len(children) < min_children:
-                    continue
+            score = scores[row_pos]
+            if score is None or score != score:   # NaN 은 비교 불가 → 0 으로 줄 세움
+                score = 0
+            candidates.append((similarity, score, row_pos, parent_id, matched_count))
+
+        if progress_callback:
+            progress_callback(total_candidates, total_candidates)
+
+        # ★ 유사도 내림차순 정렬, 같으면 score 내림차순 (안정 정렬 — 동률은 원래 행 순서)
+        candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+
+        # ── 2단계: 줄 선 순서대로 자식 구성, limit 개에서 멈춘다 ──
+        children_df = self.children_df
+        max_results = len(candidates) if limit is None else limit
+        accepted = []   # (row_pos, entry)
+        for similarity, _score, row_pos, parent_id, matched_count in candidates:
+            if len(accepted) >= max_results:
+                break
+            if _cancelled():
+                raise EventSearchCancelled()
+            children = children_df.iloc[child_positions[parent_id]]
 
             # ★ Children을 ID순 정렬 (스토리 순서)
             children = children.sort_values('id', ascending=True)
 
-            # 부분 문자열 포함 매칭 카운트
-            matched_count = 0
-            for q_tag in query_tags:
-                if q_tag in parent_tag_set:
-                    matched_count += 1
-                else:
-                    for t_tag in parent_tag_set:
-                        if q_tag in t_tag:
-                            matched_count += 1
-                            break
-
-            scored_results.append({
-                'parent': parent.to_dict(),
+            accepted.append((row_pos, {
+                'parent': None,   # 아래에서 한 번에 채운다
                 'children': children.to_dict('records'),
                 'child_count': len(children),
-                'similarity': round(similarity, 3),
+                'similarity': similarity,
                 'matched_tags': matched_count,
-                'total_query_tags': len(query_tags),
-            })
+                'total_query_tags': n_query,
+            }))
 
-        # ★ 유사도 내림차순 정렬, 같으면 score 내림차순
-        scored_results.sort(
-            key=lambda x: (x['similarity'], x['parent'].get('score', 0)),
-            reverse=True
-        )
+        # parent 행 dict 는 채택된 행만 만든다 — iterrows 로 만들어 예전 결과와 값 형식이 같다
+        if accepted:
+            parent_rows = filtered.iloc[[row_pos for row_pos, _entry in accepted]]
+            for (_label, parent), (_row_pos, entry) in zip(parent_rows.iterrows(), accepted):
+                entry['parent'] = parent.to_dict()
 
-        print(f"✅ 유사도 검색 결과: {len(scored_results)}개 (상위 {limit}개 반환)")
-        return scored_results[:limit]
-
-    # ──────────────────────────────────────────────────────
-    #  기존 search_events (하위 호환용 유지)
-    # ──────────────────────────────────────────────────────
-
-    def search_events(
-        self,
-        parent_include: str = "",
-        parent_exclude: str = "",
-        child_include: str = "",
-        child_exclude: str = "",
-        min_children: int = 2,
-        max_children: int = 20,
-        min_score: int = 0,
-        ratings: list = None,
-        require_variant_set: bool = False,
-        limit: int = 100
-    ):
-        """기존 이벤트 검색 (하위 호환)"""
-        if self.parents_df is None or len(self.parents_df) == 0:
-            print("⚠️ Parent 데이터가 없습니다.")
-            return []
-
-        results = []
-        filtered_parents = self.parents_df.copy()
-
-        if require_variant_set and 'tag_string_meta' in filtered_parents.columns:
-            filtered_parents = filtered_parents[
-                filtered_parents['tag_string_meta'].str.contains(
-                    'variant_set|large_variant_set', na=False, regex=True
-                )
-            ]
-
-        if ratings and 'rating' in filtered_parents.columns:
-            filtered_parents = filtered_parents[filtered_parents['rating'].isin(ratings)]
-
-        if min_score > 0 and 'score' in filtered_parents.columns:
-            filtered_parents = filtered_parents[filtered_parents['score'] >= min_score]
-
-        if parent_include:
-            include_tags = [t.strip().lower() for t in parent_include.split(',') if t.strip()]
-            for tag in include_tags:
-                tag_underscore = tag.replace(' ', '_')
-                tag_space = tag.replace('_', ' ')
-                mask = (
-                    filtered_parents['tag_string_general'].str.lower().str.contains(tag_underscore, na=False) |
-                    filtered_parents['tag_string_general'].str.lower().str.contains(tag_space, na=False)
-                )
-                filtered_parents = filtered_parents[mask]
-
-        if parent_exclude:
-            exclude_tags = [t.strip().lower() for t in parent_exclude.split(',') if t.strip()]
-            for tag in exclude_tags:
-                tag_underscore = tag.replace(' ', '_')
-                tag_space = tag.replace('_', ' ')
-                mask = ~(
-                    filtered_parents['tag_string_general'].str.lower().str.contains(tag_underscore, na=False) |
-                    filtered_parents['tag_string_general'].str.lower().str.contains(tag_space, na=False)
-                )
-                filtered_parents = filtered_parents[mask]
-
-        if 'score' in filtered_parents.columns:
-            filtered_parents = filtered_parents.sort_values('score', ascending=False)
-
-        for _, parent in filtered_parents.iterrows():
-            if len(results) >= limit:
-                break
-
-            parent_id = int(parent['id'])
-            if parent_id not in self.parent_child_map:
-                continue
-
-            child_ids = self.parent_child_map[parent_id]
-            children = self.children_df[self.children_df['id'].isin(child_ids)].copy()
-
-            if len(children) < min_children or len(children) > max_children:
-                continue
-
-            if child_include:
-                include_tags = [t.strip().lower() for t in child_include.split(',') if t.strip()]
-                has_required = False
-                for tag in include_tags:
-                    tag_underscore = tag.replace(' ', '_')
-                    tag_space = tag.replace('_', ' ')
-                    if (
-                        children['tag_string_general'].str.lower().str.contains(tag_underscore, na=False).any() or
-                        children['tag_string_general'].str.lower().str.contains(tag_space, na=False).any()
-                    ):
-                        has_required = True
-                        break
-                if not has_required:
-                    continue
-
-            if child_exclude:
-                exclude_tags = [t.strip().lower() for t in child_exclude.split(',') if t.strip()]
-                for tag in exclude_tags:
-                    tag_underscore = tag.replace(' ', '_')
-                    tag_space = tag.replace('_', ' ')
-                    mask = ~(
-                        children['tag_string_general'].str.lower().str.contains(tag_underscore, na=False) |
-                        children['tag_string_general'].str.lower().str.contains(tag_space, na=False)
-                    )
-                    children = children[mask]
-
-            if len(children) < min_children:
-                continue
-
-            # ★ Children ID순 정렬 (C. 스토리 순서 보장)
-            children = children.sort_values('id', ascending=True)
-
-            results.append({
-                'parent': parent.to_dict(),
-                'children': children.to_dict('records'),
-                'child_count': len(children),
-            })
-
+        results = [entry for _row_pos, entry in accepted]
+        print(f"[EventSearch] 유사도 검색 결과: 후보 {len(candidates)}개 중 {len(results)}개 반환 (limit {limit})")
         return results
-
-    # ──────────────────────────────────────────────────────
-    #  B. 이전 스텝 기준 diff로 build_steps 개선
-    # ──────────────────────────────────────────────────────
-
-    def build_steps(self, event: dict) -> list:
-        """
-        이벤트를 스텝 리스트로 변환
-        ★ 개선: Children을 ID순 정렬 + 이전 스텝 기준 diff
-
-        Step 0 = Parent (베이스)
-        Step 1+ = Children (변형, ID순 = 스토리 순)
-        """
-        parent = event['parent']
-        children = event['children']
-
-        # ★ C. Children을 ID순 정렬 (스토리 순서 보장)
-        children = sorted(children, key=lambda c: c.get('id', 0))
-
-        # Parent 태그
-        parent_tags = self._parse_tags(parent.get('tag_string_general', ''))
-
-        steps = []
-
-        # Step 0: Parent (베이스)
-        steps.append({
-            'step': 0,
-            'id': parent.get('id'),
-            'is_parent': True,
-            'tags': parent_tags.copy(),
-            'tags_str': ', '.join(sorted(parent_tags)),
-            'character': parent.get('tag_string_character', ''),
-            'copyright': parent.get('tag_string_copyright', ''),
-            'artist': parent.get('tag_string_artist', ''),
-            'rating': parent.get('rating', ''),
-            'score': parent.get('score', 0),
-            'added': [],
-            'removed': [],
-            'added_from_parent': [],
-            'removed_from_parent': [],
-        })
-
-        # Step 1+: Children
-        prev_tags = parent_tags.copy()
-
-        for i, child in enumerate(children):
-            child_tags = self._parse_tags(child.get('tag_string_general', ''))
-
-            # ★ B. 이전 스텝 기준 diff (스토리 진행감)
-            added_from_prev = sorted(child_tags - prev_tags)
-            removed_from_prev = sorted(prev_tags - child_tags)
-
-            # Parent 기준 diff도 보조로 유지
-            added_from_parent = sorted(child_tags - parent_tags)
-            removed_from_parent = sorted(parent_tags - child_tags)
-
-            steps.append({
-                'step': i + 1,
-                'id': child.get('id'),
-                'is_parent': False,
-                'tags': child_tags.copy(),
-                'tags_str': ', '.join(sorted(child_tags)),
-                'character': child.get('tag_string_character', ''),
-                'copyright': child.get('tag_string_copyright', ''),
-                'artist': child.get('tag_string_artist', ''),
-                'rating': child.get('rating', ''),
-                'score': child.get('score', 0),
-                'added': added_from_prev,
-                'removed': removed_from_prev,
-                'added_from_parent': added_from_parent,
-                'removed_from_parent': removed_from_parent,
-            })
-
-            prev_tags = child_tags.copy()
-
-        return steps
-
-    def get_event_summary(self, event: dict) -> str:
-        """이벤트 요약 문자열 생성"""
-        parent = event['parent']
-        child_count = event['child_count']
-
-        parent_id = parent.get('id', 'N/A')
-        score = parent.get('score', 0)
-        rating = parent.get('rating', '?')
-        similarity = event.get('similarity', None)
-        matched = event.get('matched_tags', None)
-        total_q = event.get('total_query_tags', None)
-
-        tags = parent.get('tag_string_general', '').split()[:5]
-        tags_preview = ', '.join(t.replace('_', ' ') for t in tags)
-
-        # ★ 유사도 정보 포함
-        sim_str = ""
-        if similarity is not None:
-            pct = int(similarity * 100)
-            sim_str = f" | 유사도:{pct}% ({matched}/{total_q})"
-
-        return (
-            f"[{rating.upper()}] score:{score} | "
-            f"{child_count} steps{sim_str} | "
-            f"{tags_preview}..."
-        )

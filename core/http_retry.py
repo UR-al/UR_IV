@@ -1,8 +1,8 @@
 # core/http_retry.py
 """트랜지언트 HTTP 실패에 대한 exponential backoff 재시도.
 
-- 5xx / 연결오류 / 타임아웃만 재시도 (4xx는 즉시 실패)
-- jitter 없음, 단순 2의 지수 백오프
+- 5xx / 연결오류 / 타임아웃만 재시도 (4xx는 즉시 반환 — 호출자가 status 를 본다)
+- 지수 백오프(backoff_factor ** attempt) + 최대 ``jitter``초(기본 0.2초)의 무작위 지연
 - requests 세션은 호출자가 관리 (여기선 stateless 호출만 지원)
 """
 from __future__ import annotations
@@ -70,7 +70,3 @@ def request_with_retry(
 
 def get_with_retry(url: str, **kwargs) -> requests.Response:
     return request_with_retry("GET", url, **kwargs)
-
-
-def post_with_retry(url: str, **kwargs) -> requests.Response:
-    return request_with_retry("POST", url, **kwargs)

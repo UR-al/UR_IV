@@ -8,7 +8,8 @@
     └─ compare            1 file  /  15 MB
 
 thumbs는 개수가 문제라 sha1 앞 2자리로 샤딩한다. 디렉터리당 ~380개로 떨어져
-`os.path.exists` 조회와 탐색기 접근이 모두 빨라진다.
+`os.path.exists` 조회와 탐색기 접근이 모두 빨라진다. (지금 캐시는 처음부터 샤딩된
+image_cache/thumbs_v2 — 옛 평면 폴더 정리는 core.legacy_thumb_cache 가 한 번 한다.)
 """
 import os
 import time
@@ -29,6 +30,81 @@ def ensure_shard_dir(path: str) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
     except OSError:
         pass
+
+
+def source_signature(path: str):
+    """원본 서명 ``(st_mtime_ns, st_size)``. 못 읽으면 None."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+# 썸네일 JPEG 의 COM(주석) 마커에 '어느 원본으로 만들었는지'를 적는다.
+THUMB_SIGNATURE_PREFIX = b'aistudio-src:'
+_SIGNATURE_READ_BYTES = 4096   # COM 은 SOI·APP0 바로 뒤에 온다 — 머리만 읽는다
+
+
+def thumb_signature_comment(signature) -> bytes:
+    """``source_signature`` → 썸네일 JPEG 주석 바이트."""
+    mtime_ns, size = signature
+    return THUMB_SIGNATURE_PREFIX + f'{int(mtime_ns)}:{int(size)}'.encode('ascii')
+
+
+def read_thumb_signature(thumb: str):
+    """썸네일 JPEG 주석에 적힌 원본 서명 ``(mtime_ns, size)``. 없거나(옛 썸네일) 못 읽으면 None."""
+    try:
+        with open(thumb, 'rb') as handle:
+            head = handle.read(_SIGNATURE_READ_BYTES)
+    except OSError:
+        return None
+    if not head.startswith(b'\xff\xd8'):
+        return None
+    pos = 2
+    while pos + 4 <= len(head):
+        if head[pos] != 0xFF:
+            return None
+        marker = head[pos + 1]
+        if marker == 0xFF:            # 채움 바이트
+            pos += 1
+            continue
+        if marker in (0xD9, 0xDA):    # EOI · SOS — 여기부터는 이미지 데이터
+            return None
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+            pos += 2
+            continue
+        length = int.from_bytes(head[pos + 2:pos + 4], 'big')
+        if length < 2:
+            return None
+        payload = head[pos + 4:pos + 2 + length]
+        if marker == 0xFE and payload.startswith(THUMB_SIGNATURE_PREFIX):
+            try:
+                mtime_ns, size = payload[len(THUMB_SIGNATURE_PREFIX):].decode('ascii').split(':')
+                return int(mtime_ns), int(size)
+            except ValueError:
+                return None
+        pos += 2 + length
+    return None
+
+
+def thumb_is_stale(source: str, thumb: str) -> bool:
+    """썸네일을 (다시) 만들어야 하는지 — 없거나, 만든 뒤 원본이 바뀌었으면.
+
+    캐시 키는 경로@폭이라, 예전에는 파일이 있기만 하면 옛 그림을 계속 보여 줬다
+    (에디터 '저장'이 사본을 갱신하거나, '다른 이름으로 저장'이 기존 파일을 덮어쓴 경우).
+    판정은 썸네일 주석에 적힌 원본 서명(mtime_ns, 크기)과 지금 원본 서명의 **일치**다.
+    예전 '원본 mtime > 썸네일 mtime' 순서 비교는 렌더 중에 덮어쓴 원본(에디터 원자 저장은 임시
+    파일의 옛 mtime 을 가진다)이나 더 옛 mtime 을 가진 파일로 바꾼 원본(copy2·탐색기 덮어쓰기)을
+    놓쳐 옛 그림을 새것처럼 남겼다. 서명이 없는 옛 썸네일은 한 번 다시 만든다.
+    원본을 못 읽으면(지워짐 등) 있는 썸네일을 그대로 쓴다. 웹 모드 /thumbnail 과 같은 규칙.
+    """
+    if not os.path.isfile(thumb):
+        return True
+    current = source_signature(source)
+    if current is None:
+        return False
+    return read_thumb_signature(thumb) != current
 
 
 def _entries_by_mtime(directory: str, exts=None):
@@ -122,34 +198,3 @@ def prune_by_total_size(directory: str, max_bytes: int, *, recursive: bool = Fal
 def prune_thumbs(directory: str, max_bytes: int = 300 * 1024 * 1024) -> int:
     """썸네일 캐시 상한(기본 300MB). 샤딩된 하위 디렉터리까지 훑는다."""
     return prune_by_total_size(directory, max_bytes, recursive=True)
-
-
-def migrate_flat_to_sharded(directory: str, limit: int = 5000) -> int:
-    """평면 캐시 디렉터리를 샤딩 구조로 이관. 한 번에 `limit`개씩(앱 시작 지연 방지).
-
-    이관 실패는 무시한다 — 썸네일은 언제든 재생성 가능하고, 실패한 파일은
-    다음 실행에서 다시 시도된다. 반환: 옮긴 파일 수.
-    """
-    moved = 0
-    try:
-        with os.scandir(directory) as scan:
-            for entry in scan:
-                if moved >= limit:
-                    break
-                if not entry.is_file():
-                    continue
-                stem, ext = os.path.splitext(entry.name)
-                if len(stem) < SHARD_PREFIX_LEN:
-                    continue
-                target = shard_path(directory, stem, ext)
-                if os.path.abspath(target) == os.path.abspath(entry.path):
-                    continue
-                ensure_shard_dir(target)
-                try:
-                    os.replace(entry.path, target)
-                    moved += 1
-                except OSError:
-                    continue
-    except (OSError, FileNotFoundError):
-        return moved
-    return moved

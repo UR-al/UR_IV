@@ -8,77 +8,10 @@ import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.error_handler import sanitize_for_ui
+from core.image_metadata import read_applicable_prompts
+from core.resource_coordinator import backend_job_guard, release_before_backend_job
 
 logger = logging.getLogger(__name__)
-
-
-def _read_exif_prompts(image_path: str):
-    """이미지 메타데이터에서 positive/negative prompt 추출.
-
-    우선순위:
-    1) PIL info 'parameters' (WebUI 포맷)
-    2) PNG 텍스트 청크 (Comfy/기타)
-    3) JSON 형태 메타데이터 (info['prompt'] or info['workflow'])
-    실패 시 ('', '')
-    """
-    try:
-        from PIL import Image
-        img = Image.open(image_path)
-        info = img.info or {}
-
-        # 1) WebUI parameters
-        raw = info.get('parameters', '')
-        if raw and 'Steps:' in raw:
-            parts = raw.split('\nNegative prompt: ')
-            prompt = parts[0].strip()
-            negative = ''
-            if len(parts) > 1:
-                sub = parts[1].split('\nSteps: ')
-                negative = sub[0].strip()
-            return prompt, negative
-
-        # 2) PNG 텍스트 청크 (getattr로 보호)
-        text_chunks = getattr(img, 'text', None) or {}
-        for key in ('parameters', 'prompt', 'Description'):
-            val = text_chunks.get(key) if isinstance(text_chunks, dict) else None
-            if val and 'Steps:' in val:
-                parts = val.split('\nNegative prompt: ')
-                prompt = parts[0].strip()
-                negative = ''
-                if len(parts) > 1:
-                    sub = parts[1].split('\nSteps: ')
-                    negative = sub[0].strip()
-                return prompt, negative
-
-        # 3) JSON 메타데이터 (Comfy 워크플로우 등)
-        for key in ('prompt', 'workflow'):
-            val = info.get(key)
-            if not val:
-                continue
-            try:
-                parsed = json.loads(val) if isinstance(val, str) else val
-            except (ValueError, TypeError):
-                continue
-            # Comfy 워크플로우에서 CLIPTextEncode 노드의 text 추출 (best-effort)
-            if isinstance(parsed, dict):
-                positive_texts, negative_texts = [], []
-                for node in parsed.values():
-                    if not isinstance(node, dict):
-                        continue
-                    inputs = node.get('inputs') or {}
-                    text = inputs.get('text')
-                    if not isinstance(text, str):
-                        continue
-                    title = (node.get('_meta') or {}).get('title', '').lower()
-                    if 'negative' in title:
-                        negative_texts.append(text)
-                    elif 'positive' in title or 'prompt' in title:
-                        positive_texts.append(text)
-                if positive_texts or negative_texts:
-                    return ', '.join(positive_texts), ', '.join(negative_texts)
-    except Exception as e:
-        logger.warning("EXIF read failed (%s): %s", os.path.basename(image_path), e)
-    return '', ''
 
 
 def _get_output_path(src_path: str, output_folder: str = '') -> str:
@@ -94,19 +27,31 @@ def _to_posix(path: str) -> str:
     return path.replace('\\', '/')
 
 
-def _prepare_settings(settings: dict, image_path: str) -> dict:
-    """EXIF 프롬프트 적용"""
+def _prepare_settings(settings: dict, image_path: str) -> tuple[dict, str]:
+    """EXIF 프롬프트 적용 → (settings, exif_warning).
+
+    프롬프트는 core.image_metadata 한 곳에서 읽는다(네거티브 없는 A1111, JPEG/WebP
+    UserComment, IDAT 뒤 텍스트, ComfyUI 그래프 역할 판정). 읽지 못했거나 ComfyUI 그래프가
+    모호하면 추측하지 않고 경고를 결과 JSON 으로 돌려준다 — BatchView 가 토스트로 알린다.
+    """
     settings = dict(settings)
     settings.setdefault('sam3_mode', 'Inpaint')
     settings.setdefault('sam3_mask_mode', 'Individual')
     settings.setdefault('sam3_prompt', 'face')
+    warning = ''
     if settings.get('use_exif_prompt'):
-        prompt, negative = _read_exif_prompts(image_path)
+        prompt, negative, warning = read_applicable_prompts(image_path)
         if prompt and not settings.get('sam3_inpaint_prompt'):
             settings['sam3_inpaint_prompt'] = prompt
         if negative and not settings.get('sam3_negative_prompt'):
             settings['sam3_negative_prompt'] = negative
-    return settings
+    return settings, warning
+
+
+def _with_exif_warning(result: dict, warning: str) -> dict:
+    if warning:
+        result['exif_warning'] = warning
+    return result
 
 
 class Sam3SingleWorker(QThread):
@@ -126,22 +71,26 @@ class Sam3SingleWorker(QThread):
                 self.finished.emit(json.dumps({'error': '백엔드 연결 없음'}))
                 return
 
-            settings = _prepare_settings(self._settings, self._path)
+            settings, exif_warning = _prepare_settings(self._settings, self._path)
 
             with open(self._path, 'rb') as f:
                 image_b64 = base64.b64encode(f.read()).decode()
 
-            result_b64 = backend.sam3(image_b64, settings)
+            # Forge가 SAM3를 올리기 전에 앱 프로세스의 편집기 SAM3 번들(~3.4GB)을 반납
+            release_before_backend_job('sam3')
+            # 모델 언로드(생성 후·대기열 정리·수동)와 배타 — 진행 중이면 기다리고, 도는 동안엔 언로드가 건너뛴다
+            with backend_job_guard('sam3'):
+                result_b64 = backend.sam3(image_b64, settings)
 
             output_path = _get_output_path(self._path, settings.get('output_folder', ''))
             with open(output_path, 'wb') as f:
                 f.write(base64.b64decode(result_b64))
 
-            self.finished.emit(json.dumps({
+            self.finished.emit(json.dumps(_with_exif_warning({
                 'before': _to_posix(self._path),
                 'after': _to_posix(output_path),
                 'output_path': _to_posix(output_path),
-            }))
+            }, exif_warning), ensure_ascii=False))
         except Exception as e:
             logger.exception("Sam3SingleWorker failed")
             self.finished.emit(json.dumps({'error': sanitize_for_ui(e)}))
@@ -174,22 +123,25 @@ class Sam3BatchWorker(QThread):
             if self._stop_event.is_set():
                 break
             try:
-                settings = _prepare_settings(self._settings, path)
+                settings, exif_warning = _prepare_settings(self._settings, path)
 
                 with open(path, 'rb') as f:
                     image_b64 = base64.b64encode(f.read()).decode()
 
-                result_b64 = backend.sam3(image_b64, settings)
+                # 항목마다 — 배치 도중 편집기에서 SAM3를 다시 올렸어도 Forge 작업과 겹치지 않게
+                release_before_backend_job('sam3-batch')
+                with backend_job_guard('sam3-batch'):          # 모델 언로드와 배타(항목마다)
+                    result_b64 = backend.sam3(image_b64, settings)
                 output_path = _get_output_path(path, settings.get('output_folder', ''))
                 with open(output_path, 'wb') as f:
                     f.write(base64.b64decode(result_b64))
 
-                self.single_done.emit(json.dumps({
+                self.single_done.emit(json.dumps(_with_exif_warning({
                     'before': _to_posix(path),
                     'after': _to_posix(output_path),
                     'output_path': _to_posix(output_path),
                     'index': i,
-                }))
+                }, exif_warning), ensure_ascii=False))
             except Exception as e:
                 logger.exception("Sam3BatchWorker failed for %s", os.path.basename(path))
                 self.single_done.emit(json.dumps({

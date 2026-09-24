@@ -355,6 +355,57 @@ class SearchResultStoreTests(unittest.TestCase):
         self.assertEqual(store.load_full(), [])
         self.assertIn("no matching active", store.last_error)
 
+    def test_expected_snapshot_loads_full_without_reparsing_active(self) -> None:
+        store = SearchResultStore(project_root=self.project_root)
+        store.save(
+            [{"general": "active"}],
+            full=[{"general": "active"}, {"general": "base only"}],
+            snapshot_id="a" * 32,
+        )
+        reads = []
+        real_read = SearchResultStore._read_envelope
+
+        def tracking_read(path, *args):
+            reads.append(Path(path).name)
+            return real_read(path, *args)
+
+        with patch.object(
+            SearchResultStore, "_read_envelope", staticmethod(tracking_read)
+        ):
+            loaded = store.load_full(expected_snapshot_id="A" * 32)
+
+        self.assertEqual(
+            loaded, [{"general": "active"}, {"general": "base only"}]
+        )
+        self.assertEqual(reads, ["last_full_results.json"])
+        self.assertIsNone(store.last_error)
+        self.assertEqual(store.last_snapshot_id, "a" * 32)
+
+    def test_expected_snapshot_rejects_a_full_base_from_another_snapshot(self) -> None:
+        store = SearchResultStore(project_root=self.project_root)
+        store.save([{"general": "a"}], full=[{"general": "a"}], snapshot_id="a" * 32)
+
+        self.assertEqual(store.load_full(expected_snapshot_id="b" * 32), [])
+        self.assertIn("different snapshot", store.last_error)
+        self.assertIsNone(store.last_snapshot_id)
+
+    def test_expected_snapshot_still_validates_dataset_and_id_format(self) -> None:
+        store = SearchResultStore(project_root=self.project_root)
+        store.save([{"general": "a"}], full=[{"general": "a"}], snapshot_id="a" * 32)
+
+        self.assertEqual(store.load_full(expected_snapshot_id="../bad"), [])
+        self.assertIn("invalid", store.last_error)
+
+        self._write_manifest("2026_08")
+        self.assertEqual(store.load_full(expected_snapshot_id="a" * 32), [])
+        self.assertIn("dataset label", store.last_error.lower())
+
+    def test_expected_snapshot_without_full_file_is_empty_not_an_error(self) -> None:
+        store = SearchResultStore(project_root=self.project_root)
+
+        self.assertEqual(store.load_full(expected_snapshot_id="a" * 32), [])
+        self.assertIsNone(store.last_error)
+
 
 if __name__ == "__main__":
     unittest.main()

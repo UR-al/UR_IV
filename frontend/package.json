@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "test": "vitest run",
+    "test:node": "node --test \"src/studio/*.test.mjs\"",
     "test:watch": "vitest"
   },
   "dependencies": {

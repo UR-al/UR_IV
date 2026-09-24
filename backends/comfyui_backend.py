@@ -7,7 +7,6 @@ import io
 import json
 import mimetypes
 import uuid
-import random
 import threading
 import requests
 import websocket
@@ -26,6 +25,13 @@ from backends.comfyui_workflow_inspector import (
     NATIVE_CHECKPOINT_LOADERS, NATIVE_UNET_LOADERS, SAMPLER_NODES,
     SAVE_NODES, TEXT_ENCODER_NODES,
 )
+from core.comfy_object_info_cache import EXTERNAL_OBJECT_INFO, ObjectInfoCache
+from core.comfy_schema_fetch import SchemaFetchCancelled
+from core.comfy_seed import graph_main_seed, with_concrete_seed
+from core.comfy_workflow_format import (
+    WEB_WORKFLOW_MESSAGE, is_web_workflow, require_api_workflow,
+)
+from core.lenient_numbers import finite_float as _float_or, lenient_int as _int_or
 
 import config
 from utils.app_logger import get_logger
@@ -53,21 +59,6 @@ _UPLOAD_IMAGE_FORMATS = {
 }
 _MAX_RESULT_ARTIFACTS = 64
 _MAX_RESULT_BYTES = 256 * 1024 * 1024
-
-
-def _int_or(value, default: int) -> int:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
-
-
-def _float_or(value, default: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed == parsed and parsed not in (float('inf'), float('-inf')) else default
 
 
 def _base64_image_size(image_b64: str) -> Tuple[int, int]:
@@ -132,7 +123,13 @@ def analyze_workflow(file_path: str) -> dict:
             'width': int | None,
             'height': int | None,
             'nodes_summary': list[str],
+            'generation_blocker': str | None,  # 생성이 항상 거부하는 구조
+            'model_selectable': bool,  # 앱 모델 선택이 워크플로 로더에 적용되는지
         }
+
+    웹(편집기 저장) 포맷은 요약만 보여 주고 valid=False — 앱은 API 포맷만 실행한다
+    (core/comfy_workflow_format.py). API 포맷은 구조 요약과 함께, 실제 컴파일러를
+    빈 payload 로 돌려 본 결과를 generation_blocker 로 알려 준다(valid 는 유지).
     """
     import os
     result = {
@@ -141,6 +138,7 @@ def analyze_workflow(file_path: str) -> dict:
         'has_positive_clip': False, 'has_negative_clip': False,
         'has_save_node': False, 'width': None, 'height': None,
         'nodes_summary': [],
+        'generation_blocker': None, 'model_selectable': False,
     }
 
     if not file_path or not os.path.exists(file_path):
@@ -157,8 +155,12 @@ def analyze_workflow(file_path: str) -> dict:
         result['error'] = f"파일 읽기 오류: {e}"
         return result
 
+    if not isinstance(data, dict):
+        result['error'] = "ComfyUI 워크플로 JSON 최상위 값은 객체여야 합니다."
+        return result
+
     # 포맷 감지
-    if 'nodes' in data and isinstance(data['nodes'], list):
+    if is_web_workflow(data):
         result['format'] = 'web'
         nodes_by_type = {}
         for node in data.get('nodes', []):
@@ -192,7 +194,9 @@ def analyze_workflow(file_path: str) -> dict:
                 continue
             cls = node.get('class_type', 'Unknown')
             nodes_by_type[cls] = nodes_by_type.get(cls, 0) + 1
-            inputs = node.get('inputs', {})
+            inputs = node.get('inputs')
+            if not isinstance(inputs, dict):
+                inputs = {}  # "inputs": null/[] — 요약은 계속하고 막힘 사유로 알린다
 
             if cls in NATIVE_CHECKPOINT_LOADERS:
                 result['checkpoint'] = inputs.get('ckpt_name')
@@ -240,9 +244,21 @@ def analyze_workflow(file_path: str) -> dict:
                 result.setdefault('inspector_notes', []).extend(ins.notes)
         except Exception as e:
             _logger.warning(f"workflow inspector 실패: {e}")
+        # 생성 컴파일러와 같은 규칙으로 '실제로 생성할 수 있는가'를 따로 알린다.
+        # valid(필수 노드 존재)는 그대로 두고, 막히는 이유는 경고로 보여 준다.
+        from core.comfy_workflow_structure import describe_generation_structure
+        structure = describe_generation_structure(data)
+        result['generation_blocker'] = structure['generation_blocker']
+        result['model_selectable'] = structure['model_selectable']
+        if result['generation_blocker'] is None and not result['model_selectable']:
+            # 앱이 모델을 써 넣을 수 없는 로더 → 생성은 워크플로 자체 모델로 돈다.
+            # 선택 화면·모델 콤보도 '워크플로가 모델 고정'으로 맞춘다.
+            result['is_locked'] = True
 
     # 유효성 검사
     errors = []
+    if result['format'] == 'web':
+        errors.append(WEB_WORKFLOW_MESSAGE)
     if not result['ksampler_type']:
         errors.append("KSampler 노드 없음")
     if not result['has_positive_clip']:
@@ -272,6 +288,12 @@ class ComfyUIBackend(AbstractBackend):
         self._current_prompt_id = None
         self._node_pack_preflight_done = False
         self._last_generation_context: Optional[dict] = None
+        # Short-lived /object_info snapshot for graph compilation only
+        # (core/comfy_object_info_cache.py). Live callers use get_object_info().
+        self._object_info_cache = ObjectInfoCache()
+        # Generation API profile jobs: per-endpoint snapshots shared across the
+        # per-job backend instances (tests swap in an isolated registry).
+        self._external_object_info_caches = EXTERNAL_OBJECT_INFO
 
     def _configured_workflow_path(self, mode: str) -> str:
         if mode == 'img2img':
@@ -321,6 +343,29 @@ class ComfyUIBackend(AbstractBackend):
                 _logger.info("ComfyUI 대기 prompt 삭제 요청 전송: %s", pid)
         except Exception as e:
             _logger.debug(f"interrupt 실패(무시): {e}")
+
+    def unload_models(self) -> bool:
+        """생성 후 VRAM 회수 — ComfyUI 의 /free 로 모델 언로드 + 캐시 해제.
+
+        WebUI 백엔드의 unload_models() 와 같은 이름이라 generator 쪽은 백엔드 종류를 몰라도
+        된다. /free 는 즉시 ACK 만 돌려주는 비동기 요청이다(완료 장벽이 아님).
+        """
+        try:
+            response = requests.post(
+                f'{self.api_url}/free',
+                json={'unload_models': True, 'free_memory': True},
+                timeout=10,
+            )
+            response.raise_for_status()
+            _logger.info("ComfyUI /free 요청 전송 (unload_models + free_memory)")
+            return True
+        except Exception as e:
+            _logger.warning("ComfyUI /free 실패: %s", e)
+            return False
+
+    def unload_checkpoint(self) -> bool:
+        """'생성 후 모델 언로드' 설정용 — ComfyUI 에선 /free 가 곧 그것이다."""
+        return self.unload_models()
 
     def test_connection(self) -> bool:
         """ComfyUI 연결 상태 확인"""
@@ -400,12 +445,67 @@ class ComfyUIBackend(AbstractBackend):
         """
         from core.http_retry import get_with_retry
 
-        data = get_with_retry(
-            f'{self.api_url}/object_info', timeout=15, retries=3,
-        ).json()
+        import time
+
+        api_url = self.api_url
+        started = time.perf_counter()
+        response = get_with_retry(
+            f'{api_url}/object_info', timeout=15, retries=3,
+        )
+        data = response.json()
         if not isinstance(data, dict):
             raise RuntimeError("ComfyUI /object_info 응답이 객체가 아닙니다")
+        # 스키마 크기(수 MB)와 왕복 시간 — 컴파일 스냅샷이 얼마나 아끼는지 로그로 잰다.
+        content = getattr(response, 'content', None)
+        size = len(content) if isinstance(content, (bytes, bytearray)) else -1
+        _logger.debug(
+            "ComfyUI /object_info %.0fms, %d bytes, %d nodes",
+            (time.perf_counter() - started) * 1000, size, len(data),
+        )
+        # Every live fetch (connect/get_info, inspector, XYZ) refreshes the
+        # compile snapshot, so the next compile starts from the newest schema.
+        self._object_info_cache.store(api_url, data)
         return data
+
+    def _compile_object_info(self, *, fresh: bool = False) -> Tuple[dict, bool]:
+        """``(/object_info, from_cache)`` for graph compilation.
+
+        Reuses this instance's snapshot for the same URL within the cache TTL
+        (one generation plus its post-processing passes no longer re-download
+        the multi-MB schema per pass).  ``fresh=True`` forces a live fetch.
+        """
+        return self._object_info_cache.get(
+            self.api_url, self.get_object_info, fresh=fresh,
+        )
+
+    def get_object_info_bounded(
+        self, cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> dict:
+        """``/object_info`` of a possibly remote target (Generation API profiles).
+
+        Unlike ``get_object_info`` (local runtime, retried, uncapped): no
+        redirects, a 32 MiB cap and one attempt that polls ``cancel_check``
+        between chunks (core/comfy_schema_fetch.py).
+        """
+        from core.comfy_schema_fetch import fetch_object_info_bounded
+
+        return fetch_object_info_bounded(self.api_url, cancel_check=cancel_check)
+
+    def _external_object_info(
+        self, cancel_check: Optional[Callable[[], bool]] = None, *, fresh: bool = False,
+    ) -> Tuple[dict, bool]:
+        """``(/object_info, from_cache)`` for ``generate_workflow``.
+
+        The Generation API builds a new backend per job, so the snapshot is
+        shared per endpoint (``EXTERNAL_OBJECT_INFO``) and repeated API jobs
+        within the TTL reuse one download.
+        """
+        cache = self._external_object_info_caches.for_url(self.api_url)
+        return cache.get(
+            self.api_url,
+            lambda: self.get_object_info_bounded(cancel_check),
+            fresh=fresh,
+        )
 
     @staticmethod
     def _is_loopback_url(value: str) -> bool:
@@ -457,8 +557,15 @@ class ComfyUIBackend(AbstractBackend):
             self._node_pack_preflight_done = True
             return
         result = install_bundled_node_pack(extension_dir)
-        if result.changed:
+        if result.changed and not getattr(result, 'restart_required', True):
+            # README/LICENSE 같은 문서만 달랐다: 실행 중인 ComfyUI 는 이미 같은
+            # .py/.json 을 쓰므로 파일만 갱신하고 재시작·생성 중단은 하지 않는다.
+            _logger.info("AI Studio ComfyUI 노드 팩 문서만 갱신(재시작 불필요): %s", result.target)
+        elif result.changed:
             _logger.info("AI Studio ComfyUI 노드 팩 설치/갱신: %s", result.target)
+            # The node set/schema changes with the new pack (after a restart):
+            # never compile against the pre-install snapshot.
+            self._object_info_cache.invalidate()
             if bool(engine.get('owned')) and bool(engine.get('running')):
                 # Comfy imports custom nodes only during startup.  Restart only
                 # the process owned by this runtime manager; an external
@@ -470,6 +577,7 @@ class ComfyUIBackend(AbstractBackend):
                 restarted_url = str(started.get('apiUrl') or '').strip()
                 if restarted_url:
                     self.api_url = restarted_url.rstrip('/')
+                self._object_info_cache.invalidate()
                 _logger.info("관리형 ComfyUI 재시작으로 번들 노드 팩 적용 완료")
             else:
                 raise RuntimeError(
@@ -479,12 +587,44 @@ class ComfyUIBackend(AbstractBackend):
                 )
         self._node_pack_preflight_done = True
 
-    def _workflow_compiler(self):
-        """Run the local install preflight, then bind compilation to live capabilities."""
+    def _workflow_compiler(self, *, fresh: bool = False):
+        """Run the local install preflight, then bind compilation to capabilities.
+
+        The capability document is this instance's short-lived snapshot
+        (``_compile_object_info``); ``fresh=True`` refetches it.  The returned
+        compiler's ``object_info_cached`` says which one it got, so
+        ``_compile_graph`` can retry a failed compile once with a fresh one.
+        """
+        from core.comfy_sam3_cache_policy import comfy_sam3_keep_in_ram_from_prefs_file
         from core.comfy_workflow_compiler import ComfyWorkflowCompiler
 
         self._preflight_bundled_node_pack()
-        return ComfyWorkflowCompiler(self.get_object_info())
+        object_info, cached = self._compile_object_info(fresh=fresh)
+        # 설정 'ComfyUI SAM3 모델 RAM 보관'(ui_prefs.comfySam3KeepInRam) → SAM3 Mask cache_model.
+        return ComfyWorkflowCompiler(
+            object_info,
+            sam3_keep_in_ram=comfy_sam3_keep_in_ram_from_prefs_file(),
+            object_info_cached=cached,
+        )
+
+    def _compile_graph(self, build: Callable):
+        """Compile with ``build(compiler)``; retry once on a fresh schema.
+
+        A snapshot can predate a model/LoRA the user just added or a node
+        pack reload, so a compile error raised while using the cached
+        document is retried once against a live ``/object_info``.  Errors on
+        a fresh document are real and propagate unchanged.
+        """
+        from core.comfy_workflow_compiler import WorkflowCompileError
+
+        compiler = self._workflow_compiler()
+        try:
+            return build(compiler)
+        except WorkflowCompileError as exc:
+            if getattr(compiler, 'object_info_cached', False) is not True:
+                raise
+            _logger.info("캐시된 ComfyUI 스키마로 컴파일 실패 → 새로 받아 1회 재시도: %s", exc)
+            return build(self._workflow_compiler(fresh=True))
 
     def get_system_stats(self) -> dict:
         """GPU/VRAM 상태 조회"""
@@ -524,10 +664,14 @@ class ComfyUIBackend(AbstractBackend):
             _logger.warning(f"ComfyUI LoRA 목록 로드 실패: {e}")
         return []
 
-    # ── 워크플로우 포맷 감지 및 변환 ──
+    # ── 사용자 워크플로 로드 ──
 
     def _load_configured_workflow(self, mode: str) -> Optional[dict]:
-        """Load an optional advanced workflow; no path means use the app graph."""
+        """Load an optional advanced workflow; no path means use the app graph.
+
+        Only ComfyUI API-format JSON is accepted (core/comfy_workflow_format.py):
+        the editor's web format needs ComfyUI's own graph conversion.
+        """
         workflow_path = self._configured_workflow_path(mode)
         if not workflow_path:
             return None
@@ -538,282 +682,9 @@ class ComfyUIBackend(AbstractBackend):
             raise RuntimeError(f"워크플로우 파일 경로가 유효하지 않습니다: {exc}") from exc
         with open(safe_path, 'r', encoding='utf-8') as handle:
             data = json.load(handle)
-        if 'nodes' in data and isinstance(data['nodes'], list):
-            _logger.info("웹 포맷 워크플로우 감지 → API 포맷으로 변환")
-            data = self._convert_web_to_api(data)
-        if not isinstance(data, dict):
-            raise RuntimeError("ComfyUI 워크플로우 최상위 값은 JSON 객체여야 합니다.")
+        data = require_api_workflow(data)
         _logger.info("고급 ComfyUI 워크플로우 로드 (노드 %d개)", len(data))
         return data
-
-    def _load_workflow(self) -> dict:
-        """사용자 워크플로우 JSON 로드 (API/웹 포맷 자동 감지)"""
-        workflow = self._load_configured_workflow('txt2img')
-        if workflow is None:
-            raise RuntimeError(
-                "ComfyUI 워크플로우 파일이 설정되지 않았습니다.\n"
-                "API 관리에서 워크플로우 JSON 파일을 선택해주세요."
-            )
-        return workflow
-
-    def _convert_web_to_api(self, web_data: dict) -> dict:
-        """ComfyUI 웹 포맷 → API 포맷 변환"""
-        nodes = web_data.get('nodes', [])
-        links = web_data.get('links', [])
-
-        # 링크 맵 구성: link_id → (source_node_id, source_slot)
-        link_map = {}
-        for link in links:
-            # link = [link_id, source_node_id, source_slot, dest_node_id, dest_slot, type]
-            if len(link) >= 6:
-                link_id = link[0]
-                source_node_id = link[1]
-                source_slot = link[2]
-                link_map[link_id] = (source_node_id, source_slot)
-
-        api_workflow = {}
-
-        for node in nodes:
-            node_id = str(node.get('id', ''))
-            node_type = node.get('type', '')
-            if not node_id or not node_type:
-                continue
-
-            api_node = {
-                'class_type': node_type,
-                'inputs': {}
-            }
-
-            # 위젯 값을 inputs에 매핑
-            widget_values = node.get('widgets_values', [])
-            node_inputs = node.get('inputs', [])
-
-            # 입력 슬롯 처리 (링크 연결)
-            for inp in node_inputs:
-                inp_name = inp.get('name', '')
-                inp_link = inp.get('link')
-                if inp_link is not None and inp_link in link_map:
-                    src_id, src_slot = link_map[inp_link]
-                    api_node['inputs'][inp_name] = [str(src_id), src_slot]
-
-            # 위젯 값 매핑 (노드 타입별)
-            self._map_widget_values(api_node, node_type, widget_values)
-
-            api_workflow[node_id] = api_node
-
-        _logger.info(f"웹→API 변환 완료 (노드 {len(api_workflow)}개)")
-        return api_workflow
-
-    def _map_widget_values(self, api_node: dict, node_type: str, values: list):
-        """노드 타입별 위젯 값을 inputs에 매핑"""
-        inputs = api_node['inputs']
-
-        if not values:
-            return
-
-        try:
-            if node_type in ('KSampler',):
-                # KSampler: seed, control_after_generate, steps, cfg, sampler_name, scheduler, denoise
-                if len(values) >= 7:
-                    inputs.setdefault('seed', values[0])
-                    # values[1] = control_after_generate (skip)
-                    inputs.setdefault('steps', values[2])
-                    inputs.setdefault('cfg', values[3])
-                    inputs.setdefault('sampler_name', values[4])
-                    inputs.setdefault('scheduler', values[5])
-                    inputs.setdefault('denoise', values[6])
-
-            elif node_type == 'KSamplerAdvanced':
-                # add_noise, noise_seed, control_after_generate, steps, cfg, sampler_name, scheduler,
-                # start_at_step, end_at_step, return_with_leftover_noise
-                if len(values) >= 10:
-                    inputs.setdefault('add_noise', values[0])
-                    inputs.setdefault('noise_seed', values[1])
-                    inputs.setdefault('steps', values[3])
-                    inputs.setdefault('cfg', values[4])
-                    inputs.setdefault('sampler_name', values[5])
-                    inputs.setdefault('scheduler', values[6])
-                    inputs.setdefault('start_at_step', values[7])
-                    inputs.setdefault('end_at_step', values[8])
-                    inputs.setdefault('return_with_leftover_noise', values[9])
-
-            elif node_type == 'CLIPTextEncode':
-                if len(values) >= 1:
-                    inputs.setdefault('text', values[0])
-
-            elif node_type == 'CheckpointLoaderSimple':
-                if len(values) >= 1:
-                    inputs.setdefault('ckpt_name', values[0])
-
-            elif node_type == 'EmptyLatentImage':
-                if len(values) >= 3:
-                    inputs.setdefault('width', values[0])
-                    inputs.setdefault('height', values[1])
-                    inputs.setdefault('batch_size', values[2])
-
-            elif node_type == 'SaveImage':
-                if len(values) >= 1:
-                    inputs.setdefault('filename_prefix', values[0])
-
-            elif node_type == 'VAELoader':
-                if len(values) >= 1:
-                    inputs.setdefault('vae_name', values[0])
-
-        except (IndexError, TypeError):
-            pass
-
-    # ── 노드 탐색 ──
-
-    def _find_ksampler_node(self, workflow: dict) -> Tuple[str, dict]:
-        """KSampler 계열 노드 찾기"""
-        sampler_types = (
-            'KSampler', 'KSamplerAdvanced',
-            'SamplerCustom', 'SamplerCustomAdvanced',
-        )
-        for node_id, node in workflow.items():
-            if not isinstance(node, dict):
-                continue
-            cls = node.get('class_type', '')
-            if cls in sampler_types:
-                return node_id, node
-
-        raise RuntimeError(
-            "워크플로우에서 KSampler 노드를 찾을 수 없습니다.\n"
-            f"지원되는 노드: {', '.join(sampler_types)}"
-        )
-
-    def _find_clip_encode_node(self, workflow: dict, start_node_id: str,
-                                max_depth: int = 5) -> Optional[str]:
-        """링크를 따라가며 CLIPTextEncode 노드를 찾기 (다단계 추적)"""
-        clip_types = ('CLIPTextEncode', 'CLIPTextEncodeSDXL')
-        visited = set()
-
-        def trace(node_id: str, depth: int) -> Optional[str]:
-            if depth > max_depth or node_id in visited:
-                return None
-            visited.add(node_id)
-
-            node = workflow.get(node_id)
-            if not node or not isinstance(node, dict):
-                return None
-
-            if node.get('class_type', '') in clip_types:
-                return node_id
-
-            # 이 노드의 입력을 추적하여 CLIPTextEncode 찾기
-            inputs = node.get('inputs', {})
-            for key, val in inputs.items():
-                if isinstance(val, list) and len(val) >= 1:
-                    linked_id = str(val[0])
-                    result = trace(linked_id, depth + 1)
-                    if result:
-                        return result
-            return None
-
-        return trace(start_node_id, 0)
-
-    def _trace_clip_nodes(self, workflow: dict, ksampler_node: dict) -> Tuple[Optional[str], Optional[str]]:
-        """KSampler의 positive/negative 입력에서 CLIPTextEncode 노드 ID 찾기"""
-        inputs = ksampler_node.get('inputs', {})
-
-        positive_id = None
-        negative_id = None
-
-        # positive 입력 추적 (다단계)
-        pos_input = inputs.get('positive')
-        if isinstance(pos_input, list) and len(pos_input) >= 1:
-            start_id = str(pos_input[0])
-            positive_id = self._find_clip_encode_node(workflow, start_id)
-
-        # negative 입력 추적 (다단계)
-        neg_input = inputs.get('negative')
-        if isinstance(neg_input, list) and len(neg_input) >= 1:
-            start_id = str(neg_input[0])
-            negative_id = self._find_clip_encode_node(workflow, start_id)
-
-        return positive_id, negative_id
-
-    def _apply_params(self, workflow: dict, model_name: str, payload: dict):
-        """워크플로우 노드에 UI 파라미터 매핑"""
-        ksampler_id, ksampler_node = self._find_ksampler_node(workflow)
-        inputs = ksampler_node.get('inputs', {})
-        cls = ksampler_node.get('class_type', '')
-
-        _logger.info(f"KSampler 노드: ID={ksampler_id}, type={cls}")
-
-        # KSampler 파라미터
-        seed = payload.get('seed', -1)
-        if seed == -1:
-            seed = random.randint(0, 2**32 - 1)
-
-        if cls == 'KSamplerAdvanced':
-            inputs['noise_seed'] = seed
-        else:
-            inputs['seed'] = seed
-
-        inputs['steps'] = payload.get('steps', 20)
-        inputs['cfg'] = payload.get('cfg_scale', 7.0)
-        inputs['sampler_name'] = payload.get('sampler_name', 'euler')
-        inputs['scheduler'] = payload.get('scheduler', 'normal')
-        inputs['denoise'] = payload.get('denoising_strength', 1.0)
-
-        # CLIP Text Encode (positive/negative) — 다단계 추적
-        pos_id, neg_id = self._trace_clip_nodes(workflow, ksampler_node)
-        _logger.info(f"CLIPTextEncode: positive={pos_id}, negative={neg_id}")
-
-        if pos_id and pos_id in workflow:
-            pos_node = workflow[pos_id]
-            pos_cls = pos_node.get('class_type', '')
-            if pos_cls == 'CLIPTextEncode':
-                pos_node['inputs']['text'] = payload.get('prompt', '')
-            elif pos_cls == 'CLIPTextEncodeSDXL':
-                # SDXL: text_g와 text_l 모두 설정
-                prompt_text = payload.get('prompt', '')
-                pos_node['inputs']['text_g'] = prompt_text
-                pos_node['inputs']['text_l'] = prompt_text
-
-        if neg_id and neg_id in workflow:
-            neg_node = workflow[neg_id]
-            neg_cls = neg_node.get('class_type', '')
-            if neg_cls == 'CLIPTextEncode':
-                neg_node['inputs']['text'] = payload.get('negative_prompt', '')
-            elif neg_cls == 'CLIPTextEncodeSDXL':
-                neg_text = payload.get('negative_prompt', '')
-                neg_node['inputs']['text_g'] = neg_text
-                neg_node['inputs']['text_l'] = neg_text
-
-        # CheckpointLoaderSimple
-        if model_name:
-            for node_id, node in workflow.items():
-                if not isinstance(node, dict):
-                    continue
-                if node.get('class_type') == 'CheckpointLoaderSimple':
-                    node['inputs']['ckpt_name'] = model_name
-                    break
-
-        # EmptyLatentImage
-        def positive_int(value, default=1):
-            try:
-                parsed = int(value)
-            except (TypeError, ValueError):
-                return default
-            return parsed if parsed > 0 else default
-
-        batch_size = positive_int(payload.get('batch_size', 1))
-        batch_count = max(
-            positive_int(payload.get('n_iter', 1)),
-            positive_int(payload.get('batch_count', 1)),
-        )
-        for node_id, node in workflow.items():
-            if not isinstance(node, dict):
-                continue
-            if node.get('class_type') == 'EmptyLatentImage':
-                node['inputs']['width'] = payload.get('width', 512)
-                node['inputs']['height'] = payload.get('height', 512)
-                node['inputs']['batch_size'] = batch_size * batch_count
-                break
-
-        _logger.info("워크플로우 파라미터 매핑 완료")
 
     # ── 생성 및 결과 수신 ──
 
@@ -1273,11 +1144,17 @@ class ComfyUIBackend(AbstractBackend):
                           ) -> GenerationResult:
         """Generate from a caller-approved workflow without mutating caller data.
 
-        ``mode`` accepts the normalized API names and their short UI aliases.
-        The supplied workflow may be ComfyUI API format or exported web format.
-        For img2img, the first ``init_images`` entry is uploaded and assigned to
-        the workflow's ``LoadImage`` node before the normal parameter mapping and
-        queue/result path are used.
+        Used by Generation API ComfyUI profiles.  ``mode`` accepts the
+        normalized API names and their short UI aliases; the workflow must be
+        ComfyUI API format.  For img2img, the first ``init_images`` entry is
+        uploaded into the workflow's ``LoadImage`` node.  The payload is then
+        applied with the app compiler's rules (``map_external_workflow``: the
+        main sampler of a single- or multi-pass graph, Forge sampler names,
+        txt2img denoise 1.0, LoRA tags → loader nodes, model on a rewritable
+        loader) without inserting bundled nodes, so a stock/remote ComfyUI
+        keeps working.  The seed actually queued is reported as
+        ``result.info['seed']``; prompt LoRAs the target lacks are skipped
+        like Forge and listed in ``result.info['warnings']``.
         """
         mode_aliases = {
             'txt2img': 'txt2img',
@@ -1302,13 +1179,15 @@ class ComfyUIBackend(AbstractBackend):
                 error="생성 payload는 JSON 객체여야 합니다.",
             )
 
+        if is_web_workflow(workflow):
+            return GenerationResult(success=False, error=WEB_WORKFLOW_MESSAGE)
+
         try:
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다.")
             prepared = copy.deepcopy(workflow)
-            prepared_payload = copy.deepcopy(payload)
-            if 'nodes' in prepared and isinstance(prepared['nodes'], list):
-                prepared = self._convert_web_to_api(prepared)
+            # One concrete seed for the whole job, reported back below.
+            prepared_payload = with_concrete_seed(copy.deepcopy(payload))
 
             if normalized_mode == 'img2img':
                 init_images = prepared_payload.get('init_images', [])
@@ -1333,16 +1212,78 @@ class ComfyUIBackend(AbstractBackend):
 
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다.")
-            self._apply_params(prepared, model_name, prepared_payload)
+            prepared, warnings = self._map_external_workflow(
+                prepared, normalized_mode, model_name, prepared_payload, cancel_check,
+            )
+            if cancel_check and cancel_check():
+                return GenerationResult(success=False, error="사용자가 작업을 취소했습니다.")
             if cancel_check is None:
-                return self.run_workflow(prepared, progress_callback)
-            return self.run_workflow(prepared, progress_callback, cancel_check)
+                result = self.run_workflow(prepared, progress_callback)
+            else:
+                result = self.run_workflow(prepared, progress_callback, cancel_check)
+            result = self._with_reported_seed(result, prepared, prepared_payload)
+            if warnings and isinstance(result, GenerationResult):
+                info = dict(result.info or {})
+                info['warnings'] = list(info.get('warnings') or []) + list(warnings)
+                result.info = info
+            return result
+        except SchemaFetchCancelled:
+            return GenerationResult(success=False, error="사용자가 작업을 취소했습니다.")
         except Exception as exc:
             _logger.error("외부 워크플로우 생성 오류: %s", exc, exc_info=True)
             return GenerationResult(
                 success=False,
                 error=f"ComfyUI 워크플로우 생성 오류: {exc}",
             )
+
+    def _map_external_workflow(self, workflow: Dict, mode: str, model_name: str,
+                               payload: Dict,
+                               cancel_check: Optional[Callable[[], bool]] = None,
+                               ) -> Tuple[dict, List[str]]:
+        """Map the payload onto a profile workflow against the target's schema.
+
+        The schema is the endpoint's shared snapshot (``_external_object_info``).
+        A snapshot can predate a model/LoRA added a moment ago, so a compile
+        error — or a prompt LoRA reported missing — on a cached document is
+        retried once against a fresh one.  Other warnings (a split-schedule
+        sampler kept as authored) do not depend on the schema and never cost
+        a re-download.  No node-pack preflight: a profile may be a remote
+        ComfyUI.
+        """
+        from core.comfy_workflow_compiler import ComfyWorkflowCompiler, WorkflowCompileError
+
+        def build(object_info: dict) -> Tuple[dict, List[str], List[str]]:
+            warnings: List[str] = []
+            missing_loras: List[str] = []
+            graph = ComfyWorkflowCompiler(object_info).map_external_workflow(
+                workflow, mode, model_name, payload,
+                warnings=warnings, missing_loras=missing_loras,
+            )
+            return graph, warnings, missing_loras
+
+        object_info, cached = self._external_object_info(cancel_check)
+        if cancel_check and cancel_check():
+            raise SchemaFetchCancelled("사용자가 작업을 취소했습니다.")
+        try:
+            graph, warnings, missing_loras = build(object_info)
+            if not (cached and missing_loras):
+                return self._log_external_warnings(graph, warnings)
+            _logger.info("캐시된 ComfyUI 스키마에 없는 LoRA → 새로 받아 1회 재확인: %s", missing_loras)
+        except WorkflowCompileError as exc:
+            if not cached:
+                raise
+            _logger.info("캐시된 ComfyUI 스키마로 매핑 실패 → 새로 받아 1회 재시도: %s", exc)
+        object_info, _cached = self._external_object_info(cancel_check, fresh=True)
+        if cancel_check and cancel_check():
+            raise SchemaFetchCancelled("사용자가 작업을 취소했습니다.")
+        graph, warnings, _missing_loras = build(object_info)
+        return self._log_external_warnings(graph, warnings)
+
+    @staticmethod
+    def _log_external_warnings(graph: dict, warnings: List[str]) -> Tuple[dict, List[str]]:
+        for warning in warnings:
+            _logger.warning("외부 워크플로우: %s", warning)
+        return graph, warnings
 
     def upload_media(self, data: bytes, filename: str,
                      mime: str = 'application/octet-stream',
@@ -1388,21 +1329,26 @@ class ComfyUIBackend(AbstractBackend):
             _logger.info(f"=== ComfyUI txt2img 시작 ===")
             _logger.info(f"모델: {model_name}")
             _logger.info(f"워크플로우 경로: {self._configured_workflow_path('txt2img') or '(미설정)'}")
-            compiler = self._workflow_compiler()
+            # Forge picks one seed for -1; every pass (base, Hires, ADetailer,
+            # SAM3) uses it and it is reported back (info['seed']).
+            job_payload = with_concrete_seed(payload)
             custom_workflow = self._load_configured_workflow('txt2img')
             from core.comfy_workflow_controls import generation_workflow_controls
-            workflow = compiler.compile(
-                'txt2img', model_name, payload, workflow=custom_workflow,
-                workflow_controls=generation_workflow_controls(
-                    self.api_url, self._configured_workflow_path('txt2img'), custom_workflow, payload, 'txt2img',
-                ),
+            controls = generation_workflow_controls(
+                self.api_url, self._configured_workflow_path('txt2img'), custom_workflow, payload, 'txt2img',
             )
+            workflow = self._compile_graph(lambda compiler: compiler.compile(
+                'txt2img', model_name, job_payload, workflow=custom_workflow,
+                workflow_controls=controls,
+            ))
             self._last_generation_context = {
                 'model_name': model_name, 'payload': copy.deepcopy(dict(payload)),
             }
             if cancel_check is None:
-                return self._queue_and_wait(workflow, progress_callback)
-            return self._queue_and_wait(workflow, progress_callback, cancel_check)
+                result = self._queue_and_wait(workflow, progress_callback)
+            else:
+                result = self._queue_and_wait(workflow, progress_callback, cancel_check)
+            return self._with_reported_seed(result, workflow, job_payload)
 
         except FileNotFoundError as e:
             _logger.error(f"워크플로우 파일 없음: {e}")
@@ -1417,15 +1363,26 @@ class ComfyUIBackend(AbstractBackend):
             _logger.error(f"예기치 못한 오류: {e}", exc_info=True)
             return GenerationResult(success=False, error=f"ComfyUI 생성 오류: {e}")
 
-    def _load_img2img_workflow(self) -> dict:
-        """img2img 워크플로우 JSON 로드"""
-        workflow = self._load_configured_workflow('img2img')
-        if workflow is None:
-            raise RuntimeError(
-                "ComfyUI img2img 워크플로우 파일이 설정되지 않았습니다.\n"
-                "설정에서 img2img 워크플로우 JSON 파일을 선택해주세요."
-            )
-        return workflow
+    @staticmethod
+    def _with_reported_seed(result: GenerationResult, graph: dict,
+                            payload: Dict) -> GenerationResult:
+        """Report the seed that was actually queued, like Forge's info.seed.
+
+        The graph's single main sampler is authoritative (workflow controls
+        are applied after compilation); graphs without one fall back to the
+        job's concrete payload seed.  Viewer, '시드 탐색' and gen_stats read
+        ``info['seed']``.
+        """
+        if not isinstance(result, GenerationResult) or not result.success:
+            return result
+        seed = graph_main_seed(graph) if isinstance(graph, dict) else None
+        if seed is None:
+            seed = _int_or(payload.get('seed') if isinstance(payload, dict) else None, -1)
+        if seed >= 0:
+            info = dict(result.info or {})
+            info['seed'] = seed
+            result.info = info
+        return result
 
     def _upload_image(self, image_b64: str,
                       cancel_check: Optional[Callable[[], bool]] = None) -> str:
@@ -1459,11 +1416,18 @@ class ComfyUIBackend(AbstractBackend):
         if format_info is None:
             raise ValueError("입력 이미지는 PNG/JPEG/WebP/BMP/TIFF만 지원합니다.")
         extension, mime = format_info
-        filename = f'input_{uuid.uuid4().hex}.{extension}'
+        # 내용 해시 이름: 서로 다른 입력(원본/마스크, 대기열의 다른 작업)은 절대 같은
+        # 이름을 쓰지 않고, 같은 원본을 N번 처리해도 input 폴더에 사본이 쌓이지 않는다.
+        # overwrite=false 면 ComfyUI 가 같은 이름·같은 내용의 파일을 다시 쓰지 않고
+        # 그 이름을 돌려준다(내용이 다르면 'name (1).ext' 로 저장해 그 이름을 준다).
+        # 규칙은 Krea2 업로드와 공유한다(core/comfy_upload_names.py).
+        from core.comfy_upload_names import content_upload_name
+
+        filename = content_upload_name(image_bytes, 'input', extension)
         if cancel_check is None:
-            return self.upload_media(image_bytes, filename, mime)
+            return self.upload_media(image_bytes, filename, mime, overwrite=False)
         return self.upload_media(
-            image_bytes, filename, mime, cancel_check=cancel_check
+            image_bytes, filename, mime, overwrite=False, cancel_check=cancel_check
         )
 
     def _find_load_image_node(self, workflow: dict) -> Optional[str]:
@@ -1503,23 +1467,26 @@ class ComfyUIBackend(AbstractBackend):
                     else self._upload_image(mask_value, cancel_check)
                 )
             mode = 'inpaint' if mask_value or payload.get('use_image_alpha_as_mask') else 'img2img'
-            compiler = self._workflow_compiler()
+            job_payload = with_concrete_seed(payload)
             custom_workflow = self._load_configured_workflow('img2img')
             from core.comfy_workflow_controls import generation_workflow_controls
-            workflow = compiler.compile(
-                mode, model_name, payload, workflow=custom_workflow,
-                uploaded_image=uploaded_filename, uploaded_mask=uploaded_mask,
-                workflow_controls=generation_workflow_controls(
-                    self.api_url, self._configured_workflow_path('img2img'), custom_workflow, payload, 'img2img',
-                ),
+            controls = generation_workflow_controls(
+                self.api_url, self._configured_workflow_path('img2img'), custom_workflow, payload, 'img2img',
             )
+            workflow = self._compile_graph(lambda compiler: compiler.compile(
+                mode, model_name, job_payload, workflow=custom_workflow,
+                uploaded_image=uploaded_filename, uploaded_mask=uploaded_mask,
+                workflow_controls=controls,
+            ))
             self._last_generation_context = {
                 'model_name': model_name, 'payload': copy.deepcopy(dict(payload)),
             }
 
             if cancel_check is None:
-                return self._queue_and_wait(workflow, progress_callback)
-            return self._queue_and_wait(workflow, progress_callback, cancel_check)
+                result = self._queue_and_wait(workflow, progress_callback)
+            else:
+                result = self._queue_and_wait(workflow, progress_callback, cancel_check)
+            return self._with_reported_seed(result, workflow, job_payload)
 
         except RuntimeError as e:
             _logger.error(f"img2img 오류: {e}")
@@ -1615,13 +1582,26 @@ class ComfyUIBackend(AbstractBackend):
         payload.pop('_comfy_detail_passes', None)
         payload.pop('_comfy_workflow_snapshot', None)
         width, height = _base64_image_size(image_b64)
+        # SAM3 "only masked" samples its crop at Forge's p.width/p.height. For a
+        # standalone pass Forge sends width/height = the input image size
+        # (webui_backend sam3()/refine()/_build_postprocess_payload), so the
+        # extension samples at the image size — never at whatever txt2img ran
+        # last. Pin it explicitly so the preserved generation payload (its
+        # pre-Hires size or a stale key) can never leak into this pass.
+        # Only in-generation SAM3 samples at the base size, which the compiler
+        # takes from that generation's own payload width/height.
         # Replace only prior image passes. Model/conditioning scripts (including
         # Anima bypass/semantic negative, NegPiP and guidance) remain in force.
         scripts = {name: block for name, block in payload['alwayson_scripts'].items()
                    if str(name).strip().casefold() not in {'adetailer', 'sam3 mask'}}
         payload.update({
+            '_sam3_processing_width': width,
+            '_sam3_processing_height': height,
             'init_images': [image_b64], 'width': width, 'height': height,
             'denoising_strength': 0.0,
+            # Forge 경로(webui_backend adetailer/sam3/refine)처럼 서버 output 에
+            # 사본을 남기지 않는다. 결과는 앱이 받아 직접 저장한다.
+            'save_images': False,
             'prompt': str(settings.get('prompt') or settings.get('ad_prompt') or payload.get('prompt') or ''),
             'negative_prompt': str(settings.get('negative_prompt') or settings.get('ad_negative') or payload.get('negative_prompt') or ''),
             'alwayson_scripts': scripts,
@@ -1654,15 +1634,15 @@ class ComfyUIBackend(AbstractBackend):
                 negative_prompt=str(payload.get('negative_prompt') or ''),
             )
             payload['alwayson_scripts'][sam3_args.SCRIPT_SAM3] = {'args': [state]}
+        # One seed for every ADetailer/SAM3 pass of this job (-1 → drawn once),
+        # stable across the compile retry below.
+        payload = with_concrete_seed(payload)
         uploaded = self._upload_image(image_b64)
-        compiler = self._workflow_compiler()
-        workflow = compiler.compile_postprocess(
+        detailer_class = 'ForgeNeoSAM3Refine' if kind == 'refine' else 'ForgeNeoSAM3Detailer'
+        workflow = self._compile_graph(lambda compiler: compiler.compile_postprocess(
             model_name, payload, uploaded_image=uploaded,
-            sam3_detailer_class=(
-                'ForgeNeoSAM3Refine' if kind == 'refine'
-                else 'ForgeNeoSAM3Detailer'
-            ),
-        )
+            sam3_detailer_class=detailer_class,
+        ))
         return self._result_as_base64(
             self._queue_and_wait(workflow), kind, prefer_last=(kind == 'refine'),
         )
@@ -1671,9 +1651,9 @@ class ComfyUIBackend(AbstractBackend):
         """Run a standalone ComfyUI pixel/model upscale graph."""
         width, height = _base64_image_size(image_b64)
         uploaded = self._upload_image(image_b64)
-        workflow = self._workflow_compiler().compile_upscale(
+        workflow = self._compile_graph(lambda compiler: compiler.compile_upscale(
             uploaded, settings, source_width=width, source_height=height,
-        )
+        ))
         return self._result_as_base64(self._queue_and_wait(workflow), '업스케일')
 
     def adetailer(self, image_b64: str, settings: Dict) -> str:
@@ -1690,9 +1670,9 @@ class ComfyUIBackend(AbstractBackend):
                 'alwayson_scripts': {sam3_args.SCRIPT_SAM3: {'args': [state]}},
             }
             uploaded = self._upload_image(image_b64)
-            workflow = self._workflow_compiler().compile_sam3_mask_only(
+            workflow = self._compile_graph(lambda compiler: compiler.compile_sam3_mask_only(
                 payload, uploaded_image=uploaded,
-            )
+            ))
             return self._result_as_base64(self._queue_and_wait(workflow), 'sam3 mask')
         return self._standalone_detail(image_b64, settings, 'sam3')
 

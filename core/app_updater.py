@@ -218,6 +218,35 @@ class GitSource:
         except AppUpdateError:
             return ""
 
+    def local_identity(self) -> dict[str, Any] | None:
+        """표시용 체크아웃 정체성을 git 프로세스 없이 .git 파일에서 읽는다.
+
+        반환: ``{"checkout": False}`` (이 프로젝트 루트에 .git 이 없음) 또는
+        ``{"checkout": True, "head", "branch", "trustedRemote"}``. 파일로 판단할 수 없으면
+        ``None`` — 호출자는 git 명령으로 되돌아간다. 업데이트 설치는 이 값을 믿지 않고
+        git 으로 다시 확인한다(_install).
+        """
+        from core.git_metadata import git_dir, head_info, remote_urls
+
+        if git_dir(self.root) is None:
+            return {"checkout": False}
+        head, branch = head_info(self.root)
+        if not _COMMIT_RE.fullmatch(head):
+            return None
+        remote = ""
+        # `git remote` 와 같은 이름순으로 공식 원격을 고른다.
+        for name, url in sorted(remote_urls(self.root).items()):
+            if _REMOTE_RE.fullmatch(url.strip()):
+                remote = name
+                break
+        if not remote:
+            # includeIf·insteadOf 같은 설정은 파일만으로 알 수 없다 — 이때만 git 에 묻는다.
+            try:
+                remote = self.trusted_remote()
+            except AppUpdateError:
+                remote = ""
+        return {"checkout": True, "head": head, "branch": branch, "trustedRemote": remote}
+
     def trusted_remote(self) -> str:
         for name in self.run("remote").splitlines():
             candidate = name.strip()
@@ -589,27 +618,48 @@ class AppUpdateManager:
             "targetVersion": str(snapshot.get("latestVersion") or ""),
         }
 
+    def _local_identity(self) -> dict[str, Any] | None:
+        reader = getattr(self.git, "local_identity", None)
+        if not callable(reader):
+            return None
+        try:
+            identity = reader()
+        except Exception:
+            return None
+        return identity if isinstance(identity, Mapping) else None
+
     def _current_source_state(self) -> dict[str, Any]:
         fallback = self._version_file()
-        if not self.git.is_checkout():
-            return {
-                "mode": "manual",
-                "version": fallback,
-                "display": f"v{fallback}",
-                "identityKnown": True,
-            }
+        manual = {
+            "mode": "manual",
+            "version": fallback,
+            "display": f"v{fallback}",
+            "identityKnown": True,
+        }
+        # 표시용 정체성(HEAD·브랜치·원격)은 .git 파일에서 읽는다 — 예전에는 앱 마운트와
+        # Settings 첫 진입마다 메인 스레드 QWebChannel 슬롯에서 git 을 7번 실행했다.
+        # git 프로세스는 `describe --dirty` 1회만 남는다(태그 거리와 작업 트리 수정 여부).
+        identity = self._local_identity()
+        if identity is not None and not identity.get("checkout"):
+            return manual
         try:
-            revision = self.git.head()
-            branch = self.git.branch()
-            remote = self.git.trusted_remote()
+            if identity is None:
+                if not self.git.is_checkout():
+                    return manual
+                revision = self.git.head()
+                branch = self.git.branch()
+                remote = self.git.trusted_remote()
+            else:
+                revision = str(identity.get("head") or "")
+                branch = str(identity.get("branch") or "")
+                remote = str(identity.get("trustedRemote") or "")
             described = self.git.describe()
         except AppUpdateError:
-            return {
-                "mode": "manual",
-                "version": fallback,
-                "display": f"v{fallback}",
-                "identityKnown": False,
-            }
+            return {**manual, "identityKnown": False}
+        if identity is not None and not described:
+            # `describe --always` 는 git 이 동작하면 항상 무언가를 돌려준다 — 빈 값은 git 을
+            # 실행할 수 없다는 뜻이다(예전 is_checkout 실패와 같은 수동 모드).
+            return manual
         version = fallback
         ahead = 0
         dirty = described.endswith("-dirty")

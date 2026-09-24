@@ -10,7 +10,9 @@ from ui.vue_bridge import VueBridge
 
 
 class _FakeSearchWorker(QObject):
-    results_ready = pyqtSignal(list, int)
+    # 실제 PandasSearchWorker 와 같은 object 시그니처 — list(QVariantList)면 emit 마다
+    # 행 전체가 복사된다.
+    results_ready = pyqtSignal(object, int)
     status_update = pyqtSignal(str)
 
     def __init__(self, *_args, **_kwargs) -> None:
@@ -240,6 +242,308 @@ class SearchBridgeStatusTests(unittest.TestCase):
             **identity,
             "snapshot_id": "a" * 32,
         }])
+
+
+_IDENTITY = {"label": "2026_07", "fingerprint": "a" * 64}
+_SNAPSHOT = "b" * 32
+
+
+class _PublishingParent(QObject):
+    def __init__(self) -> None:
+        super().__init__()
+        self.filtered_results = []
+        self.shuffled_prompt_deck = []
+        self.persisted = []
+
+    def _persist_search_results(self, *args, **kwargs) -> None:
+        self.persisted.append((args, kwargs))
+
+    def _save_deck_state(self) -> None:
+        return None
+
+
+class _IdentityStore:
+    def dataset_info(self):
+        return dict(_IDENTITY)
+
+    def save(self, *_args, **_kwargs):
+        return None
+
+
+class SearchResultPublishingTests(unittest.TestCase):
+    def test_worker_normalized_rows_skip_the_gui_thread_loop_and_become_the_base(self) -> None:
+        from core.search_rows import NormalizedSearchRows
+
+        parent = _PublishingParent()
+        bridge = VueBridge(parent)
+        published = []
+        bridge.searchResultsReady.connect(lambda payload: published.append(json.loads(payload)))
+        row = {"copyright": "", "character": "", "artist": "", "general": "ready",
+               "rating": "g", "image_width": 512, "image_height": None}
+        rows = NormalizedSearchRows([row])
+
+        with (
+            patch("workers.search_worker.PandasSearchWorker", _FakeSearchWorker),
+            patch("core.search_result_store.SearchResultStore", _IdentityStore),
+            patch(
+                "core.search_rows.normalize_search_rows_in_place",
+                side_effect=AssertionError("worker rows must not be normalised again"),
+            ),
+        ):
+            bridge.searchDanbooru(json.dumps({"ratings": ["g"]}))
+            worker = bridge._search_worker
+            worker.dataset_identity = dict(_IDENTITY)
+            worker.results_ready.emit(rows, 1)
+
+        self.assertEqual(published, [[row]])
+        # 같은 dict 객체가 그대로 런타임 풀·필터 base 가 된다(QVariant 왕복 복사 없음)
+        self.assertIs(parent.filtered_results[0], row)
+        self.assertIs(type(parent.filtered_results), list)
+        self.assertIs(parent._search_base_results, parent.filtered_results)
+        self.assertEqual(parent._search_base_snapshot_id, parent._search_snapshot_id)
+        self.assertEqual(parent._search_dataset_identity, _IDENTITY)
+
+    def test_object_signal_delivers_the_same_list_object(self) -> None:
+        received = []
+        worker = _FakeSearchWorker()
+        worker.results_ready.connect(lambda rows, total: received.append(rows))
+        rows = [{"general": "x"}]
+        worker.results_ready.emit(rows, 1)
+        self.assertIs(received[0], rows)
+
+    def test_non_list_results_are_reported_as_errors_not_empty_success(self) -> None:
+        bridge = VueBridge()
+        statuses = []
+        published = []
+        bridge.searchStatus.connect(statuses.append)
+        bridge.searchResultsReady.connect(lambda payload: published.append(json.loads(payload)))
+
+        with (
+            patch("workers.search_worker.PandasSearchWorker", _FakeSearchWorker),
+            patch("core.search_result_store.SearchResultStore", _IdentityStore),
+        ):
+            bridge.searchDanbooru(json.dumps({"ratings": ["g"]}))
+            worker = bridge._search_worker
+            worker.dataset_identity = dict(_IDENTITY)
+            worker.results_ready.emit({"general": "not a list"}, 1)
+
+        self.assertTrue(statuses[-1].startswith("❌"), statuses)
+        self.assertIn("error", published[-1])
+
+
+class SearchCacheRestoreSlotTests(unittest.TestCase):
+    def _parent_with_snapshot(self, active, base=None):
+        from core.search_session import publish_snapshot
+
+        parent = _PublishingParent()
+        publish_snapshot(
+            parent,
+            active=active,
+            base=base,
+            identity=dict(_IDENTITY),
+            snapshot_id=_SNAPSHOT,
+        )
+        return parent
+
+    def test_load_last_serialises_memory_without_reparsing_the_cache(self) -> None:
+        active = [{"general": "in-memory"}]
+        parent = self._parent_with_snapshot(active)
+        parent.shuffled_prompt_deck = ["progress"]
+        bridge = VueBridge(parent)
+        lineages = []
+        bridge.searchResultLineage.connect(lambda p: lineages.append(json.loads(p)))
+
+        class Store(_IdentityStore):
+            def load_active(self):
+                raise AssertionError("active cache must not be parsed again")
+
+        with patch("core.search_result_store.SearchResultStore", Store):
+            self.assertEqual(json.loads(bridge.loadLastSearchResults()), active)
+
+        self.assertEqual(lineages, [{**_IDENTITY, "snapshot_id": _SNAPSHOT}])
+        self.assertEqual(parent.shuffled_prompt_deck, ["progress"])   # 덱 재구성 없음
+        self.assertIs(parent.filtered_results, active)
+
+    def test_load_last_falls_back_to_disk_when_the_dataset_changed(self) -> None:
+        parent = self._parent_with_snapshot([{"general": "old dataset"}])
+
+        class Store:
+            last_error = "search result dataset fingerprint does not match"
+            last_snapshot_id = None
+            last_dataset_identity = None
+
+            @staticmethod
+            def dataset_info():
+                return {"label": "2026_07", "fingerprint": "c" * 64}
+
+            @staticmethod
+            def load_active():
+                return []
+
+        bridge = VueBridge(parent)
+        with patch("core.search_result_store.SearchResultStore", Store):
+            self.assertEqual(json.loads(bridge.loadLastSearchResults()), [])
+
+    def test_load_full_returns_the_memory_base(self) -> None:
+        base = [{"general": "a"}, {"general": "b"}]
+        parent = self._parent_with_snapshot([base[0]], base=base)
+        bridge = VueBridge(parent)
+
+        class Store(_IdentityStore):
+            def load_full(self, **_kwargs):
+                raise AssertionError("memory base must be used")
+
+            def load_active(self):
+                raise AssertionError("memory base must be used")
+
+        with patch("core.search_result_store.SearchResultStore", Store):
+            self.assertEqual(json.loads(bridge.loadFullResults()), base)
+
+    def test_load_full_reads_only_the_full_file_by_snapshot_and_records_the_base(self) -> None:
+        parent = self._parent_with_snapshot([{"general": "a"}], base=None)
+        bridge = VueBridge(parent)
+        full = [{"general": "a"}, {"general": "b"}]
+        calls = []
+
+        class Store(_IdentityStore):
+            last_error = None
+
+            def load_full(self, *, expected_snapshot_id=None):
+                calls.append(expected_snapshot_id)
+                return full
+
+            def load_active(self):
+                raise AssertionError("active must not be re-parsed for the snapshot check")
+
+        with patch("core.search_result_store.SearchResultStore", Store):
+            self.assertEqual(json.loads(bridge.loadFullResults()), full)
+            self.assertEqual(json.loads(bridge.loadFullResults()), full)
+
+        self.assertEqual(calls, [_SNAPSHOT])
+        self.assertIs(parent._search_base_results, full)
+
+    def test_startup_restore_fills_runtime_without_serialising(self) -> None:
+        from ui.generator_main import GeneratorMainUI
+
+        active = [{"general": "restored"}]
+
+        class Store:
+            last_error = None
+            last_snapshot_id = _SNAPSHOT
+            last_dataset_identity = dict(_IDENTITY)
+
+            @staticmethod
+            def load_active():
+                return active
+
+        subject = _PublishingParent()
+        subject._restore_deck_state = lambda: False
+        dumped = []
+        real_dumps = json.dumps
+
+        def recording_dumps(value, *args, **kwargs):
+            dumped.append(value)
+            return real_dumps(value, *args, **kwargs)
+
+        with (
+            patch("core.search_result_store.SearchResultStore", Store),
+            patch("json.dumps", side_effect=recording_dumps),
+        ):
+            GeneratorMainUI._restore_search_deck(subject)
+
+        self.assertFalse(any(value is active for value in dumped), "시작 복원은 결과를 직렬화하지 않는다")
+        self.assertIs(subject.filtered_results, active)
+        self.assertEqual(subject._search_snapshot_id, _SNAPSHOT)
+        self.assertEqual(subject.shuffled_prompt_deck, active)
+
+    def test_startup_restore_is_skipped_when_a_snapshot_already_exists(self) -> None:
+        from ui.generator_main import GeneratorMainUI
+
+        subject = self._parent_with_snapshot([{"general": "fresh search"}])
+        constructed = []
+
+        class Store:
+            def __init__(self):
+                constructed.append(self)   # _restore_search_deck 가 예외를 삼키므로 기록으로 검증
+
+            @staticmethod
+            def load_active():
+                return [{"general": "stale disk"}]
+
+        with patch("core.search_result_store.SearchResultStore", Store):
+            GeneratorMainUI._restore_search_deck(subject)
+
+        self.assertEqual(constructed, [])
+        self.assertEqual(subject.filtered_results, [{"general": "fresh search"}])
+
+
+class TagSuggestionWarmupTests(unittest.TestCase):
+    """예열 스레드가 적재 중일 때 GUI 슬롯은 락을 기다리지 않는다."""
+
+    def setUp(self) -> None:
+        import threading
+
+        self._release = threading.Event()
+        self._warm = threading.Thread(target=self._release.wait, daemon=True)
+        self._warm.start()
+
+    def tearDown(self) -> None:
+        self._release.set()
+        self._warm.join(1)
+
+    class _Lookup:
+        def __init__(self, ready: bool) -> None:
+            self.ready = ready
+
+        def is_ready(self) -> bool:
+            return self.ready
+
+        def search(self, _prefix, limit=10):
+            raise AssertionError("must not block on the Korean catalogue while warming")
+
+        def labels(self, tags):
+            if not self.ready:
+                raise AssertionError("must not block on the Korean catalogue while warming")
+            return [{"tag": t, "ko": "라벨", "category": "", "desc": "", "count": 0} for t in tags]
+
+    class _Completer:
+        @staticmethod
+        def get_suggestions(prefix, max_count=10):
+            return [f"{prefix}_hair"]
+
+    def _bridge(self) -> VueBridge:
+        bridge = VueBridge()
+        bridge._tag_warm_thread = self._warm
+        return bridge
+
+    def test_rich_returns_empty_while_the_completer_is_loading(self) -> None:
+        bridge = self._bridge()
+        with (
+            patch("core.tag_korean_lookup.get_korean_tag_lookup", return_value=self._Lookup(False)),
+            patch("utils.tag_completer.try_get_tag_completer", return_value=None),
+        ):
+            self.assertEqual(json.loads(bridge.getTagSuggestionsRich("long")), [])
+        # 문자열 목록만 주던 옛 슬롯은 제거됐다 — 자동완성은 Rich 하나로만 간다(웹 화이트리스트 포함)
+        self.assertFalse(hasattr(VueBridge, "getTagSuggestions"))
+
+    def test_rich_returns_unlabelled_tags_while_only_korean_labels_load(self) -> None:
+        bridge = self._bridge()
+        with (
+            patch("core.tag_korean_lookup.get_korean_tag_lookup", return_value=self._Lookup(False)),
+            patch("utils.tag_completer.try_get_tag_completer", return_value=self._Completer()),
+        ):
+            self.assertEqual(json.loads(bridge.getTagSuggestionsRich("long")), [
+                {"tag": "long_hair", "ko": "", "category": "", "desc": "", "count": 0}
+            ])
+            self.assertEqual(json.loads(bridge.getTagSuggestionsRich("장발")), [])
+
+    def test_labels_are_attached_once_the_catalogue_is_ready(self) -> None:
+        bridge = self._bridge()
+        with (
+            patch("core.tag_korean_lookup.get_korean_tag_lookup", return_value=self._Lookup(True)),
+            patch("utils.tag_completer.try_get_tag_completer", return_value=self._Completer()),
+        ):
+            self.assertEqual(json.loads(bridge.getTagSuggestionsRich("long"))[0]["ko"], "라벨")
 
 
 if __name__ == "__main__":

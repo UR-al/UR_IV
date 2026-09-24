@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from typing import Iterable
 
@@ -155,19 +156,22 @@ class TagClassifier:
         """Load the optimized Danbooru catalog, with curated database fallbacks."""
         if self._use_shared_tag_data:
             try:
-                from contextlib import redirect_stdout
-                from io import StringIO
                 from utils.tag_data import get_tag_data
 
-                # TagData's legacy emoji logging can fail under a CP949 console.
-                # The classifier emits an ASCII summary below instead.
-                with redirect_stdout(StringIO()):
-                    tag_data = get_tag_data()
+                # TagData logs through `logging` only, so no stdout redirection is
+                # needed (redirect_stdout swaps a process-global and raced with the
+                # completer warm-up thread).
+                tag_data = get_tag_data()
                 if tag_data.is_loaded:
-                    self.characters = _lower_set(tag_data.character_set)
-                    self.copyrights = _lower_set(tag_data.copyright_set)
-                    self.artists = _lower_set(tag_data.artist_set)
-                    self.meta_tags = _lower_set(tag_data.meta_set)
+                    # TagData already stores these as stripped, lower-cased, non-empty
+                    # names (the exact `_lower_set` form), so share them read-only
+                    # instead of copying ~740k strings per classifier instance.
+                    self.characters = tag_data.character_set
+                    self.copyrights = tag_data.copyright_set
+                    self.artists = tag_data.artist_set
+                    # meta_tags is extended in place by _load_manifest_meta_tags —
+                    # copy it so the shared TagData set is never mutated.
+                    self.meta_tags = set(tag_data.meta_set)
                     print(
                         f"[TagClassifier] TagData: characters={len(self.characters):,}, "
                         f"copyrights={len(self.copyrights):,}, artists={len(self.artists):,}, "
@@ -418,3 +422,29 @@ class TagClassifier:
                 continue
             classified[mapping.get(self.classify_tag(tag), "general")].append(tag)
         return classified
+
+
+# Process-wide shared classifier.  The main window (GeneratorBase.tag_classifier)
+# and VueBridge used to build one each — every build re-reads the tag-group and
+# implication parquets and indexes ~2.6k groups (~0.5 s on the GUI thread).
+_shared_classifier: TagClassifier | None = None
+_shared_classifier_lock = threading.Lock()
+
+
+def get_tag_classifier() -> TagClassifier:
+    """Return the shared default-database classifier, building it once."""
+    global _shared_classifier
+    instance = _shared_classifier
+    if instance is not None:
+        return instance
+    with _shared_classifier_lock:
+        if _shared_classifier is None:
+            _shared_classifier = TagClassifier()
+        return _shared_classifier
+
+
+def reset_tag_classifier() -> None:
+    """Drop the shared classifier (after the tag database has been refreshed)."""
+    global _shared_classifier
+    with _shared_classifier_lock:
+        _shared_classifier = None

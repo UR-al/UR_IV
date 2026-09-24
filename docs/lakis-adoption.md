@@ -71,7 +71,7 @@ LAKIS 커밋 `19ec1be13414ea8c029782184121ee43b3662bea`의 설치기 버전 고�
 - 구도 UI: `frontend/src/components/CompositionControl.vue`, `frontend/src/utils/compositionPrompt.ts`, `frontend/src/components/PromptPanel.vue`
 - 상세 입력/프리셋: `core/comfy_workflow_controls.py`, `ui/comfy_workflow_actions.py`, `core/comfy_workflow_compiler.py`, `frontend/src/components/ComfyWorkflowControls.vue`, `frontend/src/utils/comfyWorkflowControls.ts`, `frontend/src/components/BackendGate.vue`
 - 조합 비교: `core/comfy_compatibility.py`, `ui/comfy_compatibility_actions.py`, `frontend/src/components/ComfyCompatibilitySettings.vue`
-- Spectrum: `core/spectrum_settings.py`, `frontend/src/components/SpectrumSettings.vue`, `comfy_custom_nodes/ai_studio_forge_parity/spectrum_isolation.py`, 같은 폴더의 `generation.py`
+- Spectrum: `core/spectrum_settings.py`, `frontend/src/components/SpectrumSettings.vue`, `comfy_custom_nodes/ai_studio_forge_parity/generation.py` (샘플러 호출마다 `ModelPatcher.clone()` 으로 model_options 를 격리 — 별도 `spectrum_isolation.py` 는 clone 과 중복이라 제거됨)
 - 조명: `comfy_custom_nodes/ai_studio_forge_parity/relight.py`, `ui/relight_actions.py`, `frontend/src/components/RelightPanel.vue`, `frontend/src/views/I2IView.vue`, `scripts/smoke_relight.py`
 - 공통 연결: `ui/vue_bridge.py`, `ui/generator_main.py`, `ui/generator_generation.py`, `ui/chat_actions.py`, `frontend/src/types/bridge.d.ts`, `frontend/src/views/SettingsView.vue`, `core/comfy_node_pack.py`, 번들 노드 `__init__.py`, `.gitignore`
 - 대응 Python/Vue 회귀 테스트와 `frontend_dist` 빌드 산출물

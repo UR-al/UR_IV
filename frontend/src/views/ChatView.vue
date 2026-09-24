@@ -43,7 +43,7 @@
             <span class="dot"></span>{{ busyId ? '작업 중' : (models.length ? '준비됨' : '생성 가능 · 채팅 모델 없음') }}
           </span>
           <button class="cm-tool" type="button" title="대화 설정 — 지침 · 답변 최대 토큰 · 문맥 창 · 온도" @click="showSystem = !showSystem" :class="{ on: showSystem }"><Icon name="settings" size="14" /></button>
-          <button class="cm-tool" type="button" title="Markdown 으로 내보내기" :disabled="!active?.messages.length" @click="exportMarkdown"><Icon name="download" size="14" /></button>
+          <button class="cm-tool" type="button" title="Markdown 으로 내보내기" :disabled="!active?.messages.length" v-host-dialog="'chat_export'" @click="exportMarkdown"><Icon name="download" size="14" /></button>
           <button class="cm-tool" type="button" title="대화 내용 비우기" :disabled="!active?.messages.length" @click="clearMessages"><Icon name="eraser" size="14" /></button>
         </div>
       </header>
@@ -150,7 +150,7 @@
                 <pre>{{ m.thinking }}</pre>
               </details>
               <pre v-if="m.role === 'assistant' && m.structured" class="msg-content msg-json">{{ m.content }}</pre>
-              <div v-else-if="m.role === 'assistant'" class="msg-content md" v-html="renderMarkdown(m.content)"></div>
+              <div v-else-if="m.role === 'assistant'" class="msg-content md" v-html="markdownOf(m)"></div>
               <div v-else class="msg-content plain">{{ m.content }}</div>
               <div v-if="m.generation && m.pending" class="msg-generation" role="status" aria-live="polite">
                 <strong>{{ m.generation.kind === 'video' ? '영상 생성' : '이미지 생성' }}</strong>
@@ -253,9 +253,11 @@
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import { vHostDialog } from '../utils/hostDialogs'
 import { mediaUrl } from '../utils/media.js'
-import { renderMarkdown } from '../utils/chatMarkdown'
+import { createMarkdownMemo } from '../utils/chatMarkdown'
 import { copyTextToClipboard } from '../utils/clipboard'
+import { DEFAULT_OLLAMA_URL, resolveInstalledModel } from '../utils/ollamaPrefs'
 import { CHAT_SYSTEM_PRESETS, selectSystemPreset, thinkingValue, type ChatModelInfo } from '../utils/chatSettings'
 import { applyGenerationEvent, artifactMarkdown, type ChatArtifact, type GenerationRequest, type GenerationState } from '../utils/chatGeneration'
 import CustomSelect from '../components/CustomSelect.vue'
@@ -263,6 +265,7 @@ import AiAssistInstructionsSettings from '../components/AiAssistInstructionsSett
 import InstructionPresets from '../components/InstructionPresets.vue'
 import { PROMPT_JSON_SCHEMA, parseChatSchema } from '../utils/chatStructuredOutput'
 import { createSchemaAutosave } from '../composables/useSchemaAutosave'
+import { isImeComposing } from '../utils/imeComposition'
 import type { AiAssistInstructions, InstructionPreset } from '../types/bridge'
 
 interface ChatMessage {
@@ -312,7 +315,7 @@ const generationRequest = ref<GenerationRequest>({ mode: 'auto', family: 'curren
 const models = ref<string[]>([])
 const provider = ref<'ollama' | 'lmstudio'>(localStorage.getItem('chatProvider') === 'lmstudio' ? 'lmstudio' : 'ollama')
 const model = ref(localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel') || '')
-const url = ref(localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : 'http://localhost:11434'))
+const url = ref(localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : DEFAULT_OLLAMA_URL))
 const modelsError = ref('')
 const modelsLoading = ref(false)
 let modelsRequestId = ''
@@ -413,19 +416,32 @@ const visibleThreads = computed(() => {
 })
 const canSend = computed(() => !busyId.value && (draft.value.trim().length > 0 || attachments.value.length > 0))
 
+// 답의 마크다운은 메시지별로 캐시한다 — 스트리밍 중 40ms 패킷마다 화면이 다시 그려져도
+// 바뀐(스트리밍 중인) 답만 다시 렌더한다. HTML 은 여전히 renderMarkdown 만 만든다.
+const markdownOf = createMarkdownMemo()
+
 // ── 저장 — 파일로, 지연해서 ──
 let saveTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleSave() {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    const snapshot = threads.value.map((t) => ({
-      ...t,
-      messages: t.messages.filter((m) => !m.pending).map(({ pending, requestId, ...rest }) => rest),
-    }))
-    requestAction('chat_save', { threads: snapshot })
-  }, 600)
+// 방금 파일에서 읽어 온 목록을 그대로 다시 쓰지 않게, 불러온 직후의 변경 알림 한 번은 건너뛴다
+let skipLoadedSave = false
+function saveNow() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+  const snapshot = threads.value.map((t) => ({
+    ...t,
+    messages: t.messages.filter((m) => !m.pending).map(({ pending, requestId, ...rest }) => rest),
+  }))
+  requestAction('chat_save', { threads: snapshot })
 }
+function scheduleSave() {
+  if (skipLoadedSave) { skipLoadedSave = false; return }
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveNow, 600)
+}
+/** 대기 중인 저장을 지금 보낸다 — 탭 전환·창 닫기 직전 600ms 안의 변경을 잃지 않게. */
+function flushSave() {
+  if (saveTimer) saveNow()
+}
+// 안전망: 9곳 넘는 변경 지점(send·onDone·이름 바꾸기·삭제 …)을 빠짐없이 저장한다 — 유지
 watch(threads, scheduleSave, { deep: true })
 
 // ── 대화 목록 ──
@@ -666,7 +682,7 @@ function imageSrc(v: string) { return v.startsWith('data:') ? v : mediaUrl(v) }
 
 // ── 입력 ──
 function onComposerKey(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() }
+  if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); send() }
   else if (e.key === 'Escape' && busyId.value) { e.preventDefault(); stop() }
 }
 function autoGrow() {
@@ -817,7 +833,7 @@ async function restorePreferences() {
 function changeProvider() {
   models.value = []; modelsError.value = ''
   model.value = localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel') || ''
-  url.value = localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : 'http://localhost:11434')
+  url.value = localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : DEFAULT_OLLAMA_URL)
   savePreferences(); requestModels()
 }
 function saveConnection() {
@@ -882,10 +898,8 @@ function onModels(json: string) {
     if (!Array.isArray(list)) return
     clearTimeout(modelsTimer); modelsLoading.value = false
     models.value = list
-    if (list.length && !list.includes(model.value)) {
-      const base = (s: string) => (s || '').split(':')[0].toLowerCase()
-      model.value = list.find((m: string) => base(m) === base(model.value)) || list[0]
-    }
+    // 백엔드 resolve_model 과 같은 규칙(utils/ollamaPrefs) — 같은 모델 → 같은 계열 태그 → 첫 모델
+    if (list.length && !list.includes(model.value)) model.value = resolveInstalledModel(model.value, list)
   } catch {}
 }
 function onChatModels(raw: string) {
@@ -914,7 +928,13 @@ onMounted(() => {
   unsubs.push(onBackendEvent('chatThreads', (json: string) => {
     try {
       const list = JSON.parse(json)
-      if (Array.isArray(list)) threads.value = list
+      if (Array.isArray(list)) {
+        // 파일에서 막 읽은 목록 — 이 대입으로 생기는 저장 한 번은 건너뛴다(같은 내용 재기록 방지).
+        // 불러오기가 목록을 통째로 바꾸므로 그 전에 걸린 저장도 의미가 없다.
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+        skipLoadedSave = true
+        threads.value = list
+      }
     } catch {}
     // GemmaStudio 처럼 열 때마다 빈 새 대화에서 시작한다 — 기존 기록은 목록에 남는다
     if (!activeId.value) newThread()
@@ -927,6 +947,7 @@ onMounted(() => {
   unsubs.push(onBackendEvent('chatModelsReady', onChatModels))
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('beforeunload', schemaAutosave.flush)
+  window.addEventListener('beforeunload', flushSave)
   if (recoveringSchema) schemaAutosave.queue(schemaText.value)
   requestAction('chat_load')
   requestModels()
@@ -937,13 +958,15 @@ onMounted(() => {
 })
 onActivated(() => { requestModels(); focusComposer() })
 onDeactivated(schemaAutosave.flush)
+onDeactivated(flushSave)   // keep-alive 탭 전환 — 대기 중인 대화 저장을 미루지 않는다
 onBeforeUnmount(schemaAutosave.close)
 onUnmounted(() => {
   disposed = true; clearTimeout(modelsTimer)
   unsubs.forEach((u) => { try { u() } catch {} })
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('beforeunload', schemaAutosave.flush)
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+  window.removeEventListener('beforeunload', flushSave)
+  flushSave()   // 예전엔 타이머만 지워 마지막 600ms 안의 변경이 사라졌다
   if (modelInfoTimer) { clearTimeout(modelInfoTimer); modelInfoTimer = null }
 })
 </script>

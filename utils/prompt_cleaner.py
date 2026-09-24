@@ -9,6 +9,55 @@
 import re
 from typing import Tuple, List, Optional
 
+from core.instant_wildcards import INSTANT_WILDCARD_PATTERN
+from utils.file_wildcard import DUNDER_WILDCARD_PATTERN, FILE_WILDCARD_PATTERN
+
+# 와일드카드 토큰(__이름__ · ~/이름/~ · 즉석 $$이름$$)은 정리 규칙을 건너뛴다 — 밑줄→공백이
+# '__hairstyle__' 을 'hairstyle' 로, '~/hair_style/~' 을 '~/hair style/~' 로, '$$hair_style$$' 을
+# '$$hair style$$' 로 바꿔 해석기가 못 찾게 만들었다 (Vue '사용' 버튼이 넣은 토큰이 실시간 정리
+# 0.5초 뒤 평문이 되어 그대로 전송됐다). 해석기(utils.file_wildcard · core.instant_wildcards)와
+# 같은 정규식으로 찾아 자리표시자로 가렸다가 되돌린다.
+_WC_OPEN = ''
+_WC_CLOSE = ''
+_WC_SLOT = re.compile(_WC_OPEN + r'(\d+)' + _WC_CLOSE)
+
+
+def _mask_wildcard_tokens(text: str) -> Tuple[str, List[str]]:
+    """와일드카드 토큰을 자리표시자로 바꾼다 → (가린 텍스트, 원문 토큰 목록).
+
+    같은 토큰은 같은 자리표시자를 쓴다(중복 제거가 같은 글자를 같은 태그로 보던 규칙 유지).
+    자리표시자 문자가 이미 들어 있는 드문 입력은 가리지 않는다(되돌릴 때 섞이지 않게).
+    """
+    if not text or _WC_OPEN in text or _WC_CLOSE in text:
+        return text, []
+    saved: List[str] = []
+
+    def _keep(m):
+        token = m.group(0)
+        if token not in saved:
+            saved.append(token)
+        return f'{_WC_OPEN}{saved.index(token)}{_WC_CLOSE}'
+
+    # 즉석 $$이름$$ 을 먼저 통째로 가린다 — '$$a__b__c$$' 안의 '__b__' 를 파일 문법이 반쪽만
+    # 가리지 않게. 그다음 해석 순서(~/이름/~ 먼저)와 같게 — 안쪽에 먼저 가린 자리표시자가 있으면
+    # 되돌릴 때 풀린다.
+    text = INSTANT_WILDCARD_PATTERN.sub(_keep, text)
+    text = FILE_WILDCARD_PATTERN.sub(_keep, text)
+    text = DUNDER_WILDCARD_PATTERN.sub(_keep, text)
+    return text, saved
+
+
+def _unmask_wildcard_tokens(text: str, saved: List[str]) -> str:
+    """_mask_wildcard_tokens 의 반대 — 중첩된 자리표시자까지 원문으로 되돌린다."""
+    if not saved:
+        return text
+    for _ in range(len(saved) + 1):
+        restored = _WC_SLOT.sub(lambda m: saved[int(m.group(1))], text)
+        if restored == text:
+            break
+        text = restored
+    return text
+
 
 class PromptCleaner:
     """프롬프트 자동 정리기"""
@@ -30,9 +79,10 @@ class PromptCleaner:
         """전체 정리 실행"""
         if not text:
             return ""
-        
-        result = text
-        
+
+        # 와일드카드 토큰(__이름__ · ~/이름/~ · $$이름$$)은 글자 그대로 둔다 — 끝에서 되돌린다
+        result, wildcard_tokens = _mask_wildcard_tokens(text)
+
         # 1. 공백 정리
         if self.auto_space:
             result = self._clean_spaces(result)
@@ -60,8 +110,8 @@ class PromptCleaner:
         # 7. 마지막 쉼표 제거
         if self.trim_trailing_comma:
             result = result.rstrip().rstrip(',').strip()
-        
-        return result
+
+        return _unmask_wildcard_tokens(result, wildcard_tokens)
     
     def _clean_spaces(self, text: str) -> str:
         """공백 정리"""
@@ -267,28 +317,12 @@ class PromptCleaner:
                     return i
             i += 1
         return -1
-    
-    def unescape_parentheses(self, text: str) -> str:
-        """이스케이프 해제: \(\) → ()"""
-        return text.replace(r'\(', '(').replace(r'\)', ')')
-    
+
     def set_options(self, **kwargs):
         """옵션 설정"""
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
-    
-    def get_options(self) -> dict:
-        """현재 옵션 반환"""
-        return {
-            'auto_comma': self.auto_comma,
-            'auto_space': self.auto_space,
-            'auto_escape': self.auto_escape,
-            'remove_duplicates': self.remove_duplicates,
-            'underscore_to_space': self.underscore_to_space,
-            'remove_empty_parens': self.remove_empty_parens,
-            'trim_trailing_comma': self.trim_trailing_comma,
-        }
 
 
 # 싱글톤
@@ -301,16 +335,6 @@ def get_prompt_cleaner() -> PromptCleaner:
     return _cleaner_instance
 
 
-def clean_prompt(text: str) -> str:
-    """간편 함수: 프롬프트 정리"""
-    return get_prompt_cleaner().clean(text)
-
-
 def escape_parentheses(text: str) -> str:
     """간편 함수: 괄호 이스케이프 (싱글턴 재사용 — 호출마다 PromptCleaner 생성/디스크 IO 제거)"""
     return get_prompt_cleaner()._escape_parentheses(text)
-
-
-def unescape_parentheses(text: str) -> str:
-    """간편 함수: 이스케이프 해제"""
-    return text.replace(r'\(', '(').replace(r'\)', ')')

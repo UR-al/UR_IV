@@ -7,10 +7,11 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 
 class _ProxyBase(QObject):
-    """모든 프록시의 공통 no-op 메서드"""
-    def setVisible(self, v): pass
-    def hide(self): pass
-    def show(self): pass
+    """모든 프록시의 공통 no-op 메서드.
+
+    표시 여부(setVisible/hide/show)는 두지 않는다 — 보이고 숨기는 것은 Vue 화면의 일이고, 예전
+    no-op setVisible 에 연결된 배선은 아무 일도 하지 않으면서 죽은 분기를 숨겼다(audit #175).
+    """
     def installEventFilter(self, f): pass
     def setStyleSheet(self, s): pass
     def setToolTip(self, t): pass
@@ -81,7 +82,7 @@ class LineEditProxy(_ProxyBase):
 
 
 class TextEditProxy(_ProxyBase):
-    """QTextEdit / TagInputWidget 호환 프록시"""
+    """QTextEdit 호환 프록시"""
     textChanged = pyqtSignal()
 
     def __init__(self, bridge, widget_id: str, parent=None):
@@ -121,32 +122,6 @@ class TextEditProxy(_ProxyBase):
     def setToolTip(self, t): pass
     def installEventFilter(self, f): pass
 
-    # QTextEdit document() 호환
-    class _DummyLayout:
-        def documentSize(self):
-            from PyQt6.QtCore import QSizeF
-            return QSizeF(100, 60)
-        def blockBoundingRect(self, *a):
-            from PyQt6.QtCore import QRectF
-            return QRectF(0, 0, 100, 20)
-
-    class _DummyBlock:
-        def isValid(self): return False
-
-    class _DummyDocument:
-        class _Signal:
-            def connect(self, *a): pass
-        contentsChanged = _Signal()
-        def documentLayout(self):
-            return TextEditProxy._DummyLayout()
-        def setDocumentMargin(self, m): pass
-        def firstBlock(self):
-            return TextEditProxy._DummyBlock()
-        def blockCount(self): return 1
-
-    def document(self):
-        return TextEditProxy._DummyDocument()
-
     def _on_vue_changed(self, value: str):
         if self._value != value:
             self._value = value
@@ -154,7 +129,17 @@ class TextEditProxy(_ProxyBase):
 
 
 class ComboBoxProxy(_ProxyBase):
-    """QComboBox 호환 프록시"""
+    """QComboBox 호환 프록시
+
+    선택 상태 세 가지:
+    - ``_index``: 지금 목록에서 고른 항목.
+    - ``_fallback_text``: 목록에 없어 아직 고르지 못한 값(목록 도착 전 설정값·Vue 값). 실제 항목을
+      새로 고르면 지운다 — 남겨 두면 부팅 때의 설정값이 사용자가 나중에 고른 값보다 오래 살아남아,
+      연결 오류로 목록이 비었다가 다시 연결될 때 옛 값으로 되돌아갔다(감사 #29 후속).
+    - ``_last_selection``: clear() 직전에 고른 항목. currentText() 로는 내보내지 않는다 — 비운
+      콤보의 옛 이름이 다른 백엔드 생성 요청으로 흘러가면 안 된다. 연결 때 콤보를 다시 채우는
+      ui/combo_restore.py 만 :meth:`preservedText` 로 읽어, 새 목록에 그 항목이 있을 때만 고른다.
+    """
     currentTextChanged = pyqtSignal(str)
     currentIndexChanged = pyqtSignal(int)
 
@@ -164,6 +149,7 @@ class ComboBoxProxy(_ProxyBase):
         self._id = widget_id
         self._items = []
         self._index = -1
+        self._last_selection = ''
         self._enabled = True
         bridge._register_proxy(widget_id, self)
 
@@ -186,6 +172,8 @@ class ComboBoxProxy(_ProxyBase):
         self._bridge.pushWidgetProperty(self._id, "items", self._items)
 
     def clear(self):
+        if 0 <= self._index < len(self._items):
+            self._last_selection = self._items[self._index]
         self._items = []
         self._index = -1
         self._bridge.pushWidgetProperty(self._id, "items", [])
@@ -199,6 +187,8 @@ class ComboBoxProxy(_ProxyBase):
             self.setCurrentIndex(idx)
 
     def setCurrentIndex(self, idx: int):
+        if 0 <= idx < len(self._items):
+            self._fallback_text = ''   # 실제 항목을 골랐다 — 미뤄 둔 값은 이제 낡았다
         if self._index != idx and 0 <= idx < len(self._items):
             self._index = idx
             # 인덱스가 아닌 텍스트를 Vue로 전송
@@ -245,6 +235,7 @@ class ComboBoxProxy(_ProxyBase):
             idx = self._items.index(value) if value in self._items else -1
         if idx >= 0 and idx != self._index and idx < len(self._items):
             self._index = idx
+            self._fallback_text = ''   # 사용자가 실제 항목을 골랐다 — 미뤄 둔 값은 낡았다
             self.currentTextChanged.emit(self.currentText())
             self.currentIndexChanged.emit(idx)
         elif idx < 0 and value:
@@ -256,6 +247,15 @@ class ComboBoxProxy(_ProxyBase):
             return self._items[self._index]
         # fallback: items 로드 전에 설정된 텍스트 반환
         return getattr(self, '_fallback_text', '')
+
+    def preservedText(self) -> str:
+        """목록을 다시 채울 때 되살릴 선택 — 지금 항목 → 아직 못 고른 값(fallback) → 비우기 직전 항목.
+
+        fallback 은 실제 항목을 고를 때마다 지워지므로, 남아 있다면 마지막 선택보다 새 값이다.
+        """
+        if 0 <= self._index < len(self._items):
+            return self._items[self._index]
+        return getattr(self, '_fallback_text', '') or self._last_selection
 
 
 class CheckBoxProxy(_ProxyBase):
@@ -423,40 +423,8 @@ class SliderProxy(_ProxyBase):
     def setFixedWidth(self, w): pass
     def setAlignment(self, a): pass
     def installEventFilter(self, f): pass
-    def setVisible(self, v): pass
-    def hide(self): pass
-    def show(self): pass
 
     def _on_vue_changed(self, value: str):
         if self._value != value:
             self._value = value
             self.textChanged.emit(value)
-
-
-class LoraProxy(_ProxyBase):
-    """LoraActivePanel 호환 프록시"""
-    def __init__(self, bridge, widget_id: str, parent=None):
-        super().__init__(parent)
-        self._bridge = bridge
-        self._id = widget_id
-        self._loras = [] # list of {name, weight, enabled}
-        bridge._register_proxy(widget_id, self)
-
-    def get_active_lora_text(self) -> str:
-        """활성화된 LoRA들을 <lora:name:weight> 형식의 텍스트로 반환"""
-        # Vue에서 관리되는 LoRA 목록을 바탕으로 텍스트 구성
-        # (실제 데이터는 Vue에서 전달받아야 하므로 일단 빈 문자열 또는 캐시된 값 반환)
-        active_list = [f"<lora:{l['name']}:{l['weight']}>" for l in self._loras if l.get('enabled', True)]
-        return ", ".join(active_list)
-
-    def set_loras(self, loras: list):
-        self._loras = loras
-        self._bridge.pushWidgetProperty(self._id, "loras", loras)
-
-    def _on_vue_changed(self, value: str):
-        """Vue에서 LoRA 목록 변경 시 (JSON 형태)"""
-        try:
-            import json
-            self._loras = json.loads(value)
-        except Exception:
-            pass

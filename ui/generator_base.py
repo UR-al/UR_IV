@@ -2,30 +2,19 @@
 """
 GeneratorMainUI의 기본 구조 및 초기화
 """
-import os
-from PIL import Image
-
-from PyQt6.QtWidgets import QMainWindow, QWidget, QMessageBox
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QMainWindow
 
 from config import *
-from core.database import MetadataManager
-from core.image_utils import get_thumb_path
-from widgets.common_widgets import WheelEventFilter
 
 class GeneratorBase(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # 데이터베이스 & 분류기
-        self.db = MetadataManager(DB_FILE)
+        # 분류기
         self._tag_classifier = None  # 지연 로드
-        self.wheel_filter = WheelEventFilter()
-        
+
         # 상태 변수들
         self.current_image_path = None
-        self.generation_data = {}
-        self.gallery_items = []
         self.loaded_settings = {}
         self.filtered_results = []
         self.search_worker = None
@@ -51,64 +40,15 @@ class GeneratorBase(QMainWindow):
     
     @property
     def tag_classifier(self):
-        """TagClassifier 지연 로드 — 첫 접근 시 초기화"""
+        """TagClassifier 지연 로드 — 프로세스 공유 인스턴스(VueBridge 와 같은 객체)"""
         if self._tag_classifier is None:
-            from core.tag_classifier import TagClassifier
-            self._tag_classifier = TagClassifier()
+            from core.tag_classifier import get_tag_classifier
+            self._tag_classifier = get_tag_classifier()
         return self._tag_classifier
 
-    def _create_thumbnail(self, image_path):
-        """썸네일 생성"""
-        thumb_path = get_thumb_path(image_path)
-        try:
-            img = Image.open(image_path)
-            img.thumbnail((150, 150), Image.LANCZOS)
-            img.convert("RGB").save(thumb_path, "JPEG")
-        except Exception as e:
-            print(f"썸네일 생성 실패 {image_path}: {e}")
-    
-    def _auto_adjust_text_edit_height(self, text_edit):
-        """텍스트 에디트 높이 자동 조절"""
-        # Vue 프록시에서는 스킵
-        if not hasattr(text_edit, 'contentsMargins'):
-            return
-        try:
-            doc = text_edit.document()
-            layout = doc.documentLayout()
-            layout.blockBoundingRect(doc.firstBlock())
-            doc_height = layout.documentSize().height()
-            margins = text_edit.contentsMargins()
-            new_height = doc_height + margins.top() + margins.bottom() + 15
-            min_h = text_edit.minimumHeight()
-            final_height = max(min_h, new_height)
-            text_edit.setFixedHeight(int(final_height))
-        except (AttributeError, TypeError):
-            pass
-    
-    def showEvent(self, event):
-        """창 표시 이벤트"""
-        super().showEvent(event)
-        
-        # 모든 텍스트 에디트 높이 조절
-        all_text_edits = []
-        if hasattr(self, 'total_prompt_display'):
-            all_text_edits.append(self.total_prompt_display)
-        if hasattr(self, 'prefix_prompt_text'):
-            all_text_edits.append(self.prefix_prompt_text)
-        if hasattr(self, 'main_prompt_text'):
-            all_text_edits.append(self.main_prompt_text)
-        if hasattr(self, 'suffix_prompt_text'):
-            all_text_edits.append(self.suffix_prompt_text)
-        if hasattr(self, 'neg_prompt_text'):
-            all_text_edits.append(self.neg_prompt_text)
-        if hasattr(self, 'exclude_prompt_local_input'):
-            all_text_edits.append(self.exclude_prompt_local_input)
-            
-        for editor in all_text_edits:
-            QTimer.singleShot(
-                100, 
-                lambda w=editor: self._auto_adjust_text_edit_height(w)
-            )
+    # (창 표시 때 프롬프트 칸 높이를 맞추던 showEvent·_auto_adjust_text_edit_height 는 지웠다 —
+    #  칸이 모두 Vue 프록시라 contentsMargins 가드에서 늘 먼저 끝나, 표시마다 no-op 타이머 6개만
+    #  남겼다(audit #175). 칸 높이는 Vue 가 정한다.)
 
     def _apply_removal_filters(self, tags_list):
         """제거 옵션 적용 (공통)"""

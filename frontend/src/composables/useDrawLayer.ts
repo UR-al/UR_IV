@@ -1,7 +1,7 @@
 /**
  * 드로잉 레이어 — 원본을 건드리지 않는 별도 레이어와 10개 도구의 상태 기계.
  *
- * PyQt 판(`widgets/interactive_label.py`)은 `display_base_image` 를 직접 고쳤다.
+ * PyQt 판(`widgets/interactive_label.py`, 은퇴해 삭제됨)은 `display_base_image` 를 직접 고쳤다.
  * 그래서 (1) 되돌리려면 이미지 전체 스냅샷이 필요했고, (2) 투명도 있는 펜은 획이
  * 겹치는 관절마다 진해졌다. 여기서는 캔버스를 셋으로 나눈다.
  *
@@ -14,7 +14,7 @@
  * 몇 획 만에 수백 MB가 된다.
  */
 import { ref } from 'vue'
-import { floodFillMask, hexToRgb, normalizedRect, rgbToHex } from '../utils/drawTools'
+import { floodFillMask, gradientLine, hexToRgb, normalizedRect, rgbToHex } from '../utils/drawTools'
 
 export interface DrawParams {
   tool: string
@@ -59,6 +59,12 @@ export function useDrawLayer(options: {
   const hasContent = ref(false)
   const hasHeal = ref(false)
   const undoCount = ref(0)
+  /**
+   * 확정 레이어 내용이 바뀔 때마다 오르는 번호(획 확정·되돌리기·지우기·크기 재설정).
+   * 에디터가 '저장한 뒤로 레이어가 바뀌었는지'를 이것으로 판단한다 — 병합하지 않은
+   * 그림도 저장본에 들어가므로, 바뀌면 저장 안 된 변경이다.
+   */
+  const revision = ref(0)
   /** 텍스트 도구가 클릭한 위치 — 컴포넌트가 여기에 입력칸을 띄운다 */
   const textAnchor = ref<{ x: number; y: number } | null>(null)
 
@@ -108,6 +114,7 @@ export function useDrawLayer(options: {
     textAnchor.value = null
     cloneAnchor = null
     cloneOffset = null
+    revision.value++
     render()
   }
 
@@ -122,6 +129,7 @@ export function useDrawLayer(options: {
     hasContent.value = false
     hasHeal.value = false
     textAnchor.value = null
+    revision.value++
     render()
   }
 
@@ -208,6 +216,7 @@ export function useDrawLayer(options: {
     undoCount.value = undoStack.length
     committedCtx.putImageData(entry.data, entry.x, entry.y)
     hasContent.value = undoStack.length > 0 || layerHasPixels()
+    revision.value++
     render()
     return true
   }
@@ -233,6 +242,7 @@ export function useDrawLayer(options: {
     scratchCtx.clearRect(0, 0, w, h)
     strokeBounds = null
     hasContent.value = true
+    revision.value++
   }
 
   // ── 합성본 읽기 (스포이트 · 채우기 · 클론) ─────────────────────────────────
@@ -314,9 +324,10 @@ export function useDrawLayer(options: {
         else scratchCtx.stroke()
       }
     } else if (p.tool === 'gradient') {
-      // PyQt 판과 같이 화면 전체를 덮는다 — 드래그는 방향과 길이만 정한다
-      if (Math.hypot(x2 - startX, y2 - startY) >= 1) {
-        const grad = scratchCtx.createLinearGradient(startX, startY, x2, y2)
+      // PyQt 판과 같이 화면 전체를 덮는다 — 드래그는 방향과 길이만 정한다(길이 0 이면 그리지 않는다)
+      const line = gradientLine(startX, startY, x2, y2)
+      if (line) {
+        const grad = scratchCtx.createLinearGradient(line.x1, line.y1, line.x2, line.y2)
         grad.addColorStop(0, p.color)
         grad.addColorStop(1, p.gradientEnd)
         scratchCtx.fillStyle = grad
@@ -562,6 +573,7 @@ export function useDrawLayer(options: {
     hasContent,
     hasHeal,
     undoCount,
+    revision,
     textAnchor,
     resize,
     clear,

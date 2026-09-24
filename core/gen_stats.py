@@ -7,6 +7,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from core.storage_paths import user_data_file
+from utils.atomic_json import atomic_write_json
 
 _STATS_PATH = str(user_data_file(
     'stats/generation.json',
@@ -14,6 +15,60 @@ _STATS_PATH = str(user_data_file(
 ))
 _MAX_RECORDS = 5000  # 최대 보관 레코드 수
 _instance = None
+
+
+def _as_int(value):
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return number
+
+
+def request_meta_from_payload(model, payload) -> dict:
+    """start_generation 이 워커에 넘긴 **실제 요청**에서 통계용 메타를 뽑는다.
+
+    UI 위젯(model_combo/width_input)은 고해상도 배율·Anima 해상도 가드·XYZ 축·Comfy 스냅샷
+    큐가 바꾼 값을 모르고, 빈 칸이면 int('') 예외로 성공 레코드가 통째로 빠졌다(감사 #112).
+    model 은 콤보 title 형식(선택/override 값) 그대로 — 기존 통계와 이어지게.
+    단, Krea2 family 요청(payload['_generation_family']=='krea2')은 체크포인트를 쓰지 않는
+    ComfyUI 워크플로라, Krea2 모드에서 숨겨진 Standard 체크포인트 title 대신 Krea2 라벨로 기록한다.
+    (워커가 run() 에서 이 키를 pop 하므로 반드시 워커 시작 전에 호출할 것.)
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    if str(payload.get('_generation_family') or '').strip().lower() == 'krea2':
+        from core.generation_family import KREA2_LABEL
+        model = KREA2_LABEL
+    return {
+        'model': str(model or ''),
+        'width': _as_int(payload.get('width')),
+        'height': _as_int(payload.get('height')),
+        'seed': _as_int(payload.get('seed')),
+    }
+
+
+def build_generation_record(*, success: bool, duration_sec: float,
+                            request_meta=None, gen_info=None) -> dict:
+    """통계 레코드 한 건. 실패 레코드는 설계상 model 만 남긴다(해상도·시드 없음).
+
+    시드는 백엔드가 확정한 값(gen_info['seed'], -1 해석 후)을 우선하고, 없으면 요청값.
+    """
+    meta = request_meta if isinstance(request_meta, dict) else {}
+    record = {
+        'success': bool(success),
+        'duration_sec': duration_sec,
+        'model': str(meta.get('model') or ''),
+    }
+    if not success:
+        return record
+    info = gen_info if isinstance(gen_info, dict) else {}
+    seed = _as_int(info.get('seed'))
+    if seed is None:
+        seed = meta.get('seed')
+    record['seed'] = seed if seed is not None else 0
+    record['width'] = meta.get('width') or 0
+    record['height'] = meta.get('height') or 0
+    return record
 
 
 class GenStats:
@@ -36,12 +91,8 @@ class GenStats:
 
     def _save(self):
         try:
-            os.makedirs(os.path.dirname(self._path), exist_ok=True)
-            # 원자적 쓰기: tmp 파일에 쓰고 rename
-            tmp = self._path + '.tmp'
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(self._records, f, ensure_ascii=False)
-            os.replace(tmp, self._path)
+            # 원자적 쓰기는 공용 구현 한 벌(fsync + 실패 시 tmp 정리). 레코드가 많아 compact.
+            atomic_write_json(self._path, self._records, indent=None)
         except Exception as e:
             print(f"[gen_stats] 저장 실패: {e}")
 

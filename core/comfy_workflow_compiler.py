@@ -11,12 +11,22 @@ from __future__ import annotations
 import copy
 import json
 import os
-import random
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from core import anima38
+from core.comfy_node_classes import (
+    CHECKPOINT_LOADER_NODES,
+    CUSTOM_SAMPLER_NODES,
+    IMAGE_SAVE_NODES,
+    MODEL_LOADER_INPUTS,
+    SAMPLER_NODES,
+    SEMANTIC_ENCODER_NODES,
+    TEXT_ENCODER_NODES,
+)
+from core.comfy_seed import concrete_seed
+from core.lenient_numbers import finite_float as _float, lenient_int as _int
 
 
 class WorkflowCompileError(RuntimeError):
@@ -59,28 +69,78 @@ _LORA_RE = re.compile(
     r"<lora\s*:\s*([^:>]+?)\s*(?::\s*([^:>]+?))?\s*(?::\s*([^>]+?))?\s*>",
     re.IGNORECASE,
 )
-_SAMPLERS = {
-    "KSampler", "KSamplerAdvanced", "SamplerCustom", "SamplerCustomAdvanced",
-    "ForgeNeoKSamplerCNS",
+# Node vocabularies are shared with the workflow picker (core/comfy_node_classes).
+_SAMPLERS = SAMPLER_NODES
+_SAVE_NODES = IMAGE_SAVE_NODES
+_SEMANTIC_ENCODERS = SEMANTIC_ENCODER_NODES
+_TEXT_ENCODERS = TEXT_ENCODER_NODES
+# Loaders that read an uploaded input file; their choice list can be older than
+# the upload that happened just before compilation (see ``validate``).
+_UPLOAD_INPUT_LOADERS = frozenset({"LoadImage", "LoadImageMask"})
+# Bundled LoRA nodes that already handle ANIMA block layouts themselves and
+# can stay in an Anima custom workflow without a class remap.
+_ANIMA_SAFE_LORA_NODES = frozenset({
+    "ForgeNeoAnimaLoraLoader", "ForgeNeoAnimaLoraLoaderModelOnly",
+    "ForgeNeoLoraBlockWeight",
+})
+# Core LoRA loader remapped to the bundled ANIMA-compatible equivalent with the
+# same inputs.  Core LoraLoaderModelOnly stays an explicit error (the bundled
+# ForgeNeoAnimaLoraLoaderModelOnly is the supported model-only path).
+_ANIMA_LORA_REMAP = {
+    "LoraLoader": "ForgeNeoAnimaLoraLoader",
 }
-_SAVE_NODES = {"SaveImage", "PreviewImage", "ForgeNeoSaveImage"}
-_SEMANTIC_ENCODERS = {"ForgeNeoAnimaQwen35Prompt", "ForgeNeoAnima38V2Prompt"}
-_TEXT_ENCODERS = {"CLIPTextEncode", "CLIPTextEncodeSDXL"} | _SEMANTIC_ENCODERS
+# LoRA nodes with a CLIP input/output (index 1) chained like the model.
+_CLIP_LORA_NODES = frozenset({
+    "LoraLoader", "ForgeNeoAnimaLoraLoader", "ForgeNeoLoraBlockWeight",
+})
+
+# Forge/A1111 sampler labels → ComfyUI KSampler names.  The bundled node pack
+# is copied into ComfyUI and cannot import core, so
+# comfy_custom_nodes/ai_studio_forge_parity/generation.py keeps the same
+# tables for user workflows; tests/test_comfy_sampler_aliases.py pins both.
+_FORGE_SAMPLER_ALIASES = {
+    "euler": "euler", "euler a": "euler_ancestral", "euler ancestral": "euler_ancestral",
+    "lms": "lms", "heun": "heun", "dpm2": "dpm_2", "dpm2 a": "dpm_2_ancestral",
+    "dpm++ 2s a": "dpmpp_2s_ancestral", "dpm++ 2m": "dpmpp_2m",
+    "dpm++ sde": "dpmpp_sde", "dpm++ 2m sde": "dpmpp_2m_sde",
+    "dpm++ 2m sde heun": "dpmpp_2m_sde_heun", "dpm++ 3m sde": "dpmpp_3m_sde",
+    "dpm fast": "dpm_fast", "dpm adaptive": "dpm_adaptive",
+    "unipc": "uni_pc", "uni pc": "uni_pc", "uni_pc": "uni_pc",
+    "lcm": "lcm", "ddim": "ddim", "er sde": "er_sde", "er-sde": "er_sde",
+}
+# Old combined labels ("DPM++ 2M Karras") carry the scheduler as a suffix.
+_FORGE_SAMPLER_SCHEDULER_SUFFIXES = (
+    (" karras", "karras"), (" exponential", "exponential"),
+    (" sgm uniform", "sgm_uniform"), (" beta", "beta"),
+)
+_FORGE_SCHEDULER_ALIASES = {
+    "karras": "karras", "exponential": "exponential",
+    "sgm uniform": "sgm_uniform", "sgm_uniform": "sgm_uniform",
+    "simple": "simple", "normal": "normal",
+    "ddim uniform": "ddim_uniform", "ddim_uniform": "ddim_uniform",
+    "beta": "beta",
+    "beta57": "beta57", "beta 57": "beta57",
+    "beta57 (res4lyf)": "beta57", "beta 57 (res4lyf)": "beta57",
+}
+_FORGE_SAME_SCHEDULER = frozenset({"use same scheduler", "same", "automatic", "auto", ""})
+# ComfyUI comfy/samplers.py ``KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS``:
+# these samplers build their sigma array for steps+1 and drop the next-to-last
+# sigma, so one step index is a different noise level than for any other
+# sampler.  Passes that split one schedule must stay on the same side.
+_PENULTIMATE_SIGMA_DISCARD_SAMPLERS = frozenset({
+    "dpm_2", "dpm_2_ancestral", "uni_pc", "uni_pc_bh2",
+})
 
 
-def _float(value: Any, default: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed == parsed and parsed not in (float("inf"), float("-inf")) else default
-
-
-def _int(value: Any, default: int) -> int:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
+def unsupported_sampler_message(class_type: str) -> Optional[str]:
+    """Why a custom workflow sampler cannot receive the app's payload, if so."""
+    if class_type in CUSTOM_SAMPLER_NODES:
+        return (
+            f"{class_type} custom workflow는 Forge payload의 steps/CFG/denoise를 "
+            "안전하게 자동 매핑할 수 없습니다. KSampler/KSamplerAdvanced를 쓰거나 "
+            "완성된 그래프를 run_workflow로 실행하세요."
+        )
+    return None
 
 
 def _bool(value: Any, default: bool = False) -> bool:
@@ -145,8 +205,22 @@ class _Graph:
 class ComfyWorkflowCompiler:
     """Compile a canonical app payload for one concrete ComfyUI capability set."""
 
-    def __init__(self, object_info: Optional[Mapping[str, Any]] = None):
+    def __init__(
+        self,
+        object_info: Optional[Mapping[str, Any]] = None,
+        *,
+        sam3_keep_in_ram: bool = True,
+        object_info_cached: bool = False,
+    ):
         self.object_info = None if object_info is None else dict(object_info)
+        # True when ``object_info`` is a backend snapshot rather than a fetch
+        # made for this compile; the backend then retries a failed compile
+        # once with a fresh document (backends/comfyui_backend._compile_graph).
+        self.object_info_cached = bool(object_info_cached)
+        # App setting (core/comfy_sam3_cache_policy.py), the Comfy counterpart
+        # of Forge's ``sam3_unload_keep_in_ram``: after "Unload after", keep the
+        # SAM3 bundle in ComfyUI's CPU RAM for the next job, or free it.
+        self.sam3_keep_in_ram = bool(sam3_keep_in_ram)
 
     # ---- public ---------------------------------------------------------
 
@@ -189,14 +263,18 @@ class ComfyWorkflowCompiler:
                 raise WorkflowCompileError("추가 보정 패스를 사용하려면 SAM3 Inpaint를 켜세요.")
         if normalized != "txt2img":
             local_payload.setdefault("denoising_strength", 0.75)
-        loras, prompts = parse_lora_tags(
-            str(local_payload.get("prompt", "") or ""),
-            str(local_payload.get("negative_prompt", "") or ""),
-        )
-        local_payload["prompt"], local_payload["negative_prompt"] = prompts
-        anima_plan = self._resolve_anima38_plan(model_name, local_payload)
-        if anima_plan.native_modules != tuple(self._module_names(local_payload)):
-            local_payload["forge_additional_modules"] = list(anima_plan.native_modules)
+        plan_model, rewrite_model = model_name, model_name
+        if workflow is not None:
+            # A workflow whose model loader the app cannot rewrite (GGUF and
+            # other custom loaders; the picker shows it as "workflow fixes the
+            # model") owns its model: the UI's disabled combo value is ignored
+            # and the workflow's own model identifies the family.  An empty UI
+            # selection means the workflow's own loader model, for rewritable
+            # loaders too (identity and model written).
+            plan_model, rewrite_model = self._custom_workflow_model(
+                workflow, model_name, workflow_controls=workflow_controls,
+            )
+        loras, anima_plan = self._prepare_payload(plan_model, local_payload)
 
         if workflow is None:
             graph = self._compile_default(
@@ -205,7 +283,7 @@ class ComfyWorkflowCompiler:
             )
         else:
             graph = self._compile_custom(
-                normalized, model_name, local_payload, loras, workflow, anima_plan,
+                normalized, rewrite_model, local_payload, loras, workflow, anima_plan,
                 uploaded_image=uploaded_image, uploaded_mask=uploaded_mask,
             )
         if workflow_controls is not None:
@@ -216,8 +294,110 @@ class ComfyWorkflowCompiler:
                 graph = apply_controls(graph, workflow, self.object_info, workflow_controls)
             except WorkflowControlError as exc:
                 raise WorkflowCompileError(str(exc)) from exc
-        self.validate(graph)
+        self.validate(graph, uploaded_inputs=(uploaded_image, uploaded_mask))
         return graph
+
+    def _prepare_payload(
+        self, model_name: str, payload: dict,
+    ) -> tuple[list[LoraSpec], _Anima38Plan]:
+        """Shared payload normalisation for generation and post-processing.
+
+        Makes the seed concrete (one value for every pass), strips LoRA tags
+        into loader specs and resolves the Anima plan.  ``payload`` is the
+        compiler's private deep copy and is updated in place.
+        """
+        payload["seed"] = concrete_seed(payload.get("seed", -1))
+        loras, prompts = parse_lora_tags(
+            str(payload.get("prompt", "") or ""),
+            str(payload.get("negative_prompt", "") or ""),
+        )
+        payload["prompt"], payload["negative_prompt"] = prompts
+        anima_plan = self._resolve_anima38_plan(model_name, payload)
+        if anima_plan.native_modules != tuple(self._module_names(payload)):
+            payload["forge_additional_modules"] = list(anima_plan.native_modules)
+        return loras, anima_plan
+
+    def _custom_workflow_model(
+        self, workflow: Mapping[str, Any], model_name: str,
+        *, workflow_controls: Optional[Mapping[str, Any]] = None,
+    ) -> tuple[str, str]:
+        """``(model identity, model to write)`` for a custom workflow.
+
+        When the sampler's model chain ends in a loader the app can rewrite
+        (``MODEL_LOADER_INPUTS``), the selected ``model_name`` is both.  A
+        chain ending in any other loader is locked to that loader: nothing is
+        written, and the loader's own model file (when it has one) identifies
+        the model family for LoRA/Anima decisions instead of the UI value.
+        A locked loader's model is not app-managed, so a saved workflow
+        control may replace it; the identity is then read from the workflow
+        *with* those controls — the model the queued graph really loads.
+
+        An empty selection (a ComfyUI whose models are all GGUF has an empty
+        model combo, and ComfyUI allows that) means "the workflow's own
+        model": a rewritable loader's own file is then both the identity and
+        the model written (rewriting it to itself only normalises the choice,
+        and the Anima v2 path needs the loader), and a locked loader goes
+        through the same identity lookup as above.  Returning ``''`` here
+        used to skip the family check, so an Anima workflow kept core
+        ``LoraLoader`` (no block remap) and a v2 bundle lost its connector.
+        """
+        sampler_id = self._find_sampler(workflow)
+        inputs = self._node_inputs(workflow.get(sampler_id))
+        loader_id = self._trace_model_loader(workflow, inputs.get("model"))
+        if loader_id:
+            if model_name:
+                return model_name, model_name
+            loader = workflow.get(loader_id)
+            own = self._node_inputs(loader).get(
+                MODEL_LOADER_INPUTS[str(loader.get("class_type") or "")]
+            )
+            own_model = own.strip() if isinstance(own, str) else ""
+            return own_model, own_model
+        if workflow_controls is not None:
+            workflow = self._workflow_with_controls(workflow, workflow_controls)
+        from backends.comfyui_workflow_inspector import inspect_workflow
+
+        try:
+            inspection = inspect_workflow(dict(workflow))
+        except Exception:  # pragma: no cover - defensive; inspector is pure
+            return "", ""
+        node_inputs = self._node_inputs(workflow.get(str(inspection.model_node_id or "")))
+        for key in (inspection.model_param, "unet_name", "model_name", "ckpt_name", "gguf_name"):
+            value = node_inputs.get(key) if key else None
+            if isinstance(value, str) and value.strip():
+                return value.strip(), ""
+        return "", ""
+
+    def _workflow_with_controls(
+        self, workflow: Mapping[str, Any], workflow_controls: Mapping[str, Any],
+    ) -> dict:
+        """``workflow`` with its saved scalar controls applied (a new graph).
+
+        The same validation ``compile`` runs after compilation, applied to the
+        untouched workflow, so both see identical errors.
+        """
+        from core.comfy_workflow_controls import apply_controls, WorkflowControlError
+
+        try:
+            return apply_controls(workflow, workflow, self.object_info, workflow_controls)
+        except WorkflowControlError as exc:
+            raise WorkflowCompileError(str(exc)) from exc
+
+    @staticmethod
+    def _node_inputs(node: Any) -> Mapping[str, Any]:
+        """A node's ``inputs`` for reading; ``{}`` for malformed nodes."""
+        inputs = node.get("inputs") if isinstance(node, Mapping) else None
+        return inputs if isinstance(inputs, Mapping) else {}
+
+    @staticmethod
+    def _sampler_inputs(node: dict) -> dict:
+        """The sampler's writable ``inputs`` dict, or a clear compile error."""
+        inputs = node.setdefault("inputs", {})
+        if not isinstance(inputs, dict):
+            raise WorkflowCompileError(
+                f"sampler 노드({node.get('class_type')})의 inputs가 객체가 아닙니다."
+            )
+        return inputs
 
     def compile_upscale(
         self, uploaded_image: str, settings: Mapping[str, Any],
@@ -272,8 +452,8 @@ class ComfyWorkflowCompiler:
                     "height": max(1, round(height * factor)),
                     "crop": "disabled",
                 }, "Requested factor from original size")
-        graph.add("SaveImage", {"images": [image, 0], "filename_prefix": "AIStudio/upscale"}, "Save")
-        self.validate(graph.nodes)
+        self._add_output_image(graph, [image, 0], settings, "AIStudio/upscale", "Save")
+        self.validate(graph.nodes, uploaded_inputs=(uploaded_image,))
         return graph.nodes
 
     def compile_postprocess(
@@ -296,44 +476,21 @@ class ComfyWorkflowCompiler:
         local_payload = copy.deepcopy(dict(payload))
         if not self._has_image_scripts(local_payload):
             raise WorkflowCompileError("ADetailer 또는 SAM3 후처리 설정이 없습니다.")
-        loras, prompts = parse_lora_tags(
-            str(local_payload.get("prompt", "") or ""),
-            str(local_payload.get("negative_prompt", "") or ""),
-        )
-        local_payload["prompt"], local_payload["negative_prompt"] = prompts
-        anima_plan = self._resolve_anima38_plan(model_name, local_payload)
-        if anima_plan.native_modules != tuple(self._module_names(local_payload)):
-            local_payload["forge_additional_modules"] = list(anima_plan.native_modules)
+        loras, anima_plan = self._prepare_payload(model_name, local_payload)
         graph = _Graph()
-        model, clip, vae = self._add_loaders(
-            graph, model_name, local_payload, anima_plan,
-        )
-        shift = _float(local_payload.get("distilled_cfg_scale"), 0.0)
-        if shift > 0:
-            node = graph.add(
-                "ForgeNeoModelSamplingShift",
-                {"model": model, "shift": shift},
-                "Forge flow shift (preserve timestep scale)",
-            )
-            model = [node, 0]
-        model, clip = self._add_loras(graph, model, clip, loras, anima_plan)
-        model, clip = self._add_negpip(graph, model, clip, local_payload)
-        positive, negative = self._add_conditioning(
-            graph, model, clip, local_payload, anima_plan,
-        )
-        model, _sampler_options = self._add_anima_guidance(
-            graph, model, clip, positive, negative, local_payload,
+        (model, clip, vae, positive, negative,
+         _sampler_options) = self._add_default_model_stack(
+            graph, model_name, local_payload, loras, anima_plan,
         )
         source = graph.add("LoadImage", {"image": uploaded_image}, "Postprocess source")
         image = self._add_image_extensions(
             graph, [source, 0], model, clip, vae, positive, negative, local_payload,
             sam3_detailer_class=sam3_detailer_class,
         )
-        graph.add("SaveImage", {
-            "images": image,
-            "filename_prefix": str(local_payload.get("filename_prefix") or "AIStudio/postprocess"),
-        }, "Save postprocessed image")
-        self.validate(graph.nodes)
+        self._add_output_image(
+            graph, image, local_payload, "AIStudio/postprocess", "Save postprocessed image",
+        )
+        self.validate(graph.nodes, uploaded_inputs=(uploaded_image,))
         return graph.nodes
 
     def compile_sam3_mask_only(
@@ -358,17 +515,26 @@ class ComfyWorkflowCompiler:
         image = self._add_image_extensions(
             graph, [source, 0], [], [], [], [], [], local_payload,
         )
-        graph.add("SaveImage", {
-            "images": image,
-            "filename_prefix": str(local_payload.get("filename_prefix") or "AIStudio/sam3-mask"),
-        }, "Save SAM3 mask")
-        self.validate(graph.nodes)
+        self._add_output_image(
+            graph, image, local_payload, "AIStudio/sam3-mask", "Save SAM3 mask",
+        )
+        self.validate(graph.nodes, uploaded_inputs=(uploaded_image,))
         return graph.nodes
 
-    def validate(self, workflow: Mapping[str, Any]) -> None:
-        """Validate every executable class when a /object_info document exists."""
+    def validate(
+        self, workflow: Mapping[str, Any], *, uploaded_inputs: Iterable[str] = (),
+    ) -> None:
+        """Validate every executable class when a /object_info document exists.
+
+        ``uploaded_inputs`` are the input file names this job uploaded just
+        before compiling.  The capability document may be a short-lived
+        snapshot taken before the upload, so ``LoadImage``/``LoadImageMask``
+        accept exactly those names even when their choice list lacks them;
+        every other value is still checked against the published choices.
+        """
         if self.object_info is None:
             return
+        uploads = {str(name) for name in uploaded_inputs if str(name or "").strip()}
         used = {
             str(node.get("class_type") or "")
             for node in workflow.values()
@@ -417,6 +583,11 @@ class ComfyWorkflowCompiler:
                     and isinstance(spec[0], (list, tuple))
                     else []
                 )
+                if (
+                    class_type in _UPLOAD_INPUT_LOADERS and name == "image"
+                    and value in uploads
+                ):
+                    continue
                 if choices and value not in choices:
                     invalid_choices.append(f"{name}={value!r}")
             if unexpected or absent or invalid_choices:
@@ -447,26 +618,9 @@ class ComfyWorkflowCompiler:
         uploaded_mask: str,
     ) -> dict:
         graph = _Graph()
-        model, clip, vae = self._add_loaders(
-            graph, model_name, payload, anima_plan,
-        )
-
-        shift = _float(payload.get("distilled_cfg_scale"), 0.0)
-        if shift > 0:
-            shift_node = graph.add("ForgeNeoModelSamplingShift", {
-                "model": model, "shift": shift,
-            }, "Forge flow shift (preserve timestep scale)")
-            model = [shift_node, 0]
-
-        model, clip = self._add_loras(graph, model, clip, loras, anima_plan)
-        model, clip = self._add_negpip(graph, model, clip, payload)
-
-        positive_ref, negative_ref = self._add_conditioning(
-            graph, model, clip, payload, anima_plan,
-        )
-
-        model, sampler_options = self._add_anima_guidance(
-            graph, model, clip, positive_ref, negative_ref, payload,
+        (model, clip, vae, positive_ref, negative_ref,
+         sampler_options) = self._add_default_model_stack(
+            graph, model_name, payload, loras, anima_plan,
         )
         latent = self._add_latent(
             graph, mode, vae, payload,
@@ -487,10 +641,72 @@ class ComfyWorkflowCompiler:
         image = self._add_image_extensions(
             graph, image, model, clip, vae, positive_ref, negative_ref, payload,
         )
-        graph.add("SaveImage", {
-            "images": image, "filename_prefix": str(payload.get("filename_prefix") or "AIStudio/generated"),
-        }, "Save generated image")
+        self._add_output_image(
+            graph, image, payload, "AIStudio/generated", "Save generated image",
+        )
         return graph.nodes
+
+    def _add_default_model_stack(
+        self,
+        graph: _Graph,
+        model_name: str,
+        payload: Mapping[str, Any],
+        loras: Sequence[LoraSpec],
+        anima_plan: _Anima38Plan,
+    ) -> tuple[list, list, list, list, list, dict[str, Any]]:
+        """Loaders → model patches → conditioning → guidance (app graphs).
+
+        Shared by generation and standalone post-processing so both build the
+        same model/conditioning stack in the same node order.
+        """
+        model, clip, vae = self._add_loaders(graph, model_name, payload, anima_plan)
+        model, clip = self._add_model_patches(graph, model, clip, payload, loras, anima_plan)
+        positive, negative = self._add_conditioning(
+            graph, model, clip, payload, anima_plan,
+        )
+        model, sampler_options = self._add_anima_guidance(
+            graph, model, clip, positive, negative, payload,
+        )
+        return model, clip, vae, positive, negative, sampler_options
+
+    def _add_model_patches(
+        self,
+        graph: _Graph,
+        model: list,
+        clip: list,
+        payload: Mapping[str, Any],
+        loras: Sequence[LoraSpec],
+        anima_plan: Optional[_Anima38Plan],
+    ) -> tuple[list, list]:
+        """Flow shift → LoRAs → NegPiP, in Forge's application order."""
+        shift = _float(payload.get("distilled_cfg_scale"), 0.0)
+        if shift > 0:
+            shift_node = graph.add("ForgeNeoModelSamplingShift", {
+                "model": model, "shift": shift,
+            }, "Forge flow shift (preserve timestep scale)")
+            model = [shift_node, 0]
+        model, clip = self._add_loras(graph, model, clip, loras, anima_plan)
+        return self._add_negpip(graph, model, clip, payload)
+
+    @staticmethod
+    def _add_output_image(
+        graph: _Graph, image: list, payload: Mapping[str, Any],
+        default_prefix: str, title: str,
+    ) -> str:
+        """Honor Forge's ``save_images``: only an explicit True keeps a copy.
+
+        The main generation sends ``save_images=True`` (a ComfyUI/output copy,
+        like Forge's outputs folder).  Post-processing, chat, hand repair and
+        other callers send False or omit it (Forge's API default), so their
+        result is returned through ComfyUI's temp ``PreviewImage`` instead of
+        accumulating in ComfyUI/output.  Both are read back the same way.
+        """
+        if _bool(payload.get("save_images"), False):
+            return graph.add("SaveImage", {
+                "images": image,
+                "filename_prefix": str(payload.get("filename_prefix") or default_prefix),
+            }, title)
+        return graph.add("PreviewImage", {"images": image}, title)
 
     def _add_loaders(
         self,
@@ -867,9 +1083,9 @@ class ComfyWorkflowCompiler:
         self, graph: _Graph, model: list, positive: list, negative: list, latent: list,
         payload: Mapping[str, Any], options: Mapping[str, Any], *, mode: str,
     ) -> str:
-        seed = _int(payload.get("seed"), -1)
-        if seed < 0:
-            seed = random.randint(0, 2**32 - 1)
+        # compile() already made payload["seed"] concrete; this only guards
+        # direct callers so no node ever receives -1.
+        seed = concrete_seed(payload.get("seed"))
         sampler_name, scheduler = self._runtime_sampler_values(
             payload.get("sampler_name") or "euler",
             payload.get("scheduler") or "normal",
@@ -1197,8 +1413,14 @@ class ComfyWorkflowCompiler:
             ad_sampler, ad_scheduler = self._runtime_sampler_values(
                 requested_ad_sampler, requested_ad_scheduler,
             )
+            # Forge ADetailer has no seed of its own: every slot uses the
+            # image's seed (compile() made payload["seed"] concrete).
+            ad_seed = _int(slot.get("ad_seed"), -1)
             normalized_slot.update({
-                "seed": _int(slot.get("ad_seed"), _int(payload.get("seed"), 0)),
+                # Impact detector choice ("bbox/…" or "segm/…"), resolved
+                # before /prompt so a missing model fails before sampling.
+                "model_name": self._resolve_adetailer_model(slot.get("ad_model"), index),
+                "seed": ad_seed if ad_seed >= 0 else concrete_seed(payload.get("seed")),
                 "steps": (
                     _int(slot.get("ad_steps"), 28)
                     if _bool(slot.get("ad_use_steps"))
@@ -1241,6 +1463,14 @@ class ComfyWorkflowCompiler:
         sam_state = self._sam3_state(payload)
         if sam_state is not None:
             state = dict(sam_state)
+            # Forge SAM3: its own seed only with "use seed" on (-1 = random);
+            # otherwise the image's seed.  One value for mask metadata and
+            # the detailer so the saved graph replays exactly.
+            sam_seed = concrete_seed(
+                _int(state.get("sam3_seed"), -1)
+                if _bool(state.get("sam3_use_seed"))
+                else payload.get("seed")
+            )
             mask_node = graph.add("ForgeNeoSAM3Mask", {
                 "image": image,
                 "prompt": str(state.get("sam3_prompt") or "face"),
@@ -1265,8 +1495,9 @@ class ComfyWorkflowCompiler:
                 # Empty delegates to the node's Comfy output/sam3 directory.
                 # sam3_args intentionally has no artifact path field.
                 "artifact_directory": str(state.get("sam3_artifact_directory") or ""),
-                "seed": _int(state.get("sam3_seed"), _int(payload.get("seed"), -1)),
+                "seed": sam_seed,
                 "enabled": True,
+                "cache_model": self._sam3_cache_model(state),
             }, "SAM3 mask")
             if str(state.get("sam3_mode") or "Inpaint").casefold() == "mask only":
                 if _bool(state.get("sam3_preview_overlay")):
@@ -1282,9 +1513,7 @@ class ComfyWorkflowCompiler:
                 if scheduler.casefold() == "use same scheduler":
                     scheduler = str(payload.get("scheduler") or "normal")
                 sampler, scheduler = self._runtime_sampler_values(sampler, scheduler)
-                seed = _int(state.get("sam3_seed"), -1) if _bool(state.get("sam3_use_seed")) else _int(payload.get("seed"), -1)
-                if seed < 0:
-                    seed = random.randint(0, 2**32 - 1)
+                seed = sam_seed
                 detail = graph.add(sam3_detailer_class, {
                     "image": image, "mask": [mask_node, 0], "model": model, "clip": clip, "vae": vae,
                     "positive": positive, "negative": negative,
@@ -1303,6 +1532,10 @@ class ComfyWorkflowCompiler:
                     "use_custom_size": _bool(state.get("sam3_use_inpaint_width_height")),
                     "custom_width": _int(state.get("sam3_inpaint_width"), 512),
                     "custom_height": _int(state.get("sam3_inpaint_height"), 512),
+                    **dict(zip(
+                        ("target_width", "target_height"),
+                        self._sam3_processing_size(payload),
+                    )),
                     "grow_mask_by": max(0, _int(state.get("sam3_grow_mask_by"), 6)),
                     "controlnet_enable": _bool(state.get("sam3_cn_enable")),
                     "controlnet_model_name": str(state.get("sam3_cn_model") or "None"),
@@ -1360,34 +1593,19 @@ class ComfyWorkflowCompiler:
         graph = _Graph(workflow)
         sampler_id = self._find_sampler(graph.nodes)
         sampler = graph.nodes[sampler_id]
-        inputs = sampler.setdefault("inputs", {})
+        inputs = self._sampler_inputs(sampler)
         self._map_sampler_inputs(inputs, sampler.get("class_type", ""), payload, mode=mode)
-        batch = max(1, _int(payload.get("batch_size"), 1)) * max(
-            1, _int(payload.get("n_iter", payload.get("batch_count", 1)), 1)
-        )
-        latent_ids = self._trace_classes(
-            graph.nodes, inputs.get("latent_image"), {"EmptyLatentImage", "ForgeNeoLatentInput"},
-        )
-        if len(latent_ids) > 1:
-            raise WorkflowCompileError(
-                "custom workflow의 sampler latent 분기에 EmptyLatentImage가 여러 개입니다."
-            )
-        if latent_ids:
-            latent_id = latent_ids[0]
-            latent_inputs = graph.nodes[latent_id].setdefault("inputs", {})
-            latent_inputs["width"] = max(64, _int(payload.get("width"), 512))
-            latent_inputs["height"] = max(64, _int(payload.get("height"), 512))
-            latent_inputs["batch_size"] = batch
-            if graph.nodes[latent_id].get("class_type") == "ForgeNeoLatentInput":
-                latent_inputs["mode"] = mode
+        self._apply_custom_latent_size(graph.nodes, inputs, payload, mode=mode)
 
         loader_id: Optional[str] = None
         loader_type = ""
         if model_name:
+            # compile() passes a model only for a rewritable loader chain.
             loader_id = self._trace_model_loader(graph.nodes, inputs.get("model"))
             if not loader_id:
                 raise WorkflowCompileError(
-                    "custom workflow sampler의 upstream CheckpointLoaderSimple/UNETLoader를 찾지 못했습니다."
+                    "custom workflow sampler의 upstream 모델 로더("
+                    + "/".join(MODEL_LOADER_INPUTS) + ")를 찾지 못했습니다."
                 )
             loader = graph.nodes[loader_id]
             loader_type = str(loader.get("class_type") or "")
@@ -1398,11 +1616,7 @@ class ComfyWorkflowCompiler:
                     loader["inputs"] = {
                         "weight_dtype": str(payload.get("weight_dtype") or "default"),
                     }
-                loader_input = (
-                    "ckpt_name"
-                    if loader_type == "CheckpointLoaderSimple"
-                    else "unet_name"
-                )
+                loader_input = MODEL_LOADER_INPUTS[loader_type]
                 loader.setdefault("inputs", {})[loader_input] = self._resolve_choice(
                     loader_type, loader_input, model_name,
                 )
@@ -1418,6 +1632,7 @@ class ComfyWorkflowCompiler:
                 "custom workflow의 positive/negative CLIPTextEncode 연결은 각각 하나여야 합니다."
             )
         pos_id, neg_id = pos_ids[0], neg_ids[0]
+        self._shares_text_encoder(pos_id, neg_id, payload.get("negative_prompt"))
         if anima_plan.semantic and any(
             graph.nodes[node_id].get("class_type") not in {"CLIPTextEncode"} | _SEMANTIC_ENCODERS
             for node_id in (pos_id, neg_id)
@@ -1476,7 +1691,7 @@ class ComfyWorkflowCompiler:
                 raise WorkflowCompileError(
                     "Anima 3.8B v2 custom workflow model loader를 찾지 못했습니다."
                 )
-            if loader_type == "CheckpointLoaderSimple":
+            if loader_type in CHECKPOINT_LOADER_NODES:
                 stale_consumers = self._direct_link_consumers(
                     graph.nodes, loader_id, {1, 2},
                 )
@@ -1510,14 +1725,7 @@ class ComfyWorkflowCompiler:
                 ),
             }
 
-        shift = _float(payload.get("distilled_cfg_scale"), 0.0)
-        if shift > 0:
-            shift_node = graph.add("ForgeNeoModelSamplingShift", {
-                "model": model, "shift": shift,
-            }, "Forge flow shift (preserve timestep scale)")
-            model = [shift_node, 0]
-        model, clip = self._add_loras(graph, model, clip, loras, anima_plan)
-        model, clip = self._add_negpip(graph, model, clip, payload)
+        model, clip = self._add_model_patches(graph, model, clip, payload, loras, anima_plan)
         self._rewrite_custom_conditioning(
             graph, pos_id, neg_id, model, clip, payload, anima_plan,
             negative_clip=(
@@ -1590,30 +1798,350 @@ class ComfyWorkflowCompiler:
                     graph.nodes[output_id].setdefault("inputs", {})[key] = post
         return graph.nodes
 
+    # ---- external (Generation API profile) workflows --------------------
+
+    def map_external_workflow(
+        self,
+        workflow: Mapping[str, Any],
+        mode: str,
+        model_name: str,
+        payload: Mapping[str, Any],
+        *,
+        warnings: Optional[list] = None,
+        missing_loras: Optional[list] = None,
+    ) -> dict:
+        """Apply a Forge payload to a caller-owned API workflow, without app nodes.
+
+        Generation API profiles may point at a remote or stock ComfyUI that
+        does not have the bundled node pack, so unlike ``compile(workflow=…)``
+        this inserts no ForgeNeo nodes (no latent/Hires/ADetailer/SAM3/NegPiP
+        rewiring), and it accepts multi-pass graphs: the payload goes to the
+        *main* sampler only (``_find_external_sampler`` — the first pass that
+        leads to the image output), and every other sampler keeps the
+        workflow's own values, as the legacy mapper did.  On that sampler it
+        shares the compiler's rules: Forge sampler names; txt2img denoise 1.0
+        and the KSamplerAdvanced step window (steps, scheduler and window kept
+        as authored when the pass hands leftover noise to a later sampler —
+        they are one sigma schedule with that pass, and so is the sampler's
+        sigma layout: a payload sampler whose layout would move the noise
+        boundary with the continuation pass's own sampler is reported in
+        ``warnings`` and the authored one kept); latent size/batch; the
+        model on a rewritable loader (a custom loader keeps its model).
+        ``<lora:…>`` tags leave the prompt and become ``LoraLoader`` nodes
+        for every consumer of that model/CLIP; like Forge, a LoRA the target
+        does not have is skipped and reported in ``warnings`` (its name also
+        in ``missing_loras`` — the only warning a fresher schema can change)
+        instead of failing the job.  The input image of img2img is already
+        written into ``LoadImage`` by the caller.  Returns a new graph;
+        ``workflow``/``payload`` are untouched.
+        """
+        normalized = {
+            "t2i": "txt2img", "txt2img": "txt2img", "i2i": "img2img", "img2img": "img2img",
+        }.get(str(mode or "").strip().casefold())
+        if normalized is None:
+            raise WorkflowCompileError(f"지원하지 않는 ComfyUI 생성 모드입니다: {mode!r}")
+        local_payload = copy.deepcopy(dict(payload))
+        if _bool(local_payload.get("enable_hr")):
+            raise WorkflowCompileError(
+                "대상 프로필의 사용자 ComfyUI 워크플로에는 Hires.fix를 자동으로 넣을 수 "
+                "없습니다. 워크플로 안에 업스케일 단계를 두거나 enable_hr를 끄세요."
+            )
+        if normalized != "txt2img":
+            local_payload.setdefault("denoising_strength", 0.75)
+        local_payload["seed"] = concrete_seed(local_payload.get("seed", -1))
+        loras, prompts = parse_lora_tags(
+            str(local_payload.get("prompt", "") or ""),
+            str(local_payload.get("negative_prompt", "") or ""),
+        )
+        positive_text, negative_text = prompts
+
+        graph = _Graph(workflow)
+        sampler_id = self._find_external_sampler(graph.nodes)
+        sampler = graph.nodes[sampler_id]
+        inputs = self._sampler_inputs(sampler)
+        keep_step_window = self._hands_off_leftover_noise(graph.nodes, sampler_id)
+        self._map_sampler_inputs(
+            inputs, str(sampler.get("class_type") or ""), local_payload, mode=normalized,
+            keep_step_window=keep_step_window,
+            continuation_samplers=(
+                self._continuation_sampler_names(graph.nodes, sampler_id)
+                if keep_step_window else ()
+            ),
+            warnings=warnings,
+        )
+        self._apply_custom_latent_size(graph.nodes, inputs, local_payload, mode=normalized)
+
+        if model_name:
+            loader_id = self._trace_model_loader(graph.nodes, inputs.get("model"))
+            if loader_id:
+                loader = graph.nodes[loader_id]
+                loader_type = str(loader.get("class_type") or "")
+                loader_input = MODEL_LOADER_INPUTS[loader_type]
+                loader.setdefault("inputs", {})[loader_input] = self._resolve_choice(
+                    loader_type, loader_input, model_name,
+                )
+            # else: a custom loader owns the model (same rule as compile()).
+
+        pos_ids = self._trace_classes(graph.nodes, inputs.get("positive"), _TEXT_ENCODERS)
+        neg_ids = self._trace_classes(graph.nodes, inputs.get("negative"), _TEXT_ENCODERS)
+        if len(pos_ids) != 1 or len(neg_ids) != 1:
+            raise WorkflowCompileError(
+                "workflow의 positive/negative 텍스트 인코더 연결은 각각 하나여야 합니다."
+            )
+        pos_id, neg_id = pos_ids[0], neg_ids[0]
+        shared_encoder = self._shares_text_encoder(pos_id, neg_id, negative_text)
+        pos_node, neg_node = graph.nodes[pos_id], graph.nodes[neg_id]
+        available = self._available_external_loras(loras, warnings, missing_loras)
+        if available:
+            model = inputs.get("model")
+            clip = self._node_inputs(pos_node).get(self._encode_clip_input(pos_node))
+            neg_clip = self._node_inputs(neg_node).get(self._encode_clip_input(neg_node))
+            if not (_is_link(model) and _is_link(clip)) or clip != neg_clip:
+                raise WorkflowCompileError(
+                    "<lora:…> 태그를 넣으려면 sampler의 model과 positive/negative "
+                    "인코더가 같은 CLIP에 연결되어 있어야 합니다."
+                )
+            before = set(graph.nodes)
+            lora_model, lora_clip = self._add_loras(graph, model, clip, available, None)
+            lora_ids = set(graph.nodes) - before
+            # Forge applies prompt LoRAs to the whole job: every pass (and
+            # encoder) that used this model/CLIP now uses the patched one.
+            self._redirect_link(graph.nodes, model, lora_model, skip=lora_ids)
+            self._redirect_link(graph.nodes, clip, lora_clip, skip=lora_ids)
+        targets = [(pos_node, positive_text)]
+        if not shared_encoder:
+            targets.append((neg_node, negative_text))
+        for node, text in targets:
+            if node.get("class_type") in _SEMANTIC_ENCODERS:
+                node.setdefault("inputs", {})["prompt"] = text
+            else:
+                self._set_encode_text(node, text)
+        return graph.nodes
+
+    def _available_external_loras(
+        self, loras: Sequence[LoraSpec], warnings: Optional[list],
+        missing: Optional[list] = None,
+    ) -> list[LoraSpec]:
+        """Prompt LoRAs the target has, by its exact name; the rest are reported.
+
+        Forge's rule for an unknown ``<lora:…>``: the tag leaves the prompt, a
+        warning is logged and the image is still generated.  An ambiguous name
+        stays an error (``_match_choice``) — picking one would be a guess.
+        Skipped names also go to ``missing`` (a cached schema can predate them).
+        """
+        choices = self._choices("LoraLoader", "lora_name")
+        available: list[LoraSpec] = []
+        for spec in loras:
+            name = self._match_choice(spec.name, choices)
+            if name is None:
+                if warnings is not None:
+                    warnings.append(f"대상 ComfyUI에 없는 LoRA라 건너뛰었습니다: {spec.name}")
+                if missing is not None:
+                    missing.append(spec.name)
+                continue
+            available.append(LoraSpec(name, spec.strength_model, spec.strength_clip))
+        return available
+
+    @staticmethod
+    def _redirect_link(
+        nodes: Mapping[str, Any], old: Sequence[Any], new: Sequence[Any],
+        *, skip: Iterable[str] = (),
+    ) -> None:
+        """Point every input that reads link ``old`` at ``new`` (``skip`` excluded)."""
+        skipped = {str(node_id) for node_id in skip}
+        source = (str(old[0]), old[1])
+        for node_id, node in nodes.items():
+            if str(node_id) in skipped or not isinstance(node, Mapping):
+                continue
+            node_inputs = node.get("inputs")
+            if not isinstance(node_inputs, dict):
+                continue
+            for key, value in node_inputs.items():
+                if _is_link(value) and (str(value[0]), value[1]) == source:
+                    node_inputs[key] = list(new)
+
+    @staticmethod
+    def _shares_text_encoder(pos_id: str, neg_id: str, negative_text: Any) -> bool:
+        """True when the negative conditioning is derived from the positive encoder.
+
+        ``ConditioningZeroOut`` (or any other conditioning node) fed by the
+        positive encoder makes both sampler inputs trace to one text encoder.
+        Writing the negative text there would replace the positive prompt, so
+        only the positive prompt is written, and a negative prompt that has no
+        encoder of its own is an explicit error instead of a silent swap.
+        """
+        if str(pos_id) != str(neg_id):
+            return False
+        if str(negative_text or "").strip():
+            raise WorkflowCompileError(
+                "이 워크플로의 negative 조건은 positive 텍스트 인코더에서 만들어집니다"
+                "(예: ConditioningZeroOut). 네거티브 프롬프트를 넣을 인코더가 없으니 "
+                "네거티브 프롬프트를 비우거나, negative 전용 CLIPTextEncode를 연결하세요."
+            )
+        return True
+
+    @classmethod
+    def _find_external_sampler(cls, workflow: Mapping[str, Any]) -> str:
+        """The sampler that receives an external payload in a multi-pass graph.
+
+        A pass whose latent comes from another sampler (Hires refine, SDXL
+        refiner, upscale-and-resample) is a follow-up pass and keeps its
+        authored values; among the first passes, one whose result reaches an
+        image output wins, and ties keep workflow order (the legacy mapper
+        took the first sampler).  ``SamplerCustom*`` is rejected later only
+        when it is this sampler.
+        """
+        samplers = [
+            str(node_id) for node_id, node in workflow.items()
+            if isinstance(node, Mapping) and node.get("class_type") in _SAMPLERS
+        ]
+        if not samplers:
+            raise WorkflowCompileError("workflow에서 sampler 노드를 찾지 못했습니다.")
+        if len(samplers) == 1:
+            return samplers[0]
+        first_passes = [
+            sampler_id for sampler_id in samplers
+            if not any(
+                other != sampler_id and cls._link_depends_on(
+                    workflow,
+                    cls._node_inputs(workflow.get(sampler_id)).get("latent_image"),
+                    other,
+                )
+                for other in samplers
+            )
+        ] or samplers
+        output_links = [
+            value
+            for node in workflow.values()
+            if isinstance(node, Mapping) and node.get("class_type") in _SAVE_NODES
+            for value in cls._node_inputs(node).values()
+            if _is_link(value)
+        ]
+        reaching = [
+            sampler_id for sampler_id in first_passes
+            if any(cls._link_depends_on(workflow, link, sampler_id) for link in output_links)
+        ]
+        return (reaching or first_passes)[0]
+
+    @classmethod
+    def _hands_off_leftover_noise(cls, workflow: Mapping[str, Any], sampler_id: str) -> bool:
+        """True for a KSamplerAdvanced pass that returns leftover noise to a later sampler.
+
+        That is a split schedule (e.g. SDXL base + refiner): its ``steps``,
+        ``scheduler``, step window and the sampler's sigma layout
+        (``_PENULTIMATE_SIGMA_DISCARD_SAMPLERS``) belong to the workflow, or
+        the next pass would start from the wrong noise level.
+        """
+        node = workflow.get(sampler_id)
+        if not isinstance(node, Mapping) or node.get("class_type") != "KSamplerAdvanced":
+            return False
+        leftover = str(cls._node_inputs(node).get("return_with_leftover_noise") or "")
+        if leftover.strip().casefold() != "enable":
+            return False
+        return any(
+            str(other_id) != str(sampler_id)
+            and isinstance(other, Mapping)
+            and other.get("class_type") in _SAMPLERS
+            and cls._link_depends_on(
+                workflow, cls._node_inputs(other).get("latent_image"), sampler_id,
+            )
+            for other_id, other in workflow.items()
+        )
+
+    @classmethod
+    def _continuation_sampler_names(
+        cls, workflow: Mapping[str, Any], sampler_id: str,
+    ) -> list[Any]:
+        """``sampler_name`` of every pass that takes ``sampler_id``'s latent directly.
+
+        A continuation pass is a sampler whose ``latent_image`` traces back to
+        ``sampler_id`` with no other sampler in between (an SDXL refiner, not
+        a later Hires pass fed by the refiner).  Its own sampler decides the
+        sigma layout of the step it starts at.  The value is kept as authored:
+        a link (a sampler picked by another node) or ``None`` (a sampler class
+        without ``sampler_name``) means that pass's layout is unknown.
+        """
+        names: list[Any] = []
+        for other_id, other in workflow.items():
+            if (
+                str(other_id) == str(sampler_id)
+                or not isinstance(other, Mapping)
+                or other.get("class_type") not in _SAMPLERS
+            ):
+                continue
+            other_inputs = cls._node_inputs(other)
+            upstream = cls._trace_classes(workflow, other_inputs.get("latent_image"), _SAMPLERS)
+            if str(sampler_id) in upstream:
+                names.append(other_inputs.get("sampler_name"))
+        return names
+
     # ---- small helpers -------------------------------------------------
+
+    def _apply_custom_latent_size(
+        self, nodes: dict, sampler_inputs: Mapping[str, Any],
+        payload: Mapping[str, Any], *, mode: str,
+    ) -> None:
+        """Write size/batch (and ForgeNeoLatentInput mode) on the sampler's latent source."""
+        batch = max(1, _int(payload.get("batch_size"), 1)) * max(
+            1, _int(payload.get("n_iter", payload.get("batch_count", 1)), 1)
+        )
+        latent_ids = self._trace_classes(
+            nodes, sampler_inputs.get("latent_image"),
+            {"EmptyLatentImage", "ForgeNeoLatentInput"},
+        )
+        if len(latent_ids) > 1:
+            raise WorkflowCompileError(
+                "custom workflow의 sampler latent 분기에 EmptyLatentImage가 여러 개입니다."
+            )
+        if not latent_ids:
+            return
+        latent_id = latent_ids[0]
+        latent_inputs = nodes[latent_id].setdefault("inputs", {})
+        latent_inputs["width"] = max(64, _int(payload.get("width"), 512))
+        latent_inputs["height"] = max(64, _int(payload.get("height"), 512))
+        latent_inputs["batch_size"] = batch
+        if nodes[latent_id].get("class_type") == "ForgeNeoLatentInput":
+            latent_inputs["mode"] = mode
 
     def _map_sampler_inputs(
         self, inputs: dict, class_type: str, payload: Mapping[str, Any], *, mode: str,
+        keep_step_window: bool = False,
+        continuation_samplers: Sequence[Any] = (),
+        warnings: Optional[list] = None,
     ) -> None:
-        if class_type in {"SamplerCustom", "SamplerCustomAdvanced"}:
-            raise WorkflowCompileError(
-                f"{class_type} custom workflow는 Forge payload의 steps/CFG/denoise를 "
-                "안전하게 자동 매핑할 수 없습니다. KSampler/KSamplerAdvanced를 쓰거나 "
-                "완성된 그래프를 run_workflow로 실행하세요."
-            )
-        seed = _int(payload.get("seed"), -1)
-        if seed < 0:
-            seed = random.randint(0, 2**32 - 1)
+        """Write the payload's sampling settings onto one sampler node.
+
+        ``keep_step_window`` (external multi-pass graphs only): a
+        ``KSamplerAdvanced`` that splits one schedule with a later pass keeps
+        its authored ``steps``/``scheduler``/start/end/leftover-noise inputs —
+        the sigma schedule is shared with the later pass, so writing only this
+        pass's scheduler (even the ``normal`` default of a payload without one)
+        would hand the next pass a latent at the wrong noise level.  Seed and
+        cfg still come from the payload, and so does the sampler algorithm
+        when its sigma layout keeps the boundary with the later pass, whose
+        ``sampler_name`` values are ``continuation_samplers``
+        (``_map_split_pass_sampler``).
+        """
+        blocked = unsupported_sampler_message(class_type)
+        if blocked:
+            raise WorkflowCompileError(blocked)
+        seed = concrete_seed(payload.get("seed"))
         inputs["noise_seed" if class_type == "KSamplerAdvanced" else "seed"] = seed
-        steps = max(1, _int(payload.get("steps"), 20))
-        inputs["steps"] = steps
         inputs["cfg"] = _float(payload.get("cfg_scale"), 7.0)
+        # Resolved even for a split pass so an unsupported sampler/scheduler still fails.
         sampler, scheduler = self._runtime_sampler_values(
             payload.get("sampler_name") or "euler",
             payload.get("scheduler") or "normal",
         )
+        if keep_step_window and class_type == "KSamplerAdvanced":
+            self._map_split_pass_sampler(
+                inputs, payload, sampler, continuation_samplers, warnings,
+            )
+            return
         inputs["sampler_name"] = sampler
         inputs["scheduler"] = scheduler
+        steps = max(1, _int(payload.get("steps"), 20))
+        inputs["steps"] = steps
         denoise = (
             1.0 if mode == "txt2img" else
             max(0.0, min(1.0, _float(payload.get("denoising_strength"), 0.75)))
@@ -1625,6 +2153,75 @@ class ComfyWorkflowCompiler:
             inputs["return_with_leftover_noise"] = "disable"
         else:
             inputs["denoise"] = denoise
+
+    @staticmethod
+    def _map_split_pass_sampler(
+        inputs: dict, payload: Mapping[str, Any], sampler: str,
+        continuation_samplers: Sequence[Any], warnings: Optional[list],
+    ) -> None:
+        """The payload's sampler on a split-schedule pass, only if the boundary holds.
+
+        ComfyUI builds each pass's sigmas from its own sampler: the
+        ``_PENULTIMATE_SIGMA_DISCARD_SAMPLERS`` (DPM2/UniPC) use steps+1 and
+        drop the next-to-last sigma, so ``end_at_step`` here and the
+        continuation pass's ``start_at_step`` name one noise level only when
+        both passes are on the same side of that line.  The boundary is with
+        the continuation pass, so its own ``sampler_name``
+        (``continuation_samplers``, see ``_continuation_sampler_names``)
+        decides: a payload sampler of that layout is written.  So is one of
+        the authored sampler's layout — the boundary then stays exactly as
+        authored, which is all that can be checked when the continuation's
+        sampler is wired from another node; when the authored passes already
+        disagree, that is reported.  Any other sampler keeps the authored one
+        (a link included) and is reported.  A payload without a sampler keeps
+        the authored one, like the scheduler.
+        """
+        authored = inputs.get("sampler_name")
+        if authored is None or authored == "":
+            inputs["sampler_name"] = sampler  # nothing authored to keep
+            return
+        if not str(payload.get("sampler_name") or "").strip():
+            return
+        discards = _PENULTIMATE_SIGMA_DISCARD_SAMPLERS
+        continuations = list(continuation_samplers)
+        continuation_known = bool(continuations) and all(
+            isinstance(name, str) and name for name in continuations
+        )
+        next_names = ", ".join(dict.fromkeys(continuations)) if continuation_known else ""
+        # 다음 패스와 같은 시그마 배열 → 경계가 맞는다.
+        aligned = continuation_known and all(
+            (name in discards) == (sampler in discards) for name in continuations
+        )
+        # 작성된 첫 패스와 같은 배열 → 경계가 작성된 그대로다(맞든 이미 어긋났든).
+        as_authored = isinstance(authored, str) and (
+            (authored in discards) == (sampler in discards)
+        )
+        if aligned or as_authored:
+            inputs["sampler_name"] = sampler
+            if not aligned and continuation_known and warnings is not None:
+                warnings.append(
+                    f"분할 샘플링 워크플로의 두 패스가 이미 시그마 배열이 달라({authored} → "
+                    f"{next_names}) 노이즈 경계가 어긋나 있습니다 — {sampler}도 첫 패스와 같은 "
+                    f"배열입니다. 경계를 맞추려면 다음 패스({next_names})와 시그마 배열이 같은 "
+                    "샘플러를 고르세요."
+                )
+            return
+        if warnings is None:
+            return
+        first = (
+            f"첫 패스 샘플러({authored})" if isinstance(authored, str)
+            else "첫 패스 샘플러(다른 노드에서 연결됨)"
+        )
+        if continuation_known:
+            warnings.append(
+                f"분할 샘플링 워크플로라 {first}를 유지했습니다 — {sampler}는 다음 패스 "
+                f"샘플러({next_names})와 시그마 배열이 달라 노이즈 경계가 어긋납니다."
+            )
+        else:
+            warnings.append(
+                f"분할 샘플링 워크플로라 {first}를 유지했습니다 — 다음 패스 샘플러를 알 수 "
+                f"없어(다른 노드에서 연결됨) {sampler}가 같은 시그마 배열인지 확인할 수 없습니다."
+            )
 
     @staticmethod
     def _encode_clip_input(node: Mapping[str, Any]) -> str:
@@ -1652,11 +2249,16 @@ class ComfyWorkflowCompiler:
     ) -> None:
         positive_text = str(payload.get("prompt") or "")
         negative_text = str(payload.get("negative_prompt") or "")
+        # One encoder feeding both (ConditioningZeroOut negative): write the
+        # positive prompt only — the negative would otherwise replace it.
+        shared_encoder = self._shares_text_encoder(pos_id, neg_id, negative_text)
         if not anima_plan.semantic:
-            for node_id, text, encoder in (
-                (pos_id, positive_text, clip),
-                (neg_id, negative_text, negative_clip if negative_clip is not None else clip),
-            ):
+            targets = [(pos_id, positive_text, clip)]
+            if not shared_encoder:
+                targets.append(
+                    (neg_id, negative_text, negative_clip if negative_clip is not None else clip)
+                )
+            for node_id, text, encoder in targets:
                 if graph.nodes[node_id].get("class_type") in _SEMANTIC_ENCODERS:
                     graph.nodes[node_id]["class_type"] = "CLIPTextEncode"
                     graph.nodes[node_id]["inputs"] = {}
@@ -1709,6 +2311,8 @@ class ComfyWorkflowCompiler:
         graph.nodes[pos_id]["inputs"] = semantic_inputs(
             positive_text, anima_plan.settings.strength,
         )
+        if shared_encoder:
+            return
         if anima_plan.settings.negative:
             graph.nodes[neg_id]["class_type"] = prompt_type
             graph.nodes[neg_id]["inputs"] = semantic_inputs(
@@ -1775,11 +2379,19 @@ class ComfyWorkflowCompiler:
         neg_clip: Any,
         anima_plan: _Anima38Plan,
     ) -> tuple[list[str], bool]:
-        """Upgrade only active native LoRAs; reject unsupported/shared seams."""
+        """Upgrade only active native LoRAs; reject unsupported/shared seams.
+
+        Core ``LoraLoader`` becomes the bundled ANIMA loader with the same
+        inputs.  Bundled nodes that already handle ANIMA
+        block layouts (``_ANIMA_SAFE_LORA_NODES``, including block weighting)
+        stay as they are.  Returns the CLIP-carrying LoRA chain (model order)
+        and whether both encoders read its CLIP output.
+        """
 
         if not anima_plan.is_anima:
             return [], False
-        lora_ids: list[str] = []
+        lora_ids: list[str] = []      # CLIP-carrying LoRA chain, model order
+        remap_ids: list[str] = []     # core loaders switched to ANIMA classes
         visited: set[str] = set()
         link = model_link
         for _depth in range(31):
@@ -1793,22 +2405,30 @@ class ComfyWorkflowCompiler:
             if not isinstance(node, Mapping):
                 break
             class_type = str(node.get("class_type") or "")
-            if class_type in {"CheckpointLoaderSimple", "UNETLoader", "ForgeNeoAnima38V2Loader"}:
+            if class_type in MODEL_LOADER_INPUTS:
                 break
-            if class_type in {"LoraLoader", "ForgeNeoAnimaLoraLoader"}:
-                lora_ids.append(node_id)
-            elif "lora" in class_type.casefold():
+            if class_type in _ANIMA_LORA_REMAP:
+                remap_ids.append(node_id)
+            elif class_type not in _ANIMA_SAFE_LORA_NODES and "lora" in class_type.casefold():
                 raise WorkflowCompileError(
                     "Anima custom workflow의 활성 model 분기에 호환 remap을 "
-                    f"적용할 수 없는 LoRA node가 있습니다: {node_id} ({class_type})"
+                    f"적용할 수 없는 LoRA node가 있습니다: {node_id} ({class_type}). "
+                    "LoraLoader 또는 번들 ForgeNeo LoRA 노드(ForgeNeoAnimaLoraLoader·"
+                    "ForgeNeoAnimaLoraLoaderModelOnly·ForgeNeoLoraBlockWeight)를 쓰세요."
                 )
+            if class_type in _CLIP_LORA_NODES:
+                lora_ids.append(node_id)
             inputs = node.get("inputs", {})
             link = inputs.get("model") if isinstance(inputs, Mapping) else None
 
-        for node_id in lora_ids:
+        # A class switch changes every consumer, and a later CLIP rebase
+        # rewrites the chain's clip inputs: neither may leak into a branch the
+        # sampler does not use.
+        for node_id in dict.fromkeys([*remap_ids, *lora_ids]):
+            outputs = {0, 1} if graph.nodes[node_id].get("class_type") in _CLIP_LORA_NODES else {0}
             external = [
                 item for item in self._direct_link_consumers(
-                    graph.nodes, node_id, {0, 1},
+                    graph.nodes, node_id, outputs,
                 )
                 if item[0] not in active_ids
             ]
@@ -1820,9 +2440,9 @@ class ComfyWorkflowCompiler:
                     "Anima LoRA node를 선택하지 않은 custom workflow 분기가 "
                     "공유하고 있어 안전하게 교체할 수 없습니다: " + detail
                 )
-        for node_id in lora_ids:
-            if graph.nodes[node_id].get("class_type") == "LoraLoader":
-                graph.nodes[node_id]["class_type"] = "ForgeNeoAnimaLoraLoader"
+        for node_id in remap_ids:
+            node = graph.nodes[node_id]
+            node["class_type"] = _ANIMA_LORA_REMAP[str(node.get("class_type"))]
 
         clip_uses_lora = bool(
             lora_ids
@@ -2002,6 +2622,63 @@ class ComfyWorkflowCompiler:
             )
         return matched
 
+    def _resolve_adetailer_model(self, requested: Any, index: int) -> str:
+        """Map a Forge ADetailer model name to an Impact detector choice.
+
+        Impact Subpack's ``UltralyticsDetectorProvider`` publishes
+        ``bbox/<file>`` and ``segm/<file>``.  A Forge name such as
+        ``person_yolov8n-seg.pt`` must become the ``segm/`` choice when it
+        exists (Forge inpaints the silhouette, not the box); a model ComfyUI
+        does not have (e.g. ``mediapipe_face_full``) is rejected here, before
+        the base image is sampled, instead of inside the ADetailer node.
+        """
+        value = str(requested or "").strip().replace("\\", "/")
+        if not value or value.casefold() in {"none", "disabled"}:
+            raise WorkflowCompileError(f"ADetailer 슬롯 {index}에 검출 모델이 없습니다.")
+        if self.object_info is None:
+            return value  # offline compile: the node keeps its bbox/ default
+        missing = [
+            name for name in ("UltralyticsDetectorProvider", "FaceDetailer")
+            if name not in self.object_info
+        ]
+        if missing:
+            raise WorkflowCompileError(
+                "ComfyUI ADetailer에는 Impact Pack(FaceDetailer)과 Impact Subpack"
+                "(UltralyticsDetectorProvider)이 필요합니다. 없는 노드: "
+                + ", ".join(missing)
+            )
+        choices = self._choices("UltralyticsDetectorProvider", "model_name")
+        if not choices:
+            return value  # class-only capability probe publishes no files
+        by_file: dict[str, list[str]] = {}
+        for choice in choices:
+            kind, separator, rest = str(choice).replace("\\", "/").partition("/")
+            if separator and kind.casefold() in {"bbox", "segm"} and rest:
+                by_file.setdefault(rest, []).append(str(choice))
+        prefix, separator, _rest = value.partition("/")
+        if separator and prefix.casefold() in {"bbox", "segm"}:
+            # An explicit bbox/ or segm/ is a deliberate detector kind: match
+            # the whole path only (no basename fallback across kinds).
+            matched = next((
+                str(choice) for choice in choices
+                if str(choice).replace("\\", "/").casefold() == value.casefold()
+            ), None)
+            if matched is None:
+                raise WorkflowCompileError(
+                    f"ADetailer 슬롯 {index}의 검출 모델을 ComfyUI에서 찾을 수 없습니다: {value}"
+                )
+            return matched
+        matched_file = self._match_choice(value, list(by_file))
+        if matched_file is None:
+            raise WorkflowCompileError(
+                f"ADetailer 슬롯 {index}의 검출 모델을 ComfyUI에서 찾을 수 없습니다: {value}. "
+                "ComfyUI ADetailer는 models/ultralytics/bbox·segm의 YOLO 모델만 지원합니다"
+                "(mediapipe 모델은 Forge 전용)."
+            )
+        candidates = by_file[matched_file]
+        segm = [choice for choice in candidates if choice.casefold().startswith("segm/")]
+        return (segm or candidates)[0]
+
     @staticmethod
     def _script(payload: Mapping[str, Any], wanted: str) -> Optional[Mapping[str, Any]]:
         scripts = payload.get("alwayson_scripts", {})
@@ -2034,35 +2711,41 @@ class ComfyWorkflowCompiler:
         }.get(raw, "crop")
 
     @staticmethod
+    def _split_sampler_label(value: Any) -> tuple[str, Optional[str]]:
+        """Folded Forge sampler label and the scheduler its suffix implies."""
+        folded = re.sub(r"\s+", " ", str(value or "euler").strip()).casefold()
+        for suffix, scheduler in _FORGE_SAMPLER_SCHEDULER_SUFFIXES:
+            if folded.endswith(suffix):
+                return folded[: -len(suffix)].strip(), scheduler
+        return folded, None
+
+    @staticmethod
     def _comfy_sampler(value: Any) -> str:
+        """Forge/A1111 sampler label → ComfyUI ``KSampler.sampler_name``.
+
+        The bundled ADetailer node keeps an identical table
+        (``generation._AD_SAMPLER_ALIASES``); a golden test pins both.
+        """
         raw = str(value or "euler").strip()
-        folded = re.sub(r"\s+", " ", raw).casefold()
-        folded = re.sub(r"\s+karras$", "", folded)
-        aliases = {
-            "euler a": "euler_ancestral", "euler ancestral": "euler_ancestral",
-            "dpm++ 2m": "dpmpp_2m", "dpm++ 2m sde": "dpmpp_2m_sde",
-            "dpm++ sde": "dpmpp_sde", "dpm++ 3m sde": "dpmpp_3m_sde",
-            "dpm2 a": "dpm_2_ancestral", "dpm2": "dpm_2",
-            "er sde": "er_sde", "er-sde": "er_sde",
-            "heun": "heun", "lms": "lms", "ddim": "ddim", "uni_pc": "uni_pc",
-        }
-        return aliases.get(folded, raw)
+        folded, _scheduler = ComfyWorkflowCompiler._split_sampler_label(raw)
+        if folded in _FORGE_SAMPLER_ALIASES:
+            return _FORGE_SAMPLER_ALIASES[folded]
+        # Unknown multi-word labels follow Comfy's snake_case naming
+        # ("Res Multistep" → "res_multistep"); native names pass through.
+        return folded.replace(" ", "_") if " " in folded else raw
 
     @staticmethod
     def _comfy_scheduler(value: Any, *, sampler_text: str = "") -> str:
+        _folded, implied = ComfyWorkflowCompiler._split_sampler_label(sampler_text)
+        if implied:
+            return implied
         raw = str(value or "normal").strip()
-        if "karras" in str(sampler_text or "").casefold():
-            return "karras"
-        folded = raw.casefold()
-        if folded in {"use same scheduler", "automatic", "auto"}:
+        folded = re.sub(r"\s+", " ", raw).casefold()
+        if folded in _FORGE_SAME_SCHEDULER:
             return "normal"
-        return {
-            "karras": "karras", "exponential": "exponential", "sgm uniform": "sgm_uniform",
-            "simple": "simple", "normal": "normal", "ddim uniform": "ddim_uniform",
-            "beta": "beta",
-            "beta57": "beta57", "beta 57": "beta57",
-            "beta57 (res4lyf)": "beta57", "beta 57 (res4lyf)": "beta57",
-        }.get(folded, raw)
+        if folded in _FORGE_SCHEDULER_ALIASES:
+            return _FORGE_SCHEDULER_ALIASES[folded]
+        return folded.replace(" ", "_") if " " in folded else raw
 
     def _runtime_sampler_values(self, sampler: Any, scheduler: Any) -> tuple[str, str]:
         original_sampler = str(sampler or "euler")
@@ -2119,7 +2802,7 @@ class ComfyWorkflowCompiler:
             if node.get("class_type") in wanted:
                 matches.append(node_id)
                 return
-            for upstream in node.get("inputs", {}).values():
+            for upstream in ComfyWorkflowCompiler._node_inputs(node).values():
                 visit(upstream, depth + 1)
 
         visit(link, 0)
@@ -2145,9 +2828,10 @@ class ComfyWorkflowCompiler:
             node = workflow.get(node_id)
             if not isinstance(node, Mapping):
                 return None
-            if node.get("class_type") in {"CheckpointLoaderSimple", "UNETLoader", "ForgeNeoAnima38V2Loader"}:
+            if node.get("class_type") in MODEL_LOADER_INPUTS:
                 return node_id
-            link = node.get("inputs", {}).get("model")
+            inputs = node.get("inputs", {})
+            link = inputs.get("model") if isinstance(inputs, Mapping) else None
         return None
 
     @staticmethod
@@ -2188,7 +2872,7 @@ class ComfyWorkflowCompiler:
         node = workflow.get(node_id)
         if not isinstance(node, Mapping):
             return None
-        if node.get("class_type") in {"CheckpointLoaderSimple", "CheckpointLoader"}:
+        if node.get("class_type") in CHECKPOINT_LOADER_NODES:
             return [node_id, 2]
         if node.get("class_type") == "VAELoader":
             return [node_id, 0]
@@ -2234,7 +2918,7 @@ class ComfyWorkflowCompiler:
             ComfyWorkflowCompiler._link_depends_on(
                 workflow, upstream, ancestor_id, seen,
             )
-            for upstream in node.get("inputs", {}).values()
+            for upstream in ComfyWorkflowCompiler._node_inputs(node).values()
         )
 
     @staticmethod
@@ -2269,9 +2953,12 @@ class ComfyWorkflowCompiler:
         args = block.get("args", []) if isinstance(block, Mapping) else []
         if not isinstance(args, (list, tuple)) or not args or not _bool(args[0], True):
             return []
+        # ADetailer skips a tab that is disabled or whose model is "None"
+        # (ADetailerArgs.need_skip); such a slot is not an error.
         return [
             item for item in list(args)[2:]
             if isinstance(item, Mapping) and _bool(item.get("ad_tab_enable"), True)
+            and str(item.get("ad_model") or "None").strip().casefold() != "none"
         ]
 
     @staticmethod
@@ -2283,6 +2970,42 @@ class ComfyWorkflowCompiler:
         state = args[0]
         enabled = state.get("sam3_enable", state.get("enabled", True))
         return state if _bool(enabled, True) else None
+
+    def _sam3_cache_model(self, state: Mapping[str, Any]) -> bool:
+        """``ForgeNeoSAM3Mask.cache_model`` with Forge's bundle-keeping rules.
+
+        Forge keeps its SAM3 ``_BUNDLE`` on the device when "Unload after" is
+        off, and after an unload keeps a CPU RAM copy only while its
+        ``sam3_unload_keep_in_ram`` setting is on.  The app setting plays that
+        role here; ComfyUI's unload-all-models (/free) frees either copy.
+        """
+        return (not _bool(state.get("sam3_unload_after"), True)) or self.sam3_keep_in_ram
+
+    @staticmethod
+    def _sam3_processing_size(payload: Mapping[str, Any]) -> tuple[int, int]:
+        """Forge ``p.width/p.height`` for the SAM3 "only masked" pass.
+
+        In-flight SAM3 runs inside the generation whose width/height is the
+        base resolution before Hires.fix.  Standalone post-processing (SAM3,
+        Refine) is a Forge img2img whose width/height is the input image size,
+        so its payload size is the image size; the backend also pins it as
+        ``_sam3_processing_width/height`` so a preserved generation payload
+        cannot leak its size.  Explicit ``_sam3_processing_*`` keys win over
+        the payload size.  ``(0, 0)`` asks the node to sample at crop size.
+        """
+        for width_key, height_key in (
+            ("_sam3_processing_width", "_sam3_processing_height"),
+            ("width", "height"),
+        ):
+            width = _int(payload.get(width_key), 0)
+            height = _int(payload.get(height_key), 0)
+            if width > 0 and height > 0:
+                # The node accepts 64..8192 (or 0x0); keep the aspect intent.
+                return (
+                    min(8192, max(64, width)),
+                    min(8192, max(64, height)),
+                )
+        return 0, 0
 
     @staticmethod
     def _validate_adetailer_slot(slot: Mapping[str, Any], index: int) -> None:

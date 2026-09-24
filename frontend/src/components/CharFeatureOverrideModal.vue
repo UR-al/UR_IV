@@ -39,6 +39,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { getBackend } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import { useModalLayer } from '../composables/useModalLayer'
 
 const emit = defineEmits<{ close: [] }>()
 const hairLength = ref(false)
@@ -46,6 +47,9 @@ const eyeColor = ref(false)
 
 function close() { emit('close') }
 function onKey(e: KeyboardEvent) { if (e.key === 'Escape') { e.stopPropagation(); close() } }
+// 열려 있는 동안 앱 모달 스택에 올라간다 — App 의 ↑/↓ 히스토리 이동이 이 모달 뒤에서 넘어가지 않게.
+// ESC 는 위 onKey 가 직접 처리한다(window capture + stopPropagation, utils/modalStack).
+useModalLayer()
 
 async function save() {
   const bk: any = await getBackend()   // QWebChannel 백엔드 — 동적 타입

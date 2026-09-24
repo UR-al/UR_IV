@@ -31,7 +31,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"  # 1.2.0: 태그 컬럼 소문자 게시 보장
 MANIFEST_VERSION = 1
 RATINGS = ("g", "s", "q", "e")
 ARCHIVE_TAG_CATEGORIES = ("general", "character", "copyright", "artist", "meta")
@@ -516,6 +516,17 @@ def _string_array(batch: Any, source_name: str) -> Any:
     return pc.cast(_batch_array(batch, source_name), pa.string())
 
 
+def _tag_string_array(batch: Any, source_name: str) -> Any:
+    """Tag columns are published lower-case (null stays null).
+
+    The runtime Search worker matches lower-cased queries against these
+    columns directly, without keeping a lower-cased copy of each multi-million
+    row column in memory, so the build must guarantee the case contract.
+    """
+    _pa, pc, _pq = _import_arrow()
+    return pc.utf8_lower(_string_array(batch, source_name))
+
+
 def _bool_array(batch: Any, source_name: str | None, derived: Any) -> Any:
     pa, pc, _pq = _import_arrow()
     if source_name is None:
@@ -684,11 +695,12 @@ def build_posts(args: argparse.Namespace) -> dict[str, Any]:
             favourites = _cast_int64(
                 _batch_array(batch, columns["fav_count"]), name="fav_count"
             )
-            general = _string_array(batch, columns["general"])
-            character = _string_array(batch, columns["character"])
-            copyright_tags = _string_array(batch, columns["copyright"])
-            artist = _string_array(batch, columns["artist"])
-            meta_tags = _string_array(batch, columns["meta"])
+            # 태그 5종은 소문자로 게시 — Search 워커가 소문자 사본 없이 원본 컬럼으로 매칭한다.
+            general = _tag_string_array(batch, columns["general"])
+            character = _tag_string_array(batch, columns["character"])
+            copyright_tags = _tag_string_array(batch, columns["copyright"])
+            artist = _tag_string_array(batch, columns["artist"])
+            meta_tags = _tag_string_array(batch, columns["meta"])
             derived_has_children = pc.is_in(ids, value_set=all_parent_values)
             has_children = _bool_array(
                 batch, columns.get("has_children"), derived_has_children

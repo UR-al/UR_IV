@@ -23,7 +23,7 @@ const backend = Object.fromEntries([
   'widgetValueChanged', 'widgetPropertyChanged', 'batchUpdate', 'uiPrefsLoaded',
   'modelDownloadEvent', 'creatorCacheEvent', 'chatToken', 'chatDone', 'chatThreads',
   'chatGenerationEvent', 'ollamaModelsReady', 'appUpdateEvent', 'chatModelInfo',
-  'inpaintImageLoaded', 'xyzCapabilitiesReceived', 'xyzPlotEvent',
+  'inpaintImageLoaded', 'pngInfoImageLoaded', 'xyzCapabilitiesReceived', 'xyzPlotEvent',
 ].map(name => [name, signal()]))
 let prefs = { h3ConditioningCacheEnabled: true, h3ConditioningCacheMaxGB: 8, h3ConditioningCacheMaxEntries: 32 }
 const modelNames = ['tinyrick/gemma-4-31B-it-uncensored-heretic-vision-llmfan46:Q6_K_M', 'gpt-oss:20b', 'qwen3:8b']
@@ -82,7 +82,7 @@ backend.onAction = (name, raw) => {
     info: { architecture: payload.model.includes('gpt-oss') ? 'gptoss' : 'offline', moe: payload.model.includes('gpt-oss') ? true : null,
       experts: payload.model.includes('gpt-oss') ? 32 : null, activeExperts: payload.model.includes('gpt-oss') ? 4 : null,
       thinkingMode: payload.model.includes('gpt-oss') ? 'levels' : 'boolean', vision: true } }))
-  if (name === 'open_png_info_file') backend.inpaintImageLoaded.emit(fixtureImage)
+  if (name === 'open_png_info_file') backend.pngInfoImageLoaded.emit(fixtureImage)
   if (name === 'get_xyz_capabilities') backend.xyzCapabilitiesReceived.emit(JSON.stringify({ requestId: payload.requestId, ok: true,
     backend: 'comfyui', capabilityId: 'offline-capability', axes: [
       { id: 'steps', label: 'Steps', type: 'integer', min: 1, max: 10000 },

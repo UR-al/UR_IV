@@ -5,7 +5,6 @@ from core.creator_workflows import (
     CreatorWorkflowError,
     SUPPORTED_MODES,
     build,
-    build_creator_workflow,
 )
 
 
@@ -144,9 +143,8 @@ class CreatorWorkflowTests(unittest.TestCase):
         self.assertEqual(graph["11"]["inputs"]["images"], ["10", 0])
         self.assertNotIn("LoraLoaderModelOnly", result["required_node_types"])
 
-    def test_action_adapter_name_and_transport_param_aliases(self):
-        self.assertIs(build_creator_workflow, build)
-        i2v = build_creator_workflow(
+    def test_transport_param_aliases(self):
+        i2v = build(
             "h3_i2v",
             {
                 "prompt": "blink once",
@@ -159,7 +157,7 @@ class CreatorWorkflowTests(unittest.TestCase):
         self.assertEqual(i2v["workflow"]["15"]["inputs"]["filename_prefix"], "Creator/transport")
         self.assertIn("13", i2v["workflow"])
 
-        v2v = build_creator_workflow(
+        v2v = build(
             "h3_v2v",
             {
                 "prompt": "preserve the choreography",

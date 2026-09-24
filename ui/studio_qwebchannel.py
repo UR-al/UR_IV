@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
-from ui.native_dialogs import select_directory, start_directory
+from ui.native_dialogs import select_directory
 
 from core.studio_application import (
     CallContext,
@@ -74,10 +74,6 @@ class DesktopNativeHost(QObject):
         self._refreshRequested.connect(self._refresh_model_widgets_on_qt_thread)
         self._runtimeEventRequested.connect(self._forward_runtime_event_on_qt_thread)
         self._appRestartRequested.connect(self._restart_app_on_qt_thread)
-
-    @staticmethod
-    def _start_directory(current: str) -> str:
-        return start_directory(current)
 
     @staticmethod
     def _dialog_title(kind: str, selector: str) -> str:

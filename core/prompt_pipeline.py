@@ -160,6 +160,11 @@ class PromptPipeline:
             self._hooks[point].clear()
             return count
 
+    def has_hook(self, point: HookPoint, name: str) -> bool:
+        """``name`` 으로 등록된 훅이 point 단계에 있는가 — 멱등 등록용(register 는 중복을 거르지 않는다)."""
+        with self._lock:
+            return any(h.name == name for h in self._hooks[point])
+
     def hook_count(self, point: Optional[HookPoint] = None) -> int:
         with self._lock:
             if point is None:
@@ -198,7 +203,7 @@ class PromptPipeline:
 
 
 # ─────────────────────────────────────────────
-# 모듈 레벨 싱글톤 — AppContext에 등록도 함께
+# 모듈 레벨 싱글톤
 # ─────────────────────────────────────────────
 
 _pipeline_lock = threading.Lock()
@@ -206,17 +211,10 @@ _pipeline_instance: Optional[PromptPipeline] = None
 
 
 def get_pipeline() -> PromptPipeline:
-    """프로세스 전역 PromptPipeline 인스턴스. AppContext 서비스로도 등록."""
+    """프로세스 전역 PromptPipeline 인스턴스."""
     global _pipeline_instance
     if _pipeline_instance is None:
         with _pipeline_lock:
             if _pipeline_instance is None:
                 _pipeline_instance = PromptPipeline()
-                # AppContext에 서비스로 등록 — 다른 모듈이 ctx.get_service("prompt_pipeline")로도 접근 가능
-                try:
-                    from core.app_context import get_context
-                    get_context().register_service("prompt_pipeline", _pipeline_instance)
-                except Exception:
-                    # AppContext 초기화 실패해도 파이프라인 자체는 작동
-                    pass
     return _pipeline_instance

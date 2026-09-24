@@ -86,6 +86,25 @@ class StudioFrontendContractTests(unittest.TestCase):
         used = {name for name in legacy_methods if name in source}
         self.assertEqual(used, set())
 
+    def test_legacy_settings_client_and_slots_are_removed_on_both_sides(self):
+        """studio 는 데스크톱·웹 모두 항상 등록된다 — legacy 폴백과 그 슬롯은 도달 불가라 제거(audit #176)."""
+        from ui.vue_bridge import VueBridge
+
+        legacy_methods = (
+            "getBackendRuntimeState", "runBackendRuntimeOperation",
+            "getGenerationApiState", "runGenerationApiOperation",
+            "getForgeModelPaths", "saveForgeModelPaths", "resetForgeModelPaths",
+            "refreshForgeModelPaths", "selectBackendInstallDirectory",
+            "selectBackendExtensionDirectory", "selectForgeModelDirectory",
+        )
+        client = CLIENT.read_text(encoding="utf-8")
+        for name in legacy_methods:
+            self.assertNotIn(name, client, name)
+            self.assertFalse(hasattr(VueBridge, name), name)
+        self.assertNotIn("LegacyStudioClient", client)
+        self.assertNotIn("generationApiEvent", client)
+        self.assertIn("createUnavailableClient", client)
+
     def test_settings_mutations_and_lifecycle_fail_closed(self):
         source = SETTINGS.read_text(encoding="utf-8")
         self.assertIn("const forgeCanMutate = ref(false)", source)

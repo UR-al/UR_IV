@@ -8,7 +8,7 @@
         <div class="file-drop compact" @dragover.prevent @drop.prevent="onDropBatch">
           <div class="drop-hint">
             이미지 드래그 또는
-            <button class="link-btn" @click="action('open_batch_files')">파일 선택</button>
+            <button class="link-btn" v-host-dialog="'open_batch_files'" @click="action('open_batch_files')">파일 선택</button>
           </div>
         </div>
         <div class="file-count" v-if="batchFiles.length">{{ batchFiles.length }}개 파일</div>
@@ -20,8 +20,18 @@
         <div v-if="batchOp === 'format'" class="op-settings">
           <CustomSelect v-model="formatType" :options="['PNG', 'JPEG', 'WEBP']" placeholder="포맷" />
         </div>
-        <button class="btn-start" @click="startBatch" :disabled="batchFiles.length === 0">
-          배치 시작 ({{ batchFiles.length }}파일)
+        <div class="op-hint">결과는 출력 폴더의 batch 폴더에 새 파일로 저장됩니다 — 원본과 생성 정보는 그대로 둡니다.</div>
+        <div class="ad-progress" v-if="batchJob && (batchJob.running || batchJob.done)">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: jobPercent(batchJob) + '%' }"></div>
+          </div>
+          <span>{{ jobProgressText(batchJob) }}</span>
+        </div>
+        <div class="op-hint" v-if="batchJob && !batchJob.running && batchJob.output_dir" :title="batchJob.output_dir">
+          저장 위치: {{ batchJob.output_dir }}
+        </div>
+        <button class="btn-start" @click="startBatch" :disabled="batchFiles.length === 0 || batchRunning">
+          {{ batchRunning ? '배치 처리 중…' : `배치 시작 (${batchFiles.length}파일)` }}
         </button>
       </div>
       <!-- 우측: 썸네일 그리드 -->
@@ -48,7 +58,7 @@
         <div class="file-drop compact" @dragover.prevent @drop.prevent="onDropUpscale">
           <div class="drop-hint">
             이미지 드래그 또는
-            <button class="link-btn" @click="action('open_upscale_files')">파일 선택</button>
+            <button class="link-btn" v-host-dialog="'open_upscale_files'" @click="action('open_upscale_files')">파일 선택</button>
           </div>
         </div>
         <div class="file-count" v-if="upscaleFiles.length">{{ upscaleFiles.length }}개 파일</div>
@@ -59,8 +69,18 @@
           <input type="range" min="1" max="4" step="0.5" v-model.number="scaleFactor" />
           <span>{{ scaleFactor }}x</span>
         </div>
-        <button class="btn-start" @click="startUpscale" :disabled="upscaleFiles.length === 0">
-          업스케일 시작 ({{ upscaleFiles.length }}파일)
+        <div class="op-hint">결과는 출력 폴더의 upscale 폴더에 새 파일로 저장됩니다.</div>
+        <div class="ad-progress" v-if="upscaleJob && (upscaleJob.running || upscaleJob.done)">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: jobPercent(upscaleJob) + '%' }"></div>
+          </div>
+          <span>{{ jobProgressText(upscaleJob) }}</span>
+        </div>
+        <div class="op-hint" v-if="upscaleJob && !upscaleJob.running && upscaleJob.output_dir" :title="upscaleJob.output_dir">
+          저장 위치: {{ upscaleJob.output_dir }}
+        </div>
+        <button class="btn-start" @click="startUpscale" :disabled="upscaleFiles.length === 0 || upscaleRunning">
+          {{ upscaleRunning ? '업스케일 중…' : `업스케일 시작 (${upscaleFiles.length}파일)` }}
         </button>
       </div>
       <!-- 우측: 썸네일 그리드 -->
@@ -88,9 +108,9 @@
         <div class="file-drop" @dragover.prevent @drop.prevent="onDropAd">
           <div v-if="adFiles.length === 0" class="drop-hint">
             이미지 드래그 또는
-            <button class="link-btn" @click="action('open_ad_files')">파일 선택</button>
+            <button class="link-btn" v-host-dialog="'open_ad_files'" @click="action('open_ad_files')">파일 선택</button>
             /
-            <button class="link-btn" @click="action('open_ad_folder')">폴더 선택</button>
+            <button class="link-btn" v-host-dialog="'open_ad_folder'" @click="action('open_ad_folder')">폴더 선택</button>
           </div>
           <div v-else class="file-list">
             <div v-for="(f, i) in adFiles" :key="f" class="file-item"
@@ -175,9 +195,9 @@
         <div class="file-drop" @dragover.prevent @drop.prevent="onDropSam3">
           <div v-if="sam3Files.length === 0" class="drop-hint">
             이미지 드래그 또는
-            <button class="link-btn" @click="action('open_ad_files')">파일 선택</button>
+            <button class="link-btn" v-host-dialog="'open_ad_files'" @click="action('open_ad_files')">파일 선택</button>
             /
-            <button class="link-btn" @click="action('open_ad_folder')">폴더 선택</button>
+            <button class="link-btn" v-host-dialog="'open_ad_folder'" @click="action('open_ad_folder')">폴더 선택</button>
           </div>
           <div v-else class="file-list">
             <div v-for="(f, i) in sam3Files" :key="f" class="file-item"
@@ -274,6 +294,8 @@
           <label class="ad-toggle"><input type="checkbox" v-model="sam3SaveArtifacts" /><span>Artifacts 저장</span></label>
           <label class="ad-toggle" title="검출 직후 SAM3(~3.5GB) VRAM 회수 — 16GB GPU 권장">
             <input type="checkbox" v-model="sam3UnloadAfter" /><span>검출 후 SAM3 VRAM 해제</span></label>
+          <!-- ControlNet 13필드 — T2I·Refine 과 같은 패널 (예전엔 배치 SAM3 에 CN 이 아예 없었다) -->
+          <Sam3ControlNetPanel :widgets="sam3Cn" class="sam3-cn" />
         </div>
 
         <div class="ad-progress" v-if="sam3Processing">
@@ -344,7 +366,7 @@
           <div class="cap-outdir">
             <input class="s-input cap-path-input" v-model="captionCaformerDir" @change="saveCaptionPrefs"
               :placeholder="detectedCaformerDir || 'model.onnx 폴더 자동 탐색'" />
-            <button class="cap-refresh" @click="action('caption_pick_caformer_dir')" title="CAFormer 모델 폴더 선택"><Icon name="folder" /></button>
+            <button class="cap-refresh" v-host-dialog="'caption_pick_caformer_dir'" @click="action('caption_pick_caformer_dir')" title="CAFormer 모델 폴더 선택"><Icon name="folder" /></button>
             <button v-if="captionCaformerDir" class="cap-refresh" @click="clearCaptionCaformerDir" title="자동 탐색 사용"><Icon name="rotate-ccw" /></button>
           </div>
           <div class="cap-opts cap-tag-opts">
@@ -384,12 +406,12 @@
         <label class="s-label">저장 위치</label>
         <div class="cap-outdir">
           <span class="cap-outdir-path" :title="captionOutDir || '이미지와 같은 폴더'">{{ captionOutDir || '이미지와 같은 폴더 (.txt 사이드카)' }}</span>
-          <button class="cap-refresh" @click="action('caption_pick_outdir')" title="저장 폴더 선택"><Icon name="folder" /></button>
+          <button class="cap-refresh" v-host-dialog="'caption_pick_outdir'" @click="action('caption_pick_outdir')" title="저장 폴더 선택"><Icon name="folder" /></button>
           <button v-if="captionOutDir" class="cap-refresh" @click="clearCaptionOutDir" title="기본값(이미지 옆)으로"><Icon name="rotate-ccw" /></button>
         </div>
         <div class="cap-pick">
-          <button class="link-btn" @click="action('caption_pick_files')"><Icon name="file" /> 파일 선택</button>
-          <button class="link-btn" @click="action('caption_pick_folder')"><Icon name="folder" /> 폴더 선택</button>
+          <button class="link-btn" v-host-dialog="'caption_pick_files'" @click="action('caption_pick_files')"><Icon name="file" /> 파일 선택</button>
+          <button class="link-btn" v-host-dialog="'caption_pick_folder'" @click="action('caption_pick_folder')"><Icon name="folder" /> 폴더 선택</button>
         </div>
         </fieldset>
         <div class="file-count" v-if="captionItems.length">{{ captionItems.length }}개 이미지</div>
@@ -431,7 +453,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { mediaUrl } from '../utils/media.js'
@@ -441,10 +463,19 @@ import {
   matchesCaptionIdentity,
 } from '../utils/captionSession'
 import { requestAction, useWidgetStore } from '../stores/widgetStore.js'
+import { vHostDialog } from '../utils/hostDialogs'
 import { useViewMode } from '../composables/useViewMode'
+import { storedOllamaUrl } from '../utils/ollamaPrefs'
+import { droppedImagePaths, newPaths } from '../utils/dropPaths'
+import { jobPercent, jobProgressText, parseBatchJobState } from '../utils/batchJobState'
+import { sam3CnDefaults, sam3CnSettings } from '../utils/sam3ControlNet'
+import { createExifWarningNotice } from '../utils/exifWarningNotice'
 import CustomSelect from '../components/CustomSelect.vue'
+import Sam3ControlNetPanel from '../components/Sam3ControlNetPanel.vue'
 import type {
   ActionName,
+  ActionPayload,
+  BatchJobStatePayload,
   CaptionDoneEvent,
   CaptionEngineMode,
   CaptionJobStatus,
@@ -466,7 +497,7 @@ const router = useRouter()
 const widgets = useWidgetStore()
 /** 서브탭은 왼쪽 레일의 서랍이 정한다 — 여기선 읽기만 한다. `useViewMode` 참조. */
 const { mode: subTab } = useViewMode('batch')
-const action = (name: ActionName, payload: any = {}) => requestAction(name, payload)
+const action = <K extends ActionName>(name: K, payload?: ActionPayload<K>) => requestAction(name, payload)
 const basename = (p: any) => typeof p === 'string' ? p.split('/').pop()!.split('\\').pop() : p.name || p
 
 // ── Batch ──
@@ -476,11 +507,33 @@ const resizeW = ref('1024')
 const resizeH = ref('1024')
 const formatType = ref('PNG')
 
+/**
+ * 드롭한 이미지의 경로를 목록에 더한다. QtWebEngine 의 File 에는 경로가 없어서
+ * (예전엔 `(f as any).path` 가 undefined 로 들어갔다) OS 에서 끌어 온 파일은 건너뛰고
+ * 안내한다 — 앱 안 히스토리·갤러리 카드의 경로 드래그는 그대로 받는다.
+ */
+function addDroppedPaths(e: DragEvent, target: { value: string[] }) {
+  const { paths, unresolved } = droppedImagePaths(e.dataTransfer)
+  target.value.push(...newPaths(target.value, paths))
+  if (unresolved) {
+    requestAction('show_toast', {
+      type: 'warning',
+      msg: `OS 에서 끌어 온 파일은 경로를 알 수 없어 ${unresolved}개를 건너뛰었습니다 — '파일 선택'을 사용하세요`,
+    })
+  }
+}
+
+// 일괄 처리·업스케일 진행 (batchJobState) — 실행 중에는 시작 버튼을 막는다.
+const batchJob = ref<BatchJobStatePayload | null>(null)
+const upscaleJob = ref<BatchJobStatePayload | null>(null)
+const batchRunning = computed(() => !!batchJob.value?.running)
+const upscaleRunning = computed(() => !!upscaleJob.value?.running)
+
 function onDropBatch(e: DragEvent) {
-  const files = Array.from(e.dataTransfer?.files || [])
-  batchFiles.value.push(...files.filter(f => f.type.startsWith('image/')).map(f => (f as any).path))
+  addDroppedPaths(e, batchFiles)
 }
 function startBatch() {
+  if (batchRunning.value) return
   action('start_batch', {
     files: batchFiles.value,
     operation: batchOp.value,
@@ -490,15 +543,16 @@ function startBatch() {
 
 // ── Upscale ──
 const upscaleFiles = ref<string[]>([])
-const upscaler = ref('')
-const upscalers = ref<string[]>(['R-ESRGAN 4x+', 'R-ESRGAN 4x+ Anime6B'])
+// 백엔드 목록이 오기 전 기본값 — Lanczos 는 Forge·ComfyUI 둘 다 모델 없이 된다.
+const upscaler = ref('Lanczos')
+const upscalers = ref<string[]>(['Lanczos', 'R-ESRGAN 4x+', 'R-ESRGAN 4x+ Anime6B'])
 const scaleFactor = ref(2)
 
 function onDropUpscale(e: DragEvent) {
-  const files = Array.from(e.dataTransfer?.files || [])
-  upscaleFiles.value.push(...files.filter(f => f.type.startsWith('image/')).map(f => (f as any).path))
+  addDroppedPaths(e, upscaleFiles)
 }
 function startUpscale() {
+  if (upscaleRunning.value) return
   action('start_upscale', {
     files: upscaleFiles.value,
     upscaler: upscaler.value,
@@ -655,7 +709,7 @@ const captionEmptyHint = computed(() => {
   return `CAFormer 태그와 ToriiGate 자연어 캡션을 만들고 ${action}`
 })
 
-const captionUrl = () => window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
+const captionUrl = () => storedOllamaUrl()
 function saveCaptionPrefs() {
   requestAction('save_ui_prefs', {
     captionEngine: captionEngine.value,
@@ -715,11 +769,8 @@ function choosePreferredToriiModel() {
 async function loadCaptionModels() {
   try {
     const backend = await waitForCaptionBackend()
-    if (backend.requestOllamaModels) {
-      backend.requestOllamaModels(captionUrl())
-    } else if (backend.ollamaListModels) {
-      backend.ollamaListModels(captionUrl(), applyCaptionModels)
-    }
+    // 결과는 ollamaModelsReady → applyCaptionModels (동기 ollamaListModels 는 없앴다)
+    if (backend.requestOllamaModels) backend.requestOllamaModels(captionUrl())
   } catch (error) {
     captionToast('error', errorMessage(error, 'Ollama 모델 목록을 불러오지 못했습니다.'))
   }
@@ -804,7 +855,10 @@ async function loadCaptionRuntime() {
 function applyUpscalers(json: string) {
   try {
     const list = JSON.parse(json)
-    if (list.length) { upscalers.value = list; upscaler.value = list[0] }
+    if (Array.isArray(list) && list.length) {
+      upscalers.value = list
+      if (!list.includes(upscaler.value)) upscaler.value = list[0]
+    }
   } catch {}
 }
 function applyADetailerModels(json: string) {
@@ -1187,8 +1241,7 @@ const adEtaText = computed(() => {
 })
 
 function onDropAd(e: DragEvent) {
-  const files = Array.from(e.dataTransfer?.files || [])
-  adFiles.value.push(...files.filter(f => f.type.startsWith('image/')).map(f => (f as any).path))
+  addDroppedPaths(e, adFiles)
 }
 
 function previewAdFile(i: number) {
@@ -1208,10 +1261,15 @@ function _adSettings() {
   }
 }
 
+// 'EXIF 프롬프트 사용' — 워커가 메타데이터를 못 읽으면 결과에 exif_warning 을 싣는다(실행마다 첫 경고 + 요약)
+const adExifNotice = createExifWarningNotice('ADetailer')
+const sam3ExifNotice = createExifWarningNotice('SAM3')
+
 function runAdSingle() {
   const idx = adCurrentIdx.value >= 0 ? adCurrentIdx.value : 0
   const path = adFiles.value[idx]
   if (!path) return
+  adExifNotice.reset()
   adProcessing.value = true
   adBefore.value = path
   adAfter.value = ''
@@ -1220,6 +1278,7 @@ function runAdSingle() {
 
 function runAdBatch() {
   if (!adFiles.value.length) return
+  adExifNotice.reset()
   adProcessing.value = true
   adResults.value = {}
   adProgressCur.value = 0
@@ -1256,6 +1315,8 @@ const sam3Cfg = ref(7)
 const sam3Seed = ref(-1)
 const sam3RestoreFace = ref(false)
 const sam3UnloadAfter = ref(true)
+// ControlNet 13필드 (widget id 키 로컬 상태 — utils/sam3ControlNet)
+const sam3Cn = reactive(sam3CnDefaults())
 const sam3CurrentIdx = ref(-1)
 const sam3Preview = ref('')
 const sam3Before = ref('')
@@ -1267,8 +1328,7 @@ const sam3ProgressTotal = ref(0)
 const sam3ProgressPct = computed(() => sam3ProgressTotal.value ? Math.round(sam3ProgressCur.value / sam3ProgressTotal.value * 100) : 0)
 
 function onDropSam3(e: DragEvent) {
-  const files = Array.from(e.dataTransfer?.files || [])
-  sam3Files.value.push(...files.filter(f => f.type.startsWith('image/')).map(f => (f as any).path))
+  addDroppedPaths(e, sam3Files)
 }
 
 function previewSam3File(i: number) {
@@ -1313,6 +1373,8 @@ function _sam3Settings() {
     sam3_save_artifacts: sam3SaveArtifacts.value,
     // 16GB GPU에서 인페인트 OOM 방지 — 확장 API 기본값이 False라 명시 전송 필수
     sam3_unload_after: sam3UnloadAfter.value,
+    // ControlNet 주입 (sam3_cn_* 13필드)
+    ...sam3CnSettings(sam3Cn),
     use_exif_prompt: sam3UseExifPrompt.value,
     // 부모 i2i 샘플링 파라미터 (Forge 현재 UI 값에 좌우되지 않게)
     steps: sam3Steps.value,
@@ -1325,6 +1387,7 @@ function runSam3Single() {
   const idx = sam3CurrentIdx.value >= 0 ? sam3CurrentIdx.value : 0
   const path = sam3Files.value[idx]
   if (!path) return
+  sam3ExifNotice.reset()
   sam3Processing.value = true
   sam3Before.value = path
   sam3After.value = ''
@@ -1333,15 +1396,13 @@ function runSam3Single() {
 
 function runSam3Batch() {
   if (!sam3Files.value.length) return
+  sam3ExifNotice.reset()
   sam3Processing.value = true
   sam3Results.value = {}
   sam3ProgressCur.value = 0
   sam3ProgressTotal.value = sam3Files.value.length
   action('run_sam3_batch', { paths: sam3Files.value, settings: _sam3Settings() })
 }
-
-// 외부에서 이미지 수신 (History/Gallery 우클릭 → "ADetailer 적용")
-withDefaults(defineProps<{ initialAdPath?: string }>(), { initialAdPath: '' })
 
 // 캡션 화면/모델 경로가 바뀌면 마지막 값 하나만 검사한다.
 watch(subTab, (value) => {
@@ -1368,6 +1429,13 @@ onActivated(() => {
 onMounted(async () => {
   captionDisposed = false
   captionEventUnsubs.push(onBackendEvent('ollamaModelsReady', applyCaptionModels))
+  // 일괄 처리·업스케일 진행 — 실행 중 버튼 잠금과 진행률 (Python ui/batch_jobs.py)
+  captionEventUnsubs.push(onBackendEvent('batchJobState', (json: string) => {
+    const state = parseBatchJobState(json)
+    if (!state) return
+    if (state.job === 'batch') batchJob.value = state
+    else upscaleJob.value = state
+  }))
   onBackendEvent('upscalersReady', applyUpscalers)
   onBackendEvent('adetailerModelsReady', applyADetailerModels)
 
@@ -1390,27 +1458,22 @@ onMounted(async () => {
   // 캡션 모델 드롭다운 — UI 시작 시 자동 새로고침
   loadCaptionModels()
 
-  // 업스케일러 로드
+  // 업스케일러·AD 모델 로드 — 결과는 upscalersReady·adetailerModelsReady(위 구독).
+  // GUI 스레드를 막던 동기 getUpscalers·getADetailerModels 는 없앴다.
   if (backend.requestUpscalers) backend.requestUpscalers()
-  else if (backend.getUpscalers) backend.getUpscalers(applyUpscalers)
-
-  // AD 모델 로드
   if (backend.requestADetailerModels) backend.requestADetailerModels()
-  else if (backend.getADetailerModels) backend.getADetailerModels(applyADetailerModels)
 
   // 파일 선택 이벤트
   onBackendEvent('batchFilesSelected', (json: string) => {
     try {
-      const paths = JSON.parse(json)
-      if (subTab.value === 'adetailer') {
-        adFiles.value.push(...paths)
-      } else if (subTab.value === 'sam3') {
-        sam3Files.value.push(...paths)
-      } else if (subTab.value === 'upscale') {
-        upscaleFiles.value.push(...paths)
-      } else {
-        batchFiles.value.push(...paths)
-      }
+      const parsed = JSON.parse(json)
+      const paths: string[] = Array.isArray(parsed) ? parsed.filter((p: unknown): p is string => typeof p === 'string' && !!p) : []
+      // 목록 항목은 경로가 v-for key 라 중복을 넣지 않는다
+      const target = subTab.value === 'adetailer' ? adFiles
+        : subTab.value === 'sam3' ? sam3Files
+          : subTab.value === 'upscale' ? upscaleFiles
+            : batchFiles
+      target.value.push(...newPaths(target.value, paths))
     } catch {}
   })
 
@@ -1425,6 +1488,8 @@ onMounted(async () => {
       }
       adBefore.value = d.before
       adAfter.value = d.after
+      const adWarn = adExifNotice.note(d)
+      if (adWarn) requestAction('show_toast', { type: 'warning', msg: adWarn })
       if (typeof d.index === 'number') {
         adResults.value[d.index] = true
         adCurrentIdx.value = d.index
@@ -1440,6 +1505,8 @@ onMounted(async () => {
         adProcessing.value = false
         _adStartTime.value = 0
         requestAction('show_toast', { type: 'success', msg: `ADetailer 배치 완료 (${adProgressTotal.value}장)` })
+        const adSummary = adExifNotice.summary()
+        if (adSummary) requestAction('show_toast', { type: 'warning', msg: adSummary })
       }
     } catch {}
   })
@@ -1461,6 +1528,8 @@ onMounted(async () => {
       }
       sam3Before.value = d.before
       sam3After.value = d.after
+      const sam3Warn = sam3ExifNotice.note(d)
+      if (sam3Warn) requestAction('show_toast', { type: 'warning', msg: sam3Warn })
       if (typeof d.index === 'number') {
         sam3Results.value[d.index] = true
         sam3CurrentIdx.value = d.index
@@ -1475,7 +1544,11 @@ onMounted(async () => {
   onBackendEvent('sam3Progress', (cur: number, total: number) => {
     sam3ProgressCur.value = cur
     sam3ProgressTotal.value = total
-    if (cur >= total) sam3Processing.value = false
+    if (cur >= total) {
+      sam3Processing.value = false
+      const sam3Summary = sam3ExifNotice.summary()
+      if (sam3Summary) requestAction('show_toast', { type: 'warning', msg: sam3Summary })
+    }
   })
 
   // 캡션 대상 선택 (파일/폴더)
@@ -1632,6 +1705,12 @@ onUnmounted(() => {
 .slider-row input { flex: 1; accent-color: var(--accent); }
 .slider-row span { color: var(--text-secondary); font-size: 12px; min-width: 30px; font-family: monospace; }
 .op-settings { display: flex; flex-direction: column; gap: 4px; }
+/* 결과 위치 안내 — 원본을 덮어쓰지 않는다는 걸 시작 전에 보여 준다 */
+.op-hint {
+  font-size: var(--fs-label); color: var(--text-muted); line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; word-break: break-all;
+}
+.sam3-cn { margin-top: 6px; }
 /* 주 버튼: 면은 --accent-fill(글자가 4.5:1 로 읽히게 민 값), 글자는 --on-accent */
 .btn-start {
   padding: 10px; background: var(--accent-fill); border: none; border-radius: 8px;

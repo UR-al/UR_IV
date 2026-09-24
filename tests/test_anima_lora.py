@@ -12,6 +12,7 @@ from comfy_custom_nodes.ai_studio_forge_parity.anima_lora import (
     prepare_anima_lora_for_model,
     remap_anima_lora_state_dict,
 )
+from tests._optional_deps import load_torch, requires_torch
 
 
 class _CloneValue:
@@ -323,11 +324,9 @@ class SafetyTests(unittest.TestCase):
             remap_anima_lora_state_dict(raw, 40)
         self.assertEqual(set(raw), {key})
 
+    @requires_torch
     def test_optional_torch_tensor_duplicate_is_a_real_clone(self):
-        try:
-            import torch
-        except ImportError:
-            self.skipTest("torch is not installed")
+        torch = load_torch()
         raw = {
             f"lora_unet_blocks_{index}_x": torch.tensor([float(index)])
             for index in range(40)

@@ -14,10 +14,10 @@
     <div class="control-group" v-if="tool === 'lasso'">
       <label>올가미 방식</label>
       <div class="chip-grid-2">
-        <button class="chip-btn" :class="{ active: !magneticLasso }"
-          @click="magneticLasso = false; emit('magnetic-changed', false)"><Icon name="loop" /> 자유</button>
-        <button class="chip-btn magnet" :class="{ active: magneticLasso }"
-          @click="magneticLasso = true; emit('magnetic-changed', true)"><Icon name="magnet" /> 자석</button>
+        <button class="chip-btn" :class="{ active: !magnetic }"
+          @click="emit('magnetic-changed', false)"><Icon name="loop" /> 자유</button>
+        <button class="chip-btn magnet" :class="{ active: magnetic }"
+          @click="emit('magnetic-changed', true)"><Icon name="magnet" /> 자석</button>
       </div>
     </div>
 
@@ -27,11 +27,11 @@
         <label>도장 모양</label>
         <div class="chip-grid-3">
           <button class="chip-btn" :class="{ active: stampShape === 'circle' }"
-            @click="stampShape = 'circle'"><Icon name="circle" /> 원</button>
+            @click="emitParams({ stampShape: 'circle' })"><Icon name="circle" /> 원</button>
           <button class="chip-btn" :class="{ active: stampShape === 'bar' }"
-            @click="stampShape = 'bar'"><Icon name="bar" /> 띠</button>
+            @click="emitParams({ stampShape: 'bar' })"><Icon name="bar" /> 띠</button>
           <button class="chip-btn" :class="{ active: stampShape === 'rect' }"
-            @click="stampShape = 'rect'"><Icon name="square" /> 사각</button>
+            @click="emitParams({ stampShape: 'rect' })"><Icon name="square" /> 사각</button>
         </div>
       </div>
       <div class="slider-box">
@@ -56,11 +56,11 @@
         <label>지우개 종류</label>
         <div class="chip-grid-2">
           <button class="chip-btn" :class="{ active: !eraserRestore }"
-            @click="eraserRestore = false; emit('eraser-restore-changed', false)">
+            @click="emit('eraser-restore-changed', false)">
             <Icon name="wand" /> 마스크
           </button>
           <button class="chip-btn restore" :class="{ active: eraserRestore }"
-            @click="eraserRestore = true; emit('eraser-restore-changed', true)">
+            @click="emit('eraser-restore-changed', true)">
             <Icon name="sparkles" /> 모자이크
           </button>
         </div>
@@ -68,9 +68,9 @@
       <div class="control-group" v-if="!eraserRestore">
         <label>지우는 모양</label>
         <div class="chip-grid-3">
-          <button class="chip-btn" :class="{ active: eraserMode === 'brush' }" @click="setEraserMode('brush')">브러시</button>
-          <button class="chip-btn" :class="{ active: eraserMode === 'box' }" @click="setEraserMode('box')">사각</button>
-          <button class="chip-btn" :class="{ active: eraserMode === 'lasso' }" @click="setEraserMode('lasso')">올가미</button>
+          <button class="chip-btn" :class="{ active: eraserMode === 'brush' }" @click="emit('eraser-mode-changed', 'brush')">브러시</button>
+          <button class="chip-btn" :class="{ active: eraserMode === 'box' }" @click="emit('eraser-mode-changed', 'box')">사각</button>
+          <button class="chip-btn" :class="{ active: eraserMode === 'lasso' }" @click="emit('eraser-mode-changed', 'lasso')">올가미</button>
         </div>
       </div>
     </template>
@@ -86,52 +86,61 @@
  * 옵션도 도구를 따라오게 패널 맨 위로 올린다 — 고른 도구의 것만 보인다.
  *
  * 그리기 도구의 옵션은 `DrawPanel` 이 맡는다.
+ *
+ * 값은 전부 부모(EditorView)가 props 로 내려준다 — 이 패널은 표시하고 바뀐 필드만 올린다.
+ * 예전에는 로컬 ref 가 주인이라, 그리기 도구에 다녀오며 다시 마운트될 때마다
+ * 크기·도장 모양이 기본값(20/원)으로 부모 값을 덮어썼고, 지우개 종류·자석 올가미
+ * 표시는 실제 값과 어긋났다.
  */
-import { ref, computed, watch } from 'vue'
+import { computed } from 'vue'
 import { toolById } from '../../utils/editorTools'
+
+interface MaskToolParams {
+  toolSize: number; stampSpacing: number; stampShape: string; barW: number; barH: number
+}
 
 const props = withDefaults(defineProps<{
   /** 현재 도구 id (box/lasso/brush/eraser/stamp) */
   tool?: string
-}>(), { tool: 'box' })
+  toolSize?: number
+  stampSpacing?: number
+  /** 사용자가 고른 도장 모양 (circle/bar/rect) */
+  stampShape?: string
+  barW?: number
+  barH?: number
+  eraserMode?: string
+  eraserRestore?: boolean
+  magnetic?: boolean
+}>(), {
+  tool: 'box', toolSize: 20, stampSpacing: 30, stampShape: 'circle', barW: 40, barH: 15,
+  eraserMode: 'brush', eraserRestore: false, magnetic: false,
+})
 
 const emit = defineEmits<{
-  'params-changed': [payload: {
-    toolSize: number; stampSpacing: number; stampShape: string; barW: number; barH: number
-  }]
+  'params-changed': [payload: Partial<MaskToolParams>]
   'eraser-mode-changed': [mode: string]
   'eraser-restore-changed': [val: boolean]
   'magnetic-changed': [val: boolean]
 }>()
 
-const toolSize = ref(20)
-const eraserMode = ref('brush')
-const eraserRestore = ref(false)
-const magneticLasso = ref(false)
-const stampSpacing = ref(30)
-const stampShape = ref('circle')
-const barW = ref(40)
-const barH = ref(15)
-
 const toolLabel = computed(() => toolById(props.tool)?.label ?? '도구')
 const toolKey = computed(() => toolById(props.tool)?.shortcut ?? '')
 
-function setEraserMode(mode: string) {
-  eraserMode.value = mode
-  emit('eraser-mode-changed', mode)
+function emitParams(patch: Partial<MaskToolParams>) {
+  emit('params-changed', patch)
 }
 
-// 도장 모양은 스탬프 도구일 때만 뜻이 있다 — 다른 도구에서 'bar' 가 새어 나가면
-// 캔버스가 엉뚱한 커서를 그린다.
-watch([toolSize, stampSpacing, stampShape, barW, barH, () => props.tool], () => {
-  emit('params-changed', {
-    toolSize: toolSize.value,
-    stampSpacing: stampSpacing.value,
-    stampShape: props.tool === 'stamp' ? stampShape.value : 'circle',
-    barW: barW.value,
-    barH: barH.value,
+/** 슬라이더용 — 부모 값을 보여 주고 바뀐 필드만 올린다 */
+function field<K extends keyof MaskToolParams>(key: K) {
+  return computed({
+    get: () => props[key] as MaskToolParams[K],
+    set: (value: MaskToolParams[K]) => emitParams({ [key]: value } as Partial<MaskToolParams>),
   })
-}, { immediate: true })
+}
+const toolSize = field('toolSize')
+const stampSpacing = field('stampSpacing')
+const barW = field('barW')
+const barH = field('barH')
 </script>
 
 <style scoped>

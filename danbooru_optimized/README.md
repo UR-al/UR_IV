@@ -25,6 +25,26 @@ Event shard에는 해당 등급 child와 그 child가 참조하는 모든 parent
 parent의 자체 등급이 달라도 포함되므로 단일 등급만 선택해도 그래프가 끊기지 않습니다.
 여러 등급을 함께 불러올 때 생기는 parent 중복은 `EventDataLoader`가 ID 기준으로 제거합니다.
 
+## 앱 시작 시 자동 받기
+
+앱은 시작할 때 `core/fetch_data.py`가 `dataset_manifest.json`의 각 artifact `path`와
+`size_bytes`를 디스크와 비교합니다. 파일이 없거나 크기가 다르면(저장소를 pull해
+manifest가 새 릴리스를 가리키는데 parquet은 옛것인 경우 포함) **그 경로만**
+Hugging Face 데이터셋 `UR-AR/UR_IV`에서 다시 받습니다. `tags_dictionary.parquet`이
+없을 때도 함께 받습니다. 기동 시간 때문에 SHA-256은 계산하지 않으며, Search가 활성
+릴리스를 불러올 때 SHA-256·행 수·스키마를 검증합니다.
+
+받기에 실패해도 이미 쓰던 데이터가 있으면 앱은 뜨고 경고만 남깁니다. 이때 Search는
+manifest 검증 오류를, Event Gen은 manifest와 크기가 다른 shard 경고를 표시합니다.
+이 폴더에 parquet이 하나도 없는 첫 설치에서 받기에 실패하면 예전처럼 시작을 중단합니다.
+현재 manifest의 경로가 하나도 없더라도 `tags_dictionary.parquet`이나 옛 릴리스 이름의
+parquet이 있으면 쓰던 데이터가 있는 것으로 보고 경고만 남긴 채 앱을 띄웁니다.
+수동으로 다시 받으려면 프로젝트 루트에서 `python -m core.fetch_data`를 실행합니다.
+
+manifest 최상위에 선택 필드 `"hf_revision": "<커밋 해시>"`를 두면 그 Hugging Face
+커밋에서 받습니다. parquet을 업로드한 뒤 그 커밋을 적어 두면, 저장소의 manifest와
+받는 파일이 항상 같은 릴리스로 고정됩니다.
+
 ## 다시 생성하기
 
 고정된 원본 revision을 받은 뒤 다음처럼 실행합니다.

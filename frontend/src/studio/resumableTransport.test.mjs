@@ -394,24 +394,24 @@ test('stale binding generations cannot confirm, replace, or release a newer gate
   assert.equal(transport.eventEpoch, 'epoch-a')
 })
 
-test('native handshake errors propagate and only an absent transport uses legacy', async () => {
+test('native handshake errors propagate and only an absent transport is unavailable', async () => {
   const handshakeError = new Error('invalid Studio description')
-  let legacyCalls = 0
-  const legacy = async () => {
-    legacyCalls += 1
-    return { kind: 'legacy' }
+  let unavailableCalls = 0
+  const unavailable = async () => {
+    unavailableCalls += 1
+    return { kind: 'unavailable' }
   }
 
   await assert.rejects(
-    selectStudioClient({}, async () => { throw handshakeError }, legacy),
+    selectStudioClient({}, async () => { throw handshakeError }, unavailable),
     handshakeError,
   )
-  assert.equal(legacyCalls, 0)
+  assert.equal(unavailableCalls, 0)
   assert.deepEqual(
-    await selectStudioClient(null, async () => ({ kind: 'v1' }), legacy),
-    { kind: 'legacy' },
+    await selectStudioClient(null, async () => ({ kind: 'v1' }), unavailable),
+    { kind: 'unavailable' },
   )
-  assert.equal(legacyCalls, 1)
+  assert.equal(unavailableCalls, 1)
 })
 
 test('cursor recovery reconciles before resume and passes the whole bootstrap state', async () => {

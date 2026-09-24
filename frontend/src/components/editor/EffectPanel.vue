@@ -25,7 +25,7 @@
         </div>
         <div class="model-info">{{ modelLabel }}</div>
         <div class="btn-row mt-8">
-          <button class="ghost-btn" @click="$emit('add-model')">+ .PT 추가</button>
+          <button class="ghost-btn" v-host-dialog="'editor_add_yolo_model'" @click="$emit('add-model')">+ .PT 추가</button>
           <button class="ghost-btn" @click="$emit('clear-models')">초기화</button>
         </div>
         <div class="slider-box mt-12">
@@ -86,7 +86,8 @@
  * `MaskToolOptions` 로, 자르기·회전·원근은 `TransformPanel` 로 갔다.
  * 여기 남은 것은 "선택한 영역에 무언가를 한다" 하나로 묶이는 것들이다.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import { vHostDialog } from '../../utils/hostDialogs'
 import PanelSection from './PanelSection.vue'
 
 interface Effect { id: number; label: string }
@@ -98,9 +99,13 @@ interface DetectPayload {
   excludePrompt: string
 }
 
-defineProps<{
+const props = defineProps<{
   modelLabel?: string
   detectStatus?: string
+  /** Settings '기본값' 의 효과 세기 — 사용자가 바꾸지 않은 동안만 따른다(audit #140). */
+  defaultStrength?: number
+  /** Settings '기본값' 의 YOLO 신뢰도(%, 1~100). */
+  defaultDetectConf?: number
 }>()
 
 const emit = defineEmits<{
@@ -122,15 +127,28 @@ const effects: Effect[] = [
 ]
 
 const selectedEffect = ref(0)
-const strength = ref(15)
-const detectConf = ref(25)
+const strength = ref(props.defaultStrength ?? 15)
+const detectConf = ref(props.defaultDetectConf ?? 25)
+
+// 기본값이 바뀌면 손대지 않은 값만 따라간다. 세기는 아래 프리뷰 watch 를 건드리므로, 코드가
+// 대입하는 동안에는 프리뷰를 내보내지 않는다(선택 영역에 원치 않는 미리보기가 뜨지 않게).
+let applyingDefault = false
+watch(() => props.defaultStrength, (next, prev) => {
+  if (typeof next !== 'number' || strength.value !== (prev ?? 15)) return
+  applyingDefault = true
+  strength.value = next
+  void nextTick(() => { applyingDefault = false })
+})
+watch(() => props.defaultDetectConf, (next, prev) => {
+  if (typeof next === 'number' && detectConf.value === (prev ?? 25)) detectConf.value = next
+})
 const bgQuality = ref('balanced')
 
 const effectLabel = computed(() => effects.find((e) => e.id === selectedEffect.value)?.label ?? '')
 
 const samModels: SamModelOption[] = [
-  { id: 'auto', label: 'AUTO', tip: '자동 — MobileSAM 우선, 없으면 SAM3' },
-  { id: 'mobile_sam', label: 'MOBILE', tip: 'MobileSAM (가벼움/빠름, bbox 기반)' },
+  { id: 'auto', label: 'AUTO', tip: '자동 — MobileSAM 파일 우선(mobile_sam 패키지 필요, 없으면 경고 후 YOLO bbox). MobileSAM 파일이 없을 때만 SAM3' },
+  { id: 'mobile_sam', label: 'MOBILE', tip: 'MobileSAM (가벼움/빠름, bbox 기반 · mobile_sam 패키지 필요)' },
   { id: 'sam3', label: 'SAM3', tip: 'Meta SAM 3 (텍스트 프롬프트, GPU 권장)' },
   { id: 'off', label: 'OFF', tip: 'SAM 정밀화 끔 — YOLO bbox만 사용' },
 ]
@@ -165,6 +183,7 @@ function onApply() {
 
 // 효과는 여태 '적용해야만 결과를 아는' 유일한 자리였다 — 색보정처럼 미리 보여준다.
 watch([selectedEffect, strength], () => {
+  if (applyingDefault) return
   emit('effect-preview', { effect: selectedEffect.value, strength: strength.value })
 })
 </script>

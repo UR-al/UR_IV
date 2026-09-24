@@ -4,15 +4,29 @@ import re
 import json
 import hashlib
 import threading
-import pandas as pd
+# pandas(+pyarrow)는 검색을 실제로 돌릴 때(_run_locked/_load_data) import 한다 — 이 모듈이
+# 창 표시 전 경로에서 import 돼도 pandas 로드(수백 ms)를 기동에 얹지 않는다.
 from PyQt6.QtCore import QThread, pyqtSignal
+
+from core.search_rows import (
+    SEARCH_RESULT_CAP,
+    SEARCH_ROW_KEYS,
+    NormalizedSearchRows,
+    normalize_search_rows_in_place,
+)
 
 class PandasSearchWorker(QThread):
     """Pandas를 이용한 검색 워커"""
-    results_ready = pyqtSignal(list, int)
+    # object 시그니처(PyQt_PyObject) — list 로 선언하면 C++ 시그니처가 QVariantList 가
+    # 되어 emit 마다 수십만 dict 가 QVariant 로 왕복 복사되고 GUI 스레드가 수 초 멈춘다.
+    # 값은 언제나 NormalizedSearchRows(워커에서 정규화 완료된 list[dict]).
+    results_ready = pyqtSignal(object, int)
     status_update = pyqtSignal(str)
 
-    # 클래스 전역 캐시(cached_df/cached_col_lower) 보호 — 이전 워커가 1초 내 종료되지
+    # 결과 행 상한(무작위 표본). bridge 도 이 값 하나만 쓴다.
+    DEFAULT_RESULT_CAP = SEARCH_RESULT_CAP
+
+    # 클래스 전역 캐시(cached_df) 보호 — 이전 워커가 1초 내 종료되지
     # 않아 새 워커와 겹칠 때, 서로 다른 연도/등급 로드가 캐시를 동시 변이해 인덱스 불일치
     # 마스크/오데이터/RAM 중복이 나던 경합 방지. run() 전체를 직렬화한다(검색은 사실상
     # 사용자 직렬이라 동시성 손실 무해).
@@ -28,8 +42,9 @@ class PandasSearchWorker(QThread):
     ]
     LOAD_COLUMNS = REQUIRED_COLUMNS
 
+    # 태그 컬럼은 빌드(tools/refresh_danbooru_data.py)가 소문자로 보장하므로 질의용
+    # 소문자 사본을 따로 캐시하지 않는다(기본 g 에서만 RSS 약 1.4GB 절약).
     cached_df = None
-    cached_col_lower = {}  # {col_name: lowercase Series} — rating/year 변경 시 무효화
     loaded_ratings = set()
     loaded_year = ''       # 현재 캐시에 실제 로드된 릴리스
     loaded_file_signature = ()  # ((path, size, mtime_ns, file_id), ...)
@@ -43,12 +58,9 @@ class PandasSearchWorker(QThread):
     DEFAULT_DATASET_LABEL = '2026_07'
     MANIFEST_FORMAT_VERSION = 1
 
-    # 결과로 내보내는 컬럼 — bridge의 dict 재구성(_pick/_dim)이 읽는 키만.
-    # to_dict 전에 이 컬럼만 남겨 안 쓰는 컬럼(meta, 전체컬럼 폴백분)의 복제를 제거.
-    OUTPUT_COLUMNS = ['rating', 'copyright', 'character', 'artist', 'general',
-                      'image_width', 'image_height',
-                      'tag_string_copyright', 'tag_string_character',
-                      'tag_string_artist', 'tag_string_general']
+    # 결과로 내보내는 컬럼 — Search 행 계약(core.search_rows)의 키만.
+    # to_dict 전에 이 컬럼만 남겨 안 쓰는 컬럼(meta)의 복제를 제거.
+    OUTPUT_COLUMNS = list(SEARCH_ROW_KEYS)
 
     def __init__(self, parquet_dir, selected_ratings, queries, exclude_queries=None,
                  combine_mode: str = 'and', result_cap: int = None):
@@ -91,6 +103,8 @@ class PandasSearchWorker(QThread):
             self.status_update.emit(f"❌ 오류 발생: {str(e)}")
 
     def _run_locked(self):
+        import pandas as pd
+
         try:
             if not self._load_data():
                 return
@@ -98,7 +112,7 @@ class PandasSearchWorker(QThread):
                 return
 
             if self.cached_df is None or self.cached_df.empty:
-                self.results_ready.emit([], 0)
+                self.results_ready.emit(NormalizedSearchRows(), 0)
                 return
 
             self.status_update.emit(
@@ -171,13 +185,18 @@ class PandasSearchWorker(QThread):
                 print(f"[Search] capping {total_count:,} -> {self.result_cap:,} (워커 단계, RAM 절약)")
                 filtered_df = filtered_df.sample(n=self.result_cap)
 
-            # 출력 컬럼만 — 검색용으로만 쓰는 meta/전체컬럼 폴백분 복제 제거
+            # 출력 컬럼만 — 검색용으로만 쓰는 meta 복제 제거
             out_cols = [c for c in self.OUTPUT_COLUMNS if c in filtered_df.columns]
             if out_cols:
                 filtered_df = filtered_df[out_cols]
 
-            final_df = filtered_df.fillna("")
-            results = final_df.to_dict('records')
+            # 행 정규화(결측→''/None, 해상도 int)는 GUI 스레드가 아니라 여기서 끝낸다.
+            # 결측 처리는 정규화가 하므로 dtype 을 바꾸는 fillna 사본도 만들지 않는다.
+            records = filtered_df.to_dict('records')
+            if not self.is_running:
+                return
+            results = NormalizedSearchRows(normalize_search_rows_in_place(records))
+            del records
 
             if not self.is_running:   # emit 직전 최종 체크
                 return
@@ -196,27 +215,14 @@ class PandasSearchWorker(QThread):
         - 'or':  콤마=OR (필드 내 콤마도 OR로 결합)
         명시적 [A|B], [A,B] 그룹은 모드와 무관하게 항상 OR/AND.
 
-        성능: col_lower 캐시 사용 — 같은 rating set 내에서 lowercase 재사용.
-        쿼리 1회당 ~수백ms (5M rows) 절약.
+        성능: 태그 컬럼은 이미 소문자(빌드 보장)이고 로드 때 fillna('')까지 끝나
+        있으므로 원본 Series 를 그대로 매칭에 넘긴다 — 소문자 사본(컬럼당 수백 MB)과
+        컬럼별 첫 질의의 1.8~4초 변환이 없다. 질의 쪽은 tag_matcher 가 소문자로 만든다.
         """
         from core.tag_matcher import filter_dataframe
-        col_lower = self._get_col_lower(df, col)
         return filter_dataframe(df, col, query_text,
                                 default_combine=self.combine_mode,
-                                col_lower=col_lower)
-
-    @classmethod
-    def _get_col_lower(cls, df, col: str):
-        """lowercase Series 캐시 — 같은 rating set 내에서 재사용.
-        cached_df가 바뀌면 _load_data에서 cache가 clear됨.
-        """
-        if col in cls.cached_col_lower:
-            return cls.cached_col_lower[col]
-        if col not in df.columns:
-            return None
-        lower = df[col].fillna('').str.lower()
-        cls.cached_col_lower[col] = lower
-        return lower
+                                col_lower=df[col])
 
     def _active_dataset_manifest(self):
         """Read and minimally validate the authoritative runtime manifest."""
@@ -457,6 +463,8 @@ class PandasSearchWorker(QThread):
 
     def _load_data(self):
         """선택된 등급의 Parquet 파일 로드 (년도 + rating set으로 캐시 키)"""
+        import pandas as pd
+
         resolved_year = self._resolve_dataset_year()
         if resolved_year is None:
             self.status_update.emit("❌ 사용 가능한 검색 데이터가 없습니다.")
@@ -473,9 +481,8 @@ class PandasSearchWorker(QThread):
             self.dataset_identity = dict(self._pending_dataset_identity)
             return True
 
-        # rating set 또는 년도가 바뀌면 lowercase 캐시도 무효화
+        # rating set 또는 년도가 바뀌면 캐시 무효화
         PandasSearchWorker.cached_df = None
-        PandasSearchWorker.cached_col_lower.clear()
         dfs = []
 
         load_failed = False

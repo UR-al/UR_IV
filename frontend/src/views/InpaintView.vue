@@ -60,13 +60,46 @@
         <div class="glass-card">
           <label>프롬프트 덮어쓰기</label>
           <textarea v-model="prompt" rows="3" placeholder="Describe the change..."></textarea>
+          <label class="mt-6">네거티브 덮어쓰기</label>
+          <textarea v-model="negPrompt" rows="2" placeholder="비워두면 T2I 네거티브 사용"></textarea>
         </div>
 
         <div class="glass-card">
           <label>마스크 설정</label>
           <CustomSelect v-model="maskContentLabel" :options="maskContents" placeholder="마스크 영역 초기값" />
           <CustomSelect v-model="inpaintAreaLabel" :options="inpaintAreas" placeholder="인페인트 범위" class="mt-6" />
+          <label class="mt-6">마스크 블러</label>
+          <div class="slider-row">
+            <input type="range" min="0" max="64" v-model.number="maskBlur" />
+            <span class="slider-val">{{ maskBlur }}px</span>
+          </div>
+          <template v-if="inpaintArea === 1">
+            <label class="mt-6">마스크 영역 여백</label>
+            <div class="slider-row">
+              <input type="range" min="0" max="256" step="4" v-model.number="padding" />
+              <span class="slider-val">{{ padding }}px</span>
+            </div>
+          </template>
         </div>
+
+        <details class="glass-card">
+          <summary class="card-header">고급 설정</summary>
+          <label class="mt-6">스텝</label>
+          <div class="slider-row">
+            <input type="range" min="1" max="150" v-model.number="steps" />
+            <span class="slider-val">{{ steps }}</span>
+          </div>
+          <label class="mt-6">CFG</label>
+          <div class="slider-row">
+            <input type="range" min="1" max="30" step="0.5" v-model.number="cfg" />
+            <span class="slider-val">{{ cfg }}</span>
+          </div>
+          <label class="mt-6">Seed (−1 = 랜덤)</label>
+          <div class="seed-row">
+            <input v-model="seed" type="text" class="seed-input" placeholder="-1" />
+            <button class="act-btn seed-btn" @click="seed = '-1'" title="랜덤으로 초기화"><Icon name="dice" /></button>
+          </div>
+        </details>
 
         <HandReconstructionPanel :source-revision="handSourceRevision" :has-image="handImageReady" :has-mask="hasMask" :get-input="getHandReconstructionInput" />
       </div>
@@ -106,16 +139,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import EditorToolbar from '../components/editor/EditorToolbar.vue'
 import { INPAINT_TOOLS, toolById, toolByKey } from '../utils/editorTools'
 import { requestAction } from '../stores/widgetStore.js'
 import { getBackend, onBackendEvent } from '../bridge.js'
+import { mediaUrl } from '../utils/media.js'
 import CustomSelect from '../components/CustomSelect.vue'
 import HandReconstructionPanel from '../components/HandReconstructionPanel.vue'
+// 마스크 픽셀 연산·undo 정책·엣지맵은 에디터(EditorCanvas)와 같은 코드를 쓴다 — 예전엔 복사본이라
+// undo 시점·엣지맵 캐시 같은 개선이 에디터에만 들어갔다.
+import {
+  MaskHistory, appendLassoPoint, dragRect, encodeMaskPng, fillPolygon, fillRect as fillMaskRect,
+  paintMaskOverlay, rectIsApplicable, rgba32, snapshotsOnPress, stampCircle, strokeLine,
+  type MaskEdit, type Point,
+} from '../utils/maskOps'
+import {
+  EDGE_SNAP_RADIUS, EdgeMapCache, decodeEdgeMap, snapToEdge as snapToEdgeMap, type EdgeMap,
+} from '../utils/edgeMap'
 
-interface Point { x: number; y: number }
 interface DirtyRect { x1: number; y1: number; x2: number; y2: number }
+/** 인페인트 마스크 오버레이 색 (226,179,64, 알파 100) */
+const INPAINT_MASK_RGBA32 = rgba32(226, 179, 64, 100)
 
 // ── State ──
 const isDragging = ref(false)
@@ -127,13 +172,25 @@ const maskRef = ref<HTMLCanvasElement | null>(null)
 const overlayRef = ref<HTMLCanvasElement | null>(null)
 const brushSize = ref(40)
 const prompt = ref('')
+const negPrompt = ref('')
 const denoising = ref(0.75)
-const maskContent = ref(0)
-const inpaintArea = ref(0)
+// 기본값은 그동안 실제로 나가던 값(숨은 레거시 탭의 원본 유지 · 마스크 영역만)과 같게 —
+// 이 두 옵션이 백엔드에 연결되면서 결과가 조용히 바뀌지 않도록 (core/inpaint_payload.py).
+const maskContent = ref(1)
+const inpaintArea = ref(1)
+const maskBlur = ref(4)
+const padding = ref(32)
+const steps = ref(20)
+const cfg = ref(7)
+const seed = ref('-1')
 const currentTool = ref('brush')
 const eraserMode = ref('brush')
 const magneticLasso = ref(false)
-let edgeMapData: Uint8Array | null = null, edgeMapW = 0, edgeMapH = 0
+// 자석 올가미 엣지맵 — 한 장짜리 캐시(같은 이미지에서 '자석'을 다시 켜도 Canny 를 다시 돌리지 않는다)
+const edgeMapCache = new EdgeMapCache()
+let edgeMap: EdgeMap | null = null
+let edgeMapFor = ''     // edgeMap 이 어느 이미지 경로의 것인지
+let edgeMapToken = 0    // 늦게 온 옛 요청이 새 이미지의 엣지맵을 덮지 못하게
 const maskContents = ['채우기', '원본 유지', 'Latent 노이즈', 'Latent 없음']
 const inpaintAreas = ['전체 이미지', '마스크 영역만']
 const maskContentLabel = computed({
@@ -175,11 +232,13 @@ let oCtx: CanvasRenderingContext2D | null = null
 let srcImg: HTMLImageElement | null = null
 let maskData: Uint8Array | null = null
 let maskImageData: ImageData | null = null
+let maskPixels: Uint32Array | null = null   // maskImageData 의 32비트 뷰 (픽셀당 1회 대입)
 let drawing = false, panning = false
 let startX = 0, startY = 0, lastX = -1, lastY = -1
 let panSX = 0, panSY = 0
 let lassoPoints: Point[] = []
-let undoStack: Uint8Array[] = [], redoStack: Uint8Array[] = []
+const maskHistory = new MaskHistory(10)
+let overlayFrame = 0    // 올가미 경로 다시 그리기 rAF — pointermove 마다 전체 경로를 그리지 않게
 
 const cvStyle = computed(() => ({
   transform: `translate(${panX.value}px,${panY.value}px) scale(${zoom.value})`,
@@ -193,35 +252,89 @@ function handleFileSelect(e: Event) { const f = (e.target as HTMLInputElement).f
 function handleDrop(e: DragEvent) {
   isDragging.value = false
   const f = e.dataTransfer?.files?.[0]
-  if (f) { imagePath.value = (f as any).path || ''; loadFile(f); return }
+  if (f) { loadFile(f); return }
   const p = e.dataTransfer?.getData('text/plain')
   if (p && p.includes('/')) loadFromPath(p)
 }
 function loadFile(file: File) {
+  // 파일 선택·드롭은 경로를 모른다(QtWebEngine File 에는 .path 가 없다) — 이전 경로를 반드시
+  // 비운다. 안 비우면 갤러리에서 보냈던 **옛 이미지 경로**와 새 마스크가 함께 전송되고,
+  // 자석 올가미 엣지맵도 옛 이미지로 계산된다 (I2IView.loadFile 과 같은 규칙).
+  const nativePath = (file as any).path
+  imagePath.value = typeof nativePath === 'string' && nativePath ? nativePath.replace(/\\/g, '/') : ''
+  resetEdgeMap()
+  // FileReader 가 끝날 때까지 imageSrc·마스크는 옛 이미지 것이다 — 읽기 **전에** 준비 상태를
+  // 내려야 그 사이 generate 가 옛 이미지(경로 없이)·옛 마스크를 보내지 않는다.
+  const loadRevision = beginImageLoad()
   const r = new FileReader()
-  r.onload = (ev) => { imageSrc.value = ev.target!.result as string; initCanvas(ev.target!.result as string) }
+  r.onload = () => {
+    if (loadRevision !== imageLoadRevision) return   // 그새 다른 이미지를 받았다
+    const src = typeof r.result === 'string' ? r.result : ''
+    if (!src) { failImageLoad(); return }
+    imageSrc.value = src
+    initCanvas(src, loadRevision)
+  }
+  r.onerror = () => {
+    if (loadRevision !== imageLoadRevision) return
+    failImageLoad()
+  }
   r.readAsDataURL(file)
-  if ((file as any).path) imagePath.value = (file as any).path.replace(/\\/g, '/')
 }
 async function loadFromPath(path: string) {
+  resetEdgeMap()
   if (/^data:image\//i.test(path) || path.startsWith('blob:')) {
     imagePath.value = ''
     imageSrc.value = path
-    initCanvas(path)
+    initCanvas(path, beginImageLoad())
     return
   }
   const normalized = path.replace(/\\/g, '/')
   imagePath.value = normalized
-  const localUrl = 'file:///' + normalized
-  imageSrc.value = localUrl
-  initCanvas(localUrl)
+  // 표시용 src 는 mediaUrl 로 — Qt 는 file:///, 웹 모드는 /file?path= (http 페이지는
+  // file:/// 을 못 읽어 onload 가 영영 오지 않았다). 이미 file:/// 이 붙은 드롭 경로도 정리된다.
+  const displayUrl = mediaUrl(normalized)
+  imageSrc.value = displayUrl
+  initCanvas(displayUrl, beginImageLoad())
 }
 
-function initCanvas(src: string) {
+/** 새 이미지 읽기를 시작한다. 이 순간부터 generate·손 재구성은 막히고(handImageReady=false),
+ *  먼저 시작한 읽기(FileReader·<img>)의 늦은 결과는 revision 이 달라 버려진다. */
+function beginImageLoad(): number {
   const loadRevision = ++imageLoadRevision
   handSourceRevision.value++
   handImageReady.value = false
+  return loadRevision
+}
+
+/** 파일·이미지를 못 읽었다 — 캔버스·경로를 비우고 알린다. */
+function failImageLoad() {
+  resetAfterLoadError()
+  requestAction('show_toast', { type: 'error', msg: '인페인트 이미지를 불러오지 못했습니다' })
+}
+
+/** 이미지를 못 읽었으면 캔버스·마스크·경로를 전부 비운다 — 이전 이미지의 마스크가
+ *  새 경로와 함께 전송되는 일이 없게. */
+function resetAfterLoadError() {
+  imageSrc.value = ''
+  imagePath.value = ''
+  srcImg = null
+  maskData = null
+  maskImageData = null
+  maskPixels = null
+  hasMask.value = false
+  maskHistory.clear()
+  resetEdgeMap()
+  imgW.value = 0; imgH.value = 0
+}
+
+/** `loadRevision` 은 beginImageLoad() 가 준 값 — 그새 다른 이미지를 받았으면 아무것도 안 한다. */
+function initCanvas(src: string, loadRevision: number) {
+  if (loadRevision !== imageLoadRevision) return
   const img = new Image()
+  img.onerror = () => {
+    if (loadRevision !== imageLoadRevision) return
+    failImageLoad()
+  }
   img.onload = () => {
     if (loadRevision !== imageLoadRevision) return
     srcImg = img; imgW.value = img.naturalWidth; imgH.value = img.naturalHeight
@@ -237,8 +350,12 @@ function initCanvas(src: string) {
     oCtx = oc.getContext('2d'); oCtx!.clearRect(0, 0, oc.width, oc.height)
     maskData = new Uint8Array(img.naturalWidth * img.naturalHeight)
     maskImageData = mCtx!.createImageData(img.naturalWidth, img.naturalHeight)
-    hasMask.value = false; undoStack = []; redoStack = []
+    maskPixels = new Uint32Array(maskImageData.data.buffer)
+    hasMask.value = false; maskHistory.clear()
     handImageReady.value = true
+    // 자석 올가미를 켜 둔 채 이미지를 바꿨으면 새 이미지로 엣지맵을 다시 만든다.
+    // (옛 엣지맵은 loadFile/loadFromPath 가 이미 버렸다 — 옛 이미지 윤곽에 붙지 않게)
+    if (magneticLasso.value) void ensureEdgeMap()
   }
   img.src = src
 }
@@ -256,13 +373,17 @@ function onDblClick(e: MouseEvent) { if (e.altKey) { zoom.value = 1; panX.value 
 function onDown(e: MouseEvent) {
   if (e.altKey || e.button === 1) { panning = true; panSX = e.clientX - panX.value; panSY = e.clientY - panY.value; return }
   if (!maskData) return
-  saveUndo(); drawing = true
+  // 누르는 순간 마스크가 바뀌는 도구(브러시·브러시 지우개)만 여기서 undo 스냅숏을 뜬다.
+  // 사각형·올가미는 실제로 적용될 때(onUp) 뜬다 — 예전엔 누를 때마다 떠서 빈 클릭도
+  // 마스크 전체 스냅숏을 쌓고 redo 를 날렸다(에디터와 같은 정책: maskOps.snapshotsOnPress).
+  if (snapshotsOnPress(currentTool.value, eraserMode.value)) saveUndo()
+  drawing = true
   const p = getPos(e); startX = p.x; startY = p.y; lastX = p.x; lastY = p.y
 
   if (currentTool.value === 'lasso') { const sp = magneticLasso.value ? snapToEdge(p.x, p.y) : p; lassoPoints = [{ x: sp.x, y: sp.y }] }
-  else if (currentTool.value === 'brush') { paintCircle(p.x, p.y); renderDirty(circleBounds(p.x, p.y)) }
+  else if (currentTool.value === 'brush') { renderDirty(paintCircle(p.x, p.y)) }
   else if (currentTool.value === 'eraser') {
-    if (eraserMode.value === 'brush') { eraseCircle(p.x, p.y); renderDirty(circleBounds(p.x, p.y)) }
+    if (eraserMode.value === 'brush') { renderDirty(eraseCircle(p.x, p.y)) }
     else { lassoPoints = eraserMode.value === 'lasso' ? [{ x: p.x, y: p.y }] : [] }
   }
 }
@@ -286,22 +407,38 @@ function onMove(e: MouseEvent) {
     clearOverlay()
     if (oCtx) { oCtx.strokeStyle = '#E2B340'; oCtx.lineWidth = 2; oCtx.setLineDash([6,4]); oCtx.strokeRect(startX, startY, p.x-startX, p.y-startY); oCtx.setLineDash([]) }
   } else if (currentTool.value === 'lasso') {
+    // 직전 점과 1px 미만이면 버린다. 경로는 프레임당 한 번만 다시 그린다(예전엔 move 마다 전체 경로).
     const sp = magneticLasso.value ? snapToEdge(p.x, p.y) : p
-    lassoPoints.push({ x: sp.x, y: sp.y }); clearOverlay()
-    if (oCtx && lassoPoints.length > 1) {
-      oCtx.strokeStyle = magneticLasso.value ? '#60a5fa' : '#E2B340'; oCtx.lineWidth = 2; oCtx.setLineDash([4,3])
-      oCtx.beginPath(); oCtx.moveTo(lassoPoints[0].x, lassoPoints[0].y)
-      for (let i = 1; i < lassoPoints.length; i++) oCtx.lineTo(lassoPoints[i].x, lassoPoints[i].y)
-      oCtx.closePath(); oCtx.stroke(); oCtx.setLineDash([])
-      oCtx.fillStyle = 'rgba(226,179,64,0.1)'; oCtx.fill()
-    }
+    if (appendLassoPoint(lassoPoints, sp)) scheduleLassoOverlay()
   } else if (currentTool.value === 'brush') {
-    paintLine(lastX, lastY, p.x, p.y); renderDirty(lineBounds(lastX, lastY, p.x, p.y)); lastX = p.x; lastY = p.y
+    renderDirty(paintLine(lastX, lastY, p.x, p.y)); lastX = p.x; lastY = p.y
   } else if (currentTool.value === 'eraser') {
-    if (eraserMode.value === 'brush') { eraseLine(lastX, lastY, p.x, p.y); renderDirty(lineBounds(lastX, lastY, p.x, p.y)); lastX = p.x; lastY = p.y }
+    if (eraserMode.value === 'brush') { renderDirty(eraseLine(lastX, lastY, p.x, p.y)); lastX = p.x; lastY = p.y }
     else if (eraserMode.value === 'box') { clearOverlay(); if (oCtx) { oCtx.strokeStyle = '#f87171'; oCtx.lineWidth = 2; oCtx.setLineDash([6,4]); oCtx.strokeRect(startX, startY, p.x-startX, p.y-startY); oCtx.setLineDash([]) } }
-    else if (eraserMode.value === 'lasso') { lassoPoints.push({ x: p.x, y: p.y }); clearOverlay(); if (oCtx && lassoPoints.length > 1) { oCtx.strokeStyle = '#f87171'; oCtx.lineWidth = 2; oCtx.beginPath(); oCtx.moveTo(lassoPoints[0].x, lassoPoints[0].y); for (let i = 1; i < lassoPoints.length; i++) oCtx.lineTo(lassoPoints[i].x, lassoPoints[i].y); oCtx.closePath(); oCtx.stroke() } }
+    else if (eraserMode.value === 'lasso') { if (appendLassoPoint(lassoPoints, p)) scheduleLassoOverlay() }
   }
+}
+
+/** 올가미 경로 다시 그리기를 다음 프레임으로 미룬다(한 프레임에 한 번). */
+function scheduleLassoOverlay() {
+  if (overlayFrame) return
+  overlayFrame = requestAnimationFrame(() => { overlayFrame = 0; drawLassoOverlay() })
+}
+function cancelLassoOverlay() {
+  if (overlayFrame) { cancelAnimationFrame(overlayFrame); overlayFrame = 0 }
+}
+function drawLassoOverlay() {
+  if (!drawing) return
+  clearOverlay()
+  if (!oCtx || lassoPoints.length < 2) return
+  const erasing = currentTool.value === 'eraser'
+  oCtx.strokeStyle = erasing ? '#f87171' : (magneticLasso.value ? '#60a5fa' : '#E2B340')
+  oCtx.lineWidth = 2
+  if (!erasing) oCtx.setLineDash([4, 3])
+  oCtx.beginPath(); oCtx.moveTo(lassoPoints[0].x, lassoPoints[0].y)
+  for (let i = 1; i < lassoPoints.length; i++) oCtx.lineTo(lassoPoints[i].x, lassoPoints[i].y)
+  oCtx.closePath(); oCtx.stroke(); oCtx.setLineDash([])
+  if (!erasing) { oCtx.fillStyle = 'rgba(226,179,64,0.1)'; oCtx.fill() }
 }
 
 function onUp(e: MouseEvent) {
@@ -310,12 +447,23 @@ function onUp(e: MouseEvent) {
   // FIX: drawing=false 를 좌표/도구 완성 처리 후로 이동 — 그래야 box/lasso 완성 시점에
   // 다른 핸들러가 짧게 끼어들어 좌표를 더럽히는 것을 막을 수 있음.
   const p = getPos(e)
+  cancelLassoOverlay()
+  // 사각형·올가미는 실제로 적용할 때만 undo 스냅숏 — 3px 이하 드래그(클릭)는 무시한다
   let dirty: DirtyRect | null = null
-  if (currentTool.value === 'box') { dirty = rectBounds(startX, startY, p.x, p.y); fillRect(dirty.x1, dirty.y1, dirty.x2, dirty.y2) }
-  else if (currentTool.value === 'lasso') { if (lassoPoints.length > 2) { dirty = pointsBounds(lassoPoints); fillPoly(lassoPoints) }; lassoPoints = [] }
-  else if (currentTool.value === 'eraser') {
-    if (eraserMode.value === 'box') { dirty = rectBounds(startX, startY, p.x, p.y); eraseRect(dirty.x1, dirty.y1, dirty.x2, dirty.y2) }
-    else if (eraserMode.value === 'lasso') { if (lassoPoints.length > 2) { dirty = pointsBounds(lassoPoints); erasePoly(lassoPoints) }; lassoPoints = [] }
+  if (currentTool.value === 'box') {
+    const r = dragRect(startX, startY, p.x, p.y)
+    if (rectIsApplicable(r)) { saveUndo(); dirty = fillRect(r.x1, r.y1, r.x2, r.y2) }
+  } else if (currentTool.value === 'lasso') {
+    if (lassoPoints.length > 2) { saveUndo(); dirty = fillPoly(lassoPoints) }
+    lassoPoints = []
+  } else if (currentTool.value === 'eraser') {
+    if (eraserMode.value === 'box') {
+      const r = dragRect(startX, startY, p.x, p.y)
+      if (rectIsApplicable(r)) { saveUndo(); dirty = eraseRect(r.x1, r.y1, r.x2, r.y2) }
+    } else if (eraserMode.value === 'lasso') {
+      if (lassoPoints.length > 2) { saveUndo(); dirty = erasePoly(lassoPoints) }
+      lassoPoints = []
+    }
   }
   if (dirty) renderDirty(dirty)
   clearOverlay(); updateHasMask()
@@ -325,94 +473,92 @@ function onUp(e: MouseEvent) {
 function onWheel(e: WheelEvent) { zoom.value = Math.max(0.2, Math.min(5, zoom.value * (e.deltaY > 0 ? 0.9 : 1.1))) }
 
 // ── 마스크 조작 ──
-function paintCircle(cx: number, cy: number) { if (!maskData || !srcImg) return; const w = srcImg.naturalWidth, h = srcImg.naturalHeight, r = brushSize.value; for (let y = Math.max(0,Math.floor(cy-r)); y < Math.min(h,Math.ceil(cy+r)); y++) for (let x = Math.max(0,Math.floor(cx-r)); x < Math.min(w,Math.ceil(cx+r)); x++) if ((x-cx)**2+(y-cy)**2<=r**2) maskData[y*w+x]=255 }
-function paintLine(x0: number,y0: number,x1: number,y1: number) { const d=Math.hypot(x1-x0,y1-y0),s=Math.max(1,Math.ceil(d/Math.max(1,brushSize.value*0.3))); for(let i=0;i<=s;i++){const t=i/s;paintCircle(x0+(x1-x0)*t,y0+(y1-y0)*t)} }
-function eraseCircle(cx: number,cy: number) { if(!maskData||!srcImg)return;const w=srcImg.naturalWidth,h=srcImg.naturalHeight,r=brushSize.value;for(let y=Math.max(0,Math.floor(cy-r));y<Math.min(h,Math.ceil(cy+r));y++)for(let x=Math.max(0,Math.floor(cx-r));x<Math.min(w,Math.ceil(cx+r));x++)if((x-cx)**2+(y-cy)**2<=r**2)maskData[y*w+x]=0 }
-function eraseLine(x0: number,y0: number,x1: number,y1: number) { const d=Math.hypot(x1-x0,y1-y0),s=Math.max(1,Math.ceil(d/Math.max(1,brushSize.value*0.3))); for(let i=0;i<=s;i++){const t=i/s;eraseCircle(x0+(x1-x0)*t,y0+(y1-y0)*t)} }
-function fillRect(x1: number,y1: number,x2: number,y2: number) { if(!maskData||!srcImg)return;const w=srcImg.naturalWidth,h=srcImg.naturalHeight;for(let y=Math.max(0,Math.round(y1));y<Math.min(h,Math.round(y2));y++)for(let x=Math.max(0,Math.round(x1));x<Math.min(w,Math.round(x2));x++)maskData[y*w+x]=255 }
-function eraseRect(x1: number,y1: number,x2: number,y2: number) { if(!maskData||!srcImg)return;const w=srcImg.naturalWidth,h=srcImg.naturalHeight;for(let y=Math.max(0,Math.round(y1));y<Math.min(h,Math.round(y2));y++)for(let x=Math.max(0,Math.round(x1));x<Math.min(w,Math.round(x2));x++)maskData[y*w+x]=0 }
-function fillPoly(pts: Point[]) { if(!maskData||!srcImg||pts.length<3)return;const w=srcImg.naturalWidth,h=srcImg.naturalHeight;let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const p of pts){minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y)};for(let y=Math.max(0,Math.floor(minY));y<Math.min(h,Math.ceil(maxY));y++)for(let x=Math.max(0,Math.floor(minX));x<Math.min(w,Math.ceil(maxX));x++)if(pip(x,y,pts))maskData[y*w+x]=255 }
-function erasePoly(pts: Point[]) { if(!maskData||!srcImg||pts.length<3)return;const w=srcImg.naturalWidth,h=srcImg.naturalHeight;let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const p of pts){minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y)};for(let y=Math.max(0,Math.floor(minY));y<Math.min(h,Math.ceil(maxY));y++)for(let x=Math.max(0,Math.floor(minX));x<Math.min(w,Math.ceil(maxX));x++)if(pip(x,y,pts))maskData[y*w+x]=0 }
-function pip(x: number,y: number,poly: Point[]){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i].x,yi=poly[i].y,xj=poly[j].x,yj=poly[j].y;if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)inside=!inside};return inside}
+// 픽셀 연산은 utils/maskOps(에디터와 공용). 각 함수는 건드린 사각형을 돌려주고, 그 영역만 다시 그린다.
+function maskBuffer() {
+  return maskData && srcImg ? { data: maskData, w: srcImg.naturalWidth, h: srcImg.naturalHeight } : null
+}
+function paintCircle(cx: number, cy: number): MaskEdit | null {
+  const m = maskBuffer(); return m ? stampCircle(m, cx, cy, brushSize.value, true) : null
+}
+function paintLine(x0: number, y0: number, x1: number, y1: number): MaskEdit | null {
+  const m = maskBuffer(); return m ? strokeLine(m, x0, y0, x1, y1, brushSize.value, true) : null
+}
+function eraseCircle(cx: number, cy: number): MaskEdit | null {
+  const m = maskBuffer(); return m ? stampCircle(m, cx, cy, brushSize.value, false) : null
+}
+function eraseLine(x0: number, y0: number, x1: number, y1: number): MaskEdit | null {
+  const m = maskBuffer(); return m ? strokeLine(m, x0, y0, x1, y1, brushSize.value, false) : null
+}
+function fillRect(x1: number, y1: number, x2: number, y2: number): MaskEdit | null {
+  const m = maskBuffer(); return m ? fillMaskRect(m, x1, y1, x2, y2, true) : null
+}
+function eraseRect(x1: number, y1: number, x2: number, y2: number): MaskEdit | null {
+  const m = maskBuffer(); return m ? fillMaskRect(m, x1, y1, x2, y2, false) : null
+}
+// 올가미는 스캔라인 채우기 — 예전 bbox 전 픽셀 × 꼭짓점 point-in-polygon 은 긴 올가미에서 수 초 멈췄다
+function fillPoly(pts: Point[]): MaskEdit | null {
+  const m = maskBuffer(); return m && pts.length >= 3 ? fillPolygon(m, pts, true) : null
+}
+function erasePoly(pts: Point[]): MaskEdit | null {
+  const m = maskBuffer(); return m && pts.length >= 3 ? fillPolygon(m, pts, false) : null
+}
 
-function rectBounds(x1: number, y1: number, x2: number, y2: number): DirtyRect {
-  return { x1: Math.min(x1, x2), y1: Math.min(y1, y2), x2: Math.max(x1, x2), y2: Math.max(y1, y2) }
-}
-function circleBounds(x: number, y: number): DirtyRect {
-  const r = brushSize.value + 2
-  return { x1: x-r, y1: y-r, x2: x+r, y2: y+r }
-}
-function lineBounds(x1: number, y1: number, x2: number, y2: number): DirtyRect {
-  const r = brushSize.value + 2
-  return { x1: Math.min(x1,x2)-r, y1: Math.min(y1,y2)-r, x2: Math.max(x1,x2)+r, y2: Math.max(y1,y2)+r }
-}
-function pointsBounds(pts: Point[]): DirtyRect {
-  let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity
-  for (const p of pts) { x1=Math.min(x1,p.x); y1=Math.min(y1,p.y); x2=Math.max(x2,p.x); y2=Math.max(y2,p.y) }
-  return { x1, y1, x2, y2 }
-}
 function clearOverlay() {
   if (oCtx && srcImg) oCtx.clearRect(0, 0, srcImg.naturalWidth, srcImg.naturalHeight)
 }
-function renderDirty(rect?: DirtyRect) {
-  if (!mCtx || !maskData || !maskImageData || !srcImg) return
+function renderDirty(rect?: DirtyRect | null) {
+  if (!mCtx || !maskData || !maskImageData || !maskPixels || !srcImg) return
   handSourceRevision.value++
   const w = srcImg.naturalWidth, h = srcImg.naturalHeight
   const x1 = Math.max(0, Math.floor(rect?.x1 ?? 0)), y1 = Math.max(0, Math.floor(rect?.y1 ?? 0))
   const x2 = Math.min(w, Math.ceil(rect?.x2 ?? w)), y2 = Math.min(h, Math.ceil(rect?.y2 ?? h))
   if (x2 <= x1 || y2 <= y1) return
-  const rgba = maskImageData.data
-  for (let y=y1; y<y2; y++) for (let x=x1; x<x2; x++) {
-    const i = y*w+x, p = i*4
-    if (maskData[i] > 0) { rgba[p]=226; rgba[p+1]=179; rgba[p+2]=64; rgba[p+3]=100 }
-    else { rgba[p]=0; rgba[p+1]=0; rgba[p+2]=0; rgba[p+3]=0 }
-  }
+  paintMaskOverlay(maskPixels, maskData, w, x1, y1, x2, y2, INPAINT_MASK_RGBA32)
   mCtx.putImageData(maskImageData, 0, 0, x1, y1, x2-x1, y2-y1)
 }
 
-// 자석 올가미
-async function enableMagnetic() {
+// ── 자석 올가미 ── (디코드·스냅·캐시는 utils/edgeMap — 에디터와 공용)
+// 예전엔 캐시가 없어 '자석'을 누를 때마다 동기 슬롯 getEdgeMap 이 Canny 를 다시 돌려 GUI 스레드를
+// 막았고, 새 이미지를 열어도 옛 엣지맵이 남아 이전 이미지 윤곽에 붙었다.
+function resetEdgeMap() {
+  edgeMapToken++
+  edgeMap = null
+  edgeMapFor = ''
+  edgeMapCache.clear()
+}
+async function ensureEdgeMap() {
+  const path = imagePath.value
+  if (!magneticLasso.value || !path || edgeMapFor === path) return
+  const token = ++edgeMapToken
+  const b64 = await edgeMapCache.get(path)
+  // 그 사이 다른 이미지로 바뀌었으면 옛 이미지의 엣지맵을 쓰지 않는다
+  if (!b64 || token !== edgeMapToken || path !== imagePath.value) return
+  const decoded = await decodeEdgeMap(b64)
+  if (!decoded || token !== edgeMapToken || path !== imagePath.value) return
+  edgeMap = decoded
+  edgeMapFor = path
+}
+function enableMagnetic() {
   magneticLasso.value = true
-  if (!imagePath.value) return
-  const bk: any = await getBackend()
-  if (bk.getEdgeMap) {
-    bk.getEdgeMap(imagePath.value, 50, 150, (b64: string) => {
-      if (!b64) return
-      const img = new Image()
-      img.onload = () => {
-        const tc = document.createElement('canvas'); tc.width = img.naturalWidth; tc.height = img.naturalHeight
-        const tctx = tc.getContext('2d')!; tctx.drawImage(img, 0, 0)
-        const id = tctx.getImageData(0, 0, tc.width, tc.height)
-        edgeMapW = tc.width; edgeMapH = tc.height
-        edgeMapData = new Uint8Array(edgeMapW * edgeMapH)
-        for (let i = 0; i < edgeMapData.length; i++) edgeMapData[i] = id.data[i * 4]
-      }
-      img.src = b64
-    })
-  }
+  return ensureEdgeMap()
 }
 function snapToEdge(x: number, y: number): Point {
-  if (!edgeMapData || !magneticLasso.value) return { x, y }
-  const r = 12; let best = Infinity, bx = x, by = y
-  for (let py = Math.max(0, Math.floor(y-r)); py < Math.min(edgeMapH, Math.ceil(y+r)); py++)
-    for (let px = Math.max(0, Math.floor(x-r)); px < Math.min(edgeMapW, Math.ceil(x+r)); px++)
-      if (edgeMapData[py * edgeMapW + px] > 127) { const d = (px-x)**2+(py-y)**2; if (d < best) { best=d; bx=px; by=py } }
-  return { x: bx, y: by }
+  return snapToEdgeMap(magneticLasso.value ? edgeMap : null, x, y, EDGE_SNAP_RADIUS)
 }
+// 자석을 켜 둔 채 다른 도구를 쓰다 올가미로 돌아오면(그사이 이미지가 바뀌었을 수 있다) 엣지맵을 챙긴다
+watch(currentTool, (tool) => { if (tool === 'lasso' && magneticLasso.value) void ensureEdgeMap() })
+onUnmounted(cancelLassoOverlay)
 
 function updateHasMask() { hasMask.value = maskData ? maskData.some(v => v > 0) : false }
-function saveUndo() { if (maskData) { undoStack.push(new Uint8Array(maskData)); if (undoStack.length > 10) undoStack.shift(); redoStack = [] } }
-function clearMask() { if (maskData) { saveUndo(); maskData.fill(0) }; hasMask.value = false; renderDirty() }
-function undoMask() { if (!undoStack.length || !maskData) return; redoStack.push(new Uint8Array(maskData)); maskData.set(undoStack.pop()!); updateHasMask(); renderDirty() }
-function redoMask() { if (!redoStack.length || !maskData) return; undoStack.push(new Uint8Array(maskData)); maskData.set(redoStack.pop()!); updateHasMask(); renderDirty() }
+function saveUndo() { if (maskData) maskHistory.save(maskData) }
+// 이미 비어 있으면 undo 단계를 쌓지 않는다(빈 '비우기'가 redo 를 날리지 않게)
+function clearMask() { if (maskData && maskData.some(v => v > 0)) { saveUndo(); maskData.fill(0) }; hasMask.value = false; renderDirty() }
+function undoMask() { if (!maskData || !maskHistory.undo(maskData)) return; updateHasMask(); renderDirty() }
+function redoMask() { if (!maskData || !maskHistory.redo(maskData)) return; updateHasMask(); renderDirty() }
 
 function getMaskBase64() {
   if (!maskData || !srcImg) return ''
-  const w = srcImg.naturalWidth, h = srcImg.naturalHeight
-  const tc = document.createElement('canvas'); tc.width = w; tc.height = h
-  const tctx = tc.getContext('2d')!; const id = tctx.createImageData(w, h)
-  for (let i = 0; i < maskData.length; i++) { id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=maskData[i]; id.data[i*4+3]=255 }
-  tctx.putImageData(id, 0, 0); return tc.toDataURL('image/png')
+  return encodeMaskPng(maskData, srcImg.naturalWidth, srcImg.naturalHeight)
 }
 
 const HAND_SOURCE_MAX_BYTES = 64 * 1024 * 1024
@@ -542,7 +688,31 @@ async function getHandReconstructionInput() {
 }
 
 function generate() {
-  requestAction('generate_inpaint', { image: imagePath.value ? '' : imageSrc.value, image_path: imagePath.value, mask: getMaskBase64(), prompt: prompt.value, denoising: denoising.value, mask_content: maskContent.value, inpaint_area: inpaintArea.value })
+  // 새 이미지를 읽는 중이면 캔버스의 마스크는 아직 이전 이미지 것이다.
+  if (!handImageReady.value) {
+    requestAction('show_toast', { type: 'warning', msg: '이미지를 불러오는 중입니다 — 잠시 후 다시 시도하세요' })
+    return
+  }
+  if (!hasMask.value) {
+    requestAction('show_toast', { type: 'warning', msg: 'Inpaint: 마스크를 그려주세요' })
+    return
+  }
+  // 백엔드는 이 값만 본다 (core/inpaint_payload.py) — 숨은 레거시 탭 값은 쓰지 않는다.
+  requestAction('generate_inpaint', {
+    image: imagePath.value ? '' : imageSrc.value,
+    image_path: imagePath.value,
+    mask: getMaskBase64(),
+    prompt: prompt.value,
+    negative_prompt: negPrompt.value,
+    denoising: denoising.value,
+    mask_content: maskContent.value,
+    inpaint_area: inpaintArea.value,
+    mask_blur: maskBlur.value,
+    padding: padding.value,
+    steps: steps.value,
+    cfg: cfg.value,
+    seed: seed.value,
+  })
 }
 
 onMounted(() => { onBackendEvent('inpaintImageLoaded', (path: string) => loadFromPath(path)) })
@@ -576,6 +746,9 @@ onMounted(() => { onBackendEvent('inpaintImageLoaded', (path: string) => loadFro
 .slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
 .slider-val { font-size: var(--fs-label); color: var(--accent); min-width: 36px; text-align: right; font-family: monospace; }
 .mt-6 { margin-top: 6px; }
+.seed-row { display: flex; gap: 4px; align-items: center; }
+.seed-input { flex: 1; min-width: 0; }
+.act-btn.seed-btn { flex: 0 0 32px; padding: 0; display: flex; align-items: center; justify-content: center; }
 .mask-actions { display: flex; gap: 3px; }
 .act-btn { flex: 1; height: 30px; padding: 0 8px; background: var(--bg-button); border: 1px solid var(--border); border-radius: var(--radius-base); color: var(--text-secondary); font-size: var(--fs-meta); font-weight: var(--fw-bold); cursor: pointer; }
 .btn-gen { width: 100%; height: 42px; background: var(--accent-fill); border: none; border-radius: var(--radius-pill); color: var(--on-accent); font-weight: var(--fw-bold); font-size: 12px; cursor: pointer; }

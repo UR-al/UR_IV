@@ -328,6 +328,9 @@ class BackendRuntimeTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.manager.stop_all_owned()
+        purge = getattr(self.manager, "_release_purge_thread", None)
+        if purge is not None:
+            purge.join(10)   # 이전 release 백그라운드 삭제가 temp 정리와 겹치지 않게
         self.model_patch.stop()
         self.temp_dir.cleanup()
 
@@ -407,6 +410,26 @@ class BackendRuntimeExtraArgsTests(BackendRuntimeTestCase):
         config_path.write_text("{not json", encoding="utf-8")
         self.manager._launch_argv("forge", 17860)
         self.assertEqual(config_path.read_text(encoding="utf-8"), "{not json")
+
+    def test_launch_env_forces_utf8_stdio_for_korean_windows_consoles(self):
+        """CP949 콘솔에서 커스텀 노드의 이모지 print 가 엔진을 죽인다 — 자식 stdio 는 항상 UTF-8.
+
+        PYTHONUTF8 은 넣지 않는다(open() 기본 인코딩까지 바꿔 확장 설정 파일을 깨뜨릴 수 있다).
+        """
+        import os as _os
+        from unittest import mock as _mock
+        self.manager.execute("forge", "install")
+        # 테스트를 돌리는 셸에 이미 PYTHONIOENCODING 이 있으면(예: utf-8:surrogateescape) setdefault 가
+        # 그 값을 존중해 기대값이 달라진다 — 기본 경로는 그 변수가 없는 환경에서 검사한다.
+        base_env = {k: v for k, v in _os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
+        with _mock.patch.dict(_os.environ, base_env, clear=True):
+            _argv, _cwd, env = self.manager._launch_argv("forge", 17860)   # forge 는 이 픽스처에 설치됨
+        self.assertEqual(env.get("PYTHONIOENCODING"), "utf-8")
+        self.assertNotIn("PYTHONUTF8", env)
+        # 사용자가 직접 정한 값은 덮어쓰지 않는다
+        with _mock.patch.dict(_os.environ, {"PYTHONIOENCODING": "cp949"}):
+            _argv, _cwd, env = self.manager._launch_argv("forge", 17860)
+        self.assertEqual(env.get("PYTHONIOENCODING"), "cp949")
 
     def test_saving_while_running_does_not_restart(self):
         """인자를 바꿨다고 백엔드를 말없이 재시작하면 진행 중인 생성이 죽는다."""
@@ -729,6 +752,31 @@ class BackendRuntimeLinkedInstallTests(BackendRuntimeTestCase):
         self.assertTrue(snapshot["engines"]["forge"]["running"])
         self.assertEqual(snapshot["engines"]["comfyui"]["sourceMode"], "managed")
         self.assertEqual(snapshot["engines"]["comfyui"]["existingRoot"], "")
+
+    def test_install_source_switches_compute_the_result_snapshot_once(self):
+        """set_install_root/use_managed_install 도 내부 configure 가 스냅샷을 따로 계산하지 않는다."""
+        root = self.make_linked_forge()
+        calls = []
+        original = self.manager.snapshot
+
+        def counting():
+            calls.append(1)
+            return original()
+
+        self.manager.snapshot = counting
+        try:
+            for action, payload in (
+                ("set_install_root", {"existingRoot": str(root)}),
+                ("use_managed_install", {}),
+            ):
+                with self.subTest(action=action):
+                    calls.clear()
+                    result = self.manager.execute("forge", action, payload)
+                    self.assertEqual(1, len(calls), action)
+                    self.assertIs(result["state"], result["snapshot"])
+        finally:
+            self.manager.snapshot = original
+        self.assertEqual("managed", self.manager.snapshot()["engines"]["forge"]["sourceMode"])
 
     def test_linked_forge_persists_exact_layout_and_starts_without_installing(self):
         root = self.make_linked_forge()
@@ -1304,6 +1352,70 @@ class BackendRuntimeLaunchTests(BackendRuntimeTestCase):
         )
         self.assertEqual(self.manager.snapshot()["engines"]["forge"]["port"], 17861)
 
+    def _manager_reserving_generation_api(self, config: dict):
+        from core.generation_api_port import reserved_ports
+
+        api_config = self.temp / "generation_api.json"
+        api_config.write_text(json.dumps(config), encoding="utf-8")
+        return BackendRuntimeManager(
+            config_path=self.config_path,
+            runtime_root=self.runtime_root,
+            adapter=self.adapter,
+            health_timeout=0.05,
+            reserved_ports=lambda: reserved_ports(api_config),
+        )
+
+    def test_enabled_generation_api_port_is_skipped_before_the_api_binds(self):
+        """앱 시작 순서: 엔진 자동 시작(_choose_port)이 Generation API bind 보다 먼저다.
+        bind 시험으로는 아직 비어 있는 17860 을 Forge 가 가져가 API 와 충돌했다."""
+        self.manager.stop_all_owned()
+        self.manager = self._manager_reserving_generation_api(
+            {"schemaVersion": 2, "enabled": True, "port": 17860, "token": "t" * 24}
+        )
+        self.manager.execute("forge", "install")
+        self.assertNotIn(17860, self.adapter.unavailable_ports, "API 는 아직 bind 전")
+
+        started = self.manager.execute("forge", "start")
+
+        self.assertEqual(started["apiUrl"], "http://127.0.0.1:17861")
+        argv = self.adapter.start_calls[-1]["argv"]
+        self.assertEqual(argv[argv.index("--port") + 1], "17861")
+
+    def test_disabled_generation_api_does_not_reserve_its_port(self):
+        self.manager.stop_all_owned()
+        self.manager = self._manager_reserving_generation_api(
+            {"schemaVersion": 2, "enabled": False, "port": 17860, "token": "t" * 24}
+        )
+        self.manager.execute("forge", "install")
+
+        started = self.manager.execute("forge", "start")
+
+        self.assertEqual(started["apiUrl"], "http://127.0.0.1:17860")
+
+    def test_failing_reserved_port_source_does_not_block_port_choice(self):
+        def broken():
+            raise OSError("config unreadable")
+
+        manager = BackendRuntimeManager(
+            config_path=self.config_path,
+            runtime_root=self.runtime_root,
+            adapter=self.adapter,
+            health_timeout=0.05,
+            reserved_ports=broken,
+        )
+        self.assertEqual(manager._choose_port("forge"), 17860)
+
+    def test_app_singleton_reserves_the_generation_api_port(self):
+        from core import backend_runtime
+        from core.generation_api_port import reserved_ports
+
+        with (
+            patch.object(backend_runtime, "_MANAGER", None),
+            patch.object(backend_runtime, "BackendRuntimeManager") as factory,
+        ):
+            backend_runtime.get_backend_runtime_manager()
+        self.assertIs(factory.call_args.kwargs.get("reserved_ports"), reserved_ports)
+
     def test_busy_operation_reports_structured_error_without_blocking(self):
         adapter = BlockingRuntimeAdapter()
         manager = self.make_manager(adapter=adapter)
@@ -1450,6 +1562,114 @@ class BackendRuntimeUpdateTests(BackendRuntimeTestCase):
             str(old_models.resolve()),
             new_config["aistudio_shared"]["checkpoints"].splitlines(),
         )
+
+    def test_install_state_matches_the_full_snapshot_fields(self):
+        self.manager.execute("forge", "install")
+        snapshot = self.manager.snapshot()
+        for engine in ("forge", "comfyui"):
+            with self.subTest(engine=engine):
+                basics = self.manager._install_state(engine)
+                full = snapshot["engines"][engine]
+                for key in ("installed", "sourceMode", "extensionDirExternal", "extensionWritable"):
+                    self.assertEqual(full[key], basics[key], key)
+
+    def test_settings_actions_compute_the_result_snapshot_once(self):
+        calls = []
+        original = self.manager.snapshot
+
+        def counting():
+            calls.append(1)
+            return original()
+
+        self.manager.snapshot = counting
+        try:
+            result = self.manager.execute("forge", "set_auto_start", {"autoStart": True})
+        finally:
+            self.manager.snapshot = original
+        self.assertEqual(1, len(calls), "configure 내부 호출·state·snapshot 이 한 번의 계산을 공유한다")
+        self.assertIs(result["state"], result["snapshot"])
+        self.assertTrue(result["state"]["engines"]["forge"]["autoStart"])
+        # 공개 configure 는 여전히 전체 스냅샷을 돌려준다(계약).
+        self.assertIn("engines", self.manager.configure("forge", {"autoStart": False}))
+        self.assertEqual({}, self.manager.configure("forge", {"autoStart": False}, return_snapshot=False))
+
+    def test_successful_update_retires_previous_release_in_the_background(self):
+        self.manager.execute("forge", "install")
+        old_release = self.manager._state["engines"]["forge"]["release"]
+        releases_root = self.runtime_root / "forge" / "releases"
+        self.assertTrue((releases_root / old_release).is_dir())
+        self.adapter.remote_heads[FORGE_REPOSITORY] = COMMIT_B
+
+        self.manager.execute("forge", "update")
+
+        new_release = self.manager._state["engines"]["forge"]["release"]
+        self.assertNotEqual(new_release, old_release)
+        # 이름 바꾸기는 즉시 — 삭제는 백그라운드 스레드가 한다.
+        self.assertFalse((releases_root / old_release).exists())
+        purge = self.manager._release_purge_thread
+        self.assertIsNotNone(purge)
+        purge.join(10)
+        self.assertEqual(
+            sorted(child.name for child in releases_root.iterdir()), [new_release]
+        )
+
+    def test_startup_cleanup_renames_stale_releases_and_purges_them_off_thread(self):
+        self.manager.execute("forge", "install")
+        active = self.manager._state["engines"]["forge"]["release"]
+        releases_root = self.runtime_root / "forge" / "releases"
+        stale = releases_root / "20250101-000000-deadbeef-abcdef"
+        (stale / "venv").mkdir(parents=True)
+        (stale / "venv" / "python.exe").write_bytes(b"old")
+        leftover = releases_root / ".trash-crashed-12345678"
+        leftover.mkdir()
+        self.manager.stop_all_owned()
+
+        manager = self.make_manager()
+        try:
+            self.assertFalse(stale.exists(), "생성자는 이름만 바꾼다")
+            purge = manager._release_purge_thread
+            self.assertIsNotNone(purge)
+            self.assertNotEqual(purge.ident, threading.get_ident())
+            purge.join(10)
+            self.assertEqual(sorted(child.name for child in releases_root.iterdir()), [active])
+        finally:
+            manager.stop_all_owned()
+
+    def test_startup_cleanup_never_follows_a_trash_link_into_the_active_release(self):
+        """``releases/.trash-*`` 링크(정션)의 대상이 활성 release 여도 그것을 지우지 않는다."""
+        from tests.test_release_trash import make_dir_links, remove_dir_link
+
+        self.manager.execute("forge", "install")
+        active_id = self.manager._state["engines"]["forge"]["release"]
+        releases_root = self.runtime_root / "forge" / "releases"
+        active = releases_root / active_id
+
+        def tree():
+            return sorted(str(p.relative_to(active)) for p in active.rglob("*"))
+
+        before = tree()
+        self.assertTrue(before)
+        links = make_dir_links(active, releases_root / ".trash-old-deadbeef")
+        try:
+            if not links:
+                self.skipTest("디렉터리 링크를 만들 수 없는 환경")
+            leftover = releases_root / ".trash-crashed-12345678"
+            leftover.mkdir()
+            self.manager.stop_all_owned()
+
+            manager = self.make_manager()
+            try:
+                purge = manager._release_purge_thread
+                self.assertIsNotNone(purge, "진짜 .trash-* 폴더는 여전히 지운다")
+                purge.join(10)
+                self.assertFalse(leftover.exists())
+                self.assertEqual(before, tree(), "활성 release 는 그대로")
+                self.assertEqual(active_id, manager._state["engines"]["forge"]["release"])
+            finally:
+                manager.stop_all_owned()
+        finally:
+            for _kind, link in links:   # tearDown 의 temp 정리보다 먼저 링크만 지운다
+                remove_dir_link(link)
 
     def test_failed_updated_runtime_start_rolls_back_and_restarts_previous_release(self):
         self.manager.execute("forge", "install")

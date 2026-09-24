@@ -1,7 +1,7 @@
 /**
  * 히스토그램 계산 — DOM 의존 없는 순수 로직.
  *
- * PyQt 판(`tabs/editor/histogram_widget.py`)은 `cv2.calcHist` 로 R/G/B 를 센 뒤
+ * PyQt 판(`tabs/editor/histogram_widget.py`, 은퇴해 삭제됨)은 `cv2.calcHist` 로 R/G/B 를 센 뒤
  * **전체 최댓값**으로 정규화했다. 그 정규화가 문제였다 — 배경이 단색인 그림 한 장이면
  * 그 색 하나가 만든 스파이크가 천장을 다 먹고 나머지 형태는 바닥에 눕는다.
  * 여기서는 위쪽 몇 개 빈을 빼고 천장을 잡는다(`normalizationCeiling`).

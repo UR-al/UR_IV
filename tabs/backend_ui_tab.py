@@ -20,6 +20,30 @@ class _QuietPage(ThemedWebDialogs, QWebEnginePage):
         pass
 
 
+# Chromium net::ERR_ABORTED — 새로고침·다른 URL 로의 이동이 진행 중인 로드를 끊었을 때.
+_ERR_ABORTED = -3
+
+
+def load_outcome(status_name: str, error_code: int = 0):
+    """``loadingChanged`` 의 로드 상태 → ``'succeeded'`` / ``'failed'`` / ``None``(무시).
+
+    ``loadFinished(False)`` 는 진짜 실패와 '중단'을 가리지 않는다. 첫 로드 중에 🔄 를 누르거나
+    백엔드 전환으로 새 페이지를 실으면 진행 중이던 로드가 ERR_ABORTED 로 끝나는데, 그걸 실패로
+    보면 살아 있는 백엔드 UI 를 '불러오지 못했습니다' 안내로 덮고 새 로드까지 취소했다.
+    - LoadStartedStatus: 아직 끝나지 않았다.
+    - LoadStoppedStatus, 또는 ERR_ABORTED 로 끝난 LoadFailedStatus: 다른 이동이 끊은 것 — 무시.
+    """
+    if status_name == 'LoadSucceededStatus':
+        return 'succeeded'
+    try:
+        code = int(error_code)
+    except (TypeError, ValueError):
+        code = 0
+    if status_name == 'LoadFailedStatus' and code != _ERR_ABORTED:
+        return 'failed'
+    return None
+
+
 class BackendUITab(QWidget):
     """백엔드 UI 확인 탭"""
 
@@ -73,11 +97,24 @@ class BackendUITab(QWidget):
         top_bar.addWidget(btn_open)
 
         layout.addLayout(top_bar)
+        self._layout = layout
 
-        # ── 웹뷰 ──
+        # ── 웹뷰 — 처음 표시될 때(ensure_loaded) 만든다 ──
+        # 숨은 탭이 시작 시 프로필·웹뷰를 만들고 placeholder 를 setHtml 하면 보이지도 않는
+        # 페이지 때문에 렌더러 프로세스가 뜬다(탭을 여는 순간 _recreate_page 가 교체한다).
+        self._web_view = None
+        self._profile = None
+        self._page = None
+        self._showing_placeholder = False
+        self.apply_theme()
+
+    def _ensure_web_view(self):
+        """백엔드 전용 프로필·웹뷰를 한 번만 만든다."""
+        if self._web_view is not None:
+            return self._web_view
+        from PyQt6.QtGui import QColor
+
         self._web_view = QWebEngineView()
-
-        # 프로필 설정
         self._profile = QWebEngineProfile("backend_ui", self)
         self._profile.setHttpUserAgent(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -88,17 +125,15 @@ class BackendUITab(QWidget):
         self._profile.setCachePath(cache_path)
         self._profile.setPersistentStoragePath(cache_path)
 
-        # 초기 페이지 생성
         self._page = _QuietPage(self._profile, self._web_view)
         self._web_view.setPage(self._page)
         self._apply_web_settings()
+        self._page.setBackgroundColor(QColor(get_color('bg_primary')))
 
         # URL 변경 추적 (한 번만 연결)
         self._web_view.urlChanged.connect(self._on_url_changed)
-
-        # 초기 빈 페이지
-        layout.addWidget(self._web_view)
-        self.apply_theme()
+        self._layout.addWidget(self._web_view, 1)
+        return self._web_view
 
     def apply_theme(self):
         """Refresh existing chrome, including formerly frozen inline colors."""
@@ -112,12 +147,16 @@ class BackendUITab(QWidget):
         self._url_display.setStyleSheet(
             f"background: {colors['bg_input']}; color: {colors['text_secondary']}; "
             f"border: 1px solid {colors['border']}; border-radius: 4px; padding: 3px 8px; font-size: 11px;")
-        self._web_view.page().setBackgroundColor(QColor(colors['bg_primary']))
-        if not self._current_url:
-            self._web_view.setHtml(self._placeholder_html(), QUrl('about:blank'))
+        # 웹뷰는 처음 표시될 때 만든다 — 아직 없으면 배경색만 건너뛴다. placeholder 를 여기서
+        # setHtml 하지 않는다(숨은 탭의 렌더러를 띄우고, 탭을 여는 순간 교체돼 보이지도 않는다).
+        view = getattr(self, '_web_view', None)
+        if view is not None:
+            view.page().setBackgroundColor(QColor(colors['bg_primary']))
 
     def _on_url_changed(self, url: QUrl):
-        """URL 변경 시 표시 업데이트"""
+        """URL 변경 시 표시 업데이트 (로드 실패 안내 페이지의 about:blank 는 표시하지 않는다)"""
+        if self._showing_placeholder and url.toString() in ('', 'about:blank'):
+            return
         self._url_display.setText(url.toString())
 
     def _apply_web_settings(self):
@@ -135,6 +174,9 @@ class BackendUITab(QWidget):
         old_page = self._page
 
         new_page = _QuietPage(self._profile, self._web_view)
+        # 새 페이지도 테마 배경으로 시작한다(로드 전 흰 화면 번쩍임 방지).
+        from PyQt6.QtGui import QColor
+        new_page.setBackgroundColor(QColor(get_color('bg_primary')))
         self._web_view.setPage(new_page)
         self._page = new_page
         self._apply_web_settings()
@@ -187,31 +229,49 @@ class BackendUITab(QWidget):
 
     def _load_url(self, url: str, load_workflow: bool = False):
         """URL을 웹뷰에 로드 (페이지를 새로 생성하여 이전 상태 완전 제거)"""
+        self._ensure_web_view()
         self._current_url = url
         self._url_display.setText(url)
         self._load_workflow_after = load_workflow
         self._workflow_retry_count = 0
+        self._showing_placeholder = False
 
         # 페이지를 새로 생성하여 이전 JS/SPA 완전 제거
         self._recreate_page()
 
-        # 로드 완료 시그널 연결
-        self._page.loadFinished.connect(self._on_page_loaded)
+        # 로드 상태 연결 — 이 페이지를 붙잡은 연결이라, 교체된 옛 페이지가 늦게 보내는 결과는
+        # _on_page_loaded 가 걸러 낸다(옛 페이지는 deleteLater 로 연결째 사라진다).
+        page = self._page
+        page.loadingChanged.connect(
+            lambda info, page=page: self._on_loading_changed(page, info))
 
         # URL 로드
         self._web_view.setUrl(QUrl(url))
 
-    def _on_page_loaded(self, ok: bool):
-        """페이지 로드 완료"""
+    def _on_loading_changed(self, page, info):
+        """QWebEngineLoadingInfo → 로드 결과. 상태·오류 코드를 읽지 못하면 무시한다."""
         try:
-            self._page.loadFinished.disconnect(self._on_page_loaded)
-        except (TypeError, RuntimeError):
-            pass
+            status = info.status()
+            status_name = getattr(status, 'name', str(status))
+            error_code = info.errorCode()
+        except Exception:
+            return
+        self._on_page_loaded(page, load_outcome(status_name, error_code))
 
-        if not ok:
+    def _on_page_loaded(self, page, outcome):
+        """지금 페이지의 로드가 끝났다 — outcome: 'succeeded' / 'failed' / None(무시)."""
+        if page is not self._page or outcome is None or self._showing_placeholder:
+            # 교체된 옛 페이지 · 새로고침 등으로 중단된 로드 · 안내 페이지 자체의 로드
             return
 
-        # ComfyUI 모드: 워크플로우 자동 로드
+        if outcome == 'failed':
+            # 백엔드가 꺼져 있거나 주소가 틀리면 Chromium 오류 화면 대신 안내를 보인다.
+            self._showing_placeholder = True
+            self._load_workflow_after = False
+            self._web_view.setHtml(self._placeholder_html(), QUrl('about:blank'))
+            return
+
+        # ComfyUI 모드: 워크플로우 자동 로드 (첫 성공 때 한 번)
         if self._load_workflow_after:
             self._load_workflow_after = False
             self._workflow_retry_count = 0
@@ -278,10 +338,11 @@ class BackendUITab(QWidget):
                 QTimer.singleShot(1000, self._inject_comfyui_workflow)
 
     def _reload(self):
-        """현재 페이지 새로고침"""
-        if self._current_url:
+        """현재 페이지 새로고침 — 아직 웹뷰가 없거나 로드 실패 안내 중이면 다시 싣는다."""
+        if self._current_url and self._web_view is not None and not self._showing_placeholder:
             self._web_view.reload()
         else:
+            self._stale = False
             self.load_backend_ui()
 
     def _open_external(self):
@@ -291,6 +352,10 @@ class BackendUITab(QWidget):
             QDesktopServices.openUrl(QUrl(self._current_url))
 
     def _placeholder_html(self) -> str:
+        """백엔드 UI 로드가 실패했을 때만 보이는 안내 페이지."""
+        from html import escape
+
+        url = escape(self._current_url or '')
         return f"""
         <html>
         <body style="background:{get_color('bg_primary')}; color:{get_color('text_muted')}; display:flex;
@@ -298,9 +363,9 @@ class BackendUITab(QWidget):
                      font-family:sans-serif; margin:0;">
           <div style="text-align:center;">
             <div style="font-size:48px; margin-bottom:16px;">🖥️</div>
-            <div style="font-size:16px;">백엔드에 연결되면 UI가 여기에 표시됩니다</div>
+            <div style="font-size:16px;">백엔드 UI를 불러오지 못했습니다</div>
             <div style="font-size:13px; color:{get_color('text_secondary')}; margin-top:8px;">
-              WebUI &nbsp;|&nbsp; ComfyUI
+              {url}<br>백엔드가 켜져 있는지 확인한 뒤 새로고침(🔄)하세요.
             </div>
           </div>
         </body>

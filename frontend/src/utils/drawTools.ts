@@ -1,7 +1,7 @@
 /**
  * 그리기 도구의 순수 계산 — DOM 의존 없음.
  *
- * PyQt 판은 `widgets/interactive_label.py` 에서 `display_base_image` 를 **직접** 고쳤다.
+ * PyQt 판은 `widgets/interactive_label.py`(은퇴해 삭제됨)에서 `display_base_image` 를 **직접** 고쳤다.
  * 되돌리려면 이미지 전체 스냅샷을 쌓아야 했고, 투명도 있는 펜은 획이 겹치는 관절마다
  * 진해졌다. Vue 판은 별도 레이어에 그리고 병합할 때 한 번만 합성한다.
  */

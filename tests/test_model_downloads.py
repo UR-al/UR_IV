@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 import threading
 import unittest
@@ -275,7 +276,11 @@ class ModelDownloadTests(unittest.TestCase):
         manager.start(["test-pack"])
         result = manager.wait(3)
         target = Path(result["files"][0]["path"])
+        before = target.stat()
         target.write_bytes(b"x" * len(DATA))
+        # 같은 크기로 곧바로 다시 쓰면 NTFS 타임스탬프 해상도 안에서 mtime 이 그대로일 수
+        # 있다(간헐 실패의 원인). 실제 교체처럼 수정 시각이 달라진 상황을 명시적으로 만든다.
+        os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
         self.assertEqual(manager.status()["files"][0]["status"], "present")
         manager.verify(["test-pack"])
         self.assertEqual(manager.wait(3)["state"], "error")

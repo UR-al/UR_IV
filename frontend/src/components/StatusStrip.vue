@@ -33,6 +33,16 @@
       <span class="ss-val ss-model">{{ modelText }}</span>
     </div>
 
+    <!-- 상태 한 줄 — 파이썬 show_status(진행·완료·실패). 토스트가 아니라 덮어쓰는 한 줄이라
+         스텝마다 오는 진행 문구도 소란스럽지 않다. 남는 폭을 쓰고, 넘치면 말줄임 + title. -->
+    <template v-if="statusMessage">
+      <span class="ss-sep" aria-hidden="true"></span>
+      <div class="ss-item ss-status" :class="statusMessage.level" :title="statusMessage.text"
+        role="status" aria-live="polite">
+        <span class="ss-status-text">{{ statusMessage.text }}</span>
+      </div>
+    </template>
+
     <!-- 오른쪽 — 다음 생성이 어떤 값으로 나갈지. 왼쪽에만 몰아 두면 넓은 화면에서
          바의 95% 가 빈 채로 남아 '넣다 만 줄' 처럼 보인다. 여기 값은 전부
          이미 위젯 스토어에 있는 것이라 새로 물어오지 않는다. -->
@@ -49,6 +59,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useWidgetStore } from '../stores/widgetStore.js'
+import { useStatusMessage } from '../composables/useStatusMessage'
+
+// 파이썬 show_status 한 줄(statusMessage 이벤트 + 마운트 때 getStatusMessage 한 번)
+const { message: statusMessage } = useStatusMessage()
 
 /**
  * backendStatus 시그널의 페이로드. 필드가 전부 optional 인 이유는 이 값이
@@ -209,4 +223,11 @@ const modelTitle = computed(() => modelRaw.value || '체크포인트 미선택')
 
 /* 체크포인트 이름은 길다. 줄을 밀어내느니 잘라내고 전체는 title 로 준다. */
 .ss-model { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 상태 한 줄 — 남는 폭을 쓰고 넘치면 말줄임. 색은 수준(level)마다 글자용 -fg 토큰. */
+.ss-status { flex: 1 1 auto; min-width: 0; color: var(--text-secondary); font-size: var(--fs-meta); }
+.ss-status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ss-status.success { color: var(--state-ok-fg); }
+.ss-status.warning { color: var(--state-warn-fg); }
+.ss-status.error { color: var(--state-alert-fg); font-weight: var(--fw-medium); }
 </style>

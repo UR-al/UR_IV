@@ -1,5 +1,8 @@
 <template>
-  <div class="prompt-panel">
+  <div ref="rootRef" class="prompt-panel">
+    <!-- data-prompt-undo: 이 요소 안의 입력칸에서 Ctrl+Z/Y 가 패널 Undo/Redo 가 된다(패널 버튼·
+         포커스 없음도 포함 — utils/promptUndoKeys.ts). 표시한 칸은 PROMPT_UNDO_KEYS 로 추적해야
+         한다(PromptPanel.undo.test.ts). 그 밖의 입력칸은 브라우저 기본 실행 취소 그대로. -->
     <!-- 1. FINAL OUTPUT PROMPT -->
     <!-- id 는 세로 레일 서랍의 스크롤 대상이다 — `utils/navSections.ts` 와 글자 그대로
          같아야 하고, tests/test_nav_rail_contract.py 가 그걸 지킨다. -->
@@ -8,20 +11,22 @@
         최종 프롬프트
         <span class="token-info">토큰 {{ tokenCount }}</span>
       </div>
-      <TagBlockField v-if="tagBlockMode" :model-value="widgets.total_prompt_display" :color-fn="blockColorClass" placeholder=""
-        @update:model-value="onTotalBlockChange" @open-wildcard="(n) => emit('open-wildcard', n)" />
+      <TagBlockField v-if="tagBlockMode" data-prompt-undo :model-value="widgets.total_prompt_display" :color-fn="blockColorClass" placeholder=""
+        @update:model-value="onTotalBlockChange" @open-wildcard="forwardWildcard" />
+      <!-- 블록 모드 최종 프롬프트는 onTotalBlockChange 로 추적 칸에만 되쓰므로 스냅숏 범위다.
+           텍스트 모드 최종 프롬프트는 스냅숏 대상(PROMPT_UNDO_KEYS)이 아니라 네이티브 실행 취소를 둔다 -->
       <textarea v-else ref="totalPromptRef" v-model="widgets.total_prompt_display"
         class="total-prompt auto-grow" placeholder="최종 프롬프트" @input="autoGrow($event.target)"></textarea>
       <div class="prompt-actions">
-        <button class="optimize-btn" @click="optimizePrompt"><Icon name="wand" /> 최적화</button>
+        <button class="optimize-btn" @click="optimizePrompt" title="메인 태그의 중복(다른 칸과 겹친 태그 포함)을 지우고 순서를 정리합니다"><Icon name="wand" /> 최적화</button>
         <button class="optimize-btn" @click="toggleSeparate" title="표정/배경/포즈/사물/메타 태그를 분류해서 제거하거나 추출"><Icon name="tag" /> 분류</button>
         <span class="opt-result" v-if="optResult">{{ optResult }}</span>
       </div>
       <!-- 🧹 OPTIMIZE before/after 미리보기 → [적용] 클릭 시 반영 -->
       <div class="opt-preview" v-if="optPreview">
         <div class="opt-prev-head">
-          <span><Icon name="wand" /> OPTIMIZE 미리보기</span>
-          <span class="opt-prev-stat">중복 {{ optPreview.removed }}개 제거 · {{ optPreview.tagCount }}개 태그</span>
+          <span><Icon name="wand" /> 메인 태그 최적화 미리보기</span>
+          <span class="opt-prev-stat">중복 {{ optPreview.removed }}개 제거<template v-if="optPreview.fromContext"> (다른 칸과 겹침 {{ optPreview.fromContext }})</template> · {{ optPreview.tagCount }}개 태그</span>
         </div>
         <div class="opt-prev-cols">
           <div class="opt-prev-col"><label>이전</label><div class="opt-prev-text before">{{ optPreview.before }}</div></div>
@@ -56,8 +61,8 @@
           네거티브 <Icon name="chevron-down" size="12" />
           <button class="ai-btn neg-ai" @click.prevent.stop="runSmartNegative()" :disabled="ollamaLoading" title="AI 네거티브 자동 생성"><Icon name="cpu" /></button>
         </summary>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.neg_prompt_text" :color-fn="() => 'neg'" class="neg" placeholder="네거티브 추가..." />
-        <textarea v-else ref="negRef" v-model="widgets.neg_prompt_text" class="neg-prompt auto-grow" placeholder="Negative prompt..." @input="autoGrow($event.target)"></textarea>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.neg_prompt_text" :color-fn="() => 'neg'" class="neg" placeholder="네거티브 추가..." />
+        <textarea v-else ref="negRef" data-prompt-undo v-model="widgets.neg_prompt_text" class="neg-prompt auto-grow" placeholder="Negative prompt..." @input="autoGrow($event.target)"></textarea>
       </details>
     </div>
 
@@ -66,17 +71,18 @@
       <div class="card-header">캐릭터 · 모델</div>
       <div class="input-group">
         <label>글자 수</label>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.char_count_input" :color-fn="() => 'bc-count'" placeholder="인물수..." />
-        <input v-else type="text" v-model="widgets.char_count_input" placeholder="e.g. 1girl, 2girls..." />
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.char_count_input" :color-fn="() => 'bc-count'" placeholder="인물수..." />
+        <input v-else type="text" data-prompt-undo v-model="widgets.char_count_input" placeholder="e.g. 1girl, 2girls..." />
       </div>
       <div class="input-group autocomplete-wrap">
         <div class="row label-row">
           <label>캐릭터 <span v-if="sectionTokens.character" class="tk-badge" :class="tokenBadgeClass(sectionTokens.character)">{{ sectionTokens.character }}t</span></label>
           <button class="small-btn" @click="openCharPresetModal(); loadCharTags()">프리셋</button>
         </div>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.character_input" :color-fn="() => 'bc-count'" placeholder="캐릭터..." @open-wildcard="(n) => emit('open-wildcard', n)" />
-        <input v-else type="text" v-model="widgets.character_input" placeholder="e.g. hatsune miku"
-          @input="onFieldInput($event, 'character_input')" @keydown="onFieldKey($event, 'character_input')" @blur="loadCharTags" />
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.character_input" :color-fn="() => 'bc-count'" placeholder="캐릭터..." @open-wildcard="forwardWildcard" />
+        <input v-else type="text" data-prompt-undo v-model="widgets.character_input" placeholder="e.g. hatsune miku"
+          @input="onFieldInput($event, 'character_input')" @keydown="onFieldKey($event, 'character_input')"
+          @click="closeFieldAc" @blur="closeFieldAc(); loadCharTags()" />
         <div class="char-insight" v-if="charInsight.tags.length > 0">
           <div class="insight-header">
             <span class="insight-label"><Icon name="book" /> 공식 태그</span>
@@ -86,17 +92,18 @@
             <button v-for="tag in charInsight.tags" :key="tag" class="char-tag-chip" @click="insertCharTag(tag)">{{ tag.replace(/_/g, ' ') }}</button>
           </div>
         </div>
-        <div class="ac-popup" v-if="!tagBlockMode && fieldAcTarget === 'character_input' && acItems.length > 0">
-          <div v-for="(tag, i) in acItems" :key="tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(tag, 'character_input')">{{ tag }}</div>
+        <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('character_input')">
+          <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'character_input')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
         </div>
       </div>
       <div class="input-group autocomplete-wrap">
         <label>작품 <span v-if="sectionTokens.copyright" class="tk-badge" :class="tokenBadgeClass(sectionTokens.copyright)">{{ sectionTokens.copyright }}t</span></label>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.copyright_input" :color-fn="() => ''" placeholder="작품..." />
-        <input v-else type="text" v-model="widgets.copyright_input" placeholder="Copyright / Series..."
-          @input="onFieldInput($event, 'copyright_input')" @keydown="onFieldKey($event, 'copyright_input')" />
-        <div class="ac-popup" v-if="!tagBlockMode && fieldAcTarget === 'copyright_input' && acItems.length > 0">
-          <div v-for="(tag, i) in acItems" :key="tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(tag, 'copyright_input')">{{ tag }}</div>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.copyright_input" :color-fn="() => ''" placeholder="작품..." />
+        <input v-else type="text" data-prompt-undo v-model="widgets.copyright_input" placeholder="Copyright / Series..."
+          @input="onFieldInput($event, 'copyright_input')" @keydown="onFieldKey($event, 'copyright_input')"
+          @click="closeFieldAc" @blur="closeFieldAc" />
+        <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('copyright_input')">
+          <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'copyright_input')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
         </div>
       </div>
       <div class="input-group">
@@ -104,8 +111,8 @@
           <label>작가 <span v-if="sectionTokens.artist" class="tk-badge" :class="tokenBadgeClass(sectionTokens.artist)">{{ sectionTokens.artist }}t</span></label>
           <button class="lock-btn" :class="{ locked: artistLocked }" @click="toggleArtistLock"><Icon :name="artistLocked ? 'lock' : 'unlock'" /></button>
         </div>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.artist_input" :color-fn="() => ''" placeholder="작가..." />
-        <textarea v-else ref="artistRef" v-model="widgets.artist_input" class="auto-grow" placeholder="Artist tags..." @input="autoGrow($event.target)"></textarea>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.artist_input" :color-fn="() => ''" placeholder="작가..." />
+        <textarea v-else ref="artistRef" data-prompt-undo v-model="widgets.artist_input" class="auto-grow" placeholder="Artist tags..." @input="autoGrow($event.target)"></textarea>
       </div>
       <div v-if="showGenerationFamily" class="input-group generation-family">
         <label>생성 엔진</label>
@@ -178,7 +185,7 @@
         </div>
         <div v-if="aiMenu" class="ai-menu-backdrop" @click="aiMenu = ''"></div>
         <div class="nl-input-row" v-if="showNlInput">
-          <input v-model="nlPrompt" ref="nlInputRef" :placeholder="pendingNlMode === 'nl2tags' ? '자연어 설명을 입력...' : '키워드를 입력...'" @keydown.enter="runPendingNl()" class="nl-input" />
+          <input v-model="nlPrompt" ref="nlInputRef" :placeholder="pendingNlMode === 'nl2tags' ? '자연어 설명을 입력...' : '키워드를 입력...'" @keydown.enter="onNlEnter" class="nl-input" />
           <button class="ai-btn go" @click="runPendingNl()" :disabled="ollamaLoading">실행</button>
           <button class="ai-btn" @click="showNlInput = false" title="닫기"><Icon name="close" /></button>
         </div>
@@ -192,23 +199,23 @@
             <button class="ai-btn" @click="nlResult = ''; nlRes = null" title="닫기"><Icon name="close" /></button>
           </div>
         </div>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.main_prompt_text" :color-fn="blockColorClass" placeholder="태그 추가..." @open-wildcard="(n) => emit('open-wildcard', n)" />
-        <textarea v-else ref="mainRef" v-model="widgets.main_prompt_text" class="auto-grow" placeholder="메인 태그..."
-          @input="onMainInput($event)" @keydown="onAutoKey($event)" rows="3"></textarea>
-        <div class="ac-popup" v-if="!tagBlockMode && fieldAcTarget === 'main_prompt_text' && acItems.length > 0">
-          <div v-for="(tag, i) in acItems" :key="tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptSuggestion(tag)">{{ tag }}</div>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.main_prompt_text" :color-fn="blockColorClass" placeholder="태그 추가..." @open-wildcard="forwardWildcard" />
+        <textarea v-else ref="mainRef" data-prompt-undo v-model="widgets.main_prompt_text" class="auto-grow" placeholder="메인 태그..."
+          @input="onMainInput($event)" @keydown="onAutoKey($event)" @click="closeFieldAc" @blur="closeFieldAc" rows="3"></textarea>
+        <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('main_prompt_text')">
+          <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'main_prompt_text')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
         </div>
       </div>
       <CompositionControl :model-value="widgets.main_prompt_text || ''" :other-prompts="compositionOtherPrompts" @append="appendComposition" />
       <div class="input-group">
         <label>접두 <span v-if="sectionTokens.prefix" class="tk-badge" :class="tokenBadgeClass(sectionTokens.prefix)">{{ sectionTokens.prefix }}t</span></label>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.prefix_prompt_text" :color-fn="blockColorClass" placeholder="선행 추가..." @open-wildcard="(n) => emit('open-wildcard', n)" />
-        <textarea v-else ref="prefixRef" v-model="widgets.prefix_prompt_text" class="auto-grow" placeholder="선행..." @input="autoGrow($event.target)"></textarea>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.prefix_prompt_text" :color-fn="blockColorClass" placeholder="선행 추가..." @open-wildcard="forwardWildcard" />
+        <textarea v-else ref="prefixRef" data-prompt-undo v-model="widgets.prefix_prompt_text" class="auto-grow" placeholder="선행..." @input="autoGrow($event.target)"></textarea>
       </div>
       <div class="input-group">
         <label>접미 <span v-if="sectionTokens.suffix" class="tk-badge" :class="tokenBadgeClass(sectionTokens.suffix)">{{ sectionTokens.suffix }}t</span></label>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.suffix_prompt_text" :color-fn="blockColorClass" placeholder="후행 추가..." @open-wildcard="(n) => emit('open-wildcard', n)" />
-        <textarea v-else ref="suffixRef" v-model="widgets.suffix_prompt_text" class="auto-grow" placeholder="후행..." @input="autoGrow($event.target)"></textarea>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.suffix_prompt_text" :color-fn="blockColorClass" placeholder="후행 추가..." @open-wildcard="forwardWildcard" />
+        <textarea v-else ref="suffixRef" data-prompt-undo v-model="widgets.suffix_prompt_text" class="auto-grow" placeholder="후행..." @input="autoGrow($event.target)"></textarea>
       </div>
       <details class="input-group exclude-section">
         <summary class="exclude-toggle">제외 (로컬)
@@ -224,8 +231,8 @@
           <span>~단어_ → 예외 접두 유지 (~tank_ → tank top 유지)</span>
           <span>~_단어_ → 예외 포함 유지 (~_tank top_ → blue tank top 등 유지)</span>
         </div>
-        <TagBlockField v-if="tagBlockMode" v-model="widgets.exclude_prompt_local_input" :color-fn="excludeColorFn" placeholder="제외 규칙 추가..." />
-        <textarea v-else v-model="widgets.exclude_prompt_local_input" class="auto-grow exclude-textarea" placeholder="제외 규칙 (쉼표 구분)..." rows="2"></textarea>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.exclude_prompt_local_input" :color-fn="excludeColorFn" placeholder="제외 규칙 추가..." />
+        <textarea v-else data-prompt-undo v-model="widgets.exclude_prompt_local_input" class="auto-grow exclude-textarea" placeholder="제외 규칙 (쉼표 구분)..." rows="2"></textarea>
       </details>
     </details>
 
@@ -288,14 +295,32 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useWidgetStore, requestAction } from '../stores/widgetStore.js'
+import { useWidgetStore, requestAction, whenWidgetValuesLoaded } from '../stores/widgetStore.js'
 import { openCharPresetModal } from '../composables/uiModals.js'
+import { tagBlockMode } from '../composables/uiPrefs'
 import { getBackend, onBackendEvent } from '../bridge.js'
+import { isCaretMoveKey, isSameTagQuery, replaceTagToken, tagQueryAt, tagTokenAt, type TagQuery } from '../utils/tagSuggest'
+import { useTagAutocomplete } from '../composables/useTagAutocomplete'
+import { usePromptUndo } from '../composables/usePromptUndo'
+import { isImeComposing } from '../utils/imeComposition'
+import { isPanelOnTop, promptUndoCommand } from '../utils/promptUndoKeys'
+import { createExcludeMatchRequests, parseExcludeMatches } from '../utils/excludeMatches'
+import { GENERATION_FAMILY_ITEMS, familyRestoreAction, isKrea2Family, storedFamilyLabel } from '../utils/generationFamily'
+import { storedOllamaModel, storedOllamaUrl } from '../utils/ollamaPrefs'
+import {
+  isOptimizePreviewStale, optimizeContextPayload, snapshotOptimizeInputs, type OptimizeInputs,
+} from '../utils/optimizePreview'
 import CustomSelect from './CustomSelect.vue'
 import TagBlockField from './TagBlockField.vue'
 import CompositionControl from './CompositionControl.vue'
 
-const emit = defineEmits(['toggle-extend', 'open-wildcard'])
+// 타입 문법 — 배열 문법은 emit 배선 가드(tests/test_component_emit_contract.py)가 읽지 못해
+// 아무도 안 쏘는 'toggle-extend' 선언과 App 의 죽은 리스너가 남아 있었다.
+const emit = defineEmits<{ 'open-wildcard': [name: string] }>()
+/** TagBlockField 의 와일드카드 블록 클릭 → App 의 와일드카드 관리자로 전달 */
+function forwardWildcard(name: string | undefined) {
+  if (name) emit('open-wildcard', name)
+}
 const store = useWidgetStore()
 const widgets = store.widgets
 const route = useRoute()
@@ -306,24 +331,24 @@ const compositionOtherPrompts = computed(() => [
 
 function appendComposition(text: string) {
   // Main-tag writes use the same Python proxy/recomposition path as text and blocks.
-  // Save both sides immediately so even a rapid Ctrl+Z restores the full old prompt.
-  if (debounceTimer) clearTimeout(debounceTimer)
-  pushUndoSnapshot()
+  // Save both sides immediately so even a rapid Ctrl+Z restores the full old prompt
+  // (focus stays on the panel button or falls back to body — both are in the undo scope,
+  //  utils/promptUndoKeys.promptUndoScope).
+  commitUndoSnapshot()
   widgets.main_prompt_text = text
-  pushUndoSnapshot()
+  commitUndoSnapshot()
 }
 
-const generationFamilyItems = ['Standard', 'Krea2']
-/** 저장값(대문자)과 표시 라벨을 잇는다 — 비교는 전부 toUpperCase 로 하므로 표시만 바꾸면 된다. */
-const toFamilyLabel = (v: unknown) =>
-  generationFamilyItems.find((i) => i.toUpperCase() === String(v ?? '').toUpperCase()) ?? generationFamilyItems[0]
+// 옵션 라벨 = Python ComboBoxProxy 항목(대소문자 구분) — utils/generationFamily.ts 참고.
+// 저장값(대문자)과 라벨 비교는 전부 대소문자 무시(isKrea2Family/toFamilyLabel).
+const generationFamilyItems: string[] = [...GENERATION_FAMILY_ITEMS]
 const generationFamilyStorageKey = 'generationFamily'
 const standardSnapshotStorageKey = 'generationFamily.standardParams'
-const savedGenerationFamily = toFamilyLabel(window.localStorage.getItem(generationFamilyStorageKey))
+const savedGenerationFamily = storedFamilyLabel(window.localStorage.getItem(generationFamilyStorageKey))
 const showGenerationFamily = computed(() => ['t2i', 'i2i'].includes(String(route.name || '')))
 const isI2IRoute = computed(() => String(route.name || '') === 'i2i')
 const isKrea2Generation = computed(
-  () => showGenerationFamily.value && String(widgets.generation_family_combo || '').toUpperCase() === 'KREA2')
+  () => showGenerationFamily.value && isKrea2Family(widgets.generation_family_combo))
 function loadStandardGenerationSnapshot(): { steps: string; cfg: string } | null {
   try {
     const value = JSON.parse(window.localStorage.getItem(standardSnapshotStorageKey) || 'null')
@@ -349,7 +374,7 @@ watch(() => widgets.generation_family_combo, (value: any, previous: any) => {
   if (!generationFamilyRestored) return
   const family = String(value || 'STANDARD').toUpperCase()
   try { window.localStorage.setItem(generationFamilyStorageKey, family) } catch {}
-  if (family === 'KREA2' && String(previous || '').toUpperCase() !== 'KREA2') {
+  if (isKrea2Family(family) && !isKrea2Family(previous)) {
     if (!standardGenerationSnapshot) {
       standardGenerationSnapshot = {
         steps: String(widgets.steps_input || '25'),
@@ -359,7 +384,7 @@ watch(() => widgets.generation_family_combo, (value: any, previous: any) => {
     }
     widgets.steps_input = '8'
     widgets.cfg_input = '1'
-  } else if (family !== 'KREA2' && String(previous || '').toUpperCase() === 'KREA2' && standardGenerationSnapshot) {
+  } else if (!isKrea2Family(family) && isKrea2Family(previous) && standardGenerationSnapshot) {
     widgets.steps_input = standardGenerationSnapshot.steps
     widgets.cfg_input = standardGenerationSnapshot.cfg
     clearStandardGenerationSnapshot()
@@ -378,20 +403,19 @@ onMounted(() => {
       }
       const family = savedGenerationFamily
       generationFamilyRestored = true
-      if (family === 'STANDARD' && standardGenerationSnapshot) {
+      // 이 브라우저에 저장된 선택이 없으면 Python 현재값을 그대로 둔다(웹 모드 새 브라우저가
+      // 기본값 Standard 로 공유 콤보를 바꾸지 않게).
+      if (family === null) return
+      // savedGenerationFamily 는 라벨('Standard'/'Krea2')이다 — 대문자 상수와 직접 비교하면
+      // 영원히 거짓이라 Standard 스냅샷 복원이 죽어 있었다 (utils/generationFamily.ts).
+      // 콤보가 이미 Krea2 면(Python 이 새로고침을 넘어 상태 유지) steps/CFG 는 사용자가 맞춘
+      // 현재값이라 건드리지 않는다 — Krea2 기본값(8/1)은 처음 전환할 때 watch 가 적용했다.
+      const restoreAction = familyRestoreAction(
+        family, widgets.generation_family_combo, standardGenerationSnapshot !== null)
+      if (restoreAction === 'restore-standard' && standardGenerationSnapshot) {
         widgets.steps_input = standardGenerationSnapshot.steps
         widgets.cfg_input = standardGenerationSnapshot.cfg
         clearStandardGenerationSnapshot()
-      } else if (family === 'KREA2' && String(widgets.generation_family_combo || '').toUpperCase() === 'KREA2') {
-        if (!standardGenerationSnapshot) {
-          standardGenerationSnapshot = {
-            steps: String(widgets.steps_input || '25'),
-            cfg: String(widgets.cfg_input || '7'),
-          }
-          saveStandardGenerationSnapshot()
-        }
-        widgets.steps_input = '8'
-        widgets.cfg_input = '1'
       }
       widgets.generation_family_combo = family
     }
@@ -403,37 +427,29 @@ onUnmounted(() => {
   if (generationFamilyRestoreTimer) clearTimeout(generationFamilyRestoreTimer)
 })
 
-// 블록 모드 (Settings에서 제어)
-const tagBlockMode = ref(window.localStorage.getItem('tagBlockMode') === 'true')
-watch(tagBlockMode, v => window.localStorage.setItem('tagBlockMode', String(v)))
+// 블록 모드 (Settings에서 제어) — composables/uiPrefs 의 모듈 전역 ref 를 Settings 와 같이 본다.
+// 예전엔 300ms setInterval 로 localStorage 를 폴링했다(같은 문서의 변경은 storage 이벤트가 안 온다).
+// 파일 값은 App.vue uiPrefsLoaded → restoreUiFlagsFromPrefs 가 넣는다.
 
-// 같은 SPA 내 변경 감지 (keep-alive 환경)
-let _blockModeTimer: ReturnType<typeof setInterval> | null = null
+let _stopInitialUndoBaseline: (() => void) | null = null
+const rootRef = ref<HTMLElement | null>(null)
 const _backendUnsubs: Array<() => void> = []   // onBackendEvent 해제 함수 (탭 전환 시 누수 방지)
 onMounted(() => {
-  _blockModeTimer = setInterval(() => {
-    const stored = window.localStorage.getItem('tagBlockMode') === 'true'
-    if (stored !== tagBlockMode.value) {
-      tagBlockMode.value = stored
-      console.log('[PromptPanel] Block mode synced:', stored)
-    }
-  }, 300)
-  // Undo/Redo 키보드 단축키 + 초기 스냅 (현재 상태)
+  // Undo/Redo 키보드 단축키 — window 에 둔다(document 로 옮기면 EditorView 의 document 리스너가
+  // stopImmediatePropagation 으로 먼저 가져가는 우선권이 사라진다). 판정은 onKeyDownGlobal 참고.
   window.addEventListener('keydown', onKeyDownGlobal)
-  // 초기 스냅은 약간 지연 (widgets 초기 로드 후)
-  setTimeout(pushUndoSnapshot, 800)
+  // Undo 기준점 = 첫 초기값(getAllWidgetValues)이 스토어에 들어간 직후의 상태.
+  // 예전 '800ms 뒤 스냅' 은 초기값보다 먼저 찍히면 빈 칸이 기준점이 되어 Ctrl+Z 가 전 칸을 비웠다.
+  _stopInitialUndoBaseline = whenWidgetValuesLoaded(resetUndoBaseline)
 })
 onUnmounted(() => {
-  if (_blockModeTimer) clearInterval(_blockModeTimer)
   window.removeEventListener('keydown', onKeyDownGlobal)
-  if (debounceTimer) clearTimeout(debounceTimer)
+  if (_stopInitialUndoBaseline) { _stopInitialUndoBaseline(); _stopInitialUndoBaseline = null }
+  ac.close()
   for (const off of _backendUnsubs) { try { off() } catch {} }
   _backendUnsubs.length = 0
-  // UNDO watch들 일괄 해제
-  for (const stop of _undoWatchStops) {
-    try { stop() } catch {}
-  }
-  _undoWatchStops.length = 0
+  // Undo 기록의 debounce 타이머와 watch 일괄 해제
+  promptUndo.dispose()
 })
 
 const artistLocked = computed({
@@ -508,82 +524,39 @@ function tokenBadgeClass(n: number) {
 }
 
 // ── Undo/Redo ──
-// 추적 필드: 6개 프롬프트 입력 + 캐릭터/저작권/작가
-const UNDO_KEYS = [
-  'character_input', 'copyright_input', 'artist_input',
-  'main_prompt_text', 'prefix_prompt_text', 'suffix_prompt_text',
-  'neg_prompt_text',
-  'exclude_prompt_local_input',
-]
-type Snapshot = Record<string, string>
-const undoStack = ref<Snapshot[]>([])    // 과거 스냅샷
-const redoStack = ref<Snapshot[]>([])    // 미래 (Ctrl+Y용)
-const MAX_UNDO = 50
-let applying = false         // undo 적용 중에는 watch 다시 push 안 함
-let debounceTimer: ReturnType<typeof setTimeout> | null = null     // 빠른 타이핑 묶기
-
-function _snap(): Snapshot {
-  const s: Snapshot = {}
-  for (const k of UNDO_KEYS) s[k] = widgets[k] || ''
-  return s
-}
-function _eq(a: Snapshot, b: Snapshot) {
-  for (const k of UNDO_KEYS) if ((a[k] || '') !== (b[k] || '')) return false
-  return true
-}
-function pushUndoSnapshot() {
-  const cur = _snap()
-  const last = undoStack.value[undoStack.value.length - 1]
-  if (last && _eq(last, cur)) return
-  undoStack.value.push(cur)
-  if (undoStack.value.length > MAX_UNDO) undoStack.value.shift()
-  redoStack.value = []  // 새 변경 시 redo 초기화
-}
-function applySnapshot(snap: Snapshot) {
-  applying = true
-  for (const k of UNDO_KEYS) {
-    if (widgets[k] !== snap[k]) widgets[k] = snap[k]
-  }
-  nextTick(() => { applying = false })
-}
-function performUndo() {
-  if (undoStack.value.length < 2) return  // 첫 스냅(현재) 외에 없으면 안 함
-  const cur = undoStack.value.pop() as Snapshot       // 현재 상태
-  redoStack.value.push(cur)
-  const prev = undoStack.value[undoStack.value.length - 1]
-  applySnapshot(prev)
-}
-function performRedo() {
-  if (redoStack.value.length === 0) return
-  const next = redoStack.value.pop() as Snapshot
-  undoStack.value.push(next)
-  applySnapshot(next)
-}
-
-// 디바운스 watch — 빠른 타이핑이 끝나면 스냅샷 (500ms)
-// 메모리 누수 방지: stop 함수를 모아 onUnmounted에서 일괄 해제
-const _undoWatchStops: Array<() => void> = []
-for (const k of UNDO_KEYS) {
-  _undoWatchStops.push(watch(() => widgets[k], () => {
-    if (applying) return
-    if (debounceTimer) clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(pushUndoSnapshot, 500)
-  }))
-}
+// 기록(스냅숏 스택·debounce·대기 변경 확정)은 composables/usePromptUndo, 추적 키는
+// utils/promptUndoKeys.PROMPT_UNDO_KEYS (인물수·캐릭터·작품·작가·메인·접두·접미·네거티브·제외).
+const promptUndo = usePromptUndo(widgets)
+const undoStack = promptUndo.undoStack    // 템플릿: Undo/Redo 버튼 disabled
+const redoStack = promptUndo.redoStack
+const performUndo = promptUndo.undo
+const performRedo = promptUndo.redo
+/** 프로그램 편집(최적화 적용·구도 추가) 직전·직후 — debounce 없이 지금 상태를 스냅숏으로 */
+const commitUndoSnapshot = promptUndo.commit
+/** 초기값이 들어온 지금 상태를 Undo 의 출발점으로 — 그 전(빈 칸)으로는 되돌아가지 않는다 */
+const resetUndoBaseline = promptUndo.resetBaseline
 
 // 키보드 단축키 (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z)
+// 이 패널은 v-show 로 늘 마운트돼 있다. 패널이 보이고 포커스가 프롬프트 필드([data-prompt-undo])
+// · 패널 버튼 · 어디에도 없음(body, 단 패널이 모달에 가려지지 않았을 때) 중 하나일 때만 스냅숏
+// Undo/Redo 로 가로챈다 — 채팅·설정·검색·모달 등 다른 입력칸의 네이티브 실행 취소는 그대로 두고,
+// 보이지 않는 T2I 프롬프트가 몰래 되돌아가지도 않는다. 판정: utils/promptUndoKeys.promptUndoCommand.
+// (프롬프트 필드 안에서는 네이티브 textarea undo 대신 이 스냅숏이 쓰인다 — 값이 Python 과
+//  같이 움직여야 해서다.)
 function onKeyDownGlobal(e: KeyboardEvent) {
-  if (!(e.ctrlKey || e.metaKey)) return
-  // 입력 요소 안에서도 동작 — input 자체 undo는 우회됨 (덜 자주 쓰임)
-  // 단, contenteditable이나 textarea의 native undo는 그대로 (이건 우리가 못 막음)
-  const key = e.key.toLowerCase()
-  if (key === 'z' && !e.shiftKey) {
-    e.preventDefault()
-    performUndo()
-  } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
-    e.preventDefault()
-    performRedo()
-  }
+  const root = rootRef.value
+  const command = promptUndoCommand(e, {
+    target: e.target,
+    root,
+    visible: !!root && root.offsetParent !== null,
+    unobscured: () => isPanelOnTop(root, document, { width: window.innerWidth, height: window.innerHeight }),
+  })
+  if (!command) return
+  e.preventDefault()
+  // 팝업 후보는 되돌리기 전 텍스트의 조각을 가리킨다 — 남겨 두면 수락이 엉뚱한 곳을 바꾼다
+  closeFieldAc()
+  if (command === 'undo') performUndo()
+  else performRedo()
 }
 
 // 블록 색상 분류
@@ -615,17 +588,26 @@ const currentExMatches = computed(() => {
   return r ? (excludeMatches.value[r] || []) : []
 })
 
+// 규칙마다 한 번만 조회 — 백엔드는 GUI 스레드에서 태그 사전 전체를 훑는다(클릭마다 100ms+ 멈춤).
+const excludeMatchRequests = createExcludeMatchRequests()
+
 async function loadExcludeMatches(rule: string) {
-  const backend: any = await getBackend()
-  if (!backend.getExcludeMatches) return
-  backend.getExcludeMatches(rule, (json: string) => {
-    try {
-      const tags = JSON.parse(json)
-      if (Array.isArray(tags)) {
-        excludeMatches.value = { ...excludeMatches.value, [rule]: tags }
-      }
-    } catch {}
-  })
+  if (!excludeMatchRequests.begin(rule, excludeMatches.value)) return
+  let sent = false
+  try {
+    const backend: any = await getBackend()
+    if (!backend?.getExcludeMatches) return
+    backend.getExcludeMatches(rule, (json: string) => {
+      excludeMatchRequests.end(rule)
+      const tags = parseExcludeMatches(json)
+      if (tags) excludeMatches.value = { ...excludeMatches.value, [rule]: tags }
+    })
+    sent = true
+  } catch {
+    // 브리지 준비 실패 — 아래에서 조회 중 표시를 풀어 다음 클릭에 다시 시도한다
+  } finally {
+    if (!sent) excludeMatchRequests.end(rule)
+  }
 }
 
 const newExcludeRule = ref('')
@@ -759,25 +741,39 @@ watch(tagBlockMode, v => { if (v) setTimeout(classifyVisibleTags, 200) })
 
 // 딥 프롬프트 클리너
 interface Conflict { group: string; tags: string[]; [k: string]: any }
-interface OptPreview { before: string; after: string; removed: number; tagCount: number; conflicts: Conflict[]; [k: string]: any }
+interface OptPreview {
+  before: string; after: string; removed: number; fromContext: number; tagCount: number; conflicts: Conflict[]
+  /** 미리보기를 만든 입력(메인 + 6칸) — [적용] 때 하나라도 바뀌었으면 다시 최적화한다 */
+  inputs: OptimizeInputs
+  [k: string]: any
+}
 const optResult = ref('')
 const promptConflicts = ref<Conflict[]>([])
-const optPreview = ref<OptPreview | null>(null)   // {before, after, removed, tagCount, conflicts}
+const optPreview = ref<OptPreview | null>(null)   // {before, after, removed, fromContext, tagCount, conflicts, inputs}
+// 최적화 대상은 메인 태그뿐이다. 예전엔 7칸 합본(최종 프롬프트)을 정리해 메인 칸에 통째로 써서
+// 인물수·캐릭터·작품·작가·접두·접미 태그가 메인에 영구 복제됐다(캐릭터를 바꿔도 옛 태그가 남음).
+// 나머지 6칸(OPTIMIZE_CONTEXT_KEYS)은 context 로 보내 '다른 칸에 이미 있는 태그'를 메인에서 빼는 데와
+// 충돌 검사에만 쓴다 — 그래서 결과는 6칸에도 달려 있다(utils/optimizePreview).
 async function optimizePrompt() {
   const backend: any = await getBackend()
   if (!backend.deepCleanPrompt) return
-  const before = widgets.total_prompt_display || ''
-  backend.deepCleanPrompt(JSON.stringify({ prompt: before }), (json: string) => {
+  const inputs = snapshotOptimizeInputs(widgets)
+  const before = inputs.main
+  const context = optimizeContextPayload(inputs)
+  backend.deepCleanPrompt(JSON.stringify({ prompt: before, context }), (json: string) => {
     try {
       const d = JSON.parse(json)
       if (d.error) { optResult.value = d.error; return }
       // 즉시 적용하지 않고 before/after 비교 후 [적용]으로 반영
       optPreview.value = {
         before,
-        after: d.optimized || before,
+        // 메인 태그가 전부 다른 칸과 겹치면 결과는 빈 문자열이다 — `||` 로 원문에 되돌리면 안 된다
+        after: typeof d.optimized === 'string' ? d.optimized : before,
         removed: d.removed || 0,
+        fromContext: d.removed_from_context || 0,
         tagCount: d.tag_count || 0,
         conflicts: d.conflicts || [],
+        inputs,
       }
     } catch {}
   })
@@ -785,7 +781,19 @@ async function optimizePrompt() {
 function applyOptimize() {
   const p = optPreview.value
   if (!p) return
+  if (isOptimizePreviewStale(p.inputs, widgets)) {
+    // 미리보기 뒤에 메인 태그나 다른 칸(캐릭터·접두 등)이 바뀌었다 — 옛 결과로 덮으면 그 사이 편집이
+    // 사라지거나, 다른 칸에서 지운 태그가 메인에서도 빠져 프롬프트에서 통째로 없어진다
+    optPreview.value = null
+    requestAction('show_toast', { type: 'info', msg: '프롬프트 칸이 바뀌어 다시 최적화했습니다 — 미리보기를 확인하세요' })
+    optimizePrompt()
+    return
+  }
+  // 적용 전후를 바로 스냅숏으로 남겨, 곧바로 Ctrl+Z 해도 최적화 전으로 돌아간다
+  // ([적용] 버튼은 미리보기와 함께 사라져 포커스가 body 로 떨어진다 — promptUndoKeys 의 'unfocused')
+  commitUndoSnapshot()
   widgets.main_prompt_text = p.after
+  commitUndoSnapshot()
   promptConflicts.value = p.conflicts || []
   optResult.value = `${p.removed}개 중복 제거, ${p.tagCount}개 태그`
   optPreview.value = null
@@ -886,6 +894,11 @@ function runPendingNl() {
   ollamaMode.value = pendingNlMode.value || 'nl2tags'
   runOllama()
 }
+/** 자연어 입력 Enter — IME 조합 확정 Enter 는 실행이 아니다(마지막 음절이 잘린 채 나간다) */
+function onNlEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  runPendingNl()
+}
 const nlResult = ref('')
 const nlRes = ref<{ w: string; h: string } | null>(null)   // 창의 모드 추천 해상도 {w, h}
 let ollamaTimer: ReturnType<typeof setTimeout> | null = null
@@ -919,8 +932,8 @@ async function runOllama() {
   }, 65000)
   const backend: any = await getBackend()
   if (!backend.ollamaEnhance) { ollamaLoading.value = false; if (ollamaTimer) clearTimeout(ollamaTimer); return }
-  const url = window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
-  const model = window.localStorage.getItem('ollamaModel') || 'gemma3:4b'
+  const url = storedOllamaUrl()
+  const model = storedOllamaModel()   // 비면 백엔드 워커가 설치 모델로 정한다
   backend.ollamaEnhance(contentArg, mode, JSON.stringify({ prompt: extraPrompt, character: creativeChar, url, model }))
 }
 
@@ -940,9 +953,7 @@ async function runSmartNegative() {
   }, 65000)
   const backend: any = await getBackend()
   if (!backend.ollamaEnhance) { ollamaLoading.value = false; if (ollamaTimer) clearTimeout(ollamaTimer); return }
-  const url = window.localStorage.getItem('ollamaUrl') || 'http://localhost:11434'
-  const model = window.localStorage.getItem('ollamaModel') || 'gemma3:4b'
-  backend.ollamaEnhance(positivePrompt, 'negative', JSON.stringify({ url, model }))
+  backend.ollamaEnhance(positivePrompt, 'negative', JSON.stringify({ url: storedOllamaUrl(), model: storedOllamaModel() }))
 }
 
 function copyNlResult() {
@@ -972,55 +983,100 @@ function applyNlRes() {
   requestAction('show_toast', { type: 'success', msg: `해상도 ${nlRes.value.w}×${nlRes.value.h} 적용` })
 }
 
-// 자동완성
-const acItems = ref<string[]>([])
-const acIdx = ref(0)
-const fieldAcTarget = ref('')
-let acTimer: ReturnType<typeof setTimeout> | null = null
+// 자동완성 — 항목은 {tag, ko} (ko = 한국어 이름/설명, 한글 입력 시 한국어 키워드 검색)
+// 요청 수명주기(디바운스 취소·늦은 응답 버리기·팝업 주인)는 useTagAutocomplete 가 맡고,
+// 여기서는 '커서가 놓인 태그 조각'(utils/tagSuggest.tagTokenAt)을 질의하고 그 조각만 바꾼다.
+// 수락 표기는 예전 그대로 원문(밑줄) — 블록 모드(TagBlockField)는 공백 표기다.
+const ac = useTagAutocomplete({ delay: 300 })
+const acItems = ac.items
+const acIdx = ac.index
+/**
+ * 팝업(또는 응답 대기 중인 요청)이 가리키는 입력 요소와, 후보를 요청한 순간의 텍스트·커서 조각.
+ * 수락은 커서가 **그 조각 그대로**일 때만 그 조각을 바꾼다(utils/tagSuggest.isSameTagQuery).
+ */
+let acField: { fieldId: string; el: HTMLInputElement | HTMLTextAreaElement; query: TagQuery } | null = null
+/** 방금 수락으로 써 넣은 값 — 그 값으로 들어오는 input(IME 확정 등)은 새 검색을 띄우지 않는다 */
+let acAcceptedText: string | null = null
 
-function onFieldInput(e: any, fieldId: string) {
-  fieldAcTarget.value = fieldId
-  const text = e.target.value; const lastComma = text.lastIndexOf(',')
-  const prefix = (lastComma >= 0 ? text.substring(lastComma + 1) : text).trim()
-  if (prefix.length < 2) { acItems.value = []; return }
-  if (acTimer) clearTimeout(acTimer)
-  acTimer = setTimeout(async () => {
-    const backend: any = await getBackend()
-    if (backend.getTagSuggestions) backend.getTagSuggestions(prefix, (json: string) => { try { acItems.value = JSON.parse(json).slice(0, 10); acIdx.value = 0 } catch { acItems.value = [] } })
-  }, 300)
+function closeFieldAc() {
+  ac.close()
+  acField = null
+}
+watch(tagBlockMode, closeFieldAc)
+
+function onFieldInput(e: Event, fieldId: string) {
+  const el = e.target as HTMLInputElement | HTMLTextAreaElement | null
+  if (!el) return
+  // v-model 은 IME 조합 중 값을 갱신하지 않는다 — 요소 값을 직접 읽는다
+  const text = el.value
+  if (acAcceptedText !== null && text === acAcceptedText) { acAcceptedText = null; return }
+  acAcceptedText = null
+  const query = tagQueryAt(text, el.selectionStart)
+  acField = { fieldId, el, query }
+  ac.request(query.query, fieldId)
+}
+/** 떠 있는 후보가 아직 지금 텍스트·커서 조각의 것인가 */
+function fieldAcStillValid(fieldId: string): boolean {
+  const target = acField
+  return !!target && target.fieldId === fieldId
+    && isSameTagQuery(target.query, target.el.value, target.el.selectionStart)
 }
 function onFieldKey(e: KeyboardEvent, fieldId: string) {
-  if (fieldAcTarget.value !== fieldId || !acItems.value.length) return
-  if (e.key === 'ArrowDown') { e.preventDefault(); acIdx.value = Math.min(acIdx.value + 1, acItems.value.length - 1) }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); acIdx.value = Math.max(0, acIdx.value - 1) }
-  else if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); acceptFieldSuggestion(acItems.value[acIdx.value], fieldId) }
-  else if (e.key === 'Escape') { acItems.value = []; fieldAcTarget.value = '' }
+  if (isImeComposing(e)) return          // 조합 확정 키는 후보 선택이 아니다
+  if (!ac.isOpenFor(fieldId)) {
+    // 응답을 기다리는 중(디바운스 300ms + 브리지 왕복)에 키보드로 커서만 옮기면 그 요청은 옛
+    // 조각의 것이다 — 도착해 팝업이 뜨면 Enter/Tab 이 엉뚱한 태그를 바꾼다. 지금 무효로 만든다.
+    if (acField?.fieldId === fieldId && isCaretMoveKey(e.key)) closeFieldAc()
+    return
+  }
+  switch (e.key) {
+    case 'ArrowDown': e.preventDefault(); ac.move(1); return
+    case 'ArrowUp': e.preventDefault(); ac.move(-1); return
+    case 'Tab':
+    case 'Enter':
+      // 한글 검색 팝업에서는 Enter 를 평소대로(줄바꿈) 두고 팝업만 닫는다 — Tab/클릭으로 선택
+      if (e.key === 'Enter' && ac.queryHangul.value) { closeFieldAc(); return }
+      // 요청 뒤 커서·값이 바뀌었으면(Undo·백엔드 갱신 등) 옛 조각의 후보다 — 키는 가로채지 않고
+      // (Tab 은 포커스 이동, Enter 는 줄바꿈 그대로) 팝업만 닫는다
+      if (!fieldAcStillValid(fieldId)) { closeFieldAc(); return }
+      e.preventDefault(); acceptFieldSuggestion(ac.selected()?.tag, fieldId); return
+    case 'Escape': closeFieldAc(); return
+    default:
+      // 커서가 다른 조각으로 옮겨 간다 — 옛 조각의 후보를 남겨 두면 엉뚱한 곳이 바뀐다
+      if (isCaretMoveKey(e.key)) closeFieldAc()
+  }
 }
-function acceptFieldSuggestion(tag: string, fieldId: string) {
-  const text = widgets[fieldId] || ''; const lastComma = text.lastIndexOf(',')
-  widgets[fieldId] = (lastComma >= 0 ? text.substring(0, lastComma + 1) + ' ' : '') + tag + ', '
-  acItems.value = []; fieldAcTarget.value = ''
+function acceptFieldSuggestion(tag: string | undefined, fieldId: string) {
+  const target = acField
+  closeFieldAc()
+  if (!tag || !target || target.fieldId !== fieldId) return
+  const el = target.el
+  const text = el.value
+  // 후보를 요청한 조각에서 커서가 떠났거나 값이 바뀌었으면 바꾸지 않는다(팝업만 닫힘)
+  if (!isSameTagQuery(target.query, text, el.selectionStart)) return
+  const next = replaceTagToken(text, tagTokenAt(text, el.selectionStart), tag)
+  // IME 조합 중이면 v-model 이 DOM 값을 고치지 않는다(조합 보호) — 요소에도 직접 써 둔다.
+  // 조합이 끝나며 오는 input 은 acAcceptedText 로 걸러 새 검색을 띄우지 않는다.
+  if ((el as any).composing) el.value = next.text
+  acAcceptedText = next.text
+  widgets[fieldId] = next.text
+  nextTick(() => {
+    try {
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+    } catch { /* 요소가 사라졌으면 무시 */ }
+    if (el.tagName === 'TEXTAREA') autoGrow(el)
+  })
 }
-function onMainInput(e: any) { autoGrow(e.target); fieldAcTarget.value = 'main_prompt_text'; onFieldInput(e, 'main_prompt_text') }
+function onMainInput(e: Event) { autoGrow(e.target); onFieldInput(e, 'main_prompt_text') }
 function onAutoKey(e: KeyboardEvent) { onFieldKey(e, 'main_prompt_text') }
-function acceptSuggestion(tag: string) { acceptFieldSuggestion(tag, 'main_prompt_text'); nextTick(() => { if (mainRef.value) { mainRef.value.focus(); autoGrow(mainRef.value) } }) }
 
 function autoGrow(el: any) { if (!el) return; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
 function growAll() { nextTick(() => { ;[totalPromptRef, negRef, artistRef, prefixRef, mainRef, suffixRef].forEach(r => { if (r.value) autoGrow(r.value) }) }) }
 
 onMounted(() => {
   setTimeout(growAll, 500); setTimeout(growAll, 1500)
-  // UI prefs 로드 (재시작 시 블록 모드 복원)
-  _backendUnsubs.push(onBackendEvent('uiPrefsLoaded', (json: string) => {
-    try {
-      const prefs = JSON.parse(json)
-      if (typeof prefs.tagBlockMode === 'boolean') {
-        window.localStorage.setItem('tagBlockMode', String(prefs.tagBlockMode))
-        tagBlockMode.value = prefs.tagBlockMode
-      }
-      if (typeof prefs.galleryShowMetadata === 'boolean') window.localStorage.setItem('galleryShowMetadata', String(prefs.galleryShowMetadata))
-    } catch {}
-  }))
+  // 블록 모드의 재시작 복원·localStorage 미러는 App.vue uiPrefsLoaded 한 곳이 맡는다(composables/uiPrefs).
   _backendUnsubs.push(onBackendEvent('ollamaResult', (json: string) => {
     ollamaLoading.value = false
     if (ollamaTimer) clearTimeout(ollamaTimer)
@@ -1149,6 +1205,8 @@ summary::-webkit-details-marker { display: none; }
 .ac-popup { position: absolute; left: 0; right: 0; top: 100%; z-index: 100; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; max-height: 200px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
 .ac-item { padding: 6px 12px; font-size: 11px; color: var(--text-secondary); cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); }
 .ac-item:hover, .ac-item.selected { background: var(--accent-dim); color: var(--accent); }
+.ac-item .ac-ko { margin-left: 8px; font-size: 10px; color: var(--text-muted); }
+.ac-item.selected .ac-ko { color: inherit; opacity: .8; }
 label.danger { color: var(--state-alert-fg); }
 .exclude-section { margin-bottom: 0; }
 .exclude-toggle { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--state-alert-fg); letter-spacing: 0; cursor: pointer; list-style: none; }

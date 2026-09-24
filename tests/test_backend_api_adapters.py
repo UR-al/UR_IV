@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import unittest
@@ -145,26 +146,48 @@ class TestWebUIResultArtifacts(unittest.TestCase):
 def _api_workflow(*, include_load_image: bool = True) -> dict:
     workflow = {
         '1': {'class_type': 'CheckpointLoaderSimple', 'inputs': {'ckpt_name': 'old'}},
-        '2': {'class_type': 'CLIPTextEncode', 'inputs': {'text': 'old positive'}},
-        '3': {'class_type': 'CLIPTextEncode', 'inputs': {'text': 'old negative'}},
+        '2': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['1', 1], 'text': 'old positive'}},
+        '3': {'class_type': 'CLIPTextEncode', 'inputs': {'clip': ['1', 1], 'text': 'old negative'}},
         '4': {
             'class_type': 'KSampler',
             'inputs': {
+                'model': ['1', 0],
                 'positive': ['2', 0],
                 'negative': ['3', 0],
-                'seed': 1,
-                'denoise': 1.0,
+                'latent_image': ['5', 0],
+                'seed': 1, 'steps': 20, 'cfg': 7, 'sampler_name': 'euler',
+                'scheduler': 'normal', 'denoise': 1.0,
             },
         },
         '5': {
             'class_type': 'EmptyLatentImage',
             'inputs': {'width': 512, 'height': 512, 'batch_size': 1},
         },
-        '7': {'class_type': 'SaveImage', 'inputs': {}},
+        '8': {'class_type': 'VAEDecode', 'inputs': {'samples': ['4', 0], 'vae': ['1', 2]}},
+        '7': {'class_type': 'SaveImage', 'inputs': {'images': ['8', 0]}},
     }
     if include_load_image:
         workflow['6'] = {'class_type': 'LoadImage', 'inputs': {'image': 'old.png'}}
     return workflow
+
+
+def _profile_object_info() -> dict:
+    """Stock ComfyUI schema of a Generation API profile target (no node pack)."""
+    def choice(*values):
+        return [list(values), {}]
+
+    return {
+        'CheckpointLoaderSimple': {'input': {'required': {
+            'ckpt_name': choice('old', 'new-model.safetensors', 'sdxl/base.safetensors'),
+        }}},
+        'LoraLoader': {'input': {'required': {
+            'lora_name': choice('styles/ink.safetensors'),
+        }}},
+        'KSampler': {'input': {'required': {
+            'sampler_name': choice('euler', 'euler_ancestral', 'dpmpp_2m'),
+            'scheduler': choice('normal', 'karras'),
+        }}},
+    }
 
 
 class TestComfyProfileWorkflowGeneration(unittest.TestCase):
@@ -174,6 +197,12 @@ class TestComfyProfileWorkflowGeneration(unittest.TestCase):
             workflow_path='profile-txt.json',
             img2img_workflow_path='profile-img.json',
         )
+        # Never reach a real ComfyUI: the profile target's (bounded) schema read
+        # is stubbed, and the per-endpoint snapshot is private to this test.
+        from core.comfy_object_info_cache import ObjectInfoCacheRegistry
+
+        self.backend.get_object_info_bounded = mock.Mock(return_value=_profile_object_info())
+        self.backend._external_object_info_caches = ObjectInfoCacheRegistry()
 
     def test_instance_paths_override_process_config(self):
         self.assertEqual(
@@ -262,7 +291,7 @@ class TestComfyProfileWorkflowGeneration(unittest.TestCase):
         self.assertEqual(prepared['6']['inputs']['image'], 'api/source.png')
         self.assertEqual(prepared['4']['inputs']['denoise'], 0.75)
 
-    def test_upload_image_detects_actual_format_and_uses_unique_filename(self):
+    def test_upload_image_detects_actual_format_and_uses_content_hash_filename(self):
         expected_formats = (
             ('JPEG', 'jpg', 'image/jpeg'),
             ('WEBP', 'webp', 'image/webp'),
@@ -274,37 +303,51 @@ class TestComfyProfileWorkflowGeneration(unittest.TestCase):
             for image_format, _extension, _mime in expected_formats
         ]
 
-        generated_uuids = [
-            mock.Mock(hex=f'{index:032x}')
-            for index in range(1, len(expected_formats) + 1)
-        ]
         with mock.patch.object(
             self.backend,
             'upload_media',
-            side_effect=lambda _data, filename, _mime: filename,
-        ) as upload, mock.patch(
-            'backends.comfyui_backend.uuid.uuid4', side_effect=generated_uuids
-        ):
+            side_effect=lambda _data, filename, _mime, **_kwargs: filename,
+        ) as upload:
             uploaded_names = [
                 self.backend._upload_image(encoded) for encoded in encoded_images
             ]
 
+        def content_name(encoded, extension):
+            digest = hashlib.sha256(base64.b64decode(encoded)).hexdigest()[:32]
+            return f'input_{digest}.{extension}'
+
         self.assertEqual(
             uploaded_names,
             [
-                f'input_{index:032x}.{extension}'
-                for index, (_format, extension, _mime) in enumerate(
-                    expected_formats, start=1
-                )
+                content_name(encoded, extension)
+                for encoded, (_format, extension, _mime) in zip(encoded_images, expected_formats)
             ],
         )
-        for index, (call, encoded, (_format, extension, mime)) in enumerate(
-            zip(upload.call_args_list, encoded_images, expected_formats), start=1
+        self.assertEqual(len(set(uploaded_names)), len(uploaded_names))
+        for call, encoded, (_format, extension, mime) in zip(
+            upload.call_args_list, encoded_images, expected_formats
         ):
             data, filename, passed_mime = call.args
             self.assertEqual(data, base64.b64decode(encoded))
-            self.assertEqual(filename, f'input_{index:032x}.{extension}')
+            self.assertEqual(filename, content_name(encoded, extension))
             self.assertEqual(passed_mime, mime)
+            # 같은 이름·같은 내용이면 ComfyUI 가 다시 쓰지 않고 그 이름을 돌려준다.
+            self.assertIs(call.kwargs['overwrite'], False)
+
+    def test_repeated_upload_of_the_same_image_reuses_one_input_name(self):
+        encoded = base64.b64encode(_image_bytes('PNG', 'green')).decode('ascii')
+        other = base64.b64encode(_image_bytes('PNG', 'red')).decode('ascii')
+        with mock.patch.object(
+            self.backend,
+            'upload_media',
+            side_effect=lambda _data, filename, _mime, **_kwargs: filename,
+        ):
+            first = self.backend._upload_image(encoded)
+            second = self.backend._upload_image('data:image/png;base64,' + encoded)
+            different = self.backend._upload_image(other)
+        self.assertEqual(first, second)
+        # 원본과 마스크처럼 내용이 다르면 이름도 달라 서로 덮어쓰지 않는다.
+        self.assertNotEqual(first, different)
 
     def test_upload_image_rejects_non_image_bytes_before_upload(self):
         encoded = base64.b64encode(b'not an image').decode('ascii')

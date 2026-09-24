@@ -1,10 +1,13 @@
 """
-AppContext — 전역 이벤트 버스 + 서비스 로케이터.
+AppContext — 전역 이벤트 버스.
 
 목적
 ----
 UR_IV의 Python 측 모듈들이 직접 서로를 호출하는 결합을 끊기 위한 중앙 허브.
 Vue↔Python QWebChannel 시그널과 별개로, **Python 내부** 모듈 간 통신 표준.
+현재 실제 흐름은 백엔드 전환 통보뿐이다(발행: backends/__init__.py,
+구독: ui/xyz_actions.py, core/mode_aware_mixin.py). 새 이벤트는 발행과
+구독을 함께 추가할 때만 ``Events``에 등록한다.
 
 설계 원칙
 ---------
@@ -21,11 +24,6 @@ Vue↔Python QWebChannel 시그널과 별개로, **Python 내부** 모듈 간 �
 >>> h = ctx.subscribe(Events.BACKEND_CHANGED, lambda m: print(m))
 >>> ctx.publish(Events.BACKEND_CHANGED, "comfyui")
 >>> ctx.unsubscribe(Events.BACKEND_CHANGED, h)
-
-서비스 로케이터 사용 예
------------------------
->>> ctx.register_service("generator", my_generator)
->>> gen = ctx.get_service("generator")
 """
 from __future__ import annotations
 
@@ -38,37 +36,11 @@ _logger = get_logger("app_context")
 
 
 class Events:
-    """표준 이벤트 이름 상수. 새 이벤트 추가 시 여기에 등록 권장."""
+    """표준 이벤트 이름 상수. 발행·구독이 모두 있는 이벤트만 둔다."""
 
     # 백엔드 / 모드
     BACKEND_CHANGED = "backend_changed"          # data: BackendType
     BACKEND_URL_CHANGED = "backend_url_changed"  # data: str (url)
-
-    # 생성 흐름
-    GENERATION_STARTED = "generation_started"    # data: payload dict
-    GENERATION_PROGRESS = "generation_progress"  # data: {step, total}
-    GENERATION_FINISHED = "generation_finished"  # data: {image_data, info}
-    GENERATION_FAILED = "generation_failed"      # data: error str
-
-    # 자동화 흐름 (실제 상태 머신은 GeneratorActionsMixin이 소유)
-    AUTOMATION_STARTED = "automation_started"        # data: {mode, limit, delay}
-    AUTOMATION_ITERATION_END = "automation_iter_end"  # data: {iter, waiting, running}
-    AUTOMATION_STOPPED = "automation_stopped"        # data: {reason, completed}
-
-    # 프롬프트 파이프라인
-    PROMPT_GENERATED = "prompt_generated"        # data: final prompt str
-    PROMPT_CONTEXT_READY = "prompt_context_ready"  # data: PromptContext
-
-    # 큐
-    QUEUE_UPDATED = "queue_updated"              # data: queue list
-    QUEUE_ITEM_ADDED = "queue_item_added"        # data: item dict
-    QUEUE_ITEM_COMPLETED = "queue_item_completed"  # data: item dict
-
-    # 시스템
-    SAVE_DIRECTORY_CHANGED = "save_directory_changed"  # data: new dir str
-    VRAM_UPDATED = "vram_updated"                # data: {used, total, free}
-    SETTINGS_LOADED = "settings_loaded"          # data: dict
-    SETTINGS_SAVED = "settings_saved"            # data: dict
 
 
 class _Subscription:
@@ -102,8 +74,6 @@ class AppContext:
     def __init__(self) -> None:
         # event_name -> list[_Subscription]
         self._subs: dict[str, list[_Subscription]] = {}
-        # 서비스 이름 -> 인스턴스
-        self._services: dict[str, Any] = {}
         # 핸들 카운터 (단조 증가)
         self._next_handle = 1
         # 모든 mutating 연산 보호
@@ -141,12 +111,6 @@ class AppContext:
                 self._subs.pop(event, None)
             return True
 
-    def unsubscribe_all(self, event: str) -> int:
-        """이벤트의 모든 구독 해제. 해제된 개수 반환."""
-        with self._lock:
-            subs = self._subs.pop(event, [])
-            return len(subs)
-
     def publish(self, event: str, data: Any = None) -> int:
         """이벤트 발행 — 모든 구독자 동기 호출. 성공 호출 개수 반환.
 
@@ -168,43 +132,6 @@ class AppContext:
                     f"subscriber #{sub.handle} for '{event}' raised — continuing"
                 )
         return delivered
-
-    def subscriber_count(self, event: str) -> int:
-        with self._lock:
-            return len(self._subs.get(event, []))
-
-    # ────────────────────────────────────────────────────────
-    # 서비스 로케이터
-    # ────────────────────────────────────────────────────────
-
-    def register_service(self, name: str, instance: Any) -> None:
-        """이름으로 서비스 등록. 동일 이름 재등록 시 덮어씀."""
-        with self._lock:
-            self._services[name] = instance
-
-    def get_service(self, name: str, default: Any = None) -> Any:
-        """이름으로 서비스 조회. 없으면 default."""
-        with self._lock:
-            return self._services.get(name, default)
-
-    def has_service(self, name: str) -> bool:
-        with self._lock:
-            return name in self._services
-
-    def remove_service(self, name: str) -> bool:
-        with self._lock:
-            return self._services.pop(name, None) is not None
-
-    # ────────────────────────────────────────────────────────
-    # 유틸
-    # ────────────────────────────────────────────────────────
-
-    def clear(self) -> None:
-        """모든 구독자/서비스 제거 — 테스트용."""
-        with self._lock:
-            self._subs.clear()
-            self._services.clear()
-            self._next_handle = 1
 
 
 def get_context() -> AppContext:

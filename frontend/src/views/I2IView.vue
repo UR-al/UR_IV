@@ -151,6 +151,8 @@ import CustomSelect from '../components/CustomSelect.vue'
 import RefinePanel from '../components/RefinePanel.vue'
 import RelightPanel from '../components/RelightPanel.vue'
 import { useViewMode } from '../composables/useViewMode'
+import { useTabDefaultsFollower } from '../composables/useTabDefaultsFollower'
+import { followDefault } from '../utils/tabDefaults'
 
 /** 하위 탭(img2img / SAM3 정밀화)은 왼쪽 레일의 서랍이 정한다 — `useViewMode` 참조. */
 const { mode: subTab } = useViewMode('i2i')
@@ -187,6 +189,11 @@ const referenceFileInput = ref<HTMLInputElement | null>(null)
 const prompt = ref('')
 const negPrompt = ref('')
 const denoising = ref(0.75)
+// Settings '기본값' 의 Denoising(I2I) — 예전엔 저장만 되고 여기서는 늘 0.75 로 시작했다(audit #140).
+// 사용자가 이 화면에서 바꾸지 않은 동안만 기본값을 따른다.
+useTabDefaultsFollower((next, prev) => {
+  denoising.value = followDefault(denoising.value, prev.denoising, next.denoising)
+})
 const fidelity = ref(4)
 const resizeMode = ref('0')
 const resizeModeOptions = ['그대로 늘리기', '잘라서 맞추기', '여백 채우기', 'Latent 리사이즈']

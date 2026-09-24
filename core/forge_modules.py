@@ -258,17 +258,16 @@ def _list_files(root: Path, extensions: set[str] | None = None) -> list[str]:
     return result
 
 
-def list_model_files() -> list[str]:
+def _checkpoint_files(root: Path) -> list[str]:
+    """Checkpoint 폴더의 모델 파일 — Forge 처럼 ``*.vae.*`` 사이드카는 제외한다."""
     return [
-        name for name in _list_files(
-            get_forge_paths()["checkpoint_dir"], _CHECKPOINT_EXTS
-        )
-        if '.vae.' not in Path(name).name.casefold()
+        name for name in _list_files(root, _CHECKPOINT_EXTS)
+        if ".vae." not in Path(name).name.casefold()
     ]
 
 
-def list_lora_files() -> list[str]:
-    return _list_files(get_forge_paths()["lora_dir"], _LORA_EXTS)
+def _lora_files(root: Path) -> list[str]:
+    return _list_files(root, _LORA_EXTS)
 
 
 def _module_basenames(root: Path) -> list[str]:
@@ -293,25 +292,6 @@ def list_te_files() -> list[str]:
     return _module_basenames(get_forge_paths()["text_encoder_dir"])
 
 
-def list_lora_entries() -> list[dict[str, Any]]:
-    """LoRA Manager가 사용하는 백엔드 공통 형식으로 로컬 파일을 반환."""
-    root = get_forge_paths()["lora_dir"]
-    entries: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for relative in _list_files(root, _LORA_EXTS):
-        name = Path(relative).stem
-        if name.casefold() in seen:
-            continue
-        seen.add(name.casefold())
-        entries.append({
-            "name": name,
-            "alias": name,
-            "path": str(root / Path(relative)),
-            "trigger_words": [],
-        })
-    return entries
-
-
 def get_forge_path_state() -> dict[str, Any]:
     """Settings UI용 경로, 유효성, 파일 개수 스냅샷."""
     paths = get_forge_paths()
@@ -327,11 +307,8 @@ def get_forge_path_state() -> dict[str, Any]:
         "entries": {},
     }
     scanners = {
-        "checkpoint_dir": lambda path: [
-            name for name in _list_files(path, _CHECKPOINT_EXTS)
-            if ".vae." not in Path(name).name.casefold()
-        ],
-        "lora_dir": lambda path: _list_files(path, _LORA_EXTS),
+        "checkpoint_dir": _checkpoint_files,
+        "lora_dir": _lora_files,
         "vae_dir": _module_basenames,
         "text_encoder_dir": _module_basenames,
     }

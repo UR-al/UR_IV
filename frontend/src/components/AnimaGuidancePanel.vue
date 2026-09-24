@@ -370,48 +370,11 @@ const smcPresets = [
   'Flux', 'Qwen-Image', 'Cosmos / Wan', 'Custom',
 ]
 
-// 확장 기본값 — core/anima_guidance.py 스펙과 일치해야 한다
-const DEFAULTS: Record<string, string> = {
-  _guid_enabled: 'false', _guid_attn_method: 'PAG', _guid_scale: '4',
-  _guid_legacy_strength: '0.75', _guid_block_indices: '18',
-  _guid_slg_on: 'false', _guid_slg_scale: '3', _guid_slg_blocks: '18',
-  _guid_start_percent: '0', _guid_end_percent: '0.7', _guid_rescale: '0.2',
-  _guid_auto_decay: 'false',
-  _guid_apg_enabled: 'false', _guid_apg_eta: '0', _guid_apg_norm: '15',
-  _guid_apg_momentum: '0', _guid_apg_autooff: 'true',
-  _guid_adg_enabled: 'false', _guid_adg_start: '0.5', _guid_adg_interval: '0',
-  _guid_legacy_attn: 'false', _guid_seg_sigma: '100',
-  _guid_cfg_mode: 'Preserve incoming', _guid_experimental_stack: 'false',
-  _guid_cwm_alpha_low: '0.3', _guid_cwm_alpha_high: '0.15',
-  _guid_smc_lambda: '6', _guid_smc_k: '0.1',
-  _guid_dcw_enabled: 'false', _guid_dcw_lambda_low: '0.1', _guid_dcw_lambda_high: '0.02',
-  _guid_dave_enabled: 'false', _guid_dave_strength: '0.3', _guid_dave_tau: '0.1',
-  _guid_dave_blocks: '8-18',
-  _guid_cns_enabled: 'false', _guid_cns_strength: '1',
-  _guid_cns_gamma_power: '0.5', _guid_cns_gamma_scale: '3',
-  _guid_official_strength: '0.75', _guid_head_indices: '', _guid_rescale_mode: 'full',
-  _guid_smc_enabled: 'false', _guid_cwm_enabled: 'false',
-  _guid_mod_enabled: 'false', _guid_mod_clip_model: '', _guid_mod_weight: '3',
-  _guid_mod_start_layer: '0', _guid_mod_end_layer: '-1',
-  _guid_mod_base_source: 'Main positive', _guid_mod_base_prompt: '',
-  _guid_mod_positive_prompt: 'masterpiece, best quality, highres',
-  _guid_mod_negative_source: 'Main negative',
-  _guid_mod_negative_prompt: 'worst quality, low quality',
-  _guid_mod_adapter_mode: 'Auto-download official', _guid_mod_adapter_path: '',
-  _guid_smc_preset: 'Auto', _guid_smc_master_enabled: 'false',
-  _guid_rdc_enabled: 'false', _guid_rdc_tau: '0.15',
-  _guid_rdc_alpha_ll: '0.03', _guid_rdc_alpha_hh: '0',
-  _skim_enabled: 'false', _skim_skimming_cfg: '7', _skim_full_skim_negative: 'false',
-  _skim_disable_flipping_filter: 'false', _skim_start_percent: '0',
-  _skim_end_percent: '1', _skim_flip_at: '0',
-  _dd_enabled: 'false', _dd_preset: 'Medium', _dd_amount: '0.1',
-  _dd_start: '0.2', _dd_end: '0.8', _dd_bias: '0.5', _dd_exponent: '1',
-  _dd_start_offset: '0', _dd_end_offset: '0', _dd_fade: '0',
-  _dd_multiplier: '1', _dd_smooth: 'true', _dd_cfg_couple: 'true',
-}
-
+// 전체 초기화 — 기본값은 Python 이 core/anima_guidance.py 스펙(default_settings)에서 채운다.
+// 예전엔 여기에 82개 기본값 사본(DEFAULTS)을 들고 있어, 스펙이 바뀌면 이 버튼만 옛 값을 쓰거나
+// 새 키를 빠뜨릴 수 있었다. 값은 배치 한 번으로 돌아온다(generator_settings._reset_anima_guidance).
 function resetAll() {
-  for (const [key, val] of Object.entries(DEFAULTS)) w[key] = val
+  requestAction('reset_anima_guidance')
 }
 
 function importFromForge() {

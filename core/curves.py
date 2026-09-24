@@ -1,7 +1,7 @@
 # core/curves.py
 """톤 커브 — 제어점을 256칸 LUT 로 바꾸고 이미지에 적용한다. Qt 의존 없음.
 
-PyQt 판(`tabs/editor/curves_widget.py`)은 계산이 위젯 안에 들어 있어 Qt 없이는
+PyQt 판(`tabs/editor/curves_widget.py`, 은퇴해 삭제됨)은 계산이 위젯 안에 들어 있어 Qt 없이는
 테스트할 수 없었다. Vue 로 옮기면서 계산만 떼어낸다.
 
 곡선 정의는 **정렬된 제어점 사이의 선형보간** 하나뿐이다. 프론트는 곡선을 그리려고

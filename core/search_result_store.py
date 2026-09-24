@@ -52,15 +52,13 @@ class SearchResultStore:
     ) -> None:
         self.storage = storage or StoragePaths(project_root)
         self.project_root = self.storage.project_root
-        if dataset_root is None and self.project_root == PROJECT_ROOT:
-            try:
-                from config import PARQUET_DIR
-                dataset_root = PARQUET_DIR
-            except Exception:
-                dataset_root = None
-        self.dataset_root = Path(
-            dataset_root or self.project_root / "danbooru_optimized"
-        ).expanduser().resolve(strict=False)
+        if dataset_root is None:
+            # 앱의 데이터셋 경로는 core.fetch_data.DATA_DIR 한 곳(= config.PARQUET_DIR)이다. 다른 루트
+            # (테스트의 임시 프로젝트)는 같은 상대 위치를 쓴다. 가벼운 fetch_data 를 직접 읽는다 —
+            # config 는 PyQt·QtWebEngine 을 끌어온다.
+            from core.fetch_data import DATA_DIR
+            dataset_root = DATA_DIR if self.project_root == PROJECT_ROOT else self.project_root / DATA_DIR.name
+        self.dataset_root = Path(dataset_root).expanduser().resolve(strict=False)
         self.last_error: str | None = None
         self.last_snapshot_id: str | None = None
         self.last_dataset_identity: dict[str, str] | None = None
@@ -176,9 +174,20 @@ class SearchResultStore:
         with _STORE_LOCK:
             return self._load(self.active_path)
 
-    def load_full(self) -> list:
+    def load_full(self, *, expected_snapshot_id: str | None = None) -> list:
+        """Load the unfiltered base of a Search snapshot.
+
+        Without ``expected_snapshot_id`` the active envelope is read as well to
+        prove both files belong to one snapshot.  A caller that already holds
+        the active snapshot id (from a validated active load or its own save)
+        passes it instead, so the 20MB+ active file is not parsed again just to
+        compare one field.  The pairing guarantee is the same: the full base is
+        returned only when its snapshot id equals the expected one.
+        """
         with _STORE_LOCK:
-            return self._load_full()
+            if expected_snapshot_id is None:
+                return self._load_full()
+            return self._load_full_for_snapshot(expected_snapshot_id)
 
     def dataset_info(self) -> dict[str, str]:
         """Return the active manifest identity used to validate cache files."""
@@ -344,6 +353,42 @@ class SearchResultStore:
             self.last_snapshot_id = None
             self.last_dataset_identity = None
             return []
+        self.last_error = None
+        self.last_snapshot_id = full["snapshot_id"]
+        self.last_dataset_identity = {
+            "label": current_label,
+            "fingerprint": current_fingerprint,
+        }
+        return full["results"]
+
+    def _load_full_for_snapshot(self, expected_snapshot_id: str) -> list:
+        def _reject(error: str | None) -> list:
+            self.last_error = error
+            self.last_snapshot_id = None
+            self.last_dataset_identity = None
+            return []
+
+        if not isinstance(expected_snapshot_id, str) or not _SAFE_SNAPSHOT_ID.fullmatch(
+            expected_snapshot_id
+        ):
+            return _reject("expected search snapshot id is invalid")
+        if not self.full_path.is_file():
+            return _reject(None)
+        try:
+            current_label, current_fingerprint = self._dataset_identity()
+        except DatasetManifestError as exc:
+            return _reject(str(exc))
+        full, error = self._read_envelope(
+            self.full_path,
+            current_label,
+            current_fingerprint,
+        )
+        if full is None:
+            return _reject(error)
+        if full["snapshot_id"].lower() != expected_snapshot_id.lower():
+            return _reject(
+                "full search cache belongs to a different snapshot than the active view"
+            )
         self.last_error = None
         self.last_snapshot_id = full["snapshot_id"]
         self.last_dataset_identity = {

@@ -205,15 +205,22 @@ class StudioApplication:
                 )
 
             if operation == "sync.bootstrap":
-                self._require_input_keys(values)
+                self._require_input_keys(values, allowed={"includeAppUpdate"})
+                include_app_update = values.get("includeAppUpdate", True)
+                if not isinstance(include_app_update, bool):
+                    raise StudioApplicationError(
+                        "INVALID_ARGUMENT", "includeAppUpdate는 true/false여야 합니다"
+                    )
                 data = {
                     "eventEpoch": self._event_epoch,
                     "description": self.describe(context),
                     "runtime": self._runtime_snapshot(context),
                     "generationApi": self._generation_api_snapshot(context),
-                    "appUpdate": self._app_update_snapshot(context),
                     "modelPaths": self._model_paths_snapshot(context),
                 }
+                # 앱 업데이트 스냅샷은 git 을 실행한다 — 쓰지 않는 호출자(Settings)는 뺄 수 있다.
+                if include_app_update:
+                    data["appUpdate"] = self._app_update_snapshot(context)
                 return self._reply(request_id, "ok", data=data)
 
             if operation == "runtime.snapshot":
@@ -681,59 +688,69 @@ class StudioApplication:
         startup = bool(payload.get("startup", False))
 
         def work_body() -> None:
-            manager = self._get_runtime_manager()
-            started_snapshot = self._safe_runtime_snapshot()
-            self._publish(
-                topic="runtime.operation",
-                event_type="started",
-                operation="runtime.execute",
-                job_id=job_id,
-                request_id=request_id,
-                data={
-                    "engine": engine,
-                    "action": action,
-                    "snapshot": started_snapshot,
-                },
-            )
-            self._notify_runtime_host({
-                "engine": engine,
-                "type": "started",
-                "action": action,
-                "operationId": job_id,
-                "message": f"{engine} {action} 작업을 시작했습니다.",
-                "startup": startup,
-                "snapshot": started_snapshot,
-                "state": self._runtime_engine_state(started_snapshot, engine),
-            })
-
-            def progress(update: Any) -> None:
-                data = dict(update) if isinstance(update, Mapping) else {"message": str(update)}
-                snapshot = self._safe_runtime_snapshot()
+            # manager 획득·started 발행도 안쪽 try 에 둔다 — 초기화 실패도 error 이벤트가 된다.
+            try:
+                manager = self._get_runtime_manager()
+                started_snapshot = self._safe_runtime_snapshot()
                 self._publish(
                     topic="runtime.operation",
-                    event_type="progress",
+                    event_type="started",
                     operation="runtime.execute",
                     job_id=job_id,
                     request_id=request_id,
                     data={
                         "engine": engine,
                         "action": action,
-                        "update": data,
-                        "snapshot": snapshot,
+                        "snapshot": started_snapshot,
                     },
                 )
-                self._notify_runtime_host({
-                    **copy.deepcopy(data),
-                    "engine": engine,
-                    "type": "progress",
-                    "action": action,
-                    "operationId": job_id,
-                    "startup": startup,
-                    "snapshot": snapshot,
-                    "state": self._runtime_engine_state(snapshot, engine),
-                })
+                # 데스크톱 host 는 started/progress 를 시작 자동기동(startup) 안내에만 쓴다
+                # (generator_main._on_backend_runtime_event) — 그 밖엔 보내지 않는다.
+                if startup:
+                    self._notify_runtime_host({
+                        "engine": engine,
+                        "type": "started",
+                        "action": action,
+                        "operationId": job_id,
+                        "message": f"{engine} {action} 작업을 시작했습니다.",
+                        "startup": startup,
+                        "snapshot": started_snapshot,
+                        "state": self._runtime_engine_state(started_snapshot, engine),
+                    })
+                from core.progress_snapshot_gate import ProgressSnapshotGate
 
-            try:
+                progress_snapshot = ProgressSnapshotGate()
+
+                def progress(update: Any) -> None:
+                    data = dict(update) if isinstance(update, Mapping) else {"message": str(update)}
+                    event_data: dict[str, Any] = {
+                        "engine": engine,
+                        "action": action,
+                        "update": data,
+                    }
+                    # 스냅샷(엔진 전체 스캔, 약 20ms)은 단계가 바뀔 때나 2초에 한 번만 싣는다.
+                    # 명령 출력(0.2초 간격)·health 루프마다 새로 계산하던 것이 비용과 journal
+                    # 메모리의 대부분이었다. Settings 는 스냅샷 없는 progress 도 처리한다.
+                    if progress_snapshot.due(data):
+                        event_data["snapshot"] = self._safe_runtime_snapshot()
+                    self._publish(
+                        topic="runtime.operation",
+                        event_type="progress",
+                        operation="runtime.execute",
+                        job_id=job_id,
+                        request_id=request_id,
+                        data=event_data,
+                    )
+                    if startup:
+                        self._notify_runtime_host({
+                            **copy.deepcopy(data),
+                            "engine": engine,
+                            "type": "progress",
+                            "action": action,
+                            "operationId": job_id,
+                            "startup": startup,
+                        })
+
                 result = manager.execute(engine, action, payload, on_progress=progress)
                 if isinstance(result, Mapping) and result.get("ok") is False:
                     raise StudioApplicationError(
@@ -812,20 +829,14 @@ class StudioApplication:
             try:
                 work_body()
             except Exception as exc:
-                error = self._normalise_error(exc, context)
-                snapshot = self._safe_runtime_snapshot()
-                self._publish(
+                error = self._report_job_failure(
                     topic="runtime.operation",
-                    event_type="error",
                     operation="runtime.execute",
                     job_id=job_id,
                     request_id=request_id,
-                    data={
-                        "engine": engine,
-                        "action": action,
-                        "error": error.as_dict(),
-                        "snapshot": snapshot,
-                    },
+                    context=context,
+                    exc=exc,
+                    data={"engine": engine, "action": action},
                 )
                 self._notify_runtime_host({
                     "engine": engine,
@@ -834,40 +845,22 @@ class StudioApplication:
                     "operationId": job_id,
                     "ok": False,
                     "result": {},
-                    "error": error.as_dict(),
-                    "message": error.message,
+                    "error": error,
+                    "message": str(error.get("message") or ""),
                     "startup": startup,
                     "activate": False,
-                    "state": self._runtime_engine_state(snapshot, engine),
-                    "snapshot": snapshot,
+                    "state": {},
                 })
 
-        release_worker = self._launch_worker(f"studio-runtime-{engine}-{action}", work)
-        try:
-            accepted = self._publish(
-                topic="runtime.operation",
-                event_type="accepted",
-                operation="runtime.execute",
-                job_id=job_id,
-                request_id=request_id,
-                data={"engine": engine, "action": action},
-            )
-        except Exception:
-            release_worker(False)
-            raise
-        release_worker(True)
-        reply = self._reply(
-            request_id,
-            "accepted",
-            data={"jobId": job_id, "topic": "runtime.operation"},
-            seq=accepted["seq"],
+        return self._accept_job(
+            topic="runtime.operation",
+            operation="runtime.execute",
+            job_id=job_id,
+            request_id=request_id,
+            worker_name=f"studio-runtime-{engine}-{action}",
+            work=work,
+            accepted_data={"engine": engine, "action": action},
         )
-        reply["job"] = {
-            "id": job_id,
-            "operation": "runtime.execute",
-            "state": "queued",
-        }
-        return reply
 
     @staticmethod
     def _runtime_engine_state(snapshot: Mapping[str, Any], engine: str) -> dict[str, Any]:
@@ -913,16 +906,17 @@ class StudioApplication:
             self._generation_job_id = job_id
 
         def work_body() -> None:
-            manager = self._get_generation_api_manager()
-            self._publish(
-                topic="generation_api.operation",
-                event_type="started",
-                operation="generation_api.execute",
-                job_id=job_id,
-                request_id=request_id,
-                data={"action": action, "snapshot": self._safe_generation_snapshot(True)},
-            )
+            # manager 획득·started 발행도 안쪽 try 에 둔다 — 초기화 실패도 error 이벤트가 된다.
             try:
+                manager = self._get_generation_api_manager()
+                self._publish(
+                    topic="generation_api.operation",
+                    event_type="started",
+                    operation="generation_api.execute",
+                    job_id=job_id,
+                    request_id=request_id,
+                    data={"action": action, "snapshot": self._safe_generation_snapshot(True)},
+                )
                 result = manager.execute(action, payload)
                 if isinstance(result, Mapping) and result.get("ok") is False:
                     raise StudioApplicationError(
@@ -961,55 +955,28 @@ class StudioApplication:
             try:
                 work_body()
             except Exception as exc:
-                error = self._normalise_error(exc, context)
-                self._publish(
+                self._report_job_failure(
                     topic="generation_api.operation",
-                    event_type="error",
                     operation="generation_api.execute",
                     job_id=job_id,
                     request_id=request_id,
-                    data={
-                        "action": action,
-                        "error": error.as_dict(),
-                        "snapshot": self._safe_generation_snapshot(True),
-                    },
+                    context=context,
+                    exc=exc,
+                    data={"action": action},
                 )
             finally:
                 self._release_generation_job(job_id)
 
-        try:
-            release_worker = self._launch_worker(
-                f"studio-generation-api-{action}", work
-            )
-        except Exception:
-            self._release_generation_job(job_id)
-            raise
-        try:
-            accepted = self._publish(
-                topic="generation_api.operation",
-                event_type="accepted",
-                operation="generation_api.execute",
-                job_id=job_id,
-                request_id=request_id,
-                data={"action": action},
-            )
-        except Exception:
-            release_worker(False)
-            self._release_generation_job(job_id)
-            raise
-        release_worker(True)
-        reply = self._reply(
-            request_id,
-            "accepted",
-            data={"jobId": job_id, "topic": "generation_api.operation"},
-            seq=accepted["seq"],
+        return self._accept_job(
+            topic="generation_api.operation",
+            operation="generation_api.execute",
+            job_id=job_id,
+            request_id=request_id,
+            worker_name=f"studio-generation-api-{action}",
+            work=work,
+            accepted_data={"action": action},
+            release_lock=lambda: self._release_generation_job(job_id),
         )
-        reply["job"] = {
-            "id": job_id,
-            "operation": "generation_api.execute",
-            "state": "queued",
-        }
-        return reply
 
     def _release_generation_job(self, job_id: str) -> None:
         with self._generation_job_lock:
@@ -1036,32 +1003,37 @@ class StudioApplication:
             self._app_update_job_id = job_id
 
         def work_body() -> None:
-            manager = self._get_app_update_manager()
-            self._publish(
-                topic="app_update.operation",
-                event_type="started",
-                operation="app_update.execute",
-                job_id=job_id,
-                request_id=request_id,
-                data={"action": action, "snapshot": self._safe_app_update_snapshot()},
-            )
-
-            def progress(update: Any) -> None:
-                data = dict(update) if isinstance(update, Mapping) else {"message": str(update)}
+            # manager 획득·started 발행도 안쪽 try 에 둔다 — 초기화 실패도 error 이벤트가 된다.
+            try:
+                manager = self._get_app_update_manager()
                 self._publish(
                     topic="app_update.operation",
-                    event_type="progress",
+                    event_type="started",
                     operation="app_update.execute",
                     job_id=job_id,
                     request_id=request_id,
-                    data={
-                        "action": action,
-                        "update": data,
-                        "snapshot": self._safe_app_update_snapshot(),
-                    },
+                    data={"action": action, "snapshot": self._safe_app_update_snapshot()},
                 )
 
-            try:
+                from core.progress_snapshot_gate import ProgressSnapshotGate
+
+                progress_snapshot = ProgressSnapshotGate()
+
+                def progress(update: Any) -> None:
+                    data = dict(update) if isinstance(update, Mapping) else {"message": str(update)}
+                    event_data: dict[str, Any] = {"action": action, "update": data}
+                    # 업데이트 스냅샷은 git 을 실행한다 — 단계가 바뀔 때만 다시 싣는다.
+                    if progress_snapshot.due(data):
+                        event_data["snapshot"] = self._safe_app_update_snapshot()
+                    self._publish(
+                        topic="app_update.operation",
+                        event_type="progress",
+                        operation="app_update.execute",
+                        job_id=job_id,
+                        request_id=request_id,
+                        data=event_data,
+                    )
+
                 result = manager.execute(action, payload, on_progress=progress)
                 if isinstance(result, Mapping) and result.get("ok") is False:
                     raise StudioApplicationError(
@@ -1099,53 +1071,28 @@ class StudioApplication:
             try:
                 work_body()
             except Exception as exc:
-                error = self._normalise_error(exc, context)
-                self._publish(
+                self._report_job_failure(
                     topic="app_update.operation",
-                    event_type="error",
                     operation="app_update.execute",
                     job_id=job_id,
                     request_id=request_id,
-                    data={
-                        "action": action,
-                        "error": error.as_dict(),
-                        "snapshot": self._safe_app_update_snapshot(),
-                    },
+                    context=context,
+                    exc=exc,
+                    data={"action": action},
                 )
             finally:
                 self._release_app_update_job(job_id)
 
-        try:
-            release_worker = self._launch_worker(f"studio-app-update-{action}", work)
-        except Exception:
-            self._release_app_update_job(job_id)
-            raise
-        try:
-            accepted = self._publish(
-                topic="app_update.operation",
-                event_type="accepted",
-                operation="app_update.execute",
-                job_id=job_id,
-                request_id=request_id,
-                data={"action": action},
-            )
-        except Exception:
-            release_worker(False)
-            self._release_app_update_job(job_id)
-            raise
-        release_worker(True)
-        reply = self._reply(
-            request_id,
-            "accepted",
-            data={"jobId": job_id, "topic": "app_update.operation"},
-            seq=accepted["seq"],
+        return self._accept_job(
+            topic="app_update.operation",
+            operation="app_update.execute",
+            job_id=job_id,
+            request_id=request_id,
+            worker_name=f"studio-app-update-{action}",
+            work=work,
+            accepted_data={"action": action},
+            release_lock=lambda: self._release_app_update_job(job_id),
         )
-        reply["job"] = {
-            "id": job_id,
-            "operation": "app_update.execute",
-            "state": "queued",
-        }
-        return reply
 
     def _release_app_update_job(self, job_id: str) -> None:
         with self._app_update_job_lock:
@@ -1161,6 +1108,92 @@ class StudioApplication:
             callback(copy.deepcopy(dict(result)))
         except Exception:
             logger.exception("Studio app update restart callback failed")
+
+    def _accept_job(
+        self,
+        *,
+        topic: str,
+        operation: str,
+        job_id: str,
+        request_id: str,
+        worker_name: str,
+        work: Callable[[], None],
+        accepted_data: Mapping[str, Any],
+        release_lock: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """세 작업(runtime·generation API·app update)이 공유하는 접수 꼬리.
+
+        워커를 게이트 뒤에 띄우고 ``accepted`` 를 발행한 뒤에야 풀어 준다 — 이벤트 순서가
+        accepted → started → … 로 보장된다. 실패하면 워커를 취소하고 작업 락을 푼다.
+        """
+        try:
+            release_worker = self._launch_worker(worker_name, work)
+        except Exception:
+            if release_lock is not None:
+                release_lock()
+            raise
+        try:
+            accepted = self._publish(
+                topic=topic,
+                event_type="accepted",
+                operation=operation,
+                job_id=job_id,
+                request_id=request_id,
+                data=dict(accepted_data),
+            )
+        except Exception:
+            release_worker(False)
+            if release_lock is not None:
+                release_lock()
+            raise
+        release_worker(True)
+        reply = self._reply(
+            request_id,
+            "accepted",
+            data={"jobId": job_id, "topic": topic},
+            seq=accepted["seq"],
+        )
+        reply["job"] = {
+            "id": job_id,
+            "operation": operation,
+            "state": "queued",
+        }
+        return reply
+
+    def _report_job_failure(
+        self,
+        *,
+        topic: str,
+        operation: str,
+        job_id: str,
+        request_id: str,
+        context: CallContext,
+        exc: BaseException,
+        data: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """work 본문이 실패를 error 이벤트로 바꾸는 것까지 실패했을 때의 최후 방어.
+
+        본문은 manager 획득부터 모든 예외를 스스로 error 로 보고한다. 여기 오는 것은 그 보고
+        (스냅샷 계산·발행·host 통보) 자체가 깨진 경우뿐이므로, 스냅샷 없이 error 한 번만
+        시도해 UI busy 가 풀릴 기회를 남기고 로그를 남긴다.
+        """
+        logger.exception("Studio %s job %s failed while reporting its outcome", operation, job_id)
+        try:
+            error = self._normalise_error(exc, context).as_dict()
+        except Exception:
+            error = {"code": "INTERNAL", "message": "작업을 완료하지 못했습니다", "retryable": False}
+        try:
+            self._publish(
+                topic=topic,
+                event_type="error",
+                operation=operation,
+                job_id=job_id,
+                request_id=request_id,
+                data={**dict(data), "error": error},
+            )
+        except Exception:
+            logger.exception("Studio %s job %s could not publish its failure", operation, job_id)
+        return error
 
     def _launch_worker(
         self, name: str, target: Callable[[], None]

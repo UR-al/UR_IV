@@ -35,7 +35,7 @@
             <span v-else>{{ videoForm.mode === 'i2v' ? 'SOURCE IMAGE' : 'SOURCE VIDEO' }}</span>
           </div>
           <div class="slot-info"><b>{{ videoForm.mode.toUpperCase() }} SOURCE</b><small>{{ videoForm.sourcePath || 'No media selected' }}</small></div>
-          <button class="secondary-button" @click="pickMedia('video_source')">선택</button>
+          <button class="secondary-button" v-host-dialog="'creator_select_media'" @click="pickMedia('video_source')">선택</button>
           <button v-if="videoForm.sourcePath" class="icon-button" title="Clear" @click="videoForm.sourcePath = ''">×</button>
         </div>
 
@@ -45,7 +45,7 @@
             <span v-else>아이덴티티</span>
           </div>
           <div class="slot-info"><b>아이덴티티 참조</b><small>{{ videoForm.identityPath || 'Optional character reference' }}</small></div>
-          <button class="secondary-button" @click="pickMedia('video_identity')">선택</button>
+          <button class="secondary-button" v-host-dialog="'creator_select_media'" @click="pickMedia('video_identity')">선택</button>
           <button v-if="videoForm.identityPath" class="icon-button" title="Clear" @click="videoForm.identityPath = ''">×</button>
         </div>
 
@@ -88,12 +88,12 @@
           <textarea v-model="kreaForm.prompt" rows="6" placeholder="Describe the desired edit while preserving identity..." />
         </label>
         <div class="dual-media">
-          <button class="media-tile" @click="pickMedia('krea_source')">
+          <button class="media-tile" v-host-dialog="'creator_select_media'" @click="pickMedia('krea_source')">
             <img v-if="kreaForm.sourcePath" :src="displayMedia(kreaForm.sourcePath)" alt="Source" />
             <span v-else class="media-empty">＋<small>원본 이미지</small></span>
             <b>원본</b><small>{{ basename(kreaForm.sourcePath) || 'Select image' }}</small>
           </button>
-          <button class="media-tile" @click="pickMedia('krea_reference')">
+          <button class="media-tile" v-host-dialog="'creator_select_media'" @click="pickMedia('krea_reference')">
             <img v-if="kreaForm.referencePath" :src="displayMedia(kreaForm.referencePath)" alt="Identity reference" />
             <span v-else class="media-empty">＋<small>아이덴티티 참조</small></span>
             <b>참조</b><small>{{ basename(kreaForm.referencePath) || 'Select image' }}</small>
@@ -205,7 +205,7 @@
             <video v-if="selectedPanel.videoPath" :src="displayMedia(selectedPanel.videoPath)" muted autoplay loop controls />
             <img v-else-if="selectedPanel.imagePath" :src="displayMedia(selectedPanel.imagePath)" alt="Selected panel" />
             <span v-else>이미지 없음</span>
-            <button @click="pickMedia(`comic_panel_${selectedPanel.id}`)">이미지 선택</button>
+            <button v-host-dialog="'creator_select_media'" @click="pickMedia(`comic_panel_${selectedPanel.id}`)">이미지 선택</button>
           </div>
           <label class="field wide"><span>프롬프트</span><textarea v-model="selectedPanel.prompt" rows="5" /></label>
           <label class="field wide"><span>네거티브</span><textarea v-model="selectedPanel.negative" rows="3" /></label>
@@ -239,6 +239,7 @@
 import { computed, defineComponent, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import { vHostDialog } from '../utils/hostDialogs'
 import {
   createComicRecoveryMirror,
   parseComicRecovery,
@@ -340,7 +341,10 @@ const STATE_LABELS: Record<string, string> = {
   idle: '대기', ready: '준비됨', busy: '작업 중', offline: '연결 안 됨', error: '오류',
 }
 const stateLabel = computed(() => {
-  if (creatorState.value.status === 'error') return creatorState.value.message || '백엔드 오류'
+  // 백엔드는 원인을 `error` 키로 보낸다(빈 문자열일 수 있어 ?? 대신 ||).
+  if (creatorState.value.status === 'error') {
+    return creatorState.value.error || creatorState.value.message || '백엔드 오류'
+  }
   if (creatorState.value.busy || progress.value.visible) return '작업 중'
   if (creatorState.value.ready) return '준비됨'
   const raw = String(creatorState.value.status || 'offline').toLowerCase()
@@ -511,7 +515,10 @@ function generateVideo() {
   const form = videoForm.value
   requestAction('creator_generate', {
     mode: `h3_${form.mode}`, prompt: form.prompt.trim(), negative: form.negative.trim(),
-    sourcePath: form.sourcePath, identityPath: form.identityPath,
+    // 보이는 슬롯만 보낸다 — 원본은 t2v 에서 숨고, 아이덴티티는 v2v 전용(i2v 에 남은 사진이
+    // 시작 프레임을 덮지 않게; 백엔드도 mode 가 읽지 않는 입력은 올리지 않는다).
+    sourcePath: form.mode === 't2v' ? '' : form.sourcePath,
+    identityPath: form.mode === 'v2v' ? form.identityPath : '',
     width: Math.max(64, Math.round(form.width / 32) * 32),
     height: Math.max(64, Math.round(form.height / 32) * 32),
     frames: Math.round(form.frames), fps: Math.round(form.fps), seed: Math.round(form.seed),

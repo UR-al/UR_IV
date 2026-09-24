@@ -24,11 +24,25 @@ CONFIG_EXPORT_FILES = (
     "char_global_prefs.json",
     "backend_runtime.json",
     "forge_model_paths.json",
+    # 사용자가 작성한 대화/보조/스키마 지침 프리셋(core.instruction_presets). gitignore 로
+    # 저장소에서 빠지므로 백업이 유일한 사본이다.
+    "instruction_presets.json",
+    # ComfyUI 워크플로 컨트롤 편집·품질 프리셋·호환성 기준선 — 사용자가 만든 값(gitignore).
+    "comfy_workflow_controls.json",
+    "comfy_quality_preset.json",
+    "comfy_compatibility_baselines.json",
 )
-CONFIG_IMPORT_FILES = frozenset((*CONFIG_EXPORT_FILES, "gallery_last_folder.txt"))
+#: 크기가 클 수 있어(스레드당 이미지 ~6MB) 사용자가 고를 때만 내보내는 파일.
+OPTIONAL_CONFIG_EXPORT_FILES = (
+    "chat_threads.json",
+)
+CONFIG_IMPORT_FILES = frozenset((
+    *CONFIG_EXPORT_FILES, *OPTIONAL_CONFIG_EXPORT_FILES, "gallery_last_folder.txt",
+))
+# user_data/prompt_presets.json 은 빠졌다 — 생성 프리셋은 presets/ 폴더(core.generation_presets)가
+# 주인이고 그 파일은 어디서도 읽지 않는다(audit #179).
 USER_FILES = (
     "character_presets.json",
-    "prompt_presets.json",
     "prompt_history.json",
     "favorite_tags.json",
     "favorites.json",
@@ -151,11 +165,14 @@ def export_settings_archive(
     destination: str | os.PathLike[str],
     *,
     project_root: str | os.PathLike[str] = PROJECT_ROOT,
+    include_chat: bool = False,
 ) -> int:
+    """설정·사용자 데이터를 ZIP 으로. include_chat 이면 대화 기록(chat_threads.json)도 담는다."""
     root = Path(project_root).expanduser().resolve(strict=False)
     exported = 0
+    config_files = CONFIG_EXPORT_FILES + (OPTIONAL_CONFIG_EXPORT_FILES if include_chat else ())
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
-        for filename in CONFIG_EXPORT_FILES:
+        for filename in config_files:
             source = root / "config" / filename
             resolved = source.resolve(strict=False)
             if (
@@ -181,6 +198,19 @@ def export_settings_archive(
                 archive.write(source, archive_name)
                 exported += 1
     return exported
+
+
+#: 게시 전에 손보는 복원 항목. 조건식은 가져온 시각을 updatedAt 으로 찍는다 — 백업 안의 시각(내보낸
+#: 때, 옛 백업은 없음)을 그대로 두면 그 뒤에 편집한 브라우저 캐시(localStorage)가 재시작 부팅에서 더
+#: 최신으로 판정돼 가져온 규칙을 조용히 되덮었다(core/cond_rules_store.py, condRulesSource.ts).
+COND_RULES_ARCHIVE_NAME = "config/cond_rules.json"
+
+
+def _prepare_staged_entry(archive_name: str, staged_path: Path) -> None:
+    if archive_name == COND_RULES_ARCHIVE_NAME:
+        from core.cond_rules_store import stamp_cond_rules_file
+
+        stamp_cond_rules_file(str(staged_path))
 
 
 def import_settings_archive(
@@ -245,6 +275,7 @@ def import_settings_archive(
                             dst.write(chunk)
                         dst.flush()
                         os.fsync(dst.fileno())
+                    _prepare_staged_entry(checked.archive_name, temporary)
                     staged.append((temporary, checked))
                 except Exception:
                     temporary.unlink(missing_ok=True)
@@ -264,6 +295,9 @@ def import_settings_archive(
 
 
 __all__ = [
+    "CONFIG_EXPORT_FILES",
+    "OPTIONAL_CONFIG_EXPORT_FILES",
+    "USER_FILES",
     "MAX_BACKUP_FILE_BYTES",
     "MAX_BACKUP_TOTAL_BYTES",
     "SettingsBackupError",

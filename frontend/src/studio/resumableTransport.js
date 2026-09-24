@@ -485,8 +485,12 @@ export class ResumableStudioTransport {
   }
 }
 
-export function selectStudioClient(transport, createNative, createLegacy) {
-  return transport == null ? createLegacy() : createNative(transport)
+/**
+ * studio transport 가 있으면 native 클라이언트, 없으면(목 모드) 아무것도 지원하지 않는 클라이언트.
+ * native handshake 실패는 그대로 전파한다 — 조용히 다른 경로로 떨어지지 않는다(fail closed).
+ */
+export function selectStudioClient(transport, createNative, createUnavailable) {
+  return transport == null ? createUnavailable() : createNative(transport)
 }
 
 export async function recoverExpiredCursor({

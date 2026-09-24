@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 try:
     from ui.vue_bridge import VueBridge
@@ -36,11 +35,21 @@ class _SnapshotManager:
 
 @unittest.skipIf(VueBridge is None, f"PyQt6 unavailable: {_IMPORT_ERROR}")
 class GenerationApiBridgeSecurityTests(unittest.TestCase):
-    def test_web_snapshot_redacts_token_remote_url_and_workflow_paths(self):
-        bridge = VueBridge()
-        bridge._backend_runtime_is_web_mode = lambda: True
-        with patch("core.generation_api.get_generation_api_manager", return_value=_SnapshotManager()):
-            snapshot = bridge._generation_api_public_snapshot()
+    def test_bridge_has_no_unredacted_generation_api_slots(self):
+        """생성 API 는 Studio Interface(core/studio_application.py)만 노출한다 — 예전 VueBridge
+        레거시 슬롯은 도달 불가라 제거했다(audit #176). 되살아나면 redaction 이 두 벌이 된다."""
+        for name in ("getGenerationApiState", "runGenerationApiOperation",
+                     "_generation_api_public_snapshot", "generationApiEvent"):
+            self.assertFalse(hasattr(VueBridge, name), name)
+
+    def test_web_studio_snapshot_redacts_token_remote_url_and_workflow_paths(self):
+        from core.studio_application import CallContext, StudioApplication
+
+        app = StudioApplication(generation_api_manager=_SnapshotManager())
+        web = CallContext("browser", "websocket", frozenset())
+        reply = app.invoke(web, {"version": 1, "requestId": "r1",
+                                 "operation": "generation_api.snapshot", "input": {}})
+        snapshot = reply["data"]
         target = snapshot["config"]["targets"][0]
         self.assertNotIn("token", snapshot["config"])
         self.assertNotIn("url", target)

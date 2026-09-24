@@ -11,10 +11,13 @@ import unittest
 
 from core.cache_cleanup import (
     SHARD_PREFIX_LEN,
-    migrate_flat_to_sharded,
     prune_by_total_size,
     prune_editor_temp,
+    read_thumb_signature,
     shard_path,
+    source_signature,
+    thumb_is_stale,
+    thumb_signature_comment,
 )
 
 
@@ -45,6 +48,47 @@ class TestShardPath(_TmpDir):
 
     def test_short_digest_does_not_crash(self):
         self.assertTrue(shard_path('/base', '', '.jpg').endswith('.jpg'))
+
+
+class TestThumbIsStale(_TmpDir):
+    """캐시 키가 경로@폭이라, 원본이 덮어써져도 옛 썸네일이 계속 나왔다."""
+
+    def test_missing_thumb_is_stale(self):
+        src = self._touch('a.png')
+        self.assertTrue(thumb_is_stale(src, os.path.join(self.dir, 'thumb.jpg')))
+
+    def _stamped_thumb(self, src, name='thumb.jpg'):
+        """원본 서명을 주석에 담은 썸네일 JPEG(렌더러가 쓰는 모양)."""
+        from PIL import Image
+        path = os.path.join(self.dir, name)
+        Image.new('RGB', (4, 4)).save(path, 'JPEG', comment=thumb_signature_comment(source_signature(src)))
+        return path
+
+    def test_overwritten_source_makes_thumb_stale(self):
+        src = self._touch('a.png', age_hours=2)
+        thumb = self._stamped_thumb(src)
+        self.assertEqual(read_thumb_signature(thumb), source_signature(src))
+        self.assertFalse(thumb_is_stale(src, thumb))
+        self._touch('a.png')   # 에디터 '저장'이 사본을 갱신했다
+        self.assertTrue(thumb_is_stale(src, thumb))
+
+    def test_source_replaced_by_an_older_file_is_stale(self):
+        # copy2·탐색기 덮어쓰기는 원본 mtime 을 유지한다 — 썸네일보다 옛 mtime 이어도 다른 파일이다
+        src = self._touch('a.png', size=16)
+        thumb = self._stamped_thumb(src)
+        self._touch('a.png', size=32, age_hours=48)
+        self.assertLess(os.stat(src).st_mtime_ns, os.stat(thumb).st_mtime_ns)
+        self.assertTrue(thumb_is_stale(src, thumb))
+
+    def test_thumb_without_a_signature_is_rebuilt_once(self):
+        # 서명이 없는 예전 썸네일(순서 비교 시절)이나 깨진 파일은 다시 만든다
+        src = self._touch('a.png', age_hours=2)
+        self.assertTrue(thumb_is_stale(src, self._touch('legacy.jpg')))
+        self.assertIsNone(read_thumb_signature(self._touch('junk.jpg')))
+
+    def test_missing_source_keeps_existing_thumb(self):
+        thumb = self._touch('thumb.jpg')
+        self.assertFalse(thumb_is_stale(os.path.join(self.dir, 'gone.png'), thumb))
 
 
 class TestPruneEditorTemp(_TmpDir):
@@ -118,30 +162,8 @@ class TestPruneBySize(_TmpDir):
         self.assertGreaterEqual(removed, 3)
 
 
-class TestMigrate(_TmpDir):
-    def test_moves_flat_files_into_shards(self):
-        names = ['aabbcc.jpg', 'aaddee.jpg', 'ffgghh.jpg']
-        for n in names:
-            self._touch(n)
-        moved = migrate_flat_to_sharded(self.dir)
-        self.assertEqual(moved, 3)
-        self.assertTrue(os.path.exists(os.path.join(self.dir, 'aa', 'aabbcc.jpg')))
-        self.assertTrue(os.path.exists(os.path.join(self.dir, 'aa', 'aaddee.jpg')))
-        self.assertTrue(os.path.exists(os.path.join(self.dir, 'ff', 'ffgghh.jpg')))
-        # 평면 위치에는 더 이상 없어야 한다
-        self.assertFalse(os.path.exists(os.path.join(self.dir, 'aabbcc.jpg')))
-
-    def test_already_sharded_is_noop(self):
-        self._touch(os.path.join('aa', 'aabbcc.jpg'))
-        self.assertEqual(migrate_flat_to_sharded(self.dir), 0)
-
-    def test_respects_limit(self):
-        for i in range(10):
-            self._touch(f'{i:02d}aaaa.jpg')
-        self.assertEqual(migrate_flat_to_sharded(self.dir, limit=4), 4)
-
-    def test_missing_dir_is_safe(self):
-        self.assertEqual(migrate_flat_to_sharded(os.path.join(self.dir, 'nope')), 0)
+# (평면→샤드 이관 migrate_flat_to_sharded 와 그 테스트는 은퇴했다 — 캐시는 처음부터 샤딩된
+#  image_cache/thumbs_v2 를 쓰고, 옛 폴더 정리는 tests/test_legacy_thumb_cache.py 가 검증한다.)
 
 
 if __name__ == '__main__':

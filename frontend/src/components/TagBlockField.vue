@@ -13,13 +13,14 @@
         <div class="tbf-drop-marker" v-if="dropIdx === ti && draggingFrom !== ti"></div>
         <!-- 편집 모드 -->
         <input v-if="editIdx === ti" class="tbf-edit" v-model="editText"
-          @blur="finishEdit(ti)" @keydown.enter="finishEdit(ti)" @keydown.escape="editIdx = -1"
+          @blur="finishEdit(ti)" @keydown.enter="onEditEnter($event, ti)" @keydown.escape="editIdx = -1"
           ref="editInputRef" />
-        <!-- 블록 -->
+        <!-- 블록 — 클릭: 편집(와일드카드는 관리자 열기) · 우클릭: 삭제 · 끌기: 순서 변경.
+             (옛 '더블클릭 비활성화'는 일반 더블클릭으로 닿지 않고 수식키+더블클릭이면 태그가
+              지워지는 상태라 제거했다.) -->
         <button v-else class="tbf-block" draggable="true"
-          :class="[colorClass(tb.text), { disabled: tb.off, wildcard: isWc(tb.text) }]"
+          :class="[colorClass(tb.text), { wildcard: isWc(tb.text) }]"
           @click.exact="startEdit(ti)"
-          @dblclick="toggleBlock(ti)"
           @contextmenu.prevent="removeBlock(ti)"
           @dragstart="onDragStart(ti)" @dragend="draggingFrom = -1">
           <span class="wc-ico" v-if="isWc(tb.text)"><Icon name="dice" /></span>
@@ -30,14 +31,14 @@
       <div class="tbf-drop-marker" v-if="dropIdx === blocks.length"></div>
       <!-- 추가 입력 -->
       <div class="tbf-add-wrap">
-        <input class="tbf-add" v-model="newTag" :placeholder="placeholder"
+        <input ref="addInputRef" class="tbf-add" v-model="newTag" :placeholder="placeholder"
           @input="onAddInput"
           @keydown="onAddKey"
-          @blur="acItems = []" />
+          @blur="ac.close()" />
         <div class="ac-popup-block" v-if="acItems.length > 0">
-          <div v-for="(tag, i) in acItems" :key="tag" class="ac-item"
+          <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item"
             :class="{ selected: acIdx === i }"
-            @mousedown.prevent="acceptSuggestion(tag)">{{ tag.replace(/_/g, ' ') }}</div>
+            @mousedown.prevent="acceptSuggestion(item.tag)">{{ item.tag.replace(/_/g, ' ') }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
         </div>
       </div>
     </div>
@@ -45,12 +46,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
-import { getBackend } from '../bridge.js'
+import { ref, nextTick, watch, onUnmounted } from 'vue'
+import { useTagAutocomplete } from '../composables/useTagAutocomplete'
+import { isImeComposing } from '../utils/imeComposition'
 
 interface TagBlock {
   text: string
-  off: boolean
 }
 
 const props = withDefaults(defineProps<{
@@ -86,31 +87,26 @@ function parseText(text: string): TagBlock[] {
     p += (ch === ',' && depth > 0) ? '\x01' : ch
   }
   p = p.replace(/__([^_]+)__/g, m => m.replace(/,/g, '\x01'))
-  return p.split(',').map(t => t.trim().replace(/\x01/g, ',')).filter(Boolean).map(t => ({ text: t, off: false }))
+  return p.split(',').map(t => t.trim().replace(/\x01/g, ',')).filter(Boolean).map(t => ({ text: t }))
 }
 
 function syncToModel() {
-  emit('update:modelValue', blocks.value.filter(b => !b.off).map(b => b.text).join(', '))
+  emit('update:modelValue', blocks.value.map(b => b.text).join(', '))
 }
 
 watch(() => props.modelValue, (v: string) => {
-  const newBlocks = parseText(v)
-  const offSet = new Set(blocks.value.filter(b => b.off).map(b => b.text))
-  blocks.value = newBlocks.map(b => ({ ...b, off: offSet.has(b.text) }))
+  blocks.value = parseText(v)
 }, { immediate: true })
 
 // 블록 조작
-function toggleBlock(idx: number) {
-  blocks.value[idx].off = !blocks.value[idx].off
-  syncToModel()
-}
-
 function clearAllBlocks() {
-  // 전체 블록 삭제 — Ctrl+Z로 복구 가능 (PromptPanel의 undoStack이 widget 변경 추적)
+  // 전체 블록 삭제 — Ctrl+Z로 복구 가능 (PromptPanel의 undoStack이 widget 변경 추적).
+  // 이 버튼은 v-if 로 사라져 포커스가 body 로 떨어지는데, 그것도 패널 Undo 범위다
+  // (utils/promptUndoKeys 'unfocused'). 500ms debounce 전에 눌러도 Undo 가 먼저 확정한다(usePromptUndo).
   blocks.value = []
   editIdx.value = -1
   newTag.value = ''
-  acItems.value = []
+  ac.close()
   syncToModel()
 }
 
@@ -120,8 +116,10 @@ function removeBlock(idx: number) {
 }
 
 function addBlock() {
+  // 추가 뒤 250ms 에 이전 입력의 후보가 빈 칸 아래 되살아나지 않게 — 대기 중 요청까지 무효화
+  ac.close()
   const tag = newTag.value.trim()
-  if (tag) { blocks.value.push({ text: tag, off: false }); newTag.value = ''; syncToModel() }
+  if (tag) { blocks.value.push({ text: tag }); newTag.value = ''; syncToModel() }
 }
 
 function startEdit(idx: number) {
@@ -129,6 +127,12 @@ function startEdit(idx: number) {
   editIdx.value = idx
   editText.value = blocks.value[idx].text
   nextTick(() => { if (editInputRef.value?.[0]) editInputRef.value[0].focus() })
+}
+
+/** 편집 칸 Enter — IME 조합 확정 Enter 로 편집을 끝내면 마지막 음절이 잘린다 */
+function onEditEnter(e: KeyboardEvent, idx: number) {
+  if (isImeComposing(e)) return
+  finishEdit(idx)
 }
 
 function finishEdit(idx: number) {
@@ -140,50 +144,49 @@ function finishEdit(idx: number) {
   syncToModel()
 }
 
-// 자동완성 (블록 모드)
-const acItems = ref<string[]>([])
-const acIdx = ref(0)
-let acTimer: ReturnType<typeof setTimeout> | null = null
+// 자동완성 (블록 모드) — 항목은 {tag, ko}; 한글을 치면 한국어 키워드로 검색된다("장발" → long hair).
+// 요청 수명주기(디바운스 취소·늦은 응답 버리기)는 useTagAutocomplete — blur·추가·Escape 뒤에
+// 예전처럼 250ms 늦게 팝업이 되살아나 Enter/Tab 이 원치 않는 블록을 넣지 않는다.
+const ac = useTagAutocomplete({ delay: 250 })
+const acItems = ac.items
+const acIdx = ac.index
+const addInputRef = ref<HTMLInputElement | null>(null)
+onUnmounted(() => ac.close())
 
-function onAddInput() {
-  const prefix = newTag.value.trim()
-  if (prefix.length < 2) { acItems.value = []; return }
-  if (acTimer) clearTimeout(acTimer)
-  acTimer = setTimeout(async () => {
-    try {
-      const backend: any = await getBackend()
-      if (backend.getTagSuggestions) {
-        backend.getTagSuggestions(prefix, (json: string) => {
-          try {
-            const arr = JSON.parse(json)
-            acItems.value = Array.isArray(arr) ? arr.slice(0, 10) : []
-            acIdx.value = 0
-          } catch { acItems.value = [] }
-        })
-      }
-    } catch { acItems.value = [] }
-  }, 250)
+function onAddInput(e: Event) {
+  // v-model(newTag)은 IME 조합 중 갱신되지 않는다 — '장' 한 음절만 쳐도 검색되도록 요소 값을 읽는다
+  const el = e.target as HTMLInputElement | null
+  ac.request(el ? el.value : newTag.value)
 }
 
 function onAddKey(e: KeyboardEvent) {
+  // IME 조합 중 키(확정 Enter 등)는 추가·선택이 아니다 — 조합이 끝난 뒤의 Enter 가 처리한다
+  if (isImeComposing(e)) return
   // 자동완성 활성일 때 키 처리
   if (acItems.value.length > 0) {
-    if (e.key === 'ArrowDown') { e.preventDefault(); acIdx.value = Math.min(acIdx.value + 1, acItems.value.length - 1); return }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); acIdx.value = Math.max(0, acIdx.value - 1); return }
-    if (e.key === 'Tab')       { e.preventDefault(); acceptSuggestion(acItems.value[acIdx.value]); return }
-    if (e.key === 'Escape')    { acItems.value = []; return }
-    // Enter는 자동완성 항목 선택 (위쪽으로 이동 안 했어도 첫 번째 선택)
-    if (e.key === 'Enter')     { e.preventDefault(); acceptSuggestion(acItems.value[acIdx.value]); return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); ac.move(1); return }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); ac.move(-1); return }
+    if (e.key === 'Tab')       { e.preventDefault(); acceptSuggestion(ac.selected()?.tag); return }
+    if (e.key === 'Escape')    { ac.close(); return }
+    // Enter는 자동완성 항목 선택 (위쪽으로 이동 안 했어도 첫 번째 선택).
+    // 한글 검색이면 선택하지 않고 팝업만 닫은 뒤 평소처럼 입력한 글자를 블록으로 추가 — Tab/클릭으로 선택.
+    if (e.key === 'Enter') {
+      if (ac.queryHangul.value) { addBlock(); return }
+      e.preventDefault(); acceptSuggestion(ac.selected()?.tag); return
+    }
   }
   // 자동완성 없으면 기존 addBlock 동작
   if (e.key === 'Enter') addBlock()
 }
 
-function acceptSuggestion(tag: string) {
+function acceptSuggestion(tag: string | undefined) {
+  ac.close()
   if (!tag) return
   newTag.value = tag.replace(/_/g, ' ')  // 표시는 공백으로
-  acItems.value = []
   addBlock()
+  // IME 조합 중(클릭 수락)이면 v-model 이 DOM 을 비우지 않는다 — 조합 확정 때 옛 글자가 되살아나지 않게 직접 비운다
+  const el = addInputRef.value as (HTMLInputElement & { composing?: boolean }) | null
+  if (el && el.composing) el.value = ''
 }
 
 // 드래그 — 다중 행(wrap) 인식 + 행 내 X 기준 위치 판정
@@ -321,8 +324,6 @@ function isWc(text: string) { return /__.+__/.test(text) }
 .tbf-block:hover { border-color: var(--text-muted); }
 .tbf-block[draggable="true"] { cursor: grab; }
 .tbf-block[draggable="true"]:active { cursor: grabbing; opacity: 0.5; }
-.tbf-block.disabled { opacity: 0.35; }
-.tbf-block.disabled .tbf-text { text-decoration: line-through; }
 /* 색상 — 옛 11색을 태그 6색+중립으로 접었다. 11색은 5개 색상 무리에 뭉쳐 구분이
    안 됐고(인물수↔사물 2도), 토큰의 6색은 최소 이격 30도로 잡은 값이다.
    묶음은 토큰의 뜻 그대로: 인물·캐릭터(수·신체·특성) / 배경·구도 / 포즈·표정 /
@@ -371,6 +372,8 @@ function isWc(text: string) { return /__.+__/.test(text) }
 .ac-popup-block .ac-item:hover, .ac-popup-block .ac-item.selected {
   background: rgba(96,165,250,0.2); color: var(--state-info-fg);
 }
+.ac-popup-block .ac-item .ac-ko { margin-left: 8px; font-size: 10px; color: var(--text-muted); }
+.ac-popup-block .ac-item.selected .ac-ko { color: inherit; opacity: .8; }
 /* neg */
 .neg .tbf-block { border-color: rgba(248,113,113,0.2); color: var(--state-alert-fg); font-size: var(--fs-label); }
 </style>

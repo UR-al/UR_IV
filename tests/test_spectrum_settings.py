@@ -1,10 +1,8 @@
-import copy
 import unittest
+from unittest import mock
 
 from core.spectrum_settings import spectrum_payload_from_prefs, validate_spectrum_payload
-from comfy_custom_nodes.ai_studio_forge_parity.spectrum_isolation import (
-    copy_option_containers, isolated_sampler_model,
-)
+from comfy_custom_nodes.ai_studio_forge_parity import generation
 
 
 class SpectrumSettingsTests(unittest.TestCase):
@@ -28,29 +26,38 @@ class SpectrumSettingsTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(ValueError):
                 validate_spectrum_payload({"spectrum_enabled": True, **payload}, info)
 
-    def test_container_copy_preserves_gpu_resources_and_cycles(self):
-        class Resource:
-            def __deepcopy__(self, memo):
-                raise AssertionError('GPU/backend resource must not be deep-copied')
-        resource = Resource()
-        source = {"nested": [{"tensor": resource}]}
-        source["cycle"] = source
-        target = copy_option_containers(source)
-        self.assertIs(target["nested"][0]["tensor"], resource)
-        self.assertIs(target["cycle"], target)
-        target["nested"][0]["run"] = 1
-        self.assertNotIn("run", source["nested"][0])
-
-    def test_each_sampler_has_fresh_options(self):
+    def test_spectrum_patches_a_fresh_clone_not_the_cached_model(self):
+        # ModelPatcher.clone() 가 model_options 컨테이너를 이미 격리하므로
+        # 노드는 clone() 한 결과만 공급자에 넘기고 상류 MODEL 을 건드리지 않는다.
         class Model:
-            model_options = {"transformer_options": {"state": []}}
+            def __init__(self):
+                self.model_options = {"transformer_options": {"state": []}}
+                self.clones = []
+
             def clone(self):
-                return copy.copy(self)
+                clone = Model()
+                self.clones.append(clone)
+                return clone
+
         original = Model()
-        first = isolated_sampler_model(original)
-        first.model_options["transformer_options"]["state"].append(1)
-        second = isolated_sampler_model(original)
-        self.assertEqual(second.model_options["transformer_options"]["state"], [])
+        received = []
+
+        def fake_provider(name, *, method, feature, args=(), kwargs=None):
+            received.append(args[0])
+            args[0].model_options["transformer_options"]["state"].append(name)
+            return (args[0],)
+
+        with (
+            mock.patch.object(generation, "invoke_provider", side_effect=fake_provider),
+            mock.patch.object(generation, "_common_sample", side_effect=lambda model, *a, **k: (model,)),
+        ):
+            for _ in range(2):
+                generation.ForgeNeoKSamplerCNS().sample(
+                    original, "positive", "negative", {"samples": None}, 1, 28, 5.0,
+                    "euler", "normal", spectrum_enabled=True,
+                )
+        self.assertEqual(received, original.clones)
+        self.assertEqual(len(set(map(id, received))), 2)
         self.assertEqual(original.model_options["transformer_options"]["state"], [])
 
 

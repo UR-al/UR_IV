@@ -10,16 +10,21 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
-try:
-    import torch
-except ImportError:
-    torch = None
-
 from comfy_custom_nodes.ai_studio_forge_parity import generation, guidance
+from tests._optional_deps import bind_torch, requires_torch
+
+# torch 는 지연 import 한다(tests/_optional_deps) — 최상위 try-import 도 discovery 마다(= --quick 훅)
+# torch 를 올렸다. 모든 클래스가 @requires_torch 이고 setUpClass 가 이 전역을 채운다.
+torch = None
 
 
-@unittest.skipIf(torch is None, "Comfy tensor tests require torch")
+@requires_torch
 class TestInpaintMaskFit(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        bind_torch(globals())
+
     def test_image_and_mask_use_the_same_crop_and_padding(self):
         class EncodeProvider:
             def encode(self, vae, pixels, mask, grow):
@@ -82,8 +87,13 @@ class _Patcher:
             return attn(image, transformer_options=transformer)
 
 
-@unittest.skipIf(torch is None, "Comfy tensor tests require torch")
+@requires_torch
 class TestPAGAttention(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        bind_torch(globals())
+
     def attention(self):
         # Small provider contract with the same q_proj -> RMSNorm -> attn_op
         # ordering as Cosmos. Real Cosmos is exercised by the subclass below.

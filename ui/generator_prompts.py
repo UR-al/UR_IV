@@ -217,10 +217,15 @@ class PromptHandlingMixin:
         _logger.debug(f"메타 제거: {self.chk_remove_meta.isChecked()}")
         _logger.debug(f"검열 제거: {self.chk_remove_censorship.isChecked()}")
         _logger.debug(f"텍스트 제거: {self.chk_remove_text.isChecked()}")
-        _logger.debug(f"tag_classifier 존재: {hasattr(self, 'tag_classifier')}")
-        _logger.debug(f"censorship_tags 개수: {len(self.tag_classifier.censorship_tags)}")
-        _logger.debug(f"text_tags 개수: {len(self.tag_classifier.text_tags)}")
-        
+        # 분류기 통계는 **이미 만들어진 분류기가 있을 때만** 남긴다. `tag_classifier` 는 지연
+        # 로드 프로퍼티라 hasattr·속성 접근만으로 분류기(GUI 스레드 0.5초 + tag_groups·
+        # implications parquet)를 만든다. 로그 레벨 검사로는 못 막는다 — utils/app_logger 가
+        # 루트를 DEBUG 로 두어 isEnabledFor(DEBUG) 가 늘 참이다.
+        classifier = getattr(self, '_tag_classifier', None)
+        if classifier is not None:
+            _logger.debug("censorship_tags 개수: %d, text_tags 개수: %d",
+                          len(classifier.censorship_tags), len(classifier.text_tags))
+
         # 메타 제거 (parquet 773개 meta 태그 + art_style 기반)
         if self.chk_remove_meta.isChecked():
             before = len(general_list)
@@ -367,9 +372,8 @@ class PromptHandlingMixin:
         self._apply_conditional_prompts()
 
         # 11. 와일드카드 치환
-        wc_enabled = (hasattr(self, 'settings_tab') and
-                      hasattr(self.settings_tab, 'chk_wildcard_enabled') and
-                      self.settings_tab.chk_wildcard_enabled.isChecked())
+        from utils.file_wildcard import wildcards_enabled
+        wc_enabled = wildcards_enabled(self)
         if wc_enabled:
             from utils.file_wildcard import resolve_file_wildcards
             from utils.wildcard import process_wildcards
@@ -561,85 +565,99 @@ class PromptHandlingMixin:
                 self.main_prompt_text.setPlainText(insert)
             self.is_programmatic_change = False
 
-        # 3. 캐릭터별 조건부 프롬프트 적용
+        # 3. 캐릭터별 조건부 프롬프트 적용 — 전역 조건식과 같은 뜻(포지티브 기준 쉼표 AND 조건,
+        #    태그 단위 replace·remove). neg 는 조건에 넣지 않고 neg add 중복 판정에만 쓴다.
         if char_cond_all_rules:
-            from utils.condition_block import apply_rules
+            from utils.condition_block import apply_rules, split_tags
             all_tags = self._collect_all_tags()
-            result = apply_rules(char_cond_all_rules, all_tags, prevent_dupe=True)
+            result = apply_rules(
+                char_cond_all_rules, all_tags,
+                current_by_location={'neg': split_tags(self.neg_prompt_text.toPlainText())},
+                prevent_dupe=True,
+            )
             self._apply_condition_result(result)
 
     def _collect_all_tags(self) -> set[str]:
-        """모든 위치의 태그를 정규화하여 수집 (네거티브 포함)"""
+        """포지티브 칸(캐릭터/작품/본문/선행/후행)의 태그를 정규화해 수집 — 조건 판정용.
+        전역 조건식(apply_prompt_rules)과 같이 네거티브는 조건에 넣지 않는다."""
+        from utils.condition_block import norm_tag, split_tags
         all_tags: set[str] = set()
         for field in [self.character_input, self.copyright_input,
                       self.main_prompt_text, self.prefix_prompt_text,
-                      self.suffix_prompt_text, self.neg_prompt_text]:
+                      self.suffix_prompt_text]:
             text = field.text() if hasattr(field, 'text') else field.toPlainText()
-            for t in text.split(","):
-                n = t.strip().lower().replace("_", " ").replace(r"\(", "(").replace(r"\)", ")")
+            for t in split_tags(text):
+                n = norm_tag(t)
                 if n:
                     all_tags.add(n)
         return all_tags
 
     def _apply_condition_result(self, result: dict):
-        """apply_rules() 결과를 UI 위젯에 적용"""
-        widget_map = {
-            "main": self.main_prompt_text,
-            "prefix": self.prefix_prompt_text,
-            "suffix": self.suffix_prompt_text,
-            "neg": self.neg_prompt_text,
-        }
+        """apply_rules() 결과를 UI 위젯에 적용 — 태그 단위(utils.condition_block 공용 헬퍼).
 
-        self.is_programmatic_change = True
+        - add: 위치 칸 끝에, 이미 있는 태그는 빼고.
+        - remove: main/prefix/suffix 위치 규칙은 포지티브 전 칸에서, neg 규칙은 네거티브에서 뺀다.
+        - replace: 조건 태그(앵커)를 대상 태그로 — 포지티브 전 칸을 함께 보고 대상이 이미 있으면
+          앵커만 지운다(``_replace_neg`` 는 네거티브 칸에서).
+        """
+        from utils.condition_block import (
+            add_to_tags, remove_from_tags, replace_across, split_tags,
+        )
+        pos_widgets = {
+            "character": self.character_input,
+            "copyright": self.copyright_input,
+            "prefix": self.prefix_prompt_text,
+            "main": self.main_prompt_text,
+            "suffix": self.suffix_prompt_text,
+        }
+        all_widgets = {**pos_widgets, "neg": self.neg_prompt_text}
+
+        def _get(w):
+            return w.text() if hasattr(w, 'text') else w.toPlainText()
+
+        tags = {key: split_tags(_get(w)) for key, w in all_widgets.items()}
+        before = {key: list(v) for key, v in tags.items()}
 
         # add 동작: 태그 추가
         for location in ("main", "prefix", "suffix", "neg"):
-            tags = result.get(location, [])
-            if not tags:
-                continue
-            widget = widget_map.get(location)
-            if not widget:
-                continue
-            current = widget.toPlainText().strip()
-            insert = ", ".join(tags)
-            if current:
-                widget.setPlainText(f"{current}, {insert}")
-            else:
-                widget.setPlainText(insert)
+            add = result.get(location) or []
+            if add:
+                tags[location] = add_to_tags(tags[location], add)
 
         # remove 동작: 태그 제거
-        for location in ("main", "prefix", "suffix", "neg"):
-            remove_tags = result.get(f"_remove_{location}", [])
-            if not remove_tags:
-                continue
-            widget = widget_map.get(location)
-            if not widget:
-                continue
-            current_text = widget.toPlainText()
-            current_tags = [t.strip() for t in current_text.split(",") if t.strip()]
-            remove_norms = {t.strip().lower().replace("_", " ") for t in remove_tags}
-            filtered = [t for t in current_tags
-                       if t.strip().lower().replace("_", " ") not in remove_norms]
-            widget.setPlainText(", ".join(filtered))
+        pos_remove = []
+        for location in ("main", "prefix", "suffix"):
+            pos_remove.extend(result.get(f"_remove_{location}") or [])
+        if pos_remove:
+            for key in pos_widgets:
+                tags[key] = remove_from_tags(tags[key], pos_remove)
+        if result.get("_remove_neg"):
+            tags["neg"] = remove_from_tags(tags["neg"], result["_remove_neg"])
 
-        # replace 동작: 태그 교체
-        replacements = result.get("_replace", [])
-        if replacements:
-            for widget in widget_map.values():
-                text = widget.toPlainText()
-                for old_tag, new_tag in replacements:
-                    old_norm = old_tag.strip().lower().replace("_", " ")
-                    tags = [t.strip() for t in text.split(",") if t.strip()]
-                    new_tags = []
-                    for t in tags:
-                        if t.strip().lower().replace("_", " ") == old_norm:
-                            new_tags.append(new_tag)
-                        else:
-                            new_tags.append(t)
-                    text = ", ".join(new_tags)
-                widget.setPlainText(text)
+        # replace 동작: 같은 조건의 대상들을 모아 한 번에 교체(첫 대상만 남던 버그 방지)
+        def _grouped(pairs):
+            groups: dict[str, list[str]] = {}
+            for old_tag, new_tag in pairs or []:
+                groups.setdefault(old_tag, []).append(new_tag)
+            return groups.items()
 
-        self.is_programmatic_change = False
+        pos_keys = list(pos_widgets)
+        for cond, targets in _grouped(result.get("_replace")):
+            replaced = replace_across([tags[k] for k in pos_keys], cond, targets)
+            for key, new_tags in zip(pos_keys, replaced):
+                tags[key] = new_tags
+        for cond, targets in _grouped(result.get("_replace_neg")):
+            tags["neg"] = replace_across([tags["neg"]], cond, targets)[0]
+
+        prev = getattr(self, 'is_programmatic_change', False)
+        self.is_programmatic_change = True
+        try:
+            for key, widget in all_widgets.items():
+                if tags[key] != before[key]:
+                    text = ", ".join(tags[key])
+                    (widget.setText if hasattr(widget, 'text') else widget.setPlainText)(text)
+        finally:
+            self.is_programmatic_change = prev
 
     def _apply_conditional_prompts(self):
         """조건부 프롬프트 적용 — Vue 모달이 저장한 config/cond_rules.json을 소스로 사용.
@@ -663,48 +681,64 @@ class PromptHandlingMixin:
             # 동작하는 Vue 규칙 변환기 재사용 (add/remove/replace, main/prefix/suffix/neg)
             self._apply_vue_conditional_rules(pos, neg)
 
-    def apply_random_prompt(self):
-        """랜덤 프롬프트 적용 (rating 필터 반영)"""
+    def apply_random_prompt(self) -> bool:
+        """덱에서 한 장 뽑아 적용 (등급 필터 반영). 뽑았으면 True.
+
+        덱이 비면 풀에서 다시 채운다(core.search_deck.refill_owner_deck — 등급 필터·셔플·저장).
+        그래도 비면(필터를 통과한 행이 없음) pop 하지 않고 알린다 — 자동화 중이면 자동화를 멈춘다.
+        (예전엔 여기서 IndexError 가 나 자동화가 조용히 멈췄다)
+        """
+        automating = bool(getattr(self, 'is_automating', False))
         if not self.shuffled_prompt_deck:
-            if self.filtered_results:
+            if not self.filtered_results:
+                if automating and hasattr(self, '_stop_automation'):
+                    self._stop_automation("검색 결과가 없어 자동화를 중지했습니다.")
+                else:
+                    QMessageBox.warning(
+                        self, "Error",
+                        "No prompts available. Run a search first."
+                    )
+                return False
+            from core.search_deck import NO_ELIGIBLE_MESSAGE, refill_owner_deck
+            refill_owner_deck(self, emit=False)
+            if not self.shuffled_prompt_deck:
+                if automating and hasattr(self, '_stop_automation'):
+                    self._stop_automation(NO_ELIGIBLE_MESSAGE)
+                else:
+                    QMessageBox.warning(self, "Notice", NO_ELIGIBLE_MESSAGE)
+                return False
+            if automating:
+                # 자동화 도중 모달을 띄우면 사람이 누를 때까지 멈춘다 — 상태로만 알린다.
+                self.show_status(f"🔄 덱을 다시 채웠습니다 ({len(self.shuffled_prompt_deck)})")
+            else:
                 QMessageBox.information(
                     self, "Notice",
                     "All prompts used once. Reshuffling deck."
                 )
-                # rating 필터 적용
-                rating_filter = getattr(self, '_rating_filter', {'g', 's', 'q', 'e'})
-                self.shuffled_prompt_deck = [
-                    r for r in self.filtered_results
-                    if r.get('rating', 'g') in rating_filter
-                ]
-                random.shuffle(self.shuffled_prompt_deck)
-                if hasattr(self, '_save_deck_state'):
-                    self._save_deck_state()
-            else:
-                QMessageBox.warning(
-                    self, "Error",
-                    "No prompts available. Run a search first."
-                )
-                return
 
         random_bundle = self.shuffled_prompt_deck.pop()
         remaining_count = len(self.shuffled_prompt_deck)
         # 현재 자동화 프롬프트 보존 — 큐 우선 처리(자동화 중 큐 항목)가 UI 프롬프트를
         # 바꿔도 큐 처리 후 이 번들로 복원해 '남은 반복'을 이어가기 위함.
         self._current_auto_bundle = random_bundle
-        # 덱 소비 진행도 저장 — 자동화도 이 경로(apply_random_prompt)로 뽑으므로
-        # 여기서 저장해야 재시작 시 '얼마나 뽑았는지'가 복원됨.
-        if hasattr(self, '_save_deck_state'):
+        # 덱 소비 진행도 저장 — 자동화도 이 경로로 뽑는다. 뽑을 때마다 남은 덱 전체(수만 행
+        # 인덱스)를 다시 쓰지 않도록 모아서 저장하고(20회·60초·덱 소진), 자동화 중지·앱 종료
+        # 때 _flush_deck_state 로 마저 쓴다.
+        note_draw = getattr(self, '_note_deck_draw', None)
+        if callable(note_draw):
+            note_draw()
+        elif hasattr(self, '_save_deck_state'):
             self._save_deck_state()
         self.show_status(
             f"Prompt selected. Remaining: {remaining_count}"
         )
-        
+
         # 버튼 텍스트 업데이트
         self.btn_random_prompt.setText(f"🎲 랜덤 프롬프트 ({remaining_count})")
-        
+
         # apply_prompt_from_data 호출 (토글 적용됨)
         self.apply_prompt_from_data(random_bundle)
+        return True
     
     def on_base_prompts_changed(self):
         """베이스 프롬프트 변경 이벤트"""
@@ -713,130 +747,3 @@ class PromptHandlingMixin:
         self.base_prefix_prompt = self.prefix_prompt_text.toPlainText()
         self.base_suffix_prompt = self.suffix_prompt_text.toPlainText()
         self.base_neg_prompt = self.neg_prompt_text.toPlainText()
-    
-    def load_base_prompt_to_event(self):
-        """현재 메인 프롬프트를 이벤트 탭으로 복사"""
-        parts = []
-        
-        if self.char_count_input.text().strip(): 
-            parts.append(self.char_count_input.text().strip())
-            
-        if self.character_input.text().strip():
-            parts.append(self.character_input.text().strip())
-
-        if self.copyright_input.text().strip():
-            parts.append(self.copyright_input.text().strip())
-
-        if self.artist_input.toPlainText().strip():
-            parts.append(self.artist_input.toPlainText().strip())
-            
-        if self.main_prompt_text.toPlainText().strip():
-            parts.append(self.main_prompt_text.toPlainText().strip())
-
-        base_prompt = ", ".join(parts)
-        self.event_gen_tab.base_prompt_view.setPlainText(base_prompt)
-    
-    def get_prompts_from_bundle(self, bundle):
-        """자동화용 프롬프트 생성"""
-        general_tags_str = str(bundle.get('general', ''))
-        artist = str(bundle.get('artist', ''))
-        copyright_tags = str(bundle.get('copyright', ''))
-        character_tags = str(bundle.get('character', ''))
-        
-        if general_tags_str == 'nan': general_tags_str = ''
-        if artist == 'nan': artist = ''
-        if copyright_tags == 'nan': copyright_tags = ''
-        if character_tags == 'nan': character_tags = ''
-
-        def escape_tags(tag_str):
-            if not tag_str: 
-                return []
-            tags = [t.strip() for t in tag_str.split(',') if t.strip()]
-            return [t.replace('(', r'\(').replace(')', r'\)') for t in tags]
-
-        artist_list = []
-        if not self.chk_remove_artist.isChecked() and artist:
-            clean_artist = artist.replace('artist:', '').strip()
-            artist_list = escape_tags(clean_artist)
-
-        copyright_list = []
-        if not self.chk_remove_copyright.isChecked() and copyright_tags:
-            copyright_list = escape_tags(copyright_tags)
-
-        character_list = escape_tags(character_tags)
-        if self.chk_remove_character.isChecked():
-            character_list = []
-        general_list = escape_tags(general_tags_str)
-        if (hasattr(self, 'chk_remove_character_features') and
-                self.chk_remove_character_features.isChecked()):
-            general_list = [t for t in general_list if not self._is_character_feature_tag(t)]
-        if self.chk_remove_meta.isChecked():
-            general_list = [t for t in general_list if not self.tag_classifier.is_meta_tag(t)]
-        if self.chk_remove_censorship.isChecked():
-            general_list = [t for t in general_list if not self.tag_classifier.is_censorship_tag(t)]
-        if self.chk_remove_text.isChecked():
-            general_list = [t for t in general_list if not self.tag_classifier.is_text_tag(t)]
-
-        person_count_tags = {
-            "1boy", "2boys", "3boys", "4boys", "5boys", "6+boys", 
-            "1girl", "2girls", "3girls", "4girls", "5girls", "6+girls",
-            "1other", "2others", "3others", "4others", "5others", "6+others"
-        }
-        
-        count_list = []
-        main_list = []
-        
-        for tag in general_list:
-            if tag in person_count_tags:
-                count_list.append(tag)
-            else:
-                main_list.append(tag)
-
-        final_parts = []
-        
-        if count_list: 
-            final_parts.append(", ".join(count_list))
-        if character_list: 
-            final_parts.append(", ".join(character_list))
-        if copyright_list: 
-            final_parts.append(", ".join(copyright_list))
-        if artist_list: 
-            final_parts.append(", ".join(artist_list))
-        
-        prefix = self.prefix_prompt_text.toPlainText().strip()
-        if prefix: 
-            final_parts.append(prefix)
-        
-        if main_list: 
-            final_parts.append(", ".join(main_list))
-        
-        suffix = self.suffix_prompt_text.toPlainText().strip()
-        if suffix: 
-            final_parts.append(suffix)
-
-        final_prompt = ", ".join(final_parts)
-        final_neg = self.neg_prompt_text.toPlainText().strip()
-
-        # 프롬프트 토큰 집중 — 더 구체적인 태그에 포함되는 광범위 태그 제거
-        # (예: muscular, muscular male, dress, blue dress → muscular male, blue dress)
-        if hasattr(self, 'chk_prompt_focus') and self.chk_prompt_focus.isChecked():
-            try:
-                from core.prompt_focus import focus_prompt
-                final_prompt = focus_prompt(final_prompt)
-            except Exception:
-                pass
-
-        # 와일드카드 치환
-        wc_enabled = (hasattr(self, 'settings_tab') and
-                      hasattr(self.settings_tab, 'chk_wildcard_enabled') and
-                      self.settings_tab.chk_wildcard_enabled.isChecked())
-        if wc_enabled:
-            from utils.file_wildcard import resolve_file_wildcards
-            from utils.wildcard import process_wildcards
-            final_prompt = resolve_file_wildcards(final_prompt)
-            final_prompt = process_wildcards(final_prompt)
-            final_neg = resolve_file_wildcards(final_neg)
-            final_neg = process_wildcards(final_neg)
-
-        return final_prompt, final_neg
-        

@@ -28,12 +28,14 @@ REFERENCES = [
     {"id": "ultimate", "name": "Ultimate SD Upscale", "version": "", "commit": "a5547db9e1d07d3318bb21e9e9c474f4c1e9c8df", "repoUrl": "https://github.com/ssitu/ComfyUI_UltimateSDUpscale"},
     {"id": "impact", "name": "Impact Pack", "version": "", "commit": "429d0159ad429e64d2b3916e6e7be9c22d025c3c", "repoUrl": "https://github.com/ltdrdata/ComfyUI-Impact-Pack"},
 ]
-ALLOWED_EXTENSION_URLS = frozenset(item["repoUrl"] for item in REFERENCES if item["id"] != "comfy")
 RECIPES = [
+    # 기본 컴파일러가 실제로 만드는 노드만 적는다. 출력은 save_images 를 따른다 —
+    # 메인 생성(save_images=True)은 코어 SaveImage, 후처리·채팅·손 재구성 등 나머지는 코어 PreviewImage.
     {"id": "forge-parity", "title": "기본 생성 · Forge 기능 연결", "scope": "앱 기본 Comfy 워크플로",
      "nodes": {"ForgeNeoLatentInput": {"vae": "VAE", "mode": "CHOICE", "width": "INT", "height": "INT"},
                "ForgeNeoKSamplerCNS": {"model": "MODEL", "steps": "INT", "cfg": "FLOAT", "latent_image": "LATENT"},
-               "ForgeNeoSaveImage": {"images": "IMAGE", "filename_prefix": "STRING"}},
+               "SaveImage": {"images": "IMAGE", "filename_prefix": "STRING"},
+               "PreviewImage": {"images": "IMAGE"}},
      "models": ["diffusion", "text_encoder", "vae"], "repoUrl": "",
      "note": "번들 노드와 모델 목록을 확인합니다. Anima 버전별 TE/LoRA 호환성은 생성 전 컴파일 검증도 필요합니다."},
     {"id": "sam3", "title": "SAM3 영역 마스크 · 상세 보정", "scope": "앱 SAM3 생성/후처리",
@@ -125,23 +127,31 @@ def check_recipes(schema: Mapping | None) -> list[dict]:
     return results
 
 
+_BUNDLE_MAX_FILES = 256
+# tokenizer.json 같은 런타임 자산도 지문에 들어가므로 상한은 넉넉히 둔다.
+_BUNDLE_MAX_FILE_BYTES = 32 * 1024 * 1024
+
+
 def bundle_fingerprint(root: Path | None = None) -> dict:
-    root = root or PROJECT_ROOT / "comfy_custom_nodes" / "ai_studio_forge_parity"
+    """Pack digest for the compatibility screen — the installer's own algorithm.
+
+    ``diskMatch`` compares this for the app source and the installed copy, so
+    it must be exactly what ``install_bundled_node_pack`` decides a reinstall
+    on (``.py``/``.json``/``.md``/``.txt``), not a ``.py``-only variant.
+    """
+    from core.comfy_node_pack import ComfyNodePackError, node_pack_fingerprint, pack_files
+
+    root = Path(root) if root is not None else PROJECT_ROOT / "comfy_custom_nodes" / "ai_studio_forge_parity"
     try:
-        files = sorted(root.rglob("*.py"))
-        if not files or len(files) > 256:
-            return {"version": "", "fingerprint": "", "status": "unknown"}
-        digest = hashlib.sha256()
-        for path in files:
-            if path.stat().st_size > 4 * 1024 * 1024:
-                raise ValueError("bundle source limit")
-            digest.update(path.relative_to(root).as_posix().encode())
-            digest.update(b"\0" + path.read_bytes() + b"\0")
+        fingerprint = node_pack_fingerprint(
+            root, max_files=_BUNDLE_MAX_FILES, max_file_bytes=_BUNDLE_MAX_FILE_BYTES,
+        )
+        file_count = len(pack_files(root))
         source = (root / "__init__.py").read_text(encoding="utf-8")
         version = re.search(r'__version__\s*=\s*[\"\']([^\"\']+)', source)
-        return {"version": version.group(1) if version else "", "fingerprint": digest.hexdigest(),
-                "status": "source", "fileCount": len(files)}
-    except (OSError, ValueError):
+        return {"version": version.group(1) if version else "", "fingerprint": fingerprint,
+                "status": "source", "fileCount": file_count}
+    except (ComfyNodePackError, OSError, ValueError):
         return {"version": "", "fingerprint": "", "status": "unknown"}
 
 

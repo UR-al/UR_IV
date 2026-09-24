@@ -4,6 +4,7 @@
 메인 프로필과 보충 특징은 ``TagDatabase``가 관리하는 정식 자산에서 읽는다.
 """
 import re
+import threading
 
 from core.tag_database import TagAsset, get_tag_database
 
@@ -222,9 +223,9 @@ class CharacterFeatureLookup:
         self.database = get_tag_database()
 
         # 핵심 특징 (character_profiles)
+        # (프로필의 copyright·gender 는 싣지 않는다 — 읽는 곳이 없어 3만여 항목 사전만 메모리에
+        #  남았다. 작품명은 core.tag_intelligence.copyright_of 가 맡는다.)
         self._core_dict: dict[str, list[str]] | None = None   # name → core_tags
-        self._copyright: dict[str, str] = {}                    # name → copyright
-        self._gender: dict[str, dict] = {}                      # name → {boy, girl}
         self._post_count: dict[str, int] = {}                   # name → post_count
 
         # 전체 특징 (character_features parquet)
@@ -235,11 +236,26 @@ class CharacterFeatureLookup:
         self._norm_index: dict[str, str] = {}   # normalized → original key
         self._short_index: dict[str, str] = {}  # 괄호 제거 → original key
 
+        # 적재 직렬화 — 여러 스레드가 첫 조회를 동시에 해도 한 번만 적재하고, 적재 중인
+        # 반쪽 사전을 누구도 조회하지 않게 한다(_loaded 는 적재가 끝난 뒤에만 참).
+        self._loaded = False
+        self._load_lock = threading.RLock()
+
     def _ensure_loaded(self):
         """첫 호출 시 데이터 로드"""
-        if self._core_dict is not None:
+        if self._loaded:
             return
+        with self._load_lock:
+            if self._loaded:
+                return
+            try:
+                self._load_all()
+            finally:
+                # 실패해도 표시 — 자산이 없을 때 조회마다 재적재하지 않게.
+                self._loaded = True
 
+    def _load_all(self):
+        """모든 자산 적재 — _ensure_loaded 가 락 안에서 한 번만 부른다."""
         self._core_dict = {}
         self._full_dict = {}
         self._full_count = {}
@@ -255,12 +271,6 @@ class CharacterFeatureLookup:
                 core_tags = [t.replace("_", " ") for t in entry.get("core_tags", [])]
                 self._core_dict[name] = core_tags
                 self._post_count[name] = entry.get("post_count", 0)
-                copyright_val = entry.get("copyright", "")
-                if copyright_val:
-                    self._copyright[name] = copyright_val.replace("_", " ")
-                gender = entry.get("gender")
-                if gender:
-                    self._gender[name] = gender
             print(f"[CharacterFeatures] profiles loaded: {len(self._core_dict):,}")
         except Exception as e:
             print(f"[CharacterFeatures] profile load failed: {e}")
@@ -432,59 +442,6 @@ class CharacterFeatureLookup:
 
         return None
 
-    def lookup_multiple(self, text: str) -> dict[str, tuple[str, int]]:
-        """쉼표 구분 캐릭터 이름들을 다중 조회.
-        Returns: {표시이름: (특징 문자열, 게시물 수)}
-        """
-        self._ensure_loaded()
-        results: dict[str, tuple[str, int]] = {}
-        for part in text.split(","):
-            name = part.strip()
-            if not name:
-                continue
-            result = self.lookup(name)
-            if result:
-                results[name] = result
-        return results
-
-    def lookup_multiple_split(self, text: str) -> dict[str, dict]:
-        """쉼표 구분 캐릭터 → 핵심/의상 분리 조회.
-        Returns: {표시이름: {"core": (str, count), "costume": (str, count) | None}}
-        """
-        self._ensure_loaded()
-        results: dict[str, dict] = {}
-        for part in text.split(","):
-            name = part.strip()
-            if not name:
-                continue
-            core = self.lookup_core(name)
-            aux = self.lookup_aux(name)
-            costume = self.lookup_costume(name)
-            etc = self.lookup_etc(name)
-            full = self.lookup(name)
-            if core or aux or costume or etc or full:
-                count = (core[1] if core else 0) or (full[1] if full else 0)
-                results[name] = {
-                    "core": core,
-                    "aux": aux,
-                    "costume": costume,
-                    "etc": etc,
-                    "count": count,
-                }
-        return results
-
-    def get_copyright(self, name: str) -> str | None:
-        """캐릭터 → 작품명"""
-        self._ensure_loaded()
-        key = self._resolve_key(name)
-        return self._copyright.get(key) if key else None
-
-    def get_gender(self, name: str) -> dict | None:
-        """캐릭터 → gender 확률 {boy: float, girl: float}"""
-        self._ensure_loaded()
-        key = self._resolve_key(name)
-        return self._gender.get(key) if key else None
-
     def search(self, query: str, limit: int = 50) -> list[tuple[str, str, int]]:
         """캐릭터 이름 검색 (2단계 최적화).
         Phase 1: 키 매칭 + 우선순위/카운트만 (O(1) 카운트 조회)
@@ -529,11 +486,16 @@ class CharacterFeatureLookup:
 
 
 _instance: CharacterFeatureLookup | None = None
+_instance_lock = threading.Lock()
 
 
 def get_character_features() -> CharacterFeatureLookup:
-    """싱글턴 인스턴스 반환"""
+    """싱글턴 인스턴스 반환 — 여러 스레드가 동시에 불러도 한 벌만 만든다(이중 확인)."""
     global _instance
-    if _instance is None:
-        _instance = CharacterFeatureLookup()
-    return _instance
+    instance = _instance
+    if instance is not None:
+        return instance
+    with _instance_lock:
+        if _instance is None:
+            _instance = CharacterFeatureLookup()
+        return _instance

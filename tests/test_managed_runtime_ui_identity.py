@@ -25,14 +25,6 @@ class _Button:
         self.enabled = bool(enabled)
 
 
-class _Label:
-    def __init__(self):
-        self.text = ''
-
-    def setText(self, text):
-        self.text = str(text)
-
-
 class _Harness:
     _on_backend_runtime_event = GeneratorMainUI._on_backend_runtime_event
 
@@ -42,7 +34,6 @@ class _Harness:
         self._managed_runtime_startup_apply_done = True
         self.vue_bridge = SimpleNamespace(showNotification=_Signal())
         self.btn_generate = _Button()
-        self.viewer_label = _Label()
         self.info_loads = 0
 
     def load_webui_info(self):

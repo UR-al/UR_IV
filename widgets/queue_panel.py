@@ -1,22 +1,31 @@
 # widgets/queue_panel.py
 """
-대기열 패널 위젯 (가로 스크롤 카드 목록)
+대기열 상태 저장소 — 화면이 없는 QObject. 보이는 대기열은 Vue(``QueuePanel.vue``)가 그린다.
+
+예전엔 setParent(None) 으로 숨겨 둔 QWidget 이었다. 한 번도 표시되지 않는데도 항목이 바뀔
+때마다 카드(QueueItemCard) 전부를 지우고 다시 만들고, 대기열 전체 JSON 을 쓰고, 전체 목록을
+Vue 로 보냈다 — XYZ 256칸을 한 칸씩 넣으면 카드 32,896장(O(N²)), 약 20초 정지·RSS 수 GB.
+편집 다이얼로그·드래그·프리셋 같은 위젯 입력 경로도 화면이 없어 도달할 수 없었다.
+
+지금은
+- 상태: :class:`core.queue_model.QueueModel` (순수 로직 — 실행 중 항목 보호·id 유일성)
+- 변경 알림: ``queue_changed(int)`` — 목록을 직렬화하지 않아 싸다. Vue 전송은 받는 쪽
+  (``ui.queue_vue_sync``)이 한 이벤트 루프 턴에 한 번으로 합친다.
+- 디스크 저장: :data:`PERSIST_DELAY_MS` 동안 모았다가 한 번 쓴다. 앱 종료 때는
+  :meth:`QueuePanel.flush_to_disk` 로 즉시 쓴다(데스크톱 ``_quit_app`` · 웹 모드 aboutToQuit).
+
+이름(QueuePanel)과 모듈 경로는 호환을 위해 그대로 둔다 — ``ui.generator_main`` 이 이 이름으로
+만들고, 테스트가 ``ui.generator_main.QueuePanel`` 을 patch 한다.
 """
-import os
 import json
 import logging
+import os
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QMessageBox, QInputDialog,
-    QDialog, QTextEdit, QLineEdit, QDialogButtonBox, QFormLayout
-)
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent
-from widgets.queue_item import QueueItemCard
-from utils.theme_manager import get_color
+from PyQt6.QtCore import QObject, pyqtSignal
 
-PRESET_DIR = "queue_presets"
+from core.coalesced_call import CoalescedCall, qt_scheduler
+from core.queue_model import QueueModel, auto_restore_enabled, restorable_items, state_document
+from utils.atomic_json import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -28,740 +37,240 @@ _QUEUE_STATE_PATH = str(cache_file(
     legacy_paths="config/queue_state.json",
 ))
 
-
-class QueueItemEditDialog(QDialog):
-    """대기열 아이템 편집 다이얼로그"""
-
-    def __init__(self, item_data: dict, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("대기열 항목 편집")
-        self.setMinimumSize(700, 600)
-        self.resize(750, 650)
-        self.setStyleSheet(f"""
-            QDialog {{ background-color: {get_color('bg_secondary')}; color: {get_color('text_primary')}; }}
-            QLabel {{ color: {get_color('text_secondary')}; font-size: 12px; }}
-            QLineEdit, QTextEdit {{
-                background-color: {get_color('bg_input')}; border: 1px solid {get_color('border')};
-                border-radius: 6px; padding: 6px; color: {get_color('text_primary')}; font-size: 12px;
-            }}
-            QLineEdit:focus, QTextEdit:focus {{
-                border: 1px solid {get_color('accent')};
-            }}
-        """)
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-
-        # Prompt (큰 영역)
-        prompt_label = QLabel("Prompt")
-        prompt_label.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {get_color('text_primary')};")
-        layout.addWidget(prompt_label)
-        self.prompt_edit = QTextEdit()
-        self.prompt_edit.setPlainText(item_data.get('prompt', ''))
-        layout.addWidget(self.prompt_edit, stretch=3)
-
-        # Negative (중간 영역)
-        neg_label = QLabel("Negative Prompt")
-        neg_label.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {get_color('text_primary')};")
-        layout.addWidget(neg_label)
-        self.neg_edit = QTextEdit()
-        self.neg_edit.setPlainText(item_data.get('negative_prompt', ''))
-        layout.addWidget(self.neg_edit, stretch=2)
-
-        # 파라미터 (2줄로 압축)
-        param_group = QFrame()
-        param_group.setStyleSheet(f"""
-            QFrame {{
-                background-color: {get_color('bg_tertiary')}; border: 1px solid {get_color('border')};
-                border-radius: 6px; padding: 4px;
-            }}
-        """)
-        param_layout = QVBoxLayout(param_group)
-        param_layout.setContentsMargins(10, 8, 10, 8)
-        param_layout.setSpacing(6)
-
-        # 1행: Steps, CFG, Seed
-        row1 = QHBoxLayout()
-        row1.setSpacing(12)
-        row1.addWidget(QLabel("Steps"))
-        self.steps_edit = QLineEdit(str(item_data.get('steps', 20)))
-        self.steps_edit.setFixedWidth(70)
-        row1.addWidget(self.steps_edit)
-        row1.addWidget(QLabel("CFG"))
-        self.cfg_edit = QLineEdit(str(item_data.get('cfg_scale', 7.0)))
-        self.cfg_edit.setFixedWidth(70)
-        row1.addWidget(self.cfg_edit)
-        row1.addWidget(QLabel("Seed"))
-        self.seed_edit = QLineEdit(str(item_data.get('seed', -1)))
-        self.seed_edit.setFixedWidth(100)
-        row1.addWidget(self.seed_edit)
-        row1.addStretch()
-        param_layout.addLayout(row1)
-
-        # 2행: Width, Height
-        row2 = QHBoxLayout()
-        row2.setSpacing(12)
-        row2.addWidget(QLabel("Width"))
-        self.width_edit = QLineEdit(str(item_data.get('width', 1024)))
-        self.width_edit.setFixedWidth(70)
-        row2.addWidget(self.width_edit)
-        row2.addWidget(QLabel("Height"))
-        self.height_edit = QLineEdit(str(item_data.get('height', 1024)))
-        self.height_edit.setFixedWidth(70)
-        row2.addWidget(self.height_edit)
-        row2.addStretch()
-        param_layout.addLayout(row2)
-
-        layout.addWidget(param_group)
-
-        # 버튼
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        buttons.setStyleSheet("""
-            QPushButton {
-                background-color: #5865F2; color: white;
-                padding: 8px 24px; border-radius: 6px; font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton:hover { background-color: #4752C4; }
-        """)
-        layout.addWidget(buttons)
-
-    def get_data(self) -> dict:
-        """편집된 데이터 반환"""
-        return {
-            'prompt': self.prompt_edit.toPlainText(),
-            'negative_prompt': self.neg_edit.toPlainText(),
-            'steps': int(self.steps_edit.text() or 20),
-            'cfg_scale': float(self.cfg_edit.text() or 7.0),
-            'width': int(self.width_edit.text() or 1024),
-            'height': int(self.height_edit.text() or 1024),
-            'seed': int(self.seed_edit.text() or -1),
-        }
+#: 대기열 변경을 모아 디스크에 쓰는 간격 — 한 핸들러 안의 일괄 추가(XYZ·이벤트 시나리오)는 한 번만 쓴다
+PERSIST_DELAY_MS = 250
 
 
-class DropCardContainer(QWidget):
-    """드래그 앤 드롭을 지원하는 카드 컨테이너"""
+class QueuePanel(QObject):
+    """대기열 상태 저장소 (화면 없음) — 대기열 매니저와 Vue 동기화의 정본."""
 
-    item_dropped = pyqtSignal(str, int)  # item_id, drop_index
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-
-        # 드롭 위치 표시 인디케이터
-        self._drop_indicator = QFrame(self)
-        self._drop_indicator.setFixedWidth(3)
-        self._drop_indicator.setStyleSheet(f"background-color: {get_color('accent')}; border-radius: 1px;")
-        self._drop_indicator.hide()
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-
-    def dragMoveEvent(self, event):
-        event.acceptProposedAction()
-        drop_x = event.position().x()
-
-        # 드롭 위치 계산 및 인디케이터 표시
-        layout = self.layout()
-        if not layout:
-            return
-
-        indicator_x = 0
-        for i in range(layout.count()):
-            widget = layout.itemAt(i).widget()
-            if widget and widget.isVisible():
-                widget_center = widget.x() + widget.width() / 2
-                if drop_x < widget_center:
-                    indicator_x = widget.x() - 2
-                    break
-                indicator_x = widget.x() + widget.width() + 2
-
-        self._drop_indicator.setFixedHeight(self.height() - 10)
-        self._drop_indicator.move(int(indicator_x), 5)
-        self._drop_indicator.show()
-        self._drop_indicator.raise_()
-
-    def dragLeaveEvent(self, event):
-        self._drop_indicator.hide()
-
-    def dropEvent(self, event: QDropEvent):
-        self._drop_indicator.hide()
-        item_id = event.mimeData().text()
-        drop_x = event.position().x()
-
-        # 드롭 위치에서 인덱스 계산
-        layout = self.layout()
-        drop_index = layout.count()  # 기본: 맨 끝
-
-        for i in range(layout.count()):
-            widget = layout.itemAt(i).widget()
-            if widget and widget.isVisible():
-                widget_center = widget.x() + widget.width() / 2
-                if drop_x < widget_center:
-                    drop_index = i
-                    break
-
-        self.item_dropped.emit(item_id, drop_index)
-        event.acceptProposedAction()
-
-
-class QueuePanel(QWidget):
-    """대기열 패널"""
-
-    # 시그널
-    start_requested = pyqtSignal()
-    stop_requested = pyqtSignal()
-    item_edit_requested = pyqtSignal(dict)
+    # 대기열 변경(추가/삭제/순서/수정/실행 중 표시) — 인자는 항목 수. 목록은 싣지 않는다.
     queue_changed = pyqtSignal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, state_path=None, prefs_path=None, schedule=None,
+                 restore: bool = True):
         super().__init__(parent)
-        self.queue_items = []
-        self.card_widgets = {}
-        self.is_processing = False
-        self.current_processing_id = None
-        self._group_counter = 0
-        self._total_for_progress = 0
-        self._completed_for_progress = 0
+        self._model = QueueModel()
+        self._state_path = str(state_path or _QUEUE_STATE_PATH)
+        self._prefs_path = str(prefs_path) if prefs_path else None
+        self._persist_call = CoalescedCall(
+            self._persist_to_disk, schedule=schedule or qt_scheduler(), delay_ms=PERSIST_DELAY_MS,
+        )
+        if restore:
+            self._restore_from_disk()
 
-        self._setup_ui()
-        self._restore_from_disk()
+    # ── 조회 (호환 이름) ──
 
-    # ── 영속화 ──
+    @property
+    def queue_items(self) -> list:
+        """현재 항목 목록(정본). 읽기 전용 — 바꿀 땐 add/remove/update/clear 메서드로."""
+        return self._model.items
+
+    @property
+    def is_processing(self) -> bool:
+        return self._model.is_processing
+
+    @property
+    def current_processing_id(self):
+        return self._model.processing_id
+
+    @property
+    def processing_owner(self):
+        """'실행 중' 표시의 주인 — core.queue_model.QUEUE_OWNER · AUTOMATION_OWNER (옛 표시는 None)."""
+        return self._model.processing_owner
+
+    def processing_held_by_other(self, owner: str) -> bool:
+        """``owner`` 가 아닌 쪽이 지금 대기열 항목을 생성하고 있는가."""
+        return self._model.held_by_other(owner)
+
+    def processing_index(self) -> int:
+        return self._model.processing_index()
+
+    def count(self) -> int:
+        return self._model.count()
+
+    def is_empty(self) -> bool:
+        return self._model.is_empty()
+
+    def get_first_item(self):
+        return self._model.first()
+
+    def get_item_by_id(self, item_id: str):
+        return self._model.get(item_id)
+
+    # ── 변경 알림 · 영속화 ──
+
+    def _changed(self, *, persist: bool = True) -> None:
+        if persist:
+            self._persist_call.request()
+        self.queue_changed.emit(self._model.count())
+
+    def flush_to_disk(self) -> bool:
+        """모아 둔 저장을 지금 쓴다(앱 종료 직전). 쓸 것이 있었으면 True."""
+        return self._persist_call.flush()
 
     def _persist_to_disk(self) -> None:
-        """현재 대기열을 JSON으로 저장 (atomic replace)."""
+        """현재 대기열을 JSON으로 저장 (공용 atomic_write_json: fsync + 실패 시 tmp 정리).
+
+        직렬화할 수 없는 값(TypeError/ValueError)도 대기열 조작을 끊지 않게 경고만 남긴다.
+        """
         try:
-            os.makedirs(os.path.dirname(_QUEUE_STATE_PATH), exist_ok=True)
-            tmp = _QUEUE_STATE_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"items": self.queue_items}, f, ensure_ascii=False)
-            os.replace(tmp, _QUEUE_STATE_PATH)
-        except OSError as e:
+            atomic_write_json(self._state_path, state_document(self._model.items), indent=None)
+        except (OSError, TypeError, ValueError) as e:
             logger.warning("queue persist failed: %s", e)
 
+    def _read_prefs(self):
+        # 경로·로더는 core.ui_prefs 한 곳(없거나 깨졌으면 {} → 자동 복구 켬)
+        from core.ui_prefs import read_ui_prefs
+        return read_ui_prefs(self._prefs_path)
+
     def _restore_from_disk(self) -> None:
-        """앱 시작 시 미완료 대기열을 자동 복구.
-        Settings의 'queue.autoRestore' (localStorage, 기본 true)에 따라:
+        """앱 시작 시 미완료 대기열을 복구.
+
+        ui_prefs.json 의 ``queue_auto_restore`` (UI 없음 — 파일을 직접 고쳐 끄는 탈출구, 기본 true):
           - true : 다이얼로그 없이 자동 복구
           - false: 다이얼로그로 확인
         """
-        if not os.path.exists(_QUEUE_STATE_PATH):
+        if not os.path.exists(self._state_path):
             return
         try:
-            with open(_QUEUE_STATE_PATH, "r", encoding="utf-8") as f:
+            with open(self._state_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("queue restore read failed: %s", e)
             return
-        items = data.get("items") if isinstance(data, dict) else None
+        items = restorable_items(data)
         if not items:
             return
 
-        # 자동 복구 설정 — 사용자가 ui_prefs.json에서 명시적으로 끌 수 있음
-        auto_restore = True
         try:
-            ui_prefs_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "config", "ui_prefs.json",
-            )
-            if os.path.exists(ui_prefs_path):
-                with open(ui_prefs_path, "r", encoding="utf-8") as f:
-                    prefs = json.load(f)
-                if isinstance(prefs, dict):
-                    auto_restore = bool(prefs.get("queue_auto_restore", True))
+            auto_restore = auto_restore_enabled(self._read_prefs())
         except Exception:
-            pass
+            auto_restore = True
 
-        if auto_restore:
-            # 다이얼로그 없이 자동 복구
-            self.queue_items = list(items)
-            self._refresh_display()
-            self.queue_changed.emit(len(self.queue_items))
-            logger.info(f"대기열 자동 복구: {len(items)}개 항목")
-            return
+        if not auto_restore:
+            # 사용자가 명시적으로 끈 경우 — 확인 다이얼로그(화면 없는 객체라 부모 없이 띄운다)
+            from PyQt6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                None, "대기열 복구",
+                f"이전 세션의 미완료 대기열 {len(items)}개 항목을 복구할까요?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                try:
+                    os.remove(self._state_path)
+                except OSError:
+                    pass
+                return
 
-        # 사용자가 명시적으로 끈 경우 — 기존처럼 다이얼로그
-        reply = QMessageBox.question(
-            self, "대기열 복구",
-            f"이전 세션의 미완료 대기열 {len(items)}개 항목을 복구할까요?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self.queue_items = list(items)
-            self._refresh_display()
-            self.queue_changed.emit(len(self.queue_items))
-        else:
-            try:
-                os.remove(_QUEUE_STATE_PATH)
-            except OSError:
-                pass
+        restored = self._model.replace(items)
+        # 복구 전용 필드 보정(겹친 id 재발급 등)이 있었을 수 있다 — 다음 저장 때 반영된다
+        self._changed(persist=False)
+        logger.info("대기열 복구: %d개 항목", restored)
 
-    def _setup_ui(self):
-        """UI 구성"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+    # ── 변경 ──
+    # 모든 변경은 O(항목 수) 이하이고 화면을 다시 그리지 않는다. 알림은 즉시(싸다), 저장은 모아서.
 
-        # 헤더
-        header_layout = QHBoxLayout()
+    def add_single_item(self, item_data: dict) -> str:
+        """항목 하나를 맨 뒤에 넣고 id 를 돌려준다.
 
-        self.title_label = QLabel("⏳ 대기열 (0)")
-        self.title_label.setStyleSheet(f"""
-            font-weight: bold; font-size: 14px; color: {get_color('accent')};
-        """)
-        header_layout.addWidget(self.title_label)
-
-        # 진행률
-        self.progress_label = QLabel("")
-        self.progress_label.setStyleSheet(f"color: {get_color('accent')}; font-weight: bold; font-size: 12px;")
-        header_layout.addWidget(self.progress_label)
-
-        header_layout.addStretch()
-
-        # 프리셋 버튼
-        self.btn_save_preset = QPushButton("💾")
-        self.btn_save_preset.setToolTip("프리셋 저장")
-        self.btn_save_preset.setFixedWidth(35)
-        self.btn_save_preset.setStyleSheet(self._small_btn_style())
-        self.btn_save_preset.clicked.connect(self._save_preset_dialog)
-        header_layout.addWidget(self.btn_save_preset)
-
-        self.btn_load_preset = QPushButton("📂")
-        self.btn_load_preset.setToolTip("프리셋 불러오기")
-        self.btn_load_preset.setFixedWidth(35)
-        self.btn_load_preset.setStyleSheet(self._small_btn_style())
-        self.btn_load_preset.clicked.connect(self._load_preset_dialog)
-        header_layout.addWidget(self.btn_load_preset)
-
-        # 시작/중지
-        self.btn_start = QPushButton("▶ 자동 시작")
-        self.btn_start.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #27ae60; color: white;
-                border-radius: 4px; padding: 5px 15px; font-weight: bold;
-            }}
-            QPushButton:hover {{ background-color: #2ecc71; }}
-            QPushButton:disabled {{ background-color: {get_color('border')}; color: {get_color('text_muted')}; }}
-        """)
-        self.btn_start.clicked.connect(self._on_start_clicked)
-        header_layout.addWidget(self.btn_start)
-
-        self.btn_stop = QPushButton("⏹ 중지")
-        self.btn_stop.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c; color: white;
-                border-radius: 4px; padding: 5px 15px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #c0392b; }
-        """)
-        self.btn_stop.clicked.connect(lambda: self.stop_requested.emit())
-        self.btn_stop.hide()
-        header_layout.addWidget(self.btn_stop)
-
-        # 비우기
-        self.btn_clear = QPushButton("🧹")
-        self.btn_clear.setToolTip("전체 비우기")
-        self.btn_clear.setFixedWidth(35)
-        self.btn_clear.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color('bg_button')}; border: 1px solid {get_color('border')};
-                border-radius: 4px; padding: 5px;
-            }}
-            QPushButton:hover {{ background-color: #5A2A2A; }}
-        """)
-        self.btn_clear.clicked.connect(self.clear_all)
-        header_layout.addWidget(self.btn_clear)
-
-        layout.addLayout(header_layout)
-
-        # 카드 스크롤 영역 (가로)
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.setFixedHeight(140)
-        self.scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {get_color('bg_secondary')};
-                border: 1px solid {get_color('border')};
-                border-radius: 4px;
-            }}
-        """)
-
-        # 드롭 가능한 카드 컨테이너
-        self.card_container = DropCardContainer()
-        self.card_container.item_dropped.connect(self._on_item_dropped)
-        self.card_layout = QHBoxLayout(self.card_container)
-        self.card_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.card_layout.setContentsMargins(5, 5, 5, 5)
-        self.card_layout.setSpacing(8)
-
-        self.empty_label = QLabel("대기열이 비어있습니다")
-        self.empty_label.setStyleSheet(f"color: {get_color('text_muted')}; padding: 20px;")
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.card_layout.addWidget(self.empty_label)
-
-        self.scroll_area.setWidget(self.card_container)
-        layout.addWidget(self.scroll_area)
-
-        # 하단 정보
-        bottom_layout = QHBoxLayout()
-
-        self.info_label = QLabel("총 0장 예정")
-        self.info_label.setStyleSheet(f"color: {get_color('text_muted')}; font-size: 11px;")
-        bottom_layout.addWidget(self.info_label)
-
-        bottom_layout.addStretch()
-
-        self.btn_add_current = QPushButton("➕ 현재 설정")
-        self.btn_add_current.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color('bg_button')}; border: 1px solid {get_color('border')};
-                border-radius: 4px; padding: 5px 10px;
-                color: {get_color('text_primary')}; font-size: 11px;
-            }}
-            QPushButton:hover {{ background-color: {get_color('bg_button_hover')}; }}
-        """)
-        bottom_layout.addWidget(self.btn_add_current)
-
-        layout.addLayout(bottom_layout)
-
-    def _small_btn_style(self):
-        return f"""
-            QPushButton {{
-                background-color: {get_color('bg_button')}; border: 1px solid {get_color('border')};
-                border-radius: 4px; padding: 5px;
-            }}
-            QPushButton:hover {{ background-color: {get_color('bg_button_hover')}; }}
+        ``ui.generator_main._setup_queue`` 가 인스턴스에서 이 메서드를 감싸 ComfyUI 워크플로 컨트롤
+        동결과 queueItemAdded 알림을 붙인다 — 일괄 추가도 반드시 이 메서드를 한 건씩 거친다
+        (그 래퍼를 우회하는 일괄 API 를 만들지 않는다).
         """
-
-    # ========== ID 생성 ==========
-
-    def _generate_id(self):
-        import uuid
-        return str(uuid.uuid4())[:8]
-
-    def _generate_group_id(self):
-        self._group_counter += 1
-        n = self._group_counter
-        result = ''
-        while n > 0:
-            n -= 1
-            result = chr(ord('A') + n % 26) + result
-            n //= 26
-        return result
-
-    # ========== 아이템 추가/삭제 ==========
-
-    def add_item(self, item_data: dict, group_id: str = None,
-                 group_index: int = 1, group_total: int = 1,
-                 is_last_of_group: bool = True):
-        item_id = self._generate_id()
-        item = {
-            'id': item_id,
-            'group_id': group_id or '',
-            'group_index': group_index,
-            'group_total': group_total,
-            'is_last_of_group': is_last_of_group,
-            **item_data
-        }
-        self.queue_items.append(item)
-        self._refresh_display()
-        self.queue_changed.emit(len(self.queue_items))
-        self._persist_to_disk()
-        return item_id
-
-    def add_items_as_group(self, items_data: list, repeat_count: int = 1):
-        for item_data in items_data:
-            group_id = self._generate_group_id()
-            for i in range(repeat_count):
-                is_last = (i == repeat_count - 1)
-                self.add_item(
-                    item_data.copy(),
-                    group_id=group_id,
-                    group_index=i + 1,
-                    group_total=repeat_count,
-                    is_last_of_group=is_last
-                )
-
-    def add_single_item(self, item_data: dict):
-        self.add_item(item_data, group_id='', is_last_of_group=True)
-
-    def remove_item(self, item_id: str):
-        self.queue_items = [item for item in self.queue_items if item['id'] != item_id]
-        self._refresh_display()
-        self.queue_changed.emit(len(self.queue_items))
-        self._persist_to_disk()
+        item = self._model.add(item_data)
+        self._changed()
+        return item['id']
 
     def remove_items_by_ids(self, item_ids: list) -> int:
-        """여러 item_id를 한 번에 삭제. 처리 중 항목은 제외하고 안전하게 정리."""
-        if not item_ids:
-            return 0
-        targets = set(item_ids)
-        before = len(self.queue_items)
-        # 현재 실행 중인 아이템은 보호
-        running_id = getattr(self, '_processing_item_id', None)
-        if running_id:
-            targets.discard(running_id)
-        self.queue_items = [item for item in self.queue_items if item.get('id') not in targets]
-        removed = before - len(self.queue_items)
-        if removed > 0:
-            self._refresh_display()
-            self.queue_changed.emit(len(self.queue_items))
-            self._persist_to_disk()
+        """여러 item_id를 한 번에 삭제 — 실행 중 항목은 보호한다. 지운 개수를 돌려준다."""
+        removed = self._model.remove_ids(item_ids or ())
+        if removed:
+            self._changed()
         return removed
 
     def move_item_up(self, item_id: str) -> bool:
-        """item_id 항목을 한 칸 앞으로. 첫 번째거나 처리 중이면 False."""
-        if self.is_processing:
-            # 처리 중에는 인덱스 0이 실행 중이므로 0번 위치로 옮기는 건 금지
-            min_idx = 1
-        else:
-            min_idx = 0
-        for i, item in enumerate(self.queue_items):
-            if item.get('id') == item_id:
-                if i <= min_idx:
-                    return False
-                self.queue_items[i - 1], self.queue_items[i] = self.queue_items[i], self.queue_items[i - 1]
-                self._refresh_display()
-                self.queue_changed.emit(len(self.queue_items))
-                self._persist_to_disk()
-                return True
-        return False
+        """한 칸 앞으로. 첫 번째이거나 실행 중 항목과 자리를 바꾸게 되면 False."""
+        moved = self._model.move(item_id, 'up')
+        if moved:
+            self._changed()
+        return moved
 
     def move_item_down(self, item_id: str) -> bool:
-        """item_id 항목을 한 칸 뒤로. 마지막이면 False."""
-        for i, item in enumerate(self.queue_items):
-            if item.get('id') == item_id:
-                if i >= len(self.queue_items) - 1:
-                    return False
-                # 처리 중인 0번 위치와는 교환 금지
-                if self.is_processing and i == 0:
-                    return False
-                self.queue_items[i], self.queue_items[i + 1] = self.queue_items[i + 1], self.queue_items[i]
-                self._refresh_display()
-                self.queue_changed.emit(len(self.queue_items))
-                self._persist_to_disk()
-                return True
-        return False
+        """한 칸 뒤로. 마지막이거나 실행 중 항목과 자리를 바꾸게 되면 False."""
+        moved = self._model.move(item_id, 'down')
+        if moved:
+            self._changed()
+        return moved
+
+    def update_item(self, item_id: str, fields: dict) -> bool:
+        """항목 필드 수정(Vue 편집 모달). 항목이 있으면 True."""
+        found = self._model.update_fields(item_id, fields or {})
+        if found:
+            self._changed()
+        return found
+
+    def clear_items(self) -> int:
+        """전체 비우기(Vue 가 이미 확인을 받았다) — 실행 중 항목은 남긴다. 지운 개수."""
+        removed = self._model.clear()
+        if removed:
+            self._changed()
+        return removed
 
     def remove_first_item(self):
-        if self.queue_items:
-            removed = self.queue_items.pop(0)
-            self._refresh_display()
-            self.queue_changed.emit(len(self.queue_items))
-            self._persist_to_disk()
-            return removed
-        return None
+        """맨 앞 항목 제거 — 자동화 '큐 우선' 경로가 방금 처리한 항목을 정리할 때 쓴다."""
+        removed = self._model.pop_first()
+        if removed is not None:
+            self._changed()
+        return removed
 
-    def get_first_item(self):
-        return self.queue_items[0] if self.queue_items else None
+    def consume_item(self, item_id: str):
+        """생성이 끝난 **그 항목**을 지운다(대기열 매니저). 이미 없으면 None — 다른 항목은 건드리지 않는다."""
+        removed = self._model.consume(item_id)
+        if removed is not None:
+            self._changed()
+        return removed
 
-    def get_item_by_id(self, item_id: str):
-        for item in self.queue_items:
-            if item['id'] == item_id:
-                return item
-        return None
+    # ── 실행 중 표시 ──
 
-    def clear_all(self):
-        if not self.queue_items:
-            return
-        reply = QMessageBox.question(
-            self, "확인",
-            f"대기열의 {len(self.queue_items)}개 항목을 모두 삭제하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self.queue_items.clear()
-            self._refresh_display()
-            self.queue_changed.emit(0)
-            self._persist_to_disk()
+    def set_processing(self, is_processing: bool, item_id: str = None, *, owner: str = None):
+        """'실행 중' 항목 표시(주인 확인 없음 — 옛 호출용). 실행 중 항목은 삭제·비우기·순서 바꾸기에서 보호된다.
 
-    def count(self):
-        return len(self.queue_items)
+        ``item_id`` 없이 켜면(옛 호출 방식) 맨 앞 항목을 실행 중으로 본다. 표시가 바뀌면 Vue 가
+        그 행의 삭제·이동 버튼을 막도록 변경 알림을 보낸다(디스크에는 쓰지 않는다 — 복구된
+        항목은 아무도 생성 중이 아니다). 대기열 매니저·자동화는 남의 표시를 지우지 않도록
+        :meth:`claim_processing` / :meth:`release_processing` 을 쓴다.
+        """
+        target = None
+        if is_processing:
+            target = item_id
+            if target is None:
+                first = self._model.first()
+                target = first.get('id') if first else None
+        if self._model.set_processing(target, owner):
+            self._changed(persist=False)
 
-    def is_empty(self):
-        return len(self.queue_items) == 0
+    def claim_processing(self, item_id, owner: str) -> bool:
+        """``owner`` 가 ``item_id`` 를 생성한다고 표시한다. 다른 주인이 표시를 쥐고 있으면 False.
 
-    def get_all_items(self):
-        return self.queue_items.copy()
+        대기열 매니저(QUEUE_OWNER)와 자동화 '큐 우선'(AUTOMATION_OWNER)이 같은 대기열을 소비한다 —
+        한쪽이 생성 중인 항목을 다른 쪽이 다시 보내거나 그 표시를 풀면, 표시가 사라진 항목을 지운 뒤
+        완료 처리가 엉뚱한 항목을 지웠다.
+        """
+        before = (self._model.processing_id, self._model.processing_owner)
+        claimed = self._model.claim(item_id, owner)
+        if claimed and before != (self._model.processing_id, self._model.processing_owner):
+            self._changed(persist=False)
+        return claimed
 
-    # ========== 디스플레이 ==========
+    def release_processing(self, item_id, owner: str = None) -> bool:
+        """``item_id`` 가 아직 '실행 중'이고 주인이 ``owner`` 면 표시를 푼다. 풀었으면 True.
 
-    def _refresh_display(self):
-        for card in self.card_widgets.values():
-            self.card_layout.removeWidget(card)
-            card.deleteLater()
-        self.card_widgets.clear()
-
-        if not self.queue_items:
-            self.empty_label.show()
-            self.title_label.setText("⏳ 대기열 (0)")
-            self.info_label.setText("총 0장 예정")
-            self.btn_start.setEnabled(False)
-            self.progress_label.setText("")
-            return
-
-        self.empty_label.hide()
-        self.title_label.setText(f"⏳ 대기열 ({len(self.queue_items)})")
-        self.info_label.setText(f"총 {len(self.queue_items)}장 예정")
-        self.btn_start.setEnabled(not self.is_processing)
-
-        for item in self.queue_items:
-            card = QueueItemCard(item)
-            card.delete_requested.connect(self._on_delete_requested)
-            card.edit_requested.connect(self._on_edit_requested)
-            card.duplicate_requested.connect(self._on_duplicate_requested)
-
-            if item['id'] == self.current_processing_id:
-                card.set_processing(True)
-
-            self.card_layout.addWidget(card)
-            self.card_widgets[item['id']] = card
-
-    # ========== 이벤트 핸들러 ==========
-
-    def _on_delete_requested(self, item_id: str):
-        self.remove_item(item_id)
-
-    def _on_edit_requested(self, item_id: str):
-        """편집 다이얼로그 표시"""
-        item = self.get_item_by_id(item_id)
-        if not item:
-            return
-
-        dialog = QueueItemEditDialog(item, self)
-        if dialog.exec():
-            updated = dialog.get_data()
-            # 기존 항목에 편집된 필드 덮어쓰기
-            for key, val in updated.items():
-                item[key] = val
-            # 카드 UI 갱신
-            if item_id in self.card_widgets:
-                self.card_widgets[item_id].update_data(item)
-
-    def _on_duplicate_requested(self, item_id: str):
-        """항목 복제"""
-        item = self.get_item_by_id(item_id)
-        if not item:
-            return
-        new_data = {k: v for k, v in item.items() if k != 'id'}
-        self.add_item(
-            new_data,
-            group_id=item.get('group_id', ''),
-            group_index=item.get('group_index', 1),
-            group_total=item.get('group_total', 1),
-            is_last_of_group=item.get('is_last_of_group', True)
-        )
-
-    def _on_start_clicked(self):
-        if self.queue_items:
-            self.start_requested.emit()
-
-    def _on_item_dropped(self, item_id: str, drop_index: int):
-        """드래그 앤 드롭으로 순서 변경"""
-        # 원래 위치 찾기
-        src_index = None
-        for i, item in enumerate(self.queue_items):
-            if item['id'] == item_id:
-                src_index = i
-                break
-
-        if src_index is None:
-            return
-
-        # 아이템 이동
-        item = self.queue_items.pop(src_index)
-        # 소스 제거 후 인덱스 조정
-        if drop_index > src_index:
-            drop_index -= 1
-        drop_index = max(0, min(drop_index, len(self.queue_items)))
-        self.queue_items.insert(drop_index, item)
-        self._refresh_display()
-        self._persist_to_disk()
-
-    # ========== 처리 상태 ==========
-
-    def set_processing(self, is_processing: bool, item_id: str = None):
-        self.is_processing = is_processing
-        self.current_processing_id = item_id if is_processing else None
-
-        self.btn_start.setVisible(not is_processing)
-        self.btn_stop.setVisible(is_processing)
-        self.btn_clear.setEnabled(not is_processing)
-        self.btn_add_current.setEnabled(not is_processing)
-
-        for card_id, card in self.card_widgets.items():
-            card.set_processing(card_id == item_id and is_processing)
-
-    # ========== 진행률 ==========
-
-    def update_progress(self, completed: int, total: int):
-        """진행률 업데이트"""
-        self._completed_for_progress = completed
-        self._total_for_progress = total
-        if total > 0:
-            self.progress_label.setText(f"{completed}/{total} 완료")
-        else:
-            self.progress_label.setText("")
-
-    def reset_progress(self):
-        self._completed_for_progress = 0
-        self._total_for_progress = 0
-        self.progress_label.setText("")
-
-    # ========== 프리셋 ==========
-
-    def _save_preset_dialog(self):
-        if not self.queue_items:
-            QMessageBox.information(self, "알림", "대기열이 비어있습니다.")
-            return
-
-        name, ok = QInputDialog.getText(self, "프리셋 저장", "프리셋 이름:")
-        if not ok or not name.strip():
-            return
-
-        os.makedirs(PRESET_DIR, exist_ok=True)
-        clean_items = []
-        for item in self.queue_items:
-            clean = {k: v for k, v in item.items()
-                     if k not in ('id', 'current_processing_id')}
-            clean_items.append(clean)
-
-        path = os.path.join(PRESET_DIR, f"{name.strip()}.json")
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(clean_items, f, ensure_ascii=False, indent=2)
-            QMessageBox.information(self, "완료", f"프리셋 '{name.strip()}'이 저장되었습니다.")
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"저장 실패: {e}")
-
-    def _load_preset_dialog(self):
-        os.makedirs(PRESET_DIR, exist_ok=True)
-        presets = [f[:-5] for f in os.listdir(PRESET_DIR) if f.endswith('.json')]
-
-        if not presets:
-            QMessageBox.information(self, "알림", "저장된 프리셋이 없습니다.")
-            return
-
-        name, ok = QInputDialog.getItem(
-            self, "프리셋 불러오기", "프리셋:", presets, editable=False
-        )
-        if not ok:
-            return
-
-        path = os.path.join(PRESET_DIR, f"{name}.json")
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                items = json.load(f)
-            for item_data in items:
-                self.add_single_item(item_data)
-            QMessageBox.information(self, "완료", f"{len(items)}개 항목이 추가되었습니다.")
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"불러오기 실패: {e}")
+        다른 항목·다른 주인의 표시는 건드리지 않는다(``owner`` 가 None 이면 주인을 따지지 않는다).
+        자동화를 멈추면 큐 우선 항목은 소비되지 않고 대기열에 남는다 — 표시가 남으면 그 항목을
+        지울 수 없게 된다.
+        """
+        if not self._model.release(item_id, owner):
+            return False
+        self._changed(persist=False)
+        return True
