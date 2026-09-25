@@ -602,6 +602,7 @@
   "format_version": 1,
   "generated_at": "2026-09-01T22:36:55Z",
   "generated_by": "tools/refresh_danbooru_data.py 1.0.0",
+  "hf_revision": "c670007f4e81568c2ad73039d5863dba2aa283a3",
   "source": {
     "path": "posts-snapshot.parquet",
     "resolved_columns": {
