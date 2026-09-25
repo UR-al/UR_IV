@@ -89,6 +89,48 @@ class DatasetArtifactTests(unittest.TestCase):
         )
 
 
+class DownloadCallTests(unittest.TestCase):
+    """_download 이 snapshot_download 에 넘기는 값과, 받기 전에 건드리는 환경 변수."""
+
+    _TRANSFER_ENV = ("HF_HUB_ENABLE_HF_TRANSFER", "HF_XET_HIGH_PERFORMANCE")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name) / "danbooru_optimized"
+        self._patches = [
+            patch.object(fetch_data, "DATA_DIR", self.root),
+            patch.object(fetch_data, "_ensure_hf_hub"),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in reversed(self._patches):
+            p.stop()
+        self._tmp.cleanup()
+
+    def test_download_pins_revision_and_leaves_transfer_env_alone(self):
+        # huggingface_hub 1.x 는 hf_transfer 를 쓰지 않는다 — HF_HUB_ENABLE_HF_TRANSFER 를 켜 두면
+        # 첫 실행 콘솔에 FutureWarning 만 찍힌다. 전송은 hf-xet 가 알아서 맡고, 고성능 모드
+        # (HF_XET_HIGH_PERFORMANCE)는 대역폭과 CPU 코어를 다 쓰므로 앱이 기본으로 켜지 않는다.
+        env = {k: v for k, v in os.environ.items() if k not in self._TRANSFER_ENV}
+        with patch.dict(os.environ, env, clear=True), \
+                patch("huggingface_hub.snapshot_download") as snapshot, \
+                redirect_stdout(io.StringIO()):
+            ok = fetch_data._download(["tags_dictionary.parquet"], "rev1")
+            for name in self._TRANSFER_ENV:
+                self.assertNotIn(name, os.environ)
+        self.assertTrue(ok)
+        self.assertTrue(self.root.is_dir())
+        snapshot.assert_called_once_with(
+            repo_id=fetch_data.REPO_ID,
+            repo_type=fetch_data.REPO_TYPE,
+            local_dir=str(self.root),
+            allow_patterns=["tags_dictionary.parquet"],
+            revision="rev1",
+        )
+
+
 class EnsureDataTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

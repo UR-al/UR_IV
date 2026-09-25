@@ -13,7 +13,6 @@ manifest 갱신 뒤 Search 는 검증 실패로 막히고 Event 는 옛 데이�
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -100,7 +99,10 @@ def _download(patterns: list[str], revision: str | None = None) -> bool:
 
     try:
         _ensure_hf_hub()
-        os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+        # 전송 가속 환경 변수는 켜지 않는다. huggingface_hub 1.x 는 hf_transfer 를 쓰지 않아
+        # HF_HUB_ENABLE_HF_TRANSFER 는 FutureWarning 만 찍었고, 전송은 hf-xet 가 자동으로 맡는다.
+        # 후속인 HF_XET_HIGH_PERFORMANCE 는 대역폭과 CPU 코어를 다 쓰므로(학습·생성과 같은 PC)
+        # 기본으로 켜지 않는다 — 원하는 사용자는 직접 설정하면 그대로 적용된다.
 
         from huggingface_hub import snapshot_download
         from huggingface_hub.utils import HfHubHTTPError
