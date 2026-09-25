@@ -29,3 +29,10 @@ npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
 - 시작/로딩 오류가 보이면 오류 내용을 확인한다. 채팅을 재선택하거나 HTML 파일을 반복 클릭하는 것은 서버 실행을 대신하지 않는다.
 
 2026-09-05: 이전 점검 후 삭제됐던 미리보기를 복구했다. 파일 삭제 및 개발 서버 종료가 이전 링크 접근 실패의 직접 원인이었다.
+
+## README 스크린샷 모드
+
+주소 끝에 `?readme` 를 붙이면(<http://127.0.0.1:5174/dev/theme-audit.html?readme>) 문구 없는 합성 그림 6장,
+크기·시드가 있는 생성 결과, 여러 줄의 검색 결과, 와일드카드 샘플을 넣고 모의 동작 알림을 띄우지 않는다.
+README 의 `docs/images/readme/*.png` 는 이 모드를 헤드리스 Chrome 으로 찍은 것이다. 다시 찍을 때는 개발 서버를 띄운 뒤
+저장소 루트에서 `venv\Scripts\python.exe tools\capture_readme_screens.py` 를 실행한다(기본 주소는 `npm run dev` 의 5173 포트).

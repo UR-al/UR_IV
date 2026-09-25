@@ -38,7 +38,8 @@ const widgetValues = {
   main_prompt_text: 'outdoors, sunlight, blue_dress', neg_prompt_text: 'blurry',
   total_prompt_display: 'outdoors, sunlight, blue_dress',
   model_combo: '오프라인 예시 모델', sampler_combo: 'Euler', scheduler_combo: 'Normal',
-  steps_slider: '20', cfg_slider: '5', width_spin: '768', height_spin: '1024', seed_input: '-1',
+  // 파라미터 카드(components/params/ParamsBasicCard.vue)가 읽는 위젯 이름
+  steps_input: '28', cfg_input: '5', width_input: '832', height_input: '1216', shift_input: '3', seed_input: '-1',
   i2i_denoising_strength: '0.65', inpaint_denoising_strength: '0.65',
 }
 let prefs = { theme: 'light', themeOverrides: {}, iconAnimationStyle: 'none',
@@ -49,10 +50,47 @@ let instructions = { common: '', features: Object.fromEntries(
 let session = {}
 let instructionPresets = []
 function presetReply(scope, preset = null) { return json({ ok: true, scope, preset, presets: instructionPresets.filter(item => item.scope === scope) }) }
-// History appends a cache-busting query; keep it in a fragment, outside SVG bytes.
-const sampleImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="768"><rect width="640" height="768" fill="#d7e3e9"/><circle cx="440" cy="130" r="70" fill="#eed996"/><path d="M0 520L160 350 320 500 500 300 640 470V768H0Z" fill="#81998c"/><circle cx="310" cy="280" r="55" fill="#ddb9a1"/><path d="M250 350H370L410 590H210Z" fill="#4c698e"/><text x="26" y="724" font-family="sans-serif" font-size="22" fill="#1b1b19">Offline theme sample · no personal files</text></svg>') + '#offline-preview'
-const sampleRows = [{ id: 1, copyright: 'original', character: '', artist: 'fixture_artist',
+// README 스크린샷 모드(?readme): 문구 없는 합성 그림 여러 장·크기와 시드가 있는 결과·여러 줄의
+// 검색 결과·와일드카드 샘플을 쓰고, 모의 동작 알림을 띄우지 않는다. 개인 파일은 여전히 쓰지 않는다.
+const README_MODE = new URLSearchParams(location.search).has('readme')
+function svgUrl(body, tag) {
+  // History appends a cache-busting query; keep it in a fragment, outside SVG bytes.
+  return 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="832" height="1216" viewBox="0 0 832 1216">${body}</svg>`) + `#${tag}`
+}
+const sky = (a, b) => `<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="832" height="1216" fill="url(#sky)"/>`
+const figure = (dress, hair) => `<path d="M330 520 Q416 420 505 520 L512 640 Q416 590 322 640Z" fill="${hair}"/><circle cx="416" cy="585" r="68" fill="#f3d2bd"/><path d="M336 668 H496 L580 1060 H252Z" fill="${dress}"/>`
+const readmeScenes = [
+  { tag: 'meadow', seed: 1843021977, prompt: '1girl, solo, blue dress, meadow, sunlight, wind, smile',
+    body: sky('#9ecbff', '#f6dcff') + '<circle cx="640" cy="230" r="110" fill="#ffe7a3"/><path d="M0 830 Q220 700 430 800 T832 760 V1216 H0Z" fill="#8cc084"/><path d="M0 940 Q260 850 520 940 T832 910 V1216 H0Z" fill="#5f9f68"/>' + figure('#3f6fb5', '#3b2a24') },
+  { tag: 'sunset', seed: 902384411, prompt: '1girl, beach, sunset, white dress, ocean, looking at viewer',
+    body: sky('#ff9a8b', '#ffd3a5') + '<circle cx="416" cy="700" r="160" fill="#fff0c2" opacity="0.9"/><rect y="760" width="832" height="456" fill="#35507f"/><path d="M0 820 H832 M60 880 H772 M120 940 H712" stroke="#9fb4dc" stroke-width="6" opacity="0.6"/>' + figure('#f4f1ea', '#5a3a2e') },
+  { tag: 'city', seed: 55120387, prompt: 'night, city lights, rain, 1girl, umbrella, reflections',
+    body: sky('#0f2027', '#2c5364') + '<circle cx="660" cy="200" r="70" fill="#f5f3ce"/>' +
+      [[40, 520, 150], [210, 440, 130], [360, 600, 120], [500, 380, 160], [680, 500, 140]].map(([x, y, w]) =>
+        `<rect x="${x}" y="${y}" width="${w}" height="${1216 - y}" fill="#1b2d3a"/>` +
+        Array.from({ length: 6 }, (_, i) => `<rect x="${x + 20 + (i % 3) * 40}" y="${y + 40 + Math.floor(i / 3) * 70}" width="18" height="26" fill="#ffd66b" opacity="0.8"/>`).join('')).join('') },
+  { tag: 'forest', seed: 3301927745, prompt: 'forest, sunbeam, path, scenery, no humans, lush',
+    body: sky('#e3f5c3', '#9ed8a6') + [[80, 0.9], [230, 1], [420, 0.85], [600, 1], [740, 0.9]].map(([x, s]) =>
+      `<path d="M${x} ${1060 - 520 * s} L${x + 130 * s} 1060 H${x - 130 * s}Z" fill="#2f6b4f"/><rect x="${x - 14}" y="1060" width="28" height="80" fill="#5b4033"/>`).join('') + '<path d="M300 1216 Q416 1000 520 1216Z" fill="#d9c79a"/>' },
+  { tag: 'snow', seed: 72719, prompt: 'snowy mountains, winter, clear sky, scenery, landscape',
+    body: sky('#cfe2ff', '#f4f8ff') + '<path d="M0 900 L220 480 L360 700 L520 380 L832 880 V1216 H0Z" fill="#8aa1b8"/><path d="M220 480 L270 575 L180 560Z M520 380 L590 500 L455 490Z" fill="#ffffff"/><rect y="980" width="832" height="236" fill="#f7fbff"/>' },
+  { tag: 'sakura', seed: 1200773, prompt: '1girl, cherry blossoms, school uniform, petals, spring',
+    body: sky('#fbd3e9', '#bb93d8') + '<rect x="120" y="360" width="46" height="856" fill="#6b4a3c"/><circle cx="143" cy="340" r="190" fill="#f7a8c8" opacity="0.9"/><circle cx="700" cy="260" r="150" fill="#f9bdd6" opacity="0.8"/>' + figure('#2f3b5c', '#241a18') },
+]
+const readmeImages = readmeScenes.map(scene => svgUrl(scene.body, `readme-${scene.tag}`))
+const sampleImage = README_MODE ? readmeImages[0] : 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="768"><rect width="640" height="768" fill="#d7e3e9"/><circle cx="440" cy="130" r="70" fill="#eed996"/><path d="M0 520L160 350 320 500 500 300 640 470V768H0Z" fill="#81998c"/><circle cx="310" cy="280" r="55" fill="#ddb9a1"/><path d="M250 350H370L410 590H210Z" fill="#4c698e"/><text x="26" y="724" font-family="sans-serif" font-size="22" fill="#1b1b19">Offline theme sample · no personal files</text></svg>') + '#offline-preview'
+const libraryImages = README_MODE ? readmeImages : [sampleImage]
+const sampleRows = README_MODE ? [
+  { id: 1, copyright: 'original', character: '', artist: 'fixture_artist', general: '1girl solo smile standing blue_dress blue_eyes long_hair outdoors meadow sunlight', rating: 'g', image_width: 832, image_height: 1216 },
+  { id: 2, copyright: 'original', character: '', artist: 'sample_painter', general: '1girl beach sunset white_dress ocean looking_at_viewer', rating: 'g', image_width: 1024, image_height: 1024 },
+  { id: 3, copyright: 'original', character: '', artist: 'sample_painter', general: 'night city rain umbrella reflection 1girl', rating: 's', image_width: 896, image_height: 1152 },
+] : [{ id: 1, copyright: 'original', character: '', artist: 'fixture_artist',
   general: '1girl smile standing blue_dress blue_eyes outdoors sunlight', rating: 'g', image_width: 640, image_height: 768 }]
+const sampleWildcards = README_MODE ? [
+  { name: 'hairstyle', file: 'hairstyle.txt', tags: ['long hair', 'short hair', 'twintails', 'ponytail', 'bob cut'], lines: ['# 머리 모양 — 한 줄에서 하나를 고른다', 'long hair, short hair, bob cut', 'twintails, ponytail'] },
+  { name: 'outfit', file: 'outfit.txt', tags: ['school uniform', 'white dress', 'hoodie', 'kimono'], lines: ['school uniform, white dress', 'hoodie, kimono'] },
+  { name: 'background', file: 'background.txt', tags: ['meadow', 'beach', 'city', 'forest'], lines: ['meadow, beach, city, forest'] },
+] : []
 const categories = { smile: 'expression', standing: 'pose', blue_dress: 'clothing', blue_eyes: 'character_trait',
   outdoors: 'background', sunlight: 'effect', fixture_artist: 'artist', original: 'copyright' }
 const metadata = { source: 'comfyui', path: sampleImage, prompt: 'outdoors, sunlight, blue_dress', negative: 'blurry',
@@ -97,21 +135,21 @@ const methods = {
   },
   getSession: reply(() => json(session)), saveSession: (raw, callback) => { session = JSON.parse(raw); callback?.('{}') },
   getRandomResolutions: reply('[]'), getPresetList: reply('["오프라인 샘플"]'), getPresetData: reply(json({ prompt: metadata.prompt, negative: metadata.negative })),
-  getGenStats: reply('{}'), getWildcardTree: reply('[]'), getCharFeatureOverride: reply('{}'),
+  getGenStats: reply('{}'), getWildcardTree: reply(() => json(sampleWildcards)), getCharFeatureOverride: reply('{}'),
   // 비동기 조회(request* → *Ready) — 응답 id 를 되돌려 줘야 화면이 '불러오는 중'에서 풀린다
   requestLoras: (mode, requestId) => emit('lorasReady', json({ requestId, mode, loras: [] })),
   requestCharacterTagsOnline: (name, requestId) => emit('characterTagsOnlineReady', json({ requestId, name, error: offlineMessage })),
   requestCompareGif: (_before, _after, _duration, _loops, requestId) => emit('compareGifReady', json({ requestId, error: offlineMessage })),
-  getStatusMessage: reply(() => json({ text: '오프라인 테마 점검 — 상태줄 예시', level: 'info', timeoutMs: 0, at: Date.now() })),
+  getStatusMessage: reply(() => json({ text: README_MODE ? '' : '오프라인 테마 점검 — 상태줄 예시', level: 'info', timeoutMs: 0, at: Date.now() })),
   getTagSuggestionsRich: reply('[]'), getCharacterInsight: reply('{}'), getExcludeMatches: reply('[]'),
   classifyTags: reply(raw => json(Object.fromEntries(JSON.parse(raw).map(tag => [tag, categories[tag] || 'general'])))),
   getActiveSearchDataset: reply(json({ label: '오프라인 샘플', id: 'offline' })),
   loadLastSearchResults: reply(() => json(sampleRows)), loadFullResults: reply(() => json(sampleRows)),
   searchDanbooru: () => { emit('searchResultsReady', json(sampleRows)); record('Search: 샘플 태그만 표시') },
-  getFavorites: reply(json([sampleImage])), getImageExif: reply(json(metadata)),
+  getFavorites: reply(json(libraryImages)), getImageExif: reply(json(metadata)),
   getLastGalleryFolder: reply('오프라인 샘플'),
-  requestGalleryImages: folder => emit('galleryImagesReady', json({ folder, files: [sampleImage] })),
-  generateThumbnails: (raw, width) => emit('thumbnailReady', json({ width, items: JSON.parse(raw).map(path => ({ path, thumb: sampleImage })) })),
+  requestGalleryImages: folder => emit('galleryImagesReady', json({ folder, files: libraryImages })),
+  generateThumbnails: (raw, width) => emit('thumbnailReady', json({ width, items: JSON.parse(raw).map(path => ({ path, thumb: README_MODE && path.startsWith('data:') ? path : sampleImage })) })),
   requestOllamaModels: () => emit('ollamaModelsReady', json(['offline-preview:8b'])),
   requestADetailerModels: () => emit('adetailerModelsReady', '[]'),
   requestUpscalers: () => emit('upscalersReady', '["Lanczos"]'),
@@ -183,7 +221,7 @@ methods.onAction = (name, raw) => {
   if (name === 'save_global_weights') { emit('globalWeightsLoaded', json(payload.weights || [])); return }
   if (name === 'chat_save' || name.startsWith('save_') || name.startsWith('set_')) { record(`${name}: 실제 저장 없이 무시`); return }
   record(`실행하지 않음: ${name}`)
-  emit('showNotification', 'info', offlineMessage)
+  if (!README_MODE) emit('showNotification', 'info', offlineMessage)
   if (/generate|chat_send|start_xyz/.test(name)) {
     emit('generationError', offlineMessage)
     emit('chatDone', json({ id: payload.id, ok: false, error: offlineMessage }))
@@ -249,11 +287,18 @@ for (const [label, text] of [['프리셋 모달', '프리셋'], ['가중치 모�
 }
 button('샘플 이미지', () => {
   for (const event of ['inpaintImageLoaded', 'pngInfoImageLoaded', 'i2iImageLoaded', 'editorImageLoaded']) emit(event, sampleImage)
+  if (README_MODE) {
+    // 히스토리가 여러 장으로 차도록 — 마지막(첫 장면)이 맨 위에 온다
+    for (const [index, scene] of [...readmeScenes.entries()].reverse()) {
+      emit('imageGenerated', json({ path: readmeImages[index], prompt: scene.prompt, negative: 'lowres, blurry', width: 832, height: 1216, seed: scene.seed }))
+    }
+    return
+  }
   emit('imageGenerated', json({ path: sampleImage, prompt: metadata.prompt, negative: metadata.negative }))
 })
 button('Search 샘플', async () => { await navigate('search'); emit('searchResultsReady', json(sampleRows)) })
 button('Favorites 샘플', () => navigate('fav'))
-button('Gallery 샘플', async () => { await navigate('gallery'); emit('galleryImagesReady', json({ folder: '오프라인 샘플', files: [sampleImage] })) })
+button('Gallery 샘플', async () => { await navigate('gallery'); emit('galleryImagesReady', json({ folder: '오프라인 샘플', files: libraryImages })) })
 button('PNG Info 샘플', async () => { await navigate('png'); emit('pngInfoImageLoaded', sampleImage) })
 button('샘플 알림', () => { for (const type of ['success', 'info', 'error']) emit('showNotification', type, `${type} 테마 점검용 알림`) })
 const label = document.createElement('label')

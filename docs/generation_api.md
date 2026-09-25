@@ -1,35 +1,35 @@
 # Generation API Gateway
 
 AI Studio Pro는 별도 머신용 HTTP 서버를 열어 외부 프로그램의 생성 요청을 받고,
-현재 앱 백엔드 또는 Settings에 등록한 Forge/WebUI·ComfyUI로 작업을 전달할 수 있습니다.
+현재 앱 백엔드 또는 설정에 등록한 Forge/WebUI·ComfyUI로 작업을 전달할 수 있습니다.
 브라우저용 Web UI 서버와는 포트·인증·수명주기가 분리됩니다.
 
 ## 켜기
 
-1. `Settings → NETWORK`를 엽니다.
-2. `BIND HOST`와 `PORT`를 확인합니다. 기본값은 `127.0.0.1:17990`입니다.
+1. 설정 → **네트워크**의 '이 앱을 생성 API로 사용' 카드를 엽니다.
+2. '바인드 호스트'와 '포트'를 확인합니다. 기본값은 `127.0.0.1:17990`입니다.
    (관리형 Forge `17860~`·ComfyUI `18188~` 자동 포트 범위와 겹치지 않게 골랐습니다. 이전 버전의
    기본값 `17860`을 그대로 둔 채 꺼져 있던 설정은 처음 실행할 때 `17990`으로 옮겨집니다.
    켜 둔 설정의 포트는 바꾸지 않으며, 그때는 관리형 Forge가 다음 빈 포트를 씁니다.)
-3. 필요하면 원격 target을 추가합니다.
-4. `APPLY CONFIG`를 누른 뒤 `START`를 누릅니다.
-5. 표시된 Bearer token을 복사합니다.
+3. 필요하면 'Forge/WebUI · ComfyUI 연결' 카드의 `+ ADD TARGET`으로 원격 target을 추가합니다.
+4. '설정 적용'을 누른 뒤 '시작'을 누릅니다.
+5. 'Bearer 토큰' 칸의 '복사'로 token을 복사합니다.
 
-`APP STARTUP`을 켜고 저장하면 다음 앱 실행부터 자동으로 시작합니다. 서버는 기본적으로
+'앱 시작'을 켜고 '설정 적용'을 누르면 다음 앱 실행부터 자동으로 시작합니다. 서버는 기본적으로
 꺼져 있으며, `127.0.0.1`은 같은 PC에서만 접속할 수 있습니다. `0.0.0.0`으로 바꾸면
 LAN에 공개되므로 방화벽과 네트워크 접근 범위를 별도로 제한해야 합니다.
 내장 서버는 TLS를 종료하지 않는 일반 HTTP 서버이므로 token, prompt, 입력 이미지가 평문으로
 전송됩니다. 신뢰할 수 있는 LAN에서만 사용하거나 HTTPS reverse proxy/VPN 뒤에 두세요.
-`START`와 `STOP`은 현재 앱 세션의 실행 상태만 바꾸며 `APP STARTUP` 값은 변경하지 않습니다.
+'시작'과 '중지'는 현재 앱 세션의 실행 상태만 바꾸며 '앱 시작' 값은 변경하지 않습니다.
 
 ## Target 규칙
 
 - `active`: 요청을 제출한 시점의 현재 앱 백엔드를 사용합니다.
-- 등록 target: Settings에서 승인한 ID의 Forge/WebUI 또는 ComfyUI를 사용합니다.
+- 등록 target: 설정에서 승인한 ID의 Forge/WebUI 또는 ComfyUI를 사용합니다.
 - target URL은 경로가 없는 서버 root(예: `http://192.168.0.20:7860`)여야 합니다.
 - 원격 Forge/A1111은 `--api`로 API가 활성화되어 있어야 하며, ComfyUI도 해당 주소에서 API 요청을 받아야 합니다.
 - 요청 본문에는 target URL, 로컬 경로 또는 Comfy workflow JSON을 넣을 수 없습니다.
-- 일반 ComfyUI T2I/I2I target은 Settings에 각각 API-format workflow JSON 경로를 저장해야 합니다.
+- 일반 ComfyUI T2I/I2I target은 설정의 'T2I 워크플로 프로필 경로'·'I2I 워크플로 프로필 경로'에 각각 API-format workflow JSON 경로를 저장해야 합니다.
 - `family: "krea2"`는 ComfyUI target에서만 동작하며 앱의 내장 Krea2 workflow builder를 사용합니다.
 - Krea2 API 작업은 현재 요청당 이미지 1장만 지원하며 batch 값이 1보다 크면 `400`으로 거부합니다.
 - 같은 로컬 GPU를 사용하는 작업은 앱의 생성 리소스 잠금을 공유합니다.
@@ -39,7 +39,7 @@ LAN에 공개되므로 방화벽과 네트워크 접근 범위를 별도로 제�
 모든 경로는 `/api/v1/health`를 제외하고 다음 헤더가 필요합니다.
 
 ```text
-Authorization: Bearer <Settings에서 복사한 token>
+Authorization: Bearer <설정에서 복사한 token>
 ```
 
 | Method | Path | 용도 |
@@ -59,7 +59,7 @@ Authorization: Bearer <Settings에서 복사한 token>
 
 ```powershell
 $base = 'http://127.0.0.1:17990'
-$token = '<Settings에서 복사한 token>'
+$token = '<설정에서 복사한 token>'
 $headers = @{ Authorization = "Bearer $token" }
 $body = @{
   target = 'active'
@@ -159,7 +159,7 @@ $job = Invoke-RestMethod `
 | `POST` | `/sdapi/v1/interrupt` |
 | `GET` | `/sdapi/v1/options` |
 
-대상을 생략하면 Settings의 기본 target을 사용합니다. 호출별로 바꾸려면
+대상을 생략하면 설정의 '기본 대상'을 사용합니다. 호출별로 바꾸려면
 `X-AIStudio-Target: <targetId>` 헤더를 추가하거나 요청 JSON에
 `ai_studio_target`을 넣습니다. `generation_family: "krea2"`도 호환 요청에서 사용할 수
 있습니다. 생성 응답은 A1111 형식의 `images`, `parameters`, `info`를 반환합니다.
