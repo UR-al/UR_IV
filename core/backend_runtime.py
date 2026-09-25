@@ -945,7 +945,9 @@ class BackendRuntimeManager:
         )
         mount = self._extension_mount(engine)
         mount.parent.mkdir(parents=True, exist_ok=True)
-        if mount.exists() or mount.is_symlink():
+        # 대상이 사라진 junction(연결했던 설치를 지우거나 옮긴 경우)은 exists()·is_symlink() 가 모두
+        # False 다 — reparse 속성으로도 봐야 지우고 새로 연결한다(안 그러면 그 자리에 만들다 실패).
+        if mount.exists() or mount.is_symlink() or self._is_reparse_directory(mount):
             try:
                 if mount.resolve() == target.resolve():
                     return target

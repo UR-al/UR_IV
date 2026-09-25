@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -605,6 +606,36 @@ class BackendRuntimeConfigurationTests(BackendRuntimeTestCase):
         call = junction_calls[0]
         self.assertEqual(call["env"]["AISTUDIO_JUNCTION_TARGET"], str(external.resolve()))
         self.assertNotIn(str(external.resolve()), " ".join(call["argv"]))
+
+    @unittest.skipUnless(os.name == "nt", "junction semantics are Windows-only")
+    def test_dangling_extension_junction_is_replaced_when_relinking(self):
+        # 연결했던 ComfyUI 폴더를 지우거나 옮기면 data/custom_nodes 가 대상 없는 junction 으로 남는다.
+        # 그 경로는 exists()·is_symlink() 가 모두 False 라 예전에는 지우지 않고 그 위에 새 junction 을
+        # 만들려다 실패했다(EXTENSION_MOUNT_FAILED) — 새 폴더를 연결해도 ComfyUI 를 띄울 수 없었다.
+        import _winapi
+
+        old_target = self.temp / "old_portable" / "custom_nodes"
+        old_target.mkdir(parents=True)
+        mount = self.manager._extension_mount("comfyui")
+        mount.parent.mkdir(parents=True, exist_ok=True)
+        _winapi.CreateJunction(str(old_target), str(mount))
+        shutil.rmtree(self.temp / "old_portable")
+        self.assertFalse(mount.exists())
+        self.assertTrue(self.manager._is_reparse_directory(mount))
+
+        new_target = self.temp / "new_portable" / "custom_nodes"
+        new_target.mkdir(parents=True)
+        self.manager.execute("comfyui", "save_extension_dir", {"extensionDir": str(new_target)})
+
+        junction_calls = [
+            call for call in self.adapter.calls
+            if call["argv"] and call["argv"][0].casefold().endswith("powershell.exe")
+        ]
+        self.assertEqual(len(junction_calls), 1)
+        self.assertEqual(
+            junction_calls[0]["env"]["AISTUDIO_JUNCTION_TARGET"], str(new_target.resolve())
+        )
+        self.assertTrue(mount.is_dir())   # 가짜 어댑터가 새 연결 자리에 만든 폴더
 
     def test_forge_rejects_comfy_managed_shared_extension_folder(self):
         comfy_extensions = (
