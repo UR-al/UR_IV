@@ -51,11 +51,14 @@ export type ActionName =
   | 'import_anima_from_forge' | 'reset_anima_guidance' | 'unload_model_request' | 'show_toast'
   | 'chat_send' | 'chat_stop' | 'chat_load' | 'chat_save' | 'chat_export' | 'chat_model_info'
   | 'chat_models'
+  | 'memo_list' | 'memo_save' | 'memo_delete' | 'memo_sync'
   | 'get_xyz_capabilities'
+  | 'sam_extra_capabilities_get'
   | 'comfy_compatibility_refresh' | 'comfy_compatibility_save_baseline'
   | 'comfy_controls_inspect' | 'comfy_controls_save' | 'comfy_controls_clear'
   | 'comfy_quality_preset' | 'comfy_feature_preflight'
   | 'relight_preview' | 'relight_export' | 'relight_cancel'
+  | 'tile_repair_options' | 'tile_repair_run' | 'tile_repair_cancel'
   | 'hand_reconstruction_generate' | 'hand_reconstruction_export' | 'hand_reconstruction_cancel'
   | 'native_tab_switch' | 'vue_tab_switch'
   | 'probe_backend' | 'select_backend' | 'pick_comfy_workflow'
@@ -83,6 +86,7 @@ export type BackendEvent =
   | 'chatModelsReady' | 'aiAssistInstructionsChanged' | 'instructionPresetsChanged'
   | 'xyzCapabilitiesReceived' | 'xyzPlotEvent'
   | 'comfyWorkflowEvent' | 'comfyCompatibilityResult' | 'relightEvent' | 'handReconstructionEvent'
+  | 'tileRepairResult'
   | 'batchFilesSelected' | 'batchJobState' | 'adetailerResult' | 'adetailerProgress' | 'sam3Result' | 'sam3Progress'
   | 'captionFilesSelected' | 'captionProgress' | 'captionDone' | 'captionOutDirSelected'
   | 'captionModelDirSelected' | 'captionRuntimeReady'
@@ -93,8 +97,10 @@ export type BackendEvent =
   | 'creatorStateChanged' | 'creatorProgress' | 'creatorResult' | 'creatorMediaSelected'
   | 'comicStoryboardReady' | 'comicDocumentChanged'
   | 'loraManagerUrlReady' | 'refineResult'
+  | 'samExtraCapabilities'
   | 'statusMessage'
   | 'lorasReady' | 'characterTagsOnlineReady' | 'compareGifReady'
+  | 'memoState'
 
 /** statusMessage — 파이썬 show_status 한 줄(core/status_message.py). 하단 계기 스트립이 보인다.
  *  timeoutMs 0 = 다음 문구까지 유지. at = 보낸 시각(epoch ms, getStatusMessage 재생용). */
@@ -103,6 +109,79 @@ export interface StatusMessagePayload {
   level: 'info' | 'success' | 'warning' | 'error'
   timeoutMs: number
   at: number
+}
+
+// ── sam-extra 런타임 기능 스냅샷 (core/sam_extra_capabilities.py SamExtraCapabilities.to_dict) ──
+// WebUI 연결 때 파이썬이 GET 으로 확인해 samExtraCapabilities 로 보낸다. known=false 면
+// 모르는 상태 — 기능을 막지 말고 지금처럼 둔다. 서버 주소는 싣지 않는다(웹 모드).
+
+/** 'ok' 만 판단 재료가 있다. not_applicable = ComfyUI 백엔드. */
+export type SamExtraStatus = 'ok' | 'unknown' | 'unreachable' | 'error' | 'not_applicable'
+
+/** 기능 플래그 이름 — 파이썬 FEATURE_FLAGS 와 같은 순서·철자. */
+export type SamExtraFeature =
+  | 'sam3' | 'anima_guidance' | 'skimmed_cfg' | 'detail_daemon' | 'anima38' | 'dora' | 'vae2x'
+  | 'lora_manager' | 'memo_routes' | 'tipo_route' | 'reference_route' | 'contract_route'
+  | 'tile_repair_route'
+
+export interface SamExtraWarning {
+  /** 예: extension_missing · script_missing · args_fewer · args_more · pag_smc_auto_old_build ·
+   *  sam3_keys_unknown_to_extension · sam3_cn_module_not_live */
+  code: string
+  /** 기능 플래그 이름 또는 'sam_extra'(확장 전체) */
+  feature: string
+  message: string
+}
+
+export interface SamExtraScriptDetail {
+  present: boolean
+  img2img: boolean
+  live_argc: number | null
+  /** 앱이 위치 인자로 보내는 스크립트만 숫자(PAG·Skimmed·DD·Anima38) */
+  spec_argc: number | null
+  /** 확장이 짧아서 잘릴 앱 스펙 키 */
+  trailing_unmapped: string[]
+  extra_live_args: number
+}
+
+/** samExtraCapabilities 이벤트 페이로드 */
+export interface SamExtraCapabilitiesEvent {
+  status: SamExtraStatus
+  known: boolean
+  checked_at: string | null
+  installed: boolean
+  features: Record<SamExtraFeature, boolean>
+  anima_guidance_argc: number | null
+  /** Detail Daemon 인자 13(Hires Pass)이 있나. false = 그 칸이 없는 빌드(모든 패스에 적용), null = 모름·스크립트 없음 */
+  detail_daemon_hires: boolean | null
+  version: {
+    extension_version: string | null
+    audited_version: string | null
+    folder: string | null
+    branch: string | null
+    commit: string | null
+    commit_date: number | null
+    enabled: boolean | null
+    remote: string | null
+  } | Record<string, never>
+  /** 키 = 소문자 스크립트 제목 */
+  scripts: Record<string, SamExtraScriptDetail>
+  sam3_keys: { missing_in_extension?: string[]; unknown_to_app?: string[] }
+  /** Gradio /config 의 setting_sam3_* 시작값 (키에서 setting_ 을 뗀 이름) */
+  options: Record<string, unknown>
+  options_known: boolean
+  gradio_api: string[]
+  /** controlnet_models · controlnet_modules · clip_l · smc_presets · anima38_adapters ·
+   *  vae2x_decoders · dora_modes · dora_insert_policies · dora_weak_scopes (받은 것만) */
+  choices: Record<string, string[]>
+  warnings: SamExtraWarning[]
+  errors: Record<string, string>
+}
+
+/** sam_extra_capabilities_get — refresh=true 면 다시 확인(30초에 한 번까지, 확인 중이면 그 결과를 기다림),
+ *  아니면 마지막 스냅샷을 다시 보낸다. */
+export interface SamExtraCapabilitiesGetPayload {
+  refresh?: boolean
 }
 
 // ── 비동기 조회(request* 슬롯 → *Ready 이벤트) ──
@@ -405,6 +484,142 @@ export interface ActionPayloads {
   workflow_profile_save: WorkflowProfileSavePayload
   probe_backend: ProbeBackendPayload
   select_backend: SelectBackendPayload
+  sam_extra_capabilities_get: SamExtraCapabilitiesGetPayload
+  memo_list: MemoEmptyPayload
+  memo_save: MemoSavePayload
+  memo_delete: MemoDeletePayload
+  memo_sync: MemoEmptyPayload
+  tile_repair_options: TileRepairRequestPayload
+  tile_repair_run: TileRepairRunPayload
+  tile_repair_cancel: TileRepairRequestPayload
+}
+
+// ── Anima Tile & Repair (I2I 카드 · Forge sam-extra POST /sam-extra/tile-repair) ──
+// 파이썬 ui/tile_repair_actions.py 가 라우트로 보내고 tileRepairResult 로 답한다. 기본값·범위는 원본
+// (kohya sd-scripts · ComfyUI-Anima-LLLite) 그대로 — utils/tileRepair.ts · core/tile_repair_request.py.
+
+/** 카드 설정 = 라우트 본문(이미지 제외). 모델 칸의 '' 는 확장 기본값(최신 Tile & Repair · Qwen3 TE · Qwen-Image VAE · Forge 현재 DiT). */
+export interface TileRepairSettings {
+  model: string
+  prompt: string
+  negative_prompt: string
+  steps: number
+  cfg_scale: number
+  flow_shift: number
+  multiplier: number
+  short_side: number
+  /** -1 = 랜덤(쓴 시드는 결과로 온다) */
+  seed: number
+  dit: string
+  text_encoder: string
+  vae: string
+  unload_forge_before: boolean
+}
+
+/** tile_repair_options · tile_repair_cancel — cancel 의 requestId 는 멈출 run 의 것. */
+export interface TileRepairRequestPayload {
+  requestId: string
+}
+
+/** tile_repair_run — 원본은 로컬 경로(image_path)가 우선이고, 없으면 업로드 data URL(image). */
+export interface TileRepairRunPayload {
+  requestId: string
+  image_path: string
+  image: string
+  settings: TileRepairSettings
+}
+
+/** GET /sam-extra/tile-repair/options 응답 그대로 — 확장 패널의 선택지·기본값·범위. */
+export interface TileRepairOptions {
+  version: number
+  available: boolean
+  /** 3채널 Anima LLLite 만(safetensors 헤더로 판별 — 4채널 인페인트 LLLite 는 빠진다) */
+  models: string[]
+  default_model: string | null
+  dit: string[]
+  text_encoder: string[]
+  vae: string[]
+  defaults: Record<string, string | number | boolean | null>
+  ranges: Record<string, [number, number]>
+  increments: Record<string, number>
+}
+
+/** tileRepairResult — action 으로 어느 요청의 답인지 가른다. ok=false 면 error(취소면 canceled=true). */
+export interface TileRepairResultEvent {
+  action: 'tile_repair_options' | 'tile_repair_run' | 'tile_repair_cancel'
+  requestId: string
+  ok: boolean
+  error?: string
+  canceled?: boolean
+  options?: TileRepairOptions
+  /** run: 앱 출력 폴더의 tile_repair/ 아래 새 PNG(infotext 는 parameters 청크) */
+  path?: string
+  width?: number | null
+  height?: number | null
+  seed?: number | null
+  info?: string
+  model?: string
+  /** cancel: Forge 에서 멈춘 작업이 있었나 */
+  stopped?: boolean
+}
+
+// ── 메모장 (우하단 도크 · Forge sam-extra Notebook 메모와 공유) ──
+// 앱은 user_data/memos.json 에 저장하고, 메모 라우트가 있는 Forge(GET /sam3-notebook/memos 200)에
+// 닿으면 합친다(메모마다 updated_at 이 새 쪽이 이김 · 삭제 표시도 새 것이 이김 · 양쪽이 바뀐
+// 충돌은 둘 다 남기고 로컬 것을 "<제목> (충돌 사본)" 새 id 로). 화면: components/dock/MemoPanel.vue.
+
+/** 화면에 보이는 메모 한 장 — memoState.memos 의 원소. 시각은 ISO8601 UTC 문자열. */
+export interface MemoItem {
+  id: string
+  title: string
+  text: string
+  created_at: string
+  updated_at: string
+}
+
+/** 메모 동기화 상태. available=false 면 Forge 에 메모 라우트가 없거나 닿지 않는다 — 로컬에만 저장. */
+export interface MemoSyncState {
+  available: boolean
+  target: 'forge' | 'local'
+  syncing: boolean
+  last_synced_at: string | null
+  error: string | null
+}
+
+/** memoState — 메모 목록(삭제 표시 제외)과 동기화 상태. memo_* 액션마다, 동기화 전후마다 온다. */
+export interface MemoStateEvent {
+  memos: MemoItem[]
+  sync: MemoSyncState
+  /** memo_save 의 답에만 — 그 저장이 들어간 메모. 없으면 null */
+  saved: MemoSaveResult | null
+}
+
+/** 저장 하나(request)가 들어간 메모. 충돌 사본이 됐으면 id 가 사본, conflict_of 가 원래 메모(아니면 ''). */
+export interface MemoSaveResult {
+  request: string
+  id: string
+  conflict_of: string
+}
+
+/** memo_list · memo_sync — 페이로드 없음. */
+export type MemoEmptyPayload = Record<string, never>
+
+/** memo_save — 새로 만들기와 고치기(upsert). id 는 앱이 만든다(^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$).
+ *  base_updated_at: 이 편집이 기대는 저장본의 updated_at(새 메모는 null) — 충돌 판정용. */
+export interface MemoSavePayload {
+  id: string
+  title: string
+  text: string
+  base_updated_at: string | null
+  /** 저장을 보낸 편집기(화면 인스턴스) — 같은 낡은 base 의 이어 친 글만 그 편집기의 충돌 사본에 모은다 */
+  editor?: string
+  /** 이 저장의 식별자(다시 보낼 때는 같은 값) — memoState.saved.request 로 돌아온다 */
+  request?: string
+}
+
+/** memo_delete — 삭제 표시(tombstone)로 바꾼다. */
+export interface MemoDeletePayload {
+  id: string
 }
 
 /** 액션 K 의 페이로드 타입(맵에 없으면 `object`). */

@@ -225,6 +225,8 @@ _WEB_SIGNALS = frozenset({
     "galleryImagesReady", "thumbnailReady", "imageSearchTextsReady", "upscalersReady", "ollamaModelsReady",
     "chatToken", "chatDone", "chatThreads", "chatGenerationEvent", "chatModelInfo",
     "chatModelsReady", "aiAssistInstructionsChanged", "instructionPresetsChanged",
+    # 메모 목록·동기화 상태(memo_* 액션 응답) — 빠지면 웹 모드에서 메모가 영영 안 뜬다.
+    "memoState",
     "xyzCapabilitiesReceived", "xyzPlotEvent",
     "adetailerModelsReady", "queueUpdated", "queueItemAdded", "queueCompleted",
     "showNotification", "adetailerResult", "adetailerProgress", "sam3Result",
@@ -242,6 +244,8 @@ _WEB_SIGNALS = frozenset({
     "creatorMediaSelected", "comicStoryboardReady", "comicDocumentChanged",
     # SAM3 Refine (sam-extra 워크플로 2) + 임베드 LoRA Manager (워크플로 4)
     "refineResult", "loraManagerUrlReady",
+    # sam-extra 기능 스냅샷 — 서버 주소는 싣지 않는다(core/sam_extra_capabilities.to_dict)
+    "samExtraCapabilities",
     "editorWatermarkImageLoaded",
     # 에디터 저장 결과 — 빠지면 웹 모드에서 저장이 끝나도 '저장 중'에서 풀리지 않는다.
     "editorSaveResult",

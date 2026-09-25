@@ -75,6 +75,7 @@ class BatchUpscaleWorker(QThread):
                 mode = self.settings['mode']
                 backend = get_backend()
                 applied_steps = []
+                sam3_skipped = ''   # SAM3 만 실패하고 앞 단계는 적용됐을 때 사용자 문구
 
                 # 항목마다 Forge 작업(업스케일·ADetailer·SAM3) 전에 앱 프로세스의
                 # 편집기 SAM3 번들(~3.4GB)을 반납 — 배치 도중 편집기에서 다시 올렸어도 겹치지 않게
@@ -95,8 +96,19 @@ class BatchUpscaleWorker(QThread):
 
                     # SAM3
                     if mode in ('sam3_only', 'both') and self.settings.get('sam3_enabled', True):
-                        result_b64 = backend.sam3(result_b64, self.settings)
-                        applied_steps.append('sam3')
+                        sam3_b64 = backend.sam3(result_b64, self.settings)
+                        # Forge 가 'SAM3 Error' 를 남겼으면 SAM3 는 돌지 않았다 — '_sam3' 로 저장하지 않는다.
+                        # 앞 단계(업스케일·ADetailer)가 적용됐으면 그 결과는 SAM3 없이 저장하고 항목 문구로 알린다.
+                        from core.sam_extra_notices import standalone_failure_text, standalone_sam3_failure
+                        failure = standalone_sam3_failure(sam3_b64)
+                        if failure is None:
+                            result_b64 = sam3_b64
+                            applied_steps.append('sam3')
+                        elif not applied_steps:
+                            raise RuntimeError(standalone_failure_text(failure))
+                        else:
+                            sam3_skipped = standalone_failure_text(failure, saved_without_sam3=True)
+                            logger.warning("batch upscale: SAM3 skipped for %s: %s", path, sam3_skipped)
 
                 # 저장 (output_folder 아래로만 허용). 같은 이름의 이전 결과·원본을
                 # 덮어쓰지 않고 _2, _3 … 새 파일로 쓴다.
@@ -107,12 +119,16 @@ class BatchUpscaleWorker(QThread):
                     base64.b64decode(result_b64),
                 )
 
-                self.single_finished.emit(i, True, os.path.basename(output_path))
+                message = os.path.basename(output_path)
+                if sam3_skipped:
+                    message += f" ({sanitize_for_ui(sam3_skipped, max_len=400)})"
+                self.single_finished.emit(i, True, message)
 
             except Exception as e:
                 logger.warning("upscale failed for %s: %s", path, e)
                 # 사용자에게 실제 원인을 보여 준다(경로·토큰은 sanitize_for_ui 가 가린다).
-                self.single_finished.emit(i, False, sanitize_for_ui(str(e)) or "처리 실패 (로그 참조)")
+                # SAM3 실패 문구(힌트 + 원인)는 160자를 넘기 쉽다 — 단독 SAM3 워커와 같은 400자까지.
+                self.single_finished.emit(i, False, sanitize_for_ui(str(e), max_len=400) or "처리 실패 (로그 참조)")
 
         self.progress.emit(total, total)
         self.all_finished.emit()

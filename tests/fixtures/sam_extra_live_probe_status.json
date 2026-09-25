@@ -1,0 +1,14 @@
+{
+ "recorded_at": "2026-09-25",
+ "source": "Forge classic http://127.0.0.1:7860 (read-only GET), sam-extra 0.30.0 working copy (folder forge_sam3_extension, HEAD 818b8fe + uncommitted changes)",
+ "trimmed": {
+  "sam_extra_live_gradio_config.json": "only setting_sam3_* components and the sam-extra Gradio api_name values (plus 4 unrelated ones)"
+ },
+ "status": {
+  "/sam3-notebook/memos": 404,
+  "/sam3-tipo/status": 404,
+  "/sam-extra/reference": 404,
+  "/sam-extra/contract": 404
+ },
+ "script_info": "script-info 는 계약 가드 픽스처 tests/fixtures/sam_extra_script_info.json 의 scripts 를 쓴다"
+}

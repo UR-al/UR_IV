@@ -156,6 +156,9 @@ class GenerationMixin:
             self._abort_generation("체크포인트가 아직 선택되지 않았습니다 — 목록이 로딩 중이면 잠시 후 다시 누르세요")
             return False
         self._cleanup_gen_worker()
+        # sam-extra 생성 전 경고(CFG≈1 의 APG, sam3.pt 자동 다운로드, 없는 스크립트) — 막지는 않는다
+        from ui.sam_extra_notices_ui import check_before_generation
+        check_before_generation(self, payload)
         # '생성 후 언로드' 요청이 아직 날아가는 중이면 워커가 run() 초입에서 기다린다
         # (core.post_generation.wait_for_pending_unload) — UI 스레드는 막지 않는다.
         if backend_override is None:
@@ -593,6 +596,9 @@ class GenerationMixin:
             self._auto_retry_count = 0   # 성공 — 자동화 재시도 카운터 리셋
             self._process_new_image(result, gen_info)
             self.show_status("✅ 이미지 생성 완료!")
+            # sam-extra 결과 알림('SAM3 Error'·'Anima38: off'·PAG 누락) — 백엔드가 info 에 실어 둔 것
+            from ui.sam_extra_notices_ui import show_result_notices
+            show_result_notices(self, gen_info)
 
             # 프롬프트 히스토리 기록
             try:
@@ -796,7 +802,11 @@ class GenerationMixin:
             sam3_settings = self._build_sam3_settings(payload)
             if sam3_settings:
                 from core import sam3_args
-                sam3_args.apply_to_payload(payload, sam3_settings)
+                # CN 전처리기·모델 이름은 연결 때 받아 둔 기능 스냅샷의 라이브 목록 기준(P3) —
+                # 모르면 정적 목록 + 경고. 새 HTTP 요청은 없다.
+                sam3_args.apply_to_payload(
+                    payload, sam3_settings,
+                    capabilities=getattr(self, 'sam_extra_capabilities', None))
                 _logger.info("SAM3 alwayson_scripts 적용됨 (Forge Neo 방식)")
 
         # Anima Guidance Suite: PAG/SEG/SLG · APG/CWM/SMC · Skimmed CFG ·
@@ -805,6 +815,15 @@ class GenerationMixin:
         try:
             from core import anima_guidance
             anima_settings = self._build_anima_settings()
+            # Detail Daemon 값은 원본 노드 단위 그대로 간다(변환 없음). Hires Pass 를 켰는데 연결된 Forge 확장이
+            # 인자 13 을 모르면 경고만 남긴다 — 판정은 연결 때 받아 둔 기능 스냅샷(여기서 HTTP 를 부르지 않는다).
+            # ComfyUI 는 컴파일러가 dd_hires 로 패스를 고르므로 경고가 없다(남은 Forge 스냅샷도 보지 않는다).
+            from backends import BackendType, get_backend_type
+            hires_note = anima_guidance.detail_daemon_hires_note(
+                anima_settings, getattr(self, 'sam_extra_capabilities', None),
+                comfyui=get_backend_type() == BackendType.COMFYUI)
+            if hires_note:
+                _logger.warning(hires_note)
             anima_guidance.apply_to_payload(payload, anima_settings)
             summary = anima_guidance.describe_active(anima_settings)
             if summary:

@@ -336,6 +336,15 @@
 :root[data-icon-animation='claude'] .icon[data-icon-name='layers'] .icon-part-2 { --ic-open: translateY(calc(.45px * var(--ic-amp-move))); --ic-hold: translateY(calc(.3px * var(--ic-amp-move))); }
 :root[data-icon-animation='claude'] .icon[data-icon-name='layers'] .icon-part-3 { --ic-open: translateY(calc(.9px * var(--ic-amp-move))); --ic-hold: translateY(calc(.6px * var(--ic-amp-move))); }
 :root[data-icon-animation='claude'] .icon[data-icon-name='package'] .icon-part-2 { --ic-open: translateY(calc(-.45px * var(--ic-amp-move))); --ic-hold: translateY(calc(-.3px * var(--ic-amp-move))); }
+/* 대기열 — 줄(2·3)이 차례로 앞으로 밀린다: 순서대로 나간다 */
+:root[data-icon-animation='claude'] .icon[data-icon-name='list'] .icon-part-2 { --ic-open: translateX(calc(.45px * var(--ic-amp-move))); --ic-hold: translateX(calc(.3px * var(--ic-amp-move))); }
+:root[data-icon-animation='claude'] .icon[data-icon-name='list'] .icon-part-3 { --ic-open: translateX(calc(.9px * var(--ic-amp-move))); --ic-hold: translateX(calc(.6px * var(--ic-amp-move))); }
+/* 메모장 — 마지막 줄(4)이 왼쪽 끝(9,12)에서 늘어난다: 적어 넣는다 */
+:root[data-icon-animation='claude'] .icon[data-icon-name='note'] .icon-part-4 {
+  transform-box: view-box; transform-origin: 9px 12px;
+  --ic-open: scaleX(calc(1 + .2 * var(--ic-amp-size)));
+  --ic-hold: scaleX(calc(1 + .12 * var(--ic-amp-size)));
+}
 
 /* 재생 · 멈춤 · 정지 — 진행 방향으로 한 걸음 / 두 막대가 벌어진다 / 네모가 죈다 */
 :root[data-icon-animation='claude'] .icon[data-icon-name='play'] .icon-part-1 { --ic-open: translateX(calc(.6px * var(--ic-amp-move))); --ic-hold: translateX(calc(.4px * var(--ic-amp-move))); }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as Vue from 'vue'
-import { createRenderer, h, nextTick, type App } from 'vue'
+import { createRenderer, h, nextTick, ref, type App } from 'vue'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import source from './QueuePanel.vue?raw'
@@ -108,14 +108,19 @@ async function mountBeforeBridge() {
   const bridge = await import('../bridge.js')
   const store = await import('../stores/widgetStore.js')
   const root = new Node('root')
-  app = renderer.createApp({ setup: () => () => h(compile(bridge, store)) })
+  // 드로어는 우하단 도크(dock/QuickDock.vue)가 v-model:open 으로 연다 — 여기선 그 자리를 대신한다
+  const open = ref(false)
+  const panel = compile(bridge, store)
+  app = renderer.createApp({ setup: () => () => h(panel, { open: open.value, 'onUpdate:open': (v: boolean) => { open.value = v } }) })
   app.component('Icon', { render: () => h('span') })
   app.mount(root)                                   // App 의 onMounted(initBridge)보다 먼저 — 아직 백엔드 없음
+  openers.set(root, open)
   return { bridge, backend, actions, root }
 }
 
+const openers = new WeakMap<Node, { value: boolean }>()
 async function openDrawer(root: Node) {
-  byClass(root, 'queue-pin')[0].props.onClick()
+  openers.get(root)!.value = true
   await nextTick()
 }
 
@@ -132,8 +137,8 @@ it('asks for the restored queue only once the bridge is bound, and shows the ans
 
   backend.queueUpdated.emit(QUEUE_STATE())                               // 백엔드의 답
   await nextTick()
-  expect(byClass(root, 'qp-count')[0].textContent).toBe('2')
   await openDrawer(root)
+  expect(byClass(root, 'count-badge')[0].textContent).toBe('2')
   const start = byClass(root, 'btn').find(node => node.textContent.includes('시작'))
   expect(start).toBeDefined()                                            // 복구된 대기열을 시작할 수 있다
   expect(start!.props.disabled).toBe(false)

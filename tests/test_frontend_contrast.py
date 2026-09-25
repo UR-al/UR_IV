@@ -15,7 +15,15 @@ STYLE = (ROOT / "frontend" / "src" / "style.css").read_text(encoding="utf-8")
 # 프리셋 3종 전체의 대비는 `tests/test_theme_contract.py` 가 본다.
 TOKENS = (ROOT / "frontend" / "src" / "styles" / "theme-fallback.css").read_text(encoding="utf-8")
 APP = (ROOT / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
-ANIMA_PANEL = (ROOT / "frontend" / "src" / "components" / "AnimaGuidancePanel.vue").read_text(encoding="utf-8")
+# Anima 패널은 카드 틀(AnimaGuidancePanel.vue)과 기능별 칸(components/guidance/*Section.vue)으로
+# 나뉘었다(P0-B) — 컨트롤 바인딩은 섹션에, 카드·버튼·공용 모양(:deep)은 패널에 있다. 둘을 한 덩어리로 본다.
+ANIMA_PANEL = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in [
+        ROOT / "frontend" / "src" / "components" / "AnimaGuidancePanel.vue",
+        *sorted((ROOT / "frontend" / "src" / "components" / "guidance").glob("*.vue")),
+    ]
+)
 
 
 def _css_hex_variable(name: str) -> str:
@@ -63,9 +71,10 @@ class FrontendContrastTests(unittest.TestCase):
         # 타입 스케일의 하한은 `--fs-label`(11px)이다. 예전에는 10px 리터럴이었는데
         # 탭 전체 규격 정리에서 11px 로 올렸다 — 이 검사의 뜻(Anima 패널은 조밀한
         # 라벨 크기를 쓴다)은 그대로고, 값만 토큰으로 옮겼다.
+        # 섹션은 패널의 scoped 속성을 받지 않는 조각이라 패널이 :deep(.ext-note) 로 입힌다.
         self.assertRegex(
             ANIMA_PANEL,
-            r"\.ext-note\s*\{[^}]*font-size\s*:\s*var\(--fs-label\)",
+            r"(?:\.ext-note|:deep\(\.ext-note\))\s*\{[^}]*font-size\s*:\s*var\(--fs-label\)",
         )
 
     def test_anima_panel_exposes_forge_import_action(self) -> None:

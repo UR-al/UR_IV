@@ -20,7 +20,13 @@ from typing import Any
 PACK_ID = "ai_studio_forge_parity"
 # Must equal ``comfy_custom_nodes/ai_studio_forge_parity/__init__.__version__``
 # (tests/test_comfy_node_pack.py guards the pair).
-PACK_VERSION = "1.3.0"
+# 1.4.0: Detail Daemon = the original ComfyUI node (×0.1 always, no presets). Packs before it
+# read the same settings 10× stronger; their ForgeNeoAnimaDetailDaemon lacks the
+# ``cfg_scale_override`` input, so the compiler's /object_info check refuses them.
+# Same (unreleased) 1.4.0: ForgeNeoAnimaTileRepair and the SAM3 detailer's Anima
+# ControlNet-LLLite slot (kohya ComfyUI-Anima-LLLite node, vendored). Older packs have
+# no ForgeNeoAnimaTileRepair in /object_info and hand an LLLite to ControlNetLoader.
+PACK_VERSION = "1.4.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

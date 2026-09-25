@@ -13,6 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from core import anima38
@@ -130,10 +131,117 @@ _FORGE_SAME_SCHEDULER = frozenset({"use same scheduler", "same", "automatic", "a
 _PENULTIMATE_SIGMA_DISCARD_SAMPLERS = frozenset({
     "dpm_2", "dpm_2_ancestral", "uni_pc", "uni_pc_bh2",
 })
+# Fallbacks for the CNS sampler inputs = the original CNSSamplerPatch defaults
+# (strength 1.0, gamma_power 0.5, gamma_scale 2.0; the pack's
+# ``guidance_cns.CNS_INPUTS``) — origin:
+# namemechan/comfyui-cns_sampler_patch@42278b13:cns_sampler_patch.py:396-437
+_CNS_DEFAULTS: Mapping[str, float] = MappingProxyType({
+    "cns_strength": 1.0, "cns_gamma_power": 0.5, "cns_gamma_scale": 2.0,
+})
+
+
+def _cns_inputs(options: Mapping[str, Any]) -> dict[str, Any]:
+    """ForgeNeoKSamplerCNS/ForgeNeoHiresFix CNS inputs from sampler options."""
+    return {
+        "cns_enabled": _bool(options.get("cns_enabled")),
+        **{key: _float(options.get(key), default) for key, default in _CNS_DEFAULTS.items()},
+    }
+
+
+# A class only the per-step CNS pack (1.4.0+) publishes: the original's SAMPLER
+# node.  Pack 1.3.0 coloured only the initial noise, only on ForgeNeoKSamplerCNS/
+# ForgeNeoHiresFix (plan §5.2 #1), so a KSamplerAdvanced graph got no CNS at all —
+# yet its suite/sampler input contracts are identical to 1.4.0's, so validate()'s
+# contract check cannot see a stale pack.  This marker can.
+_PER_STEP_CNS_MARKER = "ForgeNeoCNSSamplerPatch"
+_CNS_SAMPLER_CARRIERS = frozenset({"ForgeNeoKSamplerCNS", "ForgeNeoHiresFix"})
+# PAG legacy (legacy strength) and head indices reach the original PAG node from pack
+# 1.4.0 on.  1.3.0's ForgeNeoAnimaGuidanceSuite/ForgeNeoAnimaSafePAG take the same
+# inputs but raise on both inside patch() (1.3.0 guidance.py:1078-1085, :862-865), so
+# the contract check passes a stale pack and the queued run fails.  1.4.0 adds no
+# PAG-only class; the per-step CNS node ships from that same 1.4.0 on.
+_PAG_ORIGIN_MARKER = _PER_STEP_CNS_MARKER
+
+
+def _suite_settings(inputs: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A ForgeNeoAnimaGuidanceSuite node's settings_json ({} when unreadable)."""
+    raw = inputs.get("settings_json")
+    try:
+        settings = json.loads(raw) if isinstance(raw, str) else {}
+    except ValueError:
+        return {}
+    return settings if isinstance(settings, Mapping) else {}
+
+
+def _graph_enables_cns(workflow: Mapping[str, Any]) -> bool:
+    """Whether a compiled graph asks the pack for CNS (suite or sampler inputs)."""
+    for node in workflow.values():
+        if not isinstance(node, Mapping):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, Mapping):
+            continue
+        class_type = node.get("class_type")
+        if class_type == "ForgeNeoAnimaGuidanceSuite":
+            if (
+                _bool(inputs.get("enabled"), True)
+                and _bool(_suite_settings(inputs).get("guid_cns_enabled"))
+            ):
+                return True
+        elif class_type in _CNS_SAMPLER_CARRIERS:
+            value = inputs.get("cns_enabled")
+            if not _is_link(value) and _bool(value):
+                return True
+    return False
+
+
+def _graph_uses_pag_legacy_or_heads(workflow: Mapping[str, Any]) -> bool:
+    """Whether a graph asks for PAG legacy/head indices — what pack 1.3.0 raises on."""
+    for node in workflow.values():
+        if not isinstance(node, Mapping):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, Mapping):
+            continue
+        class_type = node.get("class_type")
+        if class_type == "ForgeNeoAnimaGuidanceSuite":
+            settings = _suite_settings(inputs)
+            method = settings.get("guid_attn_method")
+            method = str("PAG" if method is None else method).strip().casefold()
+            if (
+                _bool(inputs.get("enabled"), True) and _bool(settings.get("guid_enabled"))
+                and method == "pag"
+                and (
+                    _bool(settings.get("guid_legacy_attn"))
+                    or str(settings.get("guid_head_indices") or "").strip()
+                )
+            ):
+                return True
+        elif class_type == "ForgeNeoAnimaSafePAG":
+            # 1.3.0's node returns the model before its head check when off or at zero.
+            enabled, heads = inputs.get("enabled"), inputs.get("head_indices")
+            if (
+                not _is_link(enabled) and _bool(enabled)
+                and not _is_link(heads) and str(heads or "").strip()
+                and all(
+                    _is_link(inputs.get(key)) or _float(inputs.get(key), 1.0) != 0.0
+                    for key in ("scale", "perturbation_strength")
+                )
+            ):
+                return True
+    return False
 
 
 def unsupported_sampler_message(class_type: str) -> Optional[str]:
-    """Why a custom workflow sampler cannot receive the app's payload, if so."""
+    """Why a custom workflow sampler cannot receive the app's payload, if so.
+
+    Only payload mapping decides this.  CNS does not: it is the pack's
+    SAMPLER_SAMPLE wrapper on the MODEL, which colours any KSAMPLER run.
+    Open item (not parity): plan §5.3 A / §8.3 APP-COMP ask to allow
+    SamplerCustom(Advanced), the original CNS node's host; that needs a
+    BasicScheduler/CFGGuider/RandomNoise payload mapping and is deferred until
+    its scope is decided.
+    """
     if class_type in CUSTOM_SAMPLER_NODES:
         return (
             f"{class_type} custom workflow는 Forge payload의 steps/CFG/denoise를 "
@@ -550,6 +658,22 @@ class ComfyWorkflowCompiler:
             raise WorkflowCompileError(
                 "ComfyUI에 필요한 노드가 없습니다: " + ", ".join(missing) + "." + hint
             )
+        if _PER_STEP_CNS_MARKER not in self.object_info and _graph_enables_cns(workflow):
+            # 옛 팩(1.3.0)은 노드 계약이 같아 아래 검사를 통과하지만 CNS 를 초기 노이즈에만 걸고
+            # KSamplerAdvanced 그래프에는 아예 걸지 않는다 — 조용히 다른 그림을 내지 않게 큐 전에 막는다.
+            raise WorkflowCompileError(
+                "CNS에는 스텝마다 노이즈를 색칠하는 AI Studio Forge Parity 노드 팩(1.4.0 이상)이 "
+                f"필요한데 ComfyUI에 {_PER_STEP_CNS_MARKER}가 없습니다(옛 팩은 CNS를 초기 노이즈에만 "
+                "적용합니다). 번들 노드 팩을 갱신하고 ComfyUI를 재시작하세요."
+            )
+        if _PAG_ORIGIN_MARKER not in self.object_info and _graph_uses_pag_legacy_or_heads(workflow):
+            # 옛 팩(1.3.0)은 노드 계약이 같아 아래 검사를 통과하지만 PAG legacy·헤드 지정을 실행 중에
+            # 예외로 거부한다 — 큐에 넣고 실패하지 않게 여기서 막는다.
+            raise WorkflowCompileError(
+                "PAG legacy·헤드 지정에는 원본 PAG 노드를 쓰는 AI Studio Forge Parity 노드 팩"
+                f"(1.4.0 이상)이 필요한데 ComfyUI에 {_PAG_ORIGIN_MARKER}가 없습니다(옛 팩은 둘 다 "
+                "실행 중에 거부합니다). 번들 노드 팩을 갱신하고 ComfyUI를 재시작하세요."
+            )
 
         # A stale copy of the bundled pack can expose the class name while
         # still having an older input contract.  Catch that before /prompt so
@@ -626,20 +750,27 @@ class ComfyWorkflowCompiler:
             graph, mode, vae, payload,
             uploaded_image=uploaded_image, uploaded_mask=uploaded_mask,
         )
+        # Detail Daemon 은 샘플링 패스마다 _add_detail_daemon 이 고른다(base 또는 hires 한 곳) — model 자체에는
+        # 없다. 디테일러가 받는 모델은 _add_image_extensions(last_pass_model=) 이 정한다.
+        pass_model = self._add_detail_daemon(graph, model, payload)
         sampler = self._add_sampler(
-            graph, model, positive_ref, negative_ref, latent, payload, sampler_options,
+            graph, pass_model,
+            positive_ref, negative_ref, latent, payload, sampler_options,
             mode=mode,
         )
         samples, decode_vae = [sampler, 0], vae
         if _bool(payload.get("enable_hr")):
+            pass_model = self._add_detail_daemon(graph, model, payload, hires_pass=True)
             samples, decode_vae = self._add_hires(
-                graph, model, clip, vae, positive_ref, negative_ref, samples, payload,
+                graph, pass_model,
+                clip, vae, positive_ref, negative_ref, samples, payload,
                 sampler_options=sampler_options, anima_plan=anima_plan,
             )
         decode = graph.add("VAEDecode", {"samples": samples, "vae": decode_vae}, "Decode")
         image = [decode, 0]
         image = self._add_image_extensions(
             graph, image, model, clip, vae, positive_ref, negative_ref, payload,
+            last_pass_model=pass_model,
         )
         self._add_output_image(
             graph, image, payload, "AIStudio/generated", "Save generated image",
@@ -1101,10 +1232,7 @@ class ComfyWorkflowCompiler:
                 1.0 if mode == "txt2img" else
                 max(0.0, min(1.0, _float(payload.get("denoising_strength"), 0.75)))
             ),
-            "cns_enabled": _bool(options.get("cns_enabled")),
-            "cns_strength": _float(options.get("cns_strength"), 1.0),
-            "cns_gamma_power": _float(options.get("cns_gamma_power"), 0.5),
-            "cns_gamma_scale": _float(options.get("cns_gamma_scale"), 3.0),
+            **_cns_inputs(options),
             "spectrum_enabled": _bool(payload.get("spectrum_enabled")),
             "spectrum_window_size": _float(payload.get("spectrum_window_size"), 2.0),
             "spectrum_flex_window": _float(payload.get("spectrum_flex_window"), 0.25),
@@ -1257,12 +1385,10 @@ class ComfyWorkflowCompiler:
                     ),
                 }, "Anima guidance suite")
                 model = [node, 0]
-            sampler_options.update({
-                "cns_enabled": _bool(settings.get("guid_cns_enabled")),
-                "cns_strength": _float(settings.get("guid_cns_strength"), 1.0),
-                "cns_gamma_power": _float(settings.get("guid_cns_gamma_power"), 0.5),
-                "cns_gamma_scale": _float(settings.get("guid_cns_gamma_scale"), 3.0),
-            })
+            sampler_options.update(_cns_inputs({
+                key: settings.get(f"guid_{key}")
+                for key in ("cns_enabled", *_CNS_DEFAULTS)
+            }))
 
         skim = self._script(payload, anima_guidance.SCRIPT_SKIMMED_CFG)
         if skim is not None:
@@ -1278,21 +1404,85 @@ class ComfyWorkflowCompiler:
                     "flip_percent": _float(settings.get("skim_flip_at"), 0.0),
                 }, "Anima skimmed CFG")
                 model = [node, 0]
+        # Detail Daemon 은 여기서 걸지 않는다 — 패스마다 _add_detail_daemon 이 고른다(base 또는 hires 한 곳만).
+        return model, sampler_options
+
+    # settings_json 에 넣는 Detail Daemon 키 = dd_enabled + 팩 노드가 원본 노드 입력으로 읽는 키
+    # (comfy_custom_nodes/ai_studio_forge_parity/guidance_dd.SETTING_KEYS — tests/test_comfy_detail_daemon.py 가 맞춘다).
+    # preset·multiplier·cfg_couple(원본에 없는 숨은 자리)과 dd_hires(패스 선택, 아래)는 보내지 않는다.
+    _DD_NODE_KEYS = (
+        "dd_enabled", "dd_amount", "dd_start", "dd_end", "dd_bias", "dd_exponent",
+        "dd_start_offset", "dd_end_offset", "dd_fade", "dd_smooth",
+    )
+
+    def _add_detail_daemon(
+        self, graph: _Graph, model: list, payload: Mapping[str, Any], *, hires_pass: bool = False,
+        cfg_scale: Any = None, sampler_name: Any = None, title: str = "",
+    ) -> list:
+        """한 샘플링 패스가 쓸 모델 — Detail Daemon 은 그 패스가 맞을 때만 건다.
+
+        Hires Pass(dd_hires, 인자 13)는 muerrilla 와 같다: 끄면(기본) base 패스만, 켜면 hires 패스만
+        (origin: muerrilla/sd-webui-detail-daemon@19479998:scripts/detail_daemon.py:104, :276).
+        값은 원본 노드(Jonseed/ComfyUI-Detail-Daemon) 단위 그대로 넘기고 ×0.1×cfg 는 노드가 한다.
+        cfg 는 base cfg_scale 이다(muerrilla 는 hr_cfg 가 아니라 p.cfg_scale: detail_daemon.py:259, :304) —
+        노드의 cfg_scale_override 로 준다.
+
+        디테일러(``_add_image_extensions`` 의 ``last_pass_model``):
+        - ADetailer 는 마지막 본 패스(hires 를 돌렸으면 hires, 아니면 base)의 모델을 그대로 받는다. muerrilla 의
+          on_cfg_denoiser 콜백은 process() 에서 걸려 postprocess() 에서야 풀리는데(detail_daemon.py:256-258,
+          :269-272) Forge 는 postprocess_image(ADetailer) 를 그보다 먼저 부르고(modules/processing.py:1068 <
+          :1180), ADetailer 의 i2i 는 고른 스크립트만 돌려 DD 를 다시 판정하지 않는다(aadetailer script_filter,
+          기본 ad_script_names 에 DD 없음). 그래서 dd_hires == (hires 를 돌렸는가) 일 때 base cfg 로 걸린다
+          (detail_daemon.py:276). 확장도 같다(_DD['on'] 이 마지막 본 패스 값으로 남는다).
+        - SAM3 디테일러 패스는 이 함수를 ``hires_pass=False`` 와 그 패스의 cfg·샘플러로 부른다. 확장의 SAM3
+          인페인트(sam3ext/inpaint_core.py build_i2i → script_filter)는 SAM3 만 빼고 alwayson 스크립트를 다시 돌려
+          anima_detail_daemon.process_before_every_sampling 이 p2(img2img, is_hr_pass False·p2.cfg_scale·
+          p2.sampler_name)로 다시 판정하기 때문이다 — dd_hires 가 꺼져 있으면 hires 여부와 상관없이 걸린다.
+        - 단독 후처리(compile_postprocess)와 mask-only 는 DD 가 없다: Forge 의 단독 요청(webui_backend
+          _build_postprocess_payload)은 ADetailer/SAM3 인자만 보내 DD 가 UI 기본값(끔)으로 돈다.
+        스케줄은 원본 노드처럼 그 디테일러 샘플러의 σ 목록으로 새로 만든다(확장 _node_lookup 과 같음). muerrilla 는
+        ADetailer 패스에서도 본 패스에서 만든 스케줄을 디테일러의 호출 카운터로 읽는다 — 호스트 차이(F·C 공통).
+        """
+        from core import anima_guidance
 
         daemon = self._script(payload, anima_guidance.SCRIPT_DETAIL_DAEMON)
-        if daemon is not None:
-            settings = self._script_settings(daemon, anima_guidance.DETAIL_DAEMON_SPEC)
-            if _bool(settings.get("dd_enabled")):
-                daemon_settings = dict(settings)
-                daemon_settings["cfg_scale"] = _float(payload.get("cfg_scale"), 7.0)
-                node = graph.add("ForgeNeoAnimaDetailDaemon", {
-                    "model": model, "enabled": True,
-                    "settings_json": json.dumps(
-                        daemon_settings, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-                    ),
-                }, "Anima detail daemon")
-                model = [node, 0]
-        return model, sampler_options
+        if daemon is None:
+            return model
+        settings = self._script_settings(daemon, anima_guidance.DETAIL_DAEMON_SPEC)
+        if not _bool(settings.get("dd_enabled")) or _bool(settings.get("dd_hires")) != hires_pass:
+            return model
+        sampler = payload.get("sampler_name") if sampler_name is None else sampler_name
+        if self._comfy_sampler(sampler).casefold() in {"dpm_adaptive", "heunpp2"}:
+            # muerrilla: "Selected sampler (DPM adaptive/HeunPP2) is not supported" — 생성 전체에서 끄고, 판정은
+            # base 샘플러(p.sampler_name)로 한다(detail_daemon.py:197-199). 확장도 같다(SAM3 패스는 p2 의 샘플러).
+            # (원본 Comfy 노드는 이 제외가 없다 — 손으로 만든 워크플로의 팩 노드는 그대로 건다.)
+            return model
+        cfg_scale = _float(payload.get("cfg_scale") if cfg_scale is None else cfg_scale, 7.0)
+        if cfg_scale <= 0.0:
+            # muerrilla 의 σ *= 1 − s·0.1·cfg 는 cfg 0 에서 정확히 아무것도 안 한다. 노드의 override 0 은
+            # '샘플러의 CFG' 라는 뜻이라(hires 는 hr_cfg) 노드를 넣지 않는다.
+            return model
+        daemon_settings = {key: settings[key] for key in self._DD_NODE_KEYS if key in settings}
+        node = graph.add("ForgeNeoAnimaDetailDaemon", {
+            "model": model, "enabled": True,
+            "settings_json": json.dumps(
+                daemon_settings, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ),
+            # 원본 노드 입력. 옛 팩(1.3.0)의 /object_info 에는 없어 validate() 가 큐 전에 '노드 계약' 오류로 막는다.
+            "cfg_scale_override": cfg_scale,
+        }, title or ("Anima detail daemon (hires pass)" if hires_pass else "Anima detail daemon"))
+        return [node, 0]
+
+    @staticmethod
+    def _detail_daemon_scripts(payload: Mapping[str, Any]) -> dict[str, Any]:
+        """payload 의 Detail Daemon 스크립트 블록(없으면 빈 dict) — 순차 SAM3 패스가 DD 를 다시 판정하게 넘긴다."""
+        from core import anima_guidance
+
+        scripts = payload.get("alwayson_scripts", {})
+        if not isinstance(scripts, Mapping):
+            return {}
+        folded = anima_guidance.SCRIPT_DETAIL_DAEMON.casefold()
+        return {name: block for name, block in scripts.items() if str(name).casefold() == folded}
 
     def _add_hires(
         self, graph: _Graph, model: list, clip: list, vae: list,
@@ -1361,10 +1551,7 @@ class ComfyWorkflowCompiler:
             "scheduler": hires_scheduler,
             "denoise": max(0.0, min(1.0, _float(payload.get("denoising_strength"), 0.5))),
             "seed_delta": _int(payload.get("hr_seed_delta"), 0),
-            "cns_enabled": _bool(sampler_options.get("cns_enabled")),
-            "cns_strength": _float(sampler_options.get("cns_strength"), 1.0),
-            "cns_gamma_power": _float(sampler_options.get("cns_gamma_power"), 0.5),
-            "cns_gamma_scale": _float(sampler_options.get("cns_gamma_scale"), 2.0),
+            **_cns_inputs(sampler_options),
             "base_vae": vae, "base_clip": clip,
             "base_steps": max(1, _int(payload.get("steps"), 20)),
             "base_sampler_name": base_sampler,
@@ -1395,7 +1582,15 @@ class ComfyWorkflowCompiler:
         self, graph: _Graph, image: list, model: list, clip: list, vae: list,
         positive: list, negative: list, payload: Mapping[str, Any],
         *, sam3_detailer_class: str = "ForgeNeoSAM3Detailer",
+        last_pass_model: Optional[list] = None,
     ) -> list:
+        """ADetailer → SAM3 → 순차 SAM3 패스.
+
+        ``last_pass_model``: 생성 안에서만 준다 — 마지막 본 샘플링 패스(base, 또는 돌렸으면 hires)가 쓴 모델.
+        ADetailer 는 그것을 받고, SAM3 디테일러는 그 패스의 cfg·샘플러로 Detail Daemon 을 다시 판정한다
+        (규칙과 근거는 ``_add_detail_daemon``). None(단독 후처리, mask-only)이면 디테일러는 ``model`` 을 받는다.
+        """
+        adetailer_model = model if last_pass_model is None else last_pass_model
         slots = self._adetailer_slots(payload)
         for index, slot in enumerate(slots, start=1):
             self._validate_adetailer_slot(slot, index)
@@ -1452,7 +1647,7 @@ class ComfyWorkflowCompiler:
                 }, f"ADetailer slot {index} negative")
                 slot_negative = [negative_node, 0]
             node = graph.add("ForgeNeoADetailer", {
-                "image": image, "model": model, "clip": clip, "vae": vae,
+                "image": image, "model": adetailer_model, "clip": clip, "vae": vae,
                 "positive": positive, "negative": slot_negative, "enabled": True,
                 "settings_json": json.dumps(
                     normalized_slot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -1514,15 +1709,21 @@ class ComfyWorkflowCompiler:
                     scheduler = str(payload.get("scheduler") or "normal")
                 sampler, scheduler = self._runtime_sampler_values(sampler, scheduler)
                 seed = sam_seed
+                sam3_cfg = _float(state.get("sam3_cfg_scale"), _float(payload.get("cfg_scale"), 7.0)) if _bool(state.get("sam3_use_cfg_scale")) else _float(payload.get("cfg_scale"), 7.0)
+                # Detail Daemon: 생성 안의 SAM3 패스는 이 패스의 cfg·샘플러로 다시 판정한다(_add_detail_daemon).
+                sam3_model = model if last_pass_model is None else self._add_detail_daemon(
+                    graph, model, payload, cfg_scale=sam3_cfg, sampler_name=sampler,
+                    title="Anima detail daemon (SAM3 detailer)",
+                )
                 detail = graph.add(sam3_detailer_class, {
-                    "image": image, "mask": [mask_node, 0], "model": model, "clip": clip, "vae": vae,
+                    "image": image, "mask": [mask_node, 0], "model": sam3_model, "clip": clip, "vae": vae,
                     "positive": positive, "negative": negative,
                     "inpaint_prompt": str(state.get("sam3_inpaint_prompt") or ""),
                     "negative_prompt": str(state.get("sam3_negative_prompt") or ""),
                     "mask_mode": str(state.get("sam3_mask_mode") or "Individual"),
                     "seed": seed,
                     "steps": _int(state.get("sam3_steps"), _int(payload.get("steps"), 28)) if _bool(state.get("sam3_use_steps")) else _int(payload.get("steps"), 28),
-                    "cfg": _float(state.get("sam3_cfg_scale"), _float(payload.get("cfg_scale"), 7.0)) if _bool(state.get("sam3_use_cfg_scale")) else _float(payload.get("cfg_scale"), 7.0),
+                    "cfg": sam3_cfg,
                     "sampler_name": sampler, "scheduler": scheduler,
                     "denoise": _float(state.get("sam3_denoising_strength"), 0.4),
                     "noise_multiplier": _float(state.get("sam3_noise_multiplier"), 1.0) if _bool(state.get("sam3_use_noise_multiplier")) else 1.0,
@@ -1576,10 +1777,14 @@ class ComfyWorkflowCompiler:
             next_payload.pop("_comfy_detail_passes", None)
             next_state = dict(self._sam3_state(payload) or {})
             next_state["sam3_prompt"] = target
-            next_payload["alwayson_scripts"] = {"SAM3 Mask": {"args": [next_state]}}
+            next_payload["alwayson_scripts"] = {
+                "SAM3 Mask": {"args": [next_state]},
+                # Detail Daemon 은 SAM3 패스마다 다시 판정한다(_add_detail_daemon) — 블록을 같이 넘긴다.
+                **self._detail_daemon_scripts(next_payload),
+            }
             image = self._add_image_extensions(
                 graph, image, model, clip, vae, positive, negative, next_payload,
-                sam3_detailer_class=sam3_detailer_class,
+                sam3_detailer_class=sam3_detailer_class, last_pass_model=last_pass_model,
             )
         return image
 
@@ -1735,7 +1940,9 @@ class ComfyWorkflowCompiler:
         model, sampler_options = self._add_anima_guidance(
             graph, model, clip, positive, negative, payload,
         )
-        inputs["model"] = model
+        # Detail Daemon 은 이 sampler(base) 또는 hires 한 곳에만 — model 자체에는 없다. 디테일러가 받는 모델은
+        # _add_image_extensions(last_pass_model=) 이 정한다.
+        inputs["model"] = pass_model = self._add_detail_daemon(graph, model, payload)
 
         if mode != "txt2img":
             if not uploaded_image:
@@ -1745,14 +1952,34 @@ class ComfyWorkflowCompiler:
                 uploaded_image=uploaded_image, uploaded_mask=uploaded_mask,
             )
             inputs["latent_image"] = latent
-        if sampler_options.get("cns_enabled") or _bool(payload.get("spectrum_enabled")) or _bool(payload.get("speed_enabled")):
-            # Replace only standard KSampler; exotic custom samplers remain user-owned.
-            if sampler.get("class_type") == "KSampler":
-                sampler["class_type"] = "ForgeNeoKSamplerCNS"
-            elif sampler.get("class_type") != "ForgeNeoKSamplerCNS":
-                raise WorkflowCompileError("CNS/Spectrum/SPEED 자동 삽입은 KSampler custom workflow에서만 지원됩니다.")
+        # CNS rides on the MODEL, not on the sampler node: the suite's MODEL carries the
+        # pack's SAMPLER_SAMPLE wrapper (guidance_cns.apply_cns), which colours the step
+        # noise of whatever KSAMPLER runs — the original is a SAMPLER patch used with
+        # SamplerCustomAdvanced (origin: namemechan/comfyui-cns_sampler_patch@42278b13:
+        # cns_sampler_patch.py:441-609).  So CNS refuses no sampler class (KSamplerAdvanced
+        # here; SamplerCustom* is refused earlier by unsupported_sampler_message for its
+        # steps/CFG/denoise, not for CNS — plan §5.3 A wants it allowed; that payload
+        # mapping is a deferred open item, not parity).  A pack older than the per-step
+        # CNS wrapper would drop CNS here silently, so validate() refuses CNS without
+        # _PER_STEP_CNS_MARKER.  A plain KSampler still becomes
+        # ForgeNeoKSamplerCNS with the same CNS values as inputs (apply_cns replaces the
+        # MODEL's CNS wrapper, never stacks one).  Spectrum/SPEED exist only on that node.
+        spectrum_or_speed = (
+            _bool(payload.get("spectrum_enabled")) or _bool(payload.get("speed_enabled"))
+        )
+        if sampler_options.get("cns_enabled") or spectrum_or_speed:
+            class_type = sampler.get("class_type")
+            if class_type == "KSampler":
+                sampler["class_type"] = class_type = "ForgeNeoKSamplerCNS"
+            elif spectrum_or_speed and class_type != "ForgeNeoKSamplerCNS":
+                raise WorkflowCompileError(
+                    "Spectrum/SPEED 자동 삽입은 KSampler custom workflow에서만 지원됩니다."
+                )
+        else:
+            class_type = None
+        if class_type == "ForgeNeoKSamplerCNS":
             for key, default in {
-                "cns_enabled": False, "cns_strength": 1.0, "cns_gamma_power": 0.5, "cns_gamma_scale": 3.0,
+                "cns_enabled": False, **_CNS_DEFAULTS,
                 "spectrum_enabled": False, "spectrum_window_size": 2.0, "spectrum_flex_window": 0.25,
                 "spectrum_warmup_steps": 6, "spectrum_tail_actual_steps": 3, "spectrum_blend_w": 0.3,
                 "spectrum_cheby_degree": 3, "spectrum_ridge_lambda": 0.1, "spectrum_history_size": 100,
@@ -1771,8 +1998,10 @@ class ComfyWorkflowCompiler:
         if not _is_link(samples):
             raise WorkflowCompileError("custom workflow VAEDecode의 samples 연결이 유효하지 않습니다.")
         if _bool(payload.get("enable_hr")):
+            pass_model = self._add_detail_daemon(graph, model, payload, hires_pass=True)
             samples, decode_vae = self._add_hires(
-                graph, model, clip, vae, positive, negative, samples, payload,
+                graph, pass_model,
+                clip, vae, positive, negative, samples, payload,
                 sampler_options=sampler_options, anima_plan=anima_plan,
             )
             decode.setdefault("inputs", {})["samples"] = samples
@@ -1792,6 +2021,7 @@ class ComfyWorkflowCompiler:
             image = list(next(iter(source_links)))
             post = self._add_image_extensions(
                 graph, image, model, clip, vae, positive, negative, payload,
+                last_pass_model=pass_model,
             )
             if post != image:
                 for output_id, key, _source in outputs:
@@ -1989,7 +2219,9 @@ class ComfyWorkflowCompiler:
         authored values; among the first passes, one whose result reaches an
         image output wins, and ties keep workflow order (the legacy mapper
         took the first sampler).  ``SamplerCustom*`` is rejected later only
-        when it is this sampler.
+        when it is this sampler, and only because the payload's steps/CFG/
+        denoise cannot be mapped onto it (``unsupported_sampler_message``) —
+        CNS is a MODEL-level sampler wrapper and limits no sampler class.
         """
         samplers = [
             str(node_id) for node_id, node in workflow.items()
@@ -3055,13 +3287,16 @@ class ComfyWorkflowCompiler:
             method = str(settings.get("guid_attn_method") or "PAG").strip().casefold()
             if method not in {"pag", "seg", "none", "off", ""}:
                 raise WorkflowCompileError(f"지원하지 않는 Anima attention 방식입니다: {method}")
-            if method in {"pag", "seg"} and _bool(settings.get("guid_legacy_attn")):
+            # PAG 는 팩이 원본 노드(comfyui-anima-safe-pag)를 그대로 불러 legacy(=legacy
+            # strength 로 같은 공식)와 헤드 지정을 받는다. SEG 는 원본이 없고 팩 구현이
+            # 둘 다 못 하므로 여기서 막는다.
+            if method == "seg" and _bool(settings.get("guid_legacy_attn")):
                 raise WorkflowCompileError(
-                    "Anima legacy attention은 ComfyUI pre-projection hook으로 표현할 수 없습니다."
+                    "Anima legacy SEG는 ComfyUI pre-projection hook으로 표현할 수 없습니다."
                 )
-            if method in {"pag", "seg"} and str(settings.get("guid_head_indices") or "").strip():
+            if method == "seg" and str(settings.get("guid_head_indices") or "").strip():
                 raise WorkflowCompileError(
-                    "Anima head-selective PAG/SEG는 ComfyUI에서 지원되지 않습니다."
+                    "Anima head-selective SEG는 ComfyUI에서 지원되지 않습니다."
                 )
         cfg_mode = str(
             settings.get("guid_cfg_mode") or "Preserve incoming"

@@ -205,6 +205,7 @@
               @click="previewSam3File(i)">
               <span>{{ basename(f) }}</span>
               <span v-if="sam3Results[i]" class="done-badge"><Icon name="check" /></span>
+              <span v-else-if="sam3Failed[i]" class="fail-badge" :title="sam3Failed[i]"><Icon name="alert" /></span>
               <button class="rm-btn" @click.stop="sam3Files.splice(i, 1)">×</button>
             </div>
           </div>
@@ -470,6 +471,7 @@ import { droppedImagePaths, newPaths } from '../utils/dropPaths'
 import { jobPercent, jobProgressText, parseBatchJobState } from '../utils/batchJobState'
 import { sam3CnDefaults, sam3CnSettings } from '../utils/sam3ControlNet'
 import { createExifWarningNotice } from '../utils/exifWarningNotice'
+import { createSam3ErrorToasts, sam3ResultOutcome } from '../utils/sam3BatchResult'
 import CustomSelect from '../components/CustomSelect.vue'
 import Sam3ControlNetPanel from '../components/Sam3ControlNetPanel.vue'
 import type {
@@ -1264,6 +1266,8 @@ function _adSettings() {
 // 'EXIF 프롬프트 사용' — 워커가 메타데이터를 못 읽으면 결과에 exif_warning 을 싣는다(실행마다 첫 경고 + 요약)
 const adExifNotice = createExifWarningNotice('ADetailer')
 const sam3ExifNotice = createExifWarningNotice('SAM3')
+// SAM3 오류 토스트 — 배치에서는 같은 원인을 실행마다 한 번만 (utils/sam3BatchResult)
+const sam3ErrorToasts = createSam3ErrorToasts()
 
 function runAdSingle() {
   const idx = adCurrentIdx.value >= 0 ? adCurrentIdx.value : 0
@@ -1322,6 +1326,7 @@ const sam3Preview = ref('')
 const sam3Before = ref('')
 const sam3After = ref('')
 const sam3Results = ref<Record<number, boolean>>({})
+const sam3Failed = ref<Record<number, string>>({})   // 배치 항목 인덱스 → 실패 문구(목록 배지 title)
 const sam3Processing = ref(false)
 const sam3ProgressCur = ref(0)
 const sam3ProgressTotal = ref(0)
@@ -1388,6 +1393,7 @@ function runSam3Single() {
   const path = sam3Files.value[idx]
   if (!path) return
   sam3ExifNotice.reset()
+  sam3ErrorToasts.reset()
   sam3Processing.value = true
   sam3Before.value = path
   sam3After.value = ''
@@ -1397,8 +1403,10 @@ function runSam3Single() {
 function runSam3Batch() {
   if (!sam3Files.value.length) return
   sam3ExifNotice.reset()
+  sam3ErrorToasts.reset()
   sam3Processing.value = true
   sam3Results.value = {}
+  sam3Failed.value = {}
   sam3ProgressCur.value = 0
   sam3ProgressTotal.value = sam3Files.value.length
   action('run_sam3_batch', { paths: sam3Files.value, settings: _sam3Settings() })
@@ -1521,9 +1529,20 @@ onMounted(async () => {
   onBackendEvent('sam3Result', (json: string) => {
     try {
       const d = JSON.parse(json)
-      if (d.error) {
-        requestAction('show_toast', { type: 'error', msg: `SAM3 오류: ${d.error}` })
-        sam3Processing.value = false
+      const outcome = sam3ResultOutcome(d)
+      if (!outcome.ok) {
+        const msg = sam3ErrorToasts.note(outcome)
+        if (msg) requestAction('show_toast', { type: 'error', msg })
+        if (outcome.index !== null) {
+          // 배치 항목 실패 — 워커는 다음 이미지로 간다. 진행 표시는 sam3Progress(끝) 또는 배치 중단이 끈다.
+          sam3Failed.value[outcome.index] = outcome.error
+          sam3CurrentIdx.value = outcome.index
+        }
+        if (outcome.endsRun) {
+          sam3Processing.value = false
+          const sam3Summary = outcome.index !== null ? sam3ExifNotice.summary() : null
+          if (sam3Summary) requestAction('show_toast', { type: 'warning', msg: sam3Summary })
+        }
         return
       }
       sam3Before.value = d.before
@@ -1690,6 +1709,7 @@ onUnmounted(() => {
 .file-item.active { background: var(--accent-dim); color: var(--accent); }
 .file-item.done { opacity: 0.6; }
 .done-badge { color: var(--state-ok-fg); font-weight: var(--fw-bold); flex: 0 !important; }
+.fail-badge { color: var(--state-alert-fg); flex: 0 !important; }
 .rm-btn { background: none; border: none; color: var(--state-alert-fg); cursor: pointer; font-size: 14px; flex-shrink: 0; }
 .file-count { font-size: var(--fs-label); color: var(--text-muted); }
 

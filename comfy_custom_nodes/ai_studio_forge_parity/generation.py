@@ -20,7 +20,13 @@ from .compat import (
     sampler_names,
     scheduler_names,
 )
-from .guidance import color_noise_wavelet
+from .guidance_cns import (
+    CNS_DEFAULTS,
+    ForgeNeoCNSSamplerPatch,
+    apply_cns,
+    cns_float_input,
+    model_cns_settings,
+)
 from .anima_lora_nodes import (
     AnimaLoraStateCache,
     load_lora_block_weight,
@@ -269,8 +275,8 @@ class ForgeNeoLatentInput:
         return (latent,)
 
 
-def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise, *, cns=None):
-    torch = require_torch()
+def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise):
+    require_torch()
     import comfy.sample
     import comfy.utils
     import latent_preview
@@ -281,12 +287,9 @@ def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, n
         latent.get("downscale_ratio_temporal"),
     )
     batch_inds = latent.get("batch_index")
+    # The initial noise is never coloured: CNS colours each step's ancestral
+    # noise through the MODEL's SAMPLER_SAMPLE wrapper (guidance_cns.apply_cns).
     noise = comfy.sample.prepare_noise(latent_image, int(seed), batch_inds)
-    if cns is not None:
-        live = latent_image
-        if not bool(live.detach().float().abs().sum()):
-            live = noise
-        noise = color_noise_wavelet(noise, live, **cns)
     callback = latent_preview.prepare_callback(model, int(steps))
     samples = comfy.sample.sample(
         model, noise, int(steps), float(cfg), sampler_name, scheduler,
@@ -301,6 +304,25 @@ def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, n
     return (output,)
 
 
+def _with_cns(model, enabled, strength, gamma_power, gamma_scale):
+    """MODEL whose sampler runs colour every step's noise (``guidance_cns``).
+
+    Explicit node inputs replace a CNS wrapper already on the MODEL.  A MODEL
+    that only carries the suite's old ``forge_neo_cns`` hand-off dict gets the
+    wrapper from it; one that already has the wrapper is left as it is.
+    """
+
+    if enabled:
+        return apply_cns(model, float(strength), float(gamma_power), float(gamma_scale))
+    inherited = (getattr(model, "model_options", {}) or {}).get("forge_neo_cns")
+    if isinstance(inherited, dict) and model_cns_settings(model) is None:
+        return apply_cns(model, *(
+            float(inherited.get(name, CNS_DEFAULTS[name]))
+            for name in ("strength", "gamma_power", "gamma_scale")
+        ))
+    return model
+
+
 class ForgeNeoKSamplerCNS:
     @classmethod
     def INPUT_TYPES(cls):
@@ -311,9 +333,9 @@ class ForgeNeoKSamplerCNS:
             "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0}),
             "sampler_name": (sampler_names(),), "scheduler": (scheduler_names(),),
             "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
-            "cns_enabled": ("BOOLEAN", {"default": False}), "cns_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
-            "cns_gamma_power": ("FLOAT", {"default": 0.5, "min": 0.05, "max": 2.0}),
-            "cns_gamma_scale": ("FLOAT", {"default": 2.0, "min": 0.25, "max": 25.0}),
+            "cns_enabled": ("BOOLEAN", {"default": False}), "cns_strength": cns_float_input("strength"),
+            "cns_gamma_power": cns_float_input("gamma_power"),
+            "cns_gamma_scale": cns_float_input("gamma_scale"),
             "spectrum_enabled": ("BOOLEAN", {"default": False}), "spectrum_window_size": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 10.0}),
             "spectrum_flex_window": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 2.0}),
             "spectrum_warmup_steps": ("INT", {"default": 6, "min": 0, "max": 10000}),
@@ -335,15 +357,10 @@ class ForgeNeoKSamplerCNS:
     CATEGORY = CATEGORY
 
     def sample(self, model, positive, negative, latent_image, seed, steps, cfg, sampler_name, scheduler, denoise=1.0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, spectrum_enabled=False, spectrum_window_size=2.0, spectrum_flex_window=0.25, spectrum_warmup_steps=6, spectrum_tail_actual_steps=3, spectrum_blend_w=0.3, spectrum_cheby_degree=3, spectrum_ridge_lambda=0.1, spectrum_history_size=100, spectrum_one_sampler_only=False, spectrum_verbose=False, speed_enabled=False, speed_split_mode="single", speed_spd_scale=0.5, speed_spd_sigma=0.7, speed_adaptive_smc_alpha=0.0):
-        inherited_cns = (getattr(model, "model_options", {}) or {}).get("forge_neo_cns")
-        if not cns_enabled and isinstance(inherited_cns, dict):
-            cns_enabled = True
-            cns_strength = inherited_cns.get("strength", cns_strength)
-            cns_gamma_power = inherited_cns.get("gamma_power", cns_gamma_power)
-            cns_gamma_scale = inherited_cns.get("gamma_scale", cns_gamma_scale)
+        model = _with_cns(model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
         if speed_enabled:
-            if cns_enabled:
-                raise RuntimeError("CNS + SPEED cannot be composed safely because SPEED owns its noise path. Disable one feature.")
+            # CNS rides on the MODEL's sampler wrapper, so it also colours the
+            # SPEED sampler's steps (Path B when SPEED wraps sample_*).
             if spectrum_enabled and (
                 float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps),
                 float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size),
@@ -363,10 +380,7 @@ class ForgeNeoKSamplerCNS:
                 "DiTSpectrumPatch", method="patch", feature="Spectrum sampler",
                 args=(model, int(steps), float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps), float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size), True, bool(spectrum_one_sampler_only), bool(spectrum_verbose)),
             )[0]
-        cns = None
-        if cns_enabled:
-            cns = {"strength": float(cns_strength), "gamma_power": float(cns_gamma_power), "gamma_scale": float(cns_gamma_scale)}
-        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise, cns=cns)
+        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise)
 
 
 def _patch_flow_shift(model: Any, shift: float):
@@ -439,8 +453,8 @@ class ForgeNeoHiresFix:
             "steps": ("INT", {"default": 0, "min": 0, "max": 10000}), "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0}),
             "sampler_name": (sampler_names(),), "scheduler": (scheduler_names(),),
             "denoise": ("FLOAT", {"default": 0.35, "min": 0.0, "max": 1.0}), "seed_delta": ("INT", {"default": 0, "min": -0xFFFFFFFF, "max": 0xFFFFFFFF}),
-            "cns_enabled": ("BOOLEAN", {"default": False}), "cns_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
-            "cns_gamma_power": ("FLOAT", {"default": 0.5, "min": 0.05, "max": 2.0}), "cns_gamma_scale": ("FLOAT", {"default": 2.0, "min": 0.25, "max": 25.0}),
+            "cns_enabled": ("BOOLEAN", {"default": False}), "cns_strength": cns_float_input("strength"),
+            "cns_gamma_power": cns_float_input("gamma_power"), "cns_gamma_scale": cns_float_input("gamma_scale"),
             "base_vae": ("VAE",), "base_clip": ("CLIP",), "base_steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
             "base_sampler_name": (sampler_names(),), "base_scheduler": (scheduler_names(),),
             "resize_width": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8}), "resize_height": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8}),
@@ -539,8 +553,8 @@ class ForgeNeoHiresFix:
             resized = _encode(active_vae, upscaled)
         actual_seed = secrets.randbits(64) if int(seed) < 0 else (int(seed) + int(seed_delta)) & 0xFFFFFFFFFFFFFFFF
         actual_steps = int(steps) if int(steps) > 0 else int(base_steps)
-        cns = {"strength": float(cns_strength), "gamma_power": float(cns_gamma_power), "gamma_scale": float(cns_gamma_scale)} if cns_enabled else None
-        output = _common_sample(active_model, actual_seed, actual_steps, cfg, sampler_name or base_sampler_name, scheduler or base_scheduler, positive, negative, resized, denoise, cns=cns)[0]
+        active_model = _with_cns(active_model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
+        output = _common_sample(active_model, actual_seed, actual_steps, cfg, sampler_name or base_sampler_name, scheduler or base_scheduler, positive, negative, resized, denoise)[0]
         return output, active_vae
 
 
@@ -1246,6 +1260,7 @@ class ForgeNeoSaveImage:
 
 NODE_CLASS_MAPPINGS = {
     "ForgeNeoKSamplerCNS": ForgeNeoKSamplerCNS,
+    "ForgeNeoCNSSamplerPatch": ForgeNeoCNSSamplerPatch,
     "ForgeNeoModelSamplingShift": ForgeNeoModelSamplingShift,
     "ForgeNeoLatentInput": ForgeNeoLatentInput,
     "ForgeNeoHiresFix": ForgeNeoHiresFix,

@@ -13,321 +13,42 @@
     <!-- ── PAG / SEG / SLG ─────────────────────────────────────────── -->
     <details class="ag-group">
       <summary>PAG / SEG / SLG — Attention perturbation</summary>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_enabled')" @update:model-value="setB('guid_enabled', $event)" size="sm" />
-        <span>Enable Perturbation Guidance</span>
-      </label>
-
-      <template v-if="b('guid_enabled')">
-        <div class="ext-field"><label>Attention method (PAG/SEG는 택1)</label>
-          <CustomSelect v-model="w._guid_attn_method" :options="['PAG', 'SEG', 'None']" placeholder="PAG" /></div>
-        <div class="ext-row">
-          <div class="ext-field"><label>Attn Scale (cond−weak 배율)</label>
-            <input type="number" v-model="w._guid_scale" step="0.1" min="0" max="15" /></div>
-          <div class="ext-field"><label>Perturbation strength (1=전체)</label>
-            <input type="number" v-model="w._guid_official_strength" step="0.01" min="0" max="1" /></div>
-        </div>
-        <div class="ext-field" v-if="w._guid_attn_method === 'SEG'">
-          <label>SEG query blur sigma (&gt;9999 = uniform)</label>
-          <input type="number" v-model="w._guid_seg_sigma" step="1" min="0" max="10000" /></div>
-        <div class="ext-row">
-          <div class="ext-field"><label>Block indices (기본 18)</label>
-            <input type="text" v-model="w._guid_block_indices" placeholder="18 또는 18-20" /></div>
-          <div class="ext-field"><label>Head indices (빈칸=전체)</label>
-            <input type="text" v-model="w._guid_head_indices" placeholder="0,2,4-7" /></div>
-        </div>
-
-        <label class="ext-check-row">
-          <ToggleSwitch :model-value="b('guid_slg_on')" @update:model-value="setB('guid_slg_on', $event)" size="sm" />
-          <span>Enable SLG (skip layers · PAG/SEG와 병용 가능)</span>
-        </label>
-        <div class="ext-row" v-if="b('guid_slg_on')">
-          <div class="ext-field"><label>SLG scale</label>
-            <input type="number" v-model="w._guid_slg_scale" step="0.1" min="0" max="15" /></div>
-          <div class="ext-field"><label>SLG skip blocks</label>
-            <input type="text" v-model="w._guid_slg_blocks" placeholder="18" /></div>
-        </div>
-
-        <div class="ext-row">
-          <div class="ext-field"><label>Start percent</label>
-            <input type="number" v-model="w._guid_start_percent" step="0.01" min="0" max="1" /></div>
-          <div class="ext-field"><label>End percent</label>
-            <input type="number" v-model="w._guid_end_percent" step="0.01" min="0" max="1" /></div>
-        </div>
-        <div class="ext-row">
-          <div class="ext-field"><label>Rescale (과대비 억제)</label>
-            <input type="number" v-model="w._guid_rescale" step="0.01" min="0" max="1" /></div>
-          <div class="ext-field"><label>Rescale mode</label>
-            <CustomSelect v-model="w._guid_rescale_mode" :options="['full', 'partial']" placeholder="full" /></div>
-        </div>
-
-        <details class="ag-sub">
-          <summary>Legacy Soft/Approx 호환</summary>
-          <label class="ext-check-row">
-            <ToggleSwitch :model-value="b('guid_legacy_attn')" @update:model-value="setB('guid_legacy_attn', $event)" size="sm" />
-            <span>기존 Soft PAG / SEG-Approx 사용</span>
-          </label>
-          <div class="ext-field" v-if="b('guid_legacy_attn')"><label>Legacy strength</label>
-            <input type="number" v-model="w._guid_legacy_strength" step="0.01" min="0" max="1" /></div>
-        </details>
-      </template>
+      <PagSection :widgets="widgets" />
     </details>
 
     <!-- ── CFG base: APG / CWM / SMC ────────────────────────────────── -->
     <details class="ag-group">
       <summary>APG / CWM / SMC — CFG base</summary>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_apg_enabled')" @update:model-value="setB('guid_apg_enabled', $event)" size="sm" />
-        <span>Enable APG (실험 · CFG &gt; 1)</span>
-      </label>
-      <template v-if="b('guid_apg_enabled')">
-        <div class="ext-row">
-          <div class="ext-field"><label>APG eta</label>
-            <input type="number" v-model="w._guid_apg_eta" step="0.05" min="-10" max="10" /></div>
-          <div class="ext-field"><label>APG norm (0=off)</label>
-            <input type="number" v-model="w._guid_apg_norm" step="0.5" min="0" max="50" /></div>
-        </div>
-        <div class="ext-field"><label>APG momentum (음수 권장 · 0=off)</label>
-          <input type="number" v-model="w._guid_apg_momentum" step="0.05" min="-1" max="1" /></div>
-        <label class="ext-check-row">
-          <ToggleSwitch :model-value="b('guid_apg_autooff')" @update:model-value="setB('guid_apg_autooff', $event)" size="sm" />
-          <span>APG 켜지면 PAG rescale 자동 끄기</span>
-        </label>
-      </template>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_cwm_enabled')" @update:model-value="setB('guid_cwm_enabled', $event)" size="sm" />
-        <span>Enable CWM</span>
-      </label>
-      <div class="ext-row" v-if="b('guid_cwm_enabled')">
-        <div class="ext-field"><label>CWM alpha low (초반 저주파)</label>
-          <input type="number" v-model="w._guid_cwm_alpha_low" step="0.01" min="-1" max="1" /></div>
-        <div class="ext-field"><label>CWM alpha high (후반 고주파)</label>
-          <input type="number" v-model="w._guid_cwm_alpha_high" step="0.01" min="-1" max="1" /></div>
-      </div>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_smc_master_enabled')" @update:model-value="setB('guid_smc_master_enabled', $event)" size="sm" />
-        <span>Enable SMC</span>
-      </label>
-      <div class="ext-field"><label>SMC preset</label>
-        <CustomSelect v-model="w._guid_smc_preset" :options="smcPresets" placeholder="Auto" /></div>
-      <div class="ext-row" v-if="w._guid_smc_preset === 'Custom'">
-        <div class="ext-field"><label>Custom SMC lambda</label>
-          <input type="number" v-model="w._guid_smc_lambda" step="0.1" min="0.5" max="30" /></div>
-        <div class="ext-field"><label>Custom SMC k</label>
-          <input type="number" v-model="w._guid_smc_k" step="0.01" min="0" max="5" /></div>
-      </div>
-      <div class="ext-note">Auto는 모델을 감지하며 Anima는 Cosmos / Wan 프리셋을 사용합니다.</div>
-
-      <details class="ag-sub">
-        <summary>Legacy CFG base 라디오 (상호배타)</summary>
-        <div class="ext-field"><label>CFG base mode</label>
-          <CustomSelect v-model="w._guid_cfg_mode" :options="cfgModes" placeholder="Preserve incoming" /></div>
-        <label class="ext-check-row">
-          <ToggleSwitch :model-value="b('guid_experimental_stack')" @update:model-value="setB('guid_experimental_stack', $event)" size="sm" />
-          <span>Experimental stack: SMC → APG → CWM</span>
-        </label>
-        <label class="ext-check-row">
-          <ToggleSwitch :model-value="b('guid_smc_enabled')" @update:model-value="setB('guid_smc_enabled', $event)" size="sm" />
-          <span>Enable SMC (legacy)</span>
-        </label>
-      </details>
+      <ApgSection :widgets="widgets" />
+      <CwmSmcSection :widgets="widgets" />
     </details>
 
     <!-- ── Skimmed CFG ──────────────────────────────────────────────── -->
     <details class="ag-group">
       <summary>Skimmed CFG — anti-burn</summary>
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('skim_enabled')" @update:model-value="setB('skim_enabled', $event)" size="sm" />
-        <span>Enable Skimmed CFG</span>
-      </label>
-      <template v-if="b('skim_enabled')">
-        <div class="ext-field"><label>Skimming CFG (-1 = 현재 CFG)</label>
-          <input type="number" v-model="w._skim_skimming_cfg" step="0.5" min="-1" max="10" /></div>
-        <label class="ext-check-row">
-          <ToggleSwitch :model-value="b('skim_full_skim_negative')" @update:model-value="setB('skim_full_skim_negative', $event)" size="sm" />
-          <span>Full skim negative</span>
-        </label>
-        <label class="ext-check-row">
-          <ToggleSwitch :model-value="b('skim_disable_flipping_filter')" @update:model-value="setB('skim_disable_flipping_filter', $event)" size="sm" />
-          <span>Disable flipping filter</span>
-        </label>
-        <div class="ext-row">
-          <div class="ext-field"><label>Start at (%)</label>
-            <input type="number" v-model="w._skim_start_percent" step="0.01" min="0" max="1" /></div>
-          <div class="ext-field"><label>End at (%)</label>
-            <input type="number" v-model="w._skim_end_percent" step="0.01" min="0" max="1" /></div>
-        </div>
-        <div class="ext-field"><label>Flip at (%) · 0 = 사용 안 함</label>
-          <input type="number" v-model="w._skim_flip_at" step="0.05" min="0" max="1" /></div>
-      </template>
+      <SkimSection :widgets="widgets" />
     </details>
 
     <!-- ── DCW / RDC / DAVE / CNS ───────────────────────────────────── -->
     <details class="ag-group">
       <summary>DCW / RDC / DAVE / CNS</summary>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_dcw_enabled')" @update:model-value="setB('guid_dcw_enabled', $event)" size="sm" />
-        <span>Enable DCW (post-CFG wavelet correction)</span>
-      </label>
-      <div class="ext-row" v-if="b('guid_dcw_enabled')">
-        <div class="ext-field"><label>DCW lambda low</label>
-          <input type="number" v-model="w._guid_dcw_lambda_low" step="0.005" min="-0.5" max="0.5" /></div>
-        <div class="ext-field"><label>DCW lambda high</label>
-          <input type="number" v-model="w._guid_dcw_lambda_high" step="0.005" min="-0.5" max="0.5" /></div>
-      </div>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_rdc_enabled')" @update:model-value="setB('guid_rdc_enabled', $event)" size="sm" />
-        <span>Enable RDC (band-wise reverse drift compensation)</span>
-      </label>
-      <template v-if="b('guid_rdc_enabled')">
-        <div class="ext-field"><label>RDC tau (EMA 기억 구간)</label>
-          <input type="number" v-model="w._guid_rdc_tau" step="0.01" min="0" max="0.5" /></div>
-        <div class="ext-row">
-          <div class="ext-field"><label>RDC alpha LL (구조 drift)</label>
-            <input type="number" v-model="w._guid_rdc_alpha_ll" step="0.005" min="0" max="0.3" /></div>
-          <div class="ext-field"><label>RDC alpha HH (텍스처 drift)</label>
-            <input type="number" v-model="w._guid_rdc_alpha_hh" step="0.001" min="0" max="0.1" /></div>
-        </div>
-        <div class="ext-note">권장 시작값: tau 0.15 · LL 0.03 · HH 0. 텍스처가 흐려지면 HH를 0으로 유지하세요.</div>
-      </template>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_dave_enabled')" @update:model-value="setB('guid_dave_enabled', $event)" size="sm" />
-        <span>Enable DAVE (block DC attenuation)</span>
-      </label>
-      <template v-if="b('guid_dave_enabled')">
-        <div class="ext-row">
-          <div class="ext-field"><label>DAVE strength</label>
-            <input type="number" v-model="w._guid_dave_strength" step="0.01" min="0" max="1" /></div>
-          <div class="ext-field"><label>DAVE tau (0=전 구간)</label>
-            <input type="number" v-model="w._guid_dave_tau" step="0.01" min="0" max="1" /></div>
-        </div>
-        <div class="ext-field"><label>DAVE block indices</label>
-          <input type="text" v-model="w._guid_dave_blocks" placeholder="8-18" /></div>
-      </template>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_cns_enabled')" @update:model-value="setB('guid_cns_enabled', $event)" size="sm" />
-        <span>Enable CNS (wavelet noise 재색칠)</span>
-      </label>
-      <template v-if="b('guid_cns_enabled')">
-        <div class="ext-row">
-          <div class="ext-field"><label>CNS strength</label>
-            <input type="number" v-model="w._guid_cns_strength" step="0.01" min="0" max="1" /></div>
-          <div class="ext-field"><label>CNS gamma power</label>
-            <input type="number" v-model="w._guid_cns_gamma_power" step="0.05" min="0.05" max="2" /></div>
-        </div>
-        <div class="ext-field"><label>CNS gamma scale (Anima 3.0)</label>
-          <input type="number" v-model="w._guid_cns_gamma_scale" step="0.25" min="0.25" max="25" /></div>
-      </template>
+      <DcwSection :widgets="widgets" />
+      <RdcSection :widgets="widgets" />
+      <DaveSection :widgets="widgets" />
+      <CnsSection :widgets="widgets" />
     </details>
 
     <!-- ── Detail Daemon ────────────────────────────────────────────── -->
     <details class="ag-group">
       <summary>Detail Daemon</summary>
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('dd_enabled')" @update:model-value="setB('dd_enabled', $event)" size="sm" />
-        <span>Enable Detail Daemon</span>
-      </label>
-      <template v-if="b('dd_enabled')">
-        <div class="ext-field"><label>Preset</label>
-          <CustomSelect v-model="w._dd_preset" :options="['Custom', 'Subtle', 'Medium', 'Strong']" placeholder="Medium" /></div>
-        <div class="ext-field" v-if="w._dd_preset === 'Custom'">
-          <label>Detail amount (음수=매끈)</label>
-          <input type="number" v-model="w._dd_amount" step="0.01" min="-1" max="1" /></div>
-        <details class="ag-sub">
-          <summary>세부 스케줄</summary>
-          <div class="ext-row">
-            <div class="ext-field"><label>Start</label>
-              <input type="number" v-model="w._dd_start" step="0.01" min="0" max="1" /></div>
-            <div class="ext-field"><label>End</label>
-              <input type="number" v-model="w._dd_end" step="0.01" min="0" max="1" /></div>
-          </div>
-          <div class="ext-row">
-            <div class="ext-field"><label>Bias</label>
-              <input type="number" v-model="w._dd_bias" step="0.01" min="0" max="1" /></div>
-            <div class="ext-field"><label>Exponent</label>
-              <input type="number" v-model="w._dd_exponent" step="0.05" min="0" max="10" /></div>
-          </div>
-          <div class="ext-row">
-            <div class="ext-field"><label>Start offset</label>
-              <input type="number" v-model="w._dd_start_offset" step="0.01" min="-1" max="1" /></div>
-            <div class="ext-field"><label>End offset</label>
-              <input type="number" v-model="w._dd_end_offset" step="0.01" min="-1" max="1" /></div>
-          </div>
-          <div class="ext-row">
-            <div class="ext-field"><label>Fade</label>
-              <input type="number" v-model="w._dd_fade" step="0.05" min="0" max="1" /></div>
-            <div class="ext-field"><label>Multiplier</label>
-              <input type="number" v-model="w._dd_multiplier" step="0.05" min="0" max="2" /></div>
-          </div>
-          <label class="ext-check-row">
-            <ToggleSwitch :model-value="b('dd_smooth')" @update:model-value="setB('dd_smooth', $event)" size="sm" />
-            <span>Smooth (코사인 스무딩)</span>
-          </label>
-          <label class="ext-check-row">
-            <ToggleSwitch :model-value="b('dd_cfg_couple')" @update:model-value="setB('dd_cfg_couple', $event)" size="sm" />
-            <span>Couple to CFG scale</span>
-          </label>
-        </details>
-      </template>
+      <DetailDaemonSection :widgets="widgets" />
     </details>
 
     <!-- ── Adaptive Guidance / Modulation ───────────────────────────── -->
     <details class="ag-group">
       <summary>Adaptive Guidance / CLIP Modulation</summary>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_adg_enabled')" @update:model-value="setB('guid_adg_enabled', $event)" size="sm" />
-        <span>Enable Adaptive Guidance (후반 uncond 생략)</span>
-      </label>
-      <div class="ext-row" v-if="b('guid_adg_enabled')">
-        <div class="ext-field"><label>Skip after</label>
-          <input type="number" v-model="w._guid_adg_start" step="0.01" min="0" max="1" /></div>
-        <div class="ext-field"><label>Keep every N (0=항상 생략)</label>
-          <input type="number" v-model="w._guid_adg_interval" step="1" min="0" max="10" /></div>
-      </div>
-
-      <label class="ext-check-row">
-        <ToggleSwitch :model-value="b('guid_mod_enabled')" @update:model-value="setB('guid_mod_enabled', $event)" size="sm" />
-        <span>Enable Anima Modulation Guidance (보조 CLIP-L)</span>
-      </label>
-      <template v-if="b('guid_mod_enabled')">
-        <div class="ext-field"><label>CLIP-L model (models/text_encoder)</label>
-          <input type="text" v-model="w._guid_mod_clip_model" placeholder="clip_l.safetensors" /></div>
-        <div class="ext-field"><label>Direction weight w</label>
-          <input type="number" v-model="w._guid_mod_weight" step="0.05" min="-20" max="20" /></div>
-        <div class="ext-row">
-          <div class="ext-field"><label>Start block</label>
-            <input type="number" v-model="w._guid_mod_start_layer" step="1" min="0" max="63" /></div>
-          <div class="ext-field"><label>End block (-1=마지막)</label>
-            <input type="number" v-model="w._guid_mod_end_layer" step="1" min="-1" max="63" /></div>
-        </div>
-        <div class="ext-field"><label>Base CLIP prompt source</label>
-          <CustomSelect v-model="w._guid_mod_base_source" :options="['Main positive', 'Custom']" placeholder="Main positive" /></div>
-        <div class="ext-field" v-if="w._guid_mod_base_source === 'Custom'">
-          <label>Custom base CLIP prompt</label>
-          <input type="text" v-model="w._guid_mod_base_prompt" /></div>
-        <div class="ext-field"><label>Positive direction prompt</label>
-          <input type="text" v-model="w._guid_mod_positive_prompt" /></div>
-        <div class="ext-field"><label>Negative direction source</label>
-          <CustomSelect v-model="w._guid_mod_negative_source" :options="['Main negative', 'Custom']" placeholder="Main negative" /></div>
-        <div class="ext-field" v-if="w._guid_mod_negative_source === 'Custom'">
-          <label>Custom negative direction prompt</label>
-          <input type="text" v-model="w._guid_mod_negative_prompt" /></div>
-        <div class="ext-field"><label>Adapter source</label>
-          <CustomSelect v-model="w._guid_mod_adapter_mode"
-            :options="['Auto-download official', 'Local file']" placeholder="Auto-download official" /></div>
-        <div class="ext-field" v-if="w._guid_mod_adapter_mode === 'Local file'">
-          <label>Local adapter path</label>
-          <input type="text" v-model="w._guid_mod_adapter_path" /></div>
-      </template>
+      <AdgSection :widgets="widgets" />
+      <ModulationSection :widgets="widgets" />
     </details>
 
     <div class="ag-actions">
@@ -341,12 +62,23 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import ToggleSwitch from './ToggleSwitch.vue'
-import CustomSelect from './CustomSelect.vue'
 import { requestAction } from '../stores/widgetStore.js'
+import { useGuidanceWidgets } from './guidance/guidanceWidgets'
+import PagSection from './guidance/PagSection.vue'
+import ApgSection from './guidance/ApgSection.vue'
+import CwmSmcSection from './guidance/CwmSmcSection.vue'
+import SkimSection from './guidance/SkimSection.vue'
+import DcwSection from './guidance/DcwSection.vue'
+import RdcSection from './guidance/RdcSection.vue'
+import DaveSection from './guidance/DaveSection.vue'
+import CnsSection from './guidance/CnsSection.vue'
+import DetailDaemonSection from './guidance/DetailDaemonSection.vue'
+import AdgSection from './guidance/AdgSection.vue'
+import ModulationSection from './guidance/ModulationSection.vue'
 
 /**
- * Anima Guidance Suite 패널.
+ * Anima Guidance Suite 패널 — 카드 · 그룹 아코디언 · 요약 배지 · 가져오기/초기화 버튼만 든다.
+ * 기능별 칸은 components/guidance/*Section.vue 에 있다(그룹 <details> 안에 조각으로 놓인다).
  *
  * 위젯 id 는 `_` + core/anima_guidance.py 의 스펙 키 (예: `_guid_enabled`).
  * 실제 alwayson_scripts 인자 배열은 백엔드가 그 스펙 순서대로 만든다 —
@@ -354,21 +86,7 @@ import { requestAction } from '../stores/widgetStore.js'
  * 순서 검증은 tests/test_anima_guidance.py 가 담당(설치된 확장과 교차검증).
  */
 const props = defineProps<{ widgets: Record<string, any> }>()
-const w = computed(() => props.widgets).value
-
-// 스토어는 값을 문자열로 들고 있다 ('true'/'false') — 백엔드 coercion 과 동일 규칙
-function b(key: string): boolean {
-  return String(w[`_${key}`] ?? '') === 'true'
-}
-function setB(key: string, val: boolean) {
-  w[`_${key}`] = val ? 'true' : 'false'
-}
-
-const cfgModes = ['Preserve incoming', 'APG', 'CWM', 'SMC', 'SMC + CWM']
-const smcPresets = [
-  'Auto', 'SD1.5 / SD2', 'SDXL', 'SD3 / SD3.5',
-  'Flux', 'Qwen-Image', 'Cosmos / Wan', 'Custom',
-]
+const { w, b } = useGuidanceWidgets(props)
 
 // 전체 초기화 — 기본값은 Python 이 core/anima_guidance.py 스펙(default_settings)에서 채운다.
 // 예전엔 여기에 82개 기본값 사본(DEFAULTS)을 들고 있어, 스펙이 바뀌면 이 버튼만 옛 값을 쓰거나
@@ -390,12 +108,15 @@ const activeSummary = computed(() => {
   ]
   for (const [key, label] of beforeSmc) if (b(key)) parts.push(label)
   if (b('guid_smc_master_enabled') || b('guid_smc_enabled')) parts.push('SMC')
-  const afterSmc: Array<[string, string]> = [
-    ['guid_cwm_enabled', 'CWM'], ['guid_dcw_enabled', 'DCW'], ['guid_rdc_enabled', 'RDC'],
-    ['guid_dave_enabled', 'DAVE'], ['guid_cns_enabled', 'CNS'],
-    ['guid_mod_enabled', 'MOD'], ['skim_enabled', 'Skim'], ['dd_enabled', 'DD'],
+  // RDC 는 보내는 값과 같은 원본 켜짐 규칙으로만 표시한다 — 스위치 · DCW · tau > 0 셋 다
+  // (core/anima_guidance.py _rdc_on / describe_active). 스위치만 켜고 tau 0(원본 기본)이면 RDC 는 꺼져 있다.
+  const rdcOn = b('guid_rdc_enabled') && b('guid_dcw_enabled') && Number(w._guid_rdc_tau) > 0
+  const afterSmc: Array<[boolean, string]> = [
+    [b('guid_cwm_enabled'), 'CWM'], [b('guid_dcw_enabled'), 'DCW'], [rdcOn, 'RDC'],
+    [b('guid_dave_enabled'), 'DAVE'], [b('guid_cns_enabled'), 'CNS'],
+    [b('guid_mod_enabled'), 'MOD'], [b('skim_enabled'), 'Skim'], [b('dd_enabled'), 'DD'],
   ]
-  for (const [key, label] of afterSmc) if (b(key)) parts.push(label)
+  for (const [on, label] of afterSmc) if (on) parts.push(label)
   return parts.join(' · ')
 })
 </script>
@@ -421,12 +142,14 @@ const activeSummary = computed(() => {
 .ag-group > summary::before { content: '▸ '; color: var(--text-muted); }
 .ag-group[open] > summary::before { content: '▾ '; }
 .ag-group > summary:hover { color: var(--text-primary); }
-.ag-sub { margin: 6px 0 6px 4px; }
-.ag-sub > summary {
+/* 섹션(guidance/*Section.vue)은 감싸는 요소 없는 조각 컴포넌트라 이 패널의 scoped 속성을 받지 않는다 —
+   섹션 안의 .ag-sub · .ext-note 는 :deep 으로 입힌다. 특이도는 예전 `.ag-sub[data-v]` 와 같다(0,2,0). */
+:deep(.ag-sub) { margin: 6px 0 6px 4px; }
+:deep(.ag-sub > summary) {
   cursor: pointer; font-size: var(--fs-label); font-weight: var(--fw-bold);
   color: var(--text-muted); padding: 3px 0;
 }
-.ext-note {
+:deep(.ext-note) {
   margin: 3px 0 6px; color: var(--text-muted);
   font-size: var(--fs-label); line-height: 1.45;
 }

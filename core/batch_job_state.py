@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-JOB_LABELS = {'batch': '배치', 'upscale': '업스케일'}
+# 'sam3' 는 batchJobState 를 보내지 않고 완료 문구만 쓴다(workers/sam3_worker.Sam3BatchWorker.completion_notice)
+JOB_LABELS = {'batch': '배치', 'upscale': '업스케일', 'sam3': 'SAM3 배치'}
 
 
 @dataclass
@@ -54,6 +55,8 @@ def completion_notice(progress: JobProgress, first_error: str = '') -> tuple[str
         reason = f' — {first_error}' if first_error else ''
         if progress.done == 0:
             return 'warning', f'{label} 중단: 처리한 파일이 없습니다'
+        if skipped:   # 멈춘 배치 — 처리한 것은 모두 실패, 나머지는 건너뜀
+            return 'error', f'{label} 실패: 처리한 {progress.failed}개 모두 실패 · 건너뜀 {skipped}{reason}'
         return 'error', f'{label} 실패: {progress.failed}개 모두 실패{reason}'
     parts = [f'성공 {progress.success}']
     if progress.failed:

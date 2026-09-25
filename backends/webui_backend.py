@@ -136,6 +136,51 @@ def _decode_webui_image(value: str, index: int) -> MediaArtifact:
     )
 
 
+def _parse_generation_info(raw_info) -> Dict:
+    """Forge 응답 'info'(JSON 문자열 또는 dict) → dict. 읽을 수 없으면 {'raw_info': …}."""
+    if isinstance(raw_info, dict):
+        return copy.deepcopy(raw_info)
+    if isinstance(raw_info, str):
+        try:
+            parsed = json.loads(raw_info) if raw_info else {}
+        except json.JSONDecodeError:
+            return {"raw_info": raw_info}
+        return parsed if isinstance(parsed, dict) else {"raw_info": parsed}
+    return {"raw_info": raw_info}
+
+
+def _rejected_request_message(response, payload: Dict) -> Optional[str]:
+    """Forge 가 요청을 거절(HTTP 422 — 확장 스크립트 없음 등)했으면 어느 확장·기능 때문인지 설명.
+
+    sam-extra 알림(P4, core/sam_extra_notices). 422 가 아니면 None — 기존 raise_for_status 흐름 그대로.
+    """
+    if getattr(response, "status_code", None) != 422:
+        return None
+    try:
+        body = response.json()
+    except Exception:
+        body = getattr(response, "text", "")
+    finally:
+        close_response = getattr(response, "close", None)
+        if callable(close_response):
+            close_response()
+    from core.sam_extra_notices import explain_rejected_request
+    message = explain_rejected_request(422, body, payload)
+    logger.warning("WebUI 요청 거절(422): %s", message)
+    return message
+
+
+def _extension_notices(api_url: str, info: Dict, payload: Dict) -> list:
+    """Forge info + 보낸 요청 → sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락). 실패하면 []."""
+    try:
+        from core.sam_extra_notices import result_notices
+        from core.sam_extra_probe import peek_capabilities
+        return result_notices(info, payload, capabilities=peek_capabilities(api_url))   # 캐시만 — HTTP 없음
+    except Exception:
+        logger.debug("sam-extra 결과 알림 계산 실패(무시)", exc_info=True)
+        return []
+
+
 class WebUIBackend(AbstractBackend):
     """Stable Diffusion WebUI API 백엔드"""
 
@@ -198,7 +243,7 @@ class WebUIBackend(AbstractBackend):
         return payload
 
     @staticmethod
-    def _build_sam3_script_state(settings: Dict) -> Dict:
+    def _build_sam3_script_state(settings: Dict, capabilities=None) -> Dict:
         """SAM3 alwayson state — core/sam3_args로 일원화 (t2i 경로와 동일 로직).
 
         예전에는 이 함수와 ui/generator_generation.py에 거의 같은 dict가 복사돼 있어
@@ -208,6 +253,8 @@ class WebUIBackend(AbstractBackend):
         ★ sam3_unload_after: 확장 UI 기본은 True지만 API 경로는 `_xyz_or(..., False)`라
           명시하지 않으면 인페인트 내내 SAM3(~3.5GB)가 상주해 16GB GPU에서 OOM 난다.
           SAM3_SPEC의 기본값이 True이므로 명시 전송된다.
+
+        capabilities: sam-extra 기능 스냅샷 — CN 전처리기·모델 이름을 라이브 목록 표기로 맞춘다(P3).
         """
         from core import sam3_args
         # 예전 호출자가 denoising_strength만 넘기던 경우 호환
@@ -218,17 +265,37 @@ class WebUIBackend(AbstractBackend):
             settings,
             prompt=str(settings.get('prompt', '') or ''),
             negative_prompt=str(settings.get('negative_prompt', '') or ''),
+            capabilities=capabilities,
         )
 
+    def _sam_extra_snapshot(self):
+        """이 WebUI 의 sam-extra 기능 스냅샷 — 연결 때 받아 둔 캐시만 본다(네트워크 없음). 없으면 None."""
+        try:
+            from core.sam_extra_probe import peek_capabilities
+            return peek_capabilities(self.api_url)
+        except Exception as exc:
+            logger.warning("sam-extra 스냅샷 조회 실패(무시): %s", exc)
+            return None
+
     def _run_img2img_postprocess(self, image_b64: str, payload: Dict) -> str:
+        """단독 ADetailer·SAM3·Refine 의 img2img. 결과는 base64 str 이다 — Forge info 와 sam-extra 알림
+        ('SAM3 Error' 등)을 붙인 ``NoticedImage`` 라 워커가 ``notices_of(result)`` 로 볼 수 있다(P4)."""
         response = requests.post(
             f'{self.api_url}/sdapi/v1/img2img',
             json=payload, headers=_HEADERS, timeout=600
         )
+        rejected = _rejected_request_message(response, payload)
+        if rejected:
+            raise RuntimeError(rejected)
         response.raise_for_status()
         r = response.json()
         if 'images' in r and r['images']:
-            return r['images'][-1]
+            image = r['images'][-1]
+            if not isinstance(image, str):
+                return image
+            from core.sam_extra_notices import NoticedImage
+            info = _parse_generation_info(r.get('info', {}))
+            return NoticedImage(image, info, _extension_notices(self.api_url, info, payload))
         raise RuntimeError("img2img 후처리 API 응답에 이미지가 없습니다.")
 
     def get_lora_manager_url(self) -> Dict:
@@ -237,16 +304,23 @@ class WebUIBackend(AbstractBackend):
         확장이 Forge FastAPI에 등록해 둔 라우트(`sam3ext/lora_manager_core.py`):
             GET /sam3-lora/spawn  → {"url", "port", "status", "message"}
         서버가 안 떠 있으면 이 호출이 띄운다(lazy spawn). 확장이 없으면 404 → 안내 메시지.
+        메모·Tile & Repair 라우트처럼 같은 출처 헤더(X-SAM3-Notebook: 1)가 없으면 403 이다 — 헤더를
+        보지 않는 옛 확장에 보내도 무해하다. 401·403(로그인·헤더 거절)은 URL 을 싣지 않은 안내로 바꾼다.
 
         반환: {'url': str, 'status': str, 'message': str}
         """
+        from core.sam_extra_capabilities import NOTEBOOK_HEADERS
         try:
             r = requests.get(f'{self.api_url}/sam3-lora/spawn',
-                             headers=_HEADERS, timeout=20)
+                             headers={**_HEADERS, **NOTEBOOK_HEADERS}, timeout=20)
             if r.status_code == 404:
                 return {'url': '', 'status': 'missing',
                         'message': 'sam-extra 확장의 LoRA Manager를 찾을 수 없습니다 '
                                    '(확장 미설치이거나 v0.9.0 미만)'}
+            if r.status_code in (401, 403):
+                return {'url': '', 'status': 'refused',
+                        'message': 'Forge 가 LoRA Manager 요청을 거부했습니다 — 로그인 설정(--gradio-auth·--api-auth)이나 '
+                                   'sam-extra 버전을 확인하세요'}
             r.raise_for_status()
             data = r.json()
             return {
@@ -701,6 +775,9 @@ class WebUIBackend(AbstractBackend):
                     url=f'{self.api_url}{endpoint}',
                     json=request_payload, headers=_HEADERS, timeout=600, stream=True
                 )
+                rejected = _rejected_request_message(response, payload)   # 422 → 어느 확장·기능인지
+                if rejected:
+                    return GenerationResult(success=False, error=rejected)
                 response.raise_for_status()
             finally:
                 with self._generation_state_lock:
@@ -741,6 +818,11 @@ class WebUIBackend(AbstractBackend):
                 else:
                     generation_info = {"raw_info": raw_info}
                 generation_info['artifact_count'] = len(artifacts)
+                # sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락) — UI 가 토스트로 띄운다(P4)
+                notices = _extension_notices(self.api_url, generation_info, payload)
+                if notices:
+                    from core.sam_extra_notices import INFO_KEY, notices_to_dicts
+                    generation_info[INFO_KEY] = notices_to_dicts(notices)
                 return GenerationResult(
                     success=True,
                     image_data=artifacts[0].data,
@@ -853,7 +935,7 @@ class WebUIBackend(AbstractBackend):
         sam3_settings['sam3_inpaint_prompt'] = prompts['prompt']
         sam3_settings['sam3_negative_prompt'] = prompts['negative_prompt']
         sam3_settings['sam3_mode'] = 'Inpaint'
-        sam3_state = self._build_sam3_script_state(sam3_settings)
+        sam3_state = self._build_sam3_script_state(sam3_settings, self._sam_extra_snapshot())
 
         image_bytes = base64.b64decode(image_b64)
         with Image.open(io.BytesIO(image_bytes)) as init_image:
@@ -897,7 +979,7 @@ class WebUIBackend(AbstractBackend):
         이제 부모 i2i는 denoise 0으로 통과시키고, 실제 작업은 SAM3 인페인트 패스가
         전담한다. 샘플링 파라미터도 명시 전송한다.
         """
-        sam3_state = self._build_sam3_script_state(settings)
+        sam3_state = self._build_sam3_script_state(settings, self._sam_extra_snapshot())
 
         image_bytes = base64.b64decode(image_b64)
         with Image.open(io.BytesIO(image_bytes)) as init_image:

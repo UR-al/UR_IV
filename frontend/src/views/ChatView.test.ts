@@ -19,6 +19,8 @@ import * as dropdownPlacement from '../utils/dropdownPlacement'
 import * as ollamaPrefs from '../utils/ollamaPrefs'
 import * as hostDialogs from '../utils/hostDialogs'
 import * as imeComposition from '../utils/imeComposition'
+import * as chatPreferences from '../composables/useChatPreferences'
+import * as chatSession from '../composables/useChatSession'
 
 const bridge = vi.hoisted(() => ({
   handlers: new Map<string, (raw: string) => void>(),
@@ -60,6 +62,8 @@ const ChatView = compileClient(chatSource, {
   '../utils/chatSettings': chatSettings, '../utils/chatGeneration': chatGeneration,
   '../composables/useSchemaAutosave': schemaAutosave,
   '../utils/imeComposition': imeComposition,
+  // 대화 목록 · 설정은 도크 대화 패널과 나눠 쓰는 composable 로 옮겨 갔다(쓰는 곳이 없으면 버려져 테스트마다 새로 만든다)
+  '../composables/useChatPreferences': chatPreferences, '../composables/useChatSession': chatSession,
   '../components/CustomSelect.vue': { __esModule: true, default: CustomSelect },
   '../utils/chatStructuredOutput': chatStructuredOutput,
   '../components/AiAssistInstructionsSettings.vue': { __esModule: true, default: { render: () => null } },

@@ -1,0 +1,155 @@
+[
+ {
+  "name": "aadetailer-neoforge",
+  "remote": "https://github.com/abzaloff/aadetailer-neoforge",
+  "branch": "main",
+  "commit_hash": "c4c036d3b1f8bd3a298d6e64878d8338dbfe2597",
+  "version": "c4c036d3",
+  "commit_date": 1780135597,
+  "enabled": true
+ },
+ {
+  "name": "forge_sam3_extension",
+  "remote": "https://github.com/UR-al/sam-extra",
+  "branch": "feat/anima-character-reference",
+  "commit_hash": "818b8fee98a902e54602ae82df126219a64bbfc9",
+  "version": "818b8fee",
+  "commit_date": 1789946473,
+  "enabled": true
+ },
+ {
+  "name": "img2img-hires-fix",
+  "remote": "https://github.com/Amadeus-AI/img2img-hires-fix",
+  "branch": "main",
+  "commit_hash": "b8930527a8cc606dd79dd54ed23bc967314d1859",
+  "version": "b8930527",
+  "commit_date": 1726641064,
+  "enabled": true
+ },
+ {
+  "name": "model-keyword",
+  "remote": "https://github.com/mix1009/model-keyword.git",
+  "branch": "main",
+  "commit_hash": "b1d622c06f94c49eebe84383cce6fb09d29ee3f7",
+  "version": "b1d622c0",
+  "commit_date": 1779472871,
+  "enabled": true
+ },
+ {
+  "name": "multidiffusion-upscaler-for-automatic1111",
+  "remote": "https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111.git",
+  "branch": "main",
+  "commit_hash": "22798f6822bc9c8a905b51da8954ee313b973331",
+  "version": "22798f68",
+  "commit_date": 1723023145,
+  "enabled": false
+ },
+ {
+  "name": "sd-dynamic-prompts",
+  "remote": "https://github.com/abzaloff/sd-dynamic-prompts",
+  "branch": "main",
+  "commit_hash": "d929ced16d2540b7856ac5bc509864a4d8e44e86",
+  "version": "d929ced1",
+  "commit_date": 1778063001,
+  "enabled": true
+ },
+ {
+  "name": "sd-dynamic-thresholding",
+  "remote": "https://github.com/mcmonkeyprojects/sd-dynamic-thresholding.git",
+  "branch": "master",
+  "commit_hash": "73e4e04565aa86237d66764ac58ffae1f7e40e48",
+  "version": "73e4e045",
+  "commit_date": 1741944811,
+  "enabled": true
+ },
+ {
+  "name": "sd-forge-negpip",
+  "remote": "https://github.com/Haoming02/sd-forge-negpip",
+  "branch": "classic",
+  "commit_hash": "b3673ced966baf99ba973bf34cd594a3dcc7591f",
+  "version": "b3673ced",
+  "commit_date": 1779104789,
+  "enabled": true
+ },
+ {
+  "name": "sd-forge-nvidia-vfx",
+  "remote": "https://github.com/Haoming02/sd-forge-nvidia-vfx",
+  "branch": "main",
+  "commit_hash": "01fbfc1ed61a3d32e016c51206aa8418bf04517a",
+  "version": "01fbfc1e",
+  "commit_date": 1776400015,
+  "enabled": true
+ },
+ {
+  "name": "sd-forge-res4lyf",
+  "remote": "https://github.com/zeydsama/sd-forge-res4lyf.git",
+  "branch": "main",
+  "commit_hash": "3a2e48dad1dbe4ead5e3b98cadc355333351c866",
+  "version": "3a2e48da",
+  "commit_date": 1779613774,
+  "enabled": true
+ },
+ {
+  "name": "sd-webui-api-payload-display",
+  "remote": "https://github.com/huchenlei/sd-webui-api-payload-display.git",
+  "branch": "main",
+  "commit_hash": "2d3332d94ffac0943bd35a1943924ed4650c6e63",
+  "version": "2d3332d9",
+  "commit_date": 1700763306,
+  "enabled": true
+ },
+ {
+  "name": "sd-webui-lora-block-weight-forgeneo-anima",
+  "remote": "https://github.com/kiygskr/sd-webui-lora-block-weight-forgeneo-anima",
+  "branch": "main",
+  "commit_hash": "5067c53dac3ae54ae2018ba52461f90b9cff5abd",
+  "version": "5067c53d",
+  "commit_date": 1778435729,
+  "enabled": true
+ },
+ {
+  "name": "sd-webui-prompt-all-in-one-neo",
+  "remote": "https://github.com/eduardoabreu81/sd-webui-prompt-all-in-one-neo",
+  "branch": "main",
+  "commit_hash": "2412df2960be2ddf01b1e97bceaeafcc9edb56b2",
+  "version": "2412df29",
+  "commit_date": 1779659434,
+  "enabled": true
+ },
+ {
+  "name": "sd-webui-tagcomplete-neo",
+  "remote": "https://github.com/eduardoabreu81/sd-webui-tagcomplete-neo",
+  "branch": "main",
+  "commit_hash": "8e0d81fd0e25fd2cf98fb4d34d097df9f71a082b",
+  "version": "8e0d81fd",
+  "commit_date": 1778258163,
+  "enabled": true
+ },
+ {
+  "name": "sd_forge_neo_extra_samplers",
+  "remote": "https://github.com/Panchovix/sd_forge_neo_extra_samplers",
+  "branch": "main",
+  "commit_hash": "7e9e2bf4e4d8956e39004fcdc3845cb0e5bca257",
+  "version": "7e9e2bf4",
+  "commit_date": 1775004646,
+  "enabled": true
+ },
+ {
+  "name": "seedvr2-webui-neo-extension",
+  "remote": "https://github.com/yamosin/seedvr2-webui-neo-extension",
+  "branch": "main",
+  "commit_hash": "1ffcaab34f03f1c3a04bdca35e58f0dc1c363b51",
+  "version": "1ffcaab3",
+  "commit_date": 1769064554,
+  "enabled": true
+ },
+ {
+  "name": "stable-diffusion-webui-localization-ko_KR",
+  "remote": "https://github.com/36DB/stable-diffusion-webui-localization-ko_KR",
+  "branch": "main",
+  "commit_hash": "78431bea6f7118a99d4bc1d8ceeff92ef95e5d97",
+  "version": "78431bea",
+  "commit_date": 1690985697,
+  "enabled": true
+ }
+]

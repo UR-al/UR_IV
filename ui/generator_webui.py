@@ -1026,6 +1026,22 @@ class WebUIMixin:
             self._emit_backend_status(True)
         except Exception as exc:
             print(f"[Backend] 상태 통보 실패(무시): {exc}")
+        # 메모 동기화(ui/memo_actions.py) — Forge 면 백그라운드로 맞추고, ComfyUI 면 로컬 전용으로 표시.
+        memo_connected = getattr(self, '_memo_backend_connected', None)
+        if callable(memo_connected):
+            try:
+                memo_connected()
+            except Exception as exc:
+                print(f"[Memo] 연결 후 동기화 예약 실패(무시): {exc}")
+        # sam-extra 확장 기능 스냅샷(ui/sam_extra_capabilities_actions.py) — 워커에서 GET 만
+        # (확장 목록 /sdapi/v1/extensions 는 Forge 가 다시 스캔하는 GET 이라 오래 캐시해 연결마다 묻지 않는다).
+        # ComfyUI 면 '해당 없음' 스냅샷을 보내 옛 Forge 결과가 남지 않게 한다.
+        refresh_sam_extra = getattr(self, '_refresh_sam_extra_capabilities', None)
+        if callable(refresh_sam_extra):
+            try:
+                refresh_sam_extra(force=True)
+            except Exception as exc:
+                print(f"[sam-extra] 기능 확인 시작 실패(무시): {exc}")
         self.btn_generate.setEnabled(True)
         self.show_status(
             f"✅ {backend_name} 연결 성공 | 모델: {len(models)}개 | 샘플러: {len(samplers)}개"

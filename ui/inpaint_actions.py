@@ -78,6 +78,9 @@ def start_vue_inpaint(mw, payload: dict, *, worker_factory=None) -> bool:
             apply_extensions(backend_payload)
         except Exception as exc:
             logger.warning("Inpaint 확장 적용 실패 (확장 없이 진행): %s", exc)
+    # sam-extra 생성 전 경고(CFG≈1 의 SMC/APG/CWM, sam3.pt 자동 다운로드, 없는 스크립트) — 막지는 않는다
+    from ui.sam_extra_notices_ui import check_before_generation
+    check_before_generation(mw, backend_payload)
 
     model_name = ''
     combo = getattr(mw, 'model_combo', None)
@@ -127,6 +130,8 @@ def _on_finished(mw, worker, result, gen_info) -> None:
             except Exception as exc:
                 logger.warning("inpaint send_image failed: %s", exc)
         _notify(mw, 'success', '인페인트 생성 완료')
+        from ui.sam_extra_notices_ui import show_result_notices
+        show_result_notices(mw, info)   # 'SAM3 Error'·'Anima38: off'·PAG 누락
         return
     if info.get('cancelled'):
         _notify(mw, 'info', '인페인트가 취소되었습니다')

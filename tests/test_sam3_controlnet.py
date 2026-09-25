@@ -137,10 +137,12 @@ class SpecTableTests(unittest.TestCase):
             cls_name, wid, _multiplier = registered[key]
             self.assertIn(cls_name, allowed[kind], key)
             self.assertEqual(wid, cn.widget_id(key), key)
-        # 선택지가 있는 필드만 콤보 — 나머지 콤보는 자유 입력을 망가뜨린다
+        # 고정 선택지만 콤보 — 나머지 콤보는 자유 입력을 망가뜨린다. 전처리기는 라이브 목록(정적 목록에
+        # 없는 이름 포함)에서 고르므로 자유 입력 + 정적 폴백 추천 목록(items)이다(P3).
         combos = {key for key, kind in cn.CN_FIELDS if kind == 'combo'}
-        self.assertEqual(combos, set(cn.choice_items()))
+        self.assertEqual(combos, set(cn.choice_items()) - {'cn_module'})
         self.assertEqual(registered['cn_model'][0], 'LineEditProxy')
+        self.assertEqual(registered['cn_module'][0], 'LineEditProxy')
 
     def test_default_values_follow_sam3_spec(self):
         defaults = cn.default_values()
@@ -167,7 +169,8 @@ class WidgetInitAndPersistenceTests(unittest.TestCase):
 
     def test_init_pushes_items_then_defaults(self):
         self.assertEqual(self.bridge.properties[('_sam3_cn_module', 'items')], list(sam3_args.CN_MODULES))
-        self.assertEqual(self.widgets['cn_module'].currentText(), 'inpaint_only')
+        self.assertEqual(self.widgets['cn_module'].text(), 'inpaint_only')
+        self.assertEqual(self.bridge.values['_sam3_cn_module'], 'inpaint_only')
         self.assertEqual(self.widgets['cn_resize_mode'].currentText(), 'Crop and Resize')
         self.assertEqual(self.bridge.values['_sam3_cn_resize_mode'], 'Crop and Resize')
         self.assertEqual(self.widgets['cn_control_mode'].currentText(), 'Balanced')
@@ -327,13 +330,20 @@ class LateClientSyncTests(unittest.TestCase):
     def test_snapshot_keeps_the_latest_push(self):
         received = []
         self.bridge.widgetPropertyChanged.connect(lambda *args: received.append(args))
-        self.widgets['cn_module'].addItems(['inpaint_only', 'canny'])
-        self.widgets['cn_module'].addItem('depth_anything')
+        self.widgets['cn_resize_mode'].addItems(['Just Resize', 'Crop and Resize'])
+        self.widgets['cn_resize_mode'].addItem('Resize and Fill')
         snapshot = json.loads(self.bridge.getAllWidgetProperties())
-        self.assertEqual(snapshot['_sam3_cn_module']['items'], ['inpaint_only', 'canny', 'depth_anything'])
+        self.assertEqual(snapshot['_sam3_cn_resize_mode']['items'],
+                         ['Just Resize', 'Crop and Resize', 'Resize and Fill'])
         # 연결된 클라이언트에는 여전히 push 로 간다
-        self.assertEqual(received[-1][0:2], ('_sam3_cn_module', 'items'))
-        self.assertEqual(json.loads(received[-1][2]), ['inpaint_only', 'canny', 'depth_anything'])
+        self.assertEqual(received[-1][0:2], ('_sam3_cn_resize_mode', 'items'))
+        self.assertEqual(json.loads(received[-1][2]), ['Just Resize', 'Crop and Resize', 'Resize and Fill'])
+
+    def test_free_text_suggestions_also_reach_the_snapshot(self):
+        """전처리기는 자유 입력(LineEditProxy)이지만 정적 폴백 목록은 같은 'items' 로 늦은 클라이언트에 간다."""
+        self.widgets['cn_module'].setSuggestions(['None', 'inpaint_noobai'])
+        snapshot = json.loads(self.bridge.getAllWidgetProperties())
+        self.assertEqual(snapshot['_sam3_cn_module']['items'], ['None', 'inpaint_noobai'])
 
     def test_web_clients_can_read_the_snapshot(self):
         try:

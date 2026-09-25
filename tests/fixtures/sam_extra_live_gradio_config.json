@@ -1,0 +1,218 @@
+{
+ "version": "4.40.0",
+ "components": [
+  {
+   "id": 5410,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_anima38_keep_resident",
+    "value": true,
+    "label": "Anima 3.8B: TE·Qwen3.5·커넥터를 생성 사이 VRAM 에 남기기 (최대 약 6~8 GB)"
+   }
+  },
+  {
+   "id": 5411,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_anima38_connector_fp32",
+    "value": true,
+    "label": "Anima 3.8B: 커넥터를 샘플링 동안 fp32 로 상주 (VRAM 약 +1.5 GB, 장당 약 1~2초 빨라짐)"
+   }
+  },
+  {
+   "id": 5412,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_anima38_connector_run_cache",
+    "value": true,
+    "label": "Anima 3.8B: 커넥터의 timestep 무관 계산을 프롬프트 줄마다 한 번만 (VRAM 줄당 약 15~70 MB)"
+   }
+  },
+  {
+   "id": 5413,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_anima38_reference_ipa",
+    "value": true,
+    "label": "Anima 3.8B: 캐릭터 레퍼런스 IP-Adapter 방식에도 v2 커넥터 설치 (끄면 결과가 바뀜)"
+   }
+  },
+  {
+   "id": 5417,
+   "type": "dropdown",
+   "props": {
+    "elem_id": "setting_sam3_appearance_theme",
+    "value": "OLED Mono",
+    "label": "Forge UI 테마 (Settings 저장 후 즉시 적용)",
+    "choices": [
+     [
+      "Forge Default",
+      "Forge Default"
+     ],
+     [
+      "Graphite Ember",
+      "Graphite Ember"
+     ],
+     [
+      "Obsidian Violet",
+      "Obsidian Violet"
+     ],
+     [
+      "Warm Espresso",
+      "Warm Espresso"
+     ],
+     [
+      "OLED Mono",
+      "OLED Mono"
+     ]
+    ]
+   }
+  },
+  {
+   "id": 5418,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_layout_sections",
+    "value": true,
+    "label": "txt2img 섹션 정리(켜진 기능·고정·더 보기) — Forge 재시작 후 적용"
+   }
+  },
+  {
+   "id": 5419,
+   "type": "slider",
+   "props": {
+    "elem_id": "setting_sam3_fast_dropdown_visible_choices",
+    "value": 60,
+    "label": "빠른 드롭다운 한 번에 표시할 항목 수"
+   }
+  },
+  {
+   "id": 5423,
+   "type": "radio",
+   "props": {
+    "elem_id": "setting_sam3_ipa_duplicate_policy",
+    "value": "lineage",
+    "label": "캐릭터 레퍼런스 IP-Adapter: 28블록 어댑터를 2.9B·3.8B 에 얹을 때 끼워 넣은 블록 처리 (결과가 바뀜)",
+    "choices": [
+     [
+      "원래 계보 블록에만 주입 (lineage · 권장)",
+      "lineage"
+     ],
+     [
+      "끼워 넣은 블록에도 전부 주입 (all · 0.21 까지의 동작)",
+      "all"
+     ],
+     [
+      "끼워 넣은 블록과 강도를 나눔 (split)",
+      "split"
+     ]
+    ]
+   }
+  },
+  {
+   "id": 5427,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_guidance_pag_prefix_dedup",
+    "value": true,
+    "label": "PAG/SEG/SLG: 첫 target 블록 이전의 weak 행 중복 계산 건너뛰기"
+   }
+  },
+  {
+   "id": 5428,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_guidance_seg_separable_blur",
+    "value": true,
+    "label": "SEG(공식): query Gaussian blur 를 가로·세로 1D 두 번으로 계산"
+   }
+  },
+  {
+   "id": 5432,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_anima_sparse_lora_forge_guess",
+    "value": false,
+    "label": "Anima 부분 LoRA 순정 추측 변환 (일부 블록만 담은 LoRA — 블록 대응이 틀릴 수 있음)"
+   }
+  },
+  {
+   "id": 5436,
+   "type": "checkbox",
+   "props": {
+    "elem_id": "setting_sam3_unload_keep_in_ram",
+    "value": true,
+    "label": "'Unload after' 뒤 SAM3 모델을 CPU RAM 에 보관 (약 3.4 GB)"
+   }
+  },
+  {
+   "id": 5440,
+   "type": "radio",
+   "props": {
+    "elem_id": "setting_sam3_lora_manager_tab_mode",
+    "value": "Add Manage tab (keep LoRA)",
+    "label": "Manage 탭 배치 (extra-networks strip)",
+    "choices": [
+     [
+      "Add Manage tab (keep LoRA)",
+      "Add Manage tab (keep LoRA)"
+     ],
+     [
+      "Replace LoRA tab",
+      "Replace LoRA tab"
+     ]
+    ]
+   }
+  },
+  {
+   "id": 5441,
+   "type": "number",
+   "props": {
+    "elem_id": "setting_sam3_lora_manager_port",
+    "value": 8765,
+    "label": "LoRA Manager standalone 서버 포트 (재시작 후 적용)"
+   }
+  }
+ ],
+ "dependencies": [
+  {
+   "api_name": "refresh_model_list"
+  },
+  {
+   "api_name": "checkpoint_change"
+  },
+  {
+   "api_name": "lambda"
+  },
+  {
+   "api_name": "js_fn"
+  },
+  {
+   "api_name": "expand"
+  },
+  {
+   "api_name": "handle_apply"
+  },
+  {
+   "api_name": "handle_refine_click"
+  },
+  {
+   "api_name": "_apply_regional_preset"
+  },
+  {
+   "api_name": "handle_anima_click"
+  },
+  {
+   "api_name": "load_selected_reference"
+  },
+  {
+   "api_name": "preview_reference_layout"
+  },
+  {
+   "api_name": "handle_anima_reference_click"
+  },
+  {
+   "api_name": "sam3_quick"
+  }
+ ]
+}

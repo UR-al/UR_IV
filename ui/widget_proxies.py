@@ -60,6 +60,11 @@ class LineEditProxy(_ProxyBase):
         self._placeholder = text
         self._bridge.pushWidgetProperty(self._id, "placeholder", text)
 
+    def setSuggestions(self, items: list):
+        """추천 목록 — Vue 가 ``getProperty(id, 'items')`` 로 읽는다. 값은 목록 밖이어도 그대로 둔다
+        (ComboBoxProxy 와 달리 목록에 없는 값을 받으면 옛 선택으로 되돌리지 않는다)."""
+        self._bridge.pushWidgetProperty(self._id, "items", list(items))
+
     def setEnabled(self, enabled: bool):
         self._enabled = enabled
         self._bridge.pushWidgetProperty(self._id, "enabled", enabled)

@@ -1,0 +1,59 @@
+/* 우하단 도크가 여는 작은 패널(대화 · 메모장)의 공통 틀 — ChatMiniPanel.vue · MemoPanel.vue 가
+   `<style scoped src>` 로 같이 쓴다. 자리는 대기열 드로어와 같은 오른쪽이지만 화면을 덮지 않는
+   떠 있는 카드다: 위는 알림 종 자리(--notif-gutter)를 비워 종이 계속 눌리고, 아래는 도크 버튼
+   (bottom 32px + 34px) 위에서 멈춘다. 뒤의 화면(히스토리 · 프롬프트)을 보면서 쓸 수 있게 어둡게
+   가리지 않는다. */
+.dock-panel {
+  position: fixed;
+  top: calc(var(--notif-gutter) + var(--sp-1));
+  right: 18px;
+  bottom: 76px;
+  z-index: 2380;
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 36px);
+  background: var(--bg-secondary);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.dp-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-3);
+  border-bottom: 1px solid var(--rule);
+  color: var(--text-primary);
+}
+.dp-title {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+.dp-spacer { flex: 1; min-width: 0; }
+.dp-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-base);
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+.dp-icon:hover:not(:disabled) { color: var(--text-primary); border-color: var(--edge); background: var(--bg-button-hover); }
+.dp-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.dock-panel-enter-active, .dock-panel-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+.dock-panel-enter-from, .dock-panel-leave-to { opacity: 0; transform: translateY(var(--sp-2)); }
+@media (prefers-reduced-motion: reduce) {
+  .dock-panel-enter-active, .dock-panel-leave-active { transition: none; }
+}

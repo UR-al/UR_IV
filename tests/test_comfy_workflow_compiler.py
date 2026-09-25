@@ -33,6 +33,9 @@ def _capabilities(*, include_forge: bool = True) -> dict:
             "ForgeNeoHiresFix", "ForgeNeoADetailer", "ForgeNeoSAM3Mask",
             "ForgeNeoSAM3Detailer", "ForgeNeoSAM3Refine", "ForgeNeoAnimaGuidanceSuite",
             "ForgeNeoSkimmedCFG", "ForgeNeoAnimaDetailDaemon",
+            # The current (1.4.0) pack's per-step CNS SAMPLER node — the compiler's
+            # stale-pack marker for CNS (TestCnsCompilation).
+            "ForgeNeoCNSSamplerPatch",
         })
     result = {name: {"input": {"required": {}}} for name in names}
     result["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"] = _choice(
@@ -93,6 +96,29 @@ def _custom_workflow() -> dict:
         "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
         "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "custom"}},
     }
+
+
+def _ksampler_advanced_workflow() -> dict:
+    workflow = _custom_workflow()
+    workflow["5"]["class_type"] = "KSamplerAdvanced"
+    inputs = workflow["5"]["inputs"]
+    inputs["noise_seed"] = inputs.pop("seed")
+    inputs.pop("denoise")
+    inputs.update({
+        "add_noise": "enable", "start_at_step": 0, "end_at_step": 20,
+        "return_with_leftover_noise": "disable",
+    })
+    return workflow
+
+
+# The CNS node's own defaults — the compiler's fallbacks for every CNS input.
+# origin: namemechan/comfyui-cns_sampler_patch@42278b13:cns_sampler_patch.py:396-437
+_ORIGIN_CNS_DEFAULTS = {"cns_strength": 1.0, "cns_gamma_power": 0.5, "cns_gamma_scale": 2.0}
+
+
+def _cns_only_alwayson() -> dict:
+    """CNS on, every CNS value left to the compiler's fallback."""
+    return {anima_guidance.SCRIPT_PERTURBATION: {"args": {"guid_cns_enabled": True}}}
 
 
 class TestLoraParsing(unittest.TestCase):
@@ -322,6 +348,13 @@ class TestDefaultCompilation(unittest.TestCase):
         classes = _classes(graph)
         _sampler_id, sampler = _node(graph, "ForgeNeoKSamplerCNS")
         self.assertEqual(sampler["inputs"]["denoise"], 1.0)
+        # CNS reaches both passes with the guidance values (base sampler and Hires).
+        for _node_id, node in (_node(graph, "ForgeNeoKSamplerCNS"), _node(graph, "ForgeNeoHiresFix")):
+            self.assertIs(node["inputs"]["cns_enabled"], True)
+            self.assertEqual(
+                {key: node["inputs"][key] for key in _ORIGIN_CNS_DEFAULTS},
+                {key: guidance[f"guid_{key}"] for key in _ORIGIN_CNS_DEFAULTS},
+            )
         for expected in (
             "ForgeNeoNegPip", "ForgeNeoAnimaGuidanceSuite", "ForgeNeoSkimmedCFG",
             "ForgeNeoAnimaDetailDaemon", "ForgeNeoHiresFix", "ForgeNeoADetailer",
@@ -447,15 +480,7 @@ class TestAdvancedWorkflowCompilation(unittest.TestCase):
         self.assertEqual(graph["7"]["inputs"]["images"], ["6", 0])
 
     def test_ksampler_advanced_maps_img2img_denoise_to_step_window(self):
-        workflow = _custom_workflow()
-        workflow["5"]["class_type"] = "KSamplerAdvanced"
-        inputs = workflow["5"]["inputs"]
-        inputs["noise_seed"] = inputs.pop("seed")
-        inputs.pop("denoise")
-        inputs.update({
-            "add_noise": "enable", "start_at_step": 0, "end_at_step": 20,
-            "return_with_leftover_noise": "disable",
-        })
+        workflow = _ksampler_advanced_workflow()
         graph = ComfyWorkflowCompiler(_capabilities()).compile(
             "img2img", "checkpoint.safetensors", {
                 "steps": 40, "denoising_strength": 0.25,
@@ -768,6 +793,269 @@ class TestAdvancedWorkflowCompilation(unittest.TestCase):
         )
         self.assertIn("PreviewImage", _classes(postprocess))
         self.assertNotIn("SaveImage", _classes(postprocess))
+
+
+class TestCnsCompilation(unittest.TestCase):
+    """CNS is the suite MODEL's sampler wrapper; the sampler nodes only carry its values."""
+
+    def _values(self, node: dict) -> dict:
+        return {key: node["inputs"][key] for key in _ORIGIN_CNS_DEFAULTS}
+
+    def test_every_fallback_is_the_original_node_default(self):
+        compiler = ComfyWorkflowCompiler(_capabilities())
+        for scripts, enabled in (({}, False), (_cns_only_alwayson(), True)):
+            with self.subTest(enabled=enabled):
+                graph = compiler.compile("txt2img", "checkpoint.safetensors", {
+                    "enable_hr": True, "hr_scale": 1.5, "alwayson_scripts": scripts,
+                })
+                for class_type in ("ForgeNeoKSamplerCNS", "ForgeNeoHiresFix"):
+                    _node_id, node = _node(graph, class_type)
+                    self.assertIs(node["inputs"]["cns_enabled"], enabled, class_type)
+                    self.assertEqual(self._values(node), _ORIGIN_CNS_DEFAULTS, class_type)
+        custom = compiler.compile("txt2img", "checkpoint.safetensors", {
+            "alwayson_scripts": _cns_only_alwayson(),
+        }, workflow=_custom_workflow())
+        self.assertEqual(custom["5"]["class_type"], "ForgeNeoKSamplerCNS")
+        self.assertIs(custom["5"]["inputs"]["cns_enabled"], True)
+        self.assertEqual(self._values(custom["5"]), _ORIGIN_CNS_DEFAULTS)
+
+    def test_fallbacks_equal_the_bundled_node_defaults(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import guidance_cns
+
+        self.assertEqual(
+            {f"cns_{name}": value for name, value in guidance_cns.CNS_DEFAULTS.items()},
+            _ORIGIN_CNS_DEFAULTS,
+        )
+
+    def test_guidance_values_win_over_the_fallbacks(self):
+        guidance = anima_guidance.default_settings()
+        guidance.update({
+            "guid_cns_enabled": True, "guid_cns_strength": 0.5,
+            "guid_cns_gamma_power": 0.75, "guid_cns_gamma_scale": 3.0,
+        })
+        graph = ComfyWorkflowCompiler(_capabilities()).compile(
+            "txt2img", "checkpoint.safetensors", {
+                "enable_hr": True, "hr_scale": 1.5,
+                "alwayson_scripts": anima_guidance.build_alwayson(guidance),
+            },
+        )
+        for class_type in ("ForgeNeoKSamplerCNS", "ForgeNeoHiresFix"):
+            _node_id, node = _node(graph, class_type)
+            self.assertEqual(self._values(node), {
+                "cns_strength": 0.5, "cns_gamma_power": 0.75, "cns_gamma_scale": 3.0,
+            }, class_type)
+
+    def test_cns_keeps_a_ksampler_advanced_graph_on_its_own_sampler(self):
+        graph = ComfyWorkflowCompiler(_capabilities()).compile(
+            "txt2img", "checkpoint.safetensors", {
+                "alwayson_scripts": _cns_only_alwayson(),
+            }, workflow=_ksampler_advanced_workflow(),
+        )
+        sampler = graph["5"]
+        self.assertEqual(sampler["class_type"], "KSamplerAdvanced")
+        self.assertFalse([
+            key for key in sampler["inputs"]
+            if key.startswith(("cns_", "spectrum_", "speed_"))
+        ])
+        # The sampler runs the suite's MODEL, which carries the CNS wrapper.
+        suite_id, suite = _node(graph, "ForgeNeoAnimaGuidanceSuite")
+        self.assertTrue(json.loads(suite["inputs"]["settings_json"])["guid_cns_enabled"])
+        self.assertEqual(sampler["inputs"]["model"], [suite_id, 0])
+
+    def test_spectrum_and_speed_still_need_a_ksampler(self):
+        capabilities = _capabilities()
+        capabilities["DiTSpectrumPatch"] = {"input": {"required": {}}}
+        for flag in ("spectrum_enabled", "speed_enabled"):
+            with self.subTest(flag=flag), self.assertRaisesRegex(
+                WorkflowCompileError, "Spectrum/SPEED",
+            ):
+                ComfyWorkflowCompiler(capabilities).compile(
+                    "txt2img", "checkpoint.safetensors", {
+                        flag: True, "alwayson_scripts": _cns_only_alwayson(),
+                    }, workflow=_ksampler_advanced_workflow(),
+                )
+
+    @staticmethod
+    def _stale_pack_capabilities() -> dict:
+        """/object_info of pack 1.3.0: same suite/sampler contracts, no per-step CNS node.
+
+        (1.3.0's ForgeNeoKSamplerCNS/ForgeNeoAnimaGuidanceSuite take the same input
+        names as 1.4.0's, so validate()'s contract check alone passes them.)
+        """
+        capabilities = _capabilities()
+        del capabilities["ForgeNeoCNSSamplerPatch"]
+        return capabilities
+
+    def test_the_stale_pack_marker_is_a_bundled_node(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import generation
+        from core import comfy_workflow_compiler
+
+        self.assertIn(comfy_workflow_compiler._PER_STEP_CNS_MARKER, generation.NODE_CLASS_MAPPINGS)
+
+    def test_a_stale_pack_refuses_cns_instead_of_dropping_it(self):
+        # Pack 1.3.0 passes the contract check but colours only the initial noise on
+        # ForgeNeoKSamplerCNS/HiresFix and nothing on KSamplerAdvanced (plan §5.2 #1).
+        compiler = ComfyWorkflowCompiler(self._stale_pack_capabilities())
+        payload = {"enable_hr": True, "hr_scale": 1.5, "alwayson_scripts": _cns_only_alwayson()}
+        for label, workflow in (
+            ("main", None), ("KSampler", _custom_workflow()),
+            ("KSamplerAdvanced", _ksampler_advanced_workflow()),
+        ):
+            with self.subTest(workflow=label), self.assertRaisesRegex(
+                WorkflowCompileError, "ForgeNeoCNSSamplerPatch.*번들 노드 팩을 갱신",
+            ):
+                compiler.compile("txt2img", "checkpoint.safetensors", payload, workflow=workflow)
+
+    def test_a_stale_pack_still_compiles_without_cns(self):
+        compiler = ComfyWorkflowCompiler(self._stale_pack_capabilities())
+        guidance = anima_guidance.default_settings()
+        guidance.update({"guid_enabled": True, "guid_cns_enabled": False})
+        for workflow in (None, _ksampler_advanced_workflow()):
+            graph = compiler.compile("txt2img", "checkpoint.safetensors", {
+                "enable_hr": True, "hr_scale": 1.5,
+                "alwayson_scripts": anima_guidance.build_alwayson(guidance),
+            }, workflow=workflow)
+            self.assertIn("ForgeNeoAnimaGuidanceSuite", _classes(graph))
+
+    def test_a_hand_built_cns_sampler_on_a_stale_pack_is_refused(self):
+        workflow = _custom_workflow()
+        workflow["5"]["class_type"] = "ForgeNeoKSamplerCNS"
+        workflow["5"]["inputs"].update({"cns_enabled": True, **_ORIGIN_CNS_DEFAULTS})
+        with self.assertRaisesRegex(WorkflowCompileError, "ForgeNeoCNSSamplerPatch"):
+            ComfyWorkflowCompiler(self._stale_pack_capabilities()).compile(
+                "txt2img", "checkpoint.safetensors", {}, workflow=workflow,
+            )
+        workflow["5"]["inputs"]["cns_enabled"] = False
+        ComfyWorkflowCompiler(self._stale_pack_capabilities()).compile(
+            "txt2img", "checkpoint.safetensors", {}, workflow=workflow,
+        )
+
+    def test_sampler_custom_is_refused_for_payload_mapping_not_for_cns(self):
+        # DELIBERATE OPEN ITEM, not parity: plan §5.3 A / §8.3 APP-COMP want
+        # SamplerCustom(Advanced) allowed — the original CNS node's own host is
+        # KSamplerSelect -> CNSSamplerPatch -> SamplerCustomAdvanced
+        # (origin: namemechan/comfyui-cns_sampler_patch@42278b13:cns_sampler_patch.py:441-609).
+        # Allowing it needs a new payload mapping onto BasicScheduler/CFGGuider/
+        # RandomNoise (steps/CFG/seed/denoise), and the workflow picker and
+        # frontend/src/utils/gateWorkflowInfo.ts share this refusal.  Deferred until the
+        # user/lead decides the scope; until then this pins today's behaviour.
+        for class_type in ("SamplerCustom", "SamplerCustomAdvanced"):
+            workflow = _custom_workflow()
+            workflow["5"]["class_type"] = class_type
+            with self.subTest(class_type=class_type), self.assertRaisesRegex(
+                WorkflowCompileError, "steps/CFG/denoise",
+            ):
+                ComfyWorkflowCompiler(_capabilities()).compile(
+                    "txt2img", "checkpoint.safetensors", {
+                        "alwayson_scripts": _cns_only_alwayson(),
+                    }, workflow=workflow,
+                )
+
+
+class TestStalePackPag(unittest.TestCase):
+    """PAG legacy/head indices need pack 1.4.0 (the original PAG node).
+
+    Pack 1.3.0's ForgeNeoAnimaGuidanceSuite/ForgeNeoAnimaSafePAG take the same inputs as
+    1.4.0's but raise inside patch() on legacy/heads (1.3.0 guidance.py:1078-1085 and
+    :862-865), so the contract check alone lets a stale remote pack fail at run time.
+    """
+
+    @staticmethod
+    def _capabilities(*, stale: bool) -> dict:
+        capabilities = _capabilities()
+        capabilities["ForgeNeoAnimaSafePAG"] = {"input": {"required": {}}}
+        if stale:
+            del capabilities["ForgeNeoCNSSamplerPatch"]  # 1.3.0 publishes no 1.4.0 class
+        return capabilities
+
+    @staticmethod
+    def _pag_payload(**settings) -> dict:
+        guidance = anima_guidance.default_settings()
+        guidance.update({"guid_enabled": True, "guid_attn_method": "PAG", **settings})
+        return {"alwayson_scripts": anima_guidance.build_alwayson(guidance)}
+
+    @staticmethod
+    def _safe_pag_workflow(**inputs) -> dict:
+        workflow = _custom_workflow()
+        workflow["8"] = {"class_type": "ForgeNeoAnimaSafePAG", "inputs": {
+            "model": ["1", 0], "enabled": True, "scale": 4.0, "block_indices": "18",
+            "perturbation_strength": 0.75, "head_indices": "", "start_percent": 0.0,
+            "end_percent": 0.7, "rescale": 0.2, "rescale_mode": "full", **inputs,
+        }}
+        workflow["5"]["inputs"]["model"] = ["8", 0]
+        return workflow
+
+    def test_the_marker_is_a_bundled_node(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import generation
+        from core import comfy_workflow_compiler
+
+        self.assertIn(comfy_workflow_compiler._PAG_ORIGIN_MARKER, generation.NODE_CLASS_MAPPINGS)
+
+    def test_a_stale_pack_refuses_pag_legacy_and_heads(self):
+        compiler = ComfyWorkflowCompiler(self._capabilities(stale=True))
+        for label, settings in (
+            ("legacy", {"guid_legacy_attn": True}),
+            ("heads", {"guid_head_indices": "0,2"}),
+            ("both", {"guid_legacy_attn": True, "guid_head_indices": "7-4"}),
+        ):
+            for workflow_label, workflow in (("main", None), ("KSampler", _custom_workflow())):
+                with self.subTest(settings=label, workflow=workflow_label), self.assertRaisesRegex(
+                    WorkflowCompileError, "PAG legacy.*1\\.4\\.0.*번들 노드 팩을 갱신",
+                ):
+                    compiler.compile(
+                        "txt2img", "checkpoint.safetensors", self._pag_payload(**settings),
+                        workflow=workflow,
+                    )
+
+    def test_the_current_pack_compiles_pag_legacy_and_heads(self):
+        graph = ComfyWorkflowCompiler(self._capabilities(stale=False)).compile(
+            "txt2img", "checkpoint.safetensors",
+            self._pag_payload(guid_legacy_attn=True, guid_head_indices="0,2"),
+        )
+        _, suite = _node(graph, "ForgeNeoAnimaGuidanceSuite")
+        settings = json.loads(suite["inputs"]["settings_json"])
+        self.assertTrue(settings["guid_legacy_attn"])
+        self.assertEqual(settings["guid_head_indices"], "0,2")
+
+    def test_a_stale_pack_still_compiles_what_it_can_run(self):
+        # 1.3.0 checks legacy/heads only when attention guidance is on (its method PAG/SEG).
+        compiler = ComfyWorkflowCompiler(self._capabilities(stale=True))
+        for label, payload in (
+            ("plain PAG", self._pag_payload()),
+            ("attention off", self._pag_payload(
+                guid_enabled=False, guid_slg_on=True,
+                guid_legacy_attn=True, guid_head_indices="0,2",
+            )),
+            ("method none", self._pag_payload(
+                guid_attn_method="None", guid_legacy_attn=True, guid_head_indices="0,2",
+            )),
+        ):
+            with self.subTest(payload=label):
+                compiler.compile("txt2img", "checkpoint.safetensors", payload)
+
+    def test_a_hand_built_safe_pag_with_heads_on_a_stale_pack_is_refused(self):
+        stale = ComfyWorkflowCompiler(self._capabilities(stale=True))
+        with self.assertRaisesRegex(WorkflowCompileError, "ForgeNeoCNSSamplerPatch"):
+            stale.compile(
+                "txt2img", "checkpoint.safetensors", {},
+                workflow=self._safe_pag_workflow(head_indices="0,2"),
+            )
+        # What 1.3.0's node returns from before its head check, or cannot be read statically.
+        for label, inputs in (
+            ("no heads", {}), ("disabled", {"enabled": False, "head_indices": "0,2"}),
+            ("scale 0", {"scale": 0.0, "head_indices": "0,2"}),
+            ("strength 0", {"perturbation_strength": 0.0, "head_indices": "0,2"}),
+            ("linked heads", {"head_indices": ["9", 0]}),
+        ):
+            with self.subTest(inputs=label):
+                stale.compile(
+                    "txt2img", "checkpoint.safetensors", {},
+                    workflow=self._safe_pag_workflow(**inputs),
+                )
+        ComfyWorkflowCompiler(self._capabilities(stale=False)).compile(
+            "txt2img", "checkpoint.safetensors", {},
+            workflow=self._safe_pag_workflow(head_indices="0,2"),
+        )
 
 
 if __name__ == "__main__":

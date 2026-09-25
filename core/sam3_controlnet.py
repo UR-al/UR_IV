@@ -10,20 +10,27 @@ widget id 를 바인딩한 곳이 없어 T2I SAM3 는 늘 CN off·기본값으�
   * 위젯 dict 키(``cn_enable``) = 저장 키 = ``'_sam3_' + 키`` 가 widget id
   * 확장 인자 키는 ``'sam3_' + 키`` (``core.sam3_args.SAM3_SPEC``)
   * 기본값·선택지는 SAM3_SPEC 에서 가져온다(두 벌로 갈라지지 않게)
-  * 전처리기(module) 목록은 ``sam3_args.CN_MODULES`` 하나 — 프록시 items 로 Vue 에 보낸다
+  * 전처리기(module)·모델(model)은 **연결된 Forge 의 라이브 목록**이 기준이다(기능 스냅샷의
+    /controlnet/module_list·model_list — Vue Sam3ControlNetPanel 이 드롭다운에 쓰고, 페이로드는
+    core/sam3_cn_names 가 대소문자를 맞춘다). ``sam3_args.CN_MODULES`` 는 모를 때의 정적 폴백으로만
+    프록시 items 에 실어 보낸다. 라이브 목록에는 정적 목록에 없는 이름(inpaint_noobai 등)이 있으므로
+    두 칸 모두 목록 밖 값을 받는 자유 입력 프록시(LineEditProxy)다 — ComboBoxProxy 는 items 에 없는 값을
+    받으면 옛 선택을 그대로 내보낸다.
+  * 저장값을 불러올 때 대소문자만 다른 이름(예전 소문자 ``'none'``)은 Forge 표기(``'None'``)로 고친다.
 """
 from __future__ import annotations
 
 from typing import Mapping
 
 from core import sam3_args
+from core.sam3_cn_names import normalize_saved
 
 # (위젯/저장 키, 프록시 종류) — 순서는 확장 SAM3 > ControlNet 아코디언과 같다.
 CN_FIELDS: tuple[tuple[str, str], ...] = (
     ('cn_enable', 'check'),
     ('cn_override_external', 'check'),
-    ('cn_model', 'text'),     # 설치 모델에 따라 달라 선택지 없는 자유 입력 (LineEditProxy)
-    ('cn_module', 'combo'),
+    ('cn_model', 'text'),     # 설치 모델에 따라 다르다 — 라이브 목록(Vue 드롭다운) 또는 자유 입력 (LineEditProxy)
+    ('cn_module', 'text'),    # 라이브 목록 기준, 정적 폴백은 추천 목록(items)으로만 (LineEditProxy)
     ('cn_weight', 'text'),
     ('cn_guidance_start', 'text'),
     ('cn_guidance_end', 'text'),
@@ -67,9 +74,10 @@ def default_values() -> dict:
 
 
 def choice_items() -> dict:
-    """콤보 위젯의 선택지 — Vue 는 ``getProperty(id, 'items')`` 로 읽는다.
+    """위젯 선택지 — Vue 는 ``getProperty(id, 'items')`` 로 읽는다.
 
-    cn_model 은 설치된 ControlNet 모델에 따라 달라 선택지를 두지 않는다(자유 입력).
+    cn_module 의 목록은 **정적 폴백**이다 — 기능 스냅샷에 라이브 목록이 있으면 Vue 가 그것을 쓴다.
+    cn_model 은 설치된 ControlNet 모델에 따라 달라 정적 선택지를 두지 않는다(라이브 목록 또는 자유 입력).
     """
     return {
         'cn_module': list(sam3_args.CN_MODULES),
@@ -97,14 +105,18 @@ def read_settings(widgets: Mapping) -> dict:
 
 
 def apply_settings(widgets: Mapping, settings: Mapping | None) -> None:
-    """저장 dict → 프록시. 없는 키(예전 저장 파일)는 확장 기본값으로 채운다."""
+    """저장 dict → 프록시. 없는 키(예전 저장 파일)는 확장 기본값으로 채운다.
+
+    전처리기·모델 이름은 대소문자만 Forge 표기로 고친다(예전 저장값 ``'none'`` → ``'None'``) —
+    설정은 연결 전에 불러오므로 정적 기준이다. 라이브 목록 기준 보정은 전송 때(core/sam3_cn_names).
+    """
     saved = settings if isinstance(settings, Mapping) else {}
     defaults = default_values()
     for key, kind in CN_FIELDS:
         proxy = widgets.get(key)
         if proxy is None:
             continue
-        value = saved.get(key, defaults[key])
+        value = normalize_saved(key, saved.get(key, defaults[key]))
         if kind == 'check':
             if isinstance(value, str):
                 value = value.strip().lower() in ('true', '1', 'yes', 'on')
@@ -113,10 +125,18 @@ def apply_settings(widgets: Mapping, settings: Mapping | None) -> None:
             proxy.setText(defaults[key] if value is None else _as_text(value))
 
 
+def _push_items(proxy, items: list) -> None:
+    """콤보는 addItems, 자유 입력(LineEditProxy)은 추천 목록(setSuggestions)으로 같은 'items' 를 보낸다."""
+    if hasattr(proxy, 'addItems'):
+        proxy.addItems(items)
+    elif hasattr(proxy, 'setSuggestions'):
+        proxy.setSuggestions(items)
+
+
 def init_widgets(widgets: Mapping) -> None:
-    """콤보 선택지를 먼저 채운 뒤 기본값을 넣는다(선택지보다 값이 먼저 가면 인덱스가 어긋난다)."""
+    """선택지를 먼저 채운 뒤 기본값을 넣는다(콤보는 선택지보다 값이 먼저 가면 인덱스가 어긋난다)."""
     for key, items in choice_items().items():
         proxy = widgets.get(key)
-        if proxy is not None and hasattr(proxy, 'addItems'):
-            proxy.addItems(items)
+        if proxy is not None:
+            _push_items(proxy, items)
     apply_settings(widgets, None)

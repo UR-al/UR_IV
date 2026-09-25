@@ -40,9 +40,13 @@ inspector recognises them.
 - `ForgeNeoAnimaLoraLoaderModelOnly`, `ForgeNeoLoraBlockWeight`
 - `ForgeNeoAnimaDAVE`, `ForgeNeoAnimaModGuidance`, `ForgeNeoAnimaSafePAG`,
   `ForgeNeoDCWCWMSMC`
+- `ForgeNeoCNSSamplerPatch` (SAMPLER -> SAMPLER, the inputs of
+  namemechan/comfyui-cns_sampler_patch; use with `SamplerCustomAdvanced`)
 - `ForgeNeoCharacterReference`, `ForgeNeoReferencePrompt`,
   `ForgeNeoReferenceOutput`, `ForgeNeoMaskSelector`
 - `ForgeNeoAnimaPiD`, `ForgeNeoAnimaVAE2x`, `ForgeNeoSAM3TileRepair`
+- `ForgeNeoAnimaTileRepair` (Anima Tile & Repair ControlNet-LLLite, pack
+  1.4.0+)
 - `ForgeNeoSaveImage`, `AIStudioRelight`
 
 When the app generates from an ANIMA custom workflow it keeps
@@ -111,6 +115,30 @@ after the updated pack is installed.
   instead of resetting it to SD3's 1000-unit scale.
 - Guidance: NegPiP, DAVE, modulation guidance, Skim CFG, PAG/SEG/SLG,
   APG/CWM/SMC/DCW/RDC, adaptive guidance, and Detail Daemon compatibility.
+  `ForgeNeoAnimaDetailDaemon` (pack 1.4.0+) behaves exactly like the
+  original "Detail Daemon Sampler" node of
+  [`Jonseed/ComfyUI-Detail-Daemon`](https://github.com/Jonseed/ComfyUI-Detail-Daemon)
+  at `3394e44`, whose schedule, sigma lookup and sampler wrapper it copies
+  unchanged (MIT, `LICENSES/ComfyUI-Detail-Daemon-MIT.txt`; the schedule
+  function is Jonseed's port of muerrilla's `make_schedule`, MIT,
+  `LICENSES/sd-webui-detail-daemon-MIT.txt`). As a MODEL patch
+  it wraps every sampling run of the patched model (a `SAMPLER_SAMPLE`
+  wrapper) in that node's sampler: each model call's sigma is looked up in the
+  sampler's sigma list, interpolated between neighbours, and scaled by
+  `max(1e-06, 1 - schedule * 0.1 * cfg)`. `settings_json` carries the node's
+  values under `dd_amount`, `dd_start`, `dd_end`, `dd_bias`, `dd_exponent`,
+  `dd_start_offset`, `dd_end_offset`, `dd_fade` and `dd_smooth` (missing keys
+  use the node's defaults, values outside its ranges are refused); presets and
+  the older `dd_amount_scale`/`dd_schedule`/`dd_multiplier`/`dd_cfg_couple`
+  keys are ignored. `cfg_scale_override` is the node's own input (0 = the
+  sampler's CFG). The app compiler gives the patched model to the passes
+  Forge runs it on with muerrilla's script and with the sam-extra extension:
+  the chosen main pass (base, or hires with Hires Pass), ADetailer when that
+  pass was the last main pass, and SAM3 detailer passes without Hires Pass
+  (with the SAM3 pass's own CFG and sampler); standalone post-processing gets
+  none. Packs before 1.4.0 read the same settings 10 times
+  stronger; their node lacks `cfg_scale_override`, so the app refuses them
+  before queueing.
 - SAM3: text/manual mask composition, mask-only output, sequential inpaint,
   independent-result Refine, Comfy masked-region repair, ControlNet hand-off,
   face restore, overlays, and artifacts.
@@ -142,6 +170,48 @@ Forge's vendored Anima/PiD/LLLite Tile Repair stack is not presented as the
 same feature: `SAM3 Region Repair (Comfy)` handles the portable masked-region
 subset, while Forge-only Tile Repair settings fail with an explicit dependency
 message instead of silently running a different pipeline.
+
+## Anima ControlNet-LLLite (pack 1.4.0+)
+
+Anima ControlNet-LLLite weights (kohya sd-scripts v2 format, safetensors keys
+`lllite_conditioning1.*`, e.g. Tile & Repair from civitai 2708551) are applied
+by the unmodified node of
+[`kohya-ss/ComfyUI-Anima-LLLite`](https://github.com/kohya-ss/ComfyUI-Anima-LLLite)
+at `b7495bd` (`vendor/comfyui_anima_lllite/`, Apache-2.0,
+`LICENSES/ComfyUI-Anima-LLLite-Apache-2.0.txt`). The weights are read from
+ComfyUI's `controlnet` folder, as that node does.
+
+- `ForgeNeoAnimaTileRepair` runs the Tile & Repair pipeline of kohya
+  sd-scripts `anima_minimal_inference_control_net_lllite.py` (which the Forge
+  extension's Tile-Repair panel runs too): the output keeps the source aspect
+  ratio (short side = `short_side`, each side rounded down to a multiple of 32,
+  at least 256), the control image is resized to that size with PIL bicubic
+  like the script, sampling starts from pure noise (denoise 1.0), and the
+  result is VAE-decoded. Sampling follows the script's `generate_body`: the
+  initial latent is its bf16 draw from a CPU `torch.Generator` seeded with
+  `seed` (not Comfy's fp32 `prepare_noise`), the σ list is its shifted
+  linspace (`get_timesteps_sigmas`: `steps + 1` points of `linspace(1, 0)`
+  under `flow_shift`, not a Comfy scheduler, whose 1000-entry table drifts
+  from it when 1000 is not a multiple of `steps`), and each step is Comfy
+  `euler` with CFG `cfg`. The defaults are the script's: 50 steps, flow shift
+  5.0, CFG 3.5 and an empty negative. `strength`, `start_percent`,
+  `end_percent` and `preserve_wrapper` are the original node's inputs with its
+  ranges. Only 3-channel (RGB) LLLite files are listed; 4-channel inpaint
+  LLLites need a mask.
+- `ForgeNeoSAM3Detailer`/`ForgeNeoSAM3Refine`: when the ControlNet model is an
+  Anima LLLite (read from its header), it is applied per pass as that node's
+  MODEL patch instead of going to `ControlNetLoader`, which cannot read it.
+  The pass image is the control image and the pass mask is passed only to
+  4-channel (inpaint) weights. Tile & Repair LLLites always get preprocessor
+  `None`, other Anima LLLites never an `inpaint_*` one (the report records
+  the override). Under `None`, `threshold_a`/`threshold_b` left from an
+  earlier preprocessor are ignored like Forge's `None` preprocessor does
+  (reported as `thresholds_ignored`). The kohya node uses only the first
+  frame of its control image and mask, so an image batch is patched and
+  sampled one image at a time (`lllite_per_image`), each with its own
+  control image and `batch_index`, like Forge running SAM3 per image.
+  `control_mode` does not apply to an LLLite (Forge's built-in LLLite
+  patcher has none either).
 
 ## Anima 3.8B provenance
 

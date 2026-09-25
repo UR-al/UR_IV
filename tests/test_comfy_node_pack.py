@@ -53,6 +53,7 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "ForgeNeoAnimaModGuidance",
     "ForgeNeoAnimaSafePAG",
     "ForgeNeoDCWCWMSMC",
+    "ForgeNeoCNSSamplerPatch",
     "ForgeNeoMaskSelector",
     "ForgeNeoLoraBlockWeight",
     "ForgeNeoCharacterReference",
@@ -61,6 +62,7 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "ForgeNeoAnimaPiD",
     "ForgeNeoAnimaVAE2x",
     "ForgeNeoSAM3TileRepair",
+    "ForgeNeoAnimaTileRepair",
     "ForgeNeoSaveImage",
     "AIStudioRelight",
 })
@@ -141,7 +143,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 34)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 36)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):

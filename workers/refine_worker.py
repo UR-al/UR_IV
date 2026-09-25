@@ -83,18 +83,33 @@ class RefineWorker(QThread):
             with backend_job_guard('refine'):
                 result_b64 = backend.refine(image_b64, self._settings)
 
+            # 'SAM3 Error'·적용 기록 없음 — 부모 패스가 denoise 0 이라 결과가 원본 그대로다. 저장하지 않고 실패로 알린다.
+            from core.sam_extra_notices import (
+                notices_of, notices_to_dicts, standalone_failure_text, standalone_sam3_failure,
+            )
+            failure = standalone_sam3_failure(result_b64)
+            if failure is not None:
+                self.finished.emit(json.dumps({
+                    'error': sanitize_for_ui(f"Refine: {standalone_failure_text(failure)}", max_len=400),
+                }, ensure_ascii=False))
+                return
+
             out_path = _output_path(self._path, self._settings.get('output_folder', ''))
             with open(out_path, 'wb') as fh:
                 fh.write(base64.b64decode(result_b64))
 
-            self.finished.emit(json.dumps({
+            result = {
                 'before': _to_posix(self._path),
                 'after': _to_posix(out_path),
                 'output_path': _to_posix(out_path),
                 'prompt': preview['prompt'],
                 'negative_prompt': preview['negative_prompt'],
                 'detect_tokens': preview['detect_tokens'],
-            }))
+            }
+            notices = notices_to_dicts(notices_of(result_b64))
+            if notices:
+                result['notices'] = notices   # GUI 가 토스트로 띄운다(ui/sam_extra_notices_ui.relay_worker_result)
+            self.finished.emit(json.dumps(result))
         except NotImplementedError as e:
             self.finished.emit(json.dumps({'error': str(e)}))
         except Exception as e:

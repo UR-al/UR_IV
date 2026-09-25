@@ -450,10 +450,11 @@ class UISetupMixin:
             # sam3_mode == 'Inpaint' + sd_forge_controlnet 로드 시에만 실제로 동작.
             'cn_enable': CheckBoxProxy(b, '_sam3_cn_enable'),
             'cn_override_external': CheckBoxProxy(b, '_sam3_cn_override_external'),
-            # Model 은 선택지 없는 자유 입력 — ComboBoxProxy 는 빈 값('None' 으로 되돌리기)을
-            # 무시하고 숫자만인 이름을 인덱스로 읽어 버려서 LineEditProxy 로 둔다.
+            # Model·Module 은 연결된 Forge 의 라이브 목록(Vue 드롭다운)에서 고르는 자유 입력 —
+            # ComboBoxProxy 는 빈 값('None' 으로 되돌리기)을 무시하고, 숫자만인 이름을 인덱스로 읽고,
+            # items(정적 폴백)에 없는 라이브 이름(inpaint_noobai 등)을 받으면 옛 선택을 그대로 내보낸다.
             'cn_model': LineEditProxy(b, '_sam3_cn_model'),
-            'cn_module': ComboBoxProxy(b, '_sam3_cn_module'),
+            'cn_module': LineEditProxy(b, '_sam3_cn_module'),
             'cn_weight': SliderProxy(b, '_sam3_cn_weight', multiplier=100),
             'cn_guidance_start': SliderProxy(b, '_sam3_cn_guidance_start', multiplier=100),
             'cn_guidance_end': SliderProxy(b, '_sam3_cn_guidance_end', multiplier=100),
@@ -506,27 +507,26 @@ class UISetupMixin:
     def _init_anima_guidance_proxies(self, b):
         """Anima Guidance Suite 프록시 — core/anima_guidance.py 스펙에서 자동 생성.
 
-        키가 82개(62+7+13)라 하나씩 손으로 나열하면 스펙과 어긋나기 쉽다. 스펙을
-        단일 출처로 삼아 루프로 만든다. 값은 Vue에서 전부 문자열로 오고
-        (`'true'`/`'0.75'`), 타입 강제는 core 쪽 `build_args`가 담당하므로
-        프록시는 LineEditProxy 하나로 통일한다.
+        키가 많아 하나씩 손으로 나열하면 스펙과 어긋나기 쉽다. 스펙의 사용자 설정 키
+        (default_settings — 자리만 남은 고정 칸은 빠진다)를 단일 출처로 삼아 루프로 만든다.
+        값은 Vue에서 전부 문자열로 오고 (`'true'`/`'0.75'`), 타입 강제는 core 쪽
+        `build_args`가 담당하므로 프록시는 LineEditProxy 하나로 통일한다.
 
-        widget_id = '_' + 스펙 키 (예: '_guid_enabled', '_dd_preset')
+        widget_id = '_' + 스펙 키 (예: '_guid_enabled', '_dd_amount')
         """
         from ui.widget_proxies import LineEditProxy
-        from core.anima_guidance import SPECS
+        from core.anima_guidance import default_settings
 
         widgets = {}
-        for spec in SPECS.values():
-            for key, _kind, default, _extra in spec:
-                proxy = LineEditProxy(b, f'_{key}')
-                # 기본값을 문자열로 심어 둔다 — Vue가 아직 값을 안 보냈어도
-                # 생성이 확장 기본값과 동일하게 나가야 하므로.
-                if isinstance(default, bool):
-                    proxy.setText('true' if default else 'false')
-                else:
-                    proxy.setText(str(default))
-                widgets[key] = proxy
+        for key, default in default_settings().items():
+            proxy = LineEditProxy(b, f'_{key}')
+            # 기본값을 문자열로 심어 둔다 — Vue가 아직 값을 안 보냈어도
+            # 생성이 확장 기본값과 동일하게 나가야 하므로.
+            if isinstance(default, bool):
+                proxy.setText('true' if default else 'false')
+            else:
+                proxy.setText(str(default))
+            widgets[key] = proxy
         return widgets
 
     def _init_button_proxies(self):

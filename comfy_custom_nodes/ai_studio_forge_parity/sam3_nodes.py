@@ -34,6 +34,7 @@ from .mask_ops import (
     subtract_exclusion,
     union_masks,
 )
+from . import anima_lllite as _anima_lllite
 
 
 CATEGORY = "AI Studio/Forge parity/SAM3"
@@ -1014,6 +1015,12 @@ def _load_controlnet(control_net: Any, model_name: str):
         raise ValueError(
             "ControlNet is enabled but neither control_net nor controlnet_model_name was provided."
         )
+    # An Anima ControlNet-LLLite file (safetensors keys lllite_conditioning1.*) is not a
+    # CONTROL_NET — ControlNetLoader rejects it. It is applied per pass as the original
+    # kohya node's MODEL patch (anima_lllite.AnimaLLLiteControl.patch_model).
+    lllite = _anima_lllite.lllite_control_for(requested)
+    if lllite is not None:
+        return lllite, lllite.name
     mappings = _node_mappings()
     loader = mappings.get("ControlNetLoader")
     if loader is None:
@@ -1787,6 +1794,8 @@ class ForgeNeoSAM3Detailer:
         control_model_source = None
         control_source = None
         control_image_mode = None
+        lllite_module_note = None
+        lllite_dropped_thresholds = None
         controlnet_requested = bool(controlnet_enable)
         controlnet_active = (
             controlnet_requested
@@ -1810,6 +1819,16 @@ class ForgeNeoSAM3Detailer:
             control_model, control_model_source = _load_controlnet(
                 control_net, str(controlnet_model_name)
             )
+            if _anima_lllite.is_lllite_control(control_model):
+                # The original feeds an LLLite the control image as it is: Tile & Repair
+                # never gets a preprocessor, other Anima LLLites never an inpaint_* one.
+                controlnet_module, lllite_module_note = _anima_lllite.forced_control_module(
+                    controlnet_module, control_model
+                )
+                # Forge's None preprocessor ignores threshold_a/b left from the earlier module.
+                control_settings, lllite_dropped_thresholds = _anima_lllite.thresholds_for_module(
+                    controlnet_module, control_settings
+                )
             if control_image is not None:
                 control_source = ensure_image(control_image)[..., :3]
                 if control_source.shape[0] == 1 and image_value.shape[0] > 1:
@@ -1904,6 +1923,8 @@ class ForgeNeoSAM3Detailer:
             )
             vae_height, vae_width = work_image.shape[1:3]
             pass_positive, pass_negative = positive_value, negative_value
+            pass_model = model
+            lllite_per_image = None
             control_report = None
             if controlnet_active:
                 # An explicitly connected control image stays fixed. Without
@@ -1988,17 +2009,41 @@ class ForgeNeoSAM3Detailer:
                     _without_existing_control(negative_value)
                     if controlnet_override_external else negative_value
                 )
-                pass_positive, pass_negative, mode_report = _apply_controlnet(
-                    control_positive,
-                    control_negative,
-                    control_model,
-                    hint,
-                    controlnet_strength_value,
-                    float(controlnet_start),
-                    float(controlnet_end),
-                    vae,
-                    str(control_settings["control_mode"]),
-                )
+                if _anima_lllite.is_lllite_control(control_model):
+                    # MODEL patch (kohya AnimaLLLiteApply_sdscripts); the pass mask
+                    # reaches it only for 4-channel (inpaint) weights.
+                    lllite_args = (
+                        hint,
+                        work_mask,
+                        controlnet_strength_value,
+                        float(controlnet_start),
+                        float(controlnet_end),
+                        str(control_settings["control_mode"]),
+                    )
+                    if int(hint.shape[0]) > 1:
+                        # The node keeps only the first control frame; each image of the
+                        # batch is patched and sampled on its own below (like Forge).
+                        mode_report = control_model.per_image_report(*lllite_args)
+                        lllite_per_image = lllite_args
+                    else:
+                        pass_model, mode_report = control_model.patch_model(model, *lllite_args)
+                    pass_positive, pass_negative = control_positive, control_negative
+                    if lllite_module_note:
+                        mode_report["module_override"] = lllite_module_note
+                    if lllite_dropped_thresholds:
+                        mode_report["thresholds_ignored"] = dict(lllite_dropped_thresholds)
+                else:
+                    pass_positive, pass_negative, mode_report = _apply_controlnet(
+                        control_positive,
+                        control_negative,
+                        control_model,
+                        hint,
+                        controlnet_strength_value,
+                        float(controlnet_start),
+                        float(controlnet_end),
+                        vae,
+                        str(control_settings["control_mode"]),
+                    )
                 control_report = {
                     "model": control_model_source,
                     "module": str(controlnet_module),
@@ -2025,11 +2070,21 @@ class ForgeNeoSAM3Detailer:
                 fill_mode=str(fill_mode),
                 seed=pass_seed,
             )
-            sampled = _sample_latent(
-                model, pass_seed, int(steps), float(cfg), str(sampler_name),
-                str(scheduler), pass_positive, pass_negative, latent,
-                denoise_value, float(noise_multiplier),
-            )
+            if lllite_per_image is not None:
+                sampled = control_model.sample_per_image(
+                    model, *lllite_per_image, latent,
+                    lambda item_model, item_latent: _sample_latent(
+                        item_model, pass_seed, int(steps), float(cfg), str(sampler_name),
+                        str(scheduler), pass_positive, pass_negative, item_latent,
+                        denoise_value, float(noise_multiplier),
+                    ),
+                )
+            else:
+                sampled = _sample_latent(
+                    pass_model, pass_seed, int(steps), float(cfg), str(sampler_name),
+                    str(scheduler), pass_positive, pass_negative, latent,
+                    denoise_value, float(noise_multiplier),
+                )
             generated = ensure_image(_vae_decode(vae, sampled))[..., :3]
             if generated.shape[0] != region.shape[0]:
                 raise RuntimeError(

@@ -215,7 +215,8 @@
       <div class="progress-fill" :style="{ width: progressVal + '%' }"></div>
     </div>
 
-    <QueuePanel />
+    <!-- 우하단 빠른 도크 — 대기열 핀을 누르면 대기열 · 대화 · 메모장 (components/dock/QuickDock.vue) -->
+    <QuickDock />
 
     <!-- 하단 계기 스트립 (백엔드 · VRAM · 모델) — 값이 없어도 줄은 남는다.
          예전 VRAM 바는 `v-if="vramInfo.total > 0"` 이라 백엔드가 없으면 통째로
@@ -305,6 +306,7 @@ import { edgeHistoryIndex, historyPageOf, historyPageSlice, stepHistoryIndex } f
 import { normalizeUiScale } from './utils/uiScale'
 import { useHistoryThumbs, normalizePreviewThumbWidth } from './composables/useHistoryThumbs'
 import { useBackendGate } from './composables/useBackendGate'
+import { useSamExtraCapabilities } from './composables/useSamExtraCapabilities'
 import { reconcileTheme } from './theme/applyTheme'
 import { resolveInstalledModel, storedOllamaModel, storedOllamaUrl } from './utils/ollamaPrefs'
 import {
@@ -323,6 +325,8 @@ const storeWidgets = wStore.widgets
 // 전역 토스트 — composables/useToasts.ts(모듈 싱글턴). 화면은 ToastLayer · NotificationCenter 가 그린다.
 // composable 들(useLoraStack · useSessionRestore …)에도 이 addToast 를 주입한다.
 const { addToast } = useToasts()
+// sam-extra 기능 스냅샷(연결 때 파이썬이 확인) — 켜 둔 기능이 확장에 없으면 경고 토스트 한 번.
+useSamExtraCapabilities({ addToast })
 // ADetailer 모델 목록 — adetailerModelsReady(부팅 때 requestADetailerModels 로 요청)가 채우고 AdetailerCard 가 그린다
 const adModelItems = ref<string[]>([])
 
@@ -359,7 +363,7 @@ import CustomSelect from './components/CustomSelect.vue'
 import NavRail from './components/NavRail.vue'
 import BackendGate from './components/BackendGate.vue'
 import { viewMode, setViewMode } from './composables/useViewMode'
-import QueuePanel from './components/QueuePanel.vue'
+import QuickDock from './components/dock/QuickDock.vue'
 import StatusStrip from './components/StatusStrip.vue'
 import CharacterPresetModal from './components/CharacterPresetModal.vue'
 import ABTestModal from './components/ABTestModal.vue'

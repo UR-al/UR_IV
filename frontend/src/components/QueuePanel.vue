@@ -1,16 +1,7 @@
 <template>
   <div class="queue-root">
-    <!-- 슬림 핀 — 항상 보임. 접혀도 카운트/러닝 상태가 보이므로 '있는 이유'가 살아있음. -->
-    <button class="queue-pin"
-      :class="{ running: isRunning && !isPaused, paused: isPaused, open: drawerOpen, bump: pinBump }"
-      @click="drawerOpen = !drawerOpen"
-      :title="isRunning ? '큐 실행 중 — 클릭하여 관리' : '큐 열기 (관리)'">
-      <span class="qp-ico">≣</span>
-      <span class="qp-label">대기열</span>
-      <span class="qp-count" v-if="items.length">{{ items.length }}</span>
-      <span class="qp-run" v-if="isRunning && !isPaused" title="실행 중"><Icon name="play" /></span>
-      <span class="qp-run paused" v-else-if="isPaused" title="일시정지"><Icon name="pause" /></span>
-    </button>
+    <!-- 항상 보이는 핀(카운트 · 실행 상태)은 우하단 도크의 버튼이 됐다(components/dock/QuickDock.vue).
+         도크가 v-model:open 으로 이 드로어를 열고, 핀에 보일 상태는 defineExpose 로 읽어 간다. -->
 
     <!-- 우측 슬라이드 드로어 — 세로 리스트라 항목이 안 찌그러짐 -->
     <transition name="qd-fade">
@@ -130,8 +121,9 @@ interface QueueItem {
 }
 
 const items = ref<QueueItem[]>([])
-const drawerOpen = ref(false)   // 우측 드로어 열림 (옛 isExpanded 대체)
-const pinBump = ref(false)      // 항목 추가 시 핀 1회 강조 애니메이션
+// 우측 드로어 열림 — 도크(components/dock/QuickDock.vue)가 v-model:open 으로 연다. 안 넘기면 제 상태로 산다.
+const drawerOpen = defineModel<boolean>('open', { default: false })
+const pinBump = ref(false)      // 항목 추가 시 핀(도크 버튼) 1회 강조 애니메이션
 const isRunning = ref(false)
 const isPaused = ref(false)
 const currentIdx = ref(-1)
@@ -381,36 +373,12 @@ onUnmounted(() => {
   window.removeEventListener('keydown', _onEditKey, true)
 })
 
-defineExpose({ items })
+// 도크 버튼이 핀처럼 보이려고 읽는 것 — 개수 · 실행/일시정지 · 추가 강조
+defineExpose({ items, isRunning, isPaused, pinBump })
 </script>
 
 <style scoped>
-.queue-root { display: contents; }  /* 레이아웃 흐름 차지 안 함 — 핀/드로어는 모두 fixed */
-
-/* ── 슬림 핀 (항상 보임, 우하단 플로팅) ── */
-.queue-pin {
-  position: fixed; right: 18px; bottom: 32px;  /* 하단 VRAM 바(22px) 위로 띄움 */
-  z-index: 2400; display: flex; align-items: center; gap: 7px;
-  height: 34px; padding: 0 14px; border-radius: 18px;
-  background: var(--bg-button); border: 1px solid var(--border); color: var(--text-muted);
-  font-size: 11px; font-weight: var(--fw-bold); letter-spacing: 0; cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4); transition: 0.18s;
-}
-.queue-pin:hover { background: var(--bg-button-hover); color: var(--text-primary); border-color: var(--accent); }
-.queue-pin.open { border-color: var(--accent); color: var(--accent); }
-.queue-pin.running { border-color: var(--state-ok-fg); color: var(--state-ok-fg); }
-.queue-pin.paused { border-color: var(--state-warn-fg); color: var(--state-warn-fg); }
-.queue-pin.bump { animation: pin-bump 0.55s ease; }
-@keyframes pin-bump { 0% { transform: scale(1); } 30% { transform: scale(1.12); } 100% { transform: scale(1); } }
-.qp-ico { font-size: 13px; opacity: 0.9; }
-.qp-label { letter-spacing: 0; }
-/* 상태색으로 채운 배지의 글자는 '바탕색 뒤집기'(--bg-primary) — 상태색은 다크에서
-   밝고 라이트에서 어두워 두 모드 모두 대비가 나오고, 사용자 강조색에 묶이지도 않는다 */
-.qp-count { background: var(--accent-fill); color: var(--on-accent); min-width: 16px; text-align: center; padding: 1px 5px; border-radius: 9px; font-size: var(--fs-label); font-weight: var(--fw-bold); }
-.queue-pin.running .qp-count { background: var(--state-ok-fg); color: var(--bg-primary); }
-.queue-pin.paused .qp-count { background: var(--state-warn-fg); color: var(--bg-primary); }
-.qp-run { font-size: var(--fs-label); }
-.qp-run.paused { color: var(--state-warn-fg); }
+.queue-root { display: contents; }  /* 레이아웃 흐름 차지 안 함 — 드로어는 fixed (핀은 dock/QuickDock.vue) */
 
 /* ── 우측 드로어 ── */
 .qd-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 2450; }

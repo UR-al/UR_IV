@@ -246,55 +246,27 @@
  * 보낸다(GemmaStudio 는 OCR 글자만 보냈다). 그래서 Settings 의 추천 모델이 전부
  * 비전 모델이다.
  *
- * 상태는 Python 파일(config/chat_threads.json)에 저장한다 — localStorage 는 이미지가
- * 붙는 순간 5MB 를 넘겨 조용히 실패한다. 브리지: chat_load/chat_save/chat_send/chat_stop,
- * 시그널 chatThreads/chatToken/chatDone (tests/test_bridge_contract.py 가 이름을 지킨다).
+ * 대화 목록 · 보내기 · 받기 · 파일 저장은 composables/useChatSession, 서버 · 모델 · 지침 · 스키마
+ * 설정은 composables/useChatPreferences 에 있다 — 우하단 도크의 작은 대화 패널
+ * (components/dock/ChatMiniPanel.vue)이 같은 대화와 설정을 나눠 쓴다. 여기 남은 것은 이 화면의
+ * 표시 상태(검색 · 첨부 · 스크롤 · 이름 바꾸기 · 확인 창 · 설정 패널)다.
  */
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
-import { getBackend, onBackendEvent } from '../bridge.js'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
 import { vHostDialog } from '../utils/hostDialogs'
 import { mediaUrl } from '../utils/media.js'
 import { createMarkdownMemo } from '../utils/chatMarkdown'
 import { copyTextToClipboard } from '../utils/clipboard'
-import { DEFAULT_OLLAMA_URL, resolveInstalledModel } from '../utils/ollamaPrefs'
-import { CHAT_SYSTEM_PRESETS, selectSystemPreset, thinkingValue, type ChatModelInfo } from '../utils/chatSettings'
-import { applyGenerationEvent, artifactMarkdown, type ChatArtifact, type GenerationRequest, type GenerationState } from '../utils/chatGeneration'
+import { CHAT_SYSTEM_PRESETS, selectSystemPreset } from '../utils/chatSettings'
+import { artifactMarkdown, type GenerationRequest } from '../utils/chatGeneration'
 import CustomSelect from '../components/CustomSelect.vue'
 import AiAssistInstructionsSettings from '../components/AiAssistInstructionsSettings.vue'
 import InstructionPresets from '../components/InstructionPresets.vue'
-import { PROMPT_JSON_SCHEMA, parseChatSchema } from '../utils/chatStructuredOutput'
-import { createSchemaAutosave } from '../composables/useSchemaAutosave'
+import { PROMPT_JSON_SCHEMA } from '../utils/chatStructuredOutput'
 import { isImeComposing } from '../utils/imeComposition'
+import { CTX_CHOICES, PREDICT_CHOICES, useChatPreferences } from '../composables/useChatPreferences'
+import { useChatSession, type ChatMessage, type ChatThread } from '../composables/useChatSession'
 import type { AiAssistInstructions, InstructionPreset } from '../types/bridge'
-
-interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  createdAt: number
-  images?: string[]
-  model?: string
-  thinking?: string
-  evalCount?: number
-  durationMs?: number
-  doneReason?: string
-  pending?: boolean
-  requestId?: string
-  error?: string
-  structured?: boolean
-  artifacts?: ChatArtifact[]
-  generationRequest?: GenerationRequest
-  generation?: GenerationState
-}
-interface ChatThread {
-  id: string
-  title: string
-  model: string
-  createdAt: number
-  updatedAt: number
-  messages: ChatMessage[]
-}
 
 const SUGGESTIONS = [
   '이 프롬프트를 더 자연스럽게 다듬어 줘',
@@ -302,103 +274,35 @@ const SUGGESTIONS = [
   '이 장면에 어울리는 Danbooru 태그를 추천해 줘',
   '눈밭에 앉아 있는 고양이 이미지 만들어줘',
 ]
-const DEFAULT_SYSTEM = CHAT_SYSTEM_PRESETS[0].prompt
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 
-// ── 상태 ──
-const threads = ref<ChatThread[]>([])
-const activeId = ref('')
+// ── 공유 상태 — 설정 · 대화 목록 (도크 대화 패널과 같은 것) ──
+const {
+  generationRequest, models, provider, model, url, modelsError, modelsLoading,
+  structuredEnabled, schemaText, schemaAutosave, schemaSaveError, schemaSaveStatus, schemaError,
+  systemPrompt, personalSystemPrompt, modelInfo, modelInfoError, modelInfoLoading,
+  thinkingLevel, chatOptions, deepThink,
+  markPreferencesEdited, saveThinkingLevel, saveChatOptions, toggleThink, saveModel, saveSystemPrompt,
+  schemaProblem, saveStructured, savePreferences, changeProvider, saveConnection,
+  requestModelInfo, requestModels,
+} = useChatPreferences()
+const session = useChatSession()
+const { activeId, busyId, active, sortedThreads, stop, flushSave } = session
+
+// ── 이 화면의 상태 ──
 const search = ref('')
 const draft = ref('')
 const attachments = ref<string[]>([])
-const generationRequest = ref<GenerationRequest>({ mode: 'auto', family: 'current', duration: 5, denoise: 0.65 })
-const models = ref<string[]>([])
-const provider = ref<'ollama' | 'lmstudio'>(localStorage.getItem('chatProvider') === 'lmstudio' ? 'lmstudio' : 'ollama')
-const model = ref(localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel') || '')
-const url = ref(localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : DEFAULT_OLLAMA_URL))
-const modelsError = ref('')
-const modelsLoading = ref(false)
-let modelsRequestId = ''
-let modelsTimer: ReturnType<typeof setTimeout> | undefined
-const structuredEnabled = ref(localStorage.getItem('chatStructuredEnabled') === '1')
-const schemaText = ref(localStorage.getItem('chatJsonSchema') ?? PROMPT_JSON_SCHEMA)
-const recoveringSchema = localStorage.getItem('chatJsonSchemaPending') === '1'
-const schemaAutosave = createSchemaAutosave()
-const schemaSaveError = schemaAutosave.error
-const schemaSaveStatus = computed(() => ({
-  idle: '입력하면 자동 저장됩니다. 작성 중인 JSON도 보관합니다.',
-  pending: '입력 내용 저장 대기 중…', saving: '입력 내용 저장 중…',
-  saved: '입력 내용 자동 저장됨', error: '자동 저장하지 못했습니다. 입력 내용은 유지됩니다.',
-}[schemaAutosave.state.value]))
-let restoringSchema = false
-watch(schemaText, text => {
-  if (restoringSchema) return
-  markPreferencesEdited()
-  // Keep an unacknowledged draft across a restart or a disconnected bridge.
-  try { localStorage.setItem('chatJsonSchema', text); localStorage.setItem('chatJsonSchemaPending', '1') } catch { /* file save still runs */ }
-  schemaAutosave.queue(text)
-}, { flush: 'sync' })
-watch(schemaAutosave.state, state => {
-  if (state === 'saved') {
-    try { localStorage.setItem('chatJsonSchemaPending', '0') } catch { /* saved on disk */ }
-  }
-}, { flush: 'sync' })
 const schemaExamplePending = ref(false)
-const schemaError = computed(() => { try { parseChatSchema(schemaText.value); return '' } catch (error) { return (error as Error).message } })
-let preferencesEdited = false
-function markPreferencesEdited() { preferencesEdited = true }
-let disposed = false
-const systemPrompt = ref(localStorage.getItem('chatSystemPrompt') ?? DEFAULT_SYSTEM)
-const personalSystemPrompt = ref<string | null>(localStorage.getItem('chatPersonalSystemPrompt'))
 const systemPreset = ref('')
 const customSystemPresets = ref<InstructionPreset[]>([])
 const chatPresetsRef = ref<{ refresh: () => Promise<void>; busy: boolean } | null>(null)
 const selectedCustomPresetId = computed(() => systemPreset.value.startsWith('custom:') ? systemPreset.value.slice(7) : '')
 const showSystem = ref(false)
 const showThreads = ref(false)
-const modelInfo = ref<ChatModelInfo | null>(null)
-const modelInfoError = ref('')
-const modelInfoLoading = ref(false)
-let modelInfoRequestId = ''
-let modelInfoTimer: ReturnType<typeof setTimeout> | null = null
-const thinkingLevel = ref(['low', 'medium', 'high'].includes(localStorage.getItem('chatThinkingLevel') || '') ? localStorage.getItem('chatThinkingLevel')! : 'medium')
-function saveThinkingLevel() { localStorage.setItem('chatThinkingLevel', thinkingLevel.value) }
 const confirmation = ref<{ kind: 'clear' | 'delete'; id: string; title: string } | null>(null)
 const confirmRef = ref<HTMLDialogElement | null>(null)
 const confirmCancelRef = ref<HTMLButtonElement | null>(null)
 let confirmationFocus: HTMLElement | null = null
-// 생성 옵션 — Ollama 기본 문맥 창(4096)은 지침 + 이미지 + 24턴 기록이면 금방 찬다. 답이 잘리면 여기서 늘린다.
-interface ChatOptions { temperature: number; numPredict: number; numCtx: number }
-const DEFAULT_OPTIONS: ChatOptions = { temperature: 0.7, numPredict: -1, numCtx: 8192 }
-const PREDICT_CHOICES = [512, 1024, 2048, 4096, 8192, 16384]
-const CTX_CHOICES = [4096, 8192, 16384, 32768, 65536, 131072]
-function loadChatOptions(): ChatOptions {
-  const o = { ...DEFAULT_OPTIONS }
-  try {
-    const raw = JSON.parse(localStorage.getItem('chatOptions.v1') || 'null')
-    if (raw && typeof raw === 'object') {
-      // 목록에 없는 값(구버전·손으로 고친 것)은 select 가 빈칸으로 보인다 — 기본값으로 되돌린다
-      if (typeof raw.temperature === 'number' && raw.temperature >= 0 && raw.temperature <= 2) o.temperature = raw.temperature
-      if (raw.numPredict === -1 || PREDICT_CHOICES.includes(raw.numPredict)) o.numPredict = raw.numPredict
-      if (raw.numCtx === 0 || CTX_CHOICES.includes(raw.numCtx)) o.numCtx = raw.numCtx
-    }
-  } catch {}
-  return o
-}
-const chatOptions = ref<ChatOptions>(loadChatOptions())
-function saveChatOptions() { localStorage.setItem('chatOptions.v1', JSON.stringify(chatOptions.value)); savePreferences() }
-function ollamaOptions(): Record<string, number> {
-  const o: Record<string, number> = { temperature: chatOptions.value.temperature }
-  // '제한 없음' 도 -1 로 명시한다 — 모델파일이 num_predict 를 박아 둔 모델이 있다
-  o.num_predict = chatOptions.value.numPredict > 0 ? chatOptions.value.numPredict : -1
-  if (provider.value === 'ollama' && chatOptions.value.numCtx > 0) o.num_ctx = chatOptions.value.numCtx
-  return o
-}
-// 깊은 추론 — Gemma 4 / Qwen3.x 같은 thinking 모델은 기본으로 생각부터 하느라 첫 글자가 1분 뒤에 온다.
-// GemmaStudio 처럼 빠른 답변이 기본, 원할 때만 켠다. 켜면 생각이 접힌 블록으로 같이 흐른다.
-const deepThink = ref(localStorage.getItem('chatThink') === '1')
-function toggleThink() { deepThink.value = !deepThink.value; localStorage.setItem('chatThink', deepThink.value ? '1' : '0') }
-const busyId = ref('')
 const dragOver = ref(false)
 const followBottom = ref(true)
 const renaming = ref(false)
@@ -408,10 +312,9 @@ const composerRef = ref<HTMLTextAreaElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
 const bottomRef = ref<HTMLElement | null>(null)
 
-const active = computed(() => threads.value.find((t) => t.id === activeId.value) || null)
 const visibleThreads = computed(() => {
   const q = search.value.trim().toLowerCase()
-  const list = [...threads.value].sort((a, b) => b.updatedAt - a.updatedAt)
+  const list = sortedThreads.value
   return q ? list.filter((t) => (t.title || '').toLowerCase().includes(q)) : list
 })
 const canSend = computed(() => !busyId.value && (draft.value.trim().length > 0 || attachments.value.length > 0))
@@ -420,42 +323,20 @@ const canSend = computed(() => !busyId.value && (draft.value.trim().length > 0 |
 // 바뀐(스트리밍 중인) 답만 다시 렌더한다. HTML 은 여전히 renderMarkdown 만 만든다.
 const markdownOf = createMarkdownMemo()
 
-// ── 저장 — 파일로, 지연해서 ──
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-// 방금 파일에서 읽어 온 목록을 그대로 다시 쓰지 않게, 불러온 직후의 변경 알림 한 번은 건너뛴다
-let skipLoadedSave = false
-function saveNow() {
-  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
-  const snapshot = threads.value.map((t) => ({
-    ...t,
-    messages: t.messages.filter((m) => !m.pending).map(({ pending, requestId, ...rest }) => rest),
-  }))
-  requestAction('chat_save', { threads: snapshot })
-}
-function scheduleSave() {
-  if (skipLoadedSave) { skipLoadedSave = false; return }
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(saveNow, 600)
-}
-/** 대기 중인 저장을 지금 보낸다 — 탭 전환·창 닫기 직전 600ms 안의 변경을 잃지 않게. */
-function flushSave() {
-  if (saveTimer) saveNow()
-}
-// 안전망: 9곳 넘는 변경 지점(send·onDone·이름 바꾸기·삭제 …)을 빠짐없이 저장한다 — 유지
-watch(threads, scheduleSave, { deep: true })
+// 대화 목록이 알려 주는 화면 일 — 스크롤 따라가기 · 저절로 열린 빈 대화의 입력칸 포커스
+const offActivity = session.onChatActivity((kind) => {
+  if (kind === 'thread-opened') focusComposer()
+  else if (kind === 'asked') { followBottom.value = true; nextTick(() => scrollToBottom(false)) }
+  else if (followBottom.value) nextTick(() => scrollToBottom(false))
+})
 
 // ── 대화 목록 ──
 function newThread() {
-  // 이미 빈 대화가 있으면 그걸 쓴다 — 빈 것이 쌓이지 않게
-  const empty = threads.value.find((t) => !t.messages.length)
-  if (empty) { activeId.value = empty.id; focusComposer(); return }
-  const t: ChatThread = { id: uid(), title: '', model: model.value, createdAt: Date.now(), updatedAt: Date.now(), messages: [] }
-  threads.value.unshift(t)
-  activeId.value = t.id
+  session.newThread()
   focusComposer()
 }
 function deleteThread(id: string) {
-  const t = threads.value.find((x) => x.id === id)
+  const t = session.threads.value.find((x) => x.id === id)
   if (t) openConfirmation('delete', t)
 }
 function clearMessages() {
@@ -474,16 +355,8 @@ function dismissConfirmation() {
 function confirmDeletion() {
   const action = confirmation.value
   if (!action) return
-  const thread = threads.value.find(t => t.id === action.id)
-  // The target is captured when the dialog opens; another thread stays untouched.
-  if (busyId.value && thread?.messages.some(m => m.requestId === busyId.value)) stop()
-  if (thread && action.kind === 'clear') {
-    thread.messages = []; thread.title = ''; thread.updatedAt = Date.now()
-  } else if (thread) {
-    threads.value = threads.value.filter(t => t.id !== thread.id)
-    if (activeId.value === thread.id) activeId.value = threads.value[0]?.id || ''
-    if (!threads.value.length) newThread()
-  }
+  if (action.kind === 'clear') session.clearThread(action.id)
+  else session.removeThread(action.id)
   dismissConfirmation()
 }
 function exportMarkdown() {
@@ -512,115 +385,17 @@ function finishRename() {
   if (active.value) { active.value.title = renameDraft.value.trim().slice(0, 80); active.value.updatedAt = Date.now() }
 }
 
-// ── 보내기 · 받기 ──
+// ── 보내기 ──
 function send() {
   if (!canSend.value || !active.value) return
   if (!checkSchema()) return
-  const thread = active.value
-  const text = draft.value.trim()
-  const user: ChatMessage = { id: uid(), role: 'user', content: text, createdAt: Date.now() }
-  user.generationRequest = { ...generationRequest.value, hadImage: attachments.value.length > 0 }
-  if (attachments.value.length) user.images = [...attachments.value]
-  thread.messages.push(user)
-  if (!thread.title) thread.title = (text || '이미지').replace(/\s+/g, ' ').slice(0, 36)
+  session.sendMessage(active.value, draft.value.trim(), attachments.value, generationRequest.value)
   draft.value = ''
   attachments.value = []
   nextTick(autoGrow)   // v-model 이 DOM 을 비운 *뒤에* 재야 컴포저가 한 줄로 돌아온다
-  ask(thread)
-}
-function ask(thread: ChatThread, retryRequest?: GenerationRequest) {
-  const requestId = uid()
-  const latestUser = [...thread.messages].reverse().find(m => m.role === 'user')
-  const request = { ...(retryRequest || latestUser?.generationRequest || generationRequest.value) }
-  const assistant: ChatMessage = { id: uid(), role: 'assistant', content: '', createdAt: Date.now(), pending: true, requestId, model: model.value }
-  assistant.generationRequest = request
-  assistant.structured = usesStructuredOutput(request)
-  thread.messages.push(assistant)
-  thread.model = model.value
-  thread.updatedAt = Date.now()
-  busyId.value = requestId
-  followBottom.value = true
-  nextTick(() => scrollToBottom(false))
-  requestAction('chat_send', {
-    id: requestId,
-    provider: provider.value,
-    schema: usesStructuredOutput(request) ? parseChatSchema(schemaText.value) : undefined,
-    url: url.value,
-    model: model.value,
-    system: systemPrompt.value,
-    think: thinkingValue(modelInfo.value, deepThink.value, thinkingLevel.value),
-    options: ollamaOptions(),
-    generation: request,
-    messages: thread.messages
-      .filter((m) => !m.pending && !m.error)
-      .map((m) => ({ role: m.role, content: m.content, images: m.images })),
-  })
-}
-function stop() {
-  if (!busyId.value) return
-  requestAction('chat_stop', { id: busyId.value })
 }
 function regenerate() {
-  const thread = active.value
-  if (!thread || busyId.value) return
-  const last = thread.messages[thread.messages.length - 1]
-  const request = last?.generationRequest || [...thread.messages].reverse().find(m => m.role === 'user')?.generationRequest || generationRequest.value
-  if (!checkSchema(request)) return
-  if (last?.role === 'assistant') thread.messages.pop()
-  ask(thread, request)
-}
-function findPending(requestId: string): ChatMessage | null {
-  for (const t of threads.value) {
-    const m = t.messages.find((x) => x.requestId === requestId)
-    if (m) return m
-  }
-  return null
-}
-function onToken(json: string) {
-  try {
-    const { id, text, thinking } = JSON.parse(json)
-    const m = findPending(id)
-    if (!m) return
-    if (thinking) m.thinking = (m.thinking || '') + thinking
-    if (!text) { if (thinking && followBottom.value) nextTick(() => scrollToBottom(false)); return }
-    m.content += text
-    if (followBottom.value) nextTick(() => scrollToBottom(false))
-  } catch {}
-}
-function onDone(json: string) {
-  try {
-    const d = JSON.parse(json)
-    const m = findPending(d.id)
-    if (m) {
-      if (typeof d.content === 'string' && d.content.length >= m.content.length) m.content = d.content
-      if (!d.ok) m.error = d.error || '응답을 받지 못했습니다'
-      else if (d.stopped) m.error = m.content ? '' : '중지됨'
-      if (typeof d.evalCount === 'number') m.evalCount = d.evalCount
-      if (typeof d.durationMs === 'number') m.durationMs = d.durationMs
-      if (typeof d.doneReason === 'string' && d.doneReason) m.doneReason = d.doneReason
-      m.pending = false
-      delete m.requestId
-      const t = threads.value.find((x) => x.messages.includes(m))
-      if (t) t.updatedAt = Date.now()
-      // 끝나면 액션 줄·메타가 생기고 생각 블록이 접혀 높이가 바뀐다 — 보고 있던 맨 아래를 지킨다
-      if (followBottom.value) nextTick(() => scrollToBottom(false))
-    }
-    if (busyId.value === d.id) busyId.value = ''
-  } catch { busyId.value = '' }
-}
-function onGeneration(json: string) {
-  try {
-    const event = JSON.parse(json)
-    const message = findPending(event.id)
-    if (!message || !applyGenerationEvent(message, event)) return
-    // Auto mode may route to media after sending: this is not a JSON response.
-    message.structured = false
-    if (event.model) message.model = String(event.model)
-    const thread = threads.value.find(t => t.messages.includes(message))
-    if (thread) thread.updatedAt = Date.now()
-    if (event.done && busyId.value === event.id) busyId.value = ''
-    if (followBottom.value) nextTick(() => scrollToBottom(false))
-  } catch { /* unrelated or malformed events do not release another request */ }
+  session.regenerate(checkSchema)
 }
 function isLast(m: ChatMessage) {
   const msgs = active.value?.messages || []
@@ -731,20 +506,7 @@ onMounted(() => {
 })
 onUnmounted(() => { _bottomObserver?.disconnect(); _bottomObserver = null })
 
-// ── 모델 · 설정 ──
-function saveModel() {
-  localStorage.setItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel', model.value)
-  if (provider.value === 'ollama') requestAction('save_ui_prefs', { ollamaModel: model.value, ollamaUrl: url.value })
-  savePreferences()
-}
-function saveSystemPrompt() {
-  localStorage.setItem('chatSystemPrompt', systemPrompt.value)
-  if (!CHAT_SYSTEM_PRESETS.some(preset => preset.prompt === systemPrompt.value)) {
-    personalSystemPrompt.value = systemPrompt.value
-    localStorage.setItem('chatPersonalSystemPrompt', systemPrompt.value)
-  }
-  savePreferences()
-}
+// ── 설정 화면 — 지침 프리셋 · 스키마 예제 (값 자체는 useChatPreferences) ──
 function applySystemPreset() {
   if (selectedCustomPresetId.value) {
     const preset = customSystemPresets.value.find(item => item.id === selectedCustomPresetId.value)
@@ -766,208 +528,34 @@ function selectCustomPreset(id: string) {
   if (id) systemPreset.value = `custom:${id}`
   else if (selectedCustomPresetId.value) systemPreset.value = ''
 }
-function usesStructuredOutput(request: GenerationRequest) {
-  return structuredEnabled.value && request.mode !== 'image' && request.mode !== 'video'
-}
 function checkSchema(request: GenerationRequest = generationRequest.value) {
-  if (!usesStructuredOutput(request) || !schemaError.value) return true
+  const problem = schemaProblem(request)
+  if (!problem) return true
   showSystem.value = true
-  requestAction('show_toast', { type: 'error', msg: schemaError.value })
+  requestAction('show_toast', { type: 'error', msg: problem })
   return false
-}
-function saveStructured() {
-  savePreferences()
 }
 function applySchemaPreset(value: string | AiAssistInstructions) {
   if (typeof value === 'string' && !busyId.value) { schemaText.value = value; schemaExamplePending.value = false }
 }
 function useSchemaExample() { schemaText.value = PROMPT_JSON_SCHEMA; schemaExamplePending.value = false }
-function savePreferences() {
-  preferencesEdited = true
-  localStorage.setItem('chatProvider', provider.value)
-  localStorage.setItem('chatStructuredEnabled', structuredEnabled.value ? '1' : '0')
-  localStorage.setItem('chatJsonSchema', schemaText.value)
-  requestAction('save_ui_prefs', { chatSettingsV2: {
-    provider: provider.value, lmStudioUrl: localStorage.getItem('chatLmStudioUrl') || 'http://localhost:1234',
-    lmStudioModel: localStorage.getItem('chatLmStudioModel') || '',
-    structuredEnabled: structuredEnabled.value, schemaText: schemaText.value,
-    systemPrompt: systemPrompt.value, personalSystemPrompt: personalSystemPrompt.value,
-    options: chatOptions.value,
-  } })
-}
-async function restorePreferences() {
-  const backend = await getBackend()
-  if (disposed || preferencesEdited || !backend?.getUiPrefs) return
-  backend.getUiPrefs((raw: string) => {
-    if (disposed || preferencesEdited) return
-    try {
-      const prefs = JSON.parse(raw), saved = prefs.chatSettingsV2
-      if (!saved || typeof saved !== 'object') return
-      if (typeof saved.lmStudioUrl === 'string') localStorage.setItem('chatLmStudioUrl', saved.lmStudioUrl)
-      if (typeof saved.lmStudioModel === 'string') localStorage.setItem('chatLmStudioModel', saved.lmStudioModel)
-      provider.value = saved.provider === 'lmstudio' ? 'lmstudio' : 'ollama'
-      localStorage.setItem('chatProvider', provider.value)
-      model.value = provider.value === 'lmstudio' ? saved.lmStudioModel || '' : prefs.ollamaModel || model.value
-      url.value = provider.value === 'lmstudio' ? saved.lmStudioUrl || 'http://localhost:1234' : prefs.ollamaUrl || url.value
-      if (provider.value === 'ollama') {
-        localStorage.setItem('ollamaUrl', url.value)
-        localStorage.setItem('ollamaModel', model.value)
-      }
-      if (typeof saved.systemPrompt === 'string') systemPrompt.value = saved.systemPrompt
-      if (typeof saved.personalSystemPrompt === 'string') personalSystemPrompt.value = saved.personalSystemPrompt
-      if (typeof saved.schemaText === 'string' && !recoveringSchema && localStorage.getItem('chatJsonSchemaPending') !== '1') {
-        restoringSchema = true
-        schemaText.value = saved.schemaText
-        restoringSchema = false
-        localStorage.setItem('chatJsonSchema', saved.schemaText)
-      }
-      if (saved.options && typeof saved.options === 'object') {
-        localStorage.setItem('chatOptions.v1', JSON.stringify(saved.options))
-        chatOptions.value = loadChatOptions()
-      }
-      structuredEnabled.value = saved.structuredEnabled === true
-      requestModels()
-    } catch { /* do not replace local edits on invalid saved settings */ }
-  })
-}
-function changeProvider() {
-  models.value = []; modelsError.value = ''
-  model.value = localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioModel' : 'ollamaModel') || ''
-  url.value = localStorage.getItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl') || (provider.value === 'lmstudio' ? 'http://localhost:1234' : DEFAULT_OLLAMA_URL)
-  savePreferences(); requestModels()
-}
-function saveConnection() {
-  localStorage.setItem(provider.value === 'lmstudio' ? 'chatLmStudioUrl' : 'ollamaUrl', url.value)
-  models.value = []; saveModel(); requestModels()
-}
-function requestModelInfo() {
-  modelInfo.value = null
-  modelInfoError.value = ''
-  if (modelInfoTimer) clearTimeout(modelInfoTimer)
-  modelInfoRequestId = uid()
-  modelInfoLoading.value = !!model.value
-  if (!model.value) return
-  const id = modelInfoRequestId
-  requestAction('chat_model_info', { id, url: url.value, model: model.value, provider: provider.value })
-  modelInfoTimer = setTimeout(() => {
-    if (modelInfoRequestId === id && modelInfoLoading.value) {
-      modelInfoLoading.value = false
-      modelInfoError.value = '모델 정보를 받지 못했습니다. 연결 후 다시 확인하세요'
-    }
-  }, 15000)
-}
-function onModelInfo(raw: string) {
-  try {
-    const event = JSON.parse(raw)
-    if (event.id !== modelInfoRequestId || event.model !== model.value) return
-    if (modelInfoTimer) clearTimeout(modelInfoTimer)
-    modelInfoLoading.value = false
-    if (event.ok && event.info) {
-      modelInfo.value = event.info
-      modelInfoError.value = ''
-    }
-    else modelInfoError.value = event.error || '모델 정보를 확인할 수 없습니다'
-  } catch { /* stale/malformed metadata never changes the selected model */ }
-}
-watch([model, url, provider], requestModelInfo)
-async function requestModels() {
-  modelsRequestId = uid()
-  const id = modelsRequestId
-  clearTimeout(modelsTimer)
-  modelsLoading.value = true; modelsError.value = ''
-  modelsTimer = setTimeout(() => {
-    if (id !== modelsRequestId) return
-    modelsLoading.value = false; modelsError.value = '모델 목록 응답이 없습니다. 서버 실행과 주소를 확인하세요.'
-  }, 12000)
-  if (provider.value === 'lmstudio') {
-    requestAction('chat_models', { id, url: url.value })
-    return
-  }
-  try {
-    const bk: any = await getBackend()
-    if (disposed || id !== modelsRequestId || provider.value !== 'ollama') return
-    url.value = localStorage.getItem('ollamaUrl') || url.value
-    if (bk?.requestOllamaModels) bk.requestOllamaModels(url.value)
-  } catch {}
-}
-function onModels(json: string) {
-  if (provider.value !== 'ollama') return
-  try {
-    const p = JSON.parse(json)
-    const list = Array.isArray(p) ? p : p.models
-    if (!Array.isArray(list)) return
-    clearTimeout(modelsTimer); modelsLoading.value = false
-    models.value = list
-    // 백엔드 resolve_model 과 같은 규칙(utils/ollamaPrefs) — 같은 모델 → 같은 계열 태그 → 첫 모델
-    if (list.length && !list.includes(model.value)) model.value = resolveInstalledModel(model.value, list)
-  } catch {}
-}
-function onChatModels(raw: string) {
-  try {
-    const event = JSON.parse(raw)
-    if (provider.value !== 'lmstudio' || event.id !== modelsRequestId) return
-    clearTimeout(modelsTimer); modelsLoading.value = false
-    if (!event.ok) { models.value = []; modelsError.value = event.error || '모델 목록을 받지 못했습니다'; return }
-    if (!Array.isArray(event.models)) return
-    models.value = event.models.filter((item: unknown) => typeof item === 'string')
-    if (!models.value.includes(model.value)) {
-      model.value = models.value[0] || ''
-      localStorage.setItem('chatLmStudioModel', model.value)
-    }
-    if (!models.value.length) modelsError.value = '서버에 모델이 없습니다. LM Studio에서 모델을 준비하세요.'
-  } catch { /* obsolete/malformed model lists do not alter the selection */ }
-}
 async function copyText(text: string) {
   const ok = await copyTextToClipboard(text)
   requestAction('show_toast', { type: ok ? 'success' : 'error',
     msg: ok ? '복사됨' : '복사하지 못했습니다. 내용을 선택하고 Ctrl+C를 눌러 주세요.' })
 }
 
-const unsubs: Array<() => void> = []
 onMounted(() => {
-  unsubs.push(onBackendEvent('chatThreads', (json: string) => {
-    try {
-      const list = JSON.parse(json)
-      if (Array.isArray(list)) {
-        // 파일에서 막 읽은 목록 — 이 대입으로 생기는 저장 한 번은 건너뛴다(같은 내용 재기록 방지).
-        // 불러오기가 목록을 통째로 바꾸므로 그 전에 걸린 저장도 의미가 없다.
-        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
-        skipLoadedSave = true
-        threads.value = list
-      }
-    } catch {}
-    // GemmaStudio 처럼 열 때마다 빈 새 대화에서 시작한다 — 기존 기록은 목록에 남는다
-    if (!activeId.value) newThread()
-  }))
-  unsubs.push(onBackendEvent('chatToken', onToken))
-  unsubs.push(onBackendEvent('chatDone', onDone))
-  unsubs.push(onBackendEvent('chatGenerationEvent', onGeneration))
-  unsubs.push(onBackendEvent('ollamaModelsReady', onModels))
-  unsubs.push(onBackendEvent('chatModelInfo', onModelInfo))
-  unsubs.push(onBackendEvent('chatModelsReady', onChatModels))
   window.addEventListener('keydown', onGlobalKey)
-  window.addEventListener('beforeunload', schemaAutosave.flush)
-  window.addEventListener('beforeunload', flushSave)
-  if (recoveringSchema) schemaAutosave.queue(schemaText.value)
-  requestAction('chat_load')
-  requestModels()
-  restorePreferences().catch(() => {})
-  requestModelInfo()
-  // 백엔드가 목록을 안 돌려줘도(웹 모드·개발 서버) 빈 대화 하나는 있어야 입력이 된다
-  setTimeout(() => { if (!threads.value.length) newThread() }, 1500)
 })
 onActivated(() => { requestModels(); focusComposer() })
 onDeactivated(schemaAutosave.flush)
 onDeactivated(flushSave)   // keep-alive 탭 전환 — 대기 중인 대화 저장을 미루지 않는다
-onBeforeUnmount(schemaAutosave.close)
 onUnmounted(() => {
-  disposed = true; clearTimeout(modelsTimer)
-  unsubs.forEach((u) => { try { u() } catch {} })
+  offActivity()
   window.removeEventListener('keydown', onGlobalKey)
-  window.removeEventListener('beforeunload', schemaAutosave.flush)
-  window.removeEventListener('beforeunload', flushSave)
-  flushSave()   // 예전엔 타이머만 지워 마지막 600ms 안의 변경이 사라졌다
-  if (modelInfoTimer) { clearTimeout(modelInfoTimer); modelInfoTimer = null }
+  // 대기 중인 대화 저장 · 스키마 저장 flush 와 백엔드 구독 해제는 공유 상태가 마지막 사용자와 함께 한다
+  // (도크 대화 패널이 아직 쓰고 있으면 살아서 계속 저장한다)
 })
 </script>
 

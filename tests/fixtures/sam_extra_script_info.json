@@ -1,0 +1,2028 @@
+{
+ "schema": 1,
+ "source": "저장된 GET /sdapi/v1/script-info 응답 script_info_now.json (받은 시각 2026-09-25T04:58:18+00:00, tools/refresh_sam_extra_fixture.py --from-file); 'anima detail daemon'·'anima skimmed cfg' 항목은 Forge 정지 중 설치된 확장 소스 ui()(AST)로 맞춤 — 원본 동등성 wave A(DD 14개 인자·Hires Pass, Skimmed flip_at step .01), 2026-09-25; 'anima perturbation guidance' Attn Scale 최대 15→100 도 소스(AST)로 맞춤 — wave B PAG-F(원본 scale 0~100, iljung1106/comfyui-anima-safe-pag@905b0107:__init__.py:201); 'anima perturbation guidance' DCW·CWM·RDC·CNS 기본값·범위·라벨도 소스(AST)로 맞춤 — wave C DCW-F(DCW .05/.01 ±.3 step .001, CWM 0/0 최대 2, RDC 켬·tau 0: namemechan/ComfyUI-DCW@66aaf9dd:dcw_node.py:630-817)·CNS-F(gamma_scale 2.0 [.1,25] step .1, gamma_power 최소 .1, strength step .05: namemechan/comfyui-cns_sampler_patch@42278b13:cns_sampler_patch.py:396-437), 2026-09-26. Forge 재시작 뒤 tools/refresh_sam_extra_fixture.py 로 다시 받는다",
+ "captured_at": "2026-09-25T05:49:48+00:00",
+ "api_url": "http://127.0.0.1:7860",
+ "ext_version": "0.30.0",
+ "extension": {
+  "name": "forge_sam3_extension",
+  "branch": "feat/anima-character-reference",
+  "commit_hash": "818b8fee98a902e54602ae82df126219a64bbfc9",
+  "commit_date": 1789946473,
+  "version": "818b8fee"
+ },
+ "scripts": [
+  {
+   "name": "anima 3.8b (qwen3.5 / v2)",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Anima 3.8B (Qwen3.5 / v2)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Adapter (v1 only)",
+     "value": "Anima-3.8B-expanded_adapter.safetensors",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Anima-3.8B-expanded_adapter.safetensors"
+     ]
+    },
+    {
+     "label": "Adapter strength (v1 only)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Use adapter on negative prompt",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Negative adapter strength",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Bypass — v2 번들도 순정 Anima(0.6B) 로 생성",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima 3.8b (qwen3.5 / v2)",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Anima 3.8B (Qwen3.5 / v2)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Adapter (v1 only)",
+     "value": "Anima-3.8B-expanded_adapter.safetensors",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Anima-3.8B-expanded_adapter.safetensors"
+     ]
+    },
+    {
+     "label": "Adapter strength (v1 only)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Use adapter on negative prompt",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Negative adapter strength",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Bypass — v2 번들도 순정 Anima(0.6B) 로 생성",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima detail daemon",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Enable Detail Daemon",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Preset (unused)",
+     "value": "Custom",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Detail amount (ComfyUI detail_amount와 같은 값 · 음수=매끈 · 양수=디테일↑)",
+     "value": 0.1,
+     "minimum": -5.0,
+     "maximum": 5.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Start",
+     "value": 0.2,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End",
+     "value": 0.8,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Bias",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Exponent",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 10.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Start offset",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End offset",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Fade",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Multiplier (unused)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Smooth (코사인 스무딩)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Couple to CFG scale (unused)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Hires Pass",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima detail daemon",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Enable Detail Daemon",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Preset (unused)",
+     "value": "Custom",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Detail amount (ComfyUI detail_amount와 같은 값 · 음수=매끈 · 양수=디테일↑)",
+     "value": 0.1,
+     "minimum": -5.0,
+     "maximum": 5.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Start",
+     "value": 0.2,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End",
+     "value": 0.8,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Bias",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Exponent",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 10.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Start offset",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End offset",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Fade",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Multiplier (unused)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Smooth (코사인 스무딩)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Couple to CFG scale (unused)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Hires Pass",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima perturbation guidance",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Enable Perturbation Guidance",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Attention perturbation method",
+     "value": "PAG",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "PAG",
+      "SEG",
+      "None"
+     ]
+    },
+    {
+     "label": "Attn Scale — PAG / SEG guidance scale (cond−weak 배율)",
+     "value": 4.0,
+     "minimum": 0.0,
+     "maximum": 100.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Legacy perturbation strength (PAG→value · SEG→uniform value)",
+     "value": 0.75,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Attention block indices (권장·빈칸 기본=18, 예: 18 / 18-20)",
+     "value": "18",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable SLG (skip layers)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "SLG guidance scale",
+     "value": 3.0,
+     "minimum": 0.0,
+     "maximum": 15.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "SLG skip block indices (빈칸 기본=18)",
+     "value": "18",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Start percent (공통 · 0=샘플링 시작)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End percent (공통 · 1=샘플링 끝)",
+     "value": 0.7,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Rescale (공통 · 대비/채도 과다 억제)",
+     "value": 0.2,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable APG (실험 · CFG > 1)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "APG eta (평행 성분 비중 · 낮을수록 과채도↓)",
+     "value": 0.0,
+     "minimum": -10.0,
+     "maximum": 10.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "APG norm threshold (guidance 크기 상한 · 0=off)",
+     "value": 15.0,
+     "minimum": 0.0,
+     "maximum": 50.0,
+     "step": 0.5,
+     "choices": null
+    },
+    {
+     "label": "APG momentum (스텝 간 running-average · 음수 권장 · 0=off)",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "APG 켜지면 PAG rescale 자동 끄기 (이중 크기보정 방지)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable Adaptive Guidance (combined-batch에서만 후반 uncond 생략)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Skip after (이 지점 이후 uncond 생략)",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Keep every N steps (0 = 항상 생략)",
+     "value": 0,
+     "minimum": 0,
+     "maximum": 10,
+     "step": 1,
+     "choices": null
+    },
+    {
+     "label": "기존 Soft PAG / SEG-Approx 사용 (공식 모드 끄기)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "SEG Gaussian query blur sigma (공식 · >9999=uniform query)",
+     "value": 100.0,
+     "minimum": 0.0,
+     "maximum": 10000.0,
+     "step": 1.0,
+     "choices": null
+    },
+    {
+     "label": "CFG base mode (legacy · 상호배타)",
+     "value": "Preserve incoming",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Preserve incoming",
+      "APG",
+      "CWM",
+      "SMC",
+      "SMC + CWM"
+     ]
+    },
+    {
+     "label": "Experimental stack: SMC → APG → CWM (legacy 단축)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "CWM alpha low (초반 저주파 CFG)",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 2.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "CWM alpha high (후반 고주파 CFG)",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 2.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Custom SMC lambda",
+     "value": 6.0,
+     "minimum": 0.5,
+     "maximum": 30.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Custom SMC k",
+     "value": 0.1,
+     "minimum": 0.0,
+     "maximum": 5.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Enable DCW",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "DCW lambda low",
+     "value": 0.05,
+     "minimum": -0.5,
+     "maximum": 0.5,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "DCW lambda high",
+     "value": 0.01,
+     "minimum": -0.3,
+     "maximum": 0.3,
+     "step": 0.001,
+     "choices": null
+    },
+    {
+     "label": "Enable DAVE",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "DAVE strength",
+     "value": 0.3,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "DAVE early-step tau (0=전 구간, 권장 0.10)",
+     "value": 0.1,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "DAVE block indices (기본 8-18)",
+     "value": "8-18",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable CNS-inspired Wavelet Noise",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "CNS strength",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "CNS gamma power",
+     "value": 0.5,
+     "minimum": 0.1,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "CNS gamma scale (기본 2.0 · Anima+cfg_pp 권장 3.0)",
+     "value": 2.0,
+     "minimum": 0.1,
+     "maximum": 25.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Perturbation strength (PAG→value · SEG→blurred query · 1=전체)",
+     "value": 0.75,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Attention head indices (빈칸=전체, 예: 0,2,4-7)",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Rescale mode (full=CFG 결과 기준 · partial=cond 기준)",
+     "value": "full",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "full",
+      "partial"
+     ]
+    },
+    {
+     "label": "Enable SMC (legacy)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable CWM",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable Anima Modulation Guidance (CLIP-L)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "CLIP-L model (models/text_encoder)",
+     "value": null,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": []
+    },
+    {
+     "label": "Direction weight w",
+     "value": 3.0,
+     "minimum": -20.0,
+     "maximum": 20.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Start block (포함)",
+     "value": 0,
+     "minimum": 0,
+     "maximum": 63,
+     "step": 1,
+     "choices": null
+    },
+    {
+     "label": "End block (포함 · -1=마지막)",
+     "value": -1,
+     "minimum": -1,
+     "maximum": 63,
+     "step": 1,
+     "choices": null
+    },
+    {
+     "label": "Base CLIP prompt source",
+     "value": "Main positive",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Main positive",
+      "Custom"
+     ]
+    },
+    {
+     "label": "Custom base CLIP prompt",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Positive direction prompt",
+     "value": "masterpiece, best quality, highres",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Negative direction source",
+     "value": "Main negative",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Main negative",
+      "Custom"
+     ]
+    },
+    {
+     "label": "Custom negative direction prompt",
+     "value": "worst quality, low quality",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Adapter source",
+     "value": "Auto-download official",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Auto-download official",
+      "Local file"
+     ]
+    },
+    {
+     "label": "Local adapter path",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "SMC preset",
+     "value": "Auto",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Auto",
+      "SD1.5 / SD2",
+      "SDXL",
+      "SD3 / SD3.5",
+      "Flux",
+      "Qwen-Image",
+      "Cosmos / Wan",
+      "Custom"
+     ]
+    },
+    {
+     "label": "Enable SMC",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable RDC",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "RDC tau (EMA 기억 구간)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 0.5,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "RDC alpha LL (구조 drift)",
+     "value": 0.03,
+     "minimum": 0.0,
+     "maximum": 0.3,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "RDC alpha HH (텍스처 drift)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 0.1,
+     "step": 0.001,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima perturbation guidance",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Enable Perturbation Guidance",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Attention perturbation method",
+     "value": "PAG",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "PAG",
+      "SEG",
+      "None"
+     ]
+    },
+    {
+     "label": "Attn Scale — PAG / SEG guidance scale (cond−weak 배율)",
+     "value": 4.0,
+     "minimum": 0.0,
+     "maximum": 100.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Legacy perturbation strength (PAG→value · SEG→uniform value)",
+     "value": 0.75,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Attention block indices (권장·빈칸 기본=18, 예: 18 / 18-20)",
+     "value": "18",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable SLG (skip layers)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "SLG guidance scale",
+     "value": 3.0,
+     "minimum": 0.0,
+     "maximum": 15.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "SLG skip block indices (빈칸 기본=18)",
+     "value": "18",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Start percent (공통 · 0=샘플링 시작)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End percent (공통 · 1=샘플링 끝)",
+     "value": 0.7,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Rescale (공통 · 대비/채도 과다 억제)",
+     "value": 0.2,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable APG (실험 · CFG > 1)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "APG eta (평행 성분 비중 · 낮을수록 과채도↓)",
+     "value": 0.0,
+     "minimum": -10.0,
+     "maximum": 10.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "APG norm threshold (guidance 크기 상한 · 0=off)",
+     "value": 15.0,
+     "minimum": 0.0,
+     "maximum": 50.0,
+     "step": 0.5,
+     "choices": null
+    },
+    {
+     "label": "APG momentum (스텝 간 running-average · 음수 권장 · 0=off)",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "APG 켜지면 PAG rescale 자동 끄기 (이중 크기보정 방지)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable Adaptive Guidance (combined-batch에서만 후반 uncond 생략)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Skip after (이 지점 이후 uncond 생략)",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Keep every N steps (0 = 항상 생략)",
+     "value": 0,
+     "minimum": 0,
+     "maximum": 10,
+     "step": 1,
+     "choices": null
+    },
+    {
+     "label": "기존 Soft PAG / SEG-Approx 사용 (공식 모드 끄기)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "SEG Gaussian query blur sigma (공식 · >9999=uniform query)",
+     "value": 100.0,
+     "minimum": 0.0,
+     "maximum": 10000.0,
+     "step": 1.0,
+     "choices": null
+    },
+    {
+     "label": "CFG base mode (legacy · 상호배타)",
+     "value": "Preserve incoming",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Preserve incoming",
+      "APG",
+      "CWM",
+      "SMC",
+      "SMC + CWM"
+     ]
+    },
+    {
+     "label": "Experimental stack: SMC → APG → CWM (legacy 단축)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "CWM alpha low (초반 저주파 CFG)",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 2.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "CWM alpha high (후반 고주파 CFG)",
+     "value": 0.0,
+     "minimum": -1.0,
+     "maximum": 2.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Custom SMC lambda",
+     "value": 6.0,
+     "minimum": 0.5,
+     "maximum": 30.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Custom SMC k",
+     "value": 0.1,
+     "minimum": 0.0,
+     "maximum": 5.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Enable DCW",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "DCW lambda low",
+     "value": 0.05,
+     "minimum": -0.5,
+     "maximum": 0.5,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "DCW lambda high",
+     "value": 0.01,
+     "minimum": -0.3,
+     "maximum": 0.3,
+     "step": 0.001,
+     "choices": null
+    },
+    {
+     "label": "Enable DAVE",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "DAVE strength",
+     "value": 0.3,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "DAVE early-step tau (0=전 구간, 권장 0.10)",
+     "value": 0.1,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "DAVE block indices (기본 8-18)",
+     "value": "8-18",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable CNS-inspired Wavelet Noise",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "CNS strength",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "CNS gamma power",
+     "value": 0.5,
+     "minimum": 0.1,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "CNS gamma scale (기본 2.0 · Anima+cfg_pp 권장 3.0)",
+     "value": 2.0,
+     "minimum": 0.1,
+     "maximum": 25.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Perturbation strength (PAG→value · SEG→blurred query · 1=전체)",
+     "value": 0.75,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Attention head indices (빈칸=전체, 예: 0,2,4-7)",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Rescale mode (full=CFG 결과 기준 · partial=cond 기준)",
+     "value": "full",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "full",
+      "partial"
+     ]
+    },
+    {
+     "label": "Enable SMC (legacy)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable CWM",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable Anima Modulation Guidance (CLIP-L)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "CLIP-L model (models/text_encoder)",
+     "value": null,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": []
+    },
+    {
+     "label": "Direction weight w",
+     "value": 3.0,
+     "minimum": -20.0,
+     "maximum": 20.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Start block (포함)",
+     "value": 0,
+     "minimum": 0,
+     "maximum": 63,
+     "step": 1,
+     "choices": null
+    },
+    {
+     "label": "End block (포함 · -1=마지막)",
+     "value": -1,
+     "minimum": -1,
+     "maximum": 63,
+     "step": 1,
+     "choices": null
+    },
+    {
+     "label": "Base CLIP prompt source",
+     "value": "Main positive",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Main positive",
+      "Custom"
+     ]
+    },
+    {
+     "label": "Custom base CLIP prompt",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Positive direction prompt",
+     "value": "masterpiece, best quality, highres",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Negative direction source",
+     "value": "Main negative",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Main negative",
+      "Custom"
+     ]
+    },
+    {
+     "label": "Custom negative direction prompt",
+     "value": "worst quality, low quality",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Adapter source",
+     "value": "Auto-download official",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Auto-download official",
+      "Local file"
+     ]
+    },
+    {
+     "label": "Local adapter path",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "SMC preset",
+     "value": "Auto",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Auto",
+      "SD1.5 / SD2",
+      "SDXL",
+      "SD3 / SD3.5",
+      "Flux",
+      "Qwen-Image",
+      "Cosmos / Wan",
+      "Custom"
+     ]
+    },
+    {
+     "label": "Enable SMC",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Enable RDC",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "RDC tau (EMA 기억 구간)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 0.5,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "RDC alpha LL (구조 drift)",
+     "value": 0.03,
+     "minimum": 0.0,
+     "maximum": 0.3,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "RDC alpha HH (텍스처 drift)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 0.1,
+     "step": 0.001,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima reference poc (shape logger)",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Enable PoC (log apply_model input shape)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Also try reference temporal-concat (init_latent을 T축 concat→apply_model→slice)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Log Guidance verification summary (PAG/SEG/SLG·APG 적용 스텝, Adaptive 실제 생략/배치 방식)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima reference poc (shape logger)",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Enable PoC (log apply_model input shape)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Also try reference temporal-concat (init_latent을 T축 concat→apply_model→slice)",
+     "value": true,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Log Guidance verification summary (PAG/SEG/SLG·APG 적용 스텝, Adaptive 실제 생략/배치 방식)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima skimmed cfg",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Enable Skimmed CFG",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Skimming CFG (되돌릴 기준 스케일 · -1 = 현재 CFG 사용)",
+     "value": 7.0,
+     "minimum": -1.0,
+     "maximum": 10.0,
+     "step": 0.5,
+     "choices": null
+    },
+    {
+     "label": "Full skim negative (네거티브를 0까지 완전히 skim)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Disable flipping filter",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Start at (%)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End at (%)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Flip at (%) · 0 = 사용 안 함",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima skimmed cfg",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Enable Skimmed CFG",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Skimming CFG (되돌릴 기준 스케일 · -1 = 현재 CFG 사용)",
+     "value": 7.0,
+     "minimum": -1.0,
+     "maximum": 10.0,
+     "step": 0.5,
+     "choices": null
+    },
+    {
+     "label": "Full skim negative (네거티브를 0까지 완전히 skim)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Disable flipping filter",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Start at (%)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "End at (%)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Flip at (%) · 0 = 사용 안 함",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima vae 2x (spacepxl decoder)",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Enable VAE 2x decode",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "spacepxl 2x VAE (12ch decoder)",
+     "value": "None",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "None",
+      "minimax_h3_audio_vae_fp32.safetensors",
+      "minimax_h3_video_vae_fp16.safetensors",
+      "qwen_image_vae.safetensors"
+     ]
+    },
+    {
+     "label": "Output",
+     "value": "1x refined (downsample)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "1x refined (downsample)",
+      "2x upscaled"
+     ]
+    },
+    {
+     "label": "Refine blur sigma (1x 모드에서 downsample 후 약한 블러)",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Latent renorm (Qwen↔Wan 색 틀어지면 켜기)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima vae 2x (spacepxl decoder)",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Enable VAE 2x decode",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "spacepxl 2x VAE (12ch decoder)",
+     "value": "None",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "None",
+      "minimax_h3_audio_vae_fp32.safetensors",
+      "minimax_h3_video_vae_fp16.safetensors",
+      "qwen_image_vae.safetensors"
+     ]
+    },
+    {
+     "label": "Output",
+     "value": "1x refined (downsample)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "1x refined (downsample)",
+      "2x upscaled"
+     ]
+    },
+    {
+     "label": "Refine blur sigma (1x 모드에서 downsample 후 약한 블러)",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Latent renorm (Qwen↔Wan 색 틀어지면 켜기)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "dora inference mode",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "DoRA 추론 방식 (Forge / LyCORIS · 끼워 넣은 블록)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "계산 방식",
+     "value": "LyCORIS (학습과 동일 · fp32)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "LyCORIS (학습과 동일 · fp32)",
+      "Forge/Comfy 공식 · fp32",
+      "Forge/Comfy (순정)",
+      "DoRA 끔 (크기 보정 없이 ΔW만 · 일반 LoKr처럼)"
+     ]
+    },
+    {
+     "label": "끼워 넣은 블록 (상향 블록 변환 시)",
+     "value": "그대로 복제 (순정 · Forge 기본)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "그대로 복제 (순정 · Forge 기본)",
+      "덧셈형 (끼워 넣은 블록만 DoRA 크기 보정 끔)",
+      "넣지 않음 (원래 블록에만 · 모든 LoRA)",
+      "약한 복사 (브리지식 · 강도·범위 조절)"
+     ]
+    },
+    {
+     "label": "약한 복사 강도 (약한 복사일 때만)",
+     "value": 0.12,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "약한 복사 범위",
+     "value": "어텐션만 (브리지 기본)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "어텐션만 (브리지 기본)",
+      "어텐션+MLP",
+      "전체 (모듈레이션·노름 포함)"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "dora inference mode",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "DoRA 추론 방식 (Forge / LyCORIS · 끼워 넣은 블록)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "계산 방식",
+     "value": "LyCORIS (학습과 동일 · fp32)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "LyCORIS (학습과 동일 · fp32)",
+      "Forge/Comfy 공식 · fp32",
+      "Forge/Comfy (순정)",
+      "DoRA 끔 (크기 보정 없이 ΔW만 · 일반 LoKr처럼)"
+     ]
+    },
+    {
+     "label": "끼워 넣은 블록 (상향 블록 변환 시)",
+     "value": "그대로 복제 (순정 · Forge 기본)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "그대로 복제 (순정 · Forge 기본)",
+      "덧셈형 (끼워 넣은 블록만 DoRA 크기 보정 끔)",
+      "넣지 않음 (원래 블록에만 · 모든 LoRA)",
+      "약한 복사 (브리지식 · 강도·범위 조절)"
+     ]
+    },
+    {
+     "label": "약한 복사 강도 (약한 복사일 때만)",
+     "value": 0.12,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "약한 복사 범위",
+     "value": "어텐션만 (브리지 기본)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "어텐션만 (브리지 기본)",
+      "어텐션+MLP",
+      "전체 (모듈레이션·노름 포함)"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sam extra anima sparse lora",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": []
+  },
+  {
+   "name": "sam extra anima sparse lora",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": []
+  },
+  {
+   "name": "sam3 lora manager bridge",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": []
+  },
+  {
+   "name": "sam3 lora manager bridge",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": []
+  },
+  {
+   "name": "sam3 mask",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Enable SAM3",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "",
+     "value": {
+      "sam3_enable": false,
+      "sam3_mode": "Inpaint",
+      "sam3_mask_mode": "Individual",
+      "sam3_prompt": "face",
+      "sam3_exclude_prompt": "",
+      "sam3_inpaint_prompt": "",
+      "sam3_negative_prompt": "",
+      "sam3_threshold": 0.4,
+      "sam3_mask_dilation": 0,
+      "sam3_mask_hull": false,
+      "sam3_mask_outline_px": 0,
+      "sam3_checkpoint": "sam3.pt",
+      "sam3_device": "auto",
+      "sam3_mask_blur": 4,
+      "sam3_denoising_strength": 0.4,
+      "sam3_inpainting_fill": "original",
+      "sam3_inpaint_only_masked": true,
+      "sam3_inpaint_only_masked_padding": 32,
+      "sam3_use_inpaint_width_height": false,
+      "sam3_inpaint_width": 512,
+      "sam3_inpaint_height": 512,
+      "sam3_use_steps": false,
+      "sam3_steps": 28,
+      "sam3_use_cfg_scale": false,
+      "sam3_cfg_scale": 7.0,
+      "sam3_use_sampler": false,
+      "sam3_sampler": "Use same sampler",
+      "sam3_use_scheduler": false,
+      "sam3_scheduler": "Use same scheduler",
+      "sam3_use_seed": false,
+      "sam3_seed": -1,
+      "sam3_use_noise_multiplier": false,
+      "sam3_noise_multiplier": 1.0,
+      "sam3_restore_face": false,
+      "sam3_preview_overlay": false,
+      "sam3_save_artifacts": true,
+      "sam3_unload_after": true,
+      "sam3_cn_enable": false,
+      "sam3_cn_override_external": false,
+      "sam3_cn_model": "None",
+      "sam3_cn_module": "inpaint_only",
+      "sam3_cn_weight": 1.0,
+      "sam3_cn_guidance_start": 0.0,
+      "sam3_cn_guidance_end": 1.0,
+      "sam3_cn_pixel_perfect": true,
+      "sam3_cn_control_mode": "Balanced",
+      "sam3_cn_resize_mode": "Crop and Resize",
+      "sam3_cn_processor_res": 512,
+      "sam3_cn_threshold_a": -1,
+      "sam3_cn_threshold_b": -1
+     },
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "sam3 mask",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Enable SAM3",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "",
+     "value": {
+      "sam3_enable": false,
+      "sam3_mode": "Inpaint",
+      "sam3_mask_mode": "Individual",
+      "sam3_prompt": "face",
+      "sam3_exclude_prompt": "",
+      "sam3_inpaint_prompt": "",
+      "sam3_negative_prompt": "",
+      "sam3_threshold": 0.4,
+      "sam3_mask_dilation": 0,
+      "sam3_mask_hull": false,
+      "sam3_mask_outline_px": 0,
+      "sam3_checkpoint": "sam3.pt",
+      "sam3_device": "auto",
+      "sam3_mask_blur": 4,
+      "sam3_denoising_strength": 0.4,
+      "sam3_inpainting_fill": "original",
+      "sam3_inpaint_only_masked": true,
+      "sam3_inpaint_only_masked_padding": 32,
+      "sam3_use_inpaint_width_height": false,
+      "sam3_inpaint_width": 512,
+      "sam3_inpaint_height": 512,
+      "sam3_use_steps": false,
+      "sam3_steps": 28,
+      "sam3_use_cfg_scale": false,
+      "sam3_cfg_scale": 7.0,
+      "sam3_use_sampler": false,
+      "sam3_sampler": "Use same sampler",
+      "sam3_use_scheduler": false,
+      "sam3_scheduler": "Use same scheduler",
+      "sam3_use_seed": false,
+      "sam3_seed": -1,
+      "sam3_use_noise_multiplier": false,
+      "sam3_noise_multiplier": 1.0,
+      "sam3_restore_face": false,
+      "sam3_preview_overlay": false,
+      "sam3_save_artifacts": true,
+      "sam3_unload_after": true,
+      "sam3_cn_enable": false,
+      "sam3_cn_override_external": false,
+      "sam3_cn_model": "None",
+      "sam3_cn_module": "inpaint_only",
+      "sam3_cn_weight": 1.0,
+      "sam3_cn_guidance_start": 0.0,
+      "sam3_cn_guidance_end": 1.0,
+      "sam3_cn_pixel_perfect": true,
+      "sam3_cn_control_mode": "Balanced",
+      "sam3_cn_resize_mode": "Crop and Resize",
+      "sam3_cn_processor_res": 512,
+      "sam3_cn_threshold_a": -1,
+      "sam3_cn_threshold_b": -1
+     },
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    }
+   ]
+  }
+ ]
+}

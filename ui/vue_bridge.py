@@ -122,6 +122,9 @@ class VueBridge(QObject):
     chatThreads = pyqtSignal(str)        # JSON [threads] — 저장된 대화 목록
     chatModelInfo = pyqtSignal(str)      # capability metadata, never loads a model
     chatModelsReady = pyqtSignal(str)
+    # 메모(공유 메모 계약) — JSON {memos:[{id,title,text,created_at,updated_at}], sync:{available,
+    # target:'forge'|'local', syncing, last_synced_at, error}}. ui/memo_actions.py 가 보낸다.
+    memoState = pyqtSignal(str)
     aiAssistInstructionsChanged = pyqtSignal(str)
     instructionPresetsChanged = pyqtSignal(str)
     xyzCapabilitiesReceived = pyqtSignal(str)
@@ -145,6 +148,8 @@ class VueBridge(QObject):
     refineResult = pyqtSignal(str)
     # sam-extra 임베드 LoRA Manager 주소 — JSON {url, status, message}
     loraManagerUrlReady = pyqtSignal(str)
+    # sam-extra 런타임 기능 스냅샷 — JSON SamExtraCapabilities.to_dict() (ui/sam_extra_capabilities_actions.py)
+    samExtraCapabilities = pyqtSignal(str)
     eventSearchProgress = pyqtSignal(int, int) # (current, total)
     # Event 데이터 적재 진행 문구 — Search 전용 searchStatus 와 분리(두 뷰가 keep-alive 로 공존)
     eventLoadStatus = pyqtSignal(str)
@@ -163,6 +168,7 @@ class VueBridge(QObject):
     comfyWorkflowEvent = pyqtSignal(str)
     comfyCompatibilityResult = pyqtSignal(str)
     relightEvent = pyqtSignal(str)
+    tileRepairResult = pyqtSignal(str)   # JSON {action, requestId, ok, ...} — ui/tile_repair_actions.py
     handReconstructionEvent = pyqtSignal(str)
     eventImportResults = pyqtSignal(str)      # JSON event list
 

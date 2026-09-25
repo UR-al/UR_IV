@@ -143,6 +143,46 @@ class TestWebUIResultArtifacts(unittest.TestCase):
                 self.assertIn(expected_error, result.error)
 
 
+class TestWebUILoraManagerUrl(unittest.TestCase):
+    """GET /sam3-lora/spawn — sam-extra 는 메모 라우트와 같은 출처 헤더(X-SAM3-Notebook: 1)를 요구한다."""
+
+    @staticmethod
+    def _response(status: int, payload=None):
+        response = mock.Mock(status_code=status)
+        response.json.return_value = payload or {}
+        if status != 200:
+            response.raise_for_status.side_effect = RuntimeError(
+                f'{status} Client Error for url: http://127.0.0.1:7860/sam3-lora/spawn')
+        return response
+
+    def test_spawn_sends_same_origin_header(self):
+        backend = WebUIBackend('http://127.0.0.1:7860')
+        payload = {'url': 'http://127.0.0.1:8765/', 'status': 'running', 'message': ''}
+        with mock.patch('backends.webui_backend.requests.get',
+                        return_value=self._response(200, payload)) as get:
+            result = backend.get_lora_manager_url()
+
+        self.assertEqual(result, {'url': 'http://127.0.0.1:8765/', 'status': 'running', 'message': ''})
+        args, kwargs = get.call_args
+        self.assertEqual(args[0], 'http://127.0.0.1:7860/sam3-lora/spawn')
+        self.assertEqual(kwargs['headers']['X-SAM3-Notebook'], '1')
+        self.assertEqual(kwargs['headers']['accept'], 'application/json')
+
+    def test_refused_spawn_is_explained_without_url(self):
+        # 401 = Forge 로그인(--gradio-auth·--api-auth), 403 = 같은 출처 헤더 거절 — '미설치'로 말하지 않는다
+        backend = WebUIBackend('http://127.0.0.1:7860')
+        for status in (401, 403):
+            with self.subTest(status=status):
+                with mock.patch('backends.webui_backend.requests.get', return_value=self._response(status)):
+                    result = backend.get_lora_manager_url()
+                self.assertEqual((result['url'], result['status']), ('', 'refused'))
+                self.assertIn('--gradio-auth', result['message'])
+                self.assertIn('--api-auth', result['message'])   # --api·--nowebui 의 HTTP Basic 도 401
+                self.assertNotIn('127.0.0.1', result['message'])
+        with mock.patch('backends.webui_backend.requests.get', return_value=self._response(404)):
+            self.assertEqual(backend.get_lora_manager_url()['status'], 'missing')
+
+
 def _api_workflow(*, include_load_image: bool = True) -> dict:
     workflow = {
         '1': {'class_type': 'CheckpointLoaderSimple', 'inputs': {'ckpt_name': 'old'}},

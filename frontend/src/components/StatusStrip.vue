@@ -1,7 +1,7 @@
 <template>
   <!-- C1c 계기 스트립 — 화면 맨 아래 한 줄. 왼쪽부터 백엔드 · VRAM · 모델.
        큐/알림은 여기 없다: 사용자가 "큐는 떠다니고 알림은 아이콘 배지가 낫다"고 해서
-       우하단 플로팅 핀(QueuePanel)과 우상단 종 배지로 이미 나뉘어 있다. -->
+       우하단 플로팅 핀(dock/QuickDock — 대기열 · 대화 · 메모장)과 우상단 종 배지로 이미 나뉘어 있다. -->
   <footer class="status-strip">
     <!-- 백엔드 -->
     <div class="ss-item" :title="backendTitle">

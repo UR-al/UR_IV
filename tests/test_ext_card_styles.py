@@ -21,6 +21,8 @@ PARAMS_DIR = SRC / "components" / "params"
 SAM3_MASK_CARD = (PARAMS_DIR / "Sam3MaskCard.vue").read_text(encoding="utf-8")
 MAIN_JS = (SRC / "main.js").read_text(encoding="utf-8")
 ANIMA = (SRC / "components" / "AnimaGuidancePanel.vue").read_text(encoding="utf-8")
+# 패널의 기능별 칸(P0-B 분할) — 카드 틀 없이 패널의 그룹 <details> 안에 조각으로 놓인다
+ANIMA_SECTIONS = {p.name: p.read_text(encoding="utf-8") for p in sorted((SRC / "components" / "guidance").glob("*.vue"))}
 SAM3_CN = (SRC / "components" / "Sam3ControlNetPanel.vue").read_text(encoding="utf-8")
 REFINE = (SRC / "components" / "RefinePanel.vue").read_text(encoding="utf-8")
 BATCH = (SRC / "views" / "BatchView.vue").read_text(encoding="utf-8")
@@ -72,12 +74,20 @@ class ExtCardStyleTests(unittest.TestCase):
 
     def test_anima_panel_relies_on_the_shared_rules(self):
         self.assertIn('<details class="ext-card">', ANIMA)
-        self.assertIn('class="ext-row"', ANIMA)
-        self.assertIn('class="ext-field"', ANIMA)
-        # 패널 자체에는 공용 규칙 사본을 두지 않는다(.ext-note 는 패널 전용)
-        own = _scoped_style(ANIMA)
-        for cls in ("ext-row", "ext-field", "ext-check-row"):
-            self.assertNotRegex(own, r"(?m)^\." + re.escape(cls) + r"\b", cls)
+        # 필드는 섹션(components/guidance/*Section.vue)에 있다 — 카드 틀은 패널만 든다
+        self.assertTrue(ANIMA_SECTIONS)
+        sections = "\n".join(ANIMA_SECTIONS.values())
+        self.assertIn('class="ext-row"', sections)
+        self.assertIn('class="ext-field"', sections)
+        for name, text in ANIMA_SECTIONS.items():
+            self.assertNotIn("ext-card", text, name)
+        # 패널 자체에는 공용 규칙 사본을 두지 않는다(.ext-note 는 패널 전용 — 섹션까지 :deep 으로 닿는다).
+        # 섹션도 사본을 두지 않는다.
+        for name, own in [("AnimaGuidancePanel.vue", _scoped_style(ANIMA))] + [
+            (n, _scoped_style(t)) for n, t in ANIMA_SECTIONS.items()
+        ]:
+            for cls in ("ext-row", "ext-field", "ext-check-row"):
+                self.assertNotRegex(own, r"(?m)^\." + re.escape(cls) + r"\b", f"{name}: {cls}")
 
     def test_no_numeric_font_weight_in_the_moved_rules(self):
         block = PANELS_CSS[PANELS_CSS.index(".ext-card {"):]

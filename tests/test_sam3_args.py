@@ -3,6 +3,10 @@
 확장의 `Sam3Args`는 `extra=Extra.forbid` — 모르는 키가 하나라도 섞이면 검증이 실패하고
 SAM3가 **조용히 꺼진다**(에러도 안 뜸). 그래서 필드 집합이 정확히 맞는지 못 박는다.
 확장이 설치돼 있으면 실제 `sam3ext/args.py`를 파싱해 교차검증한다.
+
+API 경로의 `process()` 는 state 에서 정해진 키만 골라 Sam3Args 에 넘기므로(gap matrix 나-4) 반대쪽 위험 —
+확장이 키 이름을 바꿔 앱 값이 조용히 버려지는 것 — 은 `tests/test_sam_extra_contract.py` 가 process() 의
+키 집합으로 본다. 확장 위치 찾기와 skip/강제 규칙은 `tests/_sam_extra_ext.py` 공용 헬퍼.
 """
 import ast
 import os
@@ -17,22 +21,9 @@ from core.sam3_args import (
     build_state,
     default_settings,
 )
+from tests._sam_extra_ext import EXT_ROOT, requires_extension
 
-def _find_extension_args_py() -> str:
-    configured = os.environ.get('AISTUDIO_FORGE_EXTENSION_DIR', '').strip()
-    roots = [configured] if configured else []
-    roots.extend([
-        os.path.join('C:\\', 'sd-webui-forge-classic', 'extensions',
-                     'forge_sam3_extension'),
-        os.path.join('C:\\', 'sd-webui-forge-neo', 'extensions',
-                     'forge_sam3_extension'),
-        os.path.join(os.path.expanduser('~'), 'Desktop', 'sam-extra'),
-    ])
-    candidates = [os.path.join(root, 'sam3ext', 'args.py') for root in roots if root]
-    return next((path for path in candidates if os.path.isfile(path)), candidates[0])
-
-
-_ARGS_PY = _find_extension_args_py()
+_ARGS_PY = os.path.join(str(EXT_ROOT), 'sam3ext', 'args.py') if EXT_ROOT is not None else ''
 
 # Sam3Args 스키마 밖의 활성화 플래그 — state에는 있지만 스펙에는 없어야 하는 키
 _ACTIVATION_ONLY = {'sam3_enable', 'enabled'}
@@ -144,7 +135,7 @@ def _parse_sam3args_fields(path: str) -> list:
     return []
 
 
-@unittest.skipUnless(os.path.exists(_ARGS_PY), f"sam-extra 확장 미설치 ({_ARGS_PY})")
+@requires_extension
 class TestAgainstInstalledExtension(unittest.TestCase):
     def test_field_names_match_exactly(self):
         live = _parse_sam3args_fields(_ARGS_PY)

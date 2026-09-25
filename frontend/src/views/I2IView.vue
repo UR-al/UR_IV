@@ -26,6 +26,8 @@
         <RelightPanel :image-src="imageSrc" @apply="applyRelight" />
         <button v-if="relightOriginal" type="button" class="clear-reference" @click="restoreRelightOriginal">조명 적용 전 원본 복원</button>
 
+        <TileRepairPanel :image-src="imageSrc" :image-path="imagePath" @apply="r => loadFromPath(r.path)" />
+
         <div v-if="isKrea2" class="glass-card krea-card">
           <label>아이덴티티 참조 <span class="optional">선택</span></label>
           <div class="source-thumb identity-thumb" @click="triggerReferenceInput">
@@ -155,6 +157,7 @@ import { mediaUrl } from '../utils/media.js'
 import CustomSelect from '../components/CustomSelect.vue'
 import RefinePanel from '../components/RefinePanel.vue'
 import RelightPanel from '../components/RelightPanel.vue'
+import TileRepairPanel from '../components/TileRepairPanel.vue'
 import { useViewMode } from '../composables/useViewMode'
 import { useTabDefaultsFollower } from '../composables/useTabDefaultsFollower'
 import { followDefault } from '../utils/tabDefaults'

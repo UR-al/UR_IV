@@ -43,8 +43,11 @@ from ui.xyz_actions import XYZActionsMixin
 from ui.comfy_workflow_actions import ComfyWorkflowActionsMixin
 from ui.comfy_compatibility_actions import ComfyCompatibilityActionsMixin
 from ui.relight_actions import RelightActionsMixin
+from ui.tile_repair_actions import TileRepairActionsMixin
 from ui.hand_reconstruction_actions import HandReconstructionActionsMixin
 from ui.event_search_actions import EventSearchActionsMixin
+from ui.sam_extra_capabilities_actions import SamExtraCapabilitiesActionsMixin
+from ui.memo_actions import MemoActionsMixin
 from widgets.queue_panel import QueuePanel
 from widgets.queue_manager import QueueManager
 from utils.prompt_cleaner import get_prompt_cleaner
@@ -81,8 +84,9 @@ class GeneratorMainUI(
     ActionsMixin,
     WebUIMixin,
     CreatorActionsMixin, ChatActionsMixin, ModelDownloadActionsMixin, XYZActionsMixin,
-    ComfyWorkflowActionsMixin, ComfyCompatibilityActionsMixin, RelightActionsMixin,
-    HandReconstructionActionsMixin, EventSearchActionsMixin,
+    ComfyWorkflowActionsMixin, ComfyCompatibilityActionsMixin, RelightActionsMixin, TileRepairActionsMixin,
+    SamExtraCapabilitiesActionsMixin,
+    HandReconstructionActionsMixin, EventSearchActionsMixin, MemoActionsMixin,
 ):
     _IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp')
     animaForgeImportReady = pyqtSignal(object)
@@ -232,11 +236,17 @@ class GeneratorMainUI(
             return
         if RelightActionsMixin._handle_relight_action(self, action, payload):
             return
+        if TileRepairActionsMixin._handle_tile_repair_action(self, action, payload):
+            return
         if HandReconstructionActionsMixin._handle_hand_reconstruction_action(self, action, payload):
             return
         if XYZActionsMixin._handle_xyz_action(self, action, payload):
             return
+        if SamExtraCapabilitiesActionsMixin._handle_sam_extra_capabilities_action(self, action, payload):
+            return
         if self._handle_chat_action(action, payload):
+            return
+        if MemoActionsMixin._handle_memo_action(self, action, payload):
             return
         if self._handle_creator_action(action, payload):
             return
@@ -1458,9 +1468,13 @@ class GeneratorMainUI(
         meta = result.get('meta') or {}
         ignored = int(meta.get('ignored_trailing_args') or 0)
         missing = meta.get('missing_scripts') or []
+        # append 전 확장이라 없던 뒤 칸(예: Detail Daemon Hires Pass) — 앱 기본값으로 뒀다
+        older = meta.get('missing_trailing_args') or []
         details = []
         if ignored:
             details.append(f'신버전 후행 인자 {ignored}개 제외')
+        if older:
+            details.append(f'구버전 확장에 없는 {len(older)}개는 기본값')
         if missing:
             details.append(f'미설치 스크립트 {len(missing)}개')
         suffix = f" ({', '.join(details)})" if details else ''
@@ -2473,8 +2487,10 @@ class GeneratorMainUI(
         if not path:
             self.vue_bridge.showNotification.emit('error', '이미지 경로가 없습니다')
             return
+        from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
+        check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
         self._sam3_worker = Sam3SingleWorker(path, settings, self)
-        self._sam3_worker.finished.connect(lambda r: self.vue_bridge.sam3Result.emit(r))
+        self._sam3_worker.finished.connect(lambda r: relay_worker_result(self, 'sam3Result', r))
         self._sam3_worker.start()
         self.vue_bridge.showNotification.emit('info', 'SAM3 처리 중...')
 
@@ -2486,13 +2502,15 @@ class GeneratorMainUI(
         if not paths:
             self.vue_bridge.showNotification.emit('error', '이미지가 없습니다')
             return
+        from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
+        check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
         self._sam3_batch_worker = Sam3BatchWorker(paths, settings, self)
         self._sam3_batch_worker.progress.connect(
             lambda cur, tot: self.vue_bridge.sam3Progress.emit(cur, tot))
         self._sam3_batch_worker.single_done.connect(
-            lambda r: self.vue_bridge.sam3Result.emit(r))
-        self._sam3_batch_worker.all_done.connect(
-            lambda: self.vue_bridge.showNotification.emit('success', f'SAM3 배치 완료 ({len(paths)}장)'))
+            lambda r: relay_worker_result(self, 'sam3Result', r))
+        worker = self._sam3_batch_worker   # 실제 성공·실패·건너뜀 수로 알린다(0장 저장이어도 '완료'가 뜨던 문제)
+        worker.all_done.connect(lambda: self.vue_bridge.showNotification.emit(*worker.completion_notice()))
         self._sam3_batch_worker.start()
         self.vue_bridge.showNotification.emit('info', f'SAM3 배치 시작 ({len(paths)}장)')
 
@@ -2520,8 +2538,10 @@ class GeneratorMainUI(
             except Exception:
                 pass
 
+        from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
+        check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
         self._refine_worker = RefineWorker(path, settings, self)
-        self._refine_worker.finished.connect(lambda r: self.vue_bridge.refineResult.emit(r))
+        self._refine_worker.finished.connect(lambda r: relay_worker_result(self, 'refineResult', r))
         self._refine_worker.start()
         self.vue_bridge.showNotification.emit('info', 'Refine 처리 중...')
 
@@ -2776,7 +2796,8 @@ class GeneratorMainUI(
         self._save_shutdown_state()
         for stop in (self._shutdown_model_downloads, self._chat_stop,
                      self._shutdown_comfy_compatibility, self._shutdown_comfy_workflow_controls,
-                     self._shutdown_relight, self._shutdown_hand_reconstruction):
+                     self._shutdown_relight, self._shutdown_tile_repair, self._shutdown_hand_reconstruction,
+                     self._shutdown_memo_sync):
             try:
                 stop()
             except Exception as exc:

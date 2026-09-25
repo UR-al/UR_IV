@@ -5,6 +5,10 @@ from .anima38_nodes import (
     NODE_CLASS_MAPPINGS as _ANIMA38_NODES,
     NODE_DISPLAY_NAME_MAPPINGS as _ANIMA38_DISPLAY_NAMES,
 )
+from .anima_lllite import (
+    NODE_CLASS_MAPPINGS as _ANIMA_LLLITE_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _ANIMA_LLLITE_DISPLAY_NAMES,
+)
 from .anima_lora_nodes import NODE_CLASS_MAPPINGS as _ANIMA_LORA_NODES
 from .generation import NODE_CLASS_MAPPINGS as _GENERATION_NODES
 from .guidance import NODE_CLASS_MAPPINGS as _GUIDANCE_NODES
@@ -17,7 +21,7 @@ from .sam3_nodes import (
 )
 
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside
@@ -44,6 +48,7 @@ NODE_CLASS_MAPPINGS = _merge_node_maps(
     _SAM3_NODES,
     _H3_CACHE_NODES,
     _RELIGHT_NODES,
+    _ANIMA_LLLITE_NODES,
 )
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -52,6 +57,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 }
 NODE_DISPLAY_NAME_MAPPINGS.update(_SAM3_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_ANIMA38_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_ANIMA_LLLITE_DISPLAY_NAMES)
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

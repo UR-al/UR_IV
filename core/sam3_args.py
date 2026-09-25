@@ -111,7 +111,7 @@ SAM3_SPEC = (
     ('sam3_cn_enable',                  _B, False,        None),
     ('sam3_cn_override_external',       _B, False,        None),
     ('sam3_cn_model',                   _T, 'None',       None),
-    ('sam3_cn_module',                  _T, 'inpaint_only', None),
+    ('sam3_cn_module',                  _T, 'inpaint_only', None),   # Anima LLLite 모델이면 build_state 가 'None' 으로 (sam3_cn_names.guard_lllite_module)
     ('sam3_cn_weight',                  _F, 1.0,          (0.0, 2.0)),
     ('sam3_cn_guidance_start',          _F, 0.0,          (0.0, 1.0)),
     ('sam3_cn_guidance_end',            _F, 1.0,          (0.0, 1.0)),
@@ -127,14 +127,17 @@ SAM3_SPEC = (
 
 SAM3_KEYS = tuple(key for key, _k, _d, _e in SAM3_SPEC)
 
-# 확장 UI가 노출하는 CN 전처리기(module) 목록 — 앱 드롭다운에서 사용.
+# CN 전처리기(module) **정적 폴백** 목록 — 연결된 Forge 의 라이브 목록(/controlnet/module_list,
+# 기능 스냅샷)을 모를 때만 쓴다(core/sam3_cn_names.py). Forge 는 supported_preprocessors[name] 로
+# 대소문자까지 그대로 찾으므로 '없음'은 반드시 'None' 이다 — 예전 소문자 'none' 은 KeyError 로
+# SAM3 패스를 실패시켰다(P3). tests/test_sam3_cn_names.py 가 녹화된 라이브 목록과 대조한다.
 CN_MODULES = (
     'inpaint_only', 'inpaint_only+lama', 'inpaint_global_harmonious',
     'tile_resample', 'tile_colorfix', 'tile_colorfix+sharp',
     'depth_midas', 'depth_zoe', 'depth_anything',
     'openpose', 'openpose_full', 'openpose_hand',
     'lineart_realistic', 'lineart_anime', 'lineart_coarse',
-    'canny', 'softedge_hed', 'scribble_pidinet', 'none',
+    'canny', 'softedge_hed', 'scribble_pidinet', 'None',
 )
 
 
@@ -154,16 +157,28 @@ def default_settings() -> dict:
     return {key: default for key, _k, default, _e in SAM3_SPEC}
 
 
-def build_state(settings=None, *, prompt: str = '', negative_prompt: str = '') -> dict:
+def build_state(settings=None, *, prompt: str = '', negative_prompt: str = '',
+                capabilities=None) -> dict:
     """SAM3 alwayson state dict 생성.
 
     prompt/negative_prompt: 인페인트 프롬프트가 비어 있을 때 쓸 폴백(부모 생성 프롬프트).
     확장도 빈 문자열이면 부모 프롬프트를 쓰지만, 배치/Refine처럼 부모 프롬프트 자체가
     비어 있는 경로가 있어서 여기서 명시적으로 채운다.
+
+    capabilities: sam-extra 기능 스냅샷(``SamExtraCapabilities`` | None). ControlNet 전처리기·모델
+    이름의 대소문자를 연결된 Forge 의 라이브 목록에 맞춘다(모르면 정적 목록 + 경고 한 번).
+    네트워크는 쓰지 않는다 — core/sam3_cn_names.py.
     """
     settings = settings if isinstance(settings, dict) else {}
     state = {key: _coerce(kind, settings.get(key), default, extra)
              for key, kind, default, extra in SAM3_SPEC}
+
+    from core.sam3_cn_names import guard_lllite_module, normalize_state as _normalize_cn_names
+    _normalize_cn_names(state, capabilities)
+    # Anima LLLite 는 원본처럼 사용자가 준 제어 이미지를 받는다 — Tile & Repair 면 전처리기 None, 그 밖의
+    # Anima LLLite 는 inpaint_* 만 None(lineart·canny 는 그대로). 확장 inject_controlnet_unit 과 같은 규칙
+    # (저장값·기본 inpaint_only 보정).
+    guard_lllite_module(state)
 
     # detect prompt는 비면 확장이 'face'로 되돌리므로 여기서도 동일하게 보정
     if not str(state['sam3_prompt']).strip():
@@ -188,13 +203,15 @@ def build_state(settings=None, *, prompt: str = '', negative_prompt: str = '') -
     return state
 
 
-def build_alwayson(settings=None, *, prompt: str = '', negative_prompt: str = '') -> dict:
+def build_alwayson(settings=None, *, prompt: str = '', negative_prompt: str = '',
+                   capabilities=None) -> dict:
     """{"SAM3 Mask": {"args": [state]}} 조각 생성."""
     return {SCRIPT_SAM3: {"args": [
-        build_state(settings, prompt=prompt, negative_prompt=negative_prompt)]}}
+        build_state(settings, prompt=prompt, negative_prompt=negative_prompt,
+                    capabilities=capabilities)]}}
 
 
-def apply_to_payload(payload: dict, settings=None) -> dict:
+def apply_to_payload(payload: dict, settings=None, *, capabilities=None) -> dict:
     """payload에 SAM3를 병합. 프롬프트 폴백은 payload에서 읽는다."""
     if not isinstance(payload, dict):
         return payload
@@ -205,5 +222,6 @@ def apply_to_payload(payload: dict, settings=None) -> dict:
         settings,
         prompt=str(payload.get('prompt', '') or ''),
         negative_prompt=str(payload.get('negative_prompt', '') or ''),
+        capabilities=capabilities,
     )[SCRIPT_SAM3])
     return payload

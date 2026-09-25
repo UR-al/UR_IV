@@ -15,6 +15,7 @@ import { initBridge, onBackendEvent } from '../src/bridge.js'
 import { setTheme } from '../src/theme/applyTheme'
 import { applyIconAnimationStyle } from '../src/theme/iconAnimationPreference'
 import { uiModals } from '../src/composables/uiModals.js'
+import { useQuickDock } from '../src/composables/useQuickDock'
 import catalog from '../../core/model_download_catalog.json'
 
 const status = document.getElementById('preview-status')
@@ -49,6 +50,18 @@ let instructions = { common: '', features: Object.fromEntries(
   ['expand', 'suggest', 'nl2tags', 'nl_caption', 'nl_scene', 'translate', 'creative', 'negative', 'auto_nl'].map(key => [key, ''])) }
 let session = {}
 let instructionPresets = []
+// 메모장 모의 목록 — 충돌 사본 한 장을 같이 두어 목록 표시를 점검한다(개인 데이터 아님)
+const memoSeedAt = new Date(Date.now() - 2 * 3600_000).toISOString()   // 방금 고친 메모가 위로 오게 과거 시각
+let memoStore = [
+  { id: 'offline-memo-1', title: '오프라인 예시 메모', text: '테마 점검용 메모입니다.\n입력하면 이 페이지 메모리에만 저장됩니다.', created_at: memoSeedAt, updated_at: new Date(Date.now() - 3600_000).toISOString(), deleted: false },
+  { id: 'offline-memo-2', title: '프롬프트 아이디어 (충돌 사본)', text: 'Forge 와 앱에서 따로 고친 메모는 이렇게 사본으로 남습니다.', created_at: memoSeedAt, updated_at: memoSeedAt, deleted: false },
+]
+let memoSync = { available: false, target: 'local', syncing: false, last_synced_at: null, error: null }
+function emitMemoState() {
+  const memos = memoStore.filter(m => !m.deleted).map(({ deleted, ...m }) => m)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  emit('memoState', json({ memos, sync: memoSync }))
+}
 function presetReply(scope, preset = null) { return json({ ok: true, scope, preset, presets: instructionPresets.filter(item => item.scope === scope) }) }
 // README 스크린샷 모드(?readme): 문구 없는 합성 그림 여러 장·크기와 시드가 있는 결과·여러 줄의
 // 검색 결과·와일드카드 샘플을 쓰고, 모의 동작 알림을 띄우지 않는다. 개인 파일은 여전히 쓰지 않는다.
@@ -203,6 +216,21 @@ methods.onAction = (name, raw) => {
   if (name === 'get_xyz_capabilities') {
     emit('xyzCapabilitiesReceived', json({ requestId: payload.requestId, ok: true, backend: 'comfyui', capabilityId: 'offline-only', axes: xyzAxes, notes: [offlineMessage], unsupported: [] })); return
   }
+  // 메모장(도크) — 메모리 안의 목록만 고친다. Forge 동기화는 하지 않는다(상태 문구 확인용 가짜 상태만).
+  if (name === 'memo_list') { emitMemoState(); return }
+  if (name === 'memo_save') {
+    const at = new Date().toISOString()
+    const old = memoStore.find(m => m.id === payload.id)
+    const memo = { id: payload.id, title: payload.title || '', text: payload.text || '', created_at: old?.created_at || at, updated_at: at, deleted: false }
+    memoStore = [...memoStore.filter(m => m.id !== payload.id), memo]
+    record('메모: 이 페이지 메모리에만 저장'); emitMemoState(); return
+  }
+  if (name === 'memo_delete') {
+    const at = new Date().toISOString()
+    memoStore = memoStore.map(m => m.id === payload.id ? { ...m, text: '', deleted: true, updated_at: at } : m)
+    record('메모: 모의 목록에서만 삭제'); emitMemoState(); return
+  }
+  if (name === 'memo_sync') { record('메모 동기화: 오프라인 — Forge 에 요청하지 않음'); emitMemoState(); return }
   if (name === 'chat_load') {
     emit('chatThreads', json([{ id: 'offline-chat', title: '오프라인 예시 대화', model: 'offline-preview:8b', messages: [{ id: 'sample-message', role: 'assistant', content: '테마 점검용 예시입니다. 실제 모델 호출은 하지 않습니다.', createdAt: Date.now() }], createdAt: Date.now(), updatedAt: Date.now() }])); return
   }
@@ -300,6 +328,17 @@ button('Search 샘플', async () => { await navigate('search'); emit('searchResu
 button('Favorites 샘플', () => navigate('fav'))
 button('Gallery 샘플', async () => { await navigate('gallery'); emit('galleryImagesReady', json({ folder: '오프라인 샘플', files: libraryImages })) })
 button('PNG Info 샘플', async () => { await navigate('png'); emit('pngInfoImageLoaded', sampleImage) })
+// 우하단 도크 — 펼친 아이콘 줄 · 대기열 드로어 · 작은 대화 패널 · 메모장
+const quickDock = useQuickDock()
+button('도크 펼치기', () => { quickDock.activePanel.value = null; quickDock.expanded.value = true })
+for (const [label, panel] of [['도크 대기열', 'queue'], ['도크 대화', 'chat'], ['도크 메모장', 'memo']]) button(label, () => quickDock.openPanel(panel))
+button('메모 동기화 상태', () => {
+  // 로컬 전용 → Forge 동기화됨 → 동기화 오류 순으로 돌려 머리 문구 세 가지를 본다(실제 요청 없음)
+  memoSync = !memoSync.available ? { available: true, target: 'forge', syncing: false, last_synced_at: new Date().toISOString(), error: null }
+    : !memoSync.error ? { ...memoSync, error: '오프라인 미리보기 — 모의 동기화 오류' }
+      : { available: false, target: 'local', syncing: false, last_synced_at: null, error: null }
+  emitMemoState()
+})
 button('샘플 알림', () => { for (const type of ['success', 'info', 'error']) emit('showNotification', type, `${type} 테마 점검용 알림`) })
 const label = document.createElement('label')
 label.htmlFor = 'preview-filter'

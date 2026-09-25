@@ -44,6 +44,30 @@ export function actionPayloadContractCases(): void {
   // @ts-expect-error overwrite 는 불리언 — 백엔드는 true 만 덮어쓰기 확인으로 친다
   requestAction('workflow_profile_save', { name: 'Flux', overwrite: 'true' })
 
+  requestAction('memo_save', { id: 'm1', title: '', text: '본문', base_updated_at: null })
+  // @ts-expect-error base_updated_at 은 빠뜨리지 않는다(새 메모는 null) — 충돌 판정의 근거다
+  requestAction('memo_save', { id: 'm1', title: '', text: '본문' })
+  requestAction('memo_delete', { id: 'm1' })
+  requestAction('memo_list', {})
+  // @ts-expect-error memo_sync 는 페이로드가 없다
+  requestAction('memo_sync', { force: true })
+
+  const tileSettings = {
+    model: '', prompt: 'repair', negative_prompt: '', steps: 50, cfg_scale: 3.5, flow_shift: 5,
+    multiplier: 1, short_side: 1024, seed: -1, dit: '', text_encoder: '', vae: '', unload_forge_before: true,
+  }
+  requestAction('tile_repair_run', { requestId: 'tile_run_1', image_path: 'C:/a.png', image: '', settings: tileSettings })
+  // @ts-expect-error 원본은 image_path 와 image 를 둘 다 보낸다(안 쓰는 쪽은 '') — 파이썬이 경로를 먼저 본다
+  requestAction('tile_repair_run', { requestId: 'tile_run_1', image_path: 'C:/a.png', settings: tileSettings })
+  // @ts-expect-error 배율은 숫자(−10..10) — 문자열이면 확장이 400 으로 거절한다
+  requestAction('tile_repair_run', { requestId: 'r', image_path: '', image: '', settings: { ...tileSettings, multiplier: '1' } })
+  // @ts-expect-error 확장 라우트는 모르는 키를 거절한다 — lllite_multiplier 가 아니라 multiplier
+  requestAction('tile_repair_run', { requestId: 'r', image_path: '', image: '', settings: { ...tileSettings, lllite_multiplier: 1 } })
+  requestAction('tile_repair_options', { requestId: 'tile_options_1' })
+  requestAction('tile_repair_cancel', { requestId: 'tile_run_1' })
+  // @ts-expect-error cancel 은 멈출 run 의 requestId 가 필요하다
+  requestAction('tile_repair_cancel', {})
+
   // 맵에 없는 액션은 여전히 느슨하다(object) — 페이로드 없이도 부를 수 있다.
   requestAction('generate')
   requestAction('save_ui_prefs', { anyKey: 1 })

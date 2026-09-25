@@ -1,2 +1,3 @@
 *.py text eol=lf
 comfyui_anima_3_8b/** text eol=lf whitespace=-blank-at-eof
+comfyui_anima_lllite/** text eol=lf whitespace=-blank-at-eol
