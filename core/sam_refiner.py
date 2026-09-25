@@ -470,33 +470,27 @@ _SAM3_BPE_PATH = None
 
 def _find_sam3_bpe_vocab() -> str:
     """SAM3가 사용하는 BPE vocab 파일 경로 찾기.
-    1) Forge SAM3 확장 캐시 사용
-    2) huggingface_hub로 다운로드
+    1) 로컬 후보(편집기 모델 폴더 · 알려진 Forge 설치의 SAM3 확장 자산 · 받아 둔 캐시) — core.sam3_assets
+    2) 없을 때만 huggingface_hub로 다운로드 (facebook/sam3 는 접근 승인이 필요한 저장소)
     """
     global _SAM3_BPE_PATH
     if _SAM3_BPE_PATH and os.path.exists(_SAM3_BPE_PATH):
         return _SAM3_BPE_PATH
 
-    # Forge 확장 자산에서 우선 찾기
-    forge_candidate = os.path.join(
-        'C:\\sd-webui-forge-neo', 'extensions', 'forge_sam3_extension',
-        'assets', 'bpe_simple_vocab_16e6.txt.gz',
-    )
-    if os.path.exists(forge_candidate):
-        _SAM3_BPE_PATH = forge_candidate
-        return forge_candidate
+    from core.sam3_assets import BPE_VOCAB_NAME, DOWNLOAD_CACHE_DIR, find_local_bpe_vocab
+    local = find_local_bpe_vocab()
+    if local:
+        _SAM3_BPE_PATH = local
+        return local
 
     # 프로젝트 캐시 디렉토리에 다운로드
     try:
         from huggingface_hub import hf_hub_download
-        cache_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'image_cache', 'sam3_assets',
-        )
+        cache_dir = str(DOWNLOAD_CACHE_DIR)
         os.makedirs(cache_dir, exist_ok=True)
         path = hf_hub_download(
             repo_id='facebook/sam3',
-            filename='bpe_simple_vocab_16e6.txt.gz',
+            filename=BPE_VOCAB_NAME,
             cache_dir=cache_dir,
         )
         _SAM3_BPE_PATH = path
