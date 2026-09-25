@@ -243,7 +243,7 @@ import PanelSection from '../components/editor/PanelSection.vue'
 import EditorToolbar from '../components/editor/EditorToolbar.vue'
 import { toolById, toolByKey } from '../utils/editorTools'
 import {
-  ImageSizeCache, aliasesFromSaveResult, editorResultForDoc, hasPendingSaveFor, initialDocGen,
+  ImageSizeCache, aliasesFromSaveResult, editorResultForDoc, editorResultKind, hasPendingSaveFor, initialDocGen,
   isEditorDirty, parseSaveResult, referencesAutosaveFile, replacePath, saveResultAction, saveToastMessage,
   writtenPathFromSaveResult, type PendingSave, type SavedMarker,
 } from '../utils/editorDocument'
@@ -644,14 +644,16 @@ function onEditorResult(json: string) {
       previewSrc.value = result.image_base64 || ''
       return
     }
-    if (result.path) {
+    // auto_detect 결과는 마스크와 원본 path 를 함께 싣는다 — 마스크를 먼저 봐야 감지 결과가 보인다
+    const kind = editorResultKind(result)
+    if (kind === 'mask') {
+      canvasRef.value?.loadMaskFromBase64(result.mask_base64)
+      detectStatus.value = `${result.detect_count || 0}개 감지됨`
+    } else if (kind === 'image') {
       previewSrc.value = ''   // 확정 결과가 왔으니 프리뷰는 걷는다
       pushState(result.path, true, { width: result.width, height: result.height })
       if (result.operation === 'auto_censor') detectStatus.value = '완료'
-    } else if (result.mask_base64) {
-      canvasRef.value?.loadMaskFromBase64(result.mask_base64)
-      detectStatus.value = `${result.detect_count || 0}개 감지됨`
-    } else if (result.error) {
+    } else if (kind === 'error') {
       // 콘솔에만 찍으면 사용자는 '무반응'으로 느낀다 — 토스트로 올린다
       console.error('[Editor] error:', result.error)
       requestAction('show_toast', { type: 'error', msg: result.error })

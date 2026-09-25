@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ImageSizeCache, aliasesFromSaveResult, editorResultForDoc, hasPendingSaveFor, initialDocGen,
+  ImageSizeCache, aliasesFromSaveResult, editorResultForDoc, editorResultKind, hasPendingSaveFor, initialDocGen,
   isEditorDirty, normalizeDrawOpacity, parseSaveResult, referencesAutosaveFile, replacePath,
   saveResultAction, saveToastMessage, writtenPathFromSaveResult,
   type EditorDocState, type PendingSave, type SavedMarker,
@@ -116,6 +116,22 @@ describe('editorResultForDoc', () => {
     expect(editorResultForDoc({ path: 'x.png' } as any, 12)).toBe(true)
     expect(editorResultForDoc({ doc_gen: '11', path: 'x.png' } as any, 12)).toBe(true)
     expect(editorResultForDoc(null, 12)).toBe(false)
+  })
+})
+
+describe('editorResultKind', () => {
+  it('treats an auto_detect result as a mask even though it also carries the source path', () => {
+    // ui/vue_bridge.py 의 auto_detect 결과 모양 — path 를 먼저 보면 원본을 다시 불러 마스크를 버렸다
+    const detect = { mask_base64: 'data:image/png;base64,iVBOR', detect_count: 2, path: 'C:/img/a.png',
+      operation: 'auto_detect', job_id: 7 }
+    expect(editorResultKind(detect)).toBe('mask')
+  })
+
+  it('routes file results, errors and empty payloads', () => {
+    expect(editorResultKind({ path: 'C:/cache/edited_a.png', operation: 'auto_censor' })).toBe('image')
+    expect(editorResultKind({ error: 'rembg 실패', operation: 'remove_bg' })).toBe('error')
+    expect(editorResultKind({ mask_base64: '', path: '', error: '' })).toBe('none')
+    expect(editorResultKind(null)).toBe('none')
   })
 })
 

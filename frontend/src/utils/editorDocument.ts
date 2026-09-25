@@ -83,6 +83,24 @@ export function editorResultForDoc(
   return gen === docGen
 }
 
+/**
+ * 확정(프리뷰가 아닌) editorResult 를 어느 갈래로 처리할지.
+ *  - 'mask'  : 마스크만 캔버스에 올린다(파일·undo 는 그대로) — auto_detect
+ *  - 'image' : 결과 파일로 문서를 바꾼다(undo 푸시)
+ *  - 'error' : 오류 안내
+ * auto_detect 결과는 마스크와 함께 원본 `path` 도 싣는다(ui/vue_bridge.py). 예전에는 `path` 를 먼저 봐서
+ * 원본을 다시 불러 undo 만 쌓고 마스크는 버렸다 — 감지 결과가 화면에 나오지 않았다. 그래서 마스크가 먼저다.
+ */
+export function editorResultKind(
+  result: { mask_base64?: unknown; path?: unknown; error?: unknown; [k: string]: unknown } | null | undefined,
+): 'mask' | 'image' | 'error' | 'none' {
+  if (!result || typeof result !== 'object') return 'none'
+  if (typeof result.mask_base64 === 'string' && result.mask_base64) return 'mask'
+  if (typeof result.path === 'string' && result.path) return 'image'
+  if (result.error) return 'error'
+  return 'none'
+}
+
 /** 목록에서 `from` 을 `to` 로 바꾼 새 배열. 같은 항목이 여럿이면 모두 바꾼다. */
 export function replacePath(list: readonly string[], from: string, to: string): string[] {
   return list.map((p) => (p === from ? to : p))
