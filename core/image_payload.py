@@ -113,6 +113,46 @@ def encode_image_bytes(data: bytes, *, label: str = "입력 이미지") -> Encod
     return EncodedImage(base64.b64encode(encoded).decode("ascii"), width, height, True)
 
 
+@dataclass(frozen=True)
+class ImageProbe:
+    """헤더만 읽은 입력 이미지 — 재인코딩(PNG 압축)은 하지 않는다."""
+    width: int          # 백엔드가 받을 크기(EXIF 방향 적용 후) — encode_image_bytes 결과와 같다
+    height: int
+    passthrough: bool   # True 면 encode_image_bytes 가 원본 바이트를 그대로 보낸다
+
+
+# exif_transpose 가 가로·세로를 바꾸는 방향 값(TRANSPOSE·ROTATE_270·TRANSVERSE·ROTATE_90)
+_SWAPPED_ORIENTATIONS = frozenset({5, 6, 7, 8})
+
+
+def probe_image_bytes(data: bytes, *, label: str = "입력 이미지") -> ImageProbe:
+    """``encode_image_bytes`` 와 같은 검사(빈 값·파일/픽셀 한도·읽을 수 있는 형식)와 결과 크기를
+    PNG 로 다시 압축하지 않고 구한다.
+
+    재인코딩이 필요한 입력(알파·팔레트 투명·방향 태그·BMP/GIF/TIFF)의 RGB PNG 압축은 2048² RGBA
+    한 장에 0.4초 넘게 걸린다. GUI 스레드에서는 이 함수로 요청 크기와 통과 여부만 정하고, 인코딩은
+    생성 워커 스레드가 한다(core/i2i_payload ``I2IRequest.prepare_payload``).
+    """
+    if not isinstance(data, (bytes, bytearray)) or not data:
+        raise ImagePayloadError(f"{label}: 비어 있는 이미지입니다.")
+    if len(data) > MAX_INPUT_BYTES:
+        raise ImagePayloadError(f"{label}: 이미지 파일이 너무 큽니다.")
+    try:
+        with Image.open(io.BytesIO(bytes(data))) as image:
+            width, height = image.size
+            if width < 1 or height < 1 or width * height > MAX_INPUT_PIXELS:
+                raise ImagePayloadError(f"{label}: 지원하지 않는 이미지 크기입니다 ({width}×{height}).")
+            passthrough = _can_pass_through(image)
+            orientation = 1 if passthrough else _orientation(image)
+    except ImagePayloadError:
+        raise
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as exc:
+        raise ImagePayloadError(f"{label}: 이미지를 읽을 수 없습니다.") from exc
+    if orientation in _SWAPPED_ORIENTATIONS:
+        width, height = height, width
+    return ImageProbe(width, height, passthrough)
+
+
 def encode_image_file(path: str, *, label: str = "입력 이미지") -> EncodedImage:
     """이미지 파일 → 백엔드용 base64 + 크기. 한글 경로도 PIL/open 으로 읽는다."""
     try:
@@ -193,7 +233,8 @@ def resolve_target_size(
     (``_load_image``)은 이미지 크기를 먼저 넣고 payload 값으로 덮었으므로 빈 칸은 이미지
     크기가 됐는데, 원본 바이트 전송으로 바뀐 뒤엔 숨은 입력칸의 옛 값(1024·이전 이미지 크기)이
     나갔다. ``image_size`` 는 (w, h) 또는 필요할 때만 부르는 callable(헤더 읽기 — 못 읽으면
-    ImagePayloadError). 돌려주는 None 은 '정할 수 없음'이다(호출자가 기존 값을 둔다).
+    ImagePayloadError). 돌려주는 None 은 '정할 수 없음'이다(호출자가 정한다 — core/i2i_payload 는
+    한도로 자른 이미지 크기를 쓴다).
     """
     w = _target_dimension(width)
     h = _target_dimension(height)

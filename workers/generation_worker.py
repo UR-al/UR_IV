@@ -210,16 +210,30 @@ class Img2ImgFlowWorker(QThread, _CancellableMixin):
     finished = pyqtSignal(object, dict)
     progress = pyqtSignal(int, int, object)
 
-    def __init__(self, model_name: str, payload: dict):
+    def __init__(self, model_name: str, payload: dict, *, prepare=None):
         QThread.__init__(self)
         _CancellableMixin.__init__(self)
         self.model_name = model_name
         self.payload = payload
+        # prepare(payload) — 백엔드 호출 전에 이 스레드에서 payload 사본을 마저 채운다
+        # (I2I 입력 이미지의 PNG 재압축 — GUI 스레드에서 하면 0.4초+ 멈춘다, core/i2i_payload).
+        # ImagePayloadError(ValueError) 는 사용자 문구 그대로 실패로 알린다.
+        self._prepare = prepare
 
     def run(self):
         try:
             backend = get_backend()
             payload = dict(self.payload)
+            if self._prepare is not None:
+                from core.image_payload import ImagePayloadError
+                try:
+                    self._prepare(payload)
+                except ImagePayloadError as exc:
+                    self.finished.emit(str(exc), {})
+                    return
+                if self.is_cancelled:
+                    self.finished.emit("생성 취소됨", {'cancelled': True})
+                    return
             generation_family = str(payload.pop("_generation_family", "standard") or "standard").lower()
 
             def on_progress(step: int, total: int, preview):

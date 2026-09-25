@@ -180,6 +180,49 @@ class UnsafePathError(ValueError):
     """검증에 실패한 경로가 사용되었음을 나타낸다."""
 
 
+# check_input_path 의 판정 — 사용자에게 '왜 못 여는지'를 알려 줄 때 쓴다.
+INPUT_OK = "ok"
+INPUT_EMPTY = "empty"                # 빈 경로
+INPUT_UNRESOLVABLE = "unresolvable"  # 해석 실패(잘못된 글자·너무 긴 경로 등)
+INPUT_FORBIDDEN = "forbidden"        # 시스템 폴더·판정 불가 장치 경로
+INPUT_BLOCKED_EXT = "blocked_ext"    # 허용 목록 밖 확장자
+INPUT_MISSING = "missing"            # 허용된 경로인데 파일이 없음
+INPUT_NOT_FILE = "not_file"          # 그 자리에 폴더 등 일반 파일이 아닌 것이 있음
+
+
+def check_input_path(
+    raw: str,
+    *,
+    allowed_exts: frozenset[str] | None = _DEFAULT_IMAGE_EXTS,
+) -> tuple[str | None, str]:
+    """:func:`safe_input_path` 와 같은 판정 + 실패 이유.
+
+    ``(정규화 절대 경로, INPUT_OK)`` 또는 ``(None, INPUT_*)``. 예전에는 None 하나라서 호출부가
+    막힌 확장자(.tif)·시스템 폴더도 '파일을 찾을 수 없습니다'로 알렸다(core/i2i_payload).
+    이유 판정용 추가 stat 은 실패 경로에서만 한다.
+    """
+    if not raw:
+        return None, INPUT_EMPTY
+    try:
+        resolved = Path(_strip_file_scheme(raw)).resolve(strict=False)
+    except (OSError, ValueError) as e:
+        logger.warning("input path resolve failed: %r (%s)", raw, e)
+        return None, INPUT_UNRESOLVABLE
+    if _is_forbidden(resolved):
+        logger.warning("input path forbidden root: %s", resolved)
+        return None, INPUT_FORBIDDEN
+    if allowed_exts is not None and resolved.suffix.lower() not in allowed_exts:
+        logger.warning("input path blocked ext: %s", resolved)
+        return None, INPUT_BLOCKED_EXT
+    if not resolved.is_file():
+        try:
+            present = resolved.exists() or resolved.is_symlink()
+        except OSError:
+            present = True   # 판정할 수 없으면 '없다'고 단정하지 않는다
+        return None, (INPUT_NOT_FILE if present else INPUT_MISSING)
+    return str(resolved), INPUT_OK
+
+
 def safe_input_path(
     raw: str,
     *,
@@ -190,24 +233,9 @@ def safe_input_path(
     - 존재 + 일반 파일
     - 시스템 디렉터리 차단
     - 확장자 화이트리스트 (None이면 생략)
-    성공 시 정규화된 절대 경로, 실패 시 None.
+    성공 시 정규화된 절대 경로, 실패 시 None. 실패 이유가 필요하면 :func:`check_input_path`.
     """
-    if not raw:
-        return None
-    try:
-        resolved = Path(_strip_file_scheme(raw)).resolve(strict=False)
-    except (OSError, ValueError) as e:
-        logger.warning("input path resolve failed: %r (%s)", raw, e)
-        return None
-    if _is_forbidden(resolved):
-        logger.warning("input path forbidden root: %s", resolved)
-        return None
-    if allowed_exts is not None and resolved.suffix.lower() not in allowed_exts:
-        logger.warning("input path blocked ext: %s", resolved)
-        return None
-    if not resolved.is_file():
-        return None
-    return str(resolved)
+    return check_input_path(raw, allowed_exts=allowed_exts)[0]
 
 
 def missing_input_path(

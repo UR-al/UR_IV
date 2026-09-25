@@ -58,10 +58,18 @@ const props = withDefaults(defineProps<{
   modelValue?: string
   colorFn?: (text: string) => string
   placeholder?: string
+  /** 텍스트 → 블록 경계. 없으면 프롬프트 태그 규칙(괄호·와일드카드 안 쉼표 보호).
+   *  제외 규칙 칸은 적용 쪽과 같은 나누기(utils/excludeRules.splitExcludeRules)를 넘긴다. */
+  split?: (text: string) => string[]
+  /** 블록 목록 → 텍스트. 없으면 ', ' 로 잇는다. 이전 텍스트(지금 modelValue)를 받으므로 바뀌지 않은
+   *  블록 사이의 구분자·줄바꿈을 살릴 수 있다 — 제외 규칙 칸은 utils/excludeRules.rewriteExcludeRules. */
+  join?: (previous: string, parts: string[]) => string
 }>(), {
   modelValue: '',
   colorFn: () => '',
   placeholder: '추가...',
+  split: undefined,
+  join: undefined,
 })
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -80,6 +88,7 @@ const dropIdx = ref(-1)
 // 초기화 + 동기화
 function parseText(text: string): TagBlock[] {
   if (!text) return []
+  if (props.split) return props.split(text).map(t => ({ text: t }))
   let depth = 0; let p = ''
   for (const ch of text) {
     if ('([{'.includes(ch)) depth++
@@ -91,7 +100,9 @@ function parseText(text: string): TagBlock[] {
 }
 
 function syncToModel() {
-  emit('update:modelValue', blocks.value.map(b => b.text).join(', '))
+  const parts = blocks.value.map(b => b.text)
+  // 블록은 modelValue 에서 나눠 만들었고 부모가 아직 새 값을 내려주기 전이다 — modelValue 가 이전 텍스트
+  emit('update:modelValue', props.join ? props.join(props.modelValue || '', parts) : parts.join(', '))
 }
 
 watch(() => props.modelValue, (v: string) => {

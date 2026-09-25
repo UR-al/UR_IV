@@ -297,6 +297,7 @@ import { useGenStats } from './composables/useGenStats'
 import { vScrollMemory } from './directives/vScrollMemory'
 import { appModalStack } from './utils/modalStack'
 import { createAppKeydownHandler } from './utils/appShortcuts'
+import { formatResolution, formatSeed } from './utils/imageInfo'
 import { vramLevel, vramTooltipText, type VramInfo } from './utils/vramStatus'
 import { formatEta, previewDataUrl, progressPercent } from './utils/generationProgress'
 import { exifFromPayload, exifTabContent, type ExifData } from './utils/exifPayload'
@@ -941,8 +942,9 @@ onMounted(async () => {
     }
     if (wasViewingLatest && parsed.path) {
       currentImage.value = parsed.path
-      resolution.value = `${parsed.width} × ${parsed.height}`
-      seed.value = String(parsed.seed)
+      // 크기·시드가 없는 결과(외부 워크플로 등)도 'undefined' 를 찍지 않는다(utils/imageInfo)
+      resolution.value = formatResolution(parsed.width, parsed.height)
+      seed.value = formatSeed(parsed.seed)
       // 생성 직후 EXIF 자동 로드 (추종 중일 때만 현재 EXIF 갱신)
       const bk = await getBackend()
       if (bk.getImageExif) {

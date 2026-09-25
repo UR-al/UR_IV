@@ -71,11 +71,14 @@ class RetiredFilesTests(unittest.TestCase):
 
 class RetiredHelpersTests(unittest.TestCase):
     def test_common_widgets_drops_never_used_classes(self):
-        # 소스로 본다 — 다른 정리 단계가 같은 파일의 나머지 클래스를 따로 은퇴시킨다
-        tree = ast.parse((ROOT / "widgets" / "common_widgets.py").read_text(encoding="utf-8"))
-        classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
-        for name in ("WheelEventFilter", "AutomationWidget", "SettingsDialog"):
-            self.assertNotIn(name, classes)
+        # 모듈 자체가 은퇴했다 — 마지막 NoScrollComboBox 의 사용처(숨은 InpaintTab)가 사라졌다
+        # (tests/test_legacy_i2i_inpaint_upscale_retirement.py). 되살아나면 옛 클래스는 없어야 한다.
+        path = ROOT / "widgets" / "common_widgets.py"
+        if path.exists():
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+            for name in ("WheelEventFilter", "AutomationWidget", "SettingsDialog"):
+                self.assertNotIn(name, classes)
         # 생성 창 기반·UI 구성은 더 이상 이 모듈에서 위의 클래스를 가져오지 않는다
         for rel in ("ui/generator_base.py", "ui/generator_ui_setup.py"):
             text = (ROOT / rel).read_text(encoding="utf-8")

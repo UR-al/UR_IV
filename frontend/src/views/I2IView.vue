@@ -113,9 +113,14 @@
       </div>
 
       <div class="sidebar-footer">
-        <button class="btn-generate primary" @click="generate" :disabled="!imageSrc">
-          {{ !imageSrc ? '이미지를 먼저 올리세요' : isKrea2 ? 'Krea2 아이덴티티 편집 시작' : 'I2I 생성 시작' }}
-        </button>
+        <!-- 실행 중 재요청은 Python 이 거절한다 — 그동안은 막고, 멈춘 생성을 끊을 취소 버튼을 둔다(i2iJobState). -->
+        <div class="generate-row">
+          <button class="btn-generate primary" @click="generate" :disabled="!imageSrc || jobState.running">
+            {{ i2iGenerateLabel(jobState, !!imageSrc, isKrea2) }}
+          </button>
+          <button v-if="jobState.running" type="button" class="btn-cancel" @click="cancelGenerate"
+            :disabled="jobState.cancelling" title="I2I 생성 취소"><Icon name="close" /></button>
+        </div>
       </div>
     </aside>
 
@@ -143,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { requestAction, getProperty, getValue } from '../stores/widgetStore.js'
 import { onBackendEvent } from '../bridge.js'
 import { mediaUrl } from '../utils/media.js'
@@ -153,6 +158,8 @@ import RelightPanel from '../components/RelightPanel.vue'
 import { useViewMode } from '../composables/useViewMode'
 import { useTabDefaultsFollower } from '../composables/useTabDefaultsFollower'
 import { followDefault } from '../utils/tabDefaults'
+import { IDLE_I2I_JOB, i2iGenerateLabel, parseI2IJobState } from '../utils/i2iJobState'
+import type { I2IJobStatePayload } from '../types/bridge'
 
 /** 하위 탭(img2img / SAM3 정밀화)은 왼쪽 레일의 서랍이 정한다 — `useViewMode` 참조. */
 const { mode: subTab } = useViewMode('i2i')
@@ -261,13 +268,26 @@ async function loadFromPath(path: string) {
   imageSrc.value = mediaUrl(normalized)
 }
 
+// I2I 진행 상태(ui/i2i_actions.emit_job_state) — 실행 중엔 시작을 막고 취소 버튼을 보인다
+const jobState = ref<I2IJobStatePayload>({ ...IDLE_I2I_JOB })
+let offJobState: (() => void) | null = null
+
 onMounted(() => {
   // History/Gallery에서 send_to_i2i 시 이미지 로드 — 현재 하위 탭 쪽으로 보낸다
   onBackendEvent('i2iImageLoaded', (path: string) => {
     loadFromPath(path)
     if (subTab.value === 'refine') refineRef.value?.setImage?.(path)
   })
+  offJobState = onBackendEvent('i2iJobState', (json: string) => {
+    const next = parseI2IJobState(json)
+    if (next) jobState.value = next
+  })
 })
+onUnmounted(() => { offJobState?.(); offJobState = null })
+
+function cancelGenerate() {
+  requestAction('cancel_i2i', {})
+}
 
 // Refine 탭으로 넘어갈 때 현재 이미지를 물려준다
 watch(subTab, (v) => {
@@ -366,6 +386,16 @@ function generate() {
   font-size: 12px; letter-spacing: 0; cursor: pointer; transition: var(--transition);
 }
 .btn-generate:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(250, 204, 21, 0.3); }
+.generate-row { display: flex; gap: 8px; align-items: center; }
+.generate-row .btn-generate { flex: 1; }
+/* 취소 — App.vue 의 T2I 취소 버튼과 같은 모양 */
+.btn-cancel {
+  flex: 0 0 46px; width: 46px; height: 46px; background: transparent;
+  border: 2px solid var(--state-alert-fg); border-radius: var(--radius-pill);
+  color: var(--state-alert-fg); cursor: pointer; transition: var(--transition);
+}
+.btn-cancel:hover:not(:disabled) { background: var(--state-alert); color: #fff; }
+.btn-cancel:disabled { opacity: 0.5; cursor: default; }
 
 /* Canvas Area */
 .canvas-area { flex: 1; padding: 24px; display: flex; align-items: center; justify-content: center; }

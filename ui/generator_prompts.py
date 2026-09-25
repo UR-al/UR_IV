@@ -53,7 +53,8 @@ class PromptHandlingMixin:
         preserve_locked=True (프롬프트 당겨오기): 선행/후행/작가 칸을 덮어쓰지 않고,
         당겨오는 태그를 그 칸들과 중복되면 제거한다 (인물수/캐릭터/main은 그대로 override).
         comma_only=True: 항상 콤마로만 토큰 분리 (당겨오기/EXIF — 다중단어 태그를
-        공백으로 쪼개지 않음). False면 콤마 없을 때 공백 분리(검색 결과 호환)."""
+        공백으로 쪼개지 않음). False면 콤마 없을 때 공백 분리(검색 결과 호환).
+        이 플래그는 데이터 태그에만 쓴다 — 제외 규칙 칸은 늘 쉼표·줄바꿈으로만 나눈다(core.exclude_rules)."""
         # 1. 데이터 추출
         general_str = str(bundle.get('general', ''))
         artist_str = str(bundle.get('artist', ''))
@@ -89,102 +90,16 @@ class PromptHandlingMixin:
         # ★★★ 디버그: 원본 general_list 개수 ★★★
         _logger.debug(f"원본 general_list: {len(general_list)}개")
         
-        # 3. 제외 프롬프트 적용
-        exclude_text = self.exclude_prompt_local_input.toPlainText()
-        exclude_rules = to_list(exclude_text)
-        
-        # 문법:
-        #   단어       → 포함하는 모든 태그 제거 (ex: short → short hair, very short hair)
-        #   *단어      → 완전 일치만 제거 (ex: *blue hair → blue hair만)
-        #   _단어      → 앞에 뭔가 붙은 태그 제거 (ex: _short → very short, too short)
-        #   단어_      → 뒤에 뭔가 붙은 태그 제거 (ex: short_ → short hair, short pants)
-        #   _단어_     → 포함하는 모든 태그 (단어와 동일하나 명시적)
-        #   ~단어      → 예외 완전 일치 (제외하지 않고 유지)
-        #   ~_단어     → 예외 접미 (ex: ~_tank top → tank top, blue tank top 유지)
-        #   ~단어_     → 예외 접두 (ex: ~tank_ → tank top 유지)
-        contains_exc, exact_exc, prefix_exc, suffix_exc = [], set(), [], []
-        excepts_exact, excepts_suffix, excepts_prefix, excepts_contains = set(), [], [], []
-        for r in exclude_rules:
-            r = r.strip()
-            if not r:
-                continue
-            if r.startswith('~'):
-                inner = r[1:].strip()
-                if inner.startswith('_') and inner.endswith('_') and len(inner) > 2:
-                    excepts_contains.append(inner[1:-1].strip())  # ~_tank top_ → "tank top" 포함 태그 유지
-                elif inner.startswith('_'):
-                    excepts_suffix.append(inner[1:].strip())  # ~_tank top → "tank top"으로 끝나는 태그 유지
-                elif inner.endswith('_'):
-                    excepts_prefix.append(inner[:-1].strip())  # ~tank_ → "tank"로 시작하는 태그 유지
-                else:
-                    excepts_exact.add(inner)
-            elif r.startswith('*'):
-                exact_exc.add(r[1:].strip())
-            elif r.startswith('_') and r.endswith('_') and len(r) > 2:
-                contains_exc.append(r[1:-1].strip())
-            elif r.startswith('_'):
-                suffix_exc.append(r[1:].strip())
-            elif r.endswith('_'):
-                prefix_exc.append(r[:-1].strip())
-            else:
-                contains_exc.append(r)
-
-        def _normalize(tag):
-            return tag.replace('_', ' ').strip().lower()
-
-        norm_exact = {_normalize(e) for e in exact_exc}
-        norm_excepts_exact = {_normalize(e) for e in excepts_exact}
-        norm_excepts_suffix = [_normalize(s) for s in excepts_suffix if s]
-        norm_excepts_prefix = [_normalize(p) for p in excepts_prefix if p]
-        norm_excepts_contains = [_normalize(c) for c in excepts_contains if c]
-        norm_contains = [_normalize(c) for c in contains_exc if c]
-        norm_prefix = [_normalize(p) for p in prefix_exc if p]
-        norm_suffix = [_normalize(s) for s in suffix_exc if s]
-
-        def _is_excepted(nt):
-            """예외 규칙에 해당하면 True (유지)"""
-            if nt in norm_excepts_exact:
-                return True
-            if any(nt.endswith(s) for s in norm_excepts_suffix):
-                return True
-            if any(nt.startswith(p) for p in norm_excepts_prefix):
-                return True
-            if any(c in nt for c in norm_excepts_contains):
-                return True
-            return False
-
-        def filter_tags(tags, proper=False):
-            res = []
-            for t in tags:
-                nt = _normalize(t)
-                # 예외 규칙: 유지
-                if _is_excepted(nt):
-                    res.append(t)
-                    continue
-                # 완전 일치
-                if nt in norm_exact:
-                    continue
-                # 포함: general은 부분일치, 고유명사(캐릭터/작품/작가)는 '전체 태그 일치'만.
-                #   (예: 'tank' 규칙이 캐릭터 'wakan tanka'(=wakan_tanka)를 부분일치로 통째 지우던 버그 방지.
-                #    general의 'tank top' 제거는 그대로 유지.)
-                if proper:
-                    if any(nt == c for c in norm_contains):
-                        continue
-                else:
-                    if any(c in nt for c in norm_contains):
-                        continue
-                # 접두/접미는 태그 경계 기준이라 고유명사에도 안전 (그대로 적용)
-                if any(nt.startswith(p) for p in norm_prefix):
-                    continue
-                if any(nt.endswith(s) for s in norm_suffix):
-                    continue
-                res.append(t)
-            return res
-
-        artist_list = filter_tags(artist_list, proper=True)
-        copyright_list = filter_tags(copyright_list, proper=True)
-        character_list = filter_tags(character_list, proper=True)
-        general_list = filter_tags(general_list)
+        # 3. 제외 프롬프트 적용 — 문법(9종)·나누기·적용은 core/exclude_rules 가 단일 출처다.
+        #    규칙 텍스트는 태그용 to_list 로 나누지 않는다: 쉼표가 없으면 공백 분리 + 밑줄→공백을
+        #    하는 to_list 는 `_short`(접미) 하나짜리 규칙을 `short`(포함)로 바꿔 버렸다.
+        #    고유명사 칸(캐릭터·작품·작가)은 proper=True — 포함 규칙은 태그 전체 일치만 건다.
+        from core.exclude_rules import parse_exclude_rules
+        exclude_rules = parse_exclude_rules(self.exclude_prompt_local_input.toPlainText())
+        artist_list = exclude_rules.filter_tags(artist_list, proper=True)
+        copyright_list = exclude_rules.filter_tags(copyright_list, proper=True)
+        character_list = exclude_rules.filter_tags(character_list, proper=True)
+        general_list = exclude_rules.filter_tags(general_list)
 
         # 4. 제거 토글 적용
         

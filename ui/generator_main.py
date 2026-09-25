@@ -635,17 +635,20 @@ class GeneratorMainUI(
                             'character_presets_export', 'character_presets_import'):
                 handle_settings_data_action(self, action, payload)
 
-            # 11. I2I/Inpaint 생성 (Vue payload를 탭에 주입 후 실행)
+            # 11. I2I/Inpaint 생성 — Vue 페이로드만으로 요청을 만든다(숨은 PyQt 탭은 은퇴했다 —
+            #     tests/test_legacy_i2i_inpaint_upscale_retirement.py).
             elif action == 'generate_i2i':
-                if hasattr(self, 'i2i_tab'):
-                    self.i2i_tab.main_window = self
-                    self.i2i_tab.generate_from_payload(payload)
+                from ui.i2i_actions import start_vue_i2i
+                start_vue_i2i(self, payload)
+            elif action == 'cancel_i2i':
+                # I2IView 취소 버튼 — 실행 중 재요청은 거절되므로 멈춘 생성을 멈출 길이 여기뿐이다.
+                from ui.i2i_actions import cancel_vue_i2i
+                cancel_vue_i2i(self)
             elif action == 'generate_inpaint':
-                # Vue 페이로드만으로 요청을 만든다 — 숨은 레거시 InpaintTab 을 거치지 않는다.
                 from ui.inpaint_actions import start_vue_inpaint
                 start_vue_inpaint(self, payload)
 
-            # 12. 배치/업스케일 — 숨은 레거시 BatchTab/UpscaleTab 을 거치지 않는다.
+            # 12. 배치/업스케일 — Vue 페이로드만 쓴다(숨은 레거시 BatchTab/UpscaleTab 은 은퇴했다).
             elif action == 'start_batch':
                 from ui.batch_actions import start_vue_batch
                 start_vue_batch(self, payload)
@@ -2788,7 +2791,9 @@ class GeneratorMainUI(
         # QThread 워커들 정지·짧게 대기 — Python 데몬 스레드가 아니므로 그냥 두고 os._exit하면
         # 실행 중 파괴로 Qt 경고/드문 크래시 가능. 각 ~0.5초만 기다리고 안 끝나면 포기(워치독).
         # (Ollama 워커는 브리지가 보관하고 취소할 수 없는 HTTP 라 기다려도 이득이 없다 — 대상 아님)
-        for _name in ('gen_worker', '_search_worker', 'info_worker'):
+        # Vue I2I·인페인트 워커(ui/i2i_actions·ui/inpaint_actions)도 GPU 작업이라 취소(+interrupt)한다.
+        for _name in ('gen_worker', '_search_worker', 'info_worker',
+                      '_vue_i2i_worker', '_vue_inpaint_worker'):
             try:
                 w = getattr(self, _name, None)
                 if w is None or not hasattr(w, 'isRunning') or not w.isRunning():

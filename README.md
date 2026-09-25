@@ -315,8 +315,6 @@ Python
   Vue 의 `widgets.<id>` 키와 프록시 `widget_id` 가 같다(예: `widgets.character_input` ↔ `LineEditProxy(b, 'character_input')`).
 - **Web·Backend 탭**은 Vue 뷰가 아니라 PyQt 화면이다. 레일에서 누르면 `native_tab_switch` 로 스택을 바꾼다.
 - **웹 모드**는 창 없이 같은 `GeneratorMainUI` 를 쓴다. 허용 목록만 노출하는 `WebBridgeFacade` 가 WebSocket 으로 연결되고, 호스트 전용 작업은 막힌다.
-- 숨겨진 PyQt `Img2ImgTab` 은 I2I 생성 경로와 설정 저장에, `InpaintTab` 은 설정 저장에만 아직 쓰인다.
-  `UpscaleTab` 은 만들어지기만 하고 쓰이지 않는다(업스케일은 `ui/upscale_actions.py`).
 
 ---
 
@@ -391,8 +389,8 @@ PromptPanel 의 `제외 (로컬)` 칸에 쓰고, `관리` 창에서 무엇이 �
 - 예외 규칙을 먼저 본다. 비교할 때 밑줄은 공백으로, 대소문자는 소문자로 맞춘다.
 - 이 규칙은 **데이터 태그를 프롬프트 칸에 채울 때**만 적용된다. Search 결과 적용, 랜덤 덱·자동화, 대기열 추가, 프롬프트 당겨오기가 그런 경우다. 직접 입력한 프롬프트에는 생성할 때 적용하지 않는다.
 - 캐릭터·작품·작가 칸에서는 `단어`, `_단어_` 가 태그 전체와 같을 때만 걸린다. 접두·접미 규칙은 그대로 적용된다.
-- 규칙은 콤마로 나눈다. 콤마가 없으면 공백으로 나누고 밑줄을 공백으로 바꾸므로 `_단어`·`단어_`·`~_단어` 같은 접두/접미 규칙이 깨진다.
-  규칙이 하나뿐이면 항상 끝에 콤마를 붙인다(예: `short_,`).
+- 규칙은 콤마나 줄바꿈으로만 나누고 공백으로는 나누지 않는다. 그래서 `long hair` 는 규칙 하나이고,
+  콤마 없이 하나만 쓴 규칙(`_short`, `~_tank_top`)도 종류가 그대로 유지된다.
 - `config/default_excludes.txt` 는 카테고리별로 정리한 **참고용** 목록이다. 앱이 읽거나 적용하지 않으니 필요한 줄을 제외 칸에 직접 붙여 넣는다.
 
 ### 와일드카드
@@ -521,8 +519,8 @@ PromptPanel 의 `제외 (로컬)` 칸에 쓰고, `관리` 창에서 무엇이 �
 ├── core/                   # Qt 없는 순수 로직
 ├── workers/                # QThread 워커
 ├── utils/                  # 로거, 와일드카드, 조건부 규칙, 태그 자동완성, 테마 등
-├── tabs/                   # Web·Backend 네이티브 화면 + 숨겨진 I2I/Inpaint/Upscale PyQt 탭
-├── widgets/                # 대기열 상태(QObject)·QueueManager, 작은 PyQt 위젯
+├── tabs/                   # Web·Backend 네이티브 화면
+├── widgets/                # 대기열 상태(QObject) — QueuePanel·QueueManager
 ├── frontend/               # Vue 3 + Vite 소스 (src/, dev/)
 ├── frontend_dist/          # Vue 빌드 결과 (커밋됨)
 ├── comfy_custom_nodes/     # 동봉 ComfyUI 노드 팩 ai_studio_forge_parity

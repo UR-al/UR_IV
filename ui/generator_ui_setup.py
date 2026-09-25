@@ -226,24 +226,11 @@ class UISetupMixin:
         # 결과는 vue_bridge 시그널로 간다. 히스토리·갤러리·즐겨찾기는 Vue 가 맡는다.
         # tests/test_legacy_dummies_retirement.py 가 __getattr__ 더미의 재등장을 막는다.
 
-        # 기존 PyQt 탭 인스턴스 (Python 백엔드에서 참조)
-        # (EventGen·XYZ Plot·PNG Info·Gallery 탭은 Vue 뷰로 대체돼 은퇴했다 —
-        #  tests/test_legacy_gallery_tabs_retirement.py)
-        from tabs.i2i_tab import Img2ImgTab
-        from tabs.inpaint_tab import InpaintTab
-        from tabs.upscale_tab import UpscaleTab
-        from tabs.browser_tab import BrowserTab
-        from tabs.backend_ui_tab import BackendUITab
-
-        self.i2i_tab = Img2ImgTab(self)
-        self.i2i_tab.setParent(None)
-        self.inpaint_tab = InpaintTab(self)
-        self.inpaint_tab.setParent(None)
-        self.upscale_tab = UpscaleTab(self)
-        self.upscale_tab.setParent(None)
-        # web_tab/backend_ui_tab은 위에서 _main_stack에 넣은 인스턴스를 그대로 사용한다.
-        # 여기서 다시 만들면 표시 중인 뷰와 설정/백엔드 로드 대상이 달라지고 Chromium
-        # 프로필도 불필요하게 두 벌 생성된다.
+        # 숨은 PyQt 탭은 더 만들지 않는다 — 남은 PyQt 화면은 위에서 _main_stack 에 넣은 Web·Backend
+        # 두 개뿐이다(다시 만들면 표시 중인 뷰와 설정/백엔드 로드 대상이 갈라지고 Chromium 프로필도
+        # 두 벌 생긴다). EventGen·XYZ Plot·PNG Info·Gallery(tests/test_legacy_gallery_tabs_retirement.py)와
+        # I2I·Inpaint·Upscale(tests/test_legacy_i2i_inpaint_upscale_retirement.py)은 Vue 뷰와
+        # ui/i2i_actions·inpaint_actions·upscale_actions 로 대체돼 은퇴했다.
 
         # prompt_settings.json 에서 Vue 위젯이 주인이 아닌 키(와일드카드 ON/OFF·레거시 클리너 두 옵션·
         # 글꼴) — 예전 숨은 SettingsTab 의 위젯 대신 순수 값 객체가 든다(audit #178).

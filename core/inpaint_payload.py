@@ -16,7 +16,6 @@ Vue 옵션 ↔ A1111/Forge 필드:
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Callable, Mapping, Optional
 
@@ -27,6 +26,13 @@ from core.image_payload import (
     encode_image_file,
     image_size_from_bytes,
     strip_data_url,
+)
+# 숫자 칸 규칙은 I2I(core/i2i_payload)와 한 벌 — parse_seed·MAX_SEED 는 이 모듈 이름으로도 남긴다.
+from core.request_numbers import (  # noqa: F401  (parse_seed·MAX_SEED 재노출)
+    MAX_SEED,
+    clamped_float as _clamped_float,
+    clamped_int as _clamped_int,
+    parse_seed,
 )
 
 # 화면 기본값 — 숨은 탭이 실제로 쓰던 값(원본 유지 · 마스크 영역만)과 같게 둔다.
@@ -45,7 +51,6 @@ MAX_STEPS = 150
 MAX_CFG = 30.0
 MAX_MASK_BLUR = 64
 MAX_PADDING = 256
-MAX_SEED = 2 ** 32 - 1
 
 
 @dataclass(frozen=True)
@@ -54,32 +59,6 @@ class InpaintRequest:
     source_path: str       # 경로로 받았으면 검증된 절대 경로, data URL 이면 ''
     width: int
     height: int
-
-
-def _finite_float(value, default: float) -> float:
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return default
-    return out if math.isfinite(out) else default
-
-
-def _clamped_int(value, default: int, lo: int, hi: int) -> int:
-    try:
-        out = int(float(str(value).strip()))
-    except (TypeError, ValueError, OverflowError):
-        return default
-    return max(lo, min(hi, out))
-
-
-def _clamped_float(value, default: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, _finite_float(value, default)))
-
-
-def parse_seed(value) -> int:
-    """'-1'·'' ·잘못된 값 → -1, 그 밖은 0..2^32-1 로 자른다."""
-    seed = _clamped_int(value, DEFAULT_SEED, -1, MAX_SEED)
-    return seed
 
 
 def _default_resolver(raw: str) -> Optional[str]:

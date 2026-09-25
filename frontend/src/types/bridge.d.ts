@@ -23,7 +23,7 @@ export type ActionName =
   | 'presets_export' | 'presets_import' | 'character_presets_export' | 'character_presets_import'
   | 'save_ui_prefs' | 'save_global_weights' | 'save_cond_rules' | 'save_tab_defaults' | 'set_tab_order'
   | 'send_to_i2i' | 'send_to_inpaint' | 'send_to_editor' | 'send_to_compare'
-  | 'generate_i2i' | 'generate_inpaint' | 'start_batch' | 'start_upscale' | 'start_xyz_plot'
+  | 'generate_i2i' | 'cancel_i2i' | 'generate_inpaint' | 'start_batch' | 'start_upscale' | 'start_xyz_plot'
   | 'run_adetailer_single' | 'run_adetailer_batch' | 'stop_adetailer_batch'
   | 'run_sam3_single' | 'run_sam3_batch' | 'run_refine' | 'open_ad_files' | 'open_ad_folder'
   | 'open_batch_files' | 'open_upscale_files'
@@ -72,7 +72,7 @@ export type BackendEvent =
   | 'searchResultsReady' | 'searchResultLineage' | 'searchStatus' | 'queueUpdated' | 'queueItemAdded' | 'queueCompleted'
   | 'uiPrefsLoaded' | 'condRulesLoaded' | 'loraStackLoaded' | 'globalWeightsLoaded'
   | 'promptOrderLoaded' | 'instantWildcardsList' | 'workflowProfilesList'
-  | 'editorImageLoaded' | 'editorWatermarkImageLoaded' | 'editorResult' | 'editorSaveResult' | 'editorAutoSaveReady' | 'yoloModelUpdated' | 'i2iImageLoaded' | 'inpaintImageLoaded'
+  | 'editorImageLoaded' | 'editorWatermarkImageLoaded' | 'editorResult' | 'editorSaveResult' | 'editorAutoSaveReady' | 'yoloModelUpdated' | 'i2iImageLoaded' | 'i2iJobState' | 'inpaintImageLoaded'
   | 'pngInfoImageLoaded'
   | 'compareImageLoaded' | 'galleryFolderLoaded' | 'galleryImagesReady' | 'thumbnailReady'
   | 'imageSearchTextsReady'
@@ -247,6 +247,13 @@ export interface BatchJobStatePayload {
   failed: number
   stopped: boolean
   output_dir: string
+}
+
+/** i2iJobState 이벤트 — Vue I2I 진행 (ui/i2i_actions.emit_job_state).
+ *  running 이면 I2IView 가 시작 버튼을 막고 취소 버튼(cancel_i2i)을 보인다. cancelling 은 취소 요청 뒤. */
+export interface I2IJobStatePayload {
+  running: boolean
+  cancelling: boolean
 }
 
 /** set_rating_filter 페이로드 — g/s/q/e 중 활성 등급 */

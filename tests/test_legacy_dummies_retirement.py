@@ -134,13 +134,16 @@ class BlanketDummyRetirementTests(unittest.TestCase):
         found = [f"{file}: {n}" for file, text in _ui_sources().items()
                  for n in sorted(set(names) & _code_names(text))]
         self.assertEqual(found, [])
-        widget_names = _code_names(_read('widgets/common_widgets.py'))
-        # 사용처(settings_tab·batch_tab·mosaic_panel·event_gen_tab·gallery_tab)가 은퇴한 위젯과
-        # 그 위젯만 쓰던 Qt import 도 남기지 않는다. NoScrollComboBox 는 inpaint_tab 이 쓴다.
+        # 사용처(settings_tab·batch_tab·mosaic_panel·event_gen_tab·gallery_tab)가 은퇴한 위젯은 지웠고,
+        # 마지막 NoScrollComboBox(숨은 InpaintTab 전용)도 탭과 함께 은퇴해 widgets/common_widgets.py
+        # 자체가 없어졌다(tests/test_legacy_i2i_inpaint_upscale_retirement.py). 어느 앱 소스에도 이 위젯
+        # 이름이 다시 나오지 않아야 한다.
+        self.assertFalse((ROOT / 'widgets' / 'common_widgets.py').exists())
         retired = {'ResolutionItemWidget', 'NoScrollDoubleSpinBox', 'NoScrollSpinBox', 'FlowLayout',
-                   'QSpinBox', 'QLayout', 'QRect', 'QSize'}
-        self.assertEqual(sorted(retired & widget_names), [])
-        self.assertIn('NoScrollComboBox', widget_names)
+                   'NoScrollComboBox'}
+        found = [f"{file}: {n}" for file, text in _ui_sources().items()
+                 for n in sorted(retired & _code_names(text))]
+        self.assertEqual(found, [])
 
     def test_proxies_have_no_noop_visibility_or_fake_document(self):
         from ui.widget_proxies import SliderProxy, TextEditProxy, _ProxyBase

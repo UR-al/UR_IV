@@ -22,7 +22,8 @@
   height: 54px;
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  /* 오른쪽 여백은 알림 종 자리다 (style.css --notif-gutter) — 썸네일 크기 슬라이더가 종에 닿았다 */
+  padding: 0 var(--notif-gutter) 0 20px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
 }

@@ -105,7 +105,7 @@ const presets: Preset[] = [
   { label: '스케치', name: 'sketch' },
   { label: '포스터', name: 'posterize' },
   { label: '비네트', name: 'vignette' },
-  { label: '노이즈제거', name: 'denoise' },
+  { label: '노이즈 제거', name: 'denoise' },
 ]
 
 // Live preview on slider change
@@ -276,6 +276,9 @@ function clearFilterSelection() {
   font-size: 12px;
   font-weight: var(--fw-bold);
   cursor: pointer;
+  /* 좁은 4열 격자라 긴 이름은 두 줄이 된다 — 글자 중간('노이즈제|거')이 아니라 단어 사이에서 끊는다 */
+  word-break: keep-all;
+  line-height: 1.15;
 }
 .preset-btn:hover {
   background-color: var(--bg-button-hover);

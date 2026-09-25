@@ -94,6 +94,19 @@ class VueBridgeTagDatabaseTests(unittest.TestCase):
         self.assertEqual(_CountingSet.scans, 0, "같은 규칙 재클릭·완전 일치는 사전을 훑지 않는다")
         self.assertEqual(database.catalog_reads, 1, "태그 사전은 한 번만 만든다")
 
+    def test_preview_reads_rules_with_the_application_parser(self):
+        db_patch, cls_patch = self._patched()
+        with db_patch, cls_patch:
+            bridge = VueBridge()
+            # 옛 미리보기는 '_'(빈 접미)를 모든 태그에 걸어 사전 전체(약 77만 개)를 돌려줬다 — 적용 쪽은 무시한다
+            self.assertEqual(json.loads(bridge.getExcludeMatches("_")), [])
+            self.assertEqual(json.loads(bridge.getExcludeMatches("__")), [])
+            # '_ hair' 는 적용 쪽처럼 접미 'hair' — 같은 캐시 칸을 쓴다
+            suffix = bridge.getExcludeMatches("_hair")
+            self.assertEqual(bridge.getExcludeMatches("_ hair"), suffix)
+            self.assertEqual(json.loads(suffix), ["long_hair", "short_hair"])
+            self.assertIn("suffix:hair", bridge._exclude_match_cache)
+
     def test_failed_vocabulary_build_is_not_cached_half_done(self):
         with patch("core.tag_database.get_tag_database", side_effect=RuntimeError("db down")):
             bridge = VueBridge()

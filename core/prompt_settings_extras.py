@@ -44,6 +44,10 @@ RETIRED_KEYS: dict[str, str] = {
     "bg_removal_model": "숨은 PyQt 에디터와 함께 은퇴 — Vue 배경 제거는 u2net 고정",
     "shortcuts": "utils/shortcut_manager 의 13개 단축키는 숨은 PyQt 에디터(MosaicEditor·InteractiveLabel)만 "
                  "읽었고 바꾸는 UI 는 숨은 설정 탭뿐이었다 — 둘 다 은퇴했고 Vue 단축키는 프론트가 정한다",
+    "i2i_settings": "숨은 PyQt Img2ImgTab 과 함께 은퇴 — Vue I2I 화면은 이 값을 읽은 적이 없고 생성은 Vue "
+                    "페이로드의 값을 전부 덮어써 썼다(지금은 core/i2i_payload 가 페이로드만 본다)",
+    "inpaint_settings": "숨은 PyQt InpaintTab 과 함께 은퇴 — Vue 인페인트 화면은 이 값을 읽은 적이 없고 "
+                        "생성은 core/inpaint_payload 가 Vue 페이로드만 본다",
 }
 
 

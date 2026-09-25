@@ -40,8 +40,8 @@
 
     <!-- 하단 정보 바 -->
     <div class="info-bar" v-if="imageUrl">
-      <span class="info-item">해상도 {{ resolution }}</span>
-      <span class="info-item">시드 {{ seed }}</span>
+      <span class="info-item">해상도 {{ displayInfo(resolution) }}</span>
+      <span class="info-item">시드 {{ displayInfo(seed) }}</span>
       <button class="explore-btn" @click="exploreSeed" v-if="seed"><Icon name="search" /> 시드 탐색</button>
     </div>
   </div>
@@ -51,6 +51,7 @@
 import { computed, ref, watch } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
 import { mediaUrl } from '../utils/media.js'
+import { displayInfo } from '../utils/imageInfo'
 
 const props = withDefaults(defineProps<{
   imageUrl?: string

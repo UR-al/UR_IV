@@ -388,7 +388,7 @@ class GroupBoxProxy(_ProxyBase):
 
 
 class SliderProxy(_ProxyBase):
-    """Steps/CFG 등 슬라이더+입력 쌍 프록시 (NumericSlider 패턴 호환)"""
+    """Steps/CFG 등 슬라이더+입력 쌍 프록시"""
     textChanged = pyqtSignal(str)
     editingFinished = pyqtSignal()
 

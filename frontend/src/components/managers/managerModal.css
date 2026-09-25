@@ -48,6 +48,8 @@
 .wc-spacer { flex: 1; }
 .wc-save-btn { padding: 5px 14px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
 .wc-save-btn:hover { border-color: var(--accent); color: var(--accent); }
+/* 삽입 위치 드롭다운이 폭을 다 가져가 '사용'·'저장'이 글자마다 세로로 쪼개졌다 — 버튼은 줄지 않는다 */
+.wc-use-btn, .wc-save-btn { white-space: nowrap; flex-shrink: 0; }
 .wc-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-size: 13px; }
 
 /* 워크플로우 프로파일 목록 */

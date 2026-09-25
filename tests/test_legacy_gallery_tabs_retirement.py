@@ -123,8 +123,10 @@ class LegacyGalleryTabsRetirementTests(unittest.TestCase):
             offenders.extend(f"{path.name}: {name}" for name in found)
         self.assertEqual(offenders, [])
 
-    def test_hidden_i2i_and_inpaint_tabs_no_longer_feed_the_invisible_gallery(self):
-        for rel in ("tabs/i2i_tab.py", "tabs/inpaint_tab.py", "ui/inpaint_actions.py"):
+    def test_i2i_and_inpaint_results_no_longer_feed_the_invisible_gallery(self):
+        # (숨은 I2I·Inpaint 탭 자체는 은퇴했다 — 결과 처리는 이 두 접착층뿐이다.
+        #  tests/test_legacy_i2i_inpaint_upscale_retirement.py)
+        for rel in ("ui/i2i_actions.py", "ui/inpaint_actions.py"):
             with self.subTest(file=rel):
                 names = _identifiers(_read(rel))
                 self.assertNotIn("add_image_to_gallery", names)

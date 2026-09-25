@@ -89,6 +89,9 @@ class VueBridge(QObject):
     captionModelDirSelected = pyqtSignal(str)  # CAFormer model.onnx 폴더
     captionRuntimeReady = pyqtSignal(str)    # JSON {caformer,torii,onnxruntime}
     i2iImageLoaded = pyqtSignal(str)     # file path
+    # Vue I2I 진행 — JSON {running, cancelling} (ui/i2i_actions.emit_job_state). I2IView 가
+    # 실행 중 시작 버튼을 막고 취소 버튼(cancel_i2i)을 보여 준다.
+    i2iJobState = pyqtSignal(str)
     galleryFolderLoaded = pyqtSignal(str)  # folder path
     # delete_image 결과 1건 — JSON {path(요청 원문), ok, removed, level, message}.
     # 프론트는 removed 가 참일 때만 갤러리·폴더 캐시·히스토리에서 뺀다(core/image_delete.py).
@@ -2741,13 +2744,15 @@ class VueBridge(QObject):
 
         GUI 스레드 슬롯이다. 태그 사전(약 77만 개)은 처음 한 번만 만들고, 규칙별 결과를
         기억해 같은 규칙을 다시 눌러도 사전을 다시 훑지 않는다. 완전 일치(*태그)는
-        집합 조회 한 번으로 끝난다(core.exclude_rule_match).
+        집합 조회 한 번으로 끝난다(core.exclude_rule_match). 규칙 종류는 프롬프트 적용과
+        같은 파서(core.exclude_rules)가 가린다.
         """
         try:
             from core.exclude_rule_match import match_exclude_rule, normalize_exclude_rule
 
+            # 캐시 키 = 파싱된 규칙 (비교 방식:키워드). 지우는 태그가 없는 규칙(빈 칸·~유지)은 ""
             key = normalize_exclude_rule(rule)
-            if not key or key.startswith('~'):
+            if not key:
                 return json.dumps([])
 
             cache = getattr(self, '_exclude_match_cache', None)
@@ -2757,7 +2762,7 @@ class VueBridge(QObject):
             if cached is not None:
                 return cached
 
-            result = json.dumps(match_exclude_rule(key, self._exclude_vocabulary()))
+            result = json.dumps(match_exclude_rule(rule, self._exclude_vocabulary()))
             cache[key] = result
             while len(cache) > self._EXCLUDE_MATCH_CACHE_MAX:
                 cache.pop(next(iter(cache)))

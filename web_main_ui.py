@@ -211,6 +211,8 @@ _WEB_SIGNALS = frozenset({
     "editorImageLoaded", "editorResult", "captionFilesSelected", "captionProgress",
     "captionDone", "captionOutDirSelected", "captionModelDirSelected", "captionRuntimeReady",
     "i2iImageLoaded", "galleryFolderLoaded",
+    # I2I 진행 — 빠지면 웹 모드에서 I2I 취소 버튼이 뜨지 않아 멈춘 생성을 멈출 길이 없다.
+    "i2iJobState",
     # 삭제 결과 — 빠지면 웹 모드에서 휴지통으로 옮겨도 목록에서 영영 안 빠진다.
     "imageDeleteResult",
     "inpaintImageLoaded", "searchStatus", "searchResultLineage", "loraStackLoaded",

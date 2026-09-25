@@ -1,7 +1,7 @@
 """회귀 방지: 창 표시 전 import 경로가 무거운 패키지(pandas·cv2·jsonschema)와 노드 팩을 끌어오지 않는다.
 
 new_main_ui.py / web_main_ui.py 는 창을 띄우기 전에 ``ui.generator_main`` 을 import 하고,
-GeneratorMainUI._setup_ui 가 숨은 레거시 탭을 import·생성한다. 이 경로의 모듈 최상단 import 는
+GeneratorMainUI._setup_ui 가 Web·Backend 네이티브 탭을 import·생성한다. 이 경로의 모듈 최상단 import 는
 그대로 기동 임계 경로가 된다 — 쓰는 메서드 안(또는 utils.lazy_import)으로 미룬다.
 
 또 패키지 ``__init__`` 이 서브모듈을 재수출하지 않는지 본다. 재수출은 서브모듈 하나만 import
@@ -22,9 +22,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 # ui/generator_ui_setup.py 의 _setup_ui 가 창 표시 전에 import 하는 탭 모듈들.
+# (숨은 I2I·Inpaint·Upscale 탭은 은퇴했다 — tests/test_legacy_i2i_inpaint_upscale_retirement.py)
 _SETUP_UI_TABS = (
     "tabs.browser_tab", "tabs.backend_ui_tab",
-    "tabs.i2i_tab", "tabs.inpaint_tab", "tabs.upscale_tab",
 )
 _HEAVY = ("pandas", "pyarrow", "cv2", "jsonschema", "comfy_custom_nodes.ai_studio_forge_parity")
 
@@ -63,7 +63,7 @@ class StartupImportTests(unittest.TestCase):
         )
 
     def test_package_inits_do_not_reexport_submodules(self):
-        loaded = _loaded_after("import workers.generation_worker\nimport ui.vue_bridge\nimport widgets.common_widgets\nimport core.file_naming")
+        loaded = _loaded_after("import workers.generation_worker\nimport ui.vue_bridge\nimport widgets.queue_manager\nimport core.file_naming")
         self.assertFalse(loaded["workers.search_worker"], "workers/__init__ 이 search_worker 를 재수출한다")
         self.assertFalse(loaded["ui.generator_main"], "ui/__init__ 이 메인 창을 재수출한다")
         self.assertFalse(loaded["cv2"], "widgets/__init__ 이 cv2 를 쓰는 위젯을 재수출한다")

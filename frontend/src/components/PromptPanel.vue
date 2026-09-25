@@ -70,7 +70,7 @@
     <div id="sec-character" class="glass-card">
       <div class="card-header">캐릭터 · 모델</div>
       <div class="input-group">
-        <label>글자 수</label>
+        <label>인물 수</label>
         <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.char_count_input" :color-fn="() => 'bc-count'" placeholder="인물수..." />
         <input v-else type="text" data-prompt-undo v-model="widgets.char_count_input" placeholder="e.g. 1girl, 2girls..." />
       </div>
@@ -230,9 +230,10 @@
           <span>~_단어 → 예외 접미 유지 (~_tank top → tank top 유지)</span>
           <span>~단어_ → 예외 접두 유지 (~tank_ → tank top 유지)</span>
           <span>~_단어_ → 예외 포함 유지 (~_tank top_ → blue tank top 등 유지)</span>
+          <span>규칙은 쉼표·줄바꿈으로 나눈다 — 공백은 규칙 안 글자 (long hair 는 규칙 하나)</span>
         </div>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.exclude_prompt_local_input" :color-fn="excludeColorFn" placeholder="제외 규칙 추가..." />
-        <textarea v-else data-prompt-undo v-model="widgets.exclude_prompt_local_input" class="auto-grow exclude-textarea" placeholder="제외 규칙 (쉼표 구분)..." rows="2"></textarea>
+        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.exclude_prompt_local_input" :color-fn="excludeColorFn" :split="splitExcludeRules" :join="rewriteExcludeRules" placeholder="제외 규칙 추가..." />
+        <textarea v-else data-prompt-undo v-model="widgets.exclude_prompt_local_input" class="auto-grow exclude-textarea" placeholder="제외 규칙 (쉼표·줄바꿈 구분)..." rows="2"></textarea>
       </details>
     </details>
 
@@ -275,11 +276,11 @@
                   "{{ excludeRules[selectedExRule] }}" — {{ currentExMatches.length }}개 매칭
                 </div>
                 <div class="em-match-list">
-                  <button v-for="tag in currentExMatches" :key="tag" class="em-tag"
-                    :class="{ excepted: isExcepted(tag) }"
-                    @click="toggleException(tag)"
-                    @contextmenu.prevent="addExactExclude(tag)">
-                    {{ tag.replace(/_/g, ' ') }}
+                  <button v-for="item in currentExMatchItems" :key="item.tag" class="em-tag"
+                    :class="{ excepted: item.excepted }" :title="item.hint"
+                    @click="toggleException(item.tag)"
+                    @contextmenu.prevent="addExactExclude(item.tag)">
+                    {{ item.label }}
                   </button>
                 </div>
               </template>
@@ -305,6 +306,10 @@ import { usePromptUndo } from '../composables/usePromptUndo'
 import { isImeComposing } from '../utils/imeComposition'
 import { isPanelOnTop, promptUndoCommand } from '../utils/promptUndoKeys'
 import { createExcludeMatchRequests, parseExcludeMatches } from '../utils/excludeMatches'
+import {
+  addExactExcludeRule, appendExcludeRule, buildExcludeKeepIndex, excludeRuleColorClass, keepToggleHint,
+  rewriteExcludeRules, splitExcludeRules, toggleKeepExact,
+} from '../utils/excludeRules'
 import { GENERATION_FAMILY_ITEMS, familyRestoreAction, isKrea2Family, storedFamilyLabel } from '../utils/generationFamily'
 import { storedOllamaModel, storedOllamaUrl } from '../utils/ollamaPrefs'
 import {
@@ -565,15 +570,12 @@ const blockColorCache = ref<Record<string, string>>({})
 
 // ── Exclude Manager ──
 const showExcludeManager = ref(false)
-const excludeRuleCount = computed(() =>
-  (widgets.exclude_prompt_local_input || '').split(',').filter((t: string) => t.trim()).length)
 const selectedExRule = ref<any>(-1)
 const excludeMatches = ref<Record<string, string[]>>({})  // {규칙텍스트: [tags]} — 인덱스 아닌 규칙 문자열로 키잉(중간 삭제/순서변경에도 안 어긋남)
 
-const excludeRules = computed(() => {
-  const text = widgets.exclude_prompt_local_input || ''
-  return text.split(',').map((t: string) => t.trim()).filter(Boolean)
-})
+// 규칙 나누기는 적용 쪽(core/exclude_rules)과 같은 정의 — 쉼표·줄바꿈만, 공백으로는 나누지 않는다
+const excludeRules = computed(() => splitExcludeRules(widgets.exclude_prompt_local_input || ''))
+const excludeRuleCount = computed(() => excludeRules.value.length)
 
 // 매니저 규칙 검색 — 원본 인덱스(i)를 함께 들고 다녀 selectedExRule/remove가 정확히 동작
 const exRuleSearch = ref('')
@@ -628,7 +630,8 @@ function finishEditExRule(idx: any) {
   if (!newText) { removeExcludeRule(idx); return }
   const rules = excludeRules.value.slice()
   rules[idx] = newText
-  widgets.exclude_prompt_local_input = rules.join(', ')
+  // 칸을 다시 쓸 때는 바뀐 규칙 자리만 고친다 — 한 줄에 한 규칙·카테고리별 줄 배치가 남는다
+  widgets.exclude_prompt_local_input = rewriteExcludeRules(widgets.exclude_prompt_local_input || '', rules)
   // 매칭 갱신
   selectedExRule.value = idx
   loadExcludeMatches(newText)
@@ -637,43 +640,42 @@ function finishEditExRule(idx: any) {
 function addExcludeRule() {
   const rule = newExcludeRule.value.trim()
   if (!rule) return
-  const cur = widgets.exclude_prompt_local_input || ''
-  widgets.exclude_prompt_local_input = cur ? cur + ', ' + rule : rule
+  widgets.exclude_prompt_local_input = appendExcludeRule(widgets.exclude_prompt_local_input || '', rule)
   newExcludeRule.value = ''
 }
 
 function removeExcludeRule(idx: any) {
   const rules = excludeRules.value.slice()
   rules.splice(idx, 1)
-  widgets.exclude_prompt_local_input = rules.join(', ')
+  widgets.exclude_prompt_local_input = rewriteExcludeRules(widgets.exclude_prompt_local_input || '', rules)
   if (selectedExRule.value >= rules.length) selectedExRule.value = -1
 }
 
-function isExcepted(tag: string) {
-  const cur = (widgets.exclude_prompt_local_input || '').toLowerCase()
-  return cur.includes('~' + tag.toLowerCase())
-}
+// 예외 표시 — 적용과 같은 판정(~완전일치뿐 아니라 ~_x·~x_·~_x_ 패턴 예외도)으로 칠한다.
+// 색인은 칸 텍스트가 바뀔 때만, 태그별 판정은 매칭 목록이 바뀔 때만 만든다 — 렌더마다 태그마다
+// 규칙 전체를 다시 나누면 규칙 검색·추가 칸 한 글자마다 매칭 수천 개 × 규칙 수백 개를 돌았다.
+const excludeKeepIndex = computed(() => buildExcludeKeepIndex(widgets.exclude_prompt_local_input || ''))
+const currentExMatchItems = computed(() => {
+  const keep = excludeKeepIndex.value
+  return currentExMatches.value.map((tag: string) => {
+    const keptBy = keep.keptBy(tag)
+    return { tag, label: tag.replace(/_/g, ' '), excepted: keptBy !== null, hint: keepToggleHint(keptBy) }
+  })
+})
 
 function addExactExclude(tag: string) {
-  // 우클릭: *완전일치 제외 규칙 추가
+  // 우클릭: *완전일치 제외 규칙 추가 (같은 태그의 완전 일치 규칙이 있으면 그대로)
   const cur = widgets.exclude_prompt_local_input || ''
-  const rule = '*' + tag
-  if (!cur.includes(rule)) {
-    widgets.exclude_prompt_local_input = cur ? cur + ', ' + rule : rule
-  }
+  const next = addExactExcludeRule(cur, tag)
+  if (next !== cur) widgets.exclude_prompt_local_input = next
 }
 
 function toggleException(tag: string) {
+  // ~태그 예외 추가 / 해제 (해제는 같은 태그를 가리키는 ~완전일치 규칙 모두,
+  // 패턴 예외로만 유지되는 태그는 그대로 — utils/excludeRules.toggleKeepExact)
   const cur = widgets.exclude_prompt_local_input || ''
-  const exception = '~' + tag
-  if (isExcepted(tag)) {
-    // 예외 해제 — ~tag 제거
-    const rules = cur.split(',').map((r: string) => r.trim()).filter((r: string) => r.toLowerCase() !== exception.toLowerCase())
-    widgets.exclude_prompt_local_input = rules.join(', ')
-  } else {
-    // 예외 추가
-    widgets.exclude_prompt_local_input = cur ? cur + ', ' + exception : exception
-  }
+  const next = toggleKeepExact(cur, tag)
+  if (next !== cur) widgets.exclude_prompt_local_input = next
 }
 
 // 최종 프롬프트 블록 변경 시 → 원본 필드에서 태그 제거
@@ -696,14 +698,9 @@ function onTotalBlockChange(newVal: string) {
   }
 }
 
+// 규칙 종류별 색 — 예외(초록)·완전 일치(노랑)·포함(bc-nsfw)·접미(주황)·접두(보라). 분류는 파서와 같다.
 function excludeColorFn(text: string) {
-  const t = text.trim()
-  if (t.startsWith('~')) return 'bc-action'       // 예외 계열 (초록)
-  if (t.startsWith('*')) return 'bc-expression'   // 완전 일치 (노랑)
-  if (t.startsWith('_') && t.endsWith('_')) return 'bc-nsfw'
-  if (t.startsWith('_')) return 'bc-body'         // 끝 매치 (주황)
-  if (t.endsWith('_')) return 'bc-clothing'       // 시작 매치 (보라)
-  return 'bc-nsfw'
+  return excludeRuleColorClass(text)
 }
 
 function blockColorClass(text: string) {

@@ -198,12 +198,8 @@ class SettingsMixin:
             # 워크플로라, 연결 전에 저장(게이트)하거나 끊긴 채 종료하면 둘이 갈라진다. 모르면 null.
             "comfyui_model_workflow_path": self._model_workflow_baseline(),
 
-            # I2I 탭 설정
-            "i2i_settings": self._get_i2i_settings() if hasattr(self, 'i2i_tab') else {},
-
-            # Inpaint 탭 설정
-            "inpaint_settings": self._get_inpaint_settings() if hasattr(self, 'inpaint_tab') else {},
-
+            # (i2i_settings·inpaint_settings 는 숨은 PyQt I2I·Inpaint 탭과 함께 은퇴 — Vue 화면이 읽은 적이
+            #  없고 생성은 Vue 페이로드만 쓴다. core/prompt_settings_extras.RETIRED_KEYS)
         }
         return settings
 
@@ -297,15 +293,8 @@ class SettingsMixin:
             # (갤러리 폴더는 Vue 갤러리가 ui_prefs 에서 읽는다 — 숨은 PyQt 갤러리 탭은 은퇴했다)
             migrate_legacy_gallery_folder(settings)
 
-            # I2I 탭 복원
-            i2i_s = settings.get("i2i_settings", {})
-            if i2i_s and hasattr(self, 'i2i_tab'):
-                self._apply_i2i_settings(i2i_s)
-
-            # Inpaint 탭 복원
-            inp_s = settings.get("inpaint_settings", {})
-            if inp_s and hasattr(self, 'inpaint_tab'):
-                self._apply_inpaint_settings(inp_s)
+            # (옛 파일의 i2i_settings·inpaint_settings 는 읽지 않는다 — 숨은 PyQt I2I·Inpaint 탭과 함께
+            #  은퇴했고 Vue 화면은 그 값을 쓴 적이 없다. core/prompt_settings_extras.RETIRED_KEYS)
 
             # 백엔드 설정 복원
             if "backend_type" in settings:
@@ -630,70 +619,6 @@ class SettingsMixin:
         from core.sam3_controlnet import apply_settings as _apply_sam3_cn
         _apply_sam3_cn(widgets, settings)
         return misses
-
-    # ── I2I 탭 설정 ──
-
-    def _get_i2i_settings(self) -> dict:
-        """I2I 탭 설정 가져오기"""
-        tab = self.i2i_tab
-        return {
-            "prompt": tab.prompt_text.toPlainText(),
-            "negative_prompt": tab.neg_prompt_text.toPlainText(),
-            "denoising": tab.denoise_input.text(),
-            "resize_mode": tab.resize_combo.currentIndex(),
-            "width": tab.width_input.text(),
-            "height": tab.height_input.text(),
-            "steps": tab.steps_input.text(),
-            "cfg": tab.cfg_input.text(),
-            "seed": tab.seed_input.text(),
-        }
-
-    def _apply_i2i_settings(self, s: dict):
-        """I2I 탭 설정 적용"""
-        tab = self.i2i_tab
-        tab.prompt_text.setPlainText(s.get("prompt", ""))
-        tab.neg_prompt_text.setPlainText(s.get("negative_prompt", ""))
-        tab.denoise_input.setText(s.get("denoising", "0.75"))
-        tab.resize_combo.setCurrentIndex(s.get("resize_mode", 0))
-        tab.width_input.setText(s.get("width", "1024"))
-        tab.height_input.setText(s.get("height", "1024"))
-        tab.steps_input.setText(s.get("steps", "20"))
-        tab.cfg_input.setText(s.get("cfg", "7.0"))
-        tab.seed_input.setText(s.get("seed", "-1"))
-
-    # ── Inpaint 탭 설정 ──
-
-    def _get_inpaint_settings(self) -> dict:
-        """Inpaint 탭 설정 가져오기"""
-        tab = self.inpaint_tab
-        return {
-            "prompt": tab.prompt_text.toPlainText(),
-            "negative_prompt": tab.neg_prompt_text.toPlainText(),
-            "denoising": tab.denoise_input.text(),
-            "fill_mode": tab.fill_combo.currentIndex(),
-            "mask_blur": tab.mask_blur_input.text(),
-            "full_res": tab.chk_full_res.isChecked(),
-            "padding": tab.padding_input.text(),
-            "steps": tab.steps_input.text(),
-            "cfg": tab.cfg_input.text(),
-            "seed": tab.seed_input.text(),
-            "brush_size": tab.brush_slider.value(),
-        }
-
-    def _apply_inpaint_settings(self, s: dict):
-        """Inpaint 탭 설정 적용"""
-        tab = self.inpaint_tab
-        tab.prompt_text.setPlainText(s.get("prompt", ""))
-        tab.neg_prompt_text.setPlainText(s.get("negative_prompt", ""))
-        tab.denoise_input.setText(s.get("denoising", "0.75"))
-        tab.fill_combo.setCurrentIndex(s.get("fill_mode", 1))
-        tab.mask_blur_input.setText(s.get("mask_blur", "4"))
-        tab.chk_full_res.setChecked(s.get("full_res", True))
-        tab.padding_input.setText(s.get("padding", "32"))
-        tab.steps_input.setText(s.get("steps", "20"))
-        tab.cfg_input.setText(s.get("cfg", "7.0"))
-        tab.seed_input.setText(s.get("seed", "-1"))
-        tab.brush_slider.setValue(s.get("brush_size", 30))
 
     # ── 백엔드 설정 헬퍼 ──
 

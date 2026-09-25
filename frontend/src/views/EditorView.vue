@@ -1558,9 +1558,11 @@ onUnmounted(() => {
 <style scoped>
 .editor-view { width: 100%; height: 100%; display: flex; flex-direction: column; }
 
+/* 오른쪽 여백은 알림 종 자리다 (style.css --notif-gutter) — 이 줄은 창 오른쪽 끝까지 차서
+   마지막 '닫기' 버튼이 종 밑에 깔려 눌리지 않았다 */
 .top-bar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 12px; background: var(--bg-secondary); flex-shrink: 0;
+  padding: 6px var(--notif-gutter) 6px 12px; background: var(--bg-secondary); flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
 .bar-group { display: flex; align-items: center; gap: 6px; }

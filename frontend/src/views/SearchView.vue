@@ -196,7 +196,7 @@
           <div class="detail-meta">
             <div class="meta-pill"><span class="ml">프로젝트</span>{{ currentResult.copyright || 'ORIGINAL' }}</div>
             <div class="meta-pill artist"><span class="ml">작가</span>{{ currentResult.artist || 'UNKNOWN' }}</div>
-            <div class="meta-pill character"><span class="ml">글자</span>{{ currentResult.character || 'GENERIC' }}</div>
+            <div class="meta-pill character"><span class="ml">캐릭터</span>{{ currentResult.character || 'GENERIC' }}</div>
             <div class="meta-pill mini"><span class="ml">등급</span>{{ currentResult.rating || '?' }}</div>
             <div class="meta-pill mini" v-if="currentResult.image_width && currentResult.image_height"><span class="ml">해상도</span>{{ currentResult.image_width }}×{{ currentResult.image_height }}</div>
             <div class="meta-pill mini"><span class="ml">태그</span>{{ currentTags.length }}</div>
@@ -1307,7 +1307,9 @@ function importResults() {
 /* 캐릭터는 '성공'이 아니라 분류다 — 상태색(state-ok)을 쓰면 사용자가 설정에서 성공색을
    바꿨을 때 캐릭터 이름 색이 같이 변한다. 분류색인 tag-person 을 쓴다. */
 .meta-pill.character { color: var(--tag-person); }
-.meta-pill.mini { min-width: 60px; flex: 0; }
+/* 짧은 값(등급·해상도·태그 수) 카드 — 내용 폭만큼 늘고 줄바꿈하지 않는다. flex: 0 이면
+   '640×768' 이 글자마다 쪼개져 세 줄로 찍혔다(부모의 overflow-wrap: anywhere). */
+.meta-pill.mini { min-width: 60px; flex: 0 0 auto; white-space: nowrap; overflow-wrap: normal; word-break: keep-all; }
 .ml { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--text-muted); letter-spacing: 0; }
 
 .tag-section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
