@@ -21,7 +21,7 @@ from .sam3_nodes import (
 )
 
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside

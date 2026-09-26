@@ -55,6 +55,15 @@ model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
 
+## 1.4.1 changes
+
+- DAVE + Detail Daemon: Detail Daemon hands the model a scaled sigma, which is on no schedule, so
+  the original DAVE gate (off schedule = step 0 = on) ran DAVE on every step and the image fell
+  apart — the two original nodes chained do the same. Detail Daemon now notes the sampler's own
+  sigma (`transformer_options["ai_studio_pre_dd_sigmas"]`) and DAVE judges its steps by it. Toggle:
+  `ForgeNeoAnimaDAVE.pre_dd_sigma` / suite setting `guid_dave_pre_dd` (default on; off = the
+  originals' behaviour). Runs without Detail Daemon are unchanged.
+
 ## 1.3.0 changes
 
 - SAM3 Detailer/Refine "only masked" now follows Forge `inpaint_full_res`:

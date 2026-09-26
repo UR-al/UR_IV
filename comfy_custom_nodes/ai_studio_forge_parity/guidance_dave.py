@@ -68,6 +68,7 @@ from typing import Any
 from .compat import clone_model
 from .guidance_common import (
     CATEGORY,
+    PRE_DD_SIGMAS_KEY,
     _model_blocks,
     _transformer_options,
     parse_indices,
@@ -117,7 +118,7 @@ def _first_scalar(value: Any) -> float | None:
         return None
 
 
-def dave_step(options: dict[str, Any]) -> tuple[int | None, int | None]:
+def dave_step(options: dict[str, Any], pre_dd: bool = False) -> tuple[int | None, int | None]:
     """``(step, n_steps)`` of this forward against the schedule (nodes.py:91-106).
 
     ``(None, None)`` when the sampler publishes no ``sample_sigmas`` (or fewer
@@ -130,6 +131,9 @@ def dave_step(options: dict[str, Any]) -> tuple[int | None, int | None]:
         return None, None
     n_steps = len(schedule) - 1
     current = options.get("sigmas")
+    if pre_dd and options.get(PRE_DD_SIGMAS_KEY) is not None:
+        # Detail Daemon's note: the sampler's own sigma before it scaled this call (guidance_dd).
+        current = options[PRE_DD_SIGMAS_KEY]
     if current is None:
         return 0, n_steps
     if _torch_tensor(schedule):
@@ -158,12 +162,15 @@ def dave_step(options: dict[str, Any]) -> tuple[int | None, int | None]:
     return 0, n_steps
 
 
-def dave_gate_active(options: dict[str, Any], tau: Any) -> bool:
-    """Whether DAVE runs on this forward (nodes.py:199-208). ``tau <= 0``: every step."""
+def dave_gate_active(options: dict[str, Any], tau: Any, pre_dd: bool = False) -> bool:
+    """Whether DAVE runs on this forward (nodes.py:199-208). ``tau <= 0``: every step.
+
+    ``pre_dd``: look up the sigma Detail Daemon noted before scaling it (the pre-DD option).
+    """
 
     tau_value = float(tau)
     if tau_value > 0.0:
-        step, n_steps = dave_step(options)
+        step, n_steps = dave_step(options, pre_dd)
         if step is None:  # no schedule published: every step (the original's safe default)
             return True
         cutoff = max(1, min(n_steps, round(tau_value * n_steps)))
@@ -180,6 +187,7 @@ def _patch_anima_blocks(
     dave_tau: float,
     slg_enabled: bool,
     slg_blocks: str,
+    dave_pre_dd: bool = True,
 ):
     attenuation = dave_attenuation(dave_strength) if dave_enabled else 0.0
     dave_on = attenuation > DAVE_MIN_ATTENUATION
@@ -226,7 +234,7 @@ def _patch_anima_blocks(
                     raise RuntimeError("SLG block wrapper did not receive its input tensor.")
                 return value
             output = _original(*args, **kwargs)
-            if _index in dave_targets and dave_gate_active(options, tau):
+            if _index in dave_targets and dave_gate_active(options, tau, dave_pre_dd):
                 output = apply_dave(output, attenuation)
             return output
 
@@ -260,13 +268,22 @@ class ForgeNeoAnimaDAVE:
                     "extra dose does. Recommended 0.10. Set 0 to run on every step."
                 ),
             }),
+        }, "optional": {
+            "pre_dd_sigma": ("BOOLEAN", {
+                "default": True,
+                "tooltip": (
+                    "With Anima Detail Daemon on the same model: judge DAVE's steps by the sigma "
+                    "before Detail Daemon scaled it. Off = the original nodes chained, where the "
+                    "scaled sigma is on no schedule and DAVE runs on every step."
+                ),
+            }),
         }}
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = CATEGORY
 
-    def patch(self, model, enabled=False, mask="dave_alpha.npz", strength=0.3, tau=0.1):
+    def patch(self, model, enabled=False, mask="dave_alpha.npz", strength=0.3, tau=0.1, pre_dd_sigma=True):
         if not enabled:
             return (model,)
         # 'dave_alpha.npz' stays a COMBO choice so saved workflows validate; its
@@ -287,4 +304,5 @@ class ForgeNeoAnimaDAVE:
             dave_tau=float(tau),
             slg_enabled=False,
             slg_blocks="",
+            dave_pre_dd=bool(pre_dd_sigma),
         ),)

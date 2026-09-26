@@ -40,7 +40,7 @@ import importlib
 from typing import Any
 
 from .compat import clone_model, require_torch
-from .guidance_common import CATEGORY, _as_bool, _json_settings, _setting
+from .guidance_common import CATEGORY, PRE_DD_SIGMAS_KEY, _as_bool, _json_settings, _setting
 
 ORIGIN = "Jonseed/ComfyUI-Detail-Daemon@3394e44afea04ed0188fb37b21f0d9952469766b:detail_daemon_node.py"
 
@@ -358,6 +358,33 @@ def detail_daemon_schedule(steps: int, values: dict[str, Any]):
     )
 
 
+class _PreDDSigmaSampler:
+    """``sampler`` whose model calls first note the sampler's own sigma for the DAVE gate.
+
+    The vendored ``detail_daemon_sampler`` hands its ``model_wrapper`` (which scales the sigma) to
+    ``dds_wrapped_sampler.sampler_function``; this stands in for that sampler, so the sampler calls
+    the recorder with its own sigma, and the recorder calls the unchanged ``model_wrapper``. The
+    note goes into this sampling run's ``model_options["transformer_options"]`` (a per-run clone),
+    which every model call copies into its forward's ``transformer_options``.
+    """
+
+    def __init__(self, sampler: Any):
+        self._sampler = sampler
+        self.extra_options = sampler.extra_options
+
+    def sampler_function(self, model_wrapper, x, sigmas, **kwargs):
+        def noting_wrapper(x, sigma, **extra_args):
+            model_options = extra_args.get("model_options")
+            if isinstance(model_options, dict):
+                model_options.setdefault("transformer_options", {})[PRE_DD_SIGMAS_KEY] = sigma
+            return model_wrapper(x, sigma, **extra_args)
+
+        for key in ("inner_model", "sigmas"):
+            if hasattr(model_wrapper, key):
+                setattr(noting_wrapper, key, getattr(model_wrapper, key))
+        return self._sampler.sampler_function(noting_wrapper, x, sigmas, **kwargs)
+
+
 def detail_daemon_ksampler(sampler: Any, values: dict[str, Any]) -> Any:
     """The ``KSAMPLER`` ``DetailDaemonSamplerNode.go`` returns for ``sampler`` (origin :401-410).
 
@@ -373,7 +400,7 @@ def detail_daemon_ksampler(sampler: Any, values: dict[str, Any]) -> Any:
     return samplers.KSAMPLER(
         detail_daemon_sampler,
         extra_options={
-            "dds_wrapped_sampler": sampler,
+            "dds_wrapped_sampler": _PreDDSigmaSampler(sampler),
             "dds_make_schedule": dds_make_schedule,
             "dds_cfg_scale_override": values["cfg_scale_override"],
         },

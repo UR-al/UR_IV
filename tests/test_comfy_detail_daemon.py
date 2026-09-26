@@ -29,6 +29,7 @@ from unittest import mock
 import numpy as np
 
 from comfy_custom_nodes.ai_studio_forge_parity import guidance, guidance_dd
+from comfy_custom_nodes.ai_studio_forge_parity.guidance_common import PRE_DD_SIGMAS_KEY
 from core import anima_guidance, sam3_args
 from core.comfy_workflow_compiler import ComfyWorkflowCompiler, WorkflowCompileError
 from tests._optional_deps import load_torch, requires_torch
@@ -411,7 +412,10 @@ class SamplerWrapperTorchTests(unittest.TestCase):
         (dd_sampler,) = later
         self.assertIsInstance(dd_sampler, _FakeKSampler)
         self.assertIs(dd_sampler.sampler_function, guidance_dd.detail_daemon_sampler)
-        self.assertIs(dd_sampler.extra_options["dds_wrapped_sampler"], original)
+        wrapped = dd_sampler.extra_options["dds_wrapped_sampler"]
+        self.assertIsInstance(wrapped, guidance_dd._PreDDSigmaSampler)   # DAVE 용 σ 기록만 더한다
+        self.assertIs(wrapped._sampler, original)
+        self.assertIs(wrapped.extra_options, original.extra_options)
         self.assertEqual(dd_sampler.extra_options["dds_cfg_scale_override"], 6.5)
         self.assertEqual(dd_sampler.inpaint_options, {})          # 원본 노드의 KSAMPLER 도 기본(빈) inpaint 옵션
         self.assertEqual(list(dd_sampler.extra_options["dds_make_schedule"](9)),
@@ -678,6 +682,40 @@ class CompilerPassModelTests(unittest.TestCase):
         }}}
         with self.assertRaisesRegex(WorkflowCompileError, "노드 계약.*cfg_scale_override"):
             ComfyWorkflowCompiler(stale).compile("txt2img", "checkpoint.safetensors", payload)
+
+
+
+class PreDDSigmaNoteTests(unittest.TestCase):
+    """Detail Daemon 이 줄이기 전 σ 를 적고 DAVE 가 그 σ 로 스텝을 판정한다(guidance_common.PRE_DD_SIGMAS_KEY)."""
+
+    def test_sampler_notes_its_own_sigma_before_the_wrapper_scales_it(self):
+        seen = []
+
+        def inner_sampler(model, x, sigmas, extra_args=None, **kw):
+            for sigma in sigmas[:-1]:
+                model(x, sigma, **(extra_args or {}))
+            return x
+
+        original = type("S", (), {"sampler_function": staticmethod(inner_sampler), "extra_options": {"k": 1}})()
+        wrapped = guidance_dd._PreDDSigmaSampler(original)
+        model_options = {"transformer_options": {}}
+
+        def model_wrapper(x, sigma, **extra_args):   # 원본 detail_daemon_sampler 의 model_wrapper 자리
+            seen.append((sigma, extra_args["model_options"]["transformer_options"][PRE_DD_SIGMAS_KEY]))
+            return x
+
+        wrapped.sampler_function(model_wrapper, 0, [1.0, 0.5, 0.0], extra_args={"model_options": model_options})
+        self.assertEqual(seen, [(1.0, 1.0), (0.5, 0.5)])
+
+    def test_dave_gate_uses_the_note_only_with_pre_dd(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import guidance_dave
+        schedule = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0]
+        # step 5 이 Detail Daemon 으로 0.97 배 된 호출: 스케줄에 없는 σ
+        options = {"sample_sigmas": schedule, "sigmas": 0.5 * 0.97, PRE_DD_SIGMAS_KEY: 0.5}
+        self.assertEqual(guidance_dave.dave_step(options, pre_dd=True), (5, 10))
+        self.assertEqual(guidance_dave.dave_step(options, pre_dd=False), (0, 10))   # 원본 노드 조합
+        self.assertFalse(guidance_dave.dave_gate_active(options, 0.1, pre_dd=True))
+        self.assertTrue(guidance_dave.dave_gate_active(options, 0.1, pre_dd=False))
 
 
 if __name__ == "__main__":

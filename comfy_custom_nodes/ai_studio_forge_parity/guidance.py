@@ -399,6 +399,7 @@ class ForgeNeoAnimaGuidanceSuite:
             dave_blocks=str(_setting(settings, "guid_dave_blocks", "8-18")),
             dave_strength=float(_setting(settings, "guid_dave_strength", 0.3)),
             dave_tau=float(_setting(settings, "guid_dave_tau", 0.1)),
+            dave_pre_dd=_as_bool(_setting(settings, "guid_dave_pre_dd", True)),
             slg_enabled=slg_enabled,
             slg_blocks=str(_setting(settings, "guid_slg_blocks", "18")),
         )

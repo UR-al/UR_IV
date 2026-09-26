@@ -1,15 +1,15 @@
 {
  "schema": 1,
- "source": "저장된 GET /sdapi/v1/script-info 응답 script_info_now.json (받은 시각 2026-09-25T04:58:18+00:00, tools/refresh_sam_extra_fixture.py --from-file); 'anima detail daemon'·'anima skimmed cfg' 항목은 Forge 정지 중 설치된 확장 소스 ui()(AST)로 맞춤 — 원본 동등성 wave A(DD 14개 인자·Hires Pass, Skimmed flip_at step .01), 2026-09-25; 'anima perturbation guidance' Attn Scale 최대 15→100 도 소스(AST)로 맞춤 — wave B PAG-F(원본 scale 0~100, iljung1106/comfyui-anima-safe-pag@905b0107:__init__.py:201); 'anima perturbation guidance' DCW·CWM·RDC·CNS 기본값·범위·라벨도 소스(AST)로 맞춤 — wave C DCW-F(DCW .05/.01 ±.3 step .001, CWM 0/0 최대 2, RDC 켬·tau 0: namemechan/ComfyUI-DCW@66aaf9dd:dcw_node.py:630-817)·CNS-F(gamma_scale 2.0 [.1,25] step .1, gamma_power 최소 .1, strength step .05: namemechan/comfyui-cns_sampler_patch@42278b13:cns_sampler_patch.py:396-437), 2026-09-26. Forge 재시작 뒤 tools/refresh_sam_extra_fixture.py 로 다시 받는다",
- "captured_at": "2026-09-25T05:49:48+00:00",
+ "source": "GET /sdapi/v1/script-info (tools/refresh_sam_extra_fixture.py)",
+ "captured_at": "2026-09-26T00:39:21+00:00",
  "api_url": "http://127.0.0.1:7860",
  "ext_version": "0.30.0",
  "extension": {
   "name": "forge_sam3_extension",
   "branch": "feat/anima-character-reference",
-  "commit_hash": "818b8fee98a902e54602ae82df126219a64bbfc9",
-  "commit_date": 1789946473,
-  "version": "818b8fee"
+  "commit_hash": "a2114b5b0943fb1c3869d379ca2272f20f7dc40d",
+  "commit_date": 1790372381,
+  "version": "a2114b5b"
  },
  "scripts": [
   {

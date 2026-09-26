@@ -30,9 +30,9 @@ from __future__ import annotations
 from types import MappingProxyType
 
 EXT_VERSION_AUDITED = "0.30.0"
-# 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5)까지.
+# 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e)까지.
 # 작업 트리는 깨끗했다. v0.30.0 은 아직 릴리스 전이라 같은 버전 문자열 안에서 코드가 바뀌었다(818b8fe 도 0.30.0).
-EXT_COMMIT_AUDITED = "a2114b5"
+EXT_COMMIT_AUDITED = "8878b9e"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -261,6 +261,9 @@ OPTIONS = MappingProxyType({
     "sam3_anima_sparse_lora_forge_guess": deferred("P10", "M5 — sparse LoRA 순정 추측 변환(요청별 토글)"),
     "sam3_guidance_pag_prefix_dedup": deferred("P10", "G16 — v0.30 이전 결과를 비트 단위로 재현할 때만"),
     "sam3_guidance_seg_separable_blur": deferred("P10", "G16 — v0.30 이전 결과를 비트 단위로 재현할 때만"),
+    "sam3_guidance_dave_pre_dd_sigma": deferred(
+        "P10", "DAVE+Detail Daemon 우회(기본 켬). 끄면 원본 노드 조합처럼 DAVE 가 모든 스텝에 걸린다 — "
+               "앱 Comfy 팩은 같은 기본값(guid_dave_pre_dd, 팩 1.4.1)"),
     "sam3_appearance_theme": ignored("N3 — Forge 화면 테마. 앱은 자체 디자인 토큰을 쓴다"),
     "sam3_layout_sections": ignored("N4 — txt2img 섹션 CSS 재배치, 인자 순서와 무관"),
     "sam3_fast_dropdown_visible_choices": ignored("N3 — Forge 빠른 드롭다운 표시 개수"),

@@ -26,7 +26,10 @@ PACK_ID = "ai_studio_forge_parity"
 # Same (unreleased) 1.4.0: ForgeNeoAnimaTileRepair and the SAM3 detailer's Anima
 # ControlNet-LLLite slot (kohya ComfyUI-Anima-LLLite node, vendored). Older packs have
 # no ForgeNeoAnimaTileRepair in /object_info and hand an LLLite to ControlNetLoader.
-PACK_VERSION = "1.4.0"
+# 1.4.1: DAVE judges its steps by the sigma before Detail Daemon scaled it (optional
+# ``pre_dd_sigma`` input / suite ``guid_dave_pre_dd``, default on); inputs a 1.4.0 pack
+# accepts are unchanged, so the compiler needs no gate.
+PACK_VERSION = "1.4.1"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

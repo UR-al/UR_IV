@@ -14,6 +14,11 @@ from .compat import json_object, require_torch
 
 
 CATEGORY = "AI Studio/Forge Neo parity/Guidance"
+# Detail Daemon (guidance_dd) scales the sigma the model gets; the DAVE gate (guidance_dave) looks
+# the sigma up in the schedule, where a scaled one is never found (the originals chained run DAVE
+# on every step). Detail Daemon notes the sampler's own sigma under this transformer_options key
+# for every model call it wraps; DAVE's pre-DD option (default on) looks that one up instead.
+PRE_DD_SIGMAS_KEY = "ai_studio_pre_dd_sigmas"
 
 
 def parse_indices(spec: str, count: int, *, default: str = "") -> set[int]:
