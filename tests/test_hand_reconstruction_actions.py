@@ -614,7 +614,9 @@ class HandReconstructionCapabilityTests(unittest.TestCase):
             model, result, selected = host._hand_snapshot({"prompt": "  spread fingers naturally  "})
         self.assertEqual(model, "selected-model")
         self.assertIs(selected, backend)
-        host._chat_generation_snapshot.assert_called_once_with("existing pose\nspread fingers naturally")
+        # 손 재구성은 img2img 보조 패스 — 스냅샷은 aux 규칙(메인 txt2img 게이트 없음, 게이트는 _sampling_gate 한 번)
+        host._chat_generation_snapshot.assert_called_once_with("existing pose\nspread fingers naturally",
+                                                               target="aux")
         self.assertEqual(result["forge_additional_modules"], original["forge_additional_modules"])
         self.assertIn("<lora:custom-anima:0.7>", result["prompt"])
         self.assertEqual(result["negative_prompt"], "blur, extra fingers, fused fingers, duplicated hands, malformed hands")
@@ -698,8 +700,10 @@ class HandReconstructionIntegrationBoundaryTests(unittest.TestCase):
         self.assertEqual(vae["inputs"]["vae_name"], "vae/image_vae.safetensors")
         self.assertEqual(latent["vae"], [vae_id, 0])
         loras = [node["inputs"] for node in graph.values() if node.get("class_type") == "LoraLoader"]
+        # Forge 순서: <lora:n:a:b> = 텍스트 인코더 a, UNet b → strength_clip a, strength_model b
+        # (예전 기대값은 a 를 model 로 읽었다 — core/comfy_workflow_compiler._lora_spec).
         self.assertEqual([(item["lora_name"], item["strength_model"], item["strength_clip"]) for item in loras], [
-            ("styles/ink.safetensors", 0.7, 0.4), ("characters/alice.safetensors", 0.3, 0.2),
+            ("styles/ink.safetensors", 0.4, 0.7), ("characters/alice.safetensors", 0.2, 0.3),
         ])
         self.assertIn("ForgeNeoNegPip", _classes(graph))
         self.assertEqual(_node(graph, "CLIPTextEncode")[1]["inputs"]["text"], "open hand")
@@ -749,6 +753,205 @@ class HandReconstructionIntegrationBoundaryTests(unittest.TestCase):
                         self.assertEqual(prepared.source_metadata["text"]["workflow"], original.info["workflow"])
                     self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), original_hash)
             self.assertEqual(list(Path(temporary).iterdir()), [path])
+
+
+
+class HandSamplingTableTests(unittest.TestCase):
+    """(T13, P7) 손 재구성 허용 목록 = core/alwayson_propagation 의 손 재구성 몫 + img2img 게이트."""
+
+    def setUp(self):
+        patch = mock.patch("core.error_handler.handle_error")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def _snapshot(self, **scripts):
+        snapshot = generation_snapshot()
+        snapshot["alwayson_scripts"].update(scripts)
+        return snapshot
+
+    def test_table_keeps_dora_and_drops_image_passes_and_hires_dd(self):
+        from core import alwayson_propagation as ap
+        from ui.hand_reconstruction_actions import _sampling_scripts
+        dd_hires = anima_guidance.build_args(anima_guidance.SCRIPT_DETAIL_DAEMON, {"dd_enabled": True, "dd_hires": True})
+        snapshot = self._snapshot(**{ap.TITLE_DORA: {"args": [{"enabled": True}]},
+                                     "SAM3 Mask": {"args": [{}]}, "adetailer": {"args": [True]}})
+        self.assertEqual(set(_sampling_scripts(snapshot)),
+                         {anima38.SCRIPT_NAME, *anima_guidance.SPECS, "NegPiP", ap.TITLE_DORA})
+        snapshot["alwayson_scripts"][anima_guidance.SCRIPT_DETAIL_DAEMON] = {"args": dd_hires}
+        self.assertNotIn(anima_guidance.SCRIPT_DETAIL_DAEMON, _sampling_scripts(snapshot))
+        # Comfy 손 재구성: DoRA 는 만들지 않는다(컴파일러가 모르는 제목), NegPiP 은 _add_negpip 로 적용
+        comfy = _sampling_scripts(self._snapshot(**{ap.TITLE_DORA: {"args": [{}]}}), backend="comfyui")
+        self.assertNotIn(ap.TITLE_DORA, comfy)
+        self.assertIn("NegPiP", comfy)
+        # 워커 필터(게이트 없음)는 멱등
+        prepared = prepare_hand_repair(repair_request())
+        payload = hand_generation_payload(prepared, {"alwayson_scripts": _sampling_scripts(snapshot)}, 3)
+        self.assertEqual(payload["alwayson_scripts"], _sampling_scripts(snapshot))
+
+    def test_snapshot_gates_with_the_img2img_list_of_the_webui_snapshot(self):
+        from core.sam_extra_capabilities import SamExtraCapabilities, _freeze
+        titles = {t.lower() for t in (anima38.SCRIPT_NAME, *anima_guidance.SPECS)}
+        scripts = {t: {"present": True, "img2img": t != anima_guidance.SCRIPT_SKIMMED_CFG.lower()} for t in titles}
+        host = SnapshotHost()
+        host.sam_extra_capabilities = SamExtraCapabilities(status="ok", installed=True, scripts=_freeze(scripts))
+        with mock.patch("backends.get_backend", return_value=FakeBackend()):
+            _model, result, _backend = host._hand_snapshot({"prompt": "open hand"})
+        self.assertEqual(set(result["alwayson_scripts"]),
+                         {anima38.SCRIPT_NAME, anima_guidance.SCRIPT_PERTURBATION,
+                          anima_guidance.SCRIPT_DETAIL_DAEMON, "NegPiP"})
+
+    def test_snapshot_uses_the_backend_cache_when_the_host_has_no_snapshot(self):
+        backend = FakeBackend()
+        backend.api_url = "http://127.0.0.1:7860"
+        host = SnapshotHost()
+        from core.sam_extra_capabilities import SamExtraCapabilities, _freeze
+        titles = {t.lower() for t in (anima38.SCRIPT_NAME, *anima_guidance.SPECS)}
+        missing = SamExtraCapabilities(status="ok", installed=False,
+                                       scripts=_freeze({t: {"present": False, "img2img": False} for t in titles}))
+        with mock.patch("backends.get_backend", return_value=backend), \
+                mock.patch("core.sam_extra_probe.peek_capabilities",
+                           return_value=missing) as peek:
+            _model, result, _backend = host._hand_snapshot({"prompt": "open hand"})
+        peek.assert_called_once_with("http://127.0.0.1:7860")
+        self.assertEqual(set(result["alwayson_scripts"]), {"NegPiP"})   # 확장이 없는 Forge — 확장 밖만 남는다
+
+
+class HandNoticeSendSiteTests(unittest.TestCase):
+    """(P7 검토 R2·4·5) 손 재구성은 img2img 보조 패스다. 실제 T2I 스냅샷(aux 규칙 — 메인 txt2img 게이트 없음)을 쓰고,
+    보내는 곳(_hand_snapshot)에서 기여자 알림과 이 요청의 img2img 게이트가 뺀 블록 알림을 한 번씩 띄운다."""
+
+    def setUp(self):
+        from tests.test_sampling_blocks import _webui
+        _webui(self)
+
+    def _host(self, capabilities):
+        from tests.test_sampling_blocks import ChainHost
+
+        class _Host(HandReconstructionActionsMixin, ChainHost):
+            pass
+
+        host = _Host(capabilities=capabilities)
+        host.vue_bridge.handReconstructionEvent = Signal()
+        return host
+
+    def _snapshot(self, host, contributors=None):
+        from ui import sampling_blocks as sb
+        with mock.patch("backends.get_backend", return_value=FakeBackend()), \
+                mock.patch.object(sb, "CONTRIBUTORS", contributors or sb.CONTRIBUTORS):
+            return host._hand_snapshot({"prompt": "open hand"})
+
+    def test_img2img_gate_drops_are_announced_in_the_hand_repair_wording(self):
+        from core import alwayson_propagation as ap
+        from core import sam_extra_notices as sn
+        from tests.test_alwayson_propagation import DD, PAG, SKIM, caps
+        # PAG 는 어디에도 없고, Skimmed 는 txt2img 에만 있다 — 둘 다 이 img2img 요청에서 빠진다
+        host = self._host(caps(present=(SKIM, DD), img2img=(DD,)))
+        _model, snapshot, _backend = self._snapshot(host)
+        self.assertEqual(set(snapshot["alwayson_scripts"]), {"NegPiP", DD})
+        calls = host.vue_bridge.showNotification.calls
+        self.assertEqual([level for level, _message in calls], [sn.LEVEL_INFO, sn.LEVEL_INFO])
+        for title, (_level, message) in zip((PAG, SKIM), calls):
+            self.assertIn(title, message)
+            self.assertIn(ap.aux_label(ap.AUX_HAND), message)
+            self.assertIn("(img2img)", message)
+            self.assertNotIn("(txt2img)", message)
+
+    def test_snapshot_notices_are_shown_once_at_the_send_site(self):
+        from core import sam_extra_notices as sn
+        from tests.test_alwayson_propagation import PAG, caps
+        from ui import sampling_blocks as sb
+
+        def contributor(_host, _ctx):
+            contribution = sb.Contribution()
+            contribution.notices.append(sn.block_deferred_notice(PAG))
+            return contribution
+
+        host = self._host(caps(present=(PAG,)))
+        self._snapshot(host, (contributor,))
+        [(level, message)] = host.vue_bridge.showNotification.calls
+        self.assertEqual(level, sn.LEVEL_INFO)
+        self.assertIn(PAG, message)
+        self.assertIn("확인이 아직 끝나지 않아", message)                         # 기여자 알림(게이트 알림이 아니다)
+        self._snapshot(host, (contributor,))                                   # 억제 시간 안의 반복은 뜨지 않는다
+        self.assertEqual(len(host.vue_bridge.showNotification.calls), 1)
+
+    def test_unknown_snapshot_still_applies_when_unknown_by_provenance(self):
+        """(P7 검토 R2-1) 연결 직후·백엔드 전환 직후(host 스냅샷 None, 캐시 peek 도 None)에도 손 재구성 게이트는
+        ``Rule.when_unknown`` 을 블록 출처별로 적용한다 — 메인 빌더(``ap.gate(blocks, None, ...)``)·Forge 보조 워커
+        (``WebUIBackend._propagate``)와 같다. 앱 기본값 Anima38 은 조용히 빠지고(A2·A6), 사용자 DoRA 도 모르면 늘
+        보내지 않되(422 위험) 사용자 값이라 알린다. P7 행(가이던스·NegPiP)은 모를 때 SEND 라 그대로 간다."""
+        from core import alwayson_propagation as ap
+        from core import sam_extra_notices as sn
+        from tests.test_alwayson_propagation import A38, DD, DORA, PAG, SKIM
+        from ui import sampling_blocks as sb
+
+        def app_default_anima38(_host, _ctx):
+            return sb.Contribution().add(A38, {"args": [{"negative": True}]}, provenance=ap.PROVENANCE_APP_DEFAULT)
+
+        def user_dora(_host, _ctx):
+            return sb.Contribution().add(DORA, {"args": [{"enabled": True}]}, provenance=ap.PROVENANCE_USER)
+
+        host = self._host(None)
+        _model, snapshot, _backend = self._snapshot(host, (*sb.CONTRIBUTORS, app_default_anima38))
+        self.assertNotIn(A38, snapshot["alwayson_scripts"])
+        self.assertEqual(set(snapshot["alwayson_scripts"]), {"NegPiP", PAG, SKIM, DD})
+        self.assertEqual(host.vue_bridge.showNotification.calls, [])           # 앱 기본값은 로그만
+
+        host = self._host(None)
+        _model, snapshot, _backend = self._snapshot(host, (*sb.CONTRIBUTORS, user_dora))
+        self.assertNotIn(DORA, snapshot["alwayson_scripts"])
+        self.assertEqual(set(snapshot["alwayson_scripts"]), {"NegPiP", PAG, SKIM, DD})
+        [(level, message)] = host.vue_bridge.showNotification.calls
+        self.assertEqual(level, sn.LEVEL_INFO)
+        self.assertIn(DORA, message)
+        self.assertIn("확인이 아직 끝나지 않아", message)
+
+    def test_worker_refilter_stays_ungated_for_both_backends(self):
+        """워커(``hand_generation_payload``)는 Comfy 에도 backend='webui' 로 필터만 다시 한다 — 스냅샷을 모르는 채로
+        게이트하면 확인된 스냅샷으로 통과시킨 사용자 DoRA 를 워커가 다시 빼게 된다. 그래서 스냅샷 없는
+        ``_sampling_scripts`` 는 필터만(멱등) 한다."""
+        from core import alwayson_propagation as ap
+        from ui.hand_reconstruction_actions import _sampling_gate, _sampling_scripts
+        from tests.test_alwayson_propagation import A38, DORA, caps
+
+        blocks = {"alwayson_scripts": {A38: {"args": [{"negative": True}]}, DORA: {"args": [{"enabled": True}]}}}
+        kept = _sampling_gate(blocks, backend=ap.BACKEND_WEBUI, capabilities=caps(present=(A38, DORA))).kept
+        self.assertEqual(set(kept), {A38, DORA})                               # 확인된 Forge — 보낸다
+        self.assertEqual(set(_sampling_scripts({"alwayson_scripts": kept})), {A38, DORA})
+        prepared = prepare_hand_repair(repair_request())
+        payload = hand_generation_payload(prepared, {"alwayson_scripts": kept}, 5)
+        self.assertEqual(set(payload["alwayson_scripts"]), {A38, DORA})
+        # Comfy 는 스냅샷 게이트가 없다(스냅샷은 WebUI 전용, 메인 빌더도 WebUI 만 게이트) — 앱 기본값 블록도 표 필터만
+        # 거친다(DoRA 는 Comfy 로 만들지 않는다)
+        comfy = _sampling_gate(blocks, backend=ap.BACKEND_COMFY, capabilities=None,
+                               provenance={A38: ap.PROVENANCE_APP_DEFAULT})
+        self.assertEqual((set(comfy.kept), comfy.dropped), ({A38}, ()))
+
+    def test_forge_hand_repair_hands_app_default_provenance_to_the_backend(self):
+        """(P10 검토 2) 손 재구성은 메인 경로(``WebUIBackend._generate``)로 간다 — 보낼 앱 기본값 블록의 출처만 비공개 키로
+        실어, Forge 가 그 블록을 422 로 거절하면 정보로(사용자 블록은 경고로) 알리게 한다. 백엔드가 요청 전에 뗀다."""
+        from core import alwayson_propagation as ap
+        from tests.test_alwayson_propagation import A38, DD, DORA, PAG, SKIM, caps
+        from ui import hand_reconstruction_actions as hra
+        from ui import sampling_blocks as sb
+
+        def blocks(_host, _ctx):
+            return (sb.Contribution()
+                    .add(A38, {"args": [{"negative": True}]}, provenance=ap.PROVENANCE_APP_DEFAULT)
+                    .add(DORA, {"args": [{"enabled": True}]}, provenance=ap.PROVENANCE_USER))
+
+        self.assertIn(ap.PROVENANCE_KEY, hra._GENERATION_KEYS)
+        host = self._host(caps(present=(PAG, SKIM, DD, A38, DORA)))
+        _model, snapshot, _backend = self._snapshot(host, (*sb.CONTRIBUTORS, blocks))
+        self.assertTrue({A38, DORA} <= set(snapshot["alwayson_scripts"]))
+        self.assertEqual(snapshot[ap.PROVENANCE_KEY], {A38: ap.PROVENANCE_APP_DEFAULT})
+        payload = hand_generation_payload(prepare_hand_repair(repair_request()), snapshot, 5)
+        self.assertEqual(payload[ap.PROVENANCE_KEY], {A38: ap.PROVENANCE_APP_DEFAULT})
+        # 게이트가 뺀 앱 기본값 블록은 적지 않는다(적을 것이 없으면 키도 없다)
+        host = self._host(caps(present=(PAG, SKIM, DD, DORA)))
+        _model, snapshot, _backend = self._snapshot(host, (*sb.CONTRIBUTORS, blocks))
+        self.assertNotIn(A38, snapshot["alwayson_scripts"])
+        self.assertNotIn(ap.PROVENANCE_KEY, snapshot)
 
 
 if __name__ == "__main__":

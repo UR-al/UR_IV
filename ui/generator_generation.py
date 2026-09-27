@@ -122,6 +122,12 @@ class GenerationMixin:
             else:
                 from core.payload_validator import PayloadValidator
                 payload = copy.deepcopy(payload_override)
+                # 방금 만든 페이로드(Comfy 대기열 컨트롤 동결 _comfy_queued_controls)면 그 알림을 이 사본으로 옮긴다.
+                # 동결 페이로드(시드 탐색·XYZ 대기열)는 만들 때 게이트했다 — 그 사이 스냅샷이 '없다'고 바뀐
+                # 샘플링 블록만 빼고(알림은 덧붙인다), 아래 생성 전 확인이 띄운다(ui/sampling_blocks).
+                from ui.sampling_blocks import move_sampling_notices, regate_frozen_payload
+                move_sampling_notices(self, payload_override, payload)
+                regate_frozen_payload(self, payload, backend=backend_override)
                 validation = PayloadValidator.validate(payload)
                 err = " / ".join(validation.errors)
                 if not validation.ok:
@@ -203,25 +209,34 @@ class GenerationMixin:
             except Exception:
                 self.is_automating = False
 
-    def _chat_generation_snapshot(self, prompt: str):
+    def _chat_generation_snapshot(self, prompt: str, *, target: str = 't2i'):
         """Capture current generation controls on the UI thread without writes.
 
         Chat resolves wildcard files and prompt hooks later in its own worker.
         It must remove ``_chat_deferred_prompt`` before handing off to an API.
+        ``target='i2i'``: 채팅 이미지 편집(참조 이미지 → img2img) — 샘플링 블록을 I2I 규칙
+        (img2img 스크립트 목록·'I2I·인페인트에도 적용' 토글)으로 만든다.
+        ``target='aux'``: 손 재구성(img2img 보조 패스) — T2I 패널 값 그대로, 메인 게이트 없이(보내는 곳이 게이트).
         """
         import copy
 
         model = str(self.model_combo.currentText() or '').strip()
         if not model:
             raise ValueError("T2I에서 사용할 모델을 먼저 선택하세요.")
-        payload, error = self._build_generation_payload(prompt_override=prompt, snapshot=True)
+        extra = {} if target == 't2i' else {'target': target}
+        payload, error = self._build_generation_payload(prompt_override=prompt, snapshot=True, **extra)
         if error:
             raise ValueError(error)
-        return model, copy.deepcopy(payload)
+        copied = copy.deepcopy(payload)
+        from ui.sampling_blocks import move_sampling_notices
+        move_sampling_notices(self, payload, copied)   # 보내는 곳(채팅·손 재구성)이 이 사본으로 알림을 꺼낸다
+        return model, copied
 
-    def _build_generation_payload(self, *, prompt_override=None, snapshot=False, comfy_workflow_snapshot=None):
+    def _build_generation_payload(self, *, prompt_override=None, snapshot=False, comfy_workflow_snapshot=None,
+                                  target='t2i'):
         """입력 위젯 → 검증된 payload. 성공 시 (payload, None), 실패 시 (None, 사유).
-        UI 상태는 건드리지 않음 — start_generation이 검증 통과 후에만 busy 전환."""
+        UI 상태는 건드리지 않음 — start_generation이 검증 통과 후에만 busy 전환.
+        ``target``: 샘플링 블록 규칙('t2i' 기본, 채팅 이미지 편집은 'i2i' — core/alwayson_propagation)."""
         # 해상도 결정
         if self.random_res_check.isChecked() and self.random_resolutions:
             width, height, _ = random.choice(self.random_resolutions)
@@ -369,7 +384,10 @@ class GenerationMixin:
         if hasattr(self, 'negpip_group') and self.negpip_group.isChecked():
             payload["alwayson_scripts"]["NegPiP"] = {"args": [True]}
 
-        self._apply_postprocess_chain(payload)
+        if target == 't2i':
+            self._apply_postprocess_chain(payload)   # 1-인자 호출 유지(테스트 더블·기존 호출자)
+        else:
+            self._apply_postprocess_chain(payload, target=target, krea2=self._is_krea2_generation())
 
         # Opt-in Comfy sampler experiments are snapshotted with the queued job.
         # Never leak provider-specific switches into Forge or Krea2 requests.
@@ -386,7 +404,10 @@ class GenerationMixin:
                         payload['_comfy_workflow_snapshot'] = copy.deepcopy(comfy_workflow_snapshot)
                     else:
                         from core.comfy_workflow_controls import snapshot_comfy_payload
+                        from ui.sampling_blocks import move_sampling_notices
+                        built = payload
                         payload = snapshot_comfy_payload(get_backend(), payload, 'txt2img')
+                        move_sampling_notices(self, built, payload)
                     payload['_comfy_model_snapshot'] = self.model_combo.currentText()
             except ValueError as exc:
                 return None, str(exc)
@@ -777,15 +798,42 @@ class GenerationMixin:
         payload.setdefault("alwayson_scripts", {})
         if hasattr(self, 'negpip_group') and self.negpip_group.isChecked():
             payload["alwayson_scripts"].setdefault("NegPiP", {"args": [True]})
-        self._apply_postprocess_chain(payload)
+        self._apply_postprocess_chain(payload, target='i2i')
         from backends import BackendType, get_backend_type, get_backend
         if get_backend_type() == BackendType.COMFYUI and not self._is_krea2_generation():
             from core.comfy_workflow_controls import snapshot_comfy_payload
             payload.update(snapshot_comfy_payload(get_backend(), payload, 'img2img'))
         return payload
 
-    def _apply_postprocess_chain(self, payload):
-        """Forge Neo와 동일: ADetailer + SAM3 + Anima Guidance 모두 alwayson_scripts로 적용"""
+    def _apply_postprocess_chain(self, payload, *, target='t2i', krea2=None):
+        """Forge Neo와 동일: ADetailer + SAM3(이미지 패스) + 샘플링 블록(NegPiP·Anima Guidance …) 모두 alwayson_scripts로 적용.
+
+        샘플링 블록은 ui/sampling_blocks.build_sampling_blocks 하나가 만든다 — 보조 패스(Refine·SAM3·ADetailer)
+        봉투도 같은 빌더라 둘이 갈라지지 않는다. ``target``: 't2i'(기본) | 'i2i'(I2I·인페인트·채팅 이미지 편집).
+        ``krea2`` 가 None 이면 t2i 는 생성 계열 콤보, i2i 는 payload 의 _generation_family 로 판정한다.
+        보낼 곳에서 띄울 알림은 payload 에 묶어 두고(띄우지 않는다) SamplingBlocks 를 돌려준다.
+        """
+        payload.setdefault("alwayson_scripts", {})
+        self._apply_image_passes(payload)
+        try:
+            from ui.sampling_blocks import (
+                build_sampling_blocks, mark_request_provenance, merge_sampling_blocks, remember_sampling_notices,
+            )
+            if krea2 is None and target != 't2i':
+                krea2 = str(payload.get('_generation_family') or '').strip().lower() == 'krea2'
+            result = build_sampling_blocks(self, target, krea2=krea2)
+            merge_sampling_blocks(payload, result.blocks)
+            # Forge 메인 요청이면 앱 기본값 블록 출처를 비공개로 — 백엔드가 떼어 422 재시도 알림에 쓴다(P10 검토 2)
+            mark_request_provenance(payload, result)
+            remember_sampling_notices(self, payload, result.notices, provenance=result.provenance)
+            return result
+        except Exception as e:
+            # 샘플링 블록은 부가 기능 — 실패해도 생성 자체는 진행되어야 한다
+            _logger.warning("샘플링 블록 적용 실패 (무시하고 생성 진행): %s", e)
+            return None
+
+    def _apply_image_passes(self, payload):
+        """이미지 패스(ADetailer·SAM3) — 보조 패스로는 전달하지 않는다(core/alwayson_propagation.NEVER)."""
         payload.setdefault("alwayson_scripts", {})
 
         # ADetailer: Forge Neo와 동일하게 alwayson_scripts로 직접 적용
@@ -808,29 +856,6 @@ class GenerationMixin:
                     payload, sam3_settings,
                     capabilities=getattr(self, 'sam_extra_capabilities', None))
                 _logger.info("SAM3 alwayson_scripts 적용됨 (Forge Neo 방식)")
-
-        # Anima Guidance Suite: PAG/SEG/SLG · APG/CWM/SMC · Skimmed CFG ·
-        # DCW/RDC/DAVE/CNS · Modulation · Detail Daemon.
-        # 전부 꺼져 있으면 아무것도 넣지 않는다 (확장을 건드리지 않아야 결과가 동일).
-        try:
-            from core import anima_guidance
-            anima_settings = self._build_anima_settings()
-            # Detail Daemon 값은 원본 노드 단위 그대로 간다(변환 없음). Hires Pass 를 켰는데 연결된 Forge 확장이
-            # 인자 13 을 모르면 경고만 남긴다 — 판정은 연결 때 받아 둔 기능 스냅샷(여기서 HTTP 를 부르지 않는다).
-            # ComfyUI 는 컴파일러가 dd_hires 로 패스를 고르므로 경고가 없다(남은 Forge 스냅샷도 보지 않는다).
-            from backends import BackendType, get_backend_type
-            hires_note = anima_guidance.detail_daemon_hires_note(
-                anima_settings, getattr(self, 'sam_extra_capabilities', None),
-                comfyui=get_backend_type() == BackendType.COMFYUI)
-            if hires_note:
-                _logger.warning(hires_note)
-            anima_guidance.apply_to_payload(payload, anima_settings)
-            summary = anima_guidance.describe_active(anima_settings)
-            if summary:
-                _logger.info("Anima Guidance 적용됨: %s", summary)
-        except Exception as e:
-            # guidance는 부가 기능 — 실패해도 생성 자체는 진행되어야 한다
-            _logger.warning("Anima Guidance 적용 실패 (무시하고 생성 진행): %s", e)
 
     def _build_adetailer_slot(self, widgets):
         """ADetailer 슬롯 딕셔너리 생성 (공식 REST API 스펙 준수)

@@ -8,12 +8,22 @@
 
 - ``result_notices(info, payload)``        생성 뒤: 'SAM3 Error', SAM3 적용 흔적 없음, 'Anima38: off: …',
                                             PAG/SEG/SLG 를 켰는데 'Anima Perturbation Guidance' 가 없음,
+                                            보낸 DoRA 방식의 'DoRA mode'·'DoRA inserted' 가 없음(훅 폴백, P8),
                                             부분 LoRA 추측 변환('Anima sparse LoRA', 정보)
 - ``pre_generation_notices(payload, …)``   생성 전: CFG 1 에서 켠 SMC/APG/CWM(Forge 는 CFG 1 에 네거티브를
                                             인코딩하지 않아 v0.30 은 어느 빌드든 건너뜀, 가드 없는 v0.21.2 계열은
                                             망가짐), SAM3 체크포인트 'sam3.pt' 가 없어 HF 3.4 GB 자동 다운로드,
                                             스크립트 없음(→ 422)
 - ``explain_rejected_request(status, body, payload)``  Forge HTTP 422 본문 → 어느 확장·기능인지
+  (``missing_script_title`` 은 같은 규칙으로 제목만 — 보조 패스 재시도 판정 core/forge_optional_parts)
+- ``block_*_notice``/``propagation_*_notice``  샘플링 블록 게이트·보조 패스 전달(P7, core/alwayson_propagation)
+- ``dora_*_notice``                         DoRA 추론 방식 — Comfy 순정 안내·라이브 선택지 불일치·첫 로드 앱 기본값(P8)
+- ``anima38_*_notice``                      Anima 3.8B — 첫 로드 앱 기본값(부정 커넥터 켬)·Comfy v1 자동 켜짐 폐지 안내(P9).
+                                            'off: install failed (RuntimeError)' 힌트는 결과 모델 종류(비 Anima)를 먼저 본다
+- ``app_block_retried_notice``/``block_retried_notice``  메인 생성 재시도(DoRA·Anima38 422 — 앱 기본값이면 정보, 사용자
+                                            값·출처 모름이면 경고, P10 검토 2)
+- ``forge_option_*_notice``                 Forge 옵션 덮어쓰기(P10,
+                                            설정 잠금으로 거절됐던 옵션은 기억해 보내지 않음 — ``forge_option_frozen_notice``)
 - ``NoticedImage``                          단독 SAM3/Refine/ADetailer 결과(base64 str)에 info·알림을 싣는 str
 - ``NoticeThrottle``                        같은 알림을 잠시 한 번만 (자동화·배치에서 토스트 폭주 방지)
 
@@ -34,12 +44,12 @@ import logging
 import math
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 from urllib.parse import urlsplit
 
-from core import anima38, anima_guidance, sam3_args
+from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, sam3_args
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +82,26 @@ CODE_SAM3_HF_DOWNLOAD = "sam3_hf_download"
 CODE_SCRIPT_MISSING = "script_missing"
 CODE_EXTENSION_MISSING = "extension_missing"
 CODE_REQUEST_REJECTED = "request_rejected"
+# 샘플링 블록 게이트·보조 패스 전달(P7, core/alwayson_propagation)
+CODE_BLOCK_NOT_SENT = "block_not_sent"                # 메인 생성: 스냅샷이 '없다'고 한 스크립트 블록을 빼고 보냄
+CODE_BLOCK_DEFERRED = "block_deferred"                # 확장 확인 전이라 이번 요청에는 보내지 않음
+CODE_PROPAGATION_DROPPED = "propagation_dropped"      # 보조 패스: 연결된 Forge 에 없어 전달하지 않음
+CODE_PROPAGATION_RETRIED = "propagation_retried"      # 보조 패스: Forge 가 전달 블록을 422 로 거절 → 빼고 다시 보냄
+# DoRA 추론 방식(P8, core/dora_infer_mode)
+CODE_DORA_NOT_APPLIED = "dora_not_applied"            # 결과: 보낸 방식의 infotext 기록('DoRA mode'·'DoRA inserted')이 없음
+CODE_DORA_COMFY_STOCK = "dora_comfy_stock"            # 생성 전: ComfyUI 는 순정으로만 합친다(사용자가 바꾼 값일 때만)
+CODE_DORA_CHOICE = "dora_choice"                      # 생성 전: 고른 값이 연결된 확장 선택지에 없어 보내지 않음
+CODE_DORA_APP_DEFAULT = "dora_app_default"            # 첫 로드: 옛 설정에 키가 없어 앱 기본값(LyCORIS)으로 시작
+# Anima 3.8B(P9, core/anima38)
+CODE_ANIMA38_APP_DEFAULT = "anima38_app_default"      # 첫 로드: 옛 설정에 키가 없어 앱 기본값(부정 커넥터 켬)으로 시작
+CODE_ANIMA38_COMFY_V1 = "anima38_comfy_v1"            # 생성 전(Comfy): Qwen3.5·어댑터 모듈 쌍이 있어도 v1 은 카드에서 켤 때만
+# 메인 생성 재시도·Forge 옵션 덮어쓰기(P10, core/forge_override_settings·core/forge_optional_parts)
+CODE_APP_BLOCK_RETRIED = "app_block_retried"          # 메인 생성: 앱이 넣은 블록(DoRA·Anima38)을 Forge 가 422 로 거절 → 빼고 다시
+CODE_BLOCK_RETRIED = "block_retried"                  # 메인 생성: 사용자 값(또는 출처 모름) 블록을 422 로 거절 → 빼고 다시(경고)
+CODE_FORGE_OPTION_MISSING = "forge_option_missing"    # 설정한 Forge 옵션이 연결된 sam-extra 에 없어 보내지 않음
+CODE_FORGE_OPTION_UNVERIFIED = "forge_option_unverified"   # 옵션 목록을 확인하지 못해 보내지 않음
+CODE_FORGE_OPTION_REJECTED = "forge_option_rejected"  # Forge 가 앱이 넣은 옵션을 500(KeyError·설정 잠금)으로 거절 → 빼고 다시
+CODE_FORGE_OPTION_FROZEN = "forge_option_frozen"      # 설정 잠금으로 거절됐던 옵션 — 기억해 두고 보내지 않음(P10 검토 3)
 
 # 단독 SAM3/Refine 에서 결과가 원본과 같다는 뜻인 알림 (그 결과는 저장하지 않는다)
 SAM3_FAILURE_CODES = (CODE_SAM3_ERROR, CODE_SAM3_NOT_APPLIED)
@@ -90,11 +120,35 @@ FORGE_DEFAULT_HR_CFG = 1.0
 RESULT_NOTICE_TTL_S = 30.0          # 같은 결과 알림(배치·자동화의 같은 실패)은 이 동안 한 번만
 PRE_GENERATION_NOTICE_TTL_S = 600.0  # 같은 생성 전 경고는 10분에 한 번 (자동화가 장마다 띄우지 않게)
 # 알림 종류별 최소 억제 시간 — 추측 변환 기록은 같은 LoRA 묶음이면 생성마다 남으므로(확장 gr.Info 는 로드 때 한 번)
-# 생성 전 경고처럼 드물게 띄운다.
-NOTICE_MIN_TTL_S = {CODE_LORA_SPARSE_GUESS: PRE_GENERATION_NOTICE_TTL_S}
+# 생성 전 경고처럼 드물게 띄운다. 게이트·전달 알림도 설정이 그대로면 요청마다 같으므로(배치 100장이 30초마다
+# 다시 띄우지 않게) 생성 전 경고와 같게 둔다.
+NOTICE_MIN_TTL_S = {
+    CODE_LORA_SPARSE_GUESS: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_BLOCK_NOT_SENT: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_BLOCK_DEFERRED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_PROPAGATION_DROPPED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_PROPAGATION_RETRIED: PRE_GENERATION_NOTICE_TTL_S,
+    # DoRA 알림도 설정이 그대로면 요청마다 같다(배치 100장이 30초마다 다시 띄우지 않게 — critic B14)
+    CODE_DORA_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_DORA_COMFY_STOCK: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_DORA_CHOICE: PRE_GENERATION_NOTICE_TTL_S,
+    # Anima 3.8B Comfy 안내도 모듈 목록이 그대로면 요청마다 같다(critic B14)
+    CODE_ANIMA38_COMFY_V1: PRE_GENERATION_NOTICE_TTL_S,
+    # 재시도·옵션 알림도 스냅샷·설정이 그대로면 요청마다 같다(배치 100장이 30초마다 다시 띄우지 않게 — critic B14)
+    CODE_APP_BLOCK_RETRIED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_BLOCK_RETRIED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_FORGE_OPTION_MISSING: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_FORGE_OPTION_UNVERIFIED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_FORGE_OPTION_REJECTED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_FORGE_OPTION_FROZEN: PRE_GENERATION_NOTICE_TTL_S,
+}
+# 띄울 때 GUI 가 기능 스냅샷을 다시 받아야 하는 알림(연결 때 받은 스냅샷이 틀렸다는 뜻) —
+# ui/sam_extra_notices_ui.show_notices 가 _refresh_sam_extra_capabilities(force=True) 를 부른다.
+REFRESH_CAPABILITIES_CODES = frozenset({CODE_PROPAGATION_RETRIED, CODE_APP_BLOCK_RETRIED, CODE_BLOCK_RETRIED,
+                                        CODE_FORGE_OPTION_REJECTED})
 
 # ── alwayson 제목 → 사람이 읽는 이름 ─────────────────────────────────────────
-_TITLE_DORA = "DoRA Inference Mode"
+_TITLE_DORA = dora_infer_mode.SCRIPT_NAME
 _TITLE_VAE2X = "Anima VAE 2x (spacepxl decoder)"
 SAM_EXTRA_FEATURES = {
     sam3_args.SCRIPT_SAM3.lower(): ("sam3", "SAM3 Mask"),
@@ -307,6 +361,7 @@ class RequestedFeatures:
     pag_parts: tuple = ()                     # ('PAG',) ('SEG', 'SLG') …
     cfg_bases: tuple = ()                     # ('SMC', 'APG', 'CWM') 중 실제로 거는 것(CWM 은 alpha ≠ 0)
     anima38: Optional[anima38.Anima38Settings] = None   # 블록을 보냈을 때만
+    dora: Optional[dora_infer_mode.DoraSettings] = None   # 블록을 보냈을 때만(확장이 읽는 규칙 — parse_script_block)
     cfg_scale: Optional[float] = None
     hires: bool = False
     hires_cfg: Optional[float] = None         # 요청에 hr_cfg 가 있을 때만
@@ -408,9 +463,12 @@ def requested_features(payload: Any, *, live_pag_argc: Optional[int] = None) -> 
     return RequestedFeatures(
         scripts=titles, sam3=sam3_on, sam3_state=sam3_state, pag=pag, pag_parts=parts, cfg_bases=bases,
         anima38=anima38.parse_script_block(block38) if block38 is not None else None,
+        dora=dora_infer_mode.parse_script_block(_script_block(payload, dora_infer_mode.SCRIPT_NAME)),
         cfg_scale=_number(payload.get("cfg_scale")),
         hires=hires, hires_cfg=_number(payload.get("hr_cfg")) if hires and "hr_cfg" in payload else None,
-        img2img=bool(payload.get("init_images")),
+        # 키가 있으면 img2img 요청이다 — 재인코딩하는 I2I 는 워커가 채울 때까지 init_images=[] 로 둔다
+        # (core/i2i_payload.py). T2I 페이로드에는 이 키가 없다.
+        img2img="init_images" in payload,
     )
 
 
@@ -481,6 +539,18 @@ def _anima38_status(params: Mapping) -> Optional[str]:
     for key in (KEY_ANIMA38_STATUS, *ANIMA38_LEGACY_STATUS_KEYS):
         if key in params and params[key] is not None:
             return str(params[key]).strip()
+    return None
+
+
+KEY_MODEL = "Model"   # Forge infotext 모델 이름(확장자·해시 없음)
+
+
+def _result_model_kind(images: Sequence[Mapping]) -> Optional[str]:
+    """결과 infotext 'Model' → 모델 종류(core/anima_model_kind — 연결 때 헤더로 확인한 목록, 없으면 이름). 없으면 None."""
+    for params in images:
+        name = params.get(KEY_MODEL)
+        if name not in (None, ""):
+            return anima_model_kind.kind_for_model_name(name)
     return None
 
 
@@ -568,17 +638,27 @@ def sam3_error_hint(reason: str, state: Optional[Mapping] = None) -> str:
     return "Forge 콘솔의 '[-] SAM3: failed' 줄에서 원인을 확인하세요"
 
 
-def anima38_off_hint(status: str) -> str:
+def anima38_off_hint(status: str, *, kind: Optional[str] = None) -> str:
     """'Anima38: off: …' → 확인할 것 (한 문장).
 
     확장의 FileNotFoundError 문구 세 가지(sam3ext/anima38/files.py tokenizer_dir, runtime.py _qwen35_path·
     _load_adapter)를 가른다. 토크나이저 문구에도 'qwen35'('assets/qwen35_tokenizer')가 들어 있고 어댑터 이름에도
     들어갈 수 있으므로 토크나이저 → 어댑터 → 텍스트 인코더 순서로 본다.
+
+    ``kind``(결과 모델 종류, core/anima_model_kind): 'install failed (RuntimeError)' 는 비 Anima 모델에 v1 을 켰을 때
+    확장이 남기는 흔적이다(runtime._require_anima — 'requires a loaded Anima checkpoint'). 종류가 other·unknown 이면
+    그 원인을 먼저 말한다(P9). None(모름·옛 호출)이면 예전 문구.
     """
     lower = str(status or "").lower()
     if "install failed" in lower:
-        kind = re.search(r"\(([^)]+)\)", status or "")
-        why = f"({kind.group(1)}) " if kind else ""
+        cause = re.search(r"\(([^)]+)\)", status or "")
+        why = f"({cause.group(1)}) " if cause else ""
+        if "(runtimeerror)" in lower and kind == anima_model_kind.KIND_OTHER:
+            return (f"선택한 모델이 Anima 가 아닙니다 {why}— 'Anima 3.8B' 카드의 'v1 어댑터 켜기'를 끄세요 "
+                    "(확장은 Anima 체크포인트에만 Qwen3.5 커넥터를 설치합니다)")
+        if "(runtimeerror)" in lower and kind == anima_model_kind.KIND_UNKNOWN:
+            return (f"선택한 모델이 Anima 가 아니면 'Anima 3.8B' 카드의 'v1 어댑터 켜기'를 끄세요 {why}— Anima 라면 "
+                    "VRAM 이 부족했거나 파일이 손상됐을 수 있습니다. Forge 콘솔의 '[Anima38]' 줄을 확인하세요")
         return (f"Qwen3.5 커넥터 설치 실패 {why}— VRAM 이 부족했거나 파일이 손상됐을 수 있습니다. "
                 "Forge 콘솔의 '[Anima38]' 줄을 확인하세요")
     if "tokenizer" in lower:
@@ -592,8 +672,61 @@ def anima38_off_hint(status: str) -> str:
 
 
 # ── 생성 뒤 알림 ───────────────────────────────────────────────────────────────
-def result_notices(info: Any, payload: Any = None, *, capabilities: Any = None) -> list[Notice]:
-    """Forge 응답 info + 보낸 payload → 결과 알림. 판단할 재료가 없으면 빈 목록."""
+PROPAGATED_SUFFIX = " (메인 생성 설정에서 전달됨)"
+
+
+def _dora_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
+    """보낸 DoRA 방식이 결과 infotext 에 없으면 경고 — 확장은 순정이 아닌 방식을 켠 요청마다(LoRA 가 없어도)
+    'DoRA mode' 를, 그대로 복제가 아닌 정책이면 'DoRA inserted' 를 남긴다(scripts/dora_infer_mode.py _record_state).
+    빠졌다면 훅이 없어 순정으로 떨어진 것이다(process() 의 훅 폴백 :414-419).
+
+    앱 기본값 블록(카드를 건드리지 않은 사용자에게 앱이 스스로 넣은 LyCORIS·그대로 복제 — ``APP_DEFAULTS``)이면
+    로그만 남긴다(critic A6 — 사용자가 켜지 않은 기능으로 생성마다 경고하지 않는다. 게이트가 같은 블록을 뺄 때
+    ``core/alwayson_propagation.gate_notices`` 와 같은 규칙). 훅이 없는 Forge 는 Forge UI 에서도 순정으로 합치므로 결과는
+    Forge 와 같다. 보낸 블록만으로 출처를 가른다 — 블록 내용이 앱 기본값과 같으면 앱 기본값으로 본다."""
+    sent = request.dora
+    if sent is None or sent.is_stock:
+        return []
+    if sent == dora_infer_mode.APP_DEFAULTS:
+        if not any(dora_infer_mode.INFOTEXT_MODE_KEY in p for p in images):
+            logger.info("[DoRA] 앱 기본값 %s 을(를) 보냈지만 결과에 '%s' 기록이 없음 — Forge 의 weight_adapter 훅이 없어 "
+                        "순정으로 합쳤다(알림 없음)", dora_infer_mode.describe(sent), dora_infer_mode.INFOTEXT_MODE_KEY)
+        return []
+    mode, inserted = sent.effective
+    out = []
+    if mode != dora_infer_mode.MODE_FORGE and not any(dora_infer_mode.INFOTEXT_MODE_KEY in p for p in images):
+        out.append(Notice(
+            CODE_DORA_NOT_APPLIED, LEVEL_WARNING,
+            f"DoRA 추론 방식({dora_infer_mode.SHORT_LABELS[mode]})을 보냈지만 결과에 '{dora_infer_mode.INFOTEXT_MODE_KEY}' "
+            "기록이 없습니다 — Forge 의 weight_adapter 훅이 없어 순정으로 합쳤습니다(Forge 버전 차이). Forge 콘솔의 "
+            "'[DoRA Inference]' 줄을 확인하세요.",
+            feature="dora", detail=f"mode:{mode}"))
+    if inserted != dora_infer_mode.INSERT_KEEP and not any(dora_infer_mode.INFOTEXT_INSERT_KEY in p for p in images):
+        out.append(Notice(
+            CODE_DORA_NOT_APPLIED, LEVEL_WARNING,
+            f"끼워 넣은 블록 정책({dora_infer_mode.SHORT_LABELS[inserted]})을 보냈지만 결과에 "
+            f"'{dora_infer_mode.INFOTEXT_INSERT_KEY}' 기록이 없습니다 — ANIMA LoRA 블록 변환 훅이 없어 Forge 기본대로 "
+            "복제했습니다. Forge 콘솔의 '[DoRA Inference]' 줄을 확인하세요.",
+            feature="dora", detail=f"inserted:{inserted}"))
+    return out
+
+
+def result_notices(info: Any, payload: Any = None, *, capabilities: Any = None,
+                   propagated_titles: Iterable[str] = ()) -> list[Notice]:
+    """Forge 응답 info + 보낸 payload → 결과 알림. 판단할 재료가 없으면 빈 목록.
+
+    ``propagated_titles``: 보조 패스가 메인 생성 설정에서 전달한 제목(P7). 그 기능의 알림 문구는 사용자가 이
+    패널에서 켠 것이 아니므로 '(메인 생성 설정에서 전달됨)' 을 붙인다.
+    """
+    out = _result_notices(info, payload, capabilities=capabilities)
+    features = {SAM_EXTRA_FEATURES[key][0] for key in (str(t).strip().lower() for t in propagated_titles or ())
+                if key in SAM_EXTRA_FEATURES}
+    if not features:
+        return out
+    return [replace(n, message=n.message + PROPAGATED_SUFFIX) if n.feature in features else n for n in out]
+
+
+def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None) -> list[Notice]:
     images = image_parameters(info)
     if not images:
         return []
@@ -624,10 +757,12 @@ def result_notices(info: Any, payload: Any = None, *, capabilities: Any = None) 
     # Anima 3.8B — 'off: …' 는 3.8B 가 켜져야 했을 때(v2 번들 또는 명시적으로 켬)만 남는다.
     statuses = [_anima38_status(p) for p in images]
     offs = list(dict.fromkeys(s for s in statuses if s and s.lower().startswith("off")))
+    model_kind = _result_model_kind(images) if offs else None
     for status in offs:
         out.append(Notice(
             CODE_ANIMA38_OFF, LEVEL_WARNING,
-            f"Anima 3.8B(Qwen3.5 커넥터)가 꺼진 채 순정 Anima 로 생성됐습니다 — {anima38_off_hint(status)}. "
+            f"Anima 3.8B(Qwen3.5 커넥터)가 꺼진 채 순정 Anima 로 생성됐습니다 — "
+            f"{anima38_off_hint(status, kind=model_kind)}. "
             f"(기록: {_short(status, 120)})",
             feature="anima38", detail=status))
     if not offs and request.anima38_expected and not any(statuses):
@@ -662,6 +797,8 @@ def result_notices(info: Any, payload: Any = None, *, capabilities: Any = None) 
                 CODE_PAG_DROPPED, LEVEL_WARNING,
                 f"{parts} 를 켰지만 {scope}의 infotext 에 '{KEY_PAG}' 가 없습니다 — {why}.",
                 feature="anima_guidance", detail=f"{missing}/{total}"))
+
+    out.extend(_dora_result_notices(request, images))
 
     # 부분 Anima LoRA 추측 변환 — Forge 설정을 켠 사용자에게 블록 대응이 틀릴 수 있음을 알린다(확장의 gr.Info 대응).
     guesses = list(dict.fromkeys(str(p[KEY_SPARSE_LORA_GUESS]).strip() for p in images
@@ -857,6 +994,213 @@ def _detail_of(body: Any) -> Any:
     return body
 
 
+def missing_script_title(body: Any) -> Optional[str]:
+    """Forge 422 본문이 '없는 스크립트' 거절이면 그 제목(보낸 표기가 아니라 Forge 가 적은 표기), 아니면 None.
+
+    ``always on script X not found`` (modules/api/api.py:344-345), ``Script 'X' not found``. 재시도 판정
+    (core/forge_optional_parts.plan_retry)과 설명(``explain_rejected_request``)이 같은 규칙을 쓴다.
+    """
+    detail = _detail_of(body)
+    if not isinstance(detail, str):
+        return None
+    text = detail.strip()
+    for pattern in _MISSING_SCRIPT_RES:
+        match = pattern.match(text)
+        if match:
+            return match.group("title").strip() or None
+    return None
+
+
+# ── 샘플링 블록 게이트·보조 패스 전달 알림 (P7) ─────────────────────────────────
+def block_not_sent_notice(title: str, *, img2img: bool) -> Notice:
+    """메인 생성: 기능 스냅샷이 '없다'고 한 스크립트 블록을 422 대신 빼고 보냈다(경고)."""
+    feature, label, _ext = _feature_of(title)
+    tab = "img2img" if img2img else "txt2img"
+    return Notice(
+        CODE_BLOCK_NOT_SENT, LEVEL_WARNING,
+        f"연결된 Forge 의 sam-extra 에 '{title}' 스크립트가 없어({tab}) 이 설정을 빼고 생성합니다 — {label} 를 "
+        "끄거나 확장을 업데이트하세요.",
+        feature=feature, detail=f"{title}@{tab}")
+
+
+def block_deferred_notice(title: str) -> Notice:
+    """확장 확인 전(기능 스냅샷을 모름)이라 이번 요청에는 보내지 않았다(정보)."""
+    feature, _label, _ext = _feature_of(title)
+    return Notice(
+        CODE_BLOCK_DEFERRED, LEVEL_INFO,
+        f"연결된 Forge 의 sam-extra 확인이 아직 끝나지 않아 이번 요청에는 '{title}' 을(를) 보내지 않았습니다 — "
+        "확인되면 다음 요청부터 적용됩니다.",
+        feature=feature, detail=title)
+
+
+def propagation_dropped_notice(title: str, where: str) -> Notice:
+    """보조 패스: 연결된 Forge 에 없어 메인 생성 설정을 전달하지 않았다(정보)."""
+    feature, _label, _ext = _feature_of(title)
+    return Notice(
+        CODE_PROPAGATION_DROPPED, LEVEL_INFO,
+        f"연결된 Forge 의 sam-extra 에 '{title}' 스크립트가 없어(img2img) 이 {where} 작업에는 메인 생성 설정의 "
+        "그 블록을 전달하지 않았습니다.",
+        feature=feature, detail=f"{title}@{where}")
+
+
+def propagation_retried_notice(title: str, where: str) -> Notice:
+    """보조 패스: 전달한 블록을 Forge 가 422 로 거절해 그 블록만 빼고 다시 보냈다(경고)."""
+    feature, _label, _ext = _feature_of(title)
+    return Notice(
+        CODE_PROPAGATION_RETRIED, LEVEL_WARNING,
+        f"Forge 가 메인 생성 설정에서 전달한 '{title}' 을(를) 거절해(HTTP 422, 스크립트 없음) 그 블록을 빼고 "
+        f"{where} 을(를) 다시 실행했습니다 — 확장 목록을 다시 확인합니다.",
+        feature=feature, detail=f"{title}@{where}")
+
+
+# ── DoRA 추론 방식 알림 (P8, core/dora_infer_mode) ─────────────────────────────
+def dora_comfy_stock_notice(summary: str) -> Notice:
+    """ComfyUI 는 DoRA 추론 방식을 고를 수 없어 순정으로 합친다(정보, 사용자가 바꾼 값 + LoRA 가 있을 때만)."""
+    return Notice(
+        CODE_DORA_COMFY_STOCK, LEVEL_INFO,
+        f"ComfyUI 는 DoRA 추론 방식({summary})을 지원하지 않아 순정으로 합칩니다 — DoRA LoRA 는 Forge 결과와 다를 수 "
+        "있습니다. 이 설정은 Forge 에만 적용됩니다.",
+        feature="dora", detail=summary)
+
+
+def dora_choice_notice(problem: str) -> Notice:
+    """고른 값을 연결된 확장이 몰라 이번 요청에는 DoRA 블록을 보내지 않았다(경고)."""
+    return Notice(
+        CODE_DORA_CHOICE, LEVEL_WARNING,
+        f"{problem} — 이번 요청은 DoRA 추론 방식 없이(순정) 보냅니다. 확장을 업데이트하거나 DoRA 카드의 값을 바꾸세요.",
+        feature="dora", detail=problem)
+
+
+def dora_app_default_notice(summary: str) -> Notice:
+    """옛 설정 파일에 DoRA 키가 없어 앱 기본값(Forge ui-config 의 txt2img 값)으로 시작한다(정보, 첫 로드 한 번).
+
+    Forge 에만 해당한다 — ComfyUI 백엔드면 띄우지 않는다(ui/dora_infer_mode_ui.app_default_boot_notice). 시작 게이트에서
+    백엔드를 아직 고르지 않았을 때도 틀리지 않게 문구를 Forge 로 한정한다."""
+    return Notice(
+        CODE_DORA_APP_DEFAULT, LEVEL_INFO,
+        f"Forge 로 생성할 때 DoRA LoRA 를 Forge 설정과 같게 {summary} 방식으로 합칩니다(T2I·보조 작업, I2I·인페인트는 "
+        "순정 · ComfyUI 는 늘 순정) — 바꾸거나 끄려면 파라미터의 'DoRA 추론 방식' 카드를 여세요.",
+        feature="dora", detail=summary)
+
+
+# ── Anima 3.8B 알림 (P9) ────────────────────────────────────────────────────────
+def anima38_app_default_notice() -> Notice:
+    """옛 설정 파일에 Anima38 키가 없어 앱 기본값(사용자 Forge ui-config txt2img — 부정 커넥터 켬)으로 시작한다(정보, 첫
+    로드 한 번). v1 어댑터는 끔(사용자 결정 D1=B)이라 비 번들 Anima 결과는 그대로다. ComfyUI 컴파일러도 같은 블록을
+    읽으므로 백엔드와 무관한 문구다."""
+    return Notice(
+        CODE_ANIMA38_APP_DEFAULT, LEVEL_INFO,
+        "Anima 3.8B v2 번들 모델로 생성할 때 Forge 설정과 같게 부정 프롬프트도 Qwen3.5 커넥터로 인코딩합니다(T2I·보조 "
+        "작업, I2I·인페인트는 끔) — 끄려면 파라미터의 'Anima 3.8B' 카드를 여세요.",
+        feature="anima38", detail=anima38.describe(anima38.APP_T2I_DEFAULTS))
+
+
+def anima38_comfy_v1_notice(*, i2i_off: bool = False, v1_enabled: bool = False, pick_adapter: str = "") -> Notice:
+    """ComfyUI: 모듈 목록의 Qwen3.5·v1 어댑터 쌍만으로는 v1 을 켜지 않는다(정보, 생성 전). 예전 컴파일러는 그 쌍으로 v1 을
+    자동으로 켰다 — 이제 Forge 처럼 카드의 v1 켜기를 따른다. 켰는데 파일이 없을 때의 동작은 백엔드마다 다르다(critic B8):
+    ComfyUI 는 큐에 넣기 전에 컴파일 오류로 멈추고, Forge 는 'off: …' 를 남기고 순정으로 계속한다.
+
+    ``i2i_off`` — I2I·인페인트 요청인데 카드의 'I2I·인페인트에도 적용'이 꺼져 블록이 없다. v1 을 이미 켰으면
+    원인(그 토글)만 말하고, 꺼져 있으면 두 토글을 모두 말한다(P9 리뷰 4). ``pick_adapter`` — 모듈 목록의 어댑터
+    이름이 카드 어댑터와 달라 v1 을 켤 때 카드 어댑터 칸에서 골라야 하는 이름(컴파일러는 카드 값만 쓴다 — P9 리뷰 2)."""
+    if i2i_off and v1_enabled:
+        message = ("'Anima 3.8B' 카드의 'I2I·인페인트에도 적용'이 꺼져 있어 이번 I2I·인페인트 생성에는 v1 어댑터를 "
+                   "쓰지 않습니다(Forge img2img 탭 기본값과 같음) — 모듈 목록의 Qwen3.5·어댑터도 쓰지 않고 순정 Anima "
+                   "조건으로 인코딩합니다.")
+    else:
+        when = ("'v1 어댑터 켜기'와 'I2I·인페인트에도 적용'을 모두 켤 때만" if i2i_off
+                else "'v1 어댑터 켜기'를 켤 때만")
+        message = ("모듈 목록에 Qwen3.5 인코더와 Anima v1 어댑터가 있지만, v1 어댑터는 Forge 와 같게 'Anima 3.8B' "
+                   f"카드의 {when} 씁니다 — 이번 생성은 순정 Anima 조건으로 인코딩합니다. (켰는데 ComfyUI 에 "
+                   "Qwen3.5·어댑터 파일이 없으면 생성 전에 오류로 멈춥니다. Forge 는 순정으로 계속합니다.)")
+    if pick_adapter:
+        message += (f" 켤 때는 카드의 어댑터 칸에서 '{pick_adapter}'를 고르세요 — 모듈 목록의 어댑터가 아니라 "
+                    "카드에서 고른 어댑터를 씁니다.")
+    return Notice(CODE_ANIMA38_COMFY_V1, LEVEL_INFO, message, feature="anima38")
+
+
+# ── 메인 생성 재시도·Forge 옵션 덮어쓰기 알림 (P10) ───────────────────────────────
+def app_block_retried_notice(title: str) -> Notice:
+    """메인 생성: 앱이 스스로 넣은 블록(DoRA·Anima38 — Forge 설정 맞춤)을 Forge 가 422 로 거절해 그 블록만 빼고 다시
+    생성했다(정보 — 사용자가 켜지 않은 앱 기본값이라 경고로 띄우지 않는다, critic A6). 요청의 블록 출처가 앱 기본값일
+    때만 쓴다(그 밖은 ``block_retried_notice`` — P10 검토 2). 연결 때 받은 스냅샷이 틀렸다는 뜻이라 GUI 가 스냅샷을 다시
+    받는다(``REFRESH_CAPABILITIES_CODES``) — 다음 요청부터는 게이트가 뺀다."""
+    feature, _label, _ext = _feature_of(title)
+    return Notice(
+        CODE_APP_BLOCK_RETRIED, LEVEL_INFO,
+        f"Forge 가 앱이 넣은 '{title}' 블록을 거절해(HTTP 422, 스크립트 없음) 그 블록 없이 다시 생성했습니다 — "
+        "확장 목록을 다시 확인합니다.",
+        feature=feature or "sam_extra", detail=title)
+
+
+def block_retried_notice(title: str) -> Notice:
+    """메인 생성: 사용자가 켰거나 출처를 모르는 블록(DoRA·Anima38)을 Forge 가 422 로 거절해 그 블록만 빼고 다시 생성했다
+    (경고 — 이번 결과에 그 설정이 빠졌다, critic A6). 누가 넣었는지는 말하지 않는다(P10 검토 2). 스냅샷이 틀렸거나 확인
+    전이라는 뜻이라 GUI 가 스냅샷을 다시 받는다 — 다음 요청부터는 게이트가 빼고 ``block_not_sent`` 로 알린다."""
+    feature, label, _ext = _feature_of(title)
+    return Notice(
+        CODE_BLOCK_RETRIED, LEVEL_WARNING,
+        f"연결된 Forge 가 '{title}' 블록을 거절해(HTTP 422, 스크립트 없음) 그 블록 없이 다시 생성했습니다 — 이번 결과에는 "
+        f"{label} 설정이 적용되지 않았습니다. 확장을 업데이트하거나 그 설정을 끄세요(확장 목록을 다시 확인합니다).",
+        feature=feature or "sam_extra", detail=title)
+
+
+def _option_labels(labels: Iterable[str]) -> str:
+    return ", ".join(f"'{label}'" for label in labels)
+
+
+def forge_option_missing_notice(labels: Sequence[str]) -> Notice:
+    """설정 › Forge 에서 정한 옵션이 연결된 sam-extra 에 없어 보내지 않았다(경고 — 그 요청은 Forge 설정대로)."""
+    names = _option_labels(labels)
+    return Notice(
+        CODE_FORGE_OPTION_MISSING, LEVEL_WARNING,
+        f"설정한 Forge 옵션 {names} 이(가) 연결된 Forge 의 sam-extra 에 없어 보내지 않았습니다 — 이 요청은 Forge "
+        "설정대로 생성합니다. 확장을 업데이트하거나 설정 › Forge 에서 'Forge 설정 따름'으로 되돌리세요.",
+        feature="forge_options", detail=names)
+
+
+def forge_option_unverified_notice(labels: Sequence[str], *, no_config: bool) -> Notice:
+    """옵션 목록을 확인하지 못해 앱의 sam-extra 설정을 보내지 않았다(정보 — 모르는 키는 요청 전체를 500 으로 실패시킨다)."""
+    names = _option_labels(labels)
+    why = ("Forge 설정 목록(/config)을 읽지 못해(로그인 설정·--nowebui)" if no_config
+           else "연결된 Forge 의 sam-extra 확인이 아직 끝나지 않아")
+    return Notice(
+        CODE_FORGE_OPTION_UNVERIFIED, LEVEL_INFO,
+        f"{why} 앱의 sam-extra 설정 {names} 을(를) 이번 요청에는 보내지 않았습니다 — Forge 설정대로 생성합니다.",
+        feature="forge_options", detail=f"{'no_config' if no_config else 'unknown'}:{names}")
+
+
+def forge_option_rejected_notice(labels: Sequence[str], *, frozen: bool, where: str = "",
+                                 also: Sequence[str] = ()) -> Notice:
+    """Forge 가 앱이 넣은 옵션을 거절해(HTTP 500 KeyError·설정 잠금) 앱 옵션 없이 다시 보냈다(경고). ``labels`` 는 거절된
+    (잠금이면 기억해 보내지 않을) 설정, ``also`` 는 다시 보낼 때 함께 뺐지만 다음 요청부터 다시 보내는 설정(섹션·키
+    잠금은 일부만 잠근다 — P10 검토 4). ``where`` 는 보조 작업 이름(비면 메인 생성)."""
+    names = _option_labels(labels)
+    # 잠금 인자는 셋(--freeze-settings·-in-sections·--freeze-specific-settings) — 어느 것인지 단정하지 않는다
+    why = "설정 잠금 --freeze-settings…" if frozen else "KeyError — 이 Forge 에 없는 설정"
+    what = f"{where} 을(를) 다시 실행했습니다" if where else "다시 생성했습니다"
+    # 잠금은 Forge 시작 인자라 기능 확인에 드러나지 않는다 — 기억해 두고 보내지 않는다(P10 검토 3)
+    then = "백엔드를 다시 연결할 때까지 이 설정은 보내지 않습니다" if frozen else "기능 확인을 새로 고칩니다"
+    extra = f" 이번에는 {_option_labels(also)} 도 함께 뺐습니다 — 다음 요청부터 다시 보냅니다." if also else ""
+    return Notice(
+        CODE_FORGE_OPTION_REJECTED, LEVEL_WARNING,
+        f"Forge 가 앱의 sam-extra 설정 {names} 을(를) 거절해(HTTP 500, {why}) 그 설정 없이 {what} — {then}.{extra}",
+        feature="forge_options", detail=f"{'frozen' if frozen else 'key'}:{names}@{where}")
+
+
+def forge_option_frozen_notice(labels: Sequence[str]) -> Notice:
+    """이 Forge 가 설정 잠금으로 거절했던 옵션을 기억해 보내지 않았다(경고 — 사용자가 정한 값이 적용되지 않는다).
+    ``labels`` 는 Forge 가 잠겼다고 이름을 댄 설정뿐이다(P10 검토 4). 기능 확인으로는 풀리지 않으므로 GUI 스냅샷을 다시
+    받지 않는다(``REFRESH_CAPABILITIES_CODES`` 밖)."""
+    names = _option_labels(labels)
+    return Notice(
+        CODE_FORGE_OPTION_FROZEN, LEVEL_WARNING,
+        f"연결된 Forge 가 설정 잠금(--freeze-settings…)으로 거절했던 앱의 sam-extra 설정 {names} 을(를) 보내지 않았습니다 "
+        "— 이 요청은 Forge 설정대로 생성합니다. 잠금 없이 Forge 를 다시 켰다면 백엔드를 다시 연결하세요(또는 설정 › Forge "
+        "에서 'Forge 설정 따름'으로 되돌리세요).",
+        feature="forge_options", detail=names)
+
+
 def explain_rejected_request(status: Any, body: Any, payload: Any = None) -> Optional[str]:
     """Forge 가 요청을 거절한 응답(HTTP 422) → 어느 확장·기능 때문인지 한국어 설명. 422 가 아니면 None."""
     try:
@@ -917,14 +1261,23 @@ class NoticeThrottle:
 
 
 __all__ = [
-    "CODE_ANIMA38_NOT_APPLIED", "CODE_ANIMA38_OFF", "CODE_CFG1_CFG_BASE", "CODE_EXTENSION_MISSING",
-    "CODE_LORA_SPARSE_GUESS", "CODE_PAG_DROPPED", "CODE_REQUEST_REJECTED", "CODE_SAM3_ERROR",
-    "CODE_SAM3_HF_DOWNLOAD", "CODE_SAM3_NOT_APPLIED", "CODE_SCRIPT_MISSING", "INFO_KEY", "KEY_ANIMA38_STATUS",
-    "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR", "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR",
-    "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S", "Notice", "NoticeThrottle", "NoticedImage",
-    "PRE_GENERATION_NOTICE_TTL_S", "RESULT_NOTICE_TTL_S", "RequestedFeatures", "anima38_off_hint",
-    "explain_rejected_request", "image_parameters", "is_loopback_url", "notice_ttl", "notices_from_info",
-    "notices_of", "notices_to_dicts", "pre_generation_notices", "requested_features", "result_notices",
-    "sam3_checkpoint_notice", "sam3_error_hint", "sam3_failure_repeats", "standalone_failure_text",
-    "standalone_sam3_failure",
+    "CODE_ANIMA38_APP_DEFAULT", "CODE_ANIMA38_COMFY_V1", "CODE_ANIMA38_NOT_APPLIED", "CODE_ANIMA38_OFF",
+    "CODE_APP_BLOCK_RETRIED", "CODE_BLOCK_DEFERRED",
+    "CODE_BLOCK_NOT_SENT", "CODE_BLOCK_RETRIED", "CODE_CFG1_CFG_BASE", "CODE_DORA_APP_DEFAULT", "CODE_DORA_CHOICE",
+    "CODE_DORA_COMFY_STOCK", "CODE_DORA_NOT_APPLIED", "CODE_EXTENSION_MISSING", "CODE_FORGE_OPTION_FROZEN",
+    "CODE_FORGE_OPTION_MISSING", "CODE_FORGE_OPTION_REJECTED", "CODE_FORGE_OPTION_UNVERIFIED",
+    "CODE_LORA_SPARSE_GUESS", "CODE_PAG_DROPPED", "CODE_PROPAGATION_DROPPED", "CODE_PROPAGATION_RETRIED",
+    "CODE_REQUEST_REJECTED", "CODE_SAM3_ERROR", "CODE_SAM3_HF_DOWNLOAD", "CODE_SAM3_NOT_APPLIED",
+    "CODE_SCRIPT_MISSING", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
+    "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",
+    "Notice", "NoticeThrottle", "NoticedImage", "PRE_GENERATION_NOTICE_TTL_S", "PROPAGATED_SUFFIX",
+    "REFRESH_CAPABILITIES_CODES", "RESULT_NOTICE_TTL_S", "RequestedFeatures", "anima38_app_default_notice",
+    "anima38_comfy_v1_notice", "anima38_off_hint",
+    "app_block_retried_notice", "block_deferred_notice", "block_not_sent_notice", "block_retried_notice",
+    "dora_app_default_notice", "dora_choice_notice", "dora_comfy_stock_notice", "explain_rejected_request",
+    "forge_option_frozen_notice", "forge_option_missing_notice", "forge_option_rejected_notice",
+    "forge_option_unverified_notice", "image_parameters", "is_loopback_url", "missing_script_title", "notice_ttl",
+    "notices_from_info", "notices_of", "notices_to_dicts", "pre_generation_notices", "propagation_dropped_notice",
+    "propagation_retried_notice", "requested_features", "result_notices", "sam3_checkpoint_notice",
+    "sam3_error_hint", "sam3_failure_repeats", "standalone_failure_text", "standalone_sam3_failure",
 ]

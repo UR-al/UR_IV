@@ -23,21 +23,61 @@ _GENERATION_KEYS = (
     "prompt", "negative_prompt", "sampler_name", "scheduler", "steps",
     "cfg_scale", "seed", "forge_additional_modules", "distilled_cfg_scale",
     "_chat_deferred_prompt", "alwayson_scripts",
+    # 앱 기본값 블록 출처(core/alwayson_propagation.PROVENANCE_KEY) — Forge 로 보낼 때만 _hand_snapshot 이 적고,
+    # WebUIBackend._generate 가 요청 전에 떼어 422 재시도 알림에 쓴다(P10 검토 2)
+    "_sampling_provenance",
 )
 
 
-def _sampling_scripts(snapshot):
-    from core import anima38, anima_guidance
-    allowed = {anima38.SCRIPT_NAME, *anima_guidance.SPECS, "NegPiP"}
-    return {name: copy.deepcopy(block) for name, block in snapshot.get("alwayson_scripts", {}).items()
-            if name in allowed}
+def _sampling_gate(snapshot, *, backend="webui", capabilities=None, provenance=None):
+    """손 재구성 몫의 샘플링 블록과 img2img 게이트 결과(``GateResult``) — 뺀 제목은 보내는 곳이 알린다.
+
+    손 재구성은 img2img 요청이라 이 게이트 하나가 스냅샷의 유일한 게이트다(스냅샷은 aux 규칙 — 메인 txt2img 게이트 없음).
+    기능 스냅샷은 WebUI 것이라 Comfy 는 게이트하지 않는다. WebUI 는 스냅샷이 없어도(연결 직후·백엔드 전환 직후
+    ``host.sam_extra_capabilities`` None·캐시 없음, 테스트 더블) 게이트한다 — 모를 때는 ``Rule.when_unknown`` × 출처로
+    정한다(메인 빌더·Forge 보조 워커와 같음, P7 검토 R2-1). ``provenance`` 는 빌더가 적은 블록 출처(A2·A6).
+    """
+    from core import alwayson_propagation as ap
+    blocks = ap.blocks_for(snapshot.get("alwayson_scripts", {}), ap.AUX_HAND, backend=backend)
+    if backend != ap.BACKEND_WEBUI:
+        return ap.GateResult(blocks)
+    return ap.gate(blocks, capabilities, img2img=True, provenance=provenance)
+
+
+def _sampling_scripts(snapshot, *, backend="webui", capabilities=None):
+    """샘플링 블록만(허용 목록 = core/alwayson_propagation.PROPAGATION 의 손 재구성 몫) — 깊은 복사.
+
+    ADetailer·SAM3 는 빠지고(크롭 전체에 다시 돌지 않게), DD 는 Hires Pass 가 꺼져 있을 때만 남는다. ``capabilities`` 가
+    있으면 img2img 목록으로 게이트한다(스냅샷이 '없다'고 한 스크립트는 뺀다). 없으면 필터만 한다 — 워커
+    (``hand_generation_payload``, Comfy 에도 backend='webui')는 이미 게이트한 스냅샷을 다시 거르므로(멱등) 여기서
+    모름으로 게이트하면 확인된 스냅샷으로 통과시킨 블록(DoRA 등)을 다시 뺀다.
+    """
+    from core import alwayson_propagation as ap
+    if capabilities is None:
+        return ap.blocks_for(snapshot.get("alwayson_scripts", {}), ap.AUX_HAND, backend=backend)
+    return _sampling_gate(snapshot, backend=backend, capabilities=capabilities).kept
+
+
+def _hand_capabilities(host, backend):
+    """손 재구성을 보낼 WebUI 의 기능 스냅샷 — host 값, 없으면 그 주소의 캐시(peek, HTTP 없음). 테스트 더블은 None."""
+    capabilities = getattr(host, "sam_extra_capabilities", None)
+    if capabilities is not None:
+        return capabilities
+    api_url = str(getattr(backend, "api_url", "") or "")
+    if not api_url:
+        return None
+    try:
+        from core.sam_extra_probe import peek_capabilities
+        return peek_capabilities(api_url)
+    except Exception:
+        return None
 
 
 def _data_url(png):
     return png_data_url(png)
 
 
-def hand_generation_payload(prepared, snapshot, seed):
+def hand_generation_payload(prepared, snapshot, seed, *, backend="webui"):
     """An allowlist prevents hires/detailers/custom workflows leaking into repair."""
     payload = {key: copy.deepcopy(snapshot[key]) for key in _GENERATION_KEYS if key in snapshot}
     payload.pop("_chat_deferred_prompt", None)
@@ -53,7 +93,7 @@ def hand_generation_payload(prepared, snapshot, seed):
         "mask_blur": 0, "mask_dilation": 0, "grow_mask_by": 0,
         "resize_mode": 0, "send_images": True, "save_images": False,
         "do_not_save_samples": True, "do_not_save_grid": True,
-        "alwayson_scripts": _sampling_scripts(snapshot),
+        "alwayson_scripts": _sampling_scripts(snapshot, backend=backend),
     })
     return payload
 
@@ -126,16 +166,33 @@ class HandReconstructionActionsMixin:
         prompt = "\n".join(part for part in (base_prompt, extra.strip()) if part)
         if not prompt:
             raise ValueError("손의 자세·동작을 설명하는 프롬프트를 입력하세요.")
-        model, snapshot = self._chat_generation_snapshot(prompt)
+        # 손 재구성은 img2img 보조 패스다 — 샘플링 블록은 보조 패스 규칙(T2I 패널 값, 메인 txt2img 게이트 없음)으로
+        # 만들고 아래에서 이 요청의 img2img 목록으로 한 번만 게이트한다(알림이 실제 요청을 말하게 — P7 검토 5).
+        from core import alwayson_propagation as ap
+        model, snapshot = self._chat_generation_snapshot(prompt, target=ap.TARGET_AUX)
         if snapshot.get("_generation_family") == "krea2":
             raise ValueError("Krea2는 이 손 재구성 실험에서 아직 지원하지 않습니다.")
+        backend = freeze_hand_backend(get_backend())
+        from ui.sampling_blocks import show_sampling_notice_list, take_sampling_state
+        notices, provenance = take_sampling_state(self, snapshot)   # 빌더가 묶어 둔 기여자 알림·블록 출처
+        kind = str(backend.get_backend_type() or "webui")
+        capabilities = _hand_capabilities(self, backend) if kind == "webui" else None
+        blocks = snapshot.get("alwayson_scripts", {})
         snapshot = {key: copy.deepcopy(snapshot[key]) for key in _GENERATION_KEYS if key in snapshot}
-        snapshot["alwayson_scripts"] = _sampling_scripts(snapshot)
+        gated = _sampling_gate({"alwayson_scripts": blocks}, backend=kind, capabilities=capabilities,
+                               provenance=provenance)
+        snapshot["alwayson_scripts"] = gated.kept
+        snapshot.pop(ap.PROVENANCE_KEY, None)
+        if kind == ap.BACKEND_WEBUI:
+            ap.mark_provenance(snapshot, provenance)   # 보낼 앱 기본값 블록 출처 — Forge 백엔드가 떼어 쓴다
+        # 보내는 곳 — 기여자 알림과 img2img 게이트가 뺀 블록 알림(앱 기본값은 로그만)을 함께 띄운다(B15·A6)
+        show_sampling_notice_list(self, [*notices, *ap.gate_notices(gated, provenance, img2img=True,
+                                                                   aux=ap.AUX_HAND)])
         negative = str(snapshot.get("negative_prompt") or "").strip()
         snapshot["negative_prompt"] = ", ".join(filter(None, (
             negative, "extra fingers, fused fingers, duplicated hands, malformed hands",
         )))
-        return model, snapshot, freeze_hand_backend(get_backend())
+        return model, snapshot, backend
 
     def _handle_hand_reconstruction_action(self, action, payload):
         if action not in {"hand_reconstruction_generate", "hand_reconstruction_export", "hand_reconstruction_cancel"}:

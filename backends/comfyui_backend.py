@@ -435,6 +435,10 @@ class ComfyUIBackend(AbstractBackend):
         except Exception:
             pass
 
+        # Anima 3.8B 카드의 v1 어댑터 선택지 — Forge 기능 스냅샷(choices.anima38_adapters)의 ComfyUI 짝(P9 리뷰 2)
+        from core.anima38 import comfy_adapter_choices
+        info.anima38_adapters = comfy_adapter_choices(obj_info)
+
         return info
 
     def get_object_info(self) -> dict:
@@ -1575,7 +1579,42 @@ class ComfyUIBackend(AbstractBackend):
         payload['alwayson_scripts'] = scripts
         return model_name, payload
 
+    _AUX_KINDS = {'adetailer': 'adetailer', 'sam3': 'sam3', 'refine': 'refine'}   # kind → alwayson_propagation AUX_*
+
+    @staticmethod
+    def _replace_sampling_blocks(scripts: dict, envelope: Dict, kind: str, settings: Dict,
+                                 actual_model: str = '') -> dict:
+        """봉투(클릭한 순간의 T2I 패널 — P7)가 있으면 저장 문맥의 샘플링 블록을 봉투 값으로 **교체**한다.
+
+        저장 문맥(마지막 생성)의 PROPAGATION 제목(가이던스·NegPiP·Anima38 …)은 모두 빼고 봉투의 이 패스 몫을
+        넣는다 — 생성 뒤 가이던스를 껐으면 보조 패스에도 없다. 명시 ``settings['alwayson_scripts']``(외부 호출자)가
+        봉투보다 우선한다(그 제목은 저장 문맥 값도 봉투 값도 덮지 않는다 — _saved_generation_context 가 이미 넣었다).
+        모델에 묶인 블록(Anima38 — T2I 모델 종류로 만들었다)은 이 패스가 실제로 쓰는 모델(``actual_model`` — 저장 문맥의
+        모델)이 봉투 모델과 같을 때만 넣는다(critic A7, core/alwayson_propagation.drop_model_bound).
+        """
+        from core import alwayson_propagation as ap
+
+        overrides = settings.get('alwayson_scripts')
+        explicit = ({str(name).strip().casefold() for name in overrides}
+                    if isinstance(overrides, dict) else set())
+        out = {name: block for name, block in scripts.items()
+               if ap.canonical_title(name) not in ap.PROPAGATION or str(name).strip().casefold() in explicit}
+        blocks = ap.blocks_for(envelope, ComfyUIBackend._AUX_KINDS[kind], backend=ap.BACKEND_COMFY,
+                               aux_settings=settings)
+        blocks, dropped = ap.drop_model_bound(blocks, envelope_model=envelope.get('model'), actual_model=actual_model)
+        if dropped:
+            _logger.info("%s: 저장된 생성 모델(%s)이 메인 생성 모델(%s)과 달라(또는 몰라) 전달하지 않음 — %s",
+                         ap.aux_label(ComfyUIBackend._AUX_KINDS[kind]), actual_model or '모름',
+                         envelope.get('model') or '모름', ', '.join(dropped))
+        for title, block in blocks.items():
+            if title.casefold() not in explicit:
+                out[title] = block
+        return out
+
     def _standalone_detail(self, image_b64: str, settings: Dict, kind: str) -> str:
+        from core.alwayson_propagation import take_envelope
+
+        settings, envelope = take_envelope(settings)
         model_name, payload = self._saved_generation_context(settings)
         # This action requests a new, explicit image pass. A previous T2I
         # quality preset is not part of its reusable model/conditioning context.
@@ -1590,10 +1629,25 @@ class ComfyUIBackend(AbstractBackend):
         # pre-Hires size or a stale key) can never leak into this pass.
         # Only in-generation SAM3 samples at the base size, which the compiler
         # takes from that generation's own payload width/height.
-        # Replace only prior image passes. Model/conditioning scripts (including
-        # Anima bypass/semantic negative, NegPiP and guidance) remain in force.
+        # Prior image passes never carry over. Model/conditioning scripts (Anima
+        # bypass/semantic negative, NegPiP, guidance, Detail Daemon) come from the
+        # envelope — the T2I panel at click time, same as the Forge path (P7) —
+        # or, without one (API callers), from the saved generation context.
         scripts = {name: block for name, block in payload['alwayson_scripts'].items()
                    if str(name).strip().casefold() not in {'adetailer', 'sam3 mask'}}
+        if envelope is not None:
+            scripts = self._replace_sampling_blocks(scripts, envelope, kind, settings, model_name)
+        if kind == 'adetailer':
+            # Forge 단독/배치 ADetailer 의 img2img 프롬프트 = ad_prompt, 네거티브 = ad_negative 뿐이다(webui_backend
+            # adetailer → _build_postprocess_payload). 빈 ad_prompt 슬롯은 그 빈 프롬프트를 물려받아(!adetailer.py
+            # _get_prompt) LoRA 없이 '' 를 인코딩한다 — 저장된 마지막 T2I 프롬프트(태그 포함)·네거티브로 채우지 않는다.
+            prompt = str(settings.get('prompt') or settings.get('ad_prompt') or '')
+            negative_prompt = str(settings.get('negative_prompt') or settings.get('ad_negative') or '')
+        else:
+            # SAM3/Refine: 빈 인페인트 프롬프트는 저장된 프롬프트로 채운다(sam3_args.build_state 가 아래에서 읽는다).
+            prompt = str(settings.get('prompt') or settings.get('ad_prompt') or payload.get('prompt') or '')
+            negative_prompt = str(settings.get('negative_prompt') or settings.get('ad_negative')
+                                  or payload.get('negative_prompt') or '')
         payload.update({
             '_sam3_processing_width': width,
             '_sam3_processing_height': height,
@@ -1602,8 +1656,8 @@ class ComfyUIBackend(AbstractBackend):
             # Forge 경로(webui_backend adetailer/sam3/refine)처럼 서버 output 에
             # 사본을 남기지 않는다. 결과는 앱이 받아 직접 저장한다.
             'save_images': False,
-            'prompt': str(settings.get('prompt') or settings.get('ad_prompt') or payload.get('prompt') or ''),
-            'negative_prompt': str(settings.get('negative_prompt') or settings.get('ad_negative') or payload.get('negative_prompt') or ''),
+            'prompt': prompt,
+            'negative_prompt': negative_prompt,
             'alwayson_scripts': scripts,
         })
         if kind == 'adetailer':

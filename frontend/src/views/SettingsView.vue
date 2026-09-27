@@ -73,7 +73,7 @@
               </div>
               <div class="toggle-row">
                 <span>ComfyUI SAM3 모델을 RAM 에 보관
-                  <small class="hint-inline">SAM3 의 '사용 후 언로드' 뒤에도 모델(약 3.4GB)을 ComfyUI 의 CPU RAM 에 두었다가 다음 SAM3 작업 때 옮기기만 합니다(이미지마다 체크포인트를 다시 읽지 않음, 결과는 같음). 끄면 매번 다시 읽고 보관 중인 사본도 다음 SAM3 작업에서 해제합니다. '사용 후 언로드'를 끈 SAM3 는 VRAM 에 그대로 둡니다. 위의 '생성 후 모델 언로드'(/free)는 어느 쪽이든 보관본을 해제합니다. Forge 는 Forge 설정의 SAM3 항목을 따릅니다.</small>
+                  <small class="hint-inline">SAM3 의 '사용 후 언로드' 뒤에도 모델(약 3.4GB)을 ComfyUI 의 CPU RAM 에 두었다가 다음 SAM3 작업 때 옮기기만 합니다(이미지마다 체크포인트를 다시 읽지 않음, 결과는 같음). 끄면 매번 다시 읽고 보관 중인 사본도 다음 SAM3 작업에서 해제합니다. '사용 후 언로드'를 끈 SAM3 는 VRAM 에 그대로 둡니다. 위의 '생성 후 모델 언로드'(/free)는 어느 쪽이든 보관본을 해제합니다. Forge 는 설정 › Forge 탭의 sam-extra 설정을 따릅니다(기본: Forge 설정 따름).</small>
                 </span>
                 <ToggleSwitch :model-value="comfySam3KeepInRam"
                   @update:model-value="comfySam3KeepInRam = $event; saveComfySam3KeepInRam()" />
@@ -733,6 +733,7 @@
             </div>
             <div v-if="forgeStatus" class="forge-status mt-12">{{ forgeStatus }}</div>
           </div>
+          <ForgeOptionOverridesSettings />
         </div>
 
         <!-- 4. Prompt Logic -->
@@ -1140,6 +1141,7 @@ import ModelDownloadsSettings from '../components/ModelDownloadsSettings.vue'
 import H3CacheSettings from '../components/H3CacheSettings.vue'
 import SettingsDataBackup from '../components/SettingsDataBackup.vue'
 import SpectrumSettings from '../components/SpectrumSettings.vue'
+import ForgeOptionOverridesSettings from '../components/ForgeOptionOverridesSettings.vue'
 import ComfyCompatibilitySettings from '../components/ComfyCompatibilitySettings.vue'
 import ComfyWorkflowControls from '../components/ComfyWorkflowControls.vue'
 import AiAssistInstructionsSettings from '../components/AiAssistInstructionsSettings.vue'
@@ -1274,7 +1276,7 @@ const subTabs: SubTab[] = [
   { id: 'api',       label: '네트워크',   icon: 'globe', keywords: 'network api 네트워크 webui comfy url 백엔드 연결' },
   { id: 'runtimes',  label: '런타임 · 엔진', icon: 'cpu', keywords: 'runtime engine forge neo comfyui install update start stop extension 확장 설치 업데이트 실행' },
   { id: 'models', label: '모델 다운로드', icon: 'download', keywords: 'model download anima krea2 h3 cache 모델 다운로드 영상 캐시 인코딩 텍스트 인코더 vae' },
-  { id: 'forge',     label: 'Forge',      icon: 'package', keywords: 'forge neo checkpoint model lora vae te text encoder 경로 폴더 모델 로라' },
+  { id: 'forge',     label: 'Forge',      icon: 'package', keywords: 'forge neo checkpoint model lora vae te text encoder 경로 폴더 모델 로라 sam-extra 옵션 설정 덮어쓰기 override 상주 resident fp32 캐시 dedup separable sparse dave' },
   { id: 'prompt',    label: '로직',       icon: 'pencil', keywords: 'logic 로직 프롬프트 와일드카드 wildcard 제외 exclude 조건부' },
   { id: 'tabs',      label: '워크스페이스', icon: 'layers', keywords: 'workspace 워크스페이스 탭 순서 tab order layout' },
   { id: 'theme',     label: '테마',       icon: 'palette', keywords: 'theme 테마 색 컬러 다크 라이트 강조색 accent color dark light icon 아이콘 animation 애니메이션 claude 클로드 gpt' },

@@ -254,9 +254,17 @@ class ChatActionsMixin:
             raise RuntimeError('다른 이미지·영상 생성 작업이 실행 중입니다')
         model, snapshot = '', {'prompt': plan.prompt}
         if plan.kind == 'image' and plan.family == 'current':
-            model, snapshot = self._chat_generation_snapshot(plan.prompt)
+            if plan.image:
+                # 참조 이미지 편집은 img2img 로 보낸다(core/chat_generation.run_current) — 샘플링 블록도 I2I 규칙으로
+                model, snapshot = self._chat_generation_snapshot(plan.prompt, target='i2i')
+            else:
+                model, snapshot = self._chat_generation_snapshot(plan.prompt)
             if snapshot.get('_generation_family') == 'krea2':
                 plan = replace(plan, family='krea2')
+            else:
+                # 보내는 곳 — 스냅샷을 만들 때 샘플링 블록 빌더가 묶어 둔 알림을 띄운다(ui/sampling_blocks)
+                from ui.sampling_blocks import show_sampling_notices
+                show_sampling_notices(self, snapshot)
         creator = plan.kind == 'video' or plan.family == 'krea2'
         backend = None if creator else get_backend()  # immutable backend ownership for this request
         if backend is not None:

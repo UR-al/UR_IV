@@ -12,11 +12,12 @@ import copy
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from core import anima38
+from core import anima_model_kind
 from core.comfy_node_classes import (
     CHECKPOINT_LOADER_NODES,
     CUSTOM_SAMPLER_NODES,
@@ -66,10 +67,50 @@ class _Anima38Plan:
         return self.loader_kind == "v2"
 
 
-_LORA_RE = re.compile(
-    r"<lora\s*:\s*([^:>]+?)\s*(?::\s*([^:>]+?))?\s*(?::\s*([^>]+?))?\s*>",
-    re.IGNORECASE,
-)
+@dataclass(eq=False)
+class _PassLoraBase:
+    """보조 패스(ADetailer 슬롯·SAM3 인페인트)의 LoRA 분기 출발점 — Forge 처럼 그 패스 프롬프트의 LoRA 만 건다.
+
+    Forge 는 process_images 배치마다 forge_objects 를 forge_objects_original(LoRA 없음)로 되돌리고 그 배치의
+    positive 프롬프트에서만 추가 네트워크를 건다(modules/processing.py:947, :967 → parse_extra_network_prompts
+    :492 → extra_networks.parse_prompts). SAM3 p2 도, ADetailer 슬롯의 p2(!adetailer.py:1048-1078)도
+    process_images 라 자기 프롬프트의 LoRA 만 받는다.
+
+    ``model``/``clip``: 로더(+ flow shift) 뒤·LoRA 앞. ``main_model``/``main_clip``: 메인 패스 LoRA·NegPiP 뒤(조건
+    인코더가 읽는 링크). ``positive``/``negative``: 보조 패스 노드와 가이던스 스위트가 받는 메인 조건. ``loras``: 메인
+    스택의 LoRA(생성은 프롬프트 + 네거티브 — 메인 규칙, 단독 후처리는 쓰는 패스의 목록일 수 있다 —
+    ``_postprocess_stack_loras``), ``prompt_loras``: 메인 프롬프트만의 LoRA(프롬프트가 빈 SAM3 패스가 물려받는다),
+    ``prompt``: 태그를 떼기 전 메인 프롬프트(ADetailer 의 빈 프롬프트·``[PROMPT]``·ad_copy_main_loras 가 읽는다).
+    ``payload``: 컴파일 payload(NegPiP·가이던스 블록 — 순차 보정 패스의 payload 에는 없다).
+    ``branches``: (패스 종류, LoRA 목록)별로 만든 분기(같은 목록의 ADetailer 슬롯·순차 보정 패스가 다시 쓴다).
+    """
+
+    model: list
+    clip: list
+    main_model: list
+    main_clip: list
+    positive: list
+    negative: list
+    loras: tuple[LoraSpec, ...]
+    prompt_loras: tuple[LoraSpec, ...]
+    anima_plan: _Anima38Plan
+    payload: Mapping[str, Any]
+    prompt: str = ""
+    branches: dict = field(default_factory=dict)
+
+
+# Forge 의 추가 네트워크 태그 — modules/extra_networks.py:157 re_extra_net. parse_prompt(:160-173)는 positive 프롬프트
+# 에서 이름과 상관없이 **모든** 매치를 떼고, 이름이 정확히 ``lora`` 인 것만 건다(등록된 이름 — sd_forge_lora
+# lora_script.py:54, 별칭 없음. ``<LoRA:x>``·``<lyco:x>``·``<hypernet:x>`` 는 lookup_extra_networks :100 이 로그만
+# 남긴다). 매치는 ``<이름:`` 에서 첫 ``>`` 까지라, 닫히지 않은 ``<3:``·``<hypernet:x`` 뒤의 ``<lora:…>`` 는 그 매치에
+# 삼켜져 떼어지기만 하고 걸리지 않는다. ``<lora :x>`` 처럼 콜론 앞에 공백이 있으면 태그가 아니라 글자 그대로다.
+# positive 글(메인·ADetailer·SAM3 인페인트)은 이 식으로 뗀다(_positive_extra_networks·_strip_extra_networks). 뗀 글에는
+# Impact Pack wildcard 의 LoRA 태그(``<lora:([^>]+)>`` — wildcards.py extract_lora_values·remove_lora_tags)가 남지 않아
+# Impact 가 LoRA 를 걸지 못한다(_add_image_extensions).
+_EXTRA_NET_RE = re.compile(r"<(\w+):([^>]+)>")
+# 메인 네거티브의 LoRA 태그 — 앱의 ComfyUI 규약(Forge 는 네거티브를 파싱하지 않는다): 이름이 lora(대소문자 무관)인
+# 태그만 떼고 정확히 ``lora`` 인 것만 건다. 다른 글자(다른 추가 네트워크 태그 포함)는 그대로다(parse_lora_tags).
+_LORA_RE = re.compile(r"<(lora):([^>]+)>", re.IGNORECASE)
 # Node vocabularies are shared with the workflow picker (core/comfy_node_classes).
 _SAMPLERS = SAMPLER_NODES
 _SAVE_NODES = IMAGE_SAVE_NODES
@@ -261,31 +302,141 @@ def _bool(value: Any, default: bool = False) -> bool:
     return str(value).strip().casefold() not in {"", "0", "false", "no", "off", "none"}
 
 
-def _clean_prompt_after_loras(text: str) -> str:
-    text = _LORA_RE.sub("", text)
+def _tidy_prompt_after_tags(text: str) -> str:
+    """The payload prompts' separator clean-up once their tags are gone (app rule, not Forge's)."""
     text = re.sub(r"(?:\s*,\s*){2,}", ", ", text)
     return text.strip(" \t\r\n,")
 
 
-def parse_lora_tags(*prompts: str) -> tuple[list[LoraSpec], list[str]]:
-    """Return ordered LoRA requests and prompts with loader syntax removed."""
+def _positive_extra_networks(text: str) -> tuple[list[LoraSpec], str]:
+    """Forge ``parse_prompt`` on a positive prompt: (its LoRA requests, the text without its tags).
+
+    Every ``_EXTRA_NET_RE`` match is removed whatever its name (Forge skips
+    an unregistered name with a log line only — modules/extra_networks.py
+    :100); a match named exactly ``lora`` is loaded with Forge's strengths
+    (``_lora_spec``).  A ``<lora:…>`` swallowed by an earlier unclosed
+    ``<name:`` is part of that match, so it is removed and not loaded, like
+    Forge.  Separators and whitespace stay.
+    """
     loras: list[LoraSpec] = []
-    cleaned: list[str] = []
-    for prompt in prompts:
-        text = str(prompt or "")
+
+    def found(match: re.Match) -> str:
+        if match.group(1) == "lora":
+            spec = _lora_spec(match.group(2))
+            if spec is not None:
+                loras.append(spec)
+        return ""
+
+    return loras, _EXTRA_NET_RE.sub(found, text)
+
+
+def _strip_extra_networks(text: str) -> str:
+    """A positive pass prompt without its extra-network tags (Forge parse_prompt) — nothing else changes.
+
+    What the ADetailer node hands to Impact and what the SAM3 detailer
+    encodes: the LoRAs are already on the pass's model stack.
+    """
+    return _positive_extra_networks(text)[1]
+
+
+def _lora_spec(args: str) -> Optional[LoraSpec]:
+    """One ``<lora:ARGS>`` tag's loader request, with Forge's strength rules.
+
+    Forge splits ARGS on every ``:`` and an item with exactly one ``=`` is a
+    named argument (modules/extra_networks.py ExtraNetworkParams).  Then
+    (extensions-builtin/sd_forge_lora/extra_networks_lora.py activate):
+    text encoder = the 2nd positional (0.0 when it contains ``@``), else 1.0,
+    then a named ``te=`` wins; UNet = the 3rd positional, else that text
+    encoder value, then a named ``unet=`` wins.  Other named arguments
+    (``dyn=`` …) and further positionals do not change strength.  ComfyUI's
+    loaders take ``strength_model`` = UNet and ``strength_clip`` = text
+    encoder, so ``<lora:n:a:b>`` is clip ``a`` / model ``b``; ``<lora:n:a>``
+    and ``<lora:n>`` give both the same value (a / 1.0).
+
+    Kept app leniency (Forge raises and loads no LoRA of the prompt): an
+    unusable number falls back to the value it would otherwise have, and the
+    name is trimmed.  A tag without a name is dropped (still removed from the
+    text, like Forge's parser does).
+    """
+    positional: list[str] = []
+    named: dict[str, str] = {}
+    for item in args.split(":"):
+        parts = item.split("=", 2)
+        if len(parts) == 2:
+            named[parts[0]] = parts[1]
+        else:
+            positional.append(item)
+    name = positional[0].strip() if positional else ""
+    if not name:
+        return None
+    text_encoder = 1.0
+    if len(positional) > 1:
+        text_encoder = 0.0 if "@" in positional[1] else _float(positional[1], 1.0)
+    if "te" in named:
+        text_encoder = _float(named["te"], text_encoder)
+    unet = _float(positional[2], text_encoder) if len(positional) > 2 else text_encoder
+    if "unet" in named:
+        unet = _float(named["unet"], unet)
+    return LoraSpec(name, strength_model=unet, strength_clip=text_encoder)
+
+
+def parse_lora_tags(prompt: str, *negative_prompts: str) -> tuple[list[LoraSpec], list[str]]:
+    """Return ordered LoRA requests and the prompts with loader syntax removed.
+
+    ``prompt`` is positive and parsed like Forge (``_positive_extra_networks``):
+    every extra-network tag (``<lyco:…>``, ``<hypernet:…>``, ``<LoRA:…>`` …)
+    is removed and only ``<lora:…>`` is loaded, with Forge's strengths
+    (``_lora_spec``).  ``negative_prompts`` follow the app's ComfyUI
+    convention — Forge never parses a negative: only ``_LORA_RE`` tags are
+    removed, those named exactly ``lora`` are loaded after the positive
+    ones, and any other text stays.  One cleaned text per prompt, in order.
+    """
+    loras, positive = _positive_extra_networks(str(prompt or ""))
+    cleaned = [_tidy_prompt_after_tags(positive)]
+    for negative in negative_prompts:
+        text = str(negative or "")
         for match in _LORA_RE.finditer(text):
-            name = match.group(1).strip()
-            if not name:
-                continue
-            model_strength = _float(match.group(2), 1.0)
-            clip_strength = _float(match.group(3), model_strength)
-            loras.append(LoraSpec(name, model_strength, clip_strength))
-        cleaned.append(_clean_prompt_after_loras(text))
+            spec = _lora_spec(match.group(2)) if match.group(1) == "lora" else None
+            if spec is not None:
+                loras.append(spec)
+        cleaned.append(_tidy_prompt_after_tags(_LORA_RE.sub("", text)))
     return loras, cleaned
+
+
+# aadetailer-neoforge 의 슬롯 프롬프트 규칙(scripts/!adetailer.py) — ADetailer 슬롯의 LoRA 목록(_adetailer_pass_loras).
+_AD_SEP_RE = re.compile(r"\s*\[SEP\]\s*")          # _get_prompt :315 — 검출마다 다른 프롬프트
+_AD_SKIP_RE = re.compile(r"^\s*\[SKIP\]\s*$")      # _postprocess_image_inner :1056 — 그 검출은 건너뛴다
+# AfterDetailerScript.LORA_RE(:111-113): ad_copy_main_loras 가 메인 프롬프트에서 옮기는 토큰 — 끝이 숫자 강도인
+# ``<…:숫자>`` 만(``<lora:x>``·``<lora:x:te=0.5>`` 는 옮기지 않는다).
+_AD_LORA_TOKEN_RE = re.compile(r"<([^<>]*):\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*>")
+
+
+def _append_main_prompt_loras(prompt: str, main_prompt: str) -> str:
+    """``prompt`` + the main prompt's LoRA tokens it lacks (ADetailer ``ad_copy_main_loras``).
+
+    aadetailer append_main_prompt_loras/find_loras (!adetailer.py:337-400)
+    without trigger words (the compiler refuses those options): each token
+    of ``_AD_LORA_TOKEN_RE`` in the main prompt, once, unless the prompt
+    already contains that exact text, joined with ``", "``.
+    """
+    tokens: list[str] = []
+    for match in _AD_LORA_TOKEN_RE.finditer(main_prompt):
+        token = match.group(0)
+        if token not in tokens and token not in prompt:
+            tokens.append(token)
+    if not tokens:
+        return prompt
+    base = prompt.rstrip()
+    return f"{base}{', ' if base else ''}{', '.join(tokens)}"
 
 
 def _is_link(value: Any) -> bool:
     return isinstance(value, list) and len(value) >= 2
+
+
+def _link_key(link: Sequence[Any]) -> tuple[str, int]:
+    """A link's identity for comparisons (node id as text, output index)."""
+    return str(link[0]), _int(link[1], 0)
 
 
 def _filename(value: Any) -> str:
@@ -297,6 +448,9 @@ class _Graph:
         self.nodes: dict[str, dict] = copy.deepcopy(dict(initial or {}))
         numeric = [int(str(key)) for key in self.nodes if str(key).isdigit()]
         self._next = max(numeric, default=0) + 1
+        # 복제본 id → 원본 id(``_rebase_links`` — SAM3 LoRA 분기가 다시 만든 조건 노드). 사용자 워크플로의 상세
+        # 설정(apply_controls)은 원본 id 로만 값을 바꾸므로 compile() 이 이 표로 복제본에도 같은 값을 준다.
+        self.copied_from: dict[str, str] = {}
 
     def add(self, class_type: str, inputs: Mapping[str, Any], title: str = "") -> str:
         while str(self._next) in self.nodes:
@@ -382,24 +536,33 @@ class ComfyWorkflowCompiler:
             plan_model, rewrite_model = self._custom_workflow_model(
                 workflow, model_name, workflow_controls=workflow_controls,
             )
-        loras, anima_plan = self._prepare_payload(plan_model, local_payload)
+        loras, anima_plan, prompt_loras, main_prompt = self._prepare_payload(plan_model, local_payload)
 
+        copies: dict[str, list[str]] = {}
         if workflow is None:
             graph = self._compile_default(
                 normalized, model_name, local_payload, loras, anima_plan,
                 uploaded_image=uploaded_image, uploaded_mask=uploaded_mask,
+                prompt_loras=prompt_loras, main_prompt=main_prompt,
             )
         else:
-            graph = self._compile_custom(
+            custom = self._compile_custom(
                 normalized, rewrite_model, local_payload, loras, workflow, anima_plan,
                 uploaded_image=uploaded_image, uploaded_mask=uploaded_mask,
+                prompt_loras=prompt_loras, main_prompt=main_prompt,
             )
+            graph = custom.nodes
+            for copy_id, origin in custom.copied_from.items():
+                copies.setdefault(origin, []).append(copy_id)
         if workflow_controls is not None:
             from core.comfy_workflow_controls import apply_controls, WorkflowControlError
             if workflow is None:
                 raise WorkflowCompileError("상세 설정을 적용할 사용자 워크플로가 없습니다.")
             try:
-                graph = apply_controls(graph, workflow, self.object_info, workflow_controls)
+                # 분기가 복제한 워크플로 노드(SAM3·ADetailer LoRA 분기의 조건 체인)도 원본과 같은 상세 설정 값을 받는다.
+                graph = apply_controls(
+                    graph, workflow, self.object_info, workflow_controls, copies=copies,
+                )
             except WorkflowControlError as exc:
                 raise WorkflowCompileError(str(exc)) from exc
         self.validate(graph, uploaded_inputs=(uploaded_image, uploaded_mask))
@@ -407,23 +570,32 @@ class ComfyWorkflowCompiler:
 
     def _prepare_payload(
         self, model_name: str, payload: dict,
-    ) -> tuple[list[LoraSpec], _Anima38Plan]:
+    ) -> tuple[list[LoraSpec], _Anima38Plan, list[LoraSpec], str]:
         """Shared payload normalisation for generation and post-processing.
 
-        Makes the seed concrete (one value for every pass), strips LoRA tags
-        into loader specs and resolves the Anima plan.  ``payload`` is the
-        compiler's private deep copy and is updated in place.
+        Makes the seed concrete (one value for every pass), strips the
+        prompt's extra-network tags and the negative's LoRA tags into loader
+        specs (``parse_lora_tags``) and resolves the Anima plan.  ``payload`` is the
+        compiler's private deep copy and is updated in place.  The third
+        value is the positive prompt's own LoRA list — what a SAM3 pass with
+        an empty inpaint prompt inherits (Forge ``copy_prompt`` falls back to
+        ``p.prompt``, tags included; ``_sam3_pass_stack``).  The fourth is
+        that prompt before its tags were removed — Forge's ``p.all_prompts``,
+        which an ADetailer slot reads for an empty prompt, ``[PROMPT]`` and
+        ``ad_copy_main_loras`` (``_adetailer_pass_loras``).
         """
         payload["seed"] = concrete_seed(payload.get("seed", -1))
+        prompt = str(payload.get("prompt", "") or "")
         loras, prompts = parse_lora_tags(
-            str(payload.get("prompt", "") or ""),
+            prompt,
             str(payload.get("negative_prompt", "") or ""),
         )
+        prompt_loras, _ = parse_lora_tags(prompt)
         payload["prompt"], payload["negative_prompt"] = prompts
         anima_plan = self._resolve_anima38_plan(model_name, payload)
         if anima_plan.native_modules != tuple(self._module_names(payload)):
             payload["forge_additional_modules"] = list(anima_plan.native_modules)
-        return loras, anima_plan
+        return loras, anima_plan, prompt_loras, prompt
 
     def _custom_workflow_model(
         self, workflow: Mapping[str, Any], model_name: str,
@@ -584,22 +756,66 @@ class ComfyWorkflowCompiler:
         local_payload = copy.deepcopy(dict(payload))
         if not self._has_image_scripts(local_payload):
             raise WorkflowCompileError("ADetailer 또는 SAM3 후처리 설정이 없습니다.")
-        loras, anima_plan = self._prepare_payload(model_name, local_payload)
+        loras, anima_plan, prompt_loras, main_prompt = self._prepare_payload(model_name, local_payload)
+        loras = self._postprocess_stack_loras(local_payload, loras, prompt_loras, main_prompt=main_prompt)
         graph = _Graph()
         (model, clip, vae, positive, negative,
-         _sampler_options) = self._add_default_model_stack(
-            graph, model_name, local_payload, loras, anima_plan,
+         _sampler_options, pass_lora_base) = self._add_default_model_stack(
+            graph, model_name, local_payload, loras, anima_plan, prompt_loras=prompt_loras,
+            main_prompt=main_prompt,
         )
         source = graph.add("LoadImage", {"image": uploaded_image}, "Postprocess source")
+        # Detail Daemon: Forge 단독 요청도 메인 생성 설정을 전달받으므로(P7) 부모 img2img 패스(base 판정)의 DD 가
+        # ADetailer 에 닿고, SAM3 디테일러는 자기 cfg·샘플러로 다시 판정한다(_add_detail_daemon).
+        # LoRA: ADetailer 슬롯·SAM3/Refine 은 자기 프롬프트의 LoRA 만 받는다(Forge p2 와 같다). 위 스택은 그 패스들 중
+        # 메인 목록을 쓰는 것이 없으면 첫 패스의 목록이라(_postprocess_stack_loras) 쓰지 않는 메인 LoRA 를 풀지 않고,
+        # 목록이 다른 패스는 LoRA 앞에서 가른다(_adetailer_pass_stack·_sam3_pass_stack).
         image = self._add_image_extensions(
             graph, [source, 0], model, clip, vae, positive, negative, local_payload,
             sam3_detailer_class=sam3_detailer_class,
+            last_pass_model=self._add_detail_daemon(graph, model, local_payload),
+            pass_lora_base=pass_lora_base,
         )
         self._add_output_image(
             graph, image, local_payload, "AIStudio/postprocess", "Save postprocessed image",
         )
         self.validate(graph.nodes, uploaded_inputs=(uploaded_image,))
         return graph.nodes
+
+    def _postprocess_stack_loras(
+        self,
+        payload: Mapping[str, Any],
+        loras: Sequence[LoraSpec],
+        prompt_loras: Sequence[LoraSpec],
+        *,
+        main_prompt: str = "",
+    ) -> Sequence[LoraSpec]:
+        """LoRA list for the standalone post-processing model stack.
+
+        The stack's only consumers are the passes: every ADetailer slot that
+        runs a detection pass (``_adetailer_pass_loras``) and a SAM3/Refine
+        inpaint pass (``_sam3_pass_loras``).  Forge's standalone p2 never reads
+        a LoRA its own prompt does not name (!adetailer.py p2 / sam3ext
+        inpaint_core.py p2.prompt → modules/processing.py
+        forge_objects_original), so when no pass uses the main list (prompt +
+        negative) the stack is built from the first pass's own list.
+        ``_adetailer_pass_stack``/``_sam3_pass_stack`` then find that list and
+        reuse the stack, so a main LoRA no pass loads is neither resolved (a
+        missing file is not an error) nor left as an unused branch.  When a
+        pass does use the main list, or there is no pass (mask only), the main
+        list stays.
+        """
+        consumers: list[tuple[LoraSpec, ...]] = []
+        for index, slot in enumerate(self._adetailer_slots(payload), start=1):
+            wanted = self._adetailer_pass_loras(slot, main_prompt, index)
+            if wanted is not None:
+                consumers.append(wanted)
+        state = self._sam3_state(payload)
+        if state is not None and str(state.get("sam3_mode") or "Inpaint").casefold() != "mask only":
+            consumers.append(self._sam3_pass_loras(state, prompt_loras))
+        if not consumers or tuple(loras) in consumers:
+            return loras
+        return list(consumers[0])
 
     def compile_sam3_mask_only(
         self, payload: Mapping[str, Any], *, uploaded_image: str,
@@ -740,11 +956,14 @@ class ComfyWorkflowCompiler:
         *,
         uploaded_image: str,
         uploaded_mask: str,
+        prompt_loras: Sequence[LoraSpec] = (),
+        main_prompt: str = "",
     ) -> dict:
         graph = _Graph()
         (model, clip, vae, positive_ref, negative_ref,
-         sampler_options) = self._add_default_model_stack(
-            graph, model_name, payload, loras, anima_plan,
+         sampler_options, pass_lora_base) = self._add_default_model_stack(
+            graph, model_name, payload, loras, anima_plan, prompt_loras=prompt_loras,
+            main_prompt=main_prompt,
         )
         latent = self._add_latent(
             graph, mode, vae, payload,
@@ -770,7 +989,7 @@ class ComfyWorkflowCompiler:
         image = [decode, 0]
         image = self._add_image_extensions(
             graph, image, model, clip, vae, positive_ref, negative_ref, payload,
-            last_pass_model=pass_model,
+            last_pass_model=pass_model, pass_lora_base=pass_lora_base,
         )
         self._add_output_image(
             graph, image, payload, "AIStudio/generated", "Save generated image",
@@ -784,23 +1003,49 @@ class ComfyWorkflowCompiler:
         payload: Mapping[str, Any],
         loras: Sequence[LoraSpec],
         anima_plan: _Anima38Plan,
-    ) -> tuple[list, list, list, list, list, dict[str, Any]]:
+        *,
+        prompt_loras: Sequence[LoraSpec] = (),
+        main_prompt: str = "",
+    ) -> tuple[list, list, list, list, list, dict[str, Any], _PassLoraBase]:
         """Loaders → model patches → conditioning → guidance (app graphs).
 
         Shared by generation and standalone post-processing so both build the
-        same model/conditioning stack in the same node order.
+        same model/conditioning stack in the same node order.  The last value
+        is where an ADetailer slot or a SAM3 pass with its own LoRA list
+        branches off (``_PassLoraBase`` — ``_adetailer_pass_stack``,
+        ``_sam3_pass_stack``).
         """
-        model, clip, vae = self._add_loaders(graph, model_name, payload, anima_plan)
-        model, clip = self._add_model_patches(graph, model, clip, payload, loras, anima_plan)
+        model, base_clip, vae = self._add_loaders(graph, model_name, payload, anima_plan)
+        base_model = self._add_flow_shift(graph, model, payload)
+        model, clip = self._add_lora_patches(
+            graph, base_model, base_clip, payload, loras, anima_plan,
+        )
         positive, negative = self._add_conditioning(
             graph, model, clip, payload, anima_plan,
+        )
+        pass_lora_base = _PassLoraBase(
+            model=base_model, clip=base_clip, main_model=model, main_clip=clip,
+            positive=positive, negative=negative,
+            loras=tuple(loras), prompt_loras=tuple(prompt_loras),
+            anima_plan=anima_plan, payload=payload, prompt=main_prompt,
         )
         model, sampler_options = self._add_anima_guidance(
             graph, model, clip, positive, negative, payload,
         )
-        return model, clip, vae, positive, negative, sampler_options
+        return model, clip, vae, positive, negative, sampler_options, pass_lora_base
 
-    def _add_model_patches(
+    @staticmethod
+    def _add_flow_shift(graph: _Graph, model: list, payload: Mapping[str, Any]) -> list:
+        """Flow shift — Forge applies it before any LoRA (then ``_add_lora_patches``)."""
+        shift = _float(payload.get("distilled_cfg_scale"), 0.0)
+        if shift > 0:
+            shift_node = graph.add("ForgeNeoModelSamplingShift", {
+                "model": model, "shift": shift,
+            }, "Forge flow shift (preserve timestep scale)")
+            model = [shift_node, 0]
+        return model
+
+    def _add_lora_patches(
         self,
         graph: _Graph,
         model: list,
@@ -809,13 +1054,12 @@ class ComfyWorkflowCompiler:
         loras: Sequence[LoraSpec],
         anima_plan: Optional[_Anima38Plan],
     ) -> tuple[list, list]:
-        """Flow shift → LoRAs → NegPiP, in Forge's application order."""
-        shift = _float(payload.get("distilled_cfg_scale"), 0.0)
-        if shift > 0:
-            shift_node = graph.add("ForgeNeoModelSamplingShift", {
-                "model": model, "shift": shift,
-            }, "Forge flow shift (preserve timestep scale)")
-            model = [shift_node, 0]
+        """LoRAs → NegPiP on the flow-shifted model, in Forge's application order.
+
+        Flow shift → LoRAs → NegPiP is split at the LoRAs so an ADetailer slot
+        or a SAM3 pass with its own LoRA list can rebuild the rest from the
+        same pre-LoRA point (``_add_pass_lora_branch``).
+        """
         model, clip = self._add_loras(graph, model, clip, loras, anima_plan)
         return self._add_negpip(graph, model, clip, payload)
 
@@ -979,38 +1223,24 @@ class ComfyWorkflowCompiler:
             )
         return [node, 0]
 
+    # 이름 휴리스틱은 core/anima_model_kind 한 벌(앱의 Anima38 블록 판정 name_kind 와 같은 규칙 — P9)
     @staticmethod
     def _looks_like_qwen35(value: Any) -> bool:
-        name = _filename(value).casefold()
-        return any(marker in name for marker in (
-            "qwen35_4b", "qwen3.5-4b", "qwen3_5_4b",
-        ))
+        return anima_model_kind.looks_like_qwen35(value)
 
     @staticmethod
     def _looks_like_anima_adapter(value: Any) -> bool:
-        name = _filename(value).casefold()
-        return "anima" in name and any(
-            marker in name for marker in ("adapter", "connector")
-        )
+        return anima_model_kind.looks_like_anima_adapter(value)
 
     @staticmethod
     def _looks_like_anima_model(value: Any) -> bool:
-        return "anima" in _filename(value).casefold()
+        return anima_model_kind.name_kind(value) != anima_model_kind.KIND_UNKNOWN
 
     @staticmethod
     def _looks_like_anima38_v2_bundle(value: Any) -> bool:
         """Recognise bundle release names without treating every Anima UNET as v2."""
 
-        name = _filename(value).casefold()
-        family = "anima" in name and any(
-            marker in name for marker in ("3.8b", "3-8b", "3_8b")
-        )
-        release = any(
-            marker in name for marker in (
-                "-v2", "_v2", ".v2", "-v1.1", "_v1.1", ".v1.1",
-            )
-        )
-        return family and release
+        return anima_model_kind.name_kind(value) == anima_model_kind.KIND_V2
 
     @staticmethod
     def _preferred_qwen35_choice(choices: Sequence[str]) -> str:
@@ -1096,15 +1326,17 @@ class ComfyWorkflowCompiler:
             return unique[0] if unique else ""
 
         detected_qwen = one_resource(qwen_modules, "Qwen3.5")
-        detected_adapter = one_resource(adapter_modules, "adapter")
-        legacy_candidate = bool(detected_qwen and detected_adapter)
+        one_resource(adapter_modules, "adapter")   # 여러 개면 여전히 오류(모듈 목록 정리 안내)
 
         loader_kind = "v2" if v2_model is not None else "standard"
         if settings.bypass:
             conditioning_kind = "native"
         elif v2_model is not None:
             conditioning_kind = "v2"
-        elif settings.enabled or legacy_candidate:
+        elif settings.enabled:
+            # Forge 와 같게 v1 은 enabled 일 때만(scripts/anima_3_8b.py process_batch — `if not enabled and not
+            # is_v2: return`). 예전에는 모듈 목록의 Qwen3.5·어댑터 쌍만으로도 켰다(P9 에서 없앰 — 앱이 생성 전
+            # 정보 알림 anima38_comfy_v1 을 띄운다)
             conditioning_kind = "v1"
         else:
             conditioning_kind = "native"
@@ -1136,10 +1368,28 @@ class ComfyWorkflowCompiler:
                 )
 
         if conditioning_kind == "v1":
-            requested_adapter = (
-                settings.adapter if settings.enabled else detected_adapter
-            ) or settings.adapter
+            # Forge 는 카드의 어댑터(settings.adapter)만 쓴다 — 모듈 목록의 어댑터는 보지 않는다
+            requested_adapter = settings.adapter
+            if adapter_choices and anima38.comfy_adapter_is_placeholder(adapter_choices, self.object_info):
+                # 팩이 v1 어댑터를 못 찾으면 콤보는 자리표시자 이름 하나뿐이다 — 파일이 아니라 고르면 큐에 들어간 뒤
+                # 실행 때 FileNotFoundError(vendor prompt.py _checkpoint). 고르라고 하지 않고 설치할 것을 말한다(P9 리뷰 2차 1)
+                raise WorkflowCompileError(
+                    "ComfyUI 의 Anima 3.8B 팩이 v1 어댑터를 하나도 찾지 못했습니다 — 어댑터 목록의 "
+                    f"'{anima38.COMFY_ADAPTER_FALLBACK}'는 팩이 목록이 비었을 때 넣는 자리표시자 이름일 뿐 파일이 "
+                    f"아닙니다. v1 어댑터(architecture {anima_model_kind.V1_ADAPTER_ARCHITECTURE})를 ComfyUI 의 "
+                    "models/text_encoders 폴더에 넣고 다시 연결하세요."
+                )
             if adapter_choices:
+                if self._match_choice(requested_adapter, adapter_choices) is None:
+                    # 카드 선택지와 같은 목록(core.anima38.comfy_adapter_choices — P9 리뷰 2)으로 무엇을 골라야 하는지
+                    # 말한다. 자리표시자는 그 함수가 뺀다 — 팩은 찾은 것이 없을 때만 붙이므로 위에서 이미 멈췄다
+                    pickable = anima38.comfy_adapter_choices(self.object_info) or adapter_choices
+                    raise WorkflowCompileError(
+                        f"Anima 3.8B v1 어댑터 '{requested_adapter}'를 ComfyUI 에서 찾을 수 없습니다 — "
+                        "'Anima 3.8B' 카드의 어댑터 칸에서 ComfyUI 에 있는 어댑터를 고르세요: "
+                        + ", ".join(pickable[:8])
+                        + (" …" if len(pickable) > 8 else "")
+                    )
                 adapter_name = self._resolve_choice(
                     "ForgeNeoAnimaQwen35Prompt", "adapter_name", requested_adapter,
                 )
@@ -1254,6 +1504,14 @@ class ComfyWorkflowCompiler:
 
     # ---- graph stages --------------------------------------------------
 
+    @staticmethod
+    def _lora_loader_type(anima_plan: Optional[_Anima38Plan]) -> str:
+        return (
+            "ForgeNeoAnimaLoraLoader"
+            if anima_plan is not None and anima_plan.is_anima
+            else "LoraLoader"
+        )
+
     def _add_loras(
         self,
         graph: _Graph,
@@ -1262,11 +1520,7 @@ class ComfyWorkflowCompiler:
         loras: Sequence[LoraSpec],
         anima_plan: Optional[_Anima38Plan] = None,
     ):
-        loader_type = (
-            "ForgeNeoAnimaLoraLoader"
-            if anima_plan is not None and anima_plan.is_anima
-            else "LoraLoader"
-        )
+        loader_type = self._lora_loader_type(anima_plan)
         for spec in loras:
             name = self._resolve_choice(loader_type, "lora_name", spec.name)
             node = graph.add(loader_type, {
@@ -1433,13 +1687,17 @@ class ComfyWorkflowCompiler:
           :269-272) Forge 는 postprocess_image(ADetailer) 를 그보다 먼저 부르고(modules/processing.py:1068 <
           :1180), ADetailer 의 i2i 는 고른 스크립트만 돌려 DD 를 다시 판정하지 않는다(aadetailer script_filter,
           기본 ad_script_names 에 DD 없음). 그래서 dd_hires == (hires 를 돌렸는가) 일 때 base cfg 로 걸린다
-          (detail_daemon.py:276). 확장도 같다(_DD['on'] 이 마지막 본 패스 값으로 남는다).
-        - SAM3 디테일러 패스는 이 함수를 ``hires_pass=False`` 와 그 패스의 cfg·샘플러로 부른다. 확장의 SAM3
+          (detail_daemon.py:276). 확장도 같다(_DD['on'] 이 마지막 본 패스 값으로 남는다). 슬롯이 자기 LoRA 분기를
+          받으면(``_adetailer_pass_stack``) 마지막 본 패스에 걸린 그 DD 노드를 분기 모델 위에 그대로 다시 만든다.
+        - SAM3 디테일러 패스는 이 함수를 ``hires_pass=False`` 와 그 패스의 cfg·샘플러로, 그 패스의 LoRA 스택
+          모델(메인과 같은 목록이면 메인 모델, 아니면 분기 — ``_sam3_pass_stack``)에 부른다. 확장의 SAM3
           인페인트(sam3ext/inpaint_core.py build_i2i → script_filter)는 SAM3 만 빼고 alwayson 스크립트를 다시 돌려
           anima_detail_daemon.process_before_every_sampling 이 p2(img2img, is_hr_pass False·p2.cfg_scale·
           p2.sampler_name)로 다시 판정하기 때문이다 — dd_hires 가 꺼져 있으면 hires 여부와 상관없이 걸린다.
-        - 단독 후처리(compile_postprocess)와 mask-only 는 DD 가 없다: Forge 의 단독 요청(webui_backend
-          _build_postprocess_payload)은 ADetailer/SAM3 인자만 보내 DD 가 UI 기본값(끔)으로 돈다.
+        - 단독 후처리(compile_postprocess)는 부모 img2img 패스를 base 패스로 보고 같은 규칙을 쓴다: Forge 의 단독
+          요청(webui_backend adetailer/sam3/refine)도 메인 생성의 DD 블록을 전달받아(P7, dd_hires 끔일 때만 —
+          core/alwayson_propagation) 부모 패스에서 켜지고 ADetailer 까지 남으며, SAM3 p2 는 다시 판정한다.
+          mask-only 는 샘플링이 없어 DD 가 없다.
         스케줄은 원본 노드처럼 그 디테일러 샘플러의 σ 목록으로 새로 만든다(확장 _node_lookup 과 같음). muerrilla 는
         ADetailer 패스에서도 본 패스에서 만든 스케줄을 디테일러의 호출 카운터로 읽는다 — 호스트 차이(F·C 공통).
         """
@@ -1583,17 +1841,34 @@ class ComfyWorkflowCompiler:
         positive: list, negative: list, payload: Mapping[str, Any],
         *, sam3_detailer_class: str = "ForgeNeoSAM3Detailer",
         last_pass_model: Optional[list] = None,
+        pass_lora_base: Optional[_PassLoraBase] = None,
     ) -> list:
         """ADetailer → SAM3 → 순차 SAM3 패스.
 
-        ``last_pass_model``: 생성 안에서만 준다 — 마지막 본 샘플링 패스(base, 또는 돌렸으면 hires)가 쓴 모델.
-        ADetailer 는 그것을 받고, SAM3 디테일러는 그 패스의 cfg·샘플러로 Detail Daemon 을 다시 판정한다
-        (규칙과 근거는 ``_add_detail_daemon``). None(단독 후처리, mask-only)이면 디테일러는 ``model`` 을 받는다.
+        ``last_pass_model``: 마지막 본 샘플링 패스(생성은 base 또는 돌렸으면 hires, 단독 후처리는 부모 img2img 를
+        base 로 본 판정)가 쓴 모델. ADetailer 는 그것을 받고, SAM3 디테일러는 그 패스의 cfg·샘플러로 Detail Daemon 을
+        다시 판정한다(규칙과 근거는 ``_add_detail_daemon``). None(mask-only)이면 디테일러는 ``model`` 을 받는다.
+
+        ``pass_lora_base``: ADetailer 슬롯·SAM3 디테일러가 Forge p2 처럼 자기 프롬프트의 LoRA 만 받게 하는 분기
+        출발점(``_adetailer_pass_stack``·``_sam3_pass_stack``). None(mask-only)이면 ``model``/``clip``/``positive``/
+        ``negative`` 그대로. ADetailer 프롬프트의 추가 네트워크 태그(``<lora:>`` 포함 — Forge parse_prompt 가 떼는 것)는
+        떼어 Impact 에 넘긴다 — Impact 가 받은 모델 위에 더 걸지 않게(슬롯의 LoRA 는 위 스택이 이미 걸었다).
         """
         adetailer_model = model if last_pass_model is None else last_pass_model
         slots = self._adetailer_slots(payload)
         for index, slot in enumerate(slots, start=1):
             self._validate_adetailer_slot(slot, index)
+            # LoRA: Forge 슬롯 p2 는 자기 프롬프트의 LoRA 만 건다 — 목록이 메인과 같으면 메인 스택 그대로(그래프 불변),
+            # 다르면 LoRA 앞에서 가른 분기에 마지막 본 패스의 DD 를 다시 건 스택(_adetailer_pass_stack).
+            slot_model, slot_clip, slot_positive, slot_negative = self._adetailer_pass_stack(
+                graph, slot, index, model, clip, positive, negative, adetailer_model, pass_lora_base,
+            )
+            raw_ad_prompt = str(slot.get("ad_prompt") or "")
+            # Impact FaceDetailer 는 wildcard 의 <lora:> 를 받은 모델 위에 core LoraLoader 로 더 건다(ComfyUI 순서
+            # model·clip — ComfyUI-Impact-Pack modules/impact/wildcards.py process_with_loras). 슬롯의 LoRA 는 위
+            # 스택이 이미 걸었으므로 Forge p2 의 parse_prompt 처럼 추가 네트워크 태그(lora 가 아닌 이름·삼켜진 LoRA
+            # 포함)만 뗀다 — 나머지 글자는 그대로(Impact wildcard 문법에는 ``<이름:…>`` 가 없다 — ``<lora:>`` 뿐).
+            ad_prompt = _strip_extra_networks(raw_ad_prompt)
             normalized_slot = dict(slot)
             requested_ad_sampler = (
                 str(slot.get("ad_sampler") or "euler")
@@ -1638,17 +1913,26 @@ class ComfyWorkflowCompiler:
                 ),
                 "bbox_threshold": _float(slot.get("ad_confidence"), 0.3),
                 "bbox_dilation": _int(slot.get("ad_dilate_erode"), 4),
-                "prompt": str(slot.get("ad_prompt") or ""),
+                "prompt": ad_prompt,
             })
-            slot_negative = negative
+            if raw_ad_prompt and not ad_prompt:
+                # 태그만 적은 프롬프트(예: '<lora:alice:0.7>'): Forge 는 비지 않은 ad_prompt 라 메인 프롬프트로 채우지
+                # 않고(!adetailer.py _get_prompt) 태그를 뗀 빈 글을 그 LoRA 로 인코딩한다. Impact 는 wildcard 가 빈
+                # 글이면 positive 입력(메인 프롬프트 조건)을 쓰므로(core.py enhance_detail), Impact 가 글을 인코딩하는
+                # 방식(CLIPTextEncode + 슬롯 clip) 그대로 빈 글을 인코딩해 positive 로 준다.
+                slot_positive = [graph.add("CLIPTextEncode", {
+                    "clip": slot_clip, "text": ad_prompt,
+                }, f"ADetailer slot {index} prompt (LoRA tags only)"), 0]
             if str(slot.get("ad_negative_prompt") or "").strip():
+                # 네거티브의 <lora:> 는 Forge 가 파싱하지 않아(parse_prompts 는 positive 만) 걸리지도 떼어지지도 않고
+                # 글자 그대로 인코딩된다 — 여기서도 그대로 인코딩한다.
                 negative_node = graph.add("CLIPTextEncode", {
-                    "clip": clip, "text": str(slot.get("ad_negative_prompt")),
+                    "clip": slot_clip, "text": str(slot.get("ad_negative_prompt")),
                 }, f"ADetailer slot {index} negative")
                 slot_negative = [negative_node, 0]
             node = graph.add("ForgeNeoADetailer", {
-                "image": image, "model": adetailer_model, "clip": clip, "vae": vae,
-                "positive": positive, "negative": slot_negative, "enabled": True,
+                "image": image, "model": slot_model, "clip": slot_clip, "vae": vae,
+                "positive": slot_positive, "negative": slot_negative, "enabled": True,
                 "settings_json": json.dumps(
                     normalized_slot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
                 ),
@@ -1710,15 +1994,45 @@ class ComfyWorkflowCompiler:
                 sampler, scheduler = self._runtime_sampler_values(sampler, scheduler)
                 seed = sam_seed
                 sam3_cfg = _float(state.get("sam3_cfg_scale"), _float(payload.get("cfg_scale"), 7.0)) if _bool(state.get("sam3_use_cfg_scale")) else _float(payload.get("cfg_scale"), 7.0)
-                # Detail Daemon: 생성 안의 SAM3 패스는 이 패스의 cfg·샘플러로 다시 판정한다(_add_detail_daemon).
-                sam3_model = model if last_pass_model is None else self._add_detail_daemon(
-                    graph, model, payload, cfg_scale=sam3_cfg, sampler_name=sampler,
-                    title="Anima detail daemon (SAM3 detailer)",
+                # LoRA: Forge SAM3 p2 는 자기 인페인트 프롬프트의 LoRA 만 받는다 — 목록이 메인과 같으면 메인 스택
+                # 그대로(그래프 불변), 다르면 LoRA 앞에서 가른 분기(_sam3_pass_stack).
+                sam3_model, sam3_clip, sam3_positive, sam3_negative = self._sam3_pass_stack(
+                    graph, state, model, clip, positive, negative, pass_lora_base,
                 )
+                # Detail Daemon: 생성 안의 SAM3 패스는 이 패스의 cfg·샘플러로 다시 판정한다(_add_detail_daemon).
+                if last_pass_model is not None:
+                    sam3_model = self._add_detail_daemon(
+                        graph, sam3_model, payload, cfg_scale=sam3_cfg, sampler_name=sampler,
+                        title="Anima detail daemon (SAM3 detailer)",
+                    )
+                # The node CLIP-encodes these as-is with its clip input (stock
+                # CLIPTextEncode has no <lora:> parsing). Forge's SAM3 p2 goes
+                # through process_images: parse_extra_network_prompts
+                # (modules/processing.py:492 → extra_networks.parse_prompts)
+                # strips every extra-network tag from the positive prompt only
+                # and activates exactly its LoRAs — here _sam3_pass_stack
+                # builds that LoRA set.  Tags only, like parse_prompt
+                # (modules/extra_networks.py:157-173 — <lyco:…>/<hypernet:…>
+                # too, not loaded): separators/whitespace stay, so a prompt
+                # without a tag is byte-identical.  The negative is never
+                # parsed in Forge (parse_prompts sees p.prompts/hr_prompts
+                # only), so a tag there is neither loaded nor removed: it is
+                # encoded as literal text, and so it is here.
+                raw_inpaint_prompt = str(state.get("sam3_inpaint_prompt") or "")
+                inpaint_prompt = _strip_extra_networks(raw_inpaint_prompt)
+                if raw_inpaint_prompt.strip() and not inpaint_prompt.strip():
+                    # 태그만 적은 인페인트 프롬프트(예: '<lora:alice:0.7>'): Forge copy_prompt 는 비지 않은 글이라 메인
+                    # 프롬프트로 채우지 않고(sam3ext/inpaint_core.py copy_prompt), p2 는 태그를 뗀 빈 글을 그 LoRA 로
+                    # 인코딩한다(processing.py parse_extra_network_prompts → setup_conds). 노드는 글이 비면 positive
+                    # 입력(메인 프롬프트 조건)을 쓰므로, 노드가 글을 인코딩하는 방식 그대로(CLIPTextEncode + 이 패스
+                    # clip) 뗀 글을 인코딩해 positive 로 준다.
+                    sam3_positive = [graph.add("CLIPTextEncode", {
+                        "clip": sam3_clip, "text": inpaint_prompt,
+                    }, "SAM3 inpaint prompt (LoRA tags only)"), 0]
                 detail = graph.add(sam3_detailer_class, {
-                    "image": image, "mask": [mask_node, 0], "model": sam3_model, "clip": clip, "vae": vae,
-                    "positive": positive, "negative": negative,
-                    "inpaint_prompt": str(state.get("sam3_inpaint_prompt") or ""),
+                    "image": image, "mask": [mask_node, 0], "model": sam3_model, "clip": sam3_clip, "vae": vae,
+                    "positive": sam3_positive, "negative": sam3_negative,
+                    "inpaint_prompt": inpaint_prompt,
                     "negative_prompt": str(state.get("sam3_negative_prompt") or ""),
                     "mask_mode": str(state.get("sam3_mask_mode") or "Individual"),
                     "seed": seed,
@@ -1782,11 +2096,259 @@ class ComfyWorkflowCompiler:
                 # Detail Daemon 은 SAM3 패스마다 다시 판정한다(_add_detail_daemon) — 블록을 같이 넘긴다.
                 **self._detail_daemon_scripts(next_payload),
             }
+            # LoRA 분기 출발점은 원래 payload(NegPiP·가이던스 블록)를 들고 있어 같은 분기를 다시 쓴다.
             image = self._add_image_extensions(
                 graph, image, model, clip, vae, positive, negative, next_payload,
                 sam3_detailer_class=sam3_detailer_class, last_pass_model=last_pass_model,
+                pass_lora_base=pass_lora_base,
             )
         return image
+
+    def _sam3_pass_stack(
+        self,
+        graph: _Graph,
+        state: Mapping[str, Any],
+        model: list,
+        clip: list,
+        positive: list,
+        negative: list,
+        base: Optional[_PassLoraBase],
+    ) -> tuple[list, list, list, list]:
+        """SAM3 인페인트 패스가 받을 model·clip·positive·negative — Forge 처럼 그 패스 프롬프트의 LoRA 만.
+
+        Forge: 생성 안 SAM3 의 p2 프롬프트 = copy_prompt(sam3_inpaint_prompt, p.prompt)(비면 메인 프롬프트, 태그 포함 —
+        scripts/!sam3.py, sam3ext/inpaint_core.py copy_prompt), 단독 SAM3/Refine 은 sam3_inpaint_prompt 그대로. p2 의
+        process_images 는 forge_objects_original(LoRA 없음)에서 p2 positive 의 LoRA 만 건다 — 메인 LoRA 는 따라오지
+        않고, 네거티브의 태그는 걸리지 않는다(``_PassLoraBase``). 그래서 목록은 인페인트 프롬프트(비면 메인
+        프롬프트)에서만, 메인과 같은 파서·강도 규칙(parse_lora_tags)으로 만든다(``_sam3_pass_loras`` — 태그만 적은
+        프롬프트도 비지 않은 글이라 그 태그의 LoRA 다. 뗀 빈 글의 인코딩은 호출부가 한다).
+
+        - 메인 패스 목록과 같으면(이름·강도·순서 — 이름은 메인과 같은 로더 선택지로 풀어 비교) 메인 스택을 그대로
+          준다: 그래프가 이 규칙 전과 같다. 앱은 빈 인페인트 프롬프트를 메인 프롬프트로 채우므로 기본 흐름은 전부 여기다.
+        - 다르면 ``_add_pass_lora_branch`` 가 LoRA 앞에서 가른 분기를 LoRA 목록마다 한 번 만든다(순차 보정 패스가
+          다시 쓴다). 없는 LoRA 파일은 메인과 같은 컴파일 오류다(``_resolve_choice``).
+        ``base`` 가 None(mask-only)이면 받은 스택 그대로.
+        """
+        if base is None:
+            return model, clip, positive, negative
+        wanted = self._sam3_pass_loras(state, base.prompt_loras)
+        key = self._pass_branch_key(wanted, base)
+        if key is None:
+            return model, clip, positive, negative
+        if ("SAM3", key) not in base.branches:
+            base.branches[("SAM3", key)] = self._add_pass_lora_branch(graph, base, wanted, "SAM3")
+        return base.branches[("SAM3", key)]
+
+    def _pass_branch_key(
+        self, wanted: Sequence[LoraSpec], base: _PassLoraBase,
+    ) -> Optional[tuple]:
+        """보조 패스의 LoRA 목록이 메인 스택과 다르면 분기 키(로더 선택지로 푼 이름·강도·순서), 같으면 None.
+
+        같은 파일의 다른 철자(``<lora:ink>`` 와 ``<lora:styles/ink.safetensors>``)는 메인과 같은 ``_resolve_choice`` 로
+        풀어 같은 목록으로 본다. 없는 LoRA 파일은 메인과 같은 컴파일 오류다.
+        """
+        if tuple(wanted) == base.loras:
+            return None
+        loader_type = self._lora_loader_type(base.anima_plan)
+
+        def resolved(specs: Sequence[LoraSpec]) -> tuple:
+            return tuple(
+                (self._resolve_choice(loader_type, "lora_name", spec.name),
+                 spec.strength_model, spec.strength_clip)
+                for spec in specs
+            )
+
+        key = resolved(wanted)
+        return None if key == resolved(base.loras) else key
+
+    @staticmethod
+    def _adetailer_pass_loras(
+        slot: Mapping[str, Any], main_prompt: str, index: int,
+    ) -> Optional[tuple[LoraSpec, ...]]:
+        """An ADetailer slot's LoRA list as Forge's slot p2 loads it (None: the slot runs no pass).
+
+        aadetailer get_prompt (!adetailer.py:441-466 → _get_prompt :307-327)
+        splits ``ad_prompt`` on ``[SEP]`` (one part per detection, the last
+        part repeats — i2i_prompts_replace :797-806).  An empty part is the
+        main prompt with its tags (``p.all_prompts``), a part with
+        ``[PROMPT]`` gets the main prompt in its place, and
+        ``ad_copy_main_loras`` (default False — adetailer/args.py:63) appends
+        the main prompt's LoRA tokens the part lacks (``_append_main_prompt_loras``).
+        A part that is then only ``[SKIP]`` runs no pass (:1056).  Every p2 is
+        process_images, which starts from forge_objects_original and loads the
+        tags of that part only (modules/processing.py:947, :967-970), parsed by
+        the main rule (``parse_lora_tags``); negative tags never count.
+
+        One ComfyUI ADetailer node takes one model for every detection, so
+        parts that load different lists are a compile error, not a silent union.
+        """
+        ad_prompt = str(slot.get("ad_prompt") or "")
+        copy_main = _bool(slot.get("ad_copy_main_loras"))
+        lists: list[tuple[LoraSpec, ...]] = []
+        for part in _AD_SEP_RE.split(ad_prompt):
+            if not part:
+                part = main_prompt
+            elif "[PROMPT]" in part:
+                part = part.replace("[PROMPT]", main_prompt)
+            if copy_main:
+                part = _append_main_prompt_loras(part, main_prompt)
+            if _AD_SKIP_RE.match(part):
+                continue
+            specs = tuple(parse_lora_tags(part)[0])
+            if specs not in lists:
+                lists.append(specs)
+        if len(lists) > 1:
+            listed = " / ".join(
+                ", ".join(f"{spec.name}:{spec.strength_clip:g}:{spec.strength_model:g}" for spec in specs) or "LoRA 없음"
+                for specs in lists
+            )
+            raise WorkflowCompileError(
+                f"ADetailer 슬롯 {index}의 [SEP] 프롬프트마다 LoRA가 다릅니다({listed}). ComfyUI ADetailer 노드는 "
+                "슬롯의 모든 검출에 모델 하나를 쓰므로 검출마다 다른 LoRA를 걸 수 없습니다. 슬롯을 나누거나 "
+                "같은 LoRA를 적으세요."
+            )
+        return lists[0] if lists else None
+
+    def _adetailer_pass_stack(
+        self,
+        graph: _Graph,
+        slot: Mapping[str, Any],
+        index: int,
+        model: list,
+        clip: list,
+        positive: list,
+        negative: list,
+        node_model: list,
+        base: Optional[_PassLoraBase],
+    ) -> tuple[list, list, list, list]:
+        """ADetailer 슬롯 노드가 받을 model·clip·positive·negative — Forge 처럼 그 슬롯 프롬프트의 LoRA 만.
+
+        Forge: 슬롯마다 p2 가 process_images 라(!adetailer.py:1048-1078) 그 슬롯 프롬프트의 LoRA 만 걸린다 — 목록은
+        ``_adetailer_pass_loras``(빈 ad_prompt 는 메인 프롬프트, ad_copy_main_loras 면 메인 LoRA 를 붙인다).
+        ``node_model`` 은 메인 스택을 쓸 때 노드가 받는 모델(마지막 본 패스의 모델 — ``_add_detail_daemon``).
+
+        - 메인 패스 목록과 같으면(``_pass_branch_key``) ``node_model``·메인 clip·조건 그대로: 그래프가 이 규칙 전과 같다.
+          앱은 빈 ad_prompt 를 채우지 않으므로 기본 흐름(빈 ad_prompt, 태그 없는 네거티브)은 전부 여기다.
+        - 다르면 ``_add_pass_lora_branch`` 가 LoRA 앞에서 가른 분기(그 LoRA → NegPiP → 조건 → 가이던스)에, 마지막 본
+          패스에 걸린 Detail Daemon 을 분기 모델 위에 다시 만든다(ADetailer DD 규칙 — 슬롯은 DD 를 다시 판정하지
+          않는다). 같은 목록의 슬롯은 분기 하나를 같이 쓴다. 없는 LoRA 파일은 메인과 같은 컴파일 오류다.
+        ``base`` 가 None(mask-only)이면 받은 스택 그대로.
+        """
+        if base is None:
+            return node_model, clip, positive, negative
+        wanted = self._adetailer_pass_loras(slot, base.prompt, index)
+        key = None if wanted is None else self._pass_branch_key(wanted, base)
+        if key is None:
+            return node_model, clip, positive, negative
+        if ("ADetailer", key) not in base.branches:
+            base.branches[("ADetailer", key)] = self._add_pass_lora_branch(
+                graph, base, wanted, "ADetailer", last_pass=(model, node_model),
+            )
+        return base.branches[("ADetailer", key)]
+
+    @staticmethod
+    def _sam3_pass_loras(
+        state: Mapping[str, Any], prompt_loras: Sequence[LoraSpec],
+    ) -> tuple[LoraSpec, ...]:
+        """The SAM3 inpaint pass's LoRA list, parsed like the main prompt's.
+
+        A non-blank inpaint prompt gives its own tags (a prompt that is only a
+        tag is non-blank: Forge ``copy_prompt`` keeps it); a blank one inherits
+        ``prompt_loras`` (the main/payload prompt, Forge's ``copy_prompt``
+        fallback).  Negative tags never count — Forge does not parse the
+        negative prompt.
+        """
+        text = str(state.get("sam3_inpaint_prompt") or "")
+        return tuple(parse_lora_tags(text)[0]) if text.strip() else tuple(prompt_loras)
+
+    def _add_pass_lora_branch(
+        self, graph: _Graph, base: _PassLoraBase, loras: Sequence[LoraSpec], label: str,
+        *, last_pass: Optional[tuple[list, list]] = None,
+    ) -> tuple[list, list, list, list]:
+        """LoRA 앞(로더 + flow shift)에서 가른 보조 패스 스택: 그 패스 LoRA → NegPiP → 조건 → 가이던스.
+
+        메인과 같은 함수·순서다(로더 종류·``_resolve_choice``·NegPiP·가이던스 블록은 ``base.payload`` 의 것). 새 노드
+        제목에는 ``({label} LoRA branch)`` 를 붙인다(label: "SAM3"·"ADetailer").
+
+        Detail Daemon: SAM3 는 걸지 않는다 — 호출부가 SAM3 패스 규칙대로 건다(``_add_detail_daemon``). ADetailer 는
+        ``last_pass=(메인 모델, 메인 스택을 쓸 때 노드가 받는 모델)`` 을 주어, 마지막 본 패스에 걸린 DD 노드를 분기
+        모델 위에 그대로 다시 만든다(``_rebase_links`` — 걸리지 않았으면 분기 모델 그대로).
+
+        조건은 메인 조건을 LoRA 뒤 model/clip 만 바꿔 다시 만든다(``_rebase_links`` — 같은 글·같은 인코더 종류, semantic
+        이면 Qwen3.5 로더는 함께 쓴다). 이 조건을 쓰는 곳은 둘이다.
+        - 가이던스 스위트(ForgeNeoAnimaGuidanceSuite)의 clip·positive·negative: Modulation guidance(guid_mod_enabled)
+          만 쓴다 — 'Main positive'/'Main negative' 기준 조건과, guid_mod_clip_model 이 없을 때 목표 프롬프트를
+          인코딩할 CLIP. 오늘 SAM3 패스의 스위트와 같은 글·같은 설정이고 LoRA 만 이 패스 것이다(Forge 는 기준을 LoRA 없는
+          별도 CLIP-L 로 인코딩한다 — 메인 조건을 그대로 주면 메인 LoRA 가 이 길로 SAM3 패스에 섞인다).
+        - SAM3 노드의 positive/negative: 인페인트/네거티브 글이 비었을 때만 쓰인다(글이 있으면 노드가 clip 으로 인코딩,
+          태그만 적은 인페인트 프롬프트는 호출부가 뗀 빈 글의 인코더를 positive 로 준다).
+        그래서 보조 패스 노드의 model·clip·positive·negative 위에는 메인에만 있는 LoRA 로더가 없다. ADetailer 노드의
+        positive 는 ad_prompt 가 빈 글일 때만 Impact 가 쓴다(그때 목록은 메인 프롬프트의 LoRA). 다시 만든 조건 노드가
+        사용자 워크플로 노드의 복제본이면 상세 설정 값도 받는다(``_rebase_links`` → ``_Graph.copied_from``).
+        """
+        before = set(graph.nodes)
+        model, clip = self._add_lora_patches(
+            graph, base.model, base.clip, base.payload, loras, base.anima_plan,
+        )
+        positive, negative = self._rebase_links(
+            graph, (base.positive, base.negative),
+            {_link_key(base.main_model): model, _link_key(base.main_clip): clip},
+        )
+        model, _sampler_options = self._add_anima_guidance(
+            graph, model, clip, positive, negative, base.payload,
+        )
+        if last_pass is not None:
+            main_model, last_pass_model = last_pass
+            [model] = self._rebase_links(graph, [last_pass_model], {_link_key(main_model): model})
+        for node_id in [node_id for node_id in graph.nodes if node_id not in before]:
+            node = graph.nodes[node_id]
+            meta = node.setdefault("_meta", {})
+            meta["title"] = f"{meta.get('title') or node.get('class_type')} ({label} LoRA branch)"
+        return model, clip, positive, negative
+
+    @staticmethod
+    def _rebase_links(
+        graph: _Graph,
+        links: Sequence[Any],
+        substitutions: Mapping[tuple[str, int], list],
+    ) -> list:
+        """``links`` rebuilt with every upstream read of a substituted link replaced.
+
+        Only nodes that (transitively) read a substituted link are cloned, once
+        each; everything else (loaders, the Qwen3.5 semantic encoder, images)
+        stays shared.  An unaffected link comes back unchanged.  Each clone is
+        recorded in ``graph.copied_from`` (clone → original id) so the workflow
+        controls applied after compiling reach the clones too (compile()); a
+        clone of an app node (an ADetailer branch's Detail Daemon) is recorded
+        too and never matches a control.
+        """
+        clones: dict[str, Optional[str]] = {}
+
+        def rebase(value: Any) -> Any:
+            if not _is_link(value):
+                return value
+            key = _link_key(value)
+            if key in substitutions:
+                return list(substitutions[key])
+            clone = visit(key[0])
+            return value if clone is None else [clone, value[1]]
+
+        def visit(node_id: str) -> Optional[str]:
+            if node_id in clones:
+                return clones[node_id]
+            clones[node_id] = None      # 순환 방지(유효한 그래프에는 없다)
+            node = graph.nodes.get(node_id)
+            if not isinstance(node, Mapping) or not isinstance(node.get("inputs"), Mapping):
+                return None
+            inputs = {key: rebase(value) for key, value in node["inputs"].items()}
+            if inputs == dict(node["inputs"]):
+                return None
+            title = str((node.get("_meta") or {}).get("title") or "")
+            clones[node_id] = graph.add(str(node.get("class_type") or ""), inputs, title)
+            graph.copied_from[clones[node_id]] = graph.copied_from.get(node_id, node_id)
+            return clones[node_id]
+
+        return [rebase(link) for link in links]
 
     # ---- custom workflow ----------------------------------------------
 
@@ -1794,7 +2356,15 @@ class ComfyWorkflowCompiler:
         self, mode: str, model_name: str, payload: dict, loras: Sequence[LoraSpec],
         workflow: Mapping[str, Any], anima_plan: _Anima38Plan,
         *, uploaded_image: str, uploaded_mask: str,
-    ) -> dict:
+        prompt_loras: Sequence[LoraSpec] = (),
+        main_prompt: str = "",
+    ) -> _Graph:
+        """Compile ``workflow`` with the app's settings.
+
+        Returns the ``_Graph`` (not just its nodes) so compile() can give the
+        workflow controls to the nodes an ADetailer/SAM3 LoRA branch copied
+        (``_Graph.copied_from``).
+        """
         graph = _Graph(workflow)
         sampler_id = self._find_sampler(graph.nodes)
         sampler = graph.nodes[sampler_id]
@@ -1930,12 +2500,24 @@ class ComfyWorkflowCompiler:
                 ),
             }
 
-        model, clip = self._add_model_patches(graph, model, clip, payload, loras, anima_plan)
+        base_model = self._add_flow_shift(graph, model, payload)
+        base_clip = clip
+        model, clip = self._add_lora_patches(
+            graph, base_model, base_clip, payload, loras, anima_plan,
+        )
         self._rewrite_custom_conditioning(
             graph, pos_id, neg_id, model, clip, payload, anima_plan,
             negative_clip=(
                 neg_clip if pos_clip != neg_clip and override_vae is None else clip
             ),
+        )
+        # ADetailer·SAM3 LoRA 분기는 앱이 넣은 LoRA 앞에서 가른다 — 워크플로 자체의 model 체인(그 안의 LoRA 노드 포함)은
+        # 체크포인트처럼 공유한다(프롬프트 LoRA 만 Forge p2 처럼 그 패스 것으로 바뀐다).
+        pass_lora_base = _PassLoraBase(
+            model=base_model, clip=base_clip, main_model=model, main_clip=clip,
+            positive=positive, negative=negative,
+            loras=tuple(loras), prompt_loras=tuple(prompt_loras),
+            anima_plan=anima_plan, payload=payload, prompt=main_prompt,
         )
         model, sampler_options = self._add_anima_guidance(
             graph, model, clip, positive, negative, payload,
@@ -1992,7 +2574,7 @@ class ComfyWorkflowCompiler:
         if not decode_id:
             if _bool(payload.get("enable_hr")) or self._has_image_scripts(payload):
                 raise WorkflowCompileError("Hires/ADetailer/SAM3 삽입에 필요한 VAEDecode를 custom workflow에서 찾지 못했습니다.")
-            return graph.nodes
+            return graph
         decode = graph.nodes[decode_id]
         samples = decode.get("inputs", {}).get("samples")
         if not _is_link(samples):
@@ -2021,12 +2603,12 @@ class ComfyWorkflowCompiler:
             image = list(next(iter(source_links)))
             post = self._add_image_extensions(
                 graph, image, model, clip, vae, positive, negative, payload,
-                last_pass_model=pass_model,
+                last_pass_model=pass_model, pass_lora_base=pass_lora_base,
             )
             if post != image:
                 for output_id, key, _source in outputs:
                     graph.nodes[output_id].setdefault("inputs", {})[key] = post
-        return graph.nodes
+        return graph
 
     # ---- external (Generation API profile) workflows --------------------
 

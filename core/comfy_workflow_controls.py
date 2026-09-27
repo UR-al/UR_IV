@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 import re
 import threading
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from utils.atomic_json import atomic_write_json
 
@@ -184,7 +184,16 @@ def validate_controls(graph: Mapping, object_info: Mapping, binding: Mapping) ->
             "overrides": cleaned}
 
 
-def apply_controls(compiled: Mapping, original: Mapping, object_info: Mapping, binding: Mapping) -> dict:
+def apply_controls(
+    compiled: Mapping, original: Mapping, object_info: Mapping, binding: Mapping,
+    *, copies: Mapping[str, Iterable[str]] | None = None,
+) -> dict:
+    """``binding`` 의 값을 컴파일된 그래프의 원본 노드 id 에 쓴다.
+
+    ``copies``: 컴파일러가 워크플로 노드를 복제해 만든 노드(원본 id → 복제본 id 들 — SAM3 LoRA 분기가 다른 LoRA 의
+    model/clip 으로 다시 만든 조건 체인). 복제본도 같은 워크플로 노드라 같은 값을 받는다. 단, 복제본이 아직 원본
+    워크플로 값을 쥐고 있을 때만 — 컴파일러가 그 칸을 바꾼 복제본이나 종류가 다른 노드는 건드리지 않는다.
+    """
     binding = validate_controls(original, object_info, binding)
     graph = copy.deepcopy(dict(compiled))
     for override in binding["overrides"]:
@@ -194,9 +203,16 @@ def apply_controls(compiled: Mapping, original: Mapping, object_info: Mapping, b
             raise WorkflowControlError(f"컴파일로 입력 구조가 변경되었습니다: {override['nodeId']}.{name}; 상세 설정을 해제하세요")
         # Do not overwrite a field which an app compiler hook has taken ownership
         # of since inspection. Unchanged custom scalar inputs remain safe.
-        if node["inputs"][name] != original[override["nodeId"]]["inputs"][name]:
+        pristine = original[override["nodeId"]]["inputs"][name]
+        if node["inputs"][name] != pristine:
             raise WorkflowControlError(f"앱 설정과 상세 설정이 충돌합니다: {override['nodeId']}.{name}")
         node["inputs"][name] = override["value"]
+        for copy_id in (copies or {}).get(override["nodeId"], ()):
+            clone = graph.get(copy_id)
+            inputs = clone.get("inputs") if isinstance(clone, dict) else None
+            if (isinstance(inputs, dict) and clone.get("class_type") == override["classType"]
+                    and name in inputs and inputs[name] == pristine):
+                inputs[name] = override["value"]
     return graph
 
 

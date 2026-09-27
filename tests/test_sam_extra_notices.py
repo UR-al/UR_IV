@@ -1038,5 +1038,107 @@ class ExtensionSourceTests(unittest.TestCase):
                 self.assertIn("qwen35_4b", hint, message)
 
 
+# ── 샘플링 블록 게이트·보조 패스 전달 알림 (P7, T17) ─────────────────────────────
+class PropagationNoticeTests(unittest.TestCase):
+    def test_reencoding_i2i_with_empty_init_images_is_an_img2img_request(self):
+        # core/i2i_payload.py 는 워커가 채울 때까지 init_images=[] 로 둔다 — 키가 있으면 img2img 목록으로 본다
+        self.assertTrue(sn.requested_features({"init_images": [], "alwayson_scripts": {}}).img2img)
+        self.assertFalse(sn.requested_features({"alwayson_scripts": {}}).img2img)
+        caps = SimpleNamespace(known=True, installed=True,
+                               script=lambda _t: {"present": True, "img2img": False})
+        payload = {"init_images": [], **pag_payload(guid_enabled=True)}
+        self.assertEqual(codes(sn.pre_generation_notices(payload, capabilities=caps)), [sn.CODE_SCRIPT_MISSING])
+
+    def test_propagated_features_are_marked_in_result_notices(self):
+        payload = pag_payload(guid_enabled=True)
+        plain = sn.result_notices(info_of(SAM3_OK), payload)
+        marked = sn.result_notices(info_of(SAM3_OK), payload,
+                                   propagated_titles=("anima perturbation guidance",))
+        self.assertEqual(codes(plain), codes(marked))
+        self.assertFalse(plain[0].message.endswith(sn.PROPAGATED_SUFFIX))
+        self.assertEqual(marked[0].message, plain[0].message + sn.PROPAGATED_SUFFIX)
+        # 다른 기능의 알림은 그대로
+        sam3 = sn.result_notices(info_of(SAM3_OOM), sam3_payload(), propagated_titles=("Anima Detail Daemon",))
+        self.assertFalse(sam3[0].message.endswith(sn.PROPAGATED_SUFFIX))
+
+    def test_new_codes_are_throttled_like_pre_generation_warnings(self):
+        for code in (sn.CODE_BLOCK_NOT_SENT, sn.CODE_BLOCK_DEFERRED, sn.CODE_PROPAGATION_DROPPED,
+                     sn.CODE_PROPAGATION_RETRIED):
+            with self.subTest(code=code):
+                notice = sn.Notice(code, sn.LEVEL_INFO, "m")
+                self.assertEqual(sn.notice_ttl(notice, sn.RESULT_NOTICE_TTL_S), sn.PRE_GENERATION_NOTICE_TTL_S)
+        self.assertEqual(sn.block_not_sent_notice("Anima Skimmed CFG", img2img=True).feature, "skimmed_cfg")
+        self.assertEqual(sn.propagation_retried_notice("NegPiP", "SAM3").level, sn.LEVEL_WARNING)
+
+    def test_retried_notice_refreshes_the_gui_snapshot_once(self):
+        """(A1) 캐시를 버리지 않고 GUI 스냅샷을 워커에서 다시 받는다 — 억제된 반복은 다시 부르지 않는다."""
+        from ui.sam_extra_notices_ui import show_notices
+        now = [1000.0]
+        host = _host(_sam_extra_notice_throttle=sn.NoticeThrottle(lambda: now[0]),
+                     _refresh_sam_extra_capabilities=mock.Mock())
+        retried = sn.propagation_retried_notice("Anima Detail Daemon", "Refine")
+        with self.assertLogs("ui.sam_extra_notices_ui", "INFO"):
+            show_notices(host, [sn.propagation_dropped_notice("Anima Skimmed CFG", "SAM3")])
+            host._refresh_sam_extra_capabilities.assert_not_called()
+            show_notices(host, [retried])
+            now[0] += sn.RESULT_NOTICE_TTL_S + 1
+            self.assertEqual(show_notices(host, [retried]), 0)          # 배치 100장이 30초마다 띄우지 않는다
+        host._refresh_sam_extra_capabilities.assert_called_once_with(force=True)
+
+    def test_before_generation_shows_pending_sampling_notices_on_any_backend(self):
+        from backends import BackendType
+        from ui import sam_extra_notices_ui as ui_mod
+        from ui.sampling_blocks import remember_sampling_notices
+        host = _host()
+        payload = {"prompt": "x"}
+        remember_sampling_notices(host, payload, [sn.block_not_sent_notice("Anima Skimmed CFG", img2img=False)])
+        with mock.patch("backends.get_backend_type", return_value=BackendType.COMFYUI), \
+                self.assertLogs("ui.sam_extra_notices_ui", "WARNING"):
+            self.assertEqual(ui_mod.check_before_generation(host, payload), 1)
+        self.assertEqual(ui_mod.check_before_generation(host, payload), 0)   # 한 번만
+
+
+class MainRetryAndForgeOptionNoticeTests(unittest.TestCase):
+    """P10 — 메인 생성 재시도·Forge 옵션 알림은 결과 info 로 오고, 거절 알림을 띄울 때 GUI 스냅샷을 다시 받는다(A1)."""
+
+    def test_main_result_notices_refresh_the_gui_snapshot_once_per_ttl(self):
+        from ui.sam_extra_notices_ui import show_result_notices
+        now = [1000.0]
+        host = _host(_sam_extra_notice_throttle=sn.NoticeThrottle(lambda: now[0]),
+                     _refresh_sam_extra_capabilities=mock.Mock())
+        retried = sn.app_block_retried_notice("DoRA Inference Mode")
+        rejected = sn.forge_option_rejected_notice(["PAG 앞 블록 중복 계산 건너뛰기"], frozen=False)
+        info = {sn.INFO_KEY: sn.notices_to_dicts([retried, rejected])}
+        with self.assertLogs("ui.sam_extra_notices_ui", "INFO"):
+            self.assertEqual(show_result_notices(host, info), 2)
+            now[0] += sn.RESULT_NOTICE_TTL_S + 1
+            self.assertEqual(show_result_notices(host, info), 0)   # 600초 억제(B14)
+        host._refresh_sam_extra_capabilities.assert_called_once_with(force=True)
+
+    def test_missing_and_unverified_notices_do_not_refresh(self):
+        from ui.sam_extra_notices_ui import show_notices
+        host = _host(_refresh_sam_extra_capabilities=mock.Mock())
+        with self.assertLogs("ui.sam_extra_notices_ui", "INFO"):
+            show_notices(host, [sn.forge_option_missing_notice(["x"]),
+                                sn.forge_option_unverified_notice(["x"], no_config=True)])
+        host._refresh_sam_extra_capabilities.assert_not_called()
+
+    def test_app_block_retried_notice_names_the_block(self):
+        notice = sn.app_block_retried_notice("DoRA Inference Mode")
+        self.assertEqual((notice.code, notice.level), (sn.CODE_APP_BLOCK_RETRIED, sn.LEVEL_INFO))
+        self.assertIn("'DoRA Inference Mode'", notice.message)
+        self.assertIn("HTTP 422", notice.message)
+
+    def test_block_retried_notice_is_a_neutral_throttled_warning_that_refreshes(self):
+        """(P10 검토 2) 사용자가 켰거나 출처를 모르는 블록 — 누가 넣었는지 말하지 않고, 이번 결과에 빠졌다고 경고한다."""
+        notice = sn.block_retried_notice("Anima 3.8B (Qwen3.5 / v2)")
+        self.assertEqual((notice.code, notice.level), (sn.CODE_BLOCK_RETRIED, sn.LEVEL_WARNING))
+        self.assertIn("'Anima 3.8B (Qwen3.5 / v2)'", notice.message)
+        self.assertIn("Anima 3.8B 설정이 적용되지 않았습니다", notice.message)
+        self.assertNotIn("앱이", notice.message)
+        self.assertEqual(sn.NOTICE_MIN_TTL_S[sn.CODE_BLOCK_RETRIED], sn.PRE_GENERATION_NOTICE_TTL_S)
+        self.assertIn(sn.CODE_BLOCK_RETRIED, sn.REFRESH_CAPABILITIES_CODES)
+
+
 if __name__ == "__main__":
     unittest.main()

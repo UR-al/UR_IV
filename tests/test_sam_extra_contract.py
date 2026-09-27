@@ -365,6 +365,60 @@ class TestScriptInfoFixture(unittest.TestCase):
                 self.assertTrue(same_value(app[name], args[index].get("value")),
                                 f"{name}: 앱 {app[name]!r} / 확장 {args[index].get('value')!r}")
 
+    def test_anima38_live_defaults_vs_app_t2i_defaults(self):
+        """Anima 3.8B 앱 기본값(APP_T2I_DEFAULTS — 사용자 Forge ui-config txt2img)과 라이브 txt2img 기본값의 차이는
+        KNOWN_DIFFS 에 적힌 것(부정 커넥터 켬)뿐이다. v1 enabled 는 결정 D1=B 로 라이브와 같다(끔). img2img 는 앱이
+        블록을 보내지 않는 기본(토글 끔)이라 라이브 기본값 그대로다(test_anima38_live_defaults_match_app)."""
+        from core.anima38 import APP_T2I_DEFAULTS, ARG_NAMES, V1_ENABLED_DEFAULT
+        title = "Anima 3.8B (Qwen3.5 / v2)"
+        entry = reg.SCRIPTS[title]
+        app = dataclasses.asdict(APP_T2I_DEFAULTS)
+        observed = {}
+        args = self._modes(title)[False]
+        for index, name in enumerate(ARG_NAMES):
+            if index in entry["runtime_choices"]:
+                continue
+            live = args[index].get("value")
+            if not same_value(app[name], live):
+                observed[(title, name, "default")] = (app[name], live)
+        self.assertFalse(V1_ENABLED_DEFAULT)
+        problems = _diff_problems(observed, _known("fixture", title))
+        self.assertEqual(problems, [], "\nAnima 3.8B 앱 기본값과 라이브 txt2img 기본값:\n" + "\n".join(problems))
+
+    def test_dora_live_defaults_match_app(self):
+        """DoRA 라이브 기본값(t2i·i2i arg0-4)을 앱 규칙으로 읽으면 EXTENSION_DEFAULTS 이고, 앱 기본값(APP_DEFAULTS —
+        사용자 Forge ui-config)과의 차이는 KNOWN_DIFFS 에 적힌 것(txt2img 켬)뿐이다."""
+        from core import dora_infer_mode as dim
+        title = "DoRA Inference Mode"
+        observed = {}
+        for is_img2img, args in self._modes(title).items():
+            with self.subTest(img2img=is_img2img):
+                live = dict(zip(dim.ARG_NAMES, (arg.get("value") for arg in args)))
+                parsed = dim.DoraSettings(
+                    enabled=bool(live["enabled"]), mode=dim.normalize_mode(live["mode"]),
+                    inserted=dim.normalize_insert(live["inserted"]),
+                    weak_strength=dim.clamp_strength(live["weak_strength"]),
+                    weak_scope=dim.normalize_scope(live["weak_scope"]))
+                self.assertEqual(parsed, dim.EXTENSION_DEFAULTS)
+                for name in dim.ARG_NAMES:
+                    app, value = getattr(dim.APP_DEFAULTS, name), getattr(parsed, name)
+                    if not same_value(app, value):
+                        observed[(title, name, "default")] = (app, live[name])
+        problems = _diff_problems(observed, _known("fixture", title))
+        self.assertEqual(problems, [], "\nDoRA 앱 기본값과 라이브 기본값:\n" + "\n".join(problems))
+
+    def test_dora_live_choices_normalize_to_app_keys_in_extension_order(self):
+        """라이브 선택지 라벨 → 서로 다른 앱 키(확장 라디오 순서). 모르는 라벨이 생기면 앱이 그 값을 못 고른다."""
+        from core import dora_infer_mode as dim
+        cases = ((1, dim.normalize_mode, dim.MODE_OPTIONS), (2, dim.normalize_insert, dim.INSERT_OPTIONS),
+                 (4, dim.normalize_scope, dim.SCOPE_OPTIONS))
+        for args in self._modes("DoRA Inference Mode").values():
+            for index, normalize, options in cases:
+                with self.subTest(index=index):
+                    labels = args[index].get("choices")
+                    self.assertEqual(tuple(labels), tuple(label for _k, label in options))
+                    self.assertEqual([normalize(label) for label in labels], [key for key, _l in options])
+
     def test_semantic_pins_on_live_values(self):
         for pin in (p for p in reg.SEMANTIC_PINS if p["source"] == "fixture"):
             with self.subTest(pin=pin["id"]):
@@ -464,6 +518,27 @@ class TestInstalledExtension(unittest.TestCase):
 
     def test_option_keys(self):
         self._assert_sets("Forge 옵션 키 (shared.opts.add_option)", reg.OPTIONS, self.options)
+
+    def test_p10_option_specs_match_installed_source(self):
+        """P10 — 요청마다 덮어쓰는 옵션의 기본값·infotext·컴포넌트(bool 체크박스)가 설치된 소스와 같고, onchange 콜백이
+        있는 것은 SAM3 RAM 보관 하나다. override 는 적용 때 콜백을 돌리지 않으므로(processing.py:813) 다른 옵션에 콜백이
+        생기면 '요청마다 덮어써도 된다'는 가정과 카드 경고를 다시 봐야 한다."""
+        from core.forge_override_settings import SPECS
+        infos = self.src.option_infos()
+        self.assertEqual(set(infos), set(self.options), "option_infos 가 add_option 을 모두 읽지 못했다")
+        problems = []
+        for spec in SPECS:
+            info = infos.get(spec.key)
+            if info is None:
+                problems.append(f"  {spec.key}: 설치된 확장에 없다")
+                continue
+            for field, want in (("default", spec.default), ("infotext", spec.infotext), ("component", "Checkbox")):
+                if info[field] != want or type(info[field]) is not type(want):
+                    problems.append(f"  {spec.key}.{field}: 앱 {want!r} / 확장 {info[field]!r} ({info['file']})")
+            if info["onchange"] != spec.onchange:
+                problems.append(f"  {spec.key}.onchange: 앱 {spec.onchange!r} / 확장 {info['onchange']!r}")
+        self.assertEqual(problems, [], "\ncore/forge_override_settings.SPECS 가 설치된 확장 옵션과 다르다:\n"
+                         + "\n".join(problems))
 
     def test_routes(self):
         self._assert_sets("FastAPI 라우트", reg.ROUTES, self.routes, reg.optional_keys(reg.ROUTES))

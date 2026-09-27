@@ -321,14 +321,93 @@ class TestAnima38DefaultCompilation(unittest.TestCase):
         ])
         self.assertTrue(all(node["inputs"]["adapter_name"] == ADAPTER for node in prompts))
 
-    def test_v1_module_pair_auto_enables_but_plain_anima_needs_no_qwen(self):
-        automatic = ComfyWorkflowCompiler(_anima_capabilities()).compile(
+    def test_v1_module_pair_alone_stays_native_like_forge(self):
+        """(P9) Forge 는 v1 을 enabled 일 때만 켠다 — Qwen3.5·어댑터 모듈 쌍만으로는 순정(예전 자동 켜짐 없음).
+        그 모듈은 여전히 네이티브 CLIP 입력으로 새지 않는다."""
+        for label, payload in (("블록 없음", {}),
+                               ("v1 꺼짐", {"alwayson_scripts": _script(False, ADAPTER, 1.0, True, 1.0, False)})):
+            with self.subTest(label):
+                graph = ComfyWorkflowCompiler(_anima_capabilities()).compile(
+                    "txt2img", V1_MODEL, {"forge_additional_modules": _modules(adapter=ADAPTER), **payload},
+                )
+                self.assertNotIn("ForgeNeoAnimaQwen35Prompt", _classes(graph))
+                self.assertNotIn("ForgeNeoAnimaQwen35Loader", _classes(graph))
+                self.assertEqual(_classes(graph).count("CLIPTextEncode"), 2)
+                _clip_id, clip = _node(graph, "CLIPLoader")
+                self.assertEqual(clip["inputs"]["clip_name"], NATIVE_CLIP)
+
+    def test_v1_with_a_differently_named_comfy_adapter(self):
+        """(P9 리뷰 2) 기본 이름이 아닌 어댑터만 있는 ComfyUI: 카드에서 그 어댑터를 고르면 v1 이 된다(카드 선택지는
+        object_info 에서 온다 — core.anima38.comfy_adapter_choices). 고르지 않고 켜면 무엇을 골라야 하는지 말하고 멈춘다."""
+        alt_adapter = "text/MyAnima_v1_adapter.safetensors"
+        capabilities = _anima_capabilities()
+        capabilities["ForgeNeoAnimaQwen35Prompt"]["input"]["required"]["adapter_name"] = _choice(alt_adapter)
+        base = {"forge_additional_modules": _modules(adapter=alt_adapter)}
+        self.assertEqual(anima38.comfy_adapter_choices(capabilities), [alt_adapter])
+        picked = anima38.as_dict(anima38.Anima38Settings(enabled=True, adapter=alt_adapter))
+        graph = ComfyWorkflowCompiler(capabilities).compile(
+            "txt2img", V1_MODEL, {**base, "alwayson_scripts": {anima38.SCRIPT_NAME: {"args": [picked]}}})
+        prompts = [node for node in graph.values() if node["class_type"] == "ForgeNeoAnimaQwen35Prompt"]
+        self.assertEqual([node["inputs"]["adapter_name"] for node in prompts], [alt_adapter])
+        unpicked = anima38.as_dict(anima38.Anima38Settings(enabled=True))
+        with self.assertRaisesRegex(WorkflowCompileError, r"어댑터 칸.*MyAnima_v1_adapter"):
+            ComfyWorkflowCompiler(capabilities).compile(
+                "txt2img", V1_MODEL, {**base, "alwayson_scripts": {anima38.SCRIPT_NAME: {"args": [unpicked]}}})
+
+    def test_v1_when_the_pack_found_no_adapter_names_what_to_install(self):
+        """(P9 리뷰 2차 1) 팩이 v1 어댑터를 못 찾으면 콤보가 자리표시자 이름 하나뿐이다(vendor prompt.py
+        adapter_candidates — `sorted(candidates) or [COMFY_ADAPTER_FALLBACK]`). 그 이름은 파일이 아니라 고르면 큐에
+        들어간 뒤 실행 때 FileNotFoundError 가 난다 — 고르라고 권하지 말고 무엇을 설치해야 하는지 말하며 큐 전에 멈춘다.
+        같은 이름의 진짜 파일(text_encoders 목록 = CLIPLoader.clip_name 에 보임)은 자리표시자가 아니다."""
+        fallback = anima38.COMFY_ADAPTER_FALLBACK
+        capabilities = _anima_capabilities()
+        capabilities["ForgeNeoAnimaQwen35Prompt"]["input"]["required"]["adapter_name"] = _choice(fallback)
+        base = {"forge_additional_modules": _modules()}
+        for label, adapter in (("기본 어댑터", anima38.DEFAULT_ADAPTER), ("예전 안내대로 자리표시자를 고름", fallback)):
+            with self.subTest(label):
+                block = anima38.as_dict(anima38.Anima38Settings(enabled=True, adapter=adapter))
+                with self.assertRaises(WorkflowCompileError) as caught:
+                    ComfyWorkflowCompiler(capabilities).compile(
+                        "txt2img", V1_MODEL, {**base, "alwayson_scripts": {anima38.SCRIPT_NAME: {"args": [block]}}})
+                message = str(caught.exception)
+                self.assertIn("찾지 못했습니다", message)
+                self.assertIn("자리표시자", message)
+                self.assertIn("anima_progressive_qwen35_cross_adapter_v1", message)
+                self.assertIn("text_encoders", message)
+                self.assertNotIn("고르세요", message)                       # 없는 파일을 고르라고 하지 않는다
+        # v1 을 끄면 자리표시자는 상관없다 — 순정
+        graph = ComfyWorkflowCompiler(capabilities).compile("txt2img", V1_MODEL, base)
+        self.assertNotIn("ForgeNeoAnimaQwen35Prompt", _classes(graph))
+
+        # 같은 이름의 진짜 파일이 text_encoders 에 있으면(업스트림 팩 기본 이름) 보통 어댑터처럼 고를 수 있다
+        real = copy.deepcopy(capabilities)
+        real["CLIPLoader"]["input"]["required"]["clip_name"][0].append(fallback)
+        picked = anima38.as_dict(anima38.Anima38Settings(enabled=True, adapter=fallback))
+        graph = ComfyWorkflowCompiler(real).compile(
+            "txt2img", V1_MODEL, {**base, "alwayson_scripts": {anima38.SCRIPT_NAME: {"args": [picked]}}})
+        prompts = [node for node in graph.values() if node["class_type"] == "ForgeNeoAnimaQwen35Prompt"]
+        self.assertEqual([node["inputs"]["adapter_name"] for node in prompts], [fallback])
+        unpicked = anima38.as_dict(anima38.Anima38Settings(enabled=True))
+        with self.assertRaisesRegex(WorkflowCompileError, "어댑터 칸.*" + fallback.replace(".", r"\.")):
+            ComfyWorkflowCompiler(real).compile(
+                "txt2img", V1_MODEL, {**base, "alwayson_scripts": {anima38.SCRIPT_NAME: {"args": [unpicked]}}})
+
+    def test_v1_needs_enabled_and_uses_the_card_adapter_not_the_module(self):
+        """enabled → v1. 어댑터는 카드 값(settings.adapter) — Forge 는 모듈 목록의 어댑터를 보지 않는다."""
+        alt_adapter = "text/Anima-alt_adapter.safetensors"
+        capabilities = _anima_capabilities()
+        capabilities["ForgeNeoAnimaQwen35Prompt"]["input"]["required"]["adapter_name"] = _choice(ADAPTER, alt_adapter)
+        graph = ComfyWorkflowCompiler(capabilities).compile(
             "txt2img", V1_MODEL, {
-                "forge_additional_modules": _modules(adapter=ADAPTER),
+                "forge_additional_modules": _modules(adapter=alt_adapter),
+                "alwayson_scripts": _script(True, ADAPTER, 0.8, False, 1.0, False),
             },
         )
-        self.assertIn("ForgeNeoAnimaQwen35Prompt", _classes(automatic))
+        prompts = [node for node in graph.values() if node.get("class_type") == "ForgeNeoAnimaQwen35Prompt"]
+        self.assertEqual([node["inputs"]["adapter_name"] for node in prompts], [ADAPTER])   # 부정은 순정(negative 끔)
+        self.assertEqual(prompts[0]["inputs"]["adapter_strength"], 0.8)
 
+    def test_plain_anima_needs_no_qwen(self):
         native = ComfyWorkflowCompiler(_anima_capabilities(qwen=False)).compile(
             "txt2img", V1_MODEL, {
                 "prompt": "native, <lora:ink:1>",

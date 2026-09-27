@@ -126,7 +126,7 @@ export type SamExtraFeature =
 
 export interface SamExtraWarning {
   /** 예: extension_missing · script_missing · args_fewer · args_more · pag_smc_auto_old_build ·
-   *  sam3_keys_unknown_to_extension · sam3_cn_module_not_live */
+   *  sam3_keys_unknown_to_extension · sam3_cn_module_not_live · dora_choices_unknown */
   code: string
   /** 기능 플래그 이름 또는 'sam_extra'(확장 전체) */
   feature: string

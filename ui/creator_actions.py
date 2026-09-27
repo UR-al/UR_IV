@@ -829,12 +829,16 @@ class CreatorActionsMixin:
         builder = getattr(self, "_build_generation_payload", None)
         size = comic_t2i.explicit_size(request)
         entries: list[Dict[str, Any]] = []
+        sampling_notices: list = []
         for index in indexes:
             panel_payload = panel_payloads[index]
             if callable(builder):
                 snapshot, error = builder(prompt_override=panel_payload["prompt"], snapshot=True)
                 if error or snapshot is None:
                     raise ValueError(error or "T2I 설정으로 컷 생성 요청을 만들지 못했습니다")
+                # 워커가 바로 보낸다(생성 전 확인이 없다) — 컷 빌드가 묶어 둔 샘플링 블록 알림을 모아 두었다가 아래에서 한 번
+                from ui.sampling_blocks import take_sampling_notices
+                sampling_notices.extend(take_sampling_notices(self, snapshot))
             else:
                 snapshot = comic_t2i.fallback_snapshot(panel_payload["prompt"])
             if size is None:
@@ -858,6 +862,10 @@ class CreatorActionsMixin:
                 frozen = snapshot_comfy_payload(get_backend(), {}, "txt2img")["_comfy_workflow_snapshot"]
                 for entry in entries:
                     entry["request"]["_comfy_workflow_snapshot"] = copy.deepcopy(frozen)
+        if sampling_notices and not krea2:
+            # 이 클릭이 보내는 곳이다 — 작업당 한 번(같은 알림은 억제 시간 안에 한 번만 뜬다, B15: 컷마다 띄우지 않는다)
+            from ui.sampling_blocks import show_sampling_notice_list
+            show_sampling_notice_list(self, sampling_notices)
         return {"model": model, "panels": entries, "document": document.to_dict(), **target}
 
     def _comic_panel_generation_payload(self, payload: dict, document, index: int, panel_payload: dict) -> dict:

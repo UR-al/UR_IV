@@ -630,18 +630,48 @@ class CompilerPassModelTests(unittest.TestCase):
         dd_id, _dd = _one(graph, "ForgeNeoAnimaDetailDaemon")
         self.assertEqual(_one(graph, "ForgeNeoHiresFix")[1]["inputs"]["model"], [dd_id, 0])
 
-    def test_postprocess_detailers_never_get_dd(self):
-        # Forge 의 단독 ADetailer/SAM3 요청(webui_backend._build_postprocess_payload)은 그 스크립트 인자만 보내
-        # DD 는 UI 기본값(끔)으로 돈다 — 저장된 생성 문맥에 DD 가 켜져 있어도 걸지 않는다.
+    @staticmethod
+    def _postprocess(payload, kind="ForgeNeoSAM3Detailer"):
+        return ComfyWorkflowCompiler().compile_postprocess(
+            "model.safetensors", payload, uploaded_image="source.png", sam3_detailer_class=kind)
+
+    def test_postprocess_detailers_follow_the_base_pass_rule(self):
+        # (T12, P7) Forge 의 단독 ADetailer/SAM3/Refine 요청도 메인 생성의 DD 블록을 전달받는다(dd_hires 끔일 때만 —
+        # core/alwayson_propagation). 부모 img2img 패스는 base 패스라 DD 가 켜지고 ADetailer 까지 남으며(확장
+        # _DD['on'] 은 postprocess 에서야 꺼진다), SAM3 p2 는 자기 cfg·샘플러로 다시 판정한다. 예전(P7 전)에는 없었다.
         for kind in ("ForgeNeoSAM3Detailer", "ForgeNeoSAM3Refine"):
             with self.subTest(kind=kind):
-                graph = ComfyWorkflowCompiler().compile_postprocess(
-                    "model.safetensors", _dd_payload(enable_hr=False), uploaded_image="source.png",
-                    sam3_detailer_class=kind,
-                )
-                self.assertEqual(_nodes(graph, "ForgeNeoAnimaDetailDaemon"), [])
-                self.assertTrue(_nodes(graph, "ForgeNeoADetailer"))
-                self.assertTrue(_nodes(graph, kind))
+                graph = self._postprocess(_dd_payload(enable_hr=False, sam3={"sam3_use_cfg_scale": True,
+                                                                             "sam3_cfg_scale": 4.0}), kind)
+                daemons = _dd_by_title(graph)
+                self.assertEqual(set(daemons), {BASE_DD, SAM3_DD})
+                base_id, base = daemons[BASE_DD]
+                self.assertEqual(_one(graph, "ForgeNeoADetailer")[1]["inputs"]["model"], [base_id, 0])
+                self.assertEqual(base["inputs"]["cfg_scale_override"], 5.0)
+                sam_id, sam = daemons[SAM3_DD]
+                self.assertEqual(sam["inputs"]["model"], base["inputs"]["model"])   # base DD 없는 모델에서 다시
+                self.assertEqual(_one(graph, kind)[1]["inputs"]["model"], [sam_id, 0])
+                self.assertEqual(sam["inputs"]["cfg_scale_override"], 4.0)
+
+    def test_postprocess_hires_pass_dd_does_not_run(self):
+        # dd_hires 켬 — img2img 에는 hires 패스가 없다(보조 전달도 이 블록을 빼지만 저장 문맥 경로도 같게)
+        graph = self._postprocess(_dd_payload(hires_pass=True, enable_hr=False))
+        self.assertEqual(_nodes(graph, "ForgeNeoAnimaDetailDaemon"), [])
+
+    def test_postprocess_base_sampler_does_not_pre_exclude_the_sam3_pass(self):
+        # (critic B9) 기본 샘플러가 DPM adaptive·HeunPP2 면 부모 패스(→ ADetailer)만 없고, SAM3 는 자기 샘플러로 판정
+        for base in ("DPM adaptive", "HeunPP2"):
+            with self.subTest(base=base):
+                same = self._postprocess(dict(_dd_payload(enable_hr=False), sampler_name=base))
+                self.assertEqual(_nodes(same, "ForgeNeoAnimaDetailDaemon"), [])   # SAM3 도 같은 샘플러
+                own = self._postprocess(dict(
+                    _dd_payload(enable_hr=False, sam3={"sam3_use_sampler": True, "sam3_sampler": "Euler"}),
+                    sampler_name=base))
+                daemons = _dd_by_title(own)
+                self.assertEqual(set(daemons), {SAM3_DD})
+                sam_id, sam = daemons[SAM3_DD]
+                self.assertEqual(_one(own, "ForgeNeoADetailer")[1]["inputs"]["model"], sam["inputs"]["model"])
+                self.assertEqual(_one(own, "ForgeNeoSAM3Detailer")[1]["inputs"]["model"], [sam_id, 0])
 
     def test_custom_workflow_follows_the_same_pass_rules(self):
         from tests.test_comfy_workflow_compiler import _custom_workflow

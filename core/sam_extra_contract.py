@@ -94,7 +94,19 @@ SCRIPTS = MappingProxyType({
             # 결과 infotext 'SAM3 Error'·'SAM3 Enable' → 토스트, 단독 SAM3·Refine 은 실패로 알림(P4)
             "core/sam_extra_notices.py:KEY_SAM3_ERROR", "core/sam_extra_notices.py:standalone_sam3_failure",
             comfy=("core/comfy_workflow_compiler.py:compile_sam3_mask_only",
+                   "core/comfy_workflow_compiler.py:_sam3_pass_stack",
+                   "core/comfy_workflow_compiler.py:_postprocess_stack_loras",
                    "comfy_custom_nodes/ai_studio_forge_parity/sam3_nodes.py:ForgeNeoSAM3Detailer"),
+            note="LoRA: 확장 p2 는 process_images 라 자기 인페인트 프롬프트(생성 안에서 비면 메인 프롬프트 — "
+                 "copy_prompt)의 LoRA 만 걸고 메인 LoRA 는 따라오지 않는다. Comfy 도 같은 목록이면 메인 스택을, "
+                 "다르면 LoRA 앞에서 가른 분기(LoRA→NegPiP→조건→가이던스→DD)를 SAM3 노드에 준다(ADetailer 슬롯도 "
+                 "같은 규칙 — _adetailer_pass_stack). 단독 후처리는 쓰는 패스(ADetailer 슬롯·SAM3) 중 메인 목록을 "
+                 "쓰는 것이 없으면 스택 자체를 첫 패스의 목록으로 만든다(쓰지 않는 메인 LoRA 는 풀지 않는다). 태그만 "
+                 "적은 프롬프트는 비지 않은 글이라 메인 프롬프트로 채우지 않고 태그를 뗀 빈 글을 인코딩한다. positive "
+                 "글은 Forge parse_prompt 처럼 모든 추가 네트워크 태그(<lyco:…>·<hypernet:…>, 닫히지 않은 <이름: 이 "
+                 "삼킨 <lora:…> 포함)를 떼고 이름이 정확히 lora 인 것만 건다(_positive_extra_networks). 네거티브의 "
+                 "태그는 Forge 가 파싱하지 않아 글자 그대로 인코딩된다 — 노드 negative_prompt 도 그대로. 강도는 "
+                 "Forge 순서다: <lora:이름:TE:UNet>·te=/unet= (_lora_spec)",
             gaps=("P14: BatchView SAM3 필드·inpaint W/H 폴백 1024",))),
     "Anima Perturbation Guidance": _script(
         # shape: Attn Scale 최대 15→100(원본 scale 0~100 — wave B PAG-F), DCW·CWM·RDC·CNS 기본값·범위와 숨은
@@ -108,6 +120,8 @@ SCRIPTS = MappingProxyType({
         classification=mapped(
             "core/anima_guidance.py:PERTURBATION_SPEC", "core/anima_guidance.py:build_alwayson",
             "ui/generator_generation.py:_apply_postprocess_chain",
+            # 샘플링 블록 빌더(메인 체인·보조 패스 봉투 공용)와 보조 패스 전달 규칙(P7)
+            "ui/sampling_blocks.py:build_sampling_blocks", "core/alwayson_propagation.py:PROPAGATION",
             # 칸은 AnimaGuidancePanel 이 아니라 기능별 섹션에 있다(P0-B 분할) — 섹션마다 켜기 키가 바인딩돼 있는지
             "frontend/src/components/guidance/PagSection.vue:guid_enabled",
             "frontend/src/components/guidance/ApgSection.vue:guid_apg_enabled",
@@ -157,6 +171,7 @@ SCRIPTS = MappingProxyType({
         app_spec=("core.anima_guidance:SKIMMED_SPEC", "skim_"),
         classification=mapped(
             "core/anima_guidance.py:SKIMMED_SPEC", "ui/generator_generation.py:_apply_postprocess_chain",
+            "ui/sampling_blocks.py:build_sampling_blocks", "core/alwayson_propagation.py:PROPAGATION",
             "frontend/src/components/guidance/SkimSection.vue:skim_enabled",
             comfy=("comfy_custom_nodes/ai_studio_forge_parity/guidance.py:ForgeNeoSkimmedCFG",))),
     "Anima Detail Daemon": _script(
@@ -175,6 +190,7 @@ SCRIPTS = MappingProxyType({
             "core/anima_guidance.py:detail_daemon_hires_note",
             "core/sam_extra_capabilities.py:DD_HIRES_INDEX",
             "ui/generator_generation.py:_apply_postprocess_chain",
+            "ui/sampling_blocks.py:build_sampling_blocks", "core/alwayson_propagation.py:PROPAGATION",
             "frontend/src/components/guidance/DetailDaemonSection.vue:dd_enabled",
             comfy=("core/comfy_workflow_compiler.py:_add_detail_daemon",
                    "comfy_custom_nodes/ai_studio_forge_parity/guidance.py:ForgeNeoAnimaDetailDaemon",
@@ -187,7 +203,9 @@ SCRIPTS = MappingProxyType({
                  "adaptive/HeunPP2 면 넣지 않는다. 생성 안의 디테일러도 muerrilla·확장과 같다: ADetailer 는 마지막 본 "
                  "패스의 모델을 이어받고(muerrilla 콜백은 postprocess 에서야 풀리고 ADetailer i2i 는 DD 를 다시 돌리지 "
                  "않는다 — 확장은 _DD['on'] 이 남는다), SAM3 패스는 Hires Pass 가 꺼져 있을 때 자기 cfg·샘플러로 다시 "
-                 "건다(확장 SAM3 p2 가 DD 스크립트를 다시 돌린다). 단독 후처리에는 없다(Forge 단독 요청에 DD 인자 없음)",
+                 "건다(확장 SAM3 p2 가 DD 스크립트를 다시 돌린다). 단독 후처리도 Forge 와 같게 보조 패스 전달(P7): "
+                 "Hires Pass 가 꺼져 있을 때만 전달하고(core/alwayson_propagation), 컴파일러는 부모 img2img 를 base "
+                 "패스로 보고 ADetailer 에 DD 모델을, SAM3 디테일러는 자기 cfg·샘플러로 다시 판정한다",
             gaps=("P17: Hires 체크포인트 오버라이드(hr_checkpoint_name)면 ForgeNeoHiresFix 가 모델을 새로 읽어 hires "
                   "패스의 DD(와 다른 모델 패치)가 빠진다 — Forge 는 hires 패스에도 건다",
                   "P17(호스트 차이, 확장과 공통): muerrilla 는 ADetailer 패스에서도 본 패스에서 만든 스케줄을 디테일러의 "
@@ -204,21 +222,58 @@ SCRIPTS = MappingProxyType({
                  "블록이 없어도 자동으로 켜진다. arg1(어댑터)는 실행 시점 목록.",
         classification=mapped(
             "core/anima38.py:ARG_NAMES", "core/anima38.py:parse_args",
-            "ui/hand_reconstruction_actions.py:anima38",
-            "core/sam_extra_notices.py:KEY_ANIMA38_STATUS",   # 'Anima38: off: …' 알림(P4)
+            # 블록 판정(모델 종류별 effective 규칙·출처)과 앱 기본값(부정 커넥터 켬, v1 끔 — 결정 D1=B)
+            "core/anima38.py:build_block", "core/anima38.py:plan", "core/anima38.py:APP_T2I_DEFAULTS",
+            "core/anima_model_kind.py:classify", "core/anima_model_kind.py:header_kind",
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용)와 전달 규칙(앱 기본값은 모르면 SKIP — critic A2,
+            # 보조 패스는 실제 모델이 같을 때만 — A7 model_bound)
+            "ui/anima38_ui.py:contribute", "ui/anima38_ui.py:prewarm_model_kinds", "ui/sampling_blocks.py:CONTRIBUTORS",
+            "core/alwayson_propagation.py:PROPAGATION", "core/alwayson_propagation.py:drop_model_bound",
+            "ui/hand_reconstruction_actions.py:_sampling_scripts",
+            "core/sam_extra_notices.py:KEY_ANIMA38_STATUS",   # 'Anima38: off: …' 알림(P4)·비 Anima 힌트(P9)
+            "frontend/src/components/params/Anima38Card.vue",
+            "frontend/src/utils/anima38Card.ts",
             comfy=("core/comfy_workflow_compiler.py:_resolve_anima38_plan",
-                   "comfy_custom_nodes/ai_studio_forge_parity/anima38_nodes.py:ForgeNeoAnima38V2Prompt"),
-            note="앱은 인자 파싱·hand repair 전달·Comfy 컴파일에만 쓰고 Forge 페이로드에는 블록을 만들지 않는다",
-            gaps=("P9: Bypass·부정 커넥터·v1 어댑터 UI 와 Forge 페이로드가 없다",))),
+                   "comfy_custom_nodes/ai_studio_forge_parity/anima38_nodes.py:ForgeNeoAnima38V2Prompt",
+                   # 카드의 v1 어댑터 선택지 = object_info ForgeNeoAnimaQwen35Prompt.adapter_name(P9 리뷰 2) — 팩이
+                   # 못 찾을 때 넣는 자리표시자 이름은 빼고, v1 을 켜면 설치 안내 오류로 멈춘다(P9 리뷰 2차 1)
+                   "core/anima38.py:comfy_adapter_choices", "core/anima38.py:comfy_adapter_is_placeholder",
+                   "ui/anima38_ui.py:push_comfy_adapters"),
+            note="dict 한 개(6키)로 보낸다. 모델 종류(체크포인트 헤더 — core/anima_model_kind)마다 블록이 없을 때와 결과가 "
+                 "달라질 때만 보낸다(effective): v2 = 부정 커넥터·Bypass, 비 번들 Anima = v1 켬, 비 Anima = 보내지 않음, "
+                 "모름 = 사용자가 바꾼 값만. 앱 기본값은 사용자 Forge ui-config txt2img 의 부정 커넥터 켬(KNOWN_DIFFS) — "
+                 "v1 아코디언 켬(:5443)은 따르지 않는다(D1=B). I2I·인페인트는 카드 토글(기본 끔 = img2img 탭 모두 끔). "
+                 "ComfyUI 컴파일러도 같은 블록을 읽고, v1 은 Forge 처럼 enabled 일 때만 켜고 어댑터는 카드 값만 쓴다(모듈 쌍 "
+                 "자동 켜짐 없음 — Comfy 카드 선택지는 object_info adapter_name). "
+                 "켰는데 Qwen3.5·어댑터 파일이 없으면 Comfy 는 컴파일 오류로 멈추고 Forge 는 'off: …' 로 순정 계속(차이)",
+            gaps=("P16: 결과 infotext 'Anima38 …' 붙여 넣기(core/anima38.settings_from_infotext 는 준비됨)",
+                  "P18: XYZ 체크포인트 축의 셀별 모델 종류 — 지금은 T2I 콤보 모델 기준으로 블록을 만든다",
+                  "P16: Comfy 결과에는 'Anima38' infotext 가 없다(C5)"))),
     "DoRA Inference Mode": _script(
         file="scripts/dora_infer_mode.py", form="positional_or_dict", live_argc=5, shape="027fc702edeb",
         ui_return=("enabled", "mode", "inserted", "weak_strength", "weak_scope"),
         arg_names=("enabled", "mode", "inserted", "weak_strength", "weak_scope"),
+        app_title="core.dora_infer_mode:SCRIPT_NAME", app_arg_names="core.dora_infer_mode:ARG_NAMES",
         api_note="위치 또는 dict. 라벨이 한국어라 dict(키 값 lycoris/forge_fp32/forge/no_magnitude, "
-                 "keep/additive/skip/weak, attn/attn_mlp/all)로 보내야 한다. weak_strength 는 UI 0-1, API 0-2.",
-        classification=deferred(
-            "P8", "UI·페이로드가 없다. Forge 전역 상태라 앱 요청마다 stock 으로 돌아가 사용자 Forge 결과"
-                  "(LyCORIS)와 달라진다 (M6, M7)")),
+                 "keep/additive/skip/weak, attn/attn_mlp/all)로 보내야 한다. weak_strength 는 UI 0-1, API 0-2. "
+                 "빠지거나 모르는 mode 는 순정이 아니라 LyCORIS 로 읽는다(coerce_args) — 앱은 mode 를 늘 싣는다.",
+        classification=mapped(
+            "core/dora_infer_mode.py:SCRIPT_NAME", "core/dora_infer_mode.py:plan",
+            "core/dora_infer_mode.py:parse_settings",
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용)와 전달 규칙(모르면 늘 SKIP — critic A2)
+            "ui/dora_infer_mode_ui.py:contribute", "ui/sampling_blocks.py:CONTRIBUTORS",
+            "core/alwayson_propagation.py:PROPAGATION",
+            # 결과 infotext 'DoRA mode'·'DoRA inserted' 가 없으면 훅 폴백 경고(scripts/dora_infer_mode.py:414-419)
+            "core/sam_extra_notices.py:CODE_DORA_NOT_APPLIED",
+            "frontend/src/components/params/DoraModeCard.vue",
+            "frontend/src/utils/doraMode.ts",
+            note="dict 로 보낸다. 실효 순정(꺼짐 또는 forge+keep)이면 블록을 빼고(결과가 같다), 기능 스냅샷이 스크립트를 "
+                 "확인했을 때만 보낸다. 앱 기본값은 사용자 Forge ui-config 의 txt2img 값(켬·LyCORIS — KNOWN_DIFFS), "
+                 "I2I·인페인트는 카드 토글(기본 끔 = img2img 아코디언 꺼짐). ComfyUI 는 블록을 만들지 않는다(순정 공식·"
+                 "그대로 복제와 같다 — 사용자가 바꾼 값이면 LoRA 생성에 정보 알림)",
+            gaps=("HOLD: Comfy 는 순정·그대로 복제만 — 팩 노드(P8-C)가 있어야 LyCORIS·끼워 넣은 블록 정책을 맞춘다",
+                  "P16: 결과 infotext 'DoRA mode'·'DoRA inserted' 붙여 넣기(core/dora_infer_mode.from_infotext 는 준비됨)",
+                  "P18: [DoRA] XYZ 축"))),
     "Anima VAE 2x (spacepxl decoder)": _script(
         file="scripts/anima_vae_2x.py", form="positional", live_argc=5, shape="e9431e0d6245",
         ui_return=("enabled", "vae_file", "mode", "blur_sigma", "renorm"), api_reads="0-4",
@@ -248,22 +303,44 @@ SAM3_ACTIVATION_KEYS = ("sam3_enable", "enabled")
 SAM3_ENABLE_LABEL = "Enable SAM3"      # script-info args[0].label
 SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam3Args 49 + sam3_enable
 
-# ── Forge 옵션 (shared.opts.add_option, 라이브 14개) ───────────────────────────────
+# ── Forge 옵션 (shared.opts.add_option, 라이브 15개) ───────────────────────────────
 # 주의(나-7): override_settings 에 모르는 키가 있으면 Forge classic 은 KeyError 로 요청 전체를 실패시킨다.
+# P10: 요청마다 덮어쓰는 8개(core/forge_override_settings.SPECS) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
+# 기능 스냅샷의 has_option 이 True 일 때만 보내고, 거절(500 KeyError·설정 잠금)되면 앱 키를 빼고 한 번 더 보낸다.
+_P10_APP = ("core/forge_override_settings.py:SPECS", "core/forge_override_settings.py:merge_into_payload",
+            "backends/webui_backend.py:_forge_option_parts", "frontend/src/components/ForgeOptionOverridesSettings.vue")
+
+
+def _p10(key_const: str, note: str) -> dict:
+    return mapped(*_P10_APP, f"core/forge_override_settings.py:{key_const}", note=note,
+                  gaps=("P16: 결과 infotext 붙여 넣기로 이 옵션을 한 번만 덮어쓰기(Forge 'Override settings' 드롭다운, "
+                        "P10 연구의 P10b)는 아직 없다",))
+
+
 OPTIONS = MappingProxyType({
-    "sam3_unload_keep_in_ram": deferred("P10", "S5 — SAM3 를 CPU RAM 에 보관(3.4 GB). override 는 "
-                                               "run_callbacks=False 라 이미 올라간 모델은 안 내려간다"),
+    "sam3_unload_keep_in_ram": _p10(
+        "OPT_UNLOAD_KEEP_IN_RAM",
+        "S5 — SAM3 를 CPU RAM 에 보관(3.4 GB, 결과 같음). onchange 가 있는 유일한 옵션: 요청 적용 때는 콜백이 돌지 않고 "
+        "복원 때 돈다(끔이면 즉시 버림, processing.py:813·:846). 그래서 앱 '끔'은 SAM3 unload_after 요청이면 그 요청의 "
+        "언로드에서 RAM 을 비우고, Forge 끔에 앱 '켬'은 한 요청 안의 여러 장에서만 효과가 있다(카드 경고)"),
     "sam3_ipa_duplicate_policy": deferred("P20", "R3 — 캐릭터 레퍼런스 IP-Adapter 삽입 블록 정책"),
-    "sam3_anima38_keep_resident": deferred("P10", "M2 — Qwen3.5 커넥터 VRAM 6-8GB 상주(학습과 같은 GPU)"),
-    "sam3_anima38_connector_fp32": deferred("P10", "M2 — 커넥터 fp32"),
-    "sam3_anima38_connector_run_cache": deferred("P10", "M2 — 커넥터 실행 캐시"),
+    "sam3_anima38_keep_resident": _p10(
+        "OPT_KEEP_RESIDENT", "M2 — TE·Qwen3.5·커넥터 VRAM 최대 6-8GB 상주(결과 같음). 같은 GPU 학습이면 '끔' 권장(카드 문구)"),
+    "sam3_anima38_connector_fp32": _p10("OPT_CONNECTOR_FP32", "M2 — 커넥터 fp32 상주(VRAM +1.5GB, 결과 같음)"),
+    "sam3_anima38_connector_run_cache": _p10("OPT_CONNECTOR_RUN_CACHE", "M2 — 커넥터 실행 캐시(결과 같음)"),
     "sam3_anima38_reference_ipa": deferred("P20", "R3 — 3.8B 에서 레퍼런스 IP-Adapter"),
-    "sam3_anima_sparse_lora_forge_guess": deferred("P10", "M5 — sparse LoRA 순정 추측 변환(요청별 토글)"),
-    "sam3_guidance_pag_prefix_dedup": deferred("P10", "G16 — v0.30 이전 결과를 비트 단위로 재현할 때만"),
-    "sam3_guidance_seg_separable_blur": deferred("P10", "G16 — v0.30 이전 결과를 비트 단위로 재현할 때만"),
-    "sam3_guidance_dave_pre_dd_sigma": deferred(
-        "P10", "DAVE+Detail Daemon 우회(기본 켬). 끄면 원본 노드 조합처럼 DAVE 가 모든 스텝에 걸린다 — "
-               "앱 Comfy 팩은 같은 기본값(guid_dave_pre_dd, 팩 1.4.1)"),
+    "sam3_anima_sparse_lora_forge_guess": _p10(
+        "OPT_SPARSE_FORGE_GUESS", "M5 — sparse LoRA 순정 추측 변환(결과가 달라짐). 값이 Forge 와 다르면 요청이 바뀔 때마다 "
+                                  "LoRA 를 다시 합친다(scripts/anima_lora_blocks.py process)"),
+    "sam3_guidance_pag_prefix_dedup": _p10(
+        "OPT_PREFIX_DEDUP", "G16 — 결과가 아주 미세하게 다름(infotext 'Anima PAG prefix dedup'). v0.30 이전 결과를 비트 "
+                            "단위로 재현할 때 '끔'"),
+    "sam3_guidance_seg_separable_blur": _p10(
+        "OPT_SEG_SEPARABLE", "G16 — 결과가 아주 미세하게 다름(infotext 'Anima SEG separable blur')"),
+    "sam3_guidance_dave_pre_dd_sigma": _p10(
+        "OPT_DAVE_PRE_DD", "DAVE+Detail Daemon 우회(기본 켬, 결과가 달라짐 — infotext 'Anima DAVE pre-DD sigma'). 끄면 원본 "
+                           "노드 조합처럼 DAVE 가 모든 스텝에 걸려 무너진다. 앱 Comfy 팩은 같은 기본값(guid_dave_pre_dd, 팩 "
+                           "1.4.1)"),
     "sam3_appearance_theme": ignored("N3 — Forge 화면 테마. 앱은 자체 디자인 토큰을 쓴다"),
     "sam3_layout_sections": ignored("N4 — txt2img 섹션 CSS 재배치, 인자 순서와 무관"),
     "sam3_fast_dropdown_visible_choices": ignored("N3 — Forge 빠른 드롭다운 표시 개수"),
@@ -387,8 +464,12 @@ MODULES = MappingProxyType({
         "core/forge_tile_repair_client.py:TILE_REPAIR_API_PATH",
         note="스크립트 클래스 없이 on_app_started 로 Tile & Repair 라우트만 등록한다(ROUTES 참고)"),
     "scripts/anima_detail_daemon.py": mapped("core/anima_guidance.py:SCRIPT_DETAIL_DAEMON"),
-    "scripts/anima_3_8b.py": mapped("core/anima38.py:SCRIPT_NAME", gaps=("P9",)),
-    "scripts/dora_infer_mode.py": deferred("P8", "SCRIPTS['DoRA Inference Mode']"),
+    "scripts/anima_3_8b.py": mapped("core/anima38.py:SCRIPT_NAME", "core/anima38.py:DEFAULT_ADAPTER",
+                                    note="SCRIPTS['Anima 3.8B (Qwen3.5 / v2)'] — 기본 어댑터 이름·ARG_DEFAULTS 는 "
+                                         "SEMANTIC_PINS anima38_default_adapter·anima38_arg_defaults"),
+    "scripts/dora_infer_mode.py": mapped("core/dora_infer_mode.py:SCRIPT_NAME", "core/dora_infer_mode.py:MODE_LABELS",
+                                         note="SCRIPTS['DoRA Inference Mode'] — 라벨·infotext 'DoRA inserted' 는 "
+                                              "SEMANTIC_PINS dora_*_labels·dora_infotext_insert_key"),
     "scripts/anima_vae_2x.py": deferred(HOLD, "SCRIPTS['Anima VAE 2x (spacepxl decoder)'] — M9 보류"),
     "scripts/anima_lora_blocks.py": mapped(
         "core/sam_extra_notices.py:KEY_SPARSE_LORA_GUESS",
@@ -453,14 +534,24 @@ MODULES = MappingProxyType({
     "sam3ext/anima_ipa/": deferred("P20", "R2 IP-Adapter(SigLIP2 → DiT K/V)"),
     "sam3ext/ui_tipo.py": deferred("P19", "T1 TIPO 마술봉"),
     "sam3ext/tipo/": deferred("P19", "T1/T2 TIPO 런타임·모델"),
-    "sam3ext/anima38/": mapped("core/anima38.py:parse_args", gaps=("P9",),
-                               note="Qwen3.5 커넥터 런타임 — 앱은 제목·인자만 안다"),
+    "sam3ext/anima38/": mapped("core/anima38.py:parse_args", "core/anima_model_kind.py:BUNDLE_ARCHITECTURE",
+                               "core/anima_model_kind.py:V1_ADAPTER_ARCHITECTURE",
+                               note="Qwen3.5 커넥터 런타임 — 앱은 제목·인자와 번들·v1 어댑터 판별 메타데이터(files.py, "
+                                    "SEMANTIC_PINS anima38_bundle_*·anima38_v1_architecture)만 안다"),
     "sam3ext/guidance/": mapped("core/anima_guidance.py:PERTURBATION_SPEC",
                                 note="SMC_PRESET_NAMES 등 PAG 선택지의 출처",
                                 gaps=("P17: 남은 Comfy 차이는 'Anima Perturbation Guidance' 항목의 P17 gaps",)),
-    "sam3ext/anima_lora_blocks.py": ignored("M4 — Forge 쪽 28/40/52 블록 자동 리맵, 앱 페이로드 없음. "
-                                            "Comfy sparse 규칙 차이는 P17", package="P17"),
-    "sam3ext/dora_infer_mode.py": deferred("P8", "DoRA 병합 공식"),
+    "sam3ext/anima_lora_blocks.py": mapped(
+        "core/dora_infer_mode.py:INSERT_POLICIES", "core/dora_infer_mode.py:normalize_insert",
+        "core/dora_infer_mode.py:WEAK_SCOPES",
+        note="M4 — Forge 쪽 28/40/52 블록 자동 리맵은 앱 페이로드가 없다. 앱은 DoRA 끼워 넣은 블록 정책·약한 복사 "
+             "키와 기본 강도만 쓴다(SEMANTIC_PINS dora_insert_policies·dora_weak_scopes·dora_weak_default)",
+        gaps=("P17: Comfy sparse 규칙 차이",)),
+    "sam3ext/dora_infer_mode.py": mapped(
+        "core/dora_infer_mode.py:EXTENSION_MODES", "core/dora_infer_mode.py:normalize_mode",
+        note="DoRA 병합 공식 — 앱은 모드 키·별칭 정규화·infotext 'DoRA mode' 만 쓴다(SEMANTIC_PINS dora_modes·"
+             "dora_infotext_*)",
+        gaps=("HOLD: Comfy 는 순정 공식만(P8-C 팩 노드)",)),
     "sam3ext/lora_manager_core.py": mapped("backends/webui_backend.py:get_lora_manager_url",
                                            note="_BRIDGE_JS 메시지 모양은 SEMANTIC_PINS 의 lora_bridge_message",
                                            gaps=("P6: _BRIDGE_JS 'sam3-add-lora' 메시지를 앱이 받지 않는다",)),
@@ -517,7 +608,24 @@ SEMANTIC_PINS = (
     {"id": "anima38_arg_defaults", "source": "ast", "file": "scripts/anima_3_8b.py", "name": "ARG_DEFAULTS",
      "expected": {"enabled": False, "adapter": "Anima-3.8B-expanded_adapter.safetensors", "strength": 1.0,
                   "negative": False, "negative_strength": 1.0, "bypass": False},
-     "meaning": "dict 로 보낼 때 빠진 키를 채우는 값 — core/anima38.py DEFAULT_SETTINGS 와 같아야 한다(P9)"},
+     "app": "core.anima38:ARG_DEFAULTS",
+     "meaning": "dict 로 보낼 때 빠진 키를 채우는 값 = 블록이 없을 때의 동작 — core/anima38.py DEFAULT_SETTINGS 와 같아야 "
+                "한다. 앱은 이 값과 결과가 같은 요청에는 블록을 싣지 않는다(effective, P9)"},
+    # Anima 3.8B(P9) — 앱이 같은 값을 하드코딩한다. 바뀌면 모델 종류 판정·기본 어댑터가 조용히 어긋난다.
+    {"id": "anima38_default_adapter", "source": "ast", "file": "scripts/anima_3_8b.py", "name": "DEFAULT_ADAPTER",
+     "expected": "Anima-3.8B-expanded_adapter.safetensors", "app": "core.anima38:DEFAULT_ADAPTER",
+     "meaning": "v1 어댑터 기본 이름 — 카드의 기본값·선택지 폴백(확장 _adapter_choices 는 아무것도 없어도 이 이름 하나)"},
+    {"id": "anima38_bundle_architecture", "source": "ast", "file": "sam3ext/anima38/files.py",
+     "name": "BUNDLE_ARCHITECTURE", "expected": "anima_3_8b_semantic_connector_v2_bundle",
+     "app": "core.anima_model_kind:BUNDLE_ARCHITECTURE",
+     "meaning": "v2 번들 체크포인트 메타데이터 architecture — 앱은 헤더만 읽어 같은 규칙(bundle_metadata)으로 v2 를 가린다"},
+    {"id": "anima38_bundle_format", "source": "ast", "file": "sam3ext/anima38/files.py", "name": "BUNDLE_FORMAT",
+     "expected": "1", "app": "core.anima_model_kind:BUNDLE_FORMAT",
+     "meaning": "v2 번들 메타데이터 anima_v2_bundle_format — architecture 와 함께 맞아야 v2(자동 켜짐)"},
+    {"id": "anima38_v1_architecture", "source": "ast", "file": "sam3ext/anima38/files.py", "name": "ARCHITECTURE",
+     "expected": "anima_progressive_qwen35_cross_adapter_v1", "app": "core.anima_model_kind:V1_ADAPTER_ARCHITECTURE",
+     "meaning": "v1 어댑터 architecture — infotext 'Anima38 architecture' 가 이 값이면 v1 을 켰던 이미지(붙여 넣기 "
+                "settings_from_infotext)"},
     # 결과·생성 전 알림(P4) — core/sam_extra_notices.py 가 같은 값을 읽는다. 바뀌면 알림이 조용히 멈춘다.
     {"id": "anima38_status_key", "source": "ast", "file": "scripts/anima_3_8b.py", "name": "STATUS_KEY",
      "expected": "Anima38", "app": "core.sam_extra_notices:KEY_ANIMA38_STATUS",
@@ -555,7 +663,94 @@ SEMANTIC_PINS = (
          r'"<lora:"\s*\+\s*name\s*\+\s*":"\s*\+\s*strength\s*\+\s*">"',
      ),
      "meaning": "메시지 {type:'sam3-add-lora', text:'<lora:이름:강도[:clip]>, …', replace?:bool} — P6 의 "
-                "loraManagerMessage 파서가 이 필드 이름·구분자(', ')·태그 형식을 믿는다"},
+                "loraManagerMessage 파서가 이 필드 이름·구분자(', ')·태그 형식을 믿는다. 이름은 LoRA Manager 의 것이고 "
+                "Forge 는 둘째 값을 텍스트 인코더, 셋째 값을 UNet 강도로 읽는다(ComfyUI 컴파일러도 같다 — _lora_spec)"},
+    # DoRA 추론 방식(P8) — core/dora_infer_mode.py 가 같은 키·라벨·infotext 를 하드코딩한다. 모양(인자 수·라벨 해시)이
+    # 그대로여도 키 이름·순서·기본 강도가 바뀌면 앱이 보낸 dict 가 조용히 다른 값(LyCORIS·keep·attn)으로 읽힌다.
+    {"id": "dora_modes", "source": "ast", "file": "sam3ext/dora_infer_mode.py", "name": "MODES",
+     "expected": ("forge", "forge_fp32", "lycoris", "no_magnitude"), "app": "core.dora_infer_mode:EXTENSION_MODES",
+     "meaning": "API dict 의 mode 키 — 모르는 값은 LyCORIS 로 읽힌다(coerce_args). 'forge' = 순정(블록 없음과 같음)"},
+    {"id": "dora_insert_policies", "source": "ast", "file": "sam3ext/anima_lora_blocks.py",
+     "name": "DUPLICATE_POLICIES", "expected": ("keep", "additive", "skip", "weak"),
+     "app": "core.dora_infer_mode:INSERT_POLICIES",
+     "meaning": "API dict 의 inserted 키(정규화는 이 순서의 부분 문자열) — 모르는 값은 keep(그대로 복제)"},
+    {"id": "dora_weak_scopes", "source": "ast", "file": "sam3ext/anima_lora_blocks.py", "name": "WEAK_SCOPES",
+     "expected": ("attn", "attn_mlp", "all"), "app": "core.dora_infer_mode:WEAK_SCOPES",
+     "meaning": "약한 복사 범위 키 — 모르는 값은 attn"},
+    {"id": "dora_weak_default", "source": "ast", "file": "sam3ext/anima_lora_blocks.py",
+     "name": "DEFAULT_WEAK_STRENGTH", "expected": 0.12, "app": "core.dora_infer_mode:DEFAULT_WEAK_STRENGTH",
+     "meaning": "약한 복사 강도 기본값(브리지 권장 0.08~0.18) — 숫자가 아닌 값도 이 값이 된다"},
+    {"id": "dora_infotext_mode_key", "source": "ast", "file": "sam3ext/dora_infer_mode.py", "name": "INFOTEXT_KEY",
+     "expected": "DoRA mode", "app": "core.dora_infer_mode:INFOTEXT_MODE_KEY",
+     "meaning": "순정이 아닌 방식으로 합친 요청의 infotext 키 — 앱은 보냈는데 없으면 훅 폴백 경고(CODE_DORA_NOT_APPLIED)"},
+    {"id": "dora_infotext_values", "source": "ast", "file": "sam3ext/dora_infer_mode.py", "name": "INFOTEXT_VALUES",
+     "expected": {"forge_fp32": "Forge fp32", "lycoris": "LyCORIS", "no_magnitude": "No magnitude"},
+     "app": "core.dora_infer_mode:INFOTEXT_VALUES",
+     "meaning": "'DoRA mode' 값 — 붙여 넣기(from_infotext, P16)가 이 값을 모드 키로 되읽는다"},
+    {"id": "dora_infotext_insert_key", "source": "ast", "file": "scripts/dora_infer_mode.py",
+     "name": "INFOTEXT_DUP_KEY", "expected": "DoRA inserted", "app": "core.dora_infer_mode:INFOTEXT_INSERT_KEY",
+     "meaning": "그대로 복제가 아닌 정책의 infotext 키(값 additive / skip / weak 0.12 attn)"},
+    {"id": "dora_mode_labels", "source": "ast", "file": "scripts/dora_infer_mode.py", "name": "MODE_CHOICES",
+     "expected": ("LyCORIS (학습과 동일 · fp32)", "Forge/Comfy 공식 · fp32", "Forge/Comfy (순정)",
+                  "DoRA 끔 (크기 보정 없이 ΔW만 · 일반 LoKr처럼)"),
+     "app": "core.dora_infer_mode:MODE_LABELS",
+     "meaning": "카드 표시 라벨(상류 이름 그대로)·순서 — frontend/src/utils/doraMode.ts MODE_OPTIONS 가 같은 값이다"},
+    {"id": "dora_insert_labels", "source": "ast", "file": "scripts/dora_infer_mode.py", "name": "DUP_CHOICES",
+     "expected": ("그대로 복제 (순정 · Forge 기본)", "덧셈형 (끼워 넣은 블록만 DoRA 크기 보정 끔)",
+                  "넣지 않음 (원래 블록에만 · 모든 LoRA)", "약한 복사 (브리지식 · 강도·범위 조절)"),
+     "app": "core.dora_infer_mode:INSERT_LABELS",
+     "meaning": "끼워 넣은 블록 라벨·순서 — 앱 정규화(normalize_insert)가 이 라벨을 서로 다른 키로 읽어야 한다"},
+    {"id": "dora_scope_labels", "source": "ast", "file": "scripts/dora_infer_mode.py", "name": "SCOPE_CHOICES",
+     "expected": ("어텐션만 (브리지 기본)", "어텐션+MLP", "전체 (모듈레이션·노름 포함)"),
+     "app": "core.dora_infer_mode:SCOPE_LABELS",
+     "meaning": "약한 복사 범위 라벨·순서"},
+    # Forge 옵션 덮어쓰기(P10) — 요청 중에 옵션을 **읽는** 쪽 상수. 등록 키(OPTIONS·add_option)만 같고 읽는 이름이 바뀌면
+    # 앱이 보낸 override 가 조용히 아무 일도 하지 않는다. 기본값·infotext·onchange·컴포넌트는 option_infos 테스트가 본다.
+    {"id": "opt_anima38_keep_resident", "source": "ast", "file": "sam3ext/anima38/runtime.py",
+     "name": "OPT_KEEP_RESIDENT", "expected": "sam3_anima38_keep_resident",
+     "app": "core.forge_override_settings:OPT_KEEP_RESIDENT",
+     "meaning": "인코딩 직후·생성 끝 restore 가 읽는 상주 옵션 — 앱 '끔'이면 생성 뒤 VRAM 6-8GB 를 반납한다"},
+    {"id": "opt_anima38_connector_fp32", "source": "ast", "file": "sam3ext/anima38/connector_fp32.py",
+     "name": "OPT_CONNECTOR_FP32", "expected": "sam3_anima38_connector_fp32",
+     "app": "core.forge_override_settings:OPT_CONNECTOR_FP32",
+     "meaning": "커넥터 설치 때 읽는 fp32 상주 옵션"},
+    {"id": "opt_anima38_connector_run_cache", "source": "ast", "file": "sam3ext/anima38/connector_cache.py",
+     "name": "OPT_CONNECTOR_RUN_CACHE", "expected": "sam3_anima38_connector_run_cache",
+     "app": "core.forge_override_settings:OPT_CONNECTOR_RUN_CACHE",
+     "meaning": "커넥터 호출마다 읽는 실행 캐시 옵션"},
+    {"id": "opt_sam3_keep_in_ram", "source": "ast", "file": "sam3ext/core.py", "name": "OPT_UNLOAD_KEEP_IN_RAM",
+     "expected": "sam3_unload_keep_in_ram", "app": "core.forge_override_settings:OPT_UNLOAD_KEEP_IN_RAM",
+     "meaning": "'Unload after' 마다 읽는 RAM 보관 옵션(onchange 는 복원 때만 돈다)"},
+    {"id": "opt_guidance_prefix_dedup", "source": "ast", "file": "scripts/anima_safe_pag.py", "name": "OPT_PREFIX_DEDUP",
+     "expected": "sam3_guidance_pag_prefix_dedup", "app": "core.forge_override_settings:OPT_PREFIX_DEDUP",
+     "meaning": "가이던스 패스마다 읽는 PAG prefix dedup 옵션"},
+    {"id": "opt_guidance_seg_separable", "source": "ast", "file": "scripts/anima_safe_pag.py",
+     "name": "OPT_SEG_SEPARABLE", "expected": "sam3_guidance_seg_separable_blur",
+     "app": "core.forge_override_settings:OPT_SEG_SEPARABLE",
+     "meaning": "가이던스 패스마다 읽는 SEG 1D 분리 블러 옵션"},
+    {"id": "opt_guidance_dave_pre_dd", "source": "ast", "file": "scripts/anima_safe_pag.py", "name": "OPT_DAVE_PRE_DD",
+     "expected": "sam3_guidance_dave_pre_dd_sigma", "app": "core.forge_override_settings:OPT_DAVE_PRE_DD",
+     "meaning": "DAVE 를 붙일 때마다 읽는 DAVE+Detail Daemon 우회 옵션(8878b9e)"},
+    {"id": "opt_sparse_forge_guess", "source": "ast", "file": "sam3ext/anima_lora_blocks.py",
+     "name": "OPT_SPARSE_FORGE_GUESS", "expected": "sam3_anima_sparse_lora_forge_guess",
+     "app": "core.forge_override_settings:OPT_SPARSE_FORGE_GUESS",
+     "meaning": "LoRA 로드 때 읽는 부분 LoRA 추측 변환 옵션(value is True 로만 켜진다 — 앱은 JSON bool 만 보낸다)"},
+    {"id": "opt_infotext_prefix_dedup", "source": "ast", "file": "scripts/anima_safe_pag.py",
+     "name": "INFOTEXT_PREFIX_DEDUP", "expected": "Anima PAG prefix dedup",
+     "app": "core.forge_override_settings:INFOTEXT_PREFIX_DEDUP",
+     "meaning": "dedup 실제 적용 값이 남는 infotext 이름 — 강제한 값이 적용됐는지 결과로 확인할 수 있다"},
+    {"id": "opt_infotext_seg_separable", "source": "ast", "file": "scripts/anima_safe_pag.py",
+     "name": "INFOTEXT_SEG_SEPARABLE", "expected": "Anima SEG separable blur",
+     "app": "core.forge_override_settings:INFOTEXT_SEG_SEPARABLE",
+     "meaning": "SEG 분리 블러 실제 적용 값이 남는 infotext 이름"},
+    {"id": "opt_infotext_dave_pre_dd", "source": "ast", "file": "scripts/anima_safe_pag.py",
+     "name": "INFOTEXT_DAVE_PRE_DD", "expected": "Anima DAVE pre-DD sigma",
+     "app": "core.forge_override_settings:INFOTEXT_DAVE_PRE_DD",
+     "meaning": "DAVE+Detail Daemon 우회 infotext 이름"},
+    {"id": "opt_infotext_sparse_guess", "source": "ast", "file": "sam3ext/anima_lora_blocks.py",
+     "name": "INFOTEXT_SPARSE_GUESS_KEY", "expected": "Anima sparse LoRA",
+     "app": "core.forge_override_settings:INFOTEXT_SPARSE_GUESS",
+     "meaning": "추측 변환한 생성에만 남는 infotext 이름(붙여 넣으면 이 옵션을 켜는 덮어쓰기가 된다)"},
 )
 
 # ── ui() 컴포넌트에서 AST 로 못 읽는 칸 (script, index) → 필드와 사유 ─────────────────────
@@ -597,6 +792,19 @@ KNOWN_DIFFS = MappingProxyType({
                   "dcw_node.py:757-815, :855-856). 확장은 58 칸을 숨은 True(끄는 쪽 veto 로만 읽음)로 두고, 앱은 "
                   "저장된 사용자 스위치라 기본 False 로 남기되 보내는 값은 _derive_rdc 가 원본 켜짐(스위치·DCW·"
                   "tau > 0)으로 맞춘다 — 두 기본 모두 tau 0 이라 켜지지 않는다"},
+    # DoRA 앱 기본값(P8) — API 기본값은 코드 값(아코디언 꺼짐)이고, 사용자 Forge UI 는 ui-config 로 txt2img 를 켠다(다-3).
+    # tests/test_sam_extra_contract.py test_dora_live_defaults_match_app 가 쓴다(core.dora_infer_mode.APP_DEFAULTS).
+    # Anima 3.8B 앱 기본값(P9) — 사용자 Forge ui-config txt2img 의 부정 커넥터 켬(:5452). v1 아코디언 켬(:5443)은
+    # 결정 D1=B 로 따르지 않는다(비 번들 Anima 결과 보존). tests/test_sam_extra_contract.py
+    # test_anima38_live_defaults_vs_app_t2i_defaults 가 쓴다(core.anima38.APP_T2I_DEFAULTS).
+    ("Anima 3.8B (Qwen3.5 / v2)", "negative", "default"): {
+        "app": True, "live": False, "kind": "intended", "package": "", "source": "fixture",
+        "reason": "사용자 Forge ui-config.json txt2img 부정 커넥터 켬(:5452) — API 는 블록이 없으면 끔이라 3.8B v2 요청에 "
+                  "블록을 싣는다. img2img 는 모두 끔(:5460-5475)이라 I2I·인페인트 토글 기본 끔"},
+    ("DoRA Inference Mode", "enabled", "default"): {
+        "app": True, "live": False, "kind": "intended", "package": "", "source": "fixture",
+        "reason": "사용자 Forge ui-config.json txt2img 아코디언 켬(:5669) — API 는 블록이 없으면 순정이라 앱이 늘 켠 블록을 "
+                  "싣는다. img2img 는 꺼짐(:5675)이라 I2I·인페인트 토글 기본 끔"},
 })
 
 

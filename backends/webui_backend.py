@@ -9,6 +9,7 @@ import logging
 import threading
 import time
 import requests
+from dataclasses import replace
 from typing import Callable, Dict, Optional, Any
 from PIL import Image
 
@@ -149,36 +150,59 @@ def _parse_generation_info(raw_info) -> Dict:
     return {"raw_info": raw_info}
 
 
-def _rejected_request_message(response, payload: Dict) -> Optional[str]:
-    """Forge 가 요청을 거절(HTTP 422 — 확장 스크립트 없음 등)했으면 어느 확장·기능 때문인지 설명.
-
-    sam-extra 알림(P4, core/sam_extra_notices). 422 가 아니면 None — 기존 raise_for_status 흐름 그대로.
-    """
-    if getattr(response, "status_code", None) != 422:
-        return None
+def _read_error_body(response):
+    """거절 응답의 본문(JSON, 아니면 text)을 읽고 응답을 닫는다."""
     try:
-        body = response.json()
+        return response.json()
     except Exception:
-        body = getattr(response, "text", "")
+        return getattr(response, "text", "")
     finally:
         close_response = getattr(response, "close", None)
         if callable(close_response):
             close_response()
+
+
+def _read_retryable(response, parts=None) -> tuple:
+    """Forge 가 거절했나 → (상태, 본문). 422(스크립트 거절 — 설명·재시도 판정)는 늘, 500 은 앱이 Forge 옵션을 넣었을
+    때만(``parts.option_keys`` — P10 KeyError·설정 잠금 판정) 본문을 읽고 응답을 닫는다. 그 밖은 (None, None) 이고 응답은
+    그대로다(raise_for_status·본문 읽기는 호출자 — 앱 옵션이 없는 500 은 지금과 같은 오류)."""
+    status = getattr(response, "status_code", None)
+    if status == 422 or (status == 500 and parts is not None and getattr(parts, "option_keys", ())):
+        return status, _read_error_body(response)
+    return None, None
+
+
+def _cancelled(cancel_check: Optional[Callable[[], bool]]) -> bool:
+    """중지 요청이 왔나 — ``cancel_check`` 가 없으면 False."""
+    return cancel_check is not None and bool(cancel_check())
+
+
+def _explain_rejection(body, payload: Dict) -> str:
+    """Forge 가 요청을 거절(HTTP 422 — 확장 스크립트 없음 등)했으면 어느 확장·기능 때문인지 설명(P4, core/sam_extra_notices)."""
     from core.sam_extra_notices import explain_rejected_request
     message = explain_rejected_request(422, body, payload)
     logger.warning("WebUI 요청 거절(422): %s", message)
     return message
 
 
-def _extension_notices(api_url: str, info: Dict, payload: Dict) -> list:
-    """Forge info + 보낸 요청 → sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락). 실패하면 []."""
+def _extension_notices(api_url: str, info: Dict, payload: Dict, *, propagated_titles=()) -> list:
+    """Forge info + 보낸 요청 → sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락). 실패하면 [].
+
+    ``propagated_titles``: 보조 패스가 메인 생성 설정에서 전달한 제목 — 그 기능 알림에 '(전달됨)' 을 붙인다(P7)."""
     try:
         from core.sam_extra_notices import result_notices
         from core.sam_extra_probe import peek_capabilities
-        return result_notices(info, payload, capabilities=peek_capabilities(api_url))   # 캐시만 — HTTP 없음
+        return result_notices(info, payload, capabilities=peek_capabilities(api_url),   # 캐시만 — HTTP 없음
+                              propagated_titles=propagated_titles)
     except Exception:
         logger.debug("sam-extra 결과 알림 계산 실패(무시)", exc_info=True)
         return []
+
+
+def _take_envelope(settings):
+    """워커 settings → (봉투를 뺀 사본, 메인 생성 샘플링 블록 봉투|None) — core/alwayson_propagation."""
+    from core.alwayson_propagation import take_envelope
+    return take_envelope(settings)
 
 
 class WebUIBackend(AbstractBackend):
@@ -277,26 +301,177 @@ class WebUIBackend(AbstractBackend):
             logger.warning("sam-extra 스냅샷 조회 실패(무시): %s", exc)
             return None
 
-    def _run_img2img_postprocess(self, image_b64: str, payload: Dict) -> str:
+    def _run_img2img_postprocess(self, image_b64: str, payload: Dict, *, parts=None, extra_notices=(),
+                                 cancel_check: Optional[Callable[[], bool]] = None, context: str = "") -> str:
         """단독 ADetailer·SAM3·Refine 의 img2img. 결과는 base64 str 이다 — Forge info 와 sam-extra 알림
-        ('SAM3 Error' 등)을 붙인 ``NoticedImage`` 라 워커가 ``notices_of(result)`` 로 볼 수 있다(P4)."""
-        response = requests.post(
-            f'{self.api_url}/sdapi/v1/img2img',
-            json=payload, headers=_HEADERS, timeout=600
-        )
-        rejected = _rejected_request_message(response, payload)
-        if rejected:
-            raise RuntimeError(rejected)
-        response.raise_for_status()
-        r = response.json()
-        if 'images' in r and r['images']:
-            image = r['images'][-1]
-            if not isinstance(image, str):
-                return image
-            from core.sam_extra_notices import NoticedImage
-            info = _parse_generation_info(r.get('info', {}))
-            return NoticedImage(image, info, _extension_notices(self.api_url, info, payload))
-        raise RuntimeError("img2img 후처리 API 응답에 이미지가 없습니다.")
+        ('SAM3 Error' 등)을 붙인 ``NoticedImage`` 라 워커가 ``notices_of(result)`` 로 볼 수 있다(P4).
+
+        ``parts``(core/forge_optional_parts.OptionalParts): 앱이 스스로 덧붙인 부분 — P7 전달 블록과, 여기서 싣는 앱의
+        Forge 옵션 덮어쓰기(P10 ``_forge_option_parts``, 기본 'Forge 설정 따름'이면 없음). Forge 가 그중 하나를 거절하면
+        (422 제목·500 옵션 KeyError·설정 잠금) 그것만 빼고 다시 보낸다(부분이 줄어드는 동안만, 시도 수 상한
+        ``max_attempts``). 다시 보내기 전에 ``cancel_check`` 를 본다 — 스냅샷 새로고침 앞과 **뒤** 둘 다(새로고침은 블로킹
+        GET 여러 개라 그 사이에 중지할 수 있다. 이 경로는 Forge 를 끊지 않으므로 다시 보내면 중지 뒤에도 끝까지 돈다 —
+        P10 검토 1). 취소됐으면 원래 거절로 실패한다. 재시도 때는 기능 스냅샷 캐시를 버리지 않고 이 워커에서 새로 받는다
+        (다음 요청이 새 스냅샷으로 게이트한다 — critic A1).
+        ``extra_notices``: 요청 전에 생긴 알림(전달하지 않은 블록 등). ``context``: 알림 문구의 작업 이름(보조 패스 id).
+        """
+        from core.forge_optional_parts import OptionalParts, max_attempts, plan_retry
+        parts = parts if parts is not None else OptionalParts()
+        notices = list(extra_notices or ())
+        payload, option_keys, option_notices = self._forge_option_parts(payload)
+        if option_keys:
+            parts = replace(parts, option_keys=option_keys)
+        notices.extend(option_notices)
+        attempts = max_attempts(parts)
+        for attempt in range(1, attempts + 1):
+            response = requests.post(
+                f'{self.api_url}/sdapi/v1/img2img',
+                json=payload, headers=_HEADERS, timeout=600
+            )
+            status, body = _read_retryable(response, parts)
+            if status is not None:
+                retry = plan_retry(status, body, payload, parts) if attempt < attempts else None
+                self._remember_frozen(retry)
+                if retry is not None and not _cancelled(cancel_check):
+                    retry_notices = self._optional_parts_retry_notices(retry, context)   # 스냅샷 새로고침(블로킹 GET)
+                    if not _cancelled(cancel_check):   # 새로고침 중에 중지됐으면 다시 보내지 않는다(B10)
+                        notices.extend(retry_notices)
+                        payload, parts = retry.payload, retry.remaining
+                        continue
+                if status == 422:
+                    raise RuntimeError(_explain_rejection(body, payload))
+            response.raise_for_status()
+            r = response.json()
+            if 'images' in r and r['images']:
+                image = r['images'][-1]
+                if not isinstance(image, str):
+                    return image
+                from core.sam_extra_notices import NoticedImage
+                info = _parse_generation_info(r.get('info', {}))
+                return NoticedImage(image, info, [
+                    *_extension_notices(self.api_url, info, payload, propagated_titles=parts.titles), *notices])
+            raise RuntimeError("img2img 후처리 API 응답에 이미지가 없습니다.")
+        raise RuntimeError("img2img 후처리 재시도 한도를 넘었습니다.")   # 도달하지 않는다(마지막 시도는 재시도하지 않음)
+
+    def _optional_parts_retry_notices(self, retry, context: str, *, main: bool = False, provenance=None) -> list:
+        """거절된 부분을 빼고 다시 보낼 때: 알림 + 기능 스냅샷 새로 받기(이 워커 스레드에서, 캐시 무효화 없이 — critic A1).
+
+        ``main``: 메인 생성(``_generate``) — 블록 출처(``provenance`` — 요청의 비공개 키)가 앱 기본값이면 정보
+        (``app_block_retried_notice``), 사용자 값·모르면 경고(``block_retried_notice``, P10 검토 2). 아니면 보조 패스
+        ``context``. 재시도 알림 코드는 모두 ``REFRESH_CAPABILITIES_CODES`` 라 GUI 가 띄울 때 GUI 스냅샷도 다시 받는다."""
+        from core import sam_extra_notices as sn
+        from core.alwayson_propagation import aux_label
+        from core.forge_optional_parts import REASON_FROZEN
+        logger.warning("Forge 가 앱이 덧붙인 부분을 거절 — 빼고 다시 보냄: %s", ", ".join(retry.removed))
+        # 설정 잠금은 Forge 시작 인자라 스냅샷에 드러나지 않는다 — 새로 받아도 소용없다(기억은 _remember_frozen, P10 검토 3)
+        if retry.reason != REASON_FROZEN:
+            try:
+                from core.sam_extra_probe import get_capabilities
+                get_capabilities(self.api_url, refresh=True)   # 워커 전용(블로킹 GET). 배치의 다음 장은 새 스냅샷으로 게이트
+            except Exception:
+                logger.debug("sam-extra 스냅샷 새로고침 실패(무시)", exc_info=True)
+        where = "" if main else aux_label(context)
+        if retry.code == sn.CODE_FORGE_OPTION_REJECTED:
+            from core.forge_override_settings import label_of
+            frozen = retry.reason == REASON_FROZEN
+            # 잠금이면 거절된 것 = Forge 가 이름을 댄(기억할) 키. 함께 뺀 나머지는 이번 한 번만 빠졌다(P10 검토 4)
+            named = retry.frozen if frozen else retry.removed
+            also = [label_of(key) for key in retry.removed if key not in named]
+            return [sn.forge_option_rejected_notice([label_of(key) for key in named], frozen=frozen, where=where,
+                                                    also=also)]
+        if retry.code != sn.CODE_PROPAGATION_RETRIED:
+            return []
+        if main:
+            from core.alwayson_propagation import PROVENANCE_APP_DEFAULT, provenance_of
+            return [sn.app_block_retried_notice(title) if provenance_of(provenance, title) == PROVENANCE_APP_DEFAULT
+                    else sn.block_retried_notice(title) for title in retry.removed]
+        return [sn.propagation_retried_notice(title, where) for title in retry.removed]
+
+    def _remember_frozen(self, retry) -> None:
+        """Forge 가 설정 잠금(--freeze-settings…)으로 앱 옵션을 거절했으면 이 주소에 기억한다 — 다음 요청부터 보내지 않는다.
+
+        잠금은 스냅샷을 새로 받아도 드러나지 않아(옵션은 '있다'로 남는다) 기억이 없으면 요청마다 거절·재시도를
+        되풀이한다(P10 검토 3). 기억하는 것은 Forge 가 잠겼다고 이름을 댄 키(``retry.frozen``)뿐이다 — 섹션·키 잠금은
+        일부만 잠그므로 재시도에서 함께 뺀 나머지는 다음 요청부터 다시 보낸다(전역 잠금만 앱 키 전부, P10 검토 4).
+        취소로 다시 보내지 않더라도 기억한다 — Forge 의 사실이다. 백엔드 변경·재연결과 수동 새로고침이 잊게 한다
+        (ui/sam_extra_capabilities_actions)."""
+        from core.forge_optional_parts import REASON_FROZEN
+        if retry is None or retry.reason != REASON_FROZEN or not retry.frozen:
+            return
+        from core.forge_override_settings import remember_frozen_options
+        remember_frozen_options(self.api_url, retry.frozen)
+        logger.warning("Forge 설정 잠금 — 앞으로 이 Forge 에는 보내지 않음: %s", ", ".join(retry.frozen))
+
+    def _forge_option_parts(self, payload: Dict) -> tuple:
+        """앱의 Forge 옵션 덮어쓰기(P10, core/forge_override_settings)를 요청에 싣는다 → (요청 payload, 넣은 키, 알림).
+
+        설정(GUI 가 밀어 넣은 ``forgeOptionOverrides``)이 비면 — 기본 'Forge 설정 따름'(D3) — payload 객체를 그대로
+        돌려준다: 요청은 P10 전과 바이트 단위로 같다. 키마다 요청 직전의 스냅샷(peek — 캐시만, HTTP 없음)이 '있다'고 한
+        것만 넣는다(모르는 키는 요청 전체가 500). 이 Forge 가 설정 잠금으로 거절했던 키(``_remember_frozen``)는 넣지 않는다.
+        알림(없음·확인 못 함·잠금)은 결과 info 에 실린다."""
+        try:
+            from core import forge_override_settings as fos
+            overrides = fos.forge_option_overrides_setting()
+            if not overrides:
+                return payload, (), []
+            plan = fos.plan_overrides(overrides, self._sam_extra_snapshot(),
+                                      frozen=fos.frozen_options(self.api_url))
+            merged, sent = fos.merge_into_payload(payload, plan)
+            if sent:
+                logger.info("Forge 옵션 덮어쓰기(이 요청만): %s",
+                            ", ".join(f"{key}={merged['override_settings'][key]}" for key in sent))
+            return merged, sent, fos.plan_notices(plan)
+        except Exception:
+            logger.debug("Forge 옵션 덮어쓰기 계산 실패(무시하고 그대로 보냄)", exc_info=True)
+            return payload, (), []
+
+    def _propagate(self, payload: Dict, envelope: Dict, aux: str, settings: Dict) -> tuple:
+        """메인 생성의 샘플링 블록 봉투를 이 보조 요청에 싣는다 → (OptionalParts, 알림).
+
+        봉투는 클릭한 순간의 T2I 패널(ui/aux_pass_snapshot). 여기서 패스·백엔드 규칙과 조건(DD Hires Pass,
+        SAM3 Mask only)을 적용하고, 요청 직전의 스냅샷(peek — 캐시만)으로 게이트한 뒤 setdefault 로 넣는다 —
+        보조 경로 자신의 SAM3 Mask·ADetailer 는 덮지 않는다. 봉투 키는 요청 JSON 에 들어가지 않는다.
+        """
+        from core import alwayson_propagation as ap
+        from core.forge_optional_parts import OptionalParts
+        blocks = ap.blocks_for(envelope, aux, backend=ap.BACKEND_WEBUI, aux_settings=settings)
+        if ap.has_model_bound(blocks):
+            # (critic A7) Anima38 블록은 클릭한 순간의 T2I 모델 종류로 만들었다. 보조 요청은 체크포인트를 지정하지 않아
+            # Forge 에 지금 걸린 체크포인트로 돈다 — 그것이 봉투 모델과 같을 때만 보낸다(모르거나 다르면 빼고 정보 로그).
+            actual = self._active_checkpoint()
+            blocks, dropped = ap.drop_model_bound(blocks, envelope_model=envelope.get("model"), actual_model=actual)
+            if dropped:
+                logger.info("%s: 실제 모델(%s)이 메인 생성 모델(%s)과 같다고 확인하지 못해 전달하지 않음 — %s",
+                            ap.aux_label(aux), actual or "모름", envelope.get("model") or "모름", ", ".join(dropped))
+        provenance = ap.envelope_provenance(envelope)
+        result = ap.gate(blocks, self._sam_extra_snapshot(), img2img=True, provenance=provenance)
+        inserted = ap.apply(payload, result.kept)
+        if inserted:
+            logger.info("%s: 메인 생성 설정 전달 — %s", ap.aux_label(aux), ", ".join(inserted))
+        notices = ap.gate_notices(result, provenance, img2img=True, aux=aux)
+        return OptionalParts(titles=inserted), tuple(notices)
+
+    def _active_checkpoint(self) -> str:
+        """Forge 에 지금 걸린 체크포인트(``options.sd_model_checkpoint``) — 보조 요청(Refine·SAM3·ADetailer)은 체크포인트를
+        지정하지 않아 이 모델로 돈다(critic A7). 메인 생성 전에 ``_switch_model_if_needed`` 가 부르는 것과 같은 GET 이고,
+        봉투에 모델에 묶인 블록(Anima38)이 있을 때만 부른다(워커 스레드). 실패하면 '' (모름 → 그 블록은 빠진다)."""
+        try:
+            response = requests.get(url=f'{self.api_url}/sdapi/v1/options', headers=_HEADERS, timeout=10)
+            response.raise_for_status()
+            options = response.json()
+            return str(options.get('sd_model_checkpoint') or '') if isinstance(options, dict) else ''
+        except Exception as e:
+            logger.info("Forge 현재 체크포인트 확인 실패(모델에 묶인 전달 블록은 빼고 보냄): %s", e)
+            return ''
+
+    def _run_aux_postprocess(self, image_b64: str, payload: Dict, envelope, aux: str, settings: Dict,
+                             cancel_check: Optional[Callable[[], bool]]) -> str:
+        """보조 패스 공통 송신. 봉투도 취소 확인도 없으면 예전과 같은 2-인자 호출(테스트 더블 호환)."""
+        if envelope is None and cancel_check is None:
+            return self._run_img2img_postprocess(image_b64, payload)
+        parts, notices = self._propagate(payload, envelope, aux, settings) if envelope is not None else (None, ())
+        return self._run_img2img_postprocess(image_b64, payload, parts=parts, extra_notices=notices,
+                                             cancel_check=cancel_check, context=aux)
 
     def get_lora_manager_url(self) -> Dict:
         """sam-extra의 임베드된 LoRA Manager 주소를 얻는다.
@@ -722,8 +897,21 @@ class WebUIBackend(AbstractBackend):
     def _generate(self, endpoint: str, model_name: str, payload: Dict,
                   progress_callback: Optional[ProgressCallback] = None,
                   cancel_check: Optional[Callable[[], bool]] = None) -> GenerationResult:
-        """txt2img / img2img 공통 생성 로직"""
+        """txt2img / img2img 공통 생성 로직.
+
+        앱이 스스로 덧붙인 부분 — Forge 설정에 맞춰 넣는 블록(DoRA·Anima38, ``main_retry_titles``)과 Forge 옵션 덮어쓰기
+        (P10 ``_forge_option_parts``) — 을 Forge 가 거절하면(422 스크립트 없음·500 KeyError·설정 잠금) 그것만 빼고 다시
+        보낸다(``core/forge_optional_parts.plan_retry``, 부분이 줄어드는 동안만). 시도마다 새 task id(``_generate_once``),
+        다시 보내기 전에 취소 확인(critic B10), 기능 스냅샷은 캐시를 버리지 않고 이 워커에서 새로 받는다(critic A1).
+        사용자가 패널에서 켠 가이던스 블록의 422 는 지금처럼 설명과 함께 실패한다. 모델 전환은 첫 시도 전에 한 번.
+
+        DoRA·Anima38 422 알림은 요청의 비공개 블록 출처(``core/alwayson_propagation.PROVENANCE_KEY`` — 메인 체인이 앱 기본값
+        블록만 적는다)로 가른다: 앱 기본값 = 정보(``app_block_retried``), 사용자 값·출처 모름 = 경고(``block_retried``,
+        P10 검토 2 — A6). 그 키는 여기서 떼어 Forge 요청에는 싣지 않는다(키가 없으면 payload 객체 그대로).
+        """
         try:
+            from core.alwayson_propagation import take_provenance
+            payload, provenance = take_provenance(payload)
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
             self._switch_model_if_needed(model_name, payload.get('forge_additional_modules'))
@@ -735,110 +923,143 @@ class WebUIBackend(AbstractBackend):
             # 정리하므로 사전 unload는 불필요 + 메모리 단편화로 가용 VRAM
             # 4GB 정도 손실시킴 (사용자 로그 비교로 확인). 제거.
 
-            # 요청마다 force_task_id 를 붙여 취소 시 '우리 작업'의 상태를 볼 수 있게 한다
-            # (core/webui_cancel.py). save_images 는 Forge 숨은 폴더 중복 저장 방지 정책으로
-            # 확정한다 — 사용자가 설정에서 Forge 쪽 저장을 켰을 때만 요청값을 따른다.
-            # 설정은 GUI 가 메모리로 밀어 넣은 값만 읽는다(이 워커 스레드가 ui_prefs.json 을
-            # 열면 GUI 의 os.replace 저장이 Windows 에서 PermissionError 로 실패했다).
-            from core.forge_output_policy import apply_save_policy, forge_save_outputs_setting
-            from core.webui_cancel import approx_payload_bytes, unseen_grace_seconds, with_task_id
-            request_payload, task_id = with_task_id(
-                apply_save_policy(payload, forge_save_outputs_setting()))
-            # 큰 본문(init 이미지·마스크)은 업로드·파싱이 끝나야 큐에 보인다 — unseen 유예를 늘린다.
-            unseen_grace = unseen_grace_seconds(approx_payload_bytes(request_payload))
-
-            # 진행률 폴링 시작
-            stop_event = threading.Event()
-            interrupt_requested = threading.Event()
-            with self._generation_state_lock:
+            from core.alwayson_propagation import main_retry_titles
+            from core.forge_optional_parts import OptionalParts, max_attempts, plan_retry
+            request_base, option_keys, notices = self._forge_option_parts(payload)
+            parts = OptionalParts(titles=main_retry_titles(request_base), option_keys=option_keys)
+            attempts = max_attempts(parts)
+            for attempt in range(1, attempts + 1):
+                result, rejection = self._generate_once(endpoint, request_base, progress_callback, cancel_check,
+                                                        parts=parts, notices=notices)
+                if rejection is None:
+                    return result
+                status, body, response = rejection
+                retry = plan_retry(status, body, request_base, parts) if attempt < attempts else None
+                self._remember_frozen(retry)
+                if retry is None:
+                    if status == 422:   # 어느 확장·기능인지 설명(P4)
+                        return GenerationResult(success=False, error=_explain_rejection(body, request_base))
+                    response.raise_for_status()   # 앱 옵션 탓이 아닌 500 — 지금과 같은 오류(아래 except)
+                    return GenerationResult(success=False, error=f"API 요청 실패: HTTP {status}")
                 if cancel_check and cancel_check():
                     return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
-                self._generation_inflight = True
-                self._inflight_interrupts[task_id] = interrupt_requested
-            if progress_callback:
-                poll_thread = threading.Thread(
-                    target=self._start_progress_polling,
-                    args=(progress_callback, stop_event),
-                    daemon=True
-                )
-                poll_thread.start()
-            # cancel_check 또는 interrupt() 가 오면 우리 작업이 active 일 때만 전역 interrupt 반복.
-            threading.Thread(
-                target=self._watch_cancellation,
-                args=(task_id, stop_event, interrupt_requested, cancel_check, unseen_grace),
-                name="webui-cancel-watch",
-                daemon=True,
-            ).start()
-
-            try:
-                response = requests.post(
-                    url=f'{self.api_url}{endpoint}',
-                    json=request_payload, headers=_HEADERS, timeout=600, stream=True
-                )
-                rejected = _rejected_request_message(response, payload)   # 422 → 어느 확장·기능인지
-                if rejected:
-                    return GenerationResult(success=False, error=rejected)
-                response.raise_for_status()
-            finally:
-                with self._generation_state_lock:
-                    self._inflight_interrupts.pop(task_id, None)
-                    self._generation_inflight = bool(self._inflight_interrupts)
-                stop_event.set()
-
-            try:
-                r = _bounded_response_json(response)
-            finally:
-                close_response = getattr(response, "close", None)
-                if callable(close_response):
-                    close_response()
-            if 'images' in r and r['images']:
-                image_values = r['images']
-                if not isinstance(image_values, list) or len(image_values) > _MAX_RESULT_ARTIFACTS:
-                    raise ValueError(f"WebUI 이미지 결과는 최대 {_MAX_RESULT_ARTIFACTS}개까지 허용됩니다.")
-                artifacts = []
-                total_bytes = 0
-                for index, value in enumerate(image_values):
-                    artifact = _decode_webui_image(value, index)
-                    total_bytes += len(artifact.data or b"")
-                    if total_bytes > _MAX_RESULT_BYTES:
-                        raise ValueError("WebUI 이미지 결과 총 용량이 256MiB를 초과합니다.")
-                    artifacts.append(artifact)
-                raw_info = r.get('info', {})
-                if isinstance(raw_info, dict):
-                    generation_info = copy.deepcopy(raw_info)
-                elif isinstance(raw_info, str):
-                    try:
-                        parsed_info = json.loads(raw_info) if raw_info else {}
-                    except json.JSONDecodeError:
-                        parsed_info = {"raw_info": raw_info}
-                    generation_info = (
-                        parsed_info if isinstance(parsed_info, dict)
-                        else {"raw_info": parsed_info}
-                    )
-                else:
-                    generation_info = {"raw_info": raw_info}
-                generation_info['artifact_count'] = len(artifacts)
-                # sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락) — UI 가 토스트로 띄운다(P4)
-                notices = _extension_notices(self.api_url, generation_info, payload)
-                if notices:
-                    from core.sam_extra_notices import INFO_KEY, notices_to_dicts
-                    generation_info[INFO_KEY] = notices_to_dicts(notices)
-                return GenerationResult(
-                    success=True,
-                    image_data=artifacts[0].data,
-                    info=generation_info,
-                    artifacts=artifacts,
-                )
-            else:
-                return GenerationResult(
-                    success=False,
-                    error=f"API 응답에 이미지가 없습니다: {r.get('detail', '알 수 없는 오류')}"
-                )
+                notices = [*notices, *self._optional_parts_retry_notices(retry, "", main=True, provenance=provenance)]
+                request_base, parts = retry.payload, retry.remaining
+            return GenerationResult(success=False, error="생성 재시도 한도를 넘었습니다.")   # 도달하지 않는다
 
         except requests.exceptions.RequestException as e:
             return GenerationResult(success=False, error=f"API 요청 실패: {e}")
         except Exception as e:
             return GenerationResult(success=False, error=f"생성 중 오류: {e}")
+
+    def _generate_once(self, endpoint: str, payload: Dict,
+                       progress_callback: Optional[ProgressCallback],
+                       cancel_check: Optional[Callable[[], bool]], *,
+                       parts=None, notices=()) -> tuple:
+        """한 번 보낸다 → ``(결과, None)``, Forge 가 거절했으면 ``(None, (상태, 본문, 응답))``(``_read_retryable``).
+
+        시도마다 새 force_task_id·취소 감시 스레드를 쓴다 — 거절된 요청은 Forge 가 start_task 만 하고 finish_task 를
+        하지 않았다(modules/api/api.py) — 같은 id 를 다시 쓰면 취소 감시가 헷갈린다. ``notices``: 요청 전·재시도에서 생긴
+        알림 — 결과 info 에 sam-extra 결과 알림 뒤로 붙인다. 네트워크·응답 예외는 호출자(``_generate``)가 받는다.
+        """
+        # 요청마다 force_task_id 를 붙여 취소 시 '우리 작업'의 상태를 볼 수 있게 한다
+        # (core/webui_cancel.py). save_images 는 Forge 숨은 폴더 중복 저장 방지 정책으로
+        # 확정한다 — 사용자가 설정에서 Forge 쪽 저장을 켰을 때만 요청값을 따른다.
+        # 설정은 GUI 가 메모리로 밀어 넣은 값만 읽는다(이 워커 스레드가 ui_prefs.json 을
+        # 열면 GUI 의 os.replace 저장이 Windows 에서 PermissionError 로 실패했다).
+        from core.forge_output_policy import apply_save_policy, forge_save_outputs_setting
+        from core.webui_cancel import approx_payload_bytes, unseen_grace_seconds, with_task_id
+        request_payload, task_id = with_task_id(
+            apply_save_policy(payload, forge_save_outputs_setting()))
+        # 큰 본문(init 이미지·마스크)은 업로드·파싱이 끝나야 큐에 보인다 — unseen 유예를 늘린다.
+        unseen_grace = unseen_grace_seconds(approx_payload_bytes(request_payload))
+
+        # 진행률 폴링 시작
+        stop_event = threading.Event()
+        interrupt_requested = threading.Event()
+        with self._generation_state_lock:
+            if cancel_check and cancel_check():
+                return GenerationResult(success=False, error="사용자가 작업을 취소했습니다"), None
+            self._generation_inflight = True
+            self._inflight_interrupts[task_id] = interrupt_requested
+        if progress_callback:
+            poll_thread = threading.Thread(
+                target=self._start_progress_polling,
+                args=(progress_callback, stop_event),
+                daemon=True
+            )
+            poll_thread.start()
+        # cancel_check 또는 interrupt() 가 오면 우리 작업이 active 일 때만 전역 interrupt 반복.
+        threading.Thread(
+            target=self._watch_cancellation,
+            args=(task_id, stop_event, interrupt_requested, cancel_check, unseen_grace),
+            name="webui-cancel-watch",
+            daemon=True,
+        ).start()
+
+        try:
+            response = requests.post(
+                url=f'{self.api_url}{endpoint}',
+                json=request_payload, headers=_HEADERS, timeout=600, stream=True
+            )
+            status, body = _read_retryable(response, parts)   # 422 → 설명·재시도 판정, 앱 옵션의 500 → 재시도 판정
+            if status is not None:
+                return None, (status, body, response)
+            response.raise_for_status()
+        finally:
+            with self._generation_state_lock:
+                self._inflight_interrupts.pop(task_id, None)
+                self._generation_inflight = bool(self._inflight_interrupts)
+            stop_event.set()
+
+        try:
+            r = _bounded_response_json(response)
+        finally:
+            close_response = getattr(response, "close", None)
+            if callable(close_response):
+                close_response()
+        if 'images' in r and r['images']:
+            image_values = r['images']
+            if not isinstance(image_values, list) or len(image_values) > _MAX_RESULT_ARTIFACTS:
+                raise ValueError(f"WebUI 이미지 결과는 최대 {_MAX_RESULT_ARTIFACTS}개까지 허용됩니다.")
+            artifacts = []
+            total_bytes = 0
+            for index, value in enumerate(image_values):
+                artifact = _decode_webui_image(value, index)
+                total_bytes += len(artifact.data or b"")
+                if total_bytes > _MAX_RESULT_BYTES:
+                    raise ValueError("WebUI 이미지 결과 총 용량이 256MiB를 초과합니다.")
+                artifacts.append(artifact)
+            raw_info = r.get('info', {})
+            if isinstance(raw_info, dict):
+                generation_info = copy.deepcopy(raw_info)
+            elif isinstance(raw_info, str):
+                try:
+                    parsed_info = json.loads(raw_info) if raw_info else {}
+                except json.JSONDecodeError:
+                    parsed_info = {"raw_info": raw_info}
+                generation_info = (
+                    parsed_info if isinstance(parsed_info, dict)
+                    else {"raw_info": parsed_info}
+                )
+            else:
+                generation_info = {"raw_info": raw_info}
+            generation_info['artifact_count'] = len(artifacts)
+            # sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락) + 요청 전·재시도 알림(P10) — UI 가 토스트로 띄운다(P4)
+            result_notices = [*_extension_notices(self.api_url, generation_info, payload), *(notices or ())]
+            if result_notices:
+                from core.sam_extra_notices import INFO_KEY, notices_to_dicts
+                generation_info[INFO_KEY] = notices_to_dicts(result_notices)
+            return GenerationResult(
+                success=True,
+                image_data=artifacts[0].data,
+                info=generation_info,
+                artifacts=artifacts,
+            ), None
+        return GenerationResult(
+            success=False,
+            error=f"API 응답에 이미지가 없습니다: {r.get('detail', '알 수 없는 오류')}"
+        ), None
 
     def txt2img(self, model_name: str, payload: Dict,
                 progress_callback: Optional[ProgressCallback] = None,
@@ -876,7 +1097,8 @@ class WebUIBackend(AbstractBackend):
             return r['image']
         raise RuntimeError("업스케일 API 응답에 이미지가 없습니다.")
 
-    def adetailer(self, image_b64: str, settings: Dict) -> str:
+    def adetailer(self, image_b64: str, settings: Dict, *,
+                  cancel_check: Optional[Callable[[], bool]] = None) -> str:
         """단독/배치 ADetailer — 확장의 공식 ``skip_img2img`` 로 부모 재확산 없이 보정한다.
 
         확장 인자는 ``[enable, skip_img2img, slot...]`` 이다(aadetailer ui.py 의 components 순서).
@@ -888,7 +1110,10 @@ class WebUIBackend(AbstractBackend):
         width/height 를 ``_ad_orig`` 에 보관해 인페인트 패스에 쓰며, 입력은 init 이미지 원본이다.
         그래서 그 값들을 sam3()/refine() 처럼 명시 전송한다(``_build_postprocess_payload``).
         t2i/i2i 안의 ADetailer(generator_generation)는 부모 생성 자체가 목적이라 False 가 맞다.
+
+        settings 에 메인 생성 샘플링 블록 봉투가 있으면 ADetailer 블록 **뒤에** 전달한다(P7, ``_propagate``).
         """
+        settings, envelope = _take_envelope(settings)
         adetailer_args = settings.get('adetailer_args')
         if not adetailer_args:
             # 슬롯 본문·기본값은 core/adetailer_args 한 벌 (예전엔 workers 레이어를 역참조했다).
@@ -904,9 +1129,11 @@ class WebUIBackend(AbstractBackend):
             negative_prompt=settings.get('ad_negative', ''),
         )
         payload["alwayson_scripts"]["ADetailer"] = {"args": adetailer_args}
-        return self._run_img2img_postprocess(image_b64, payload)
+        from core.alwayson_propagation import AUX_ADETAILER
+        return self._run_aux_postprocess(image_b64, payload, envelope, AUX_ADETAILER, settings, cancel_check)
 
-    def refine(self, image_b64: str, settings: Dict) -> str:
+    def refine(self, image_b64: str, settings: Dict, *,
+               cancel_check: Optional[Callable[[], bool]] = None) -> str:
         """SAM3 Refine — 기존 이미지를 Target/Replacement로 재손질.
 
         sam-extra 워크플로 2를 앱에서 구현한 것. 확장의 Refine 패널은 Gradio 전용이라
@@ -917,9 +1144,11 @@ class WebUIBackend(AbstractBackend):
             SAM3 인페인트만 일하게 한다. (예전 sam3()는 denoise 0.1 부모 패스로 **이미지
             전체를 한 번 재확산**했다 — 지금은 sam3()도 denoise 0.)
           · steps/cfg/sampler/seed를 명시해 Forge 현재 UI 값에 좌우되지 않게 한다.
+          · 메인 생성 샘플링 블록 봉투가 있으면 SAM3 Mask 뒤에 전달한다(P7 — 생성 안 SAM3 패스와 같게).
         """
         from core.refine_prompt import build_refine_prompts
 
+        settings, envelope = _take_envelope(settings)
         prompts = build_refine_prompts(
             main_prompt=settings.get('main_prompt', ''),
             main_negative=settings.get('main_negative', ''),
@@ -965,9 +1194,11 @@ class WebUIBackend(AbstractBackend):
             payload["scheduler"] = scheduler
 
         logger.info("Refine: target=%r → prompt=%r", settings.get('target'), prompts['prompt'])
-        return self._run_img2img_postprocess(image_b64, payload)
+        from core.alwayson_propagation import AUX_REFINE
+        return self._run_aux_postprocess(image_b64, payload, envelope, AUX_REFINE, sam3_settings, cancel_check)
 
-    def sam3(self, image_b64: str, settings: Dict) -> str:
+    def sam3(self, image_b64: str, settings: Dict, *,
+             cancel_check: Optional[Callable[[], bool]] = None) -> str:
         """img2img + SAM3 확장으로 마스킹/인페인트 (배치/단독 실행 경로).
 
         예전에는 `_build_postprocess_payload`를 썼는데 거기 기본 denoising_strength가
@@ -978,7 +1209,11 @@ class WebUIBackend(AbstractBackend):
 
         이제 부모 i2i는 denoise 0으로 통과시키고, 실제 작업은 SAM3 인페인트 패스가
         전담한다. 샘플링 파라미터도 명시 전송한다.
+
+        메인 생성 샘플링 블록 봉투가 있으면 SAM3 Mask 뒤에 전달한다(P7). 'Mask only' 는 인페인트 패스가 없어
+        전달하지 않는다(core/alwayson_propagation.blocks_for).
         """
+        settings, envelope = _take_envelope(settings)
         sam3_state = self._build_sam3_script_state(settings, self._sam_extra_snapshot())
 
         image_bytes = base64.b64decode(image_b64)
@@ -1009,4 +1244,5 @@ class WebUIBackend(AbstractBackend):
         scheduler = str(settings.get('scheduler') or '').strip()
         if scheduler and scheduler != 'Use same scheduler':
             payload["scheduler"] = scheduler
-        return self._run_img2img_postprocess(image_b64, payload)
+        from core.alwayson_propagation import AUX_SAM3
+        return self._run_aux_postprocess(image_b64, payload, envelope, AUX_SAM3, settings, cancel_check)

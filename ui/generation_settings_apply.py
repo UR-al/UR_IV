@@ -320,6 +320,14 @@ def apply_generation_settings(host, settings: Mapping[str, Any], *, only_present
     if hasattr(host, 'anima_guidance_widgets') and isinstance(settings.get('anima_guidance_settings'), Mapping):
         host._set_anima_guidance_settings(host.anima_guidance_widgets, settings['anima_guidance_settings'])
 
+    # DoRA 추론 방식 — 키가 없으면 프리셋은 그대로, load_settings(옛 설정)는 앱 기본값 + Vue 준비 뒤 안내 한 번
+    from ui.dora_infer_mode_ui import apply_saved_settings as _apply_dora_settings
+    _apply_dora_settings(host, settings, only_present=only_present)
+
+    # Anima 3.8B — 같은 규칙(키가 없으면 프리셋은 그대로, 옛 설정은 앱 기본값 + Vue 준비 뒤 안내 한 번)
+    from ui.anima38_ui import apply_saved_settings as _apply_anima38_settings
+    _apply_anima38_settings(host, settings, only_present=only_present)
+
     if unavailable:
         warnings.append(unavailable_message(unavailable))
     return warnings

@@ -130,6 +130,23 @@ class WorkflowControlsTests(unittest.TestCase):
         with self.assertRaisesRegex(WorkflowControlError, "구조가 변경"):
             apply_controls(compiled, self.graph, self.info, binding_for(self.schema))
 
+    def test_copies_of_a_controlled_node_get_the_value_while_they_still_hold_the_original(self):
+        """컴파일러가 복제한 노드(예: SAM3 LoRA 분기가 다시 만든 조건 노드)도 같은 워크플로 노드라 같은 값을 받는다.
+        컴파일러가 값을 바꾼 복제본·다른 종류의 노드는 건드리지 않고, 원본 워크플로와 넘긴 그래프는 바꾸지 않는다."""
+        compiled = copy.deepcopy(self.graph)
+        compiled["copy"] = copy.deepcopy(self.graph["extra"])
+        compiled["owned"] = copy.deepcopy(self.graph["extra"])
+        compiled["owned"]["inputs"]["amount"] = .2
+        compiled["other"] = {"class_type": "OtherAdjust", "inputs": {"amount": .5}}
+        before, original = copy.deepcopy(compiled), copy.deepcopy(self.graph)
+        result = apply_controls(compiled, self.graph, self.info, binding_for(self.schema),
+                                copies={"extra": ["copy", "owned", "other", "absent"]})
+        self.assertEqual([result[node_id]["inputs"]["amount"] for node_id in ("extra", "copy", "owned", "other")],
+                         [.75, .75, .2, .5])
+        self.assertEqual((compiled, self.graph), (before, original))
+        self.assertEqual(apply_controls(compiled, self.graph, self.info, binding_for(self.schema))["copy"],
+                         before["copy"])
+
     def test_persistence_endpoint_path_and_drift_scoped_and_clear_preserves_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = Path(tmp) / "settings.json"

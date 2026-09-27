@@ -35,6 +35,7 @@ class WebUIInfoWorker(QThread):
                 'options': info.options,
                 'vae': info.vae,
                 'checkpoints': info.checkpoints,
+                'anima38_adapters': getattr(info, 'anima38_adapters', None),
             })
         except Exception as e:
             logger.exception("WebUIInfoWorker failed")

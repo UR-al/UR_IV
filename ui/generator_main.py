@@ -1211,6 +1211,15 @@ class GeneratorMainUI(
                     # Anima Guard 값은 파일에 쓰기 전에 안전 범위/8배수로 정규화.
                     from core.resolution_guard import normalize_anima_guard_prefs
                     prefs.update(normalize_anima_guard_prefs(prefs))
+                    # sam-extra Forge 옵션 덮어쓰기(P10) — 스펙 키·진짜 bool 만 남긴다. Vue 는 dict 전체를 보낸다
+                    # ('Forge 설정 따름' = 키 없음). 모두 따름이면 키를 지워 기본 파일 모양을 그대로 둔다.
+                    from core.forge_override_settings import PREF_KEY as FORGE_OPTIONS_KEY, normalize_overrides
+                    if FORGE_OPTIONS_KEY in prefs:
+                        forge_options = normalize_overrides(prefs.get(FORGE_OPTIONS_KEY))
+                        if forge_options:
+                            prefs[FORGE_OPTIONS_KEY] = forge_options
+                        else:
+                            prefs.pop(FORGE_OPTIONS_KEY, None)
                     save_ui_prefs(prefs_path, prefs)
                     # FIX: Vue의 LOGIC 토글을 prompt_cleaner에 즉시 적용
                     # (이전에는 저장만 되고 효과 없었음)
@@ -1220,6 +1229,9 @@ class GeneratorMainUI(
                     # Forge 출력 폴더 저장 설정 — 생성 워커는 파일이 아니라 이 메모리 값을 읽는다.
                     from core.forge_output_policy import update_forge_save_outputs_from_prefs
                     update_forge_save_outputs_from_prefs(prefs)
+                    # sam-extra Forge 옵션 덮어쓰기도 같다 — 생성 워커는 이 메모리 값만 읽는다(P10).
+                    from core.forge_override_settings import update_forge_option_overrides_from_prefs
+                    update_forge_option_overrides_from_prefs(prefs)
                     # 테마는 PyQt 쪽 색표에도 반영 — 다음에 뜨는 다이얼로그/스플래시가
                     # Vue 와 같은 색이어야 한다. (theme 키가 안 왔으면 no-op)
                     if 'theme' in payload or 'themeOverrides' in payload:
@@ -1248,6 +1260,11 @@ class GeneratorMainUI(
                 entries = payload.get('entries', [])
                 self._vue_lora_entries = normalize_lora_entries(
                     entries if isinstance(entries, list) else [], unit=UNIT_MULTIPLIER)
+                # Vue 가 부팅 복원(uiPrefsLoaded → LoRA 스택)을 마친 신호 — 그 전에 쌓인 알림(load_settings 의 DoRA
+                # 첫 로드 안내 등)을 띄운다. 메인 창이 아직 숨어 있으면(스플래시 단계) 준비만 기록하고 창을 띄운 뒤
+                # 띄운다. 쌓인 것이 없으면 아무 일도 하지 않는다(ui/boot_notices, critic A5).
+                from ui.boot_notices import flush_boot_notices
+                flush_boot_notices(self)
 
             # ═══════ 조건부 프롬프트 저장 ═══════
             elif action == 'save_cond_rules':
@@ -1723,6 +1740,12 @@ class GeneratorMainUI(
             # (워커 스레드가 ui_prefs.json 을 열면 GUI 의 os.replace 저장이 Windows 에서 실패).
             from core.forge_output_policy import update_forge_save_outputs_from_prefs
             update_forge_save_outputs_from_prefs(prefs)
+        except Exception:
+            pass
+        try:
+            # sam-extra Forge 옵션 덮어쓰기(P10) — 같은 이유로 부팅 때 메모리에 밀어 넣는다
+            from core.forge_override_settings import update_forge_option_overrides_from_prefs
+            update_forge_option_overrides_from_prefs(prefs)
         except Exception:
             pass
 
@@ -2452,12 +2475,15 @@ class GeneratorMainUI(
         """단일 이미지에 ADetailer 적용"""
         from workers.adetailer_worker import ADetailerSingleWorker
         path = payload.get('path', '')
-        settings = payload.get('settings', {})
         if not path:
             self.vue_bridge.showNotification.emit('error', '이미지 경로가 없습니다')
             return
+        from ui.aux_pass_snapshot import attach_sampling_snapshot
+        from ui.sam_extra_notices_ui import relay_worker_result
+        # 메인 생성 샘플링 블록(가이던스 등)을 클릭한 순간의 T2I 패널에서 싣는다(P7) — 원본 dict 는 그대로
+        settings = attach_sampling_snapshot(self, payload.get('settings', {}))
         self._ad_worker = ADetailerSingleWorker(path, settings, self)
-        self._ad_worker.finished.connect(lambda r: self.vue_bridge.adetailerResult.emit(r))
+        self._ad_worker.finished.connect(lambda r: relay_worker_result(self, 'adetailerResult', r))
         self._ad_worker.start()
         self.vue_bridge.showNotification.emit('info', 'ADetailer 처리 중...')
 
@@ -2465,15 +2491,17 @@ class GeneratorMainUI(
         """배치 이미지에 ADetailer 적용"""
         from workers.adetailer_worker import ADetailerBatchWorker
         paths = payload.get('paths', [])
-        settings = payload.get('settings', {})
         if not paths:
             self.vue_bridge.showNotification.emit('error', '이미지가 없습니다')
             return
+        from ui.aux_pass_snapshot import attach_sampling_snapshot
+        from ui.sam_extra_notices_ui import relay_worker_result
+        settings = attach_sampling_snapshot(self, payload.get('settings', {}))   # 배치 전체가 같은 블록(P7)
         self._ad_batch_worker = ADetailerBatchWorker(paths, settings, self)
         self._ad_batch_worker.progress.connect(
             lambda cur, tot: self.vue_bridge.adetailerProgress.emit(cur, tot))
         self._ad_batch_worker.single_done.connect(
-            lambda r: self.vue_bridge.adetailerResult.emit(r))
+            lambda r: relay_worker_result(self, 'adetailerResult', r))
         self._ad_batch_worker.all_done.connect(
             lambda: self.vue_bridge.showNotification.emit('success', f'ADetailer 배치 완료 ({len(paths)}장)'))
         self._ad_batch_worker.start()
@@ -2483,11 +2511,12 @@ class GeneratorMainUI(
         """단일 이미지에 SAM3 적용"""
         from workers.sam3_worker import Sam3SingleWorker
         path = payload.get('path', '')
-        settings = payload.get('settings', {})
         if not path:
             self.vue_bridge.showNotification.emit('error', '이미지 경로가 없습니다')
             return
+        from ui.aux_pass_snapshot import attach_sampling_snapshot
         from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
+        settings = attach_sampling_snapshot(self, payload.get('settings', {}))   # 메인 생성 샘플링 블록(P7)
         check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
         self._sam3_worker = Sam3SingleWorker(path, settings, self)
         self._sam3_worker.finished.connect(lambda r: relay_worker_result(self, 'sam3Result', r))
@@ -2498,11 +2527,12 @@ class GeneratorMainUI(
         """배치 이미지에 SAM3 적용"""
         from workers.sam3_worker import Sam3BatchWorker
         paths = payload.get('paths', [])
-        settings = payload.get('settings', {})
         if not paths:
             self.vue_bridge.showNotification.emit('error', '이미지가 없습니다')
             return
+        from ui.aux_pass_snapshot import attach_sampling_snapshot
         from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
+        settings = attach_sampling_snapshot(self, payload.get('settings', {}))   # 배치 전체가 같은 블록(P7)
         check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
         self._sam3_batch_worker = Sam3BatchWorker(paths, settings, self)
         self._sam3_batch_worker.progress.connect(
@@ -2518,25 +2548,17 @@ class GeneratorMainUI(
         """SAM3 Refine — 기존 이미지를 Target/Replacement로 재손질 (sam-extra 워크플로 2).
 
         메인 프롬프트를 안 보냈으면 현재 t2i 프롬프트를 상속시킨다
-        (확장 Refine 패널의 'Inherit main t2i prompt' 기본 ON과 동일).
+        (확장 Refine 패널의 'Inherit main t2i prompt' 기본 ON과 동일). 물려받을 때는 LoRA 스택도 붙이고(D2),
+        메인 생성 샘플링 블록을 싣는다(P7) — ui/aux_pass_snapshot.
         """
         from workers.refine_worker import RefineWorker
         path = payload.get('path', '')
-        settings = dict(payload.get('settings', {}))
         if not path:
             self.vue_bridge.showNotification.emit('error', 'Refine: 이미지 경로가 없습니다')
             return
 
-        if not settings.get('main_prompt') and hasattr(self, 'total_prompt_display'):
-            try:
-                settings['main_prompt'] = self.total_prompt_display.toPlainText()
-            except Exception:
-                pass
-        if not settings.get('main_negative') and hasattr(self, 'neg_prompt_text'):
-            try:
-                settings['main_negative'] = self.neg_prompt_text.toPlainText()
-            except Exception:
-                pass
+        from ui.aux_pass_snapshot import attach_sampling_snapshot, inherit_refine_prompts
+        settings = attach_sampling_snapshot(self, inherit_refine_prompts(self, payload.get('settings', {})))
 
         from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
         check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고

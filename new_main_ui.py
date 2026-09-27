@@ -130,6 +130,10 @@ def main():
     except Exception as exc:
         print(f"[Generation API] startup skipped: {exc}")
     window.showMaximized()
+    # 부팅 중 쌓인 알림(DoRA 첫 로드 안내 등)은 Vue 준비와 창 표시가 둘 다 참일 때 띄운다. Vue 준비 신호
+    # (set_lora_stack)는 보통 창이 뜨기 전(스플래시 단계)에 오므로 창을 띄운 뒤 한 번 더 본다(ui/boot_notices, A5).
+    from ui.boot_notices import schedule_flush_after_show
+    schedule_flush_after_show(window)
 
     # run_main_loop = app.exec() + 메인 루프 표시 — 슬롯 안 Ctrl+C(KeyboardInterrupt)를 크래시 훅이
     # 앱 종료 요청으로 넘길 때, 메인 루프면 창 닫기 확인·저장을 타는 quit() 을 쓴다(core/console_interrupt).

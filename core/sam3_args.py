@@ -127,6 +127,18 @@ SAM3_SPEC = (
 
 SAM3_KEYS = tuple(key for key, _k, _d, _e in SAM3_SPEC)
 
+MODE_MASK_ONLY = 'Mask only'
+
+
+def mode_of(settings=None) -> str:
+    """settings 의 sam3_mode 를 build_state 와 같은 규칙(대소문자·공백 무시, 모르면 'Inpaint')으로 정규화.
+
+    보조 패스 전달(core/alwayson_propagation)이 'Mask only' 를 판정할 때 쓴다 — 확장에 가는 값과 같은 판정.
+    """
+    _key, _kind, default, choices = SAM3_SPEC[0]
+    value = settings.get('sam3_mode') if isinstance(settings, dict) else None
+    return _as_choice(value, default, choices)
+
 # CN 전처리기(module) **정적 폴백** 목록 — 연결된 Forge 의 라이브 목록(/controlnet/module_list,
 # 기능 스냅샷)을 모를 때만 쓴다(core/sam3_cn_names.py). Forge 는 supported_preprocessors[name] 로
 # 대소문자까지 그대로 찾으므로 '없음'은 반드시 'None' 이다 — 예전 소문자 'none' 은 KeyError 로

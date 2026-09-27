@@ -104,6 +104,10 @@ class XYZActionsMixin:
             base, error = self._build_generation_payload(snapshot=True)
             if error or base is None:
                 raise ValueError(error or "생성 설정을 확인하세요")
+            # This click is the send site: queued copies no longer carry the
+            # sampling blocks the build gate dropped (ui/sampling_blocks).
+            from ui.sampling_blocks import freeze_sampling_payload, show_sampling_notice_list
+            notices = freeze_sampling_payload(self, base)
             jobs = build_jobs(base, self.model_combo.currentText(), payload.get("axes"), cached["data"])
             kind = get_backend_type().value
             for index, job in enumerate(jobs):
@@ -114,6 +118,7 @@ class XYZActionsMixin:
                 self._xyz_seen_requests.add(request_id)
                 if len(self._xyz_seen_requests) > 128:
                     self._xyz_seen_requests = {request_id}
+            show_sampling_notice_list(self, notices)   # before the queue can dispatch
             if getattr(manager, "is_running", False):
                 manager.total_count += len(jobs)
             else:

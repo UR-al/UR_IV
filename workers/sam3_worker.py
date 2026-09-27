@@ -7,6 +7,7 @@ import logging
 import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core.cancellable_call import call_with_optional_cancel
 from core.error_handler import sanitize_for_ui
 from core.image_metadata import read_applicable_prompts
 from core.resource_coordinator import backend_job_guard, release_before_backend_job
@@ -165,7 +166,9 @@ class Sam3BatchWorker(QThread):
                 # 항목마다 — 배치 도중 편집기에서 SAM3를 다시 올렸어도 Forge 작업과 겹치지 않게
                 release_before_backend_job('sam3-batch')
                 with backend_job_guard('sam3-batch'):          # 모델 언로드와 배타(항목마다)
-                    result_b64 = backend.sam3(image_b64, settings)
+                    # 받을 수 있는 백엔드(WebUI)에는 중지 확인을 넘긴다 — 거절된 전달 블록을 빼고 다시 보내기 전에 본다
+                    result_b64 = call_with_optional_cancel(backend.sam3, image_b64, settings,
+                                                           cancel_check=self._stop_event.is_set)
                 failure, repeats = _sam3_failure(result_b64)
                 if failure:
                     self._record(False, failure)

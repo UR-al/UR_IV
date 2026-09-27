@@ -123,17 +123,30 @@ def _cns_only_alwayson() -> dict:
 
 class TestLoraParsing(unittest.TestCase):
     def test_parses_order_and_independent_clip_weight(self):
+        # Forge 순서(extra_networks_lora.py activate): <lora:n:a:b> 는 텍스트 인코더 a, UNet b — Comfy 의
+        # strength_clip a, strength_model b. (예전 기대값은 a 를 model, b 를 clip 으로 읽었다.)
         specs, cleaned = parse_lora_tags(
             "portrait, <lora:ink:0.7>, <lora:alice:1.2:0.4>",
             "bad, <lora:negative-helper:-0.2>",
         )
         self.assertEqual([item.name for item in specs], ["ink", "alice", "negative-helper"])
-        self.assertEqual(specs[0].strength_clip, 0.7)
-        self.assertEqual(specs[1].strength_clip, 0.4)
+        self.assertEqual((specs[0].strength_model, specs[0].strength_clip), (0.7, 0.7))
+        self.assertEqual((specs[1].strength_model, specs[1].strength_clip), (0.4, 1.2))
         self.assertEqual(cleaned, ["portrait", "bad"])
 
 
 class TestDefaultCompilation(unittest.TestCase):
+    def test_private_sampling_provenance_key_is_ignored(self):
+        """(P10 검토 2) Forge 메인 요청용 비공개 블록 출처 키가 Comfy 로 와도(보내기 직전 백엔드 전환) 그래프는 같다 —
+        컴파일러는 이 키를 읽지 않는다."""
+        from core.alwayson_propagation import PROVENANCE_APP_DEFAULT, PROVENANCE_KEY
+        payload = {"prompt": "portrait", "seed": 7, "alwayson_scripts": {}}
+        plain = ComfyWorkflowCompiler(_capabilities()).compile("txt2img", "checkpoint.safetensors", dict(payload))
+        marked = ComfyWorkflowCompiler(_capabilities()).compile(
+            "txt2img", "checkpoint.safetensors",
+            {**payload, PROVENANCE_KEY: {"DoRA Inference Mode": PROVENANCE_APP_DEFAULT}})
+        self.assertEqual(json.dumps(plain, sort_keys=True), json.dumps(marked, sort_keys=True))
+
     def test_explicit_lora_path_wins_over_an_earlier_matching_filename(self):
         capabilities = _capabilities()
         capabilities["LoraLoader"]["input"]["required"]["lora_name"] = _choice(

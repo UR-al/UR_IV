@@ -54,6 +54,9 @@ def start_seed_explore(owner: Any, payload: Any) -> bool:
         base, error = owner._build_generation_payload(snapshot=True)
         if error or base is None:
             raise ValueError(error or '생성 설정을 확인하세요.')
+        # 이 클릭이 보내는 곳이다 — 대기열 사본은 빌드 게이트가 뺀 샘플링 블록을 다시 볼 수 없다(ui/sampling_blocks)
+        from ui.sampling_blocks import freeze_sampling_payload, show_sampling_notice_list
+        notices = freeze_sampling_payload(owner, base)
         # 와일드카드·프롬프트 훅을 지금 한 번만 푼다 — 9장이 같은 프롬프트여야 시드 비교가 된다
         from core.chat_generation import prepare_prompt_payload
         base = prepare_prompt_payload(base)
@@ -73,6 +76,7 @@ def start_seed_explore(owner: Any, payload: Any) -> bool:
         )
         for job in jobs:
             panel.add_single_item(job)
+        show_sampling_notice_list(owner, notices)   # 대기열이 첫 장을 내기 전에
         if running:
             manager.total_count += len(jobs)   # 도는 대기열에 합류 — 카운터를 리셋하지 않는다
         elif not automating:

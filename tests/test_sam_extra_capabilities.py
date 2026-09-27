@@ -781,6 +781,28 @@ class ActionsMixinTests(unittest.TestCase):
         self.assertEqual(signal.sent[-1]["status"], "not_applicable")
         self.assertFalse(signal.sent[-1]["known"])
 
+    def test_reconnect_and_manual_refresh_forget_the_frozen_verdict(self):
+        """(P10 검토 3) 잠금 기억은 백엔드 변경·재연결(set_backend → 무효화)과 사용자의 수동 새로고침에서만 잊는다 —
+        재시도 알림이 부르는 강제 새로고침(연결 훅과 같은 force)은 잊지 않는다(잊으면 생성마다 거절이 되풀이된다)."""
+        from backends import BackendType
+        from core import forge_override_settings as fos
+        from core.forge_override_settings import OPT_PREFIX_DEDUP as KEY
+        self.addCleanup(fos.forget_frozen_options)
+        host, _signal = self._host(lambda url, force: SamExtraCapabilities(status="ok"))
+        with mock.patch("backends.get_backend_type", return_value=BackendType.WEBUI), \
+                mock.patch("backends.get_backend", return_value=mock.Mock(api_url=BASE)), \
+                mock.patch("core.sam_extra_probe.invalidate_extensions"):
+            fos.remember_frozen_options(BASE, [KEY])
+            host._refresh_sam_extra_capabilities(force=True)             # 연결 훅·알림의 강제 새로고침
+            self._wait(host)
+            self.assertEqual(fos.frozen_options(BASE), frozenset({KEY}))
+            host._handle_sam_extra_capabilities_action("sam_extra_capabilities_get", {"refresh": True})   # 수동
+            self._wait(host)
+            self.assertEqual(fos.frozen_options(BASE), frozenset())
+            fos.remember_frozen_options(BASE, [KEY])
+            host._invalidate_sam_extra_capabilities()                    # 백엔드 변경·재연결
+            self.assertEqual(fos.frozen_options(BASE), frozenset())
+
     def test_invalidation_discards_late_result(self):
         from backends import BackendType
         gate = threading.Event()

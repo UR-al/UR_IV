@@ -9,6 +9,18 @@ from config import PROMPT_SETTINGS_FILE
 from core.prompt_settings_extras import PromptSettingsExtras, extras_of
 
 
+def _dora_settings(host) -> dict:
+    """DoRA 추론 방식 카드 값(ui/dora_infer_mode_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
+    from ui.dora_infer_mode_ui import get_settings
+    return get_settings(host)
+
+
+def _anima38_settings(host) -> dict:
+    """Anima 3.8B 카드 값(ui/anima38_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
+    from ui.anima38_ui import get_settings
+    return get_settings(host)
+
+
 def migrate_legacy_gallery_folder(
     settings: dict,
     *,
@@ -157,6 +169,10 @@ class SettingsMixin:
                 self._get_anima_guidance_settings(self.anima_guidance_widgets)
                 if hasattr(self, 'anima_guidance_widgets') else {}
             ),
+            # DoRA 추론 방식 카드(core/dora_infer_mode.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
+            "dora_infer_settings": _dora_settings(self),
+            # Anima 3.8B 카드(core/anima38.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
+            "anima38_settings": _anima38_settings(self),
             
             
             "remove_artist": self.chk_remove_artist.isChecked(),

@@ -904,6 +904,21 @@ class WebUIMixin:
             self.vue_bridge.pushWidgetProperty('model_combo', 'optionGroups', model_option_groups)
         except Exception:
             pass
+        # Anima 3.8B 카드·블록용 모델 종류(v2 번들·Anima·그 밖) — 체크포인트 헤더를 데몬 스레드에서 읽어
+        # model_combo.animaKinds 로 보낸다(GUI 스레드는 디스크를 읽지 않는다). 로컬 파일이 없으면 이름으로만.
+        try:
+            from ui.anima38_ui import checkpoint_paths, prewarm_model_kinds
+
+            prewarm_model_kinds(self, models, checkpoint_paths(model_inventory, models))
+        except Exception as exc:
+            print(f"[Models] Anima 모델 종류 확인 시작 실패: {exc}")
+        # ComfyUI 의 v1 어댑터 선택지(object_info) — Forge 는 None 이라 카드가 기능 스냅샷 선택지로 돌아간다
+        try:
+            from ui.anima38_ui import push_comfy_adapters
+
+            push_comfy_adapters(self, info.get('anima38_adapters'))
+        except Exception as exc:
+            print(f"[Models] Anima v1 어댑터 선택지 전달 실패: {exc}")
 
         # 샘플러
         samplers = info.get('samplers', [])
@@ -1091,6 +1106,18 @@ class WebUIMixin:
         try:
             self.vue_bridge.pushWidgetProperty('model_combo', 'optionGroups', [])
             self.vue_bridge.pushWidgetProperty('te_main_input', 'items', [])
+        except Exception:
+            pass
+        try:
+            from ui.anima38_ui import clear_model_kinds
+
+            clear_model_kinds(self)   # 끊긴 백엔드의 모델 종류(animaKinds)도 비운다
+        except Exception:
+            pass
+        try:
+            from ui.anima38_ui import push_comfy_adapters
+
+            push_comfy_adapters(self, None)   # 끊긴 ComfyUI 의 v1 어댑터 선택지도 지운다
         except Exception:
             pass
 

@@ -8,8 +8,9 @@
 
 **왜 필요한가** (gap matrix 5-(b), 라-8): 확장이 없거나 스크립트 제목이 바뀌면 Forge 가
 422 로 생성 전체를 거절하고, 구버전이면 뒤쪽 위치 인자가 잘려 조용히 무시된다. 이 스냅샷은
-그것을 **요청 전에** 알 수 있게 한다. 페이로드를 실제로 거르는 일은 뒤 패키지(P2/P3/P7-P9)가
-``may_use()`` 로 한다 — 이 모듈은 판단 재료만 만든다.
+그것을 **요청 전에** 알 수 있게 한다. 이 모듈은 판단 재료만 만든다 — 샘플링 블록(가이던스·Anima38·DoRA)을
+실제로 거르는 일은 core/alwayson_propagation.gate 가 제목별 규칙(모를 때 SEND/SKIP)으로 하고, 그 밖의 소비자는
+``may_use()``(모르면 True)를 쓴다.
 
 보수적 기본값: 수집에 실패하면 ``status`` 가 ok 가 아니고 ``may_use()`` 는 True 를 돌려준다
 (모르면 지금처럼 보낸다). 알 수 있을 때만 막는다.
@@ -34,7 +35,7 @@ from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional
 from urllib.parse import urlsplit, urlunsplit
 
-from core import anima38, anima_guidance, sam3_args
+from core import anima38, anima_guidance, dora_infer_mode, sam3_args
 
 # ── GET 경로 ────────────────────────────────────────────────────────────────
 EP_SCRIPTS = "/sdapi/v1/scripts"
@@ -68,7 +69,7 @@ TITLE_PAG = anima_guidance.SCRIPT_PERTURBATION.lower()
 TITLE_SKIMMED = anima_guidance.SCRIPT_SKIMMED_CFG.lower()
 TITLE_DETAIL_DAEMON = anima_guidance.SCRIPT_DETAIL_DAEMON.lower()
 TITLE_ANIMA38 = anima38.SCRIPT_NAME.lower()
-TITLE_DORA = "dora inference mode"                  # scripts/dora_infer_mode.py (DORA_INFER_NAME)
+TITLE_DORA = dora_infer_mode.SCRIPT_NAME.lower()    # scripts/dora_infer_mode.py (DORA_INFER_NAME)
 TITLE_VAE2X = "anima vae 2x (spacepxl decoder)"     # scripts/anima_vae_2x.py
 TITLE_LORA_BRIDGE = "sam3 lora manager bridge"      # scripts/lora_manager.py (인자 0개)
 TITLE_SPARSE_LORA = "sam extra anima sparse lora"   # scripts/anima_lora_blocks.py (인자 0개)
@@ -82,7 +83,9 @@ SAM_EXTRA_TITLES = (
 EXTENSION_FOLDERS = ("forge_sam3_extension", "sam-extra")
 
 # 앱이 위치 인자로 보내는 스크립트 → 앱 스펙 키 순서. 인자 수 비교와 '잘려서 무시될 키' 계산에 쓴다.
-# SAM3 는 dict 한 개로 보내므로 인자 수 대신 키 집합을 비교한다. DoRA·VAE 2x 는 아직 앱이 보내지 않는다.
+# SAM3 는 dict 한 개로 보내므로 인자 수 대신 키 집합을 비교한다. DoRA 는 이름 붙은 dict 한 개로 보내므로(인자를 뒤에만
+# 덧붙이는 확장이라 인자 수와 무관) 여기 없고 라이브 선택지로 검사한다(dora_choices_unknown·core/dora_infer_mode).
+# VAE 2x 는 앱이 보내지 않는다.
 POSITIONAL_SPECS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     TITLE_PAG: tuple(key for key, *_ in anima_guidance.PERTURBATION_SPEC),
     TITLE_SKIMMED: tuple(key for key, *_ in anima_guidance.SKIMMED_SPEC),
@@ -577,6 +580,13 @@ def build_capabilities(responses: Mapping[str, HttpResult], *,
         dd_hires = dd_argc > DD_HIRES_INDEX
 
     choices = _choices(t2i_info, get(EP_CN_MODELS), get(EP_CN_MODULES))
+    # DoRA: 확장이 앱이 모르는 방식·정책·범위를 더했으면 알리기만 한다 — 고른 값이 선택지에 있으면 계속 보낸다
+    # (고른 값이 없을 때만 core/dora_infer_mode.live_choice_problem 이 그 요청에서 뺀다).
+    if flags["dora"]:
+        for name, labels in dora_infer_mode.unknown_live_choices(choices).items():
+            warnings.append(_warning("dora_choices_unknown", "dora",
+                                     "앱이 아직 모르는 DoRA 추론 방식 선택지가 있습니다(앱에서는 고를 수 없음): "
+                                     + ", ".join(labels)))
     live_modules = choices.get("controlnet_modules")
     if flags["sam3"] and live_modules:
         unknown = [m for m in sam3_args.CN_MODULES if m not in live_modules]

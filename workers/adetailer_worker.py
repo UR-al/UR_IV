@@ -6,6 +6,7 @@ import base64
 import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core.cancellable_call import call_with_optional_cancel
 from core.image_metadata import read_applicable_prompts
 from core.resource_coordinator import backend_job_guard, release_before_backend_job
 
@@ -45,6 +46,17 @@ def _with_exif_warning(result: dict, warning: str) -> dict:
     return result
 
 
+def _with_notices(result: dict, result_b64) -> dict:
+    """sam-extra 알림(메인 생성 설정 전달 제외·재시도, PAG 누락 등)은 결과 JSON 의 notices 로 —
+    GUI 가 토스트로 띄운다(ui/sam_extra_notices_ui.relay_worker_result). ComfyUI 결과(평범한 str)는 없다."""
+    from core.sam_extra_notices import notices_of, notices_to_dicts
+
+    notices = notices_to_dicts(notices_of(result_b64))
+    if notices:
+        result['notices'] = notices
+    return result
+
+
 class ADetailerSingleWorker(QThread):
     """단일 이미지 ADetailer 처리"""
     finished = pyqtSignal(str)
@@ -77,11 +89,11 @@ class ADetailerSingleWorker(QThread):
             with open(output_path, 'wb') as f:
                 f.write(base64.b64decode(result_b64))
 
-            self.finished.emit(json.dumps(_with_exif_warning({
+            self.finished.emit(json.dumps(_with_notices(_with_exif_warning({
                 'before': _to_posix(self._path),
                 'after': _to_posix(output_path),
                 'output_path': _to_posix(output_path),
-            }, exif_warning), ensure_ascii=False))
+            }, exif_warning), result_b64), ensure_ascii=False))
         except Exception as e:
             self.finished.emit(json.dumps({'error': str(e)}))
 
@@ -121,17 +133,19 @@ class ADetailerBatchWorker(QThread):
                 # 항목마다 — 배치 도중 편집기에서 SAM3를 다시 올렸어도 Forge 작업과 겹치지 않게
                 release_before_backend_job('adetailer-batch')
                 with backend_job_guard('adetailer-batch'):     # 모델 언로드와 배타(항목마다)
-                    result_b64 = backend.adetailer(image_b64, settings)
+                    # 받을 수 있는 백엔드(WebUI)에는 중지 확인을 넘긴다 — 거절된 전달 블록을 빼고 다시 보내기 전에 본다
+                    result_b64 = call_with_optional_cancel(backend.adetailer, image_b64, settings,
+                                                           cancel_check=self._stop_event.is_set)
                 output_path = _get_output_path(path, settings.get('output_folder', ''))
                 with open(output_path, 'wb') as f:
                     f.write(base64.b64decode(result_b64))
 
-                self.single_done.emit(json.dumps(_with_exif_warning({
+                self.single_done.emit(json.dumps(_with_notices(_with_exif_warning({
                     'before': _to_posix(path),
                     'after': _to_posix(output_path),
                     'output_path': _to_posix(output_path),
                     'index': i,
-                }, exif_warning), ensure_ascii=False))
+                }, exif_warning), result_b64), ensure_ascii=False))
             except Exception as e:
                 self.single_done.emit(json.dumps({
                     'error': str(e),

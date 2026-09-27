@@ -35,14 +35,29 @@ def _throttle(host) -> notices_core.NoticeThrottle:
     return throttle
 
 
+def _refresh_capabilities(host) -> None:
+    """연결 때 받은 기능 스냅샷이 틀렸다(Forge 가 앱이 덧붙인 블록·옵션을 거절 — ``REFRESH_CAPABILITIES_CODES``) — GUI
+    스냅샷도 워커에서 다시 받는다. 백엔드 워커는 공용 캐시를 이미 새로 받았다(WebUIBackend._generate·
+    _run_img2img_postprocess 의 재시도). 캐시를 버리지 않는다(critic A1)."""
+    refresh = getattr(host, "_refresh_sam_extra_capabilities", None)
+    if not callable(refresh):
+        return
+    try:
+        refresh(force=True)
+    except Exception:
+        logger.debug("sam-extra 스냅샷 새로고침 실패(무시)", exc_info=True)
+
+
 def show_notices(host, notices: Iterable[Notice], *, ttl: float = notices_core.RESULT_NOTICE_TTL_S) -> int:
     """알림을 토스트로 띄운다(억제된 것 제외). 띄운 수."""
     signal = getattr(getattr(host, "vue_bridge", None), "showNotification", None)
     shown = 0
     throttle = _throttle(host)
+    refresh = False
     for notice in notices:
         if not isinstance(notice, Notice) or not throttle.allow(notice, notices_core.notice_ttl(notice, ttl)):
             continue
+        refresh = refresh or notice.code in notices_core.REFRESH_CAPABILITIES_CODES
         log = logger.info if notice.level == notices_core.LEVEL_INFO else logger.warning
         log("[sam-extra] %s: %s", notice.code, notice.message)
         if signal is None:
@@ -53,6 +68,8 @@ def show_notices(host, notices: Iterable[Notice], *, ttl: float = notices_core.R
             shown += 1
         except RuntimeError:
             pass   # 종료 중 QObject 가 이미 사라졌다
+    if refresh:
+        _refresh_capabilities(host)
     return shown
 
 
@@ -83,16 +100,26 @@ def _webui_context(host) -> tuple[bool, Any, bool]:
 
 
 def check_before_generation(host, payload: Any) -> int:
-    """보내기 직전 payload 경고를 띄운다. 생성은 막지 않는다(실패해도 조용히 0)."""
+    """보내기 직전 payload 경고를 띄운다. 생성은 막지 않는다(실패해도 조용히 0).
+
+    먼저 그 payload 를 만들 때 샘플링 블록 빌더가 묶어 둔 알림(게이트로 뺀 블록·기여자 안내 — ui/sampling_blocks)을
+    띄운다. 빌더는 알림을 띄우지 않으므로(보내지 않는 빌드에서 뜨지 않게) 보내는 곳인 여기서 띄운다. 백엔드와 무관.
+    """
+    shown = 0
+    try:
+        from ui.sampling_blocks import show_sampling_notices
+        shown += show_sampling_notices(host, payload)
+    except Exception:
+        logger.debug("샘플링 블록 알림 실패(무시)", exc_info=True)
     try:
         is_webui, capabilities, remote = _webui_context(host)
         if not is_webui or not isinstance(payload, Mapping):
-            return 0
+            return shown
         notices = notices_core.pre_generation_notices(payload, capabilities=capabilities, remote=remote)
-        return show_notices(host, notices, ttl=notices_core.PRE_GENERATION_NOTICE_TTL_S)
+        return shown + show_notices(host, notices, ttl=notices_core.PRE_GENERATION_NOTICE_TTL_S)
     except Exception:
         logger.debug("sam-extra 생성 전 검사 실패(무시)", exc_info=True)
-        return 0
+        return shown
 
 
 def check_standalone_sam3(host, settings: Any) -> int:

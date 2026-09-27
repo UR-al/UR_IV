@@ -117,12 +117,18 @@ class SamExtraCapabilitiesActionsMixin:
             invalidate_capabilities()   # 이벤트에 옛 주소가 없다 — 전부 버린다(연결 훅이 곧 다시 묻는다)
         except Exception as exc:
             print(f"[sam-extra] 스냅샷 캐시 무효화 실패(무시): {exc}", flush=True)
+        try:
+            from core.forge_override_settings import forget_frozen_options
+            forget_frozen_options()     # 재연결 — Forge 가 잠금 없이 다시 켜졌을 수 있다(P10 검토 3)
+        except Exception as exc:
+            print(f"[sam-extra] Forge 설정 잠금 기억 지우기 실패(무시): {exc}", flush=True)
         self._emit_sam_extra_capabilities()
 
     def _refresh_sam_extra_capabilities(self, *, force: bool = False, manual: bool = False):
         """지금 백엔드의 스냅샷을 워커에서 다시 얻는다. GUI 스레드를 막지 않는다.
 
-        ``manual`` = 사용자의 수동 새로고침(간격 제한은 호출하는 쪽) — 확장 목록 캐시도 버린다.
+        ``manual`` = 사용자의 수동 새로고침(간격 제한은 호출하는 쪽) — 확장 목록 캐시와 Forge 설정 잠금 기억도 버린다
+        (재시도 알림이 부르는 강제 새로고침은 잠금 기억을 두어야 요청마다 거절이 되풀이되지 않는다 — P10 검토 3).
         """
         self._sam_extra_ensure()
         from backends import BackendType, get_backend, get_backend_type
@@ -138,8 +144,10 @@ class SamExtraCapabilitiesActionsMixin:
             self._store_sam_extra_capabilities(unknown_capabilities(STATUS_UNKNOWN), serial)
             return
         if manual:
+            from core.forge_override_settings import forget_frozen_options
             from core.sam_extra_probe import invalidate_extensions
             invalidate_extensions(base_url)
+            forget_frozen_options(base_url)
         fetch = getattr(self, "_sam_extra_fetch", None)
 
         def work():

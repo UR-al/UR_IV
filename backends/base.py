@@ -15,6 +15,9 @@ class BackendInfo:
     vae: List[str] = field(default_factory=lambda: ["Use same VAE"])
     checkpoints: List[str] = field(default_factory=list)
     options: Dict = field(default_factory=dict)
+    # ComfyUI: Anima 3.8B 카드의 v1 어댑터 선택지(core.anima38.comfy_adapter_choices). Forge·모름 = None
+    # (Forge 는 sam-extra 기능 스냅샷 choices.anima38_adapters 를 쓴다)
+    anima38_adapters: Optional[List[str]] = None
 
 
 @dataclass

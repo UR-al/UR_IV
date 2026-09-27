@@ -492,6 +492,16 @@ class UISetupMixin:
         #    · Detail Daemon · Modulation). 위치 인자 계약은 core/anima_guidance.py 참조.
         self.anima_guidance_widgets = self._init_anima_guidance_proxies(b)
 
+        # ── DoRA 추론 방식(sam-extra DoRA Inference Mode) — _dora_<key> 프록시, 초기값은 앱 기본값
+        #    (사용자 Forge ui-config txt2img 값). 판정·정규화는 core/dora_infer_mode.py.
+        from ui.dora_infer_mode_ui import init_dora_proxies
+        self.dora_widgets = init_dora_proxies(b)
+
+        # ── Anima 3.8B(sam-extra Anima 3.8B (Qwen3.5 / v2)) — _a38_<key> 프록시, 초기값은 앱 기본값
+        #    (부정 커넥터 켬·v1 끔 — 사용자 Forge ui-config txt2img, 결정 D1=B). 판정은 core/anima38.py.
+        from ui.anima38_ui import init_anima38_proxies
+        self.anima38_widgets = init_anima38_proxies(b)
+
         # 제거 옵션
         self.chk_remove_artist = CheckBoxProxy(b, 'chk_remove_artist')
         self.chk_remove_copyright = CheckBoxProxy(b, 'chk_remove_copyright')

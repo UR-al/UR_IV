@@ -651,6 +651,44 @@ class ExtensionSource:
                 found[key] = self.rel(path)
         return found
 
+    def option_infos(self) -> dict[str, dict]:
+        """``add_option(KEY, OptionInfo(default, label, component, …).info(…))`` → {키: 속성} (P10 계약 테스트용).
+
+        속성: ``file``, ``default``(정적으로 못 풀면 None), ``component``(``gr.Checkbox`` → 'Checkbox'), ``infotext``
+        (키워드가 없으면 ''), ``onchange``(콜백을 넘겼나). ``.info()``·``.needs_reload_ui()`` 같은 체인 호출은 벗긴다.
+        못 푸는 칸은 None 으로 두고 ``unresolved`` 에 적지 않는다(키 존재는 ``option_keys`` 가 본다)."""
+        found: dict[str, dict] = {}
+        for path, call in self._calls(lambda name: name == "add_option"):
+            info = call.args[1] if len(call.args) > 1 else next(
+                (kw.value for kw in call.keywords if kw.arg == "info"), None)
+            while (isinstance(info, ast.Call) and isinstance(info.func, ast.Attribute)
+                   and info.func.attr != "OptionInfo" and isinstance(info.func.value, ast.Call)):
+                info = info.func.value   # .info("…") / .needs_reload_ui() / .link(…) 체인
+            if not isinstance(info, ast.Call) or _call_name(info.func) != "OptionInfo":
+                continue
+            scope = self.enclosing_function(path, call)
+
+            def value_of(node):
+                if node is None:
+                    return None
+                found_values = self.values(path, node, scope=scope)
+                return found_values[0] if len(found_values) == 1 else None
+
+            keywords = {kw.arg: kw.value for kw in info.keywords if kw.arg}
+            component = info.args[2] if len(info.args) > 2 else keywords.get("component")
+            onchange = keywords.get("onchange")
+            infotext = value_of(keywords.get("infotext"))
+            attrs = {
+                "file": self.rel(path),
+                "default": value_of(info.args[0] if info.args else keywords.get("default")),
+                "component": _call_name(component) if component is not None else None,
+                "infotext": infotext if isinstance(infotext, str) else "",
+                "onchange": onchange is not None and not (isinstance(onchange, ast.Constant) and onchange.value is None),
+            }
+            for key, _env in self._resolve_arg(path, call, 0, "key", "옵션 키", report=False):
+                found[key] = dict(attrs)
+        return found
+
     def routes(self) -> dict[str, str]:
         """FastAPI 라우트 ``"METHOD /path"`` → 파일 (add_api_route / add_route / app.get 등)."""
         found: dict[str, str] = {}
@@ -860,6 +898,15 @@ def _walk_scope(fn: ast.AST):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
         stack.extend(ast.iter_child_nodes(node))
+
+
+def _call_name(node: ast.AST | None) -> str | None:
+    """``gr.Checkbox`` → 'Checkbox', ``OptionInfo`` → 'OptionInfo'. 그 밖은 None."""
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
 
 
 def _is_always_visible(node: ast.AST | None) -> bool:

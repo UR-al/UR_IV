@@ -72,6 +72,10 @@
             <AdetailerCard :model-items="adModelItems" />
             <Sam3MaskCard />
 
+            <!-- Anima 3.8B(Qwen3.5 커넥터·v2 번들) — 가이던스 패널과 별도 카드. 카드가 위젯 스토어(_a38_*)와
+                 model_combo 의 animaKinds 속성을 직접 읽는다(destructure 없음) -->
+            <Anima38Card />
+
             <!-- Anima Guidance Suite — SAM3와 완전히 분리된 독립 기능.
                  인자 계약(위치 기반 62/7/13개)은 core/anima_guidance.py 참조. -->
             <AnimaGuidancePanel :widgets="storeWidgets" />
@@ -79,6 +83,8 @@
             <!-- NegPiP 상시 적용 / 조건부 프롬프트는 STUDIO TOOLS '조건부' 모달로 이동 -->
 
             <LoraStackCard :lora="lora" />
+            <!-- DoRA 추론 방식 — 카드가 위젯 스토어(_dora_*)를 직접 읽는다(destructure 없음) -->
+            <DoraModeCard />
           </div>
         </div>
         <div class="gen-footer">
@@ -382,6 +388,8 @@ import PromptFilterCard from './components/params/PromptFilterCard.vue'
 import AdetailerCard from './components/params/AdetailerCard.vue'
 import Sam3MaskCard from './components/params/Sam3MaskCard.vue'
 import LoraStackCard from './components/params/LoraStackCard.vue'
+import DoraModeCard from './components/params/DoraModeCard.vue'
+import Anima38Card from './components/params/Anima38Card.vue'
 import PresetManagerModal from './components/managers/PresetManagerModal.vue'
 import WeightManagerModal from './components/managers/WeightManagerModal.vue'
 import WildcardManagerModal from './components/managers/WildcardManagerModal.vue'

@@ -15,7 +15,7 @@
 | `tests/_sam_extra_ext.py` | 확장 위치 찾기와 skip 규칙을 가드 테스트끼리 공유한다 (`test_sam3_args`, `test_anima_guidance` 도 쓴다). |
 | `core/sam_extra_notices.py` · `tests/test_sam_extra_notices.py` | 결과 infotext(`SAM3 Error`, `Anima38: off: …`, `Anima Perturbation Guidance` 누락)와 생성 전 조건(CFG≈1 의 SMC/APG/CWM, `sam3.pt` 자동 다운로드, 없는 스크립트), HTTP 422 본문을 사용자 알림으로 바꾼다(P4). 테스트의 `ExtensionSourceTests` 가 이 infotext 키와 가드 함수가 설치된 확장에 그대로 있는지 본다. |
 
-레지스트리가 다루는 범위는 다음과 같다. always-on 스크립트 제목(10개), 스크립트별 `ui()` 반환 순서와 `ARG_NAMES`, API 경로가 `_arg(N)` 으로 읽는 인덱스, `Sam3Args` 필드·기본값·어노테이션 범위와 `process()` 가 state 에서 읽는 키, Forge 옵션 키(14개), FastAPI 라우트, XYZ 축 라벨(104개), Gradio 전용 이름 엔드포인트(앱이 기대면 안 되는 것), 모듈 파일 단위, `preload.py` 명령줄 플래그, 의미 핀(Detail Daemon 배율, 공유 메모 스키마·한도, LoRA Manager `_BRIDGE_JS` 메시지 모양 등), 앱 spec 과 라이브 값의 알려진 차이.
+레지스트리가 다루는 범위는 다음과 같다. always-on 스크립트 제목(10개), 스크립트별 `ui()` 반환 순서와 `ARG_NAMES`, API 경로가 `_arg(N)` 으로 읽는 인덱스, `Sam3Args` 필드·기본값·어노테이션 범위와 `process()` 가 state 에서 읽는 키, Forge 옵션 키(15개 — 그중 8개는 요청마다 덮어쓸 수 있다, `core/forge_override_settings.SPECS`), FastAPI 라우트, XYZ 축 라벨(104개), Gradio 전용 이름 엔드포인트(앱이 기대면 안 되는 것), 모듈 파일 단위, `preload.py` 명령줄 플래그, 의미 핀(Detail Daemon 배율, 공유 메모 스키마·한도, LoRA Manager `_BRIDGE_JS` 메시지 모양 등), 앱 spec 과 라이브 값의 알려진 차이.
 
 ### 소스와 픽스처를 둘 다 보는 이유
 
@@ -65,7 +65,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
    확장이 다른 곳에 있으면 `$env:AISTUDIO_FORGE_EXTENSION_DIR = '<확장 루트>'` 로 지정한다. 지정하면 그 경로만 본다. 경로가 틀리면 다른 설치로 대신하지 않고 skip 한다(강제 모드면 실패). skip 이유에 지정한 경로가 나온다.
 
 4. **실패 항목을 하나씩 처리한다.** 메시지의 `+` 는 새 항목, `-` 는 사라진 항목이다.
-   - **새 항목**(스크립트, 인자, 라우트, 옵션, 축, 파일, 플래그): 레지스트리에 mapped, ignored(사유), deferred(패키지와 사유) 중 하나로 적는다. mapped 로 적는다면 앱 spec, 카드 UI, 페이로드, 보조 경로 전달(P7), Comfy 미러까지 함께 고친다.
+   - **새 항목**(스크립트, 인자, 라우트, 옵션, 축, 파일, 플래그): 레지스트리에 mapped, ignored(사유), deferred(패키지와 사유) 중 하나로 적는다. mapped 로 적는다면 앱 spec, 카드 UI, 페이로드, Comfy 미러까지 함께 고친다. alwayson 스크립트면 `core/alwayson_propagation.py` 의 `PROPAGATION`(보조 패스에 보냄 — 패스·백엔드·모를 때 규칙과 사유)이나 `NEVER`(보내지 않음 — 사유) 중 한 곳에 분류한다(`tests/test_alwayson_propagation.py` 가 빠진 제목을 잡는다). 샘플링 블록은 `ui/sampling_blocks.py` 의 기여자로 만든다. Forge 옵션이면 요청 중에 읽는 bool 옵션인지 보고, 앱이 요청마다 덮어쓸 것이면 `core/forge_override_settings.SPECS`·`frontend/src/utils/forgeOptionOverrides.ts` 에 한 줄씩 더하고(기본은 'Forge 설정 따름' — 키를 보내지 않는다) 읽는 쪽 상수를 `SEMANTIC_PINS` 에 건다. `test_p10_option_specs_match_installed_source` 가 기본값·infotext·체크박스·onchange 를 소스와 맞대 본다.
    - **사라진 항목**: 앱 UI, 페이로드, 저장된 설정값에서 쓰는 곳을 정리한다. 옛 저장값을 어떻게 옮길지 정한 뒤 레지스트리에서 지운다.
    - **기본값, 범위, 선택지, 라벨이 바뀜**(`test_arg_shapes`, 스펙 비교 테스트): CHANGELOG 와 코드로 **의미**가 바뀌었는지 먼저 확인한다. 그다음 앱 spec 을 고치거나, 일부러 다르게 두는 것이면 `KNOWN_DIFFS` 에 사유와 함께 적는다. 확인이 끝나면 메시지가 알려 준 새 해시로 `shape` 를 바꾼다.
    - **`KNOWN_DIFFS` 에 있는데 더는 차이가 없음**: 작업 패키지가 고쳤다는 뜻이다. 그 항목을 지운다.
@@ -75,6 +75,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
    - **위치 읽기 인덱스가 바뀜**(`test_positional_reads`): API 가 어떤 인자를 새로 읽거나 더는 읽지 않는다는 뜻이다. Detail Daemon 의 arg1(preset)을 API 가 무시하게 된 변화가 이 경우다.
    - **의미 핀이 깨짐**(`SEMANTIC_PINS`): 인자 모양은 같은데 의미가 바뀐 경우다. 예: Detail Daemon arg2 의 범위(±5)와 `_SIGMA_SCALE`(0.1)은 원본 노드(Jonseed/ComfyUI-Detail-Daemon) 값이다. 앱은 노드 단위를 변환 없이 보내므로(`core/anima_guidance.py` `DETAIL_DAEMON_SPEC`), 확장이 원본과 다른 단위·범위를 쓰게 되면 원본 대조 테스트(`tests/test_detail_daemon_origin.py`)와 Comfy 미러(`DD_SIGMA_SCALE`, `tests/test_comfy_detail_daemon.py`)부터 확인한다. 핀에 `app` 이 붙은 항목은 앱 상수가 다르면 확장 없이도 실패한다.
    - **`process()` 키 테스트가 깨짐**: 확장이 SAM3 state 키 이름을 바꿨다. 앱이 보내는 값이 조용히 버려지고 있으므로 가장 먼저 고친다.
+   - **Anima 3.8B 모델 종류 핀이 깨짐**(핀 `anima38_bundle_architecture`·`anima38_bundle_format`·`anima38_v1_architecture`·`anima38_default_adapter`): 확장이 v2 번들·v1 어댑터를 가리는 메타데이터나 기본 어댑터 이름을 바꿨다. 앱은 체크포인트 헤더를 같은 규칙으로 읽어 모델 종류를 정하고(`core/anima_model_kind.py`), 그 종류로 Anima38 블록을 보낼지 정한다(`core/anima38.py` `effective`·`plan`). 그대로 두면 3.8B 모델이 'Anima'나 '모름'으로 보여 부정 커넥터 앱 기본값이 조용히 빠진다. 앱 상수와 `frontend/src/utils/anima38Card.ts` 를 함께 고친다.
    - **알림 키 테스트가 깨짐**(`tests.test_sam_extra_notices.ExtensionSourceTests`, 핀 `anima38_status_key`·`sam3_hf_checkpoint_*`): 확장이 실패 흔적을 남기는 infotext 키나 CFG 1 가드·OOM 폴백 함수를 바꿨다. 그대로 두면 사용자 알림이 조용히 멈춘다. `core/sam_extra_notices.py` 의 `KEY_*` 상수와 원인 → 설정 힌트(`sam3_error_hint`, `anima38_off_hint`)를 새 문구에 맞춘다.
    - **정적으로 풀지 못한 항목**(`test_everything_was_resolved_statically`): 확장이 새 방식으로 상수를 만든다. `core/sam_extra_scan.py` 를 보강하거나, 그 항목을 레지스트리에 직접 분류한다.
    - **Gradio 전용 함수가 사라짐**: 앱은 이 엔드포인트를 부르지 않는다. 다만 뒤 패키지(P11, P12, P19, P20)가 참고하므로 새 이름으로 고쳐 둔다.

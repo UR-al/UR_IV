@@ -437,6 +437,57 @@ class ComicUsesT2IBuilderTests(unittest.TestCase):
                          "lowres, text")
 
 
+class _Toasts:
+    def __init__(self):
+        self.calls = []
+
+    def emit(self, *args):
+        self.calls.append(args)
+
+
+class _NoticeHost(_Host):
+    """실제 빌더처럼 컷 스냅샷마다 게이트가 뺀 사용자 블록 알림을 묶어 둔다(ui/sampling_blocks)."""
+
+    def __init__(self, document, *, fail_at=None, **kwargs):
+        super().__init__(document, **kwargs)
+        self.vue_bridge.showNotification = _Toasts()
+        self._fail_at = fail_at
+
+    def _build_generation_payload(self, **kwargs):
+        from core import sam_extra_notices as sn
+        from ui.sampling_blocks import remember_sampling_notices
+
+        payload, error = super()._build_generation_payload(**kwargs)
+        if len(self.builder_calls) == self._fail_at:
+            return None, "steps는 1~150 범위여야 합니다"
+        remember_sampling_notices(self, payload, [
+            sn.block_not_sent_notice("Anima Perturbation Guidance", img2img=False)])
+        return payload, error
+
+
+class ComicSamplingNoticeTests(unittest.TestCase):
+    """(P7-R2) 만화 컷은 워커가 바로 보낸다(생성 전 확인이 없다) — 클릭이 보내는 곳이다. 컷 빌드 게이트가 뺀 사용자
+    블록 알림을 모아 작업당 한 번 띄운다(B15: 컷마다 띄우지 않는다). 보내지 않으면 띄우지 않는다."""
+
+    def _run(self, host):
+        with mock.patch.object(CreatorActionsMixin, "_ensure_creator_runtime", lambda self: None):
+            return _run(host, "comic_generate_all", {"document": {}}, _RecordingBackend())
+
+    def test_generate_all_announces_the_dropped_block_once_per_job(self):
+        host = _NoticeHost(_Document(3))
+        self.assertTrue(self._run(host)["ok"])
+        [(level, message)] = host.vue_bridge.showNotification.calls
+        self.assertEqual(level, "warning")
+        self.assertIn("Anima Perturbation Guidance", message)
+
+    def test_nothing_is_announced_when_the_job_is_not_sent_or_is_krea2(self):
+        for label, host in (("builder error", _NoticeHost(_Document(3), fail_at=2)),
+                            ("krea2", _NoticeHost(_Document(2), family="krea2"))):
+            with self.subTest(label):
+                self._run(host)
+                self.assertEqual(host.vue_bridge.showNotification.calls, [])
+
+
 class _RealStudioHost(_Host):
     """실제 ComicStudio.normalize/save 를 쓰는 호스트 — UI 스레드와 워커가 각자 정규화하는 경로."""
 
