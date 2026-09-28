@@ -166,13 +166,18 @@ def _opencv():
 
 
 def _map_binary_cv(mask: Any, operation):
+    import numpy as np
+
     torch = _torch()
     normalized = ensure_mask(mask)
     device = normalized.device
     arrays = []
     for item in normalized.detach().cpu().numpy():
-        arrays.append(operation(item > 0.5))
-    return torch.from_numpy(__import__("numpy").stack(arrays, axis=0)).to(
+        # A transposed/permuted MASK keeps its strides through ensure_mask and
+        # .numpy(); OpenCV 5 rejects such a layout as an output array (see
+        # make_overlay), so every cv2 step gets a C-contiguous copy.
+        arrays.append(operation(np.ascontiguousarray(item > 0.5)))
+    return torch.from_numpy(np.stack(arrays, axis=0)).to(
         device=device, dtype=torch.float32
     )
 
@@ -185,9 +190,11 @@ def convex_hull(mask: Any):
     def apply(item):
         if not item.any():
             return item.astype(np.float32)
-        source = item.astype(np.uint8) * 255
+        source = np.ascontiguousarray(item, dtype=np.uint8) * 255
         count, labels = cv2.connectedComponents(source)
-        result = np.zeros_like(source)
+        # fillPoly draws into ``result``: np.zeros_like would copy a
+        # non-C-contiguous layout that OpenCV 5 refuses as an output array.
+        result = np.zeros(source.shape, dtype=np.uint8)
         for label in range(1, count):
             component = (labels == label).astype(np.uint8) * 255
             contours, _ = cv2.findContours(
@@ -227,10 +234,14 @@ def edge_aware_outline(mask: Any, image: Any, pixels: int,
     results = []
     kernel = np.ones((3, 3), dtype=np.uint8)
     for batch_index, item in enumerate(mask_value.detach().cpu().numpy()):
-        rgb = (image_value[batch_index, ..., :3].detach().cpu().numpy() * 255.0).round().astype(np.uint8)
+        # VAEDecode's IMAGE is a movedim view (channels-first strides); hand
+        # OpenCV C-contiguous arrays like every other cv2 call in this module.
+        rgb = np.ascontiguousarray(
+            (image_value[batch_index, ..., :3].detach().cpu().numpy() * 255.0).round().astype(np.uint8)
+        )
         gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
         edges = cv2.dilate(cv2.Canny(gray, canny_low, canny_high), kernel) > 0
-        current = item > 0.5
+        current = np.ascontiguousarray(item > 0.5)
         for _ in range(int(pixels)):
             expanded = cv2.dilate(current.astype(np.uint8), kernel) > 0
             additions = expanded & ~current & ~edges
@@ -377,7 +388,14 @@ def make_overlay(image: Any, mask: Any, boxes: Sequence[Sequence[float]] | None 
     # accurate cyan masks and expose boxes separately in that case.
     if boxes is not None and len(boxes) > 0 and overlay.shape[0] == 1:
         cv2, np = _opencv()
-        array = (overlay[0].detach().cpu().numpy() * 255.0).round().astype(np.uint8)
+        # The IMAGE from VAEDecode is a movedim(1, -1) view, and the blend
+        # above keeps its channels-first strides, so this array is not
+        # C-contiguous. cv2.rectangle/putText draw in place, and OpenCV 5.0
+        # rejects that layout ("Layout of the output array img is
+        # incompatible with cv::Mat"), which failed every in-generation SAM3.
+        array = np.ascontiguousarray(
+            (overlay[0].detach().cpu().numpy() * 255.0).round().astype(np.uint8)
+        )
         score_values = list(scores or [])
         for index, box in enumerate(boxes):
             if len(box) != 4:

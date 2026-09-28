@@ -83,7 +83,8 @@ class RefineWorker(QThread):
             with backend_job_guard('refine'):
                 result_b64 = backend.refine(image_b64, self._settings)
 
-            # 'SAM3 Error'·적용 기록 없음 — 부모 패스가 denoise 0 이라 결과가 원본 그대로다. 저장하지 않고 실패로 알린다.
+            # 'SAM3 Error'·적용 기록 없음 — SAM3 가 아무것도 고치지 않았다. 결과는 원본(확장이 원본 기준 요청을 따를 때)이거나
+            # denoise 0 부모 패스의 VAE 왕복본(조금 바뀐 원본)이라 '_refine' 로 저장할 것이 없다. 저장하지 않고 실패로 알린다.
             from core.sam_extra_notices import (
                 notices_of, notices_to_dicts, standalone_failure_text, standalone_sam3_failure,
             )

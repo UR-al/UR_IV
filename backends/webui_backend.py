@@ -11,7 +11,7 @@ import time
 import requests
 from dataclasses import replace
 from typing import Callable, Dict, Optional, Any
-from PIL import Image
+from PIL import Image, ImageOps
 
 from backends.base import (
     AbstractBackend, BackendInfo, GenerationResult, MediaArtifact,
@@ -205,6 +205,22 @@ def _take_envelope(settings):
     return take_envelope(settings)
 
 
+def _forge_init_size(image_b64: str) -> tuple:
+    """Forge 가 API init 이미지로 쓰는 (width, height) — 단독 경로 payload 의 width/height.
+
+    Forge 는 base64 init 이미지를 decode_base64_to_image → images.read → fix_image 로 읽고, fix_image 가
+    ``ImageOps.exif_transpose`` 로 EXIF 방향부터 적용한다(실패하면 그대로 쓴다). 워커는 파일 바이트를 그대로 보내므로
+    방향 적용 전 크기를 보내면, 방향 태그로 세운 사진(휴대폰·카메라 JPEG)을 부모 패스가 가로·세로 바뀐 크기로 늘려
+    이미지 전체가 찌그러지고 원본 기준 SAM3 도 'size WxH != HxW' 로 폴백한다. 그래서 Forge 와 같게 세워서 잰다.
+    """
+    with Image.open(io.BytesIO(base64.b64decode(image_b64))) as image:
+        try:
+            upright = ImageOps.exif_transpose(image)
+        except Exception:
+            upright = image          # Forge fix_image 도 방향 적용이 실패하면 그대로 쓴다
+        return upright.size
+
+
 class WebUIBackend(AbstractBackend):
     """Stable Diffusion WebUI API 백엔드"""
 
@@ -237,9 +253,7 @@ class WebUIBackend(AbstractBackend):
         (예전엔 ``_postprocess_base_payload`` 를 복사·정리하는 코드가 있었지만 그 값을 채우는
         호출자가 없어 늘 빈 dict 였다.)
         """
-        image_bytes = base64.b64decode(image_b64)
-        with Image.open(io.BytesIO(image_bytes)) as init_image:
-            init_width, init_height = init_image.size
+        init_width, init_height = _forge_init_size(image_b64)   # Forge 가 EXIF 방향을 적용한 크기
 
         number = WebUIBackend._setting_number
         payload = {
@@ -1143,6 +1157,10 @@ class WebUIBackend(AbstractBackend):
           · Refine은 마스크 영역만 건드려야 하므로 부모 i2i는 denoise 0으로 통과시키고
             SAM3 인페인트만 일하게 한다. (예전 sam3()는 denoise 0.1 부모 패스로 **이미지
             전체를 한 번 재확산**했다 — 지금은 sam3()도 denoise 0.)
+          · denoise 0 이어도 부모 패스는 VAE 인코드·디코드를 거쳐 픽셀이 조금씩 바뀐다(드리프트) — SAM3 가 그 출력을
+            쓰면 마스크 밖도 원본과 달라진다. 그래서 SAM3 state 에 원본 기준 요청(``sam3_args.with_init_source``)을 실어
+            확장이 init 이미지로 검출·인페인트하게 한다. 지원하지 않는 확장·조건이 안 맞아 출력으로 돌았으면 결과 알림
+            (infotext 'SAM3 Source', core/sam_extra_notices)으로 알린다.
           · steps/cfg/sampler/seed를 명시해 Forge 현재 UI 값에 좌우되지 않게 한다.
           · 메인 생성 샘플링 블록 봉투가 있으면 SAM3 Mask 뒤에 전달한다(P7 — 생성 안 SAM3 패스와 같게).
         """
@@ -1164,17 +1182,17 @@ class WebUIBackend(AbstractBackend):
         sam3_settings['sam3_inpaint_prompt'] = prompts['prompt']
         sam3_settings['sam3_negative_prompt'] = prompts['negative_prompt']
         sam3_settings['sam3_mode'] = 'Inpaint'
-        sam3_state = self._build_sam3_script_state(sam3_settings, self._sam_extra_snapshot())
-
-        image_bytes = base64.b64decode(image_b64)
-        with Image.open(io.BytesIO(image_bytes)) as init_image:
-            init_width, init_height = init_image.size
+        from core.sam3_args import with_init_source
+        sam3_state = with_init_source(self._build_sam3_script_state(sam3_settings, self._sam_extra_snapshot()))
+        # Forge 가 EXIF 방향을 적용한 크기 — 다르면 부모 패스가 늘려 찌그러지고 원본 기준 SAM3 도 'size' 로 폴백한다
+        init_width, init_height = _forge_init_size(image_b64)
 
         payload = {
             "init_images": [image_b64],
             "prompt": prompts['prompt'],
             "negative_prompt": prompts['negative_prompt'],
-            # 부모 i2i는 아무것도 바꾸지 않게 — 실제 작업은 SAM3 인페인트 패스가 한다
+            # 부모 i2i는 재확산하지 않게 denoise 0 — 그래도 VAE 왕복으로 픽셀이 조금 바뀌므로 SAM3 는 그 출력이 아니라
+            # init 이미지를 쓴다(sam3_state 의 원본 기준 요청). 실제 작업은 SAM3 인페인트 패스가 한다.
             "denoising_strength": 0.0,
             "resize_mode": 0,
             "width": init_width,
@@ -1202,23 +1220,24 @@ class WebUIBackend(AbstractBackend):
         """img2img + SAM3 확장으로 마스킹/인페인트 (배치/단독 실행 경로).
 
         예전에는 `_build_postprocess_payload`를 썼는데 거기 기본 denoising_strength가
-        0.1이라 **이미지 전체가 한 번 재확산**됐다. Forge의 SAM3는 마스크 영역만
-        건드리므로 결과가 달라지고, 전역 디테일 드리프트 + 낭비되는 시간까지 붙었다.
-        `_postprocess_base_payload`를 채우는 호출자도 없어 steps/cfg/sampler가 전부
-        Forge 현재 UI 값에 좌우돼 재현도 안 됐다.
+        0.1이라 **이미지 전체가 한 번 재확산**됐다. `_postprocess_base_payload`를 채우는
+        호출자도 없어 steps/cfg/sampler가 전부 Forge 현재 UI 값에 좌우돼 재현도 안 됐다.
 
         이제 부모 i2i는 denoise 0으로 통과시키고, 실제 작업은 SAM3 인페인트 패스가
-        전담한다. 샘플링 파라미터도 명시 전송한다.
+        전담한다. 샘플링 파라미터도 명시 전송한다. 다만 denoise 0 이어도 부모 패스는 VAE
+        인코드·디코드를 거쳐 픽셀이 조금씩 바뀐다 — SAM3 가 그 출력을 검출·인페인트하면 마스크
+        밖도 원본과 달라진다(드리프트). 그래서 SAM3 state 에 원본 기준 요청
+        (``sam3_args.with_init_source``)을 실어 확장이 init 이미지를 쓰게 한다. 확장이 모르거나
+        조건이 안 맞아 출력으로 돌았으면 결과 알림(infotext 'SAM3 Source', core/sam_extra_notices)이 알린다.
 
         메인 생성 샘플링 블록 봉투가 있으면 SAM3 Mask 뒤에 전달한다(P7). 'Mask only' 는 인페인트 패스가 없어
         전달하지 않는다(core/alwayson_propagation.blocks_for).
         """
         settings, envelope = _take_envelope(settings)
-        sam3_state = self._build_sam3_script_state(settings, self._sam_extra_snapshot())
-
-        image_bytes = base64.b64decode(image_b64)
-        with Image.open(io.BytesIO(image_bytes)) as init_image:
-            init_width, init_height = init_image.size
+        from core.sam3_args import with_init_source
+        sam3_state = with_init_source(self._build_sam3_script_state(settings, self._sam_extra_snapshot()))
+        # Forge 가 EXIF 방향을 적용한 크기 — 다르면 부모 패스가 늘려 찌그러지고 원본 기준 SAM3 도 'size' 로 폴백한다
+        init_width, init_height = _forge_init_size(image_b64)
 
         prompt = sam3_state.get('sam3_inpaint_prompt', '') or settings.get('prompt', '')
         negative = sam3_state.get('sam3_negative_prompt', '') or settings.get('negative_prompt', '')

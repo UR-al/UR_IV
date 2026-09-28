@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 import tempfile
@@ -20,6 +21,18 @@ torch = None
 
 def _image(batch=1, height=12, width=14, value=0.0):
     return torch.full((batch, height, width, 3), value, dtype=torch.float32)
+
+
+def _vae_decode_image(height, width, seed=0):
+    """ComfyUI VAEDecode 가 주는 IMAGE 모양 — [B,C,H,W] 를 movedim(1,-1) 한 뷰라 C 연속이 아니다."""
+    generator = torch.Generator().manual_seed(seed)
+    return torch.rand((1, 3, height, width), generator=generator).movedim(1, -1)
+
+
+def _skip_without_cv2():
+    """OpenCV 가 없는 python(시스템 python 등)에서는 cv2 경로 테스트를 건너뛴다 — 앱 venv·ComfyUI 에는 있다."""
+    if importlib.util.find_spec("cv2") is None:
+        raise unittest.SkipTest("opencv-python 미설치 — cv2 경로 테스트 건너뜀")
 
 
 class _FakeModel:
@@ -258,6 +271,68 @@ class TestComfySam3Nodes(unittest.TestCase):
         self.assertGreater(expanded.sum().item(), hull.sum().item())
         self.assertGreater(blurred[0, 0, 0].item(), 0.0)
         self.assertLessEqual(blurred.max().item(), 1.0)
+
+    def test_overlay_boxes_draw_on_a_vae_decode_view(self):
+        """(B1) 생성 안 SAM3 는 VAEDecode 의 movedim 뷰를 받는다. 합성 뒤에도 그 stride 가 남아 numpy 배열이 C 연속이
+        아니었고, OpenCV 5.0 은 그런 배열에 제자리로 그리지 못해(rectangle: 'Layout of the output array img is
+        incompatible with cv::Mat') 모든 생성 안 SAM3 가 멈췄다. 연속 입력과 비트까지 같은 미리보기여야 한다."""
+        _skip_without_cv2()
+        image = _vae_decode_image(64, 96, seed=3)
+        self.assertFalse(image.is_contiguous())
+        mask = torch.zeros((1, 64, 96))
+        mask[:, 30:50, 20:60] = 1
+        boxes, scores = [[20.0, 30.0, 60.0, 50.0]], [0.87]
+        overlay = mask_ops.make_overlay(image, mask, boxes, scores)
+        self.assertEqual(tuple(overlay.shape), (1, 64, 96, 3))
+        self.assertTrue(torch.equal(overlay, mask_ops.make_overlay(image.contiguous(), mask, boxes, scores)))
+        pixels = (overlay[0] * 255.0).round()
+        self.assertEqual(pixels[50, 40].tolist(), [30.0, 120.0, 255.0])         # 상자 아래 변
+        plain = (mask_ops.make_overlay(image, mask)[0] * 255.0).round()        # 상자 없는 cyan 미리보기
+        self.assertTrue(torch.equal(pixels[55:, 70:], plain[55:, 70:]))         # 상자·점수 글자에서 먼 곳
+
+    def test_mask_cv_steps_accept_non_contiguous_masks_and_images(self):
+        """(B1) 입력만 읽는 cv2 호출은 비연속 배열을 복사해 받지만 convex_hull 은 np.zeros_like(비연속 레이아웃)에
+        fillPoly 로 그려 같은 오류로 멈췄다. 전치 뷰 마스크·movedim 이미지도 연속 입력과 같은 결과를 낸다."""
+        _skip_without_cv2()
+        contiguous = torch.zeros((1, 12, 9))
+        contiguous[0, 2, 2:7] = 1
+        contiguous[0, 2:9, 2] = 1
+        strided = contiguous.transpose(1, 2).contiguous().transpose(1, 2)
+        self.assertFalse(strided.is_contiguous())
+        self.assertTrue(torch.equal(strided, contiguous))
+        image = _vae_decode_image(12, 9, seed=5)
+        steps = {
+            "convex hull": lambda mask, source: mask_ops.convex_hull(mask),
+            "edge-aware outline": lambda mask, source: mask_ops.edge_aware_outline(mask, source, 2),
+            "dilation": lambda mask, source: mask_ops.dilate(mask, 1),
+            "Forge order": lambda mask, source: mask_ops.refine_generated_mask(
+                mask, source, use_convex_hull=True, outline_pixels=2, dilation_pixels=1,
+            ),
+        }
+        for name, step in steps.items():
+            with self.subTest(step=name):
+                expected = step(contiguous, image.contiguous())
+                self.assertTrue(torch.equal(step(strided, image), expected))
+                self.assertGreaterEqual(expected.sum().item(), contiguous.sum().item())
+
+    def test_mask_node_overlay_on_a_vae_decode_view(self):
+        """(B1) sam3_nodes.ForgeNeoSAM3Mask.segment → make_overlay 경로(GPU 세션의 traceback 자리) 그대로."""
+        _skip_without_cv2()
+        _FakeSegmenter.calls = []
+        image = _vae_decode_image(10, 10, seed=7)
+        results = []
+        with mock.patch.object(sam3_nodes, "_resolve_easy_node", return_value=_FakeSegmenter):
+            for source in (image, image.contiguous()):
+                results.append(sam3_nodes.ForgeNeoSAM3Mask().segment(
+                    source, prompt="face", mask_mode="Combined", convex_hull=True,
+                    mask_blur=0, save_artifacts=False, unload_after=False,
+                    sam3_model={"model": _FakeModel(), "device": "cpu", "segmentor": "image"},
+                ))
+        (_, combined, _, overlay, boxes, _, _), contiguous_result = results
+        self.assertEqual(boxes, [[1.0, 1.0, 3.0, 3.0]])
+        self.assertEqual(combined[0, 1, 1].item(), 1)
+        self.assertEqual(tuple(overlay.shape), (1, 10, 10, 3))
+        self.assertTrue(torch.equal(overlay, contiguous_result[3]))
 
     def test_intersection_falls_back_to_manual_per_image(self):
         generated = torch.zeros((2, 6, 6))

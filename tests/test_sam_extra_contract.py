@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
 import importlib
 import io
@@ -95,6 +96,28 @@ def _ref_problem(ref: str) -> str:
         if not found:
             return f"{ref}: 파일에 '{symbol}' 이 (코드로) 없다"
     return ""
+
+
+def _state_reads_by_constant(src: ExtensionSource, rel_file: str, function: str, state_var: str) -> frozenset:
+    """``function`` 안에서 ``state_var.get(모듈 상수)`` 로 읽는 키 — ``ExtensionSource.state_reads`` 는 문자열
+    리터럴만 본다. 요청 전용 키(SAM3_REQUEST_ONLY_KEYS)는 확장이 상수(SOURCE_STATE_KEY)로 읽는다."""
+    tree = src.tree(src.root / rel_file)
+    keys: set[str] = set()
+    for fn in (n for n in ast.walk(tree or ast.Module(body=[], type_ignores=[]))
+               if isinstance(n, ast.FunctionDef) and n.name == function):
+        for node in ast.walk(fn):
+            if not (isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Name)):
+                continue
+            func = node.func
+            if (isinstance(func, ast.Attribute) and func.attr == "get"
+                    and isinstance(func.value, ast.Name) and func.value.id == state_var):
+                try:
+                    value = src.module_constant(rel_file, node.args[0].id)
+                except KeyError:
+                    continue   # 지역 이름(예: _xyz_or 의 state_key 인자) — 문자열 리터럴 읽기는 state_reads 가 본다
+                if isinstance(value, str):
+                    keys.add(value)
+    return frozenset(keys)
 
 
 def _spec_names(title: str) -> list[str]:
@@ -448,6 +471,7 @@ class TestInstalledExtension(unittest.TestCase):
         sam3_file = reg.SCRIPTS["SAM3 Mask"]["file"]
         cls.payload_keys = src.dict_keys_assigned(sam3_file, "process", "payload")
         cls.state_reads = src.state_reads(sam3_file, "process", "state", ("_xyz_or", "_bool_or"))
+        cls.state_reads |= _state_reads_by_constant(src, sam3_file, "process", "state")
         cls.unresolved = list(src.unresolved)
 
     def _assert_sets(self, what, registered, found, optional=frozenset()):
@@ -632,17 +656,30 @@ class TestInstalledExtension(unittest.TestCase):
         self.assertEqual(problems, [], "\nSam3Args 기본값과 앱 기본값:\n" + "\n".join(problems))
 
     def test_sam3_process_reads_every_key_the_app_sends(self):
-        """나-4: process() 는 정해진 키만 골라 Sam3Args 에 넘긴다 — 확장이 키 이름을 바꾸면 앱 값이 조용히 버려진다."""
-        from core.sam3_args import build_state
+        """나-4: process() 는 정해진 키만 골라 Sam3Args 에 넘긴다 — 확장이 키 이름을 바꾸면 앱 값이 조용히 버려진다.
+
+        요청 전용 키(``SAM3_REQUEST_ONLY_KEYS`` — 단독 SAM3·Refine 의 원본 기준 요청)는 생성 안 SAM3(build_state)가
+        보내지 않고 단독 경로(``with_init_source``)만 더한다. process() 는 그 키를 Sam3Args 밖에서 읽어야 한다
+        (extra=forbid 라 Sam3Args 에 넣으면 검증이 통째로 실패해 SAM3 가 꺼진다).
+        """
+        from core.sam3_args import build_state, with_init_source
+        request_only = set(reg.SAM3_REQUEST_ONLY_KEYS)
         sent = set(build_state({}))
+        standalone = set(with_init_source(build_state({})))
         dropped = sorted(sent - self.state_reads)
-        unsent = sorted(self.state_reads - sent)
+        unsent = sorted(self.state_reads - sent - request_only)
         self.assertEqual(dropped, [], f"앱이 보내지만 process() 가 읽지 않는 키(조용히 버려짐): {dropped}")
         self.assertEqual(unsent, [], f"process() 가 state 에서 읽지만 앱이 보내지 않는 키: {unsent}")
+        self.assertEqual(sorted(sent & request_only), [], "생성 안 SAM3(build_state)는 요청 전용 키를 보내지 않는다")
+        self.assertEqual(sorted(standalone - sent), sorted(request_only), "단독 경로가 더하는 키 = 요청 전용 키")
+        self.assertEqual(sorted(request_only - self.state_reads), [],
+                         "앱이 단독 경로에서 보내지만 process() 가 읽지 않는 요청 전용 키(조용히 무시됨)")
         self.assertEqual(set(self.payload_keys), set(self.sam3args["fields"]),
                          "process() 가 Sam3Args 에 넘기는 키 ≠ Sam3Args 필드")
-        self.assertEqual(sorted(self.state_reads - set(self.payload_keys)), sorted(reg.SAM3_ACTIVATION_KEYS),
-                         "Sam3Args 밖에서 읽는 활성화 플래그가 바뀌었다")
+        self.assertEqual(sorted(request_only & set(self.payload_keys)), [],
+                         "요청 전용 키를 Sam3Args 에 넘기면(extra=forbid) 검증이 실패해 SAM3 가 꺼진다")
+        self.assertEqual(sorted(self.state_reads - set(self.payload_keys) - request_only),
+                         sorted(reg.SAM3_ACTIVATION_KEYS), "Sam3Args 밖에서 읽는 활성화 플래그가 바뀌었다")
 
     def test_semantic_pins_on_source_constants(self):
         for pin in (p for p in reg.SEMANTIC_PINS if p["source"] == "ast"):

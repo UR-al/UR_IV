@@ -412,6 +412,68 @@ def _patched_blocks(model) -> set[int]:
     return {int(path[len(prefix):-len(suffix)]) for path in model.object_patches}
 
 
+class _LiveBlocks(list):
+    """nn.ModuleList 처럼 ``blocks.3`` 경로를 getattr 로 푼다(comfy.utils.get_attr/set_attr)."""
+
+    def __getattr__(self, name):
+        if name.isdigit():
+            return self[int(name)]
+        raise AttributeError(name)
+
+
+class _LivePatcher:
+    """ComfyUI 0.36 ModelPatcher 의 object patch 수명(comfy/model_patcher.py) — B2 회귀용.
+
+    - clone(): object_patches 는 복사, object_patches_backup 은 공유(get_clone_model_override :429, clone :452·:459).
+    - get_model_object(): 자기 patch → backup(원래 값) → 모듈 속성(:751-771).
+    - load(): load_models_gpu → partially_load(:1257-1266) 처럼 지난 patch 를 되돌리고(unpatch_model: backup 복원·
+      비움) 자기 patch 를 건다(patch_model: set_attr, 처음 건 key 만 backup). 실행이 끝나도 되돌리지 않는다 —
+      다른 clone 으로 바꿀 때도 detach(unpatch_all=False)(model_management.py:988)라, 다음 그래프의 노드가 patch()
+      할 때 모듈에는 지난 실행의 래퍼가 걸려 있다.
+    """
+
+    def __init__(self, blocks, backup=None):
+        self.model = SimpleNamespace(diffusion_model=SimpleNamespace(blocks=blocks))
+        self.object_patches = {}
+        self.object_patches_backup = {} if backup is None else backup
+
+    def clone(self):
+        clone = _LivePatcher(self.model.diffusion_model.blocks, self.object_patches_backup)
+        clone.model = self.model
+        clone.object_patches = self.object_patches.copy()
+        return clone
+
+    def add_object_patch(self, name, obj):
+        self.object_patches[name] = obj
+
+    def _resolve(self, name):
+        *path, last = name.split(".")
+        owner = self.model
+        for part in path:
+            owner = getattr(owner, part)
+        return owner, last
+
+    def get_model_object(self, name):
+        if name in self.object_patches:
+            return self.object_patches[name]
+        if name in self.object_patches_backup:
+            return self.object_patches_backup[name]
+        owner, last = self._resolve(name)
+        return getattr(owner, last)
+
+    def load(self):
+        for key in list(self.object_patches_backup):
+            owner, last = self._resolve(key)
+            setattr(owner, last, self.object_patches_backup[key])
+        self.object_patches_backup.clear()
+        for key, value in self.object_patches.items():
+            owner, last = self._resolve(key)
+            previous = getattr(owner, last)
+            setattr(owner, last, value)
+            self.object_patches_backup.setdefault(key, previous)
+        return self
+
+
 class TestAnimaDaveOriginParity(unittest.TestCase):
     @staticmethod
     def _active_steps(sigmas, tau) -> list[int]:
@@ -667,6 +729,85 @@ class TestAnimaDaveOriginParity(unittest.TestCase):
         self.assertTrue(torch.equal(wrapper(None, transformer_options=options(midpoint)), edited))
         late_no_schedule = {"sigmas": schedule[20].reshape(1)}
         self.assertTrue(torch.equal(wrapper(None, transformer_options=late_no_schedule), edited))
+
+
+@requires_torch
+class TestAnimaBlockPatchHistory(unittest.TestCase):
+    """(B2) DAVE/SLG 블록 래퍼의 결과가 지난 실행에 따라 달라지면 안 된다.
+
+    ComfyUI 는 끝난 실행의 object patch 를 모듈에 걸어 둔 채 다음 그래프를 돌린다(_LivePatcher). 예전 래퍼는 감쌀
+    원본을 ``blocks[i].forward``(모듈 속성 = 지난 실행의 래퍼)에서 읽어 실행마다 한 겹씩 쌓였다 — tau·pre-DD 를 끈
+    지난 DAVE 가 새 DAVE 안에서 계속 돌아 이미지가 무너질 수 있었다. 원본은 ``get_model_object`` 로 읽는다.
+    """
+
+    def setUp(self):
+        self.torch = torch = load_torch()
+        self.block_out = torch.randn((2, 1, 4, 4, 8), generator=torch.Generator().manual_seed(4)) + 1
+        self.block_in = torch.full((2, 1, 4, 4, 8), -3.0)
+        self.base = _LivePatcher(_LiveBlocks(_DaveBlock(self.block_out.clone) for _ in range(28)))
+        self.original_forward = self.base.model.diffusion_model.blocks[18].forward
+        schedule = torch.tensor(_anima_simple_sigmas(30), dtype=torch.float32)
+        self.late = {"sample_sigmas": schedule, "sigmas": schedule[20].reshape(1).repeat(2)}
+
+    def _dave(self, model, strength, tau):
+        return guidance.ForgeNeoAnimaDAVE().patch(model, True, "dave_alpha.npz", strength, tau)[0]
+
+    def _slg(self, model, blocks="18"):
+        return guidance._patch_anima_blocks(
+            model, dave_enabled=False, dave_blocks="", dave_strength=0.0, dave_tau=0.0,
+            slg_enabled=True, slg_blocks=blocks,
+        )
+
+    def _run(self, patched, block, options):
+        """patched 를 로드하고(샘플링 시작) 그 블록을 부른다 — 모듈에 걸린 forward 가 실제로 도는 것."""
+        patched.load()
+        return self.base.model.diffusion_model.blocks[block].forward(self.block_in, transformer_options=options)
+
+    def _dc(self, value, attenuation):
+        return guidance_dave.apply_dave(value, attenuation)
+
+    def test_a_new_run_never_wraps_the_previous_runs_wrapper(self):
+        torch = self.torch
+        first_runs = {
+            "DAVE 0.5 (every step)": lambda: self._dave(self.base, 0.5, 0.0),
+            "SLG on 18": lambda: self._slg(self.base),
+        }
+        slg_on = {"forge_neo_slg_active": True}
+        # (다음 실행, 그 실행의 옵션, 기대값 = 깨끗한 모델에서 같은 실행의 결과)
+        second_runs = {
+            "DAVE 0.3": (lambda: self._dave(self.base, 0.3, 0.0), {}, self._dc(self.block_out, 0.3)),
+            "DAVE tau .1 at a late step (gate off)": (
+                lambda: self._dave(self.base, 0.3, 0.1), dict(self.late), self.block_out),
+            "same DAVE again": (lambda: self._dave(self.base, 0.5, 0.0), {}, self._dc(self.block_out, 0.5)),
+            "DAVE while the old SLG flag is set": (
+                lambda: self._dave(self.base, 0.3, 0.0), slg_on, self._dc(self.block_out, 0.3)),
+        }
+        for first_label, first in first_runs.items():
+            for second_label, (second, options, expected) in second_runs.items():
+                with self.subTest(first=first_label, second=second_label):
+                    self._run(first(), 18, {})
+                    self.assertIsNot(self.base.model.diffusion_model.blocks[18].forward, self.original_forward)
+                    self.assertTrue(torch.equal(self._run(second(), 18, dict(options)), expected))
+                    # 패치가 없는 clone 을 로드하면 원래 forward 로 돌아온다(ComfyUI unpatch_model).
+                    self.base.clone().load()
+                    self.assertEqual(self.base.model.diffusion_model.blocks[18].forward, self.original_forward)
+
+    def test_repeated_identical_runs_give_identical_results(self):
+        torch = self.torch
+        results = [self._run(self._dave(self.base, 0.4, 0.0), 12, {}) for _ in range(3)]
+        for result in results:
+            self.assertTrue(torch.equal(result, self._dc(self.block_out, 0.4)))
+
+    def test_nodes_chained_in_one_graph_still_compose(self):
+        """같은 그래프의 윗단 노드 patch(clone 의 object_patches)는 ComfyUI 규약대로 이어 감싼다 — DAVE 노드 뒤의
+        SLG 는 블록 18 에서 DAVE 를 부르고(SLG 꺼짐), SLG 가 켜지면 블록을 통째로 건너뛴다. 두 번 돌려도 같다."""
+        torch = self.torch
+        for _ in range(2):
+            chained = self._slg(self._dave(self.base, 0.5, 0.0))
+            self.assertTrue(torch.equal(self._run(chained, 18, {}), self._dc(self.block_out, 0.5)))
+            self.assertTrue(torch.equal(
+                self._run(chained, 18, {"forge_neo_slg_active": True}), self.block_in))
+            self.assertTrue(torch.equal(self._run(chained, 8, {}), self._dc(self.block_out, 0.5)))
 
 
 if __name__ == "__main__":

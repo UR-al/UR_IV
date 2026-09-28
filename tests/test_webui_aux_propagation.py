@@ -43,8 +43,13 @@ class _Response:
         self.closed = True
 
 
+# 단독 Refine·SAM3 는 원본 기준 요청(sam3_source_image)을 싣는다 — 그 요청을 따른 확장의 결과 모양('SAM3 Source: init
+# image'). 이 키가 없으면 '지원하지 않는 확장' 정보 알림이 붙는다(tests/test_sam3_init_source.py).
+SAM3_OK_INIT_SOURCE = SAM3_OK.replace("SAM3 Version: 0.30.0, ", "SAM3 Version: 0.30.0, SAM3 Source: init image, ")
+
+
 def ok(image=None):
-    return _Response({"images": [image or png_b64()], "info": info_of(SAM3_OK)})
+    return _Response({"images": [image or png_b64()], "info": info_of(SAM3_OK_INIT_SOURCE)})
 
 
 def rejected(title):

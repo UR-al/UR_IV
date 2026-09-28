@@ -58,7 +58,8 @@ def _blur(value, radius):
         return value.copy()
     # OpenCV is an existing app dependency; no animation or inference library.
     import cv2
-    return cv2.GaussianBlur(value, (0, 0), float(radius), borderType=cv2.BORDER_REFLECT_101)
+    # C 연속 배열로 넘긴다 — OpenCV 5.0 은 비연속 배열(전치·채널 뷰)을 출력 배열로 받지 않는다(mask_ops.make_overlay).
+    return cv2.GaussianBlur(np.ascontiguousarray(value), (0, 0), float(radius), borderType=cv2.BORDER_REFLECT_101)
 
 
 def relight_image(image, *, depth=None, normals=None, mask=None, settings=None):

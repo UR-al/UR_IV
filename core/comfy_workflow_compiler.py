@@ -770,12 +770,18 @@ class ComfyWorkflowCompiler:
         # LoRA: ADetailer 슬롯·SAM3/Refine 은 자기 프롬프트의 LoRA 만 받는다(Forge p2 와 같다). 위 스택은 그 패스들 중
         # 메인 목록을 쓰는 것이 없으면 첫 패스의 목록이라(_postprocess_stack_loras) 쓰지 않는 메인 LoRA 를 풀지 않고,
         # 목록이 다른 패스는 LoRA 앞에서 가른다(_adetailer_pass_stack·_sam3_pass_stack).
+        parent_pass_model = self._add_detail_daemon(graph, model, local_payload)
         image = self._add_image_extensions(
             graph, [source, 0], model, clip, vae, positive, negative, local_payload,
             sam3_detailer_class=sam3_detailer_class,
-            last_pass_model=self._add_detail_daemon(graph, model, local_payload),
+            last_pass_model=parent_pass_model,
             pass_lora_base=pass_lora_base,
         )
+        if parent_pass_model is not model:
+            # 부모 패스의 DD 노드를 읽는 것은 메인 스택을 쓰는 ADetailer 슬롯뿐이다 — SAM3/Refine 은 자기 DD 를 새로
+            # 걸고, LoRA 분기 슬롯은 이 노드를 본뜬 복제본을 쓴다(_add_pass_lora_branch). 아무도 읽지 않으면 매달린
+            # 노드로 남기지 않는다(읽히면 그래프는 예전과 바이트 단위로 같다).
+            self._drop_unread_node(graph, parent_pass_model)
         self._add_output_image(
             graph, image, local_payload, "AIStudio/postprocess", "Save postprocessed image",
         )
@@ -2350,6 +2356,25 @@ class ComfyWorkflowCompiler:
 
         return [rebase(link) for link in links]
 
+    @staticmethod
+    def _drop_unread_node(graph: _Graph, link: Any) -> bool:
+        """``link`` 의 노드를 다른 어떤 노드의 입력도 읽지 않으면 그래프에서 뺀다(뺐으면 True).
+
+        출력 노드가 아닌, 이 컴파일이 방금 만든 노드에만 쓴다 — ComfyUI 는 출력에 닿지 않는 노드를 실행하지 않지만
+        매달린 노드는 저장된 그래프를 읽는 사람을 헷갈리게 한다. id 는 다시 매기지 않는다(뒤 노드의 id 그대로).
+        """
+        if not _is_link(link):
+            return False
+        node_id = str(link[0])
+        for other_id, node in graph.nodes.items():
+            inputs = node.get("inputs") if isinstance(node, Mapping) else None
+            if str(other_id) == node_id or not isinstance(inputs, Mapping):
+                continue
+            if any(_is_link(value) and str(value[0]) == node_id for value in inputs.values()):
+                return False
+        graph.nodes.pop(node_id, None)
+        return True
+
     # ---- custom workflow ----------------------------------------------
 
     def _compile_custom(
@@ -3388,6 +3413,10 @@ class ComfyWorkflowCompiler:
         for match in (
             lambda name: "/" in folded and os.path.splitext(name.replace("\\", "/").casefold())[0] == folded,
             lambda name: _filename(name).casefold() == basename,
+            # Forge 의 <lora:이름> 은 확장자를 뗀 파일 이름(stem) 그대로다. 이름에 점이 있으면
+            # ('anima_my8t_v1.1-epoch24') 요청에 splitext 를 하면 '.1-epoch24' 를 확장자로 잘라 버리므로,
+            # 요청 이름 전체를 선택지 자신의 stem 과 먼저 비교한다(잘린 stem 비교는 그다음 — 다른 확장자용).
+            lambda name: os.path.splitext(_filename(name).casefold())[0] == basename,
             lambda name: bool(stem) and os.path.splitext(_filename(name).casefold())[0] == stem,
         ):
             candidates: dict[str, str] = {}

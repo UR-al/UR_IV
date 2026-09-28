@@ -30,9 +30,11 @@ from __future__ import annotations
 from types import MappingProxyType
 
 EXT_VERSION_AUDITED = "0.30.0"
-# 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e)까지.
+# 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
+# API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
+# 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
 # 작업 트리는 깨끗했다. v0.30.0 은 아직 릴리스 전이라 같은 버전 문자열 안에서 코드가 바뀌었다(818b8fe 도 0.30.0).
-EXT_COMMIT_AUDITED = "8878b9e"
+EXT_COMMIT_AUDITED = "0059da8"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -82,7 +84,9 @@ SCRIPTS = MappingProxyType({
                  "script-info args[1].value 는 50개 키(sam3_enable 포함). sam3_cn_module/sam3_cn_model 은 "
                  "Forge ControlNet 이 대소문자까지 그대로 찾는다(supported_preprocessors[name]·"
                  "controlnet_filename_dict[name]) — 앱은 기능 스냅샷의 /controlnet/module_list·model_list "
-                 "표기로 맞추고, 모르면 CN_MODULES 정적 폴백('None')을 쓴다(P3).",
+                 "표기로 맞추고, 모르면 CN_MODULES 정적 폴백('None')을 쓴다(P3). 단독 SAM3·Refine 은 state 에 "
+                 "요청 전용 키 sam3_source_image='init'(SAM3_REQUEST_ONLY_KEYS)를 더한다 — process() 가 Sam3Args 밖에서 "
+                 "읽고 postprocess_image 가 init 이미지로 검출·인페인트한 뒤 infotext 'SAM3 Source' 로 알린다.",
         classification=mapped(
             "core/sam3_args.py:SAM3_SPEC", "core/sam3_args.py:build_state",
             "core/sam3_args.py:CN_MODULES", "core/sam3_cn_names.py:normalize_state",
@@ -93,6 +97,9 @@ SCRIPTS = MappingProxyType({
             "frontend/src/utils/sam3ControlNet.ts",
             # 결과 infotext 'SAM3 Error'·'SAM3 Enable' → 토스트, 단독 SAM3·Refine 은 실패로 알림(P4)
             "core/sam_extra_notices.py:KEY_SAM3_ERROR", "core/sam_extra_notices.py:standalone_sam3_failure",
+            # 단독 SAM3·Refine 의 원본 기준 요청(denoise 0 부모 패스의 VAE 왕복 드리프트) → 'SAM3 Source' 결과 알림
+            "core/sam3_args.py:with_init_source", "backends/webui_backend.py:with_init_source",
+            "core/sam_extra_notices.py:KEY_SAM3_SOURCE", "core/sam_extra_notices.py:_sam3_source_notices",
             comfy=("core/comfy_workflow_compiler.py:compile_sam3_mask_only",
                    "core/comfy_workflow_compiler.py:_sam3_pass_stack",
                    "core/comfy_workflow_compiler.py:_postprocess_stack_loras",
@@ -300,6 +307,11 @@ SCRIPTS = MappingProxyType({
 # ── SAM3 state 계약 (dict 형태라 위치 대신 키로 맞춘다) ─────────────────────────────
 # Sam3Args 에는 없지만 process() 가 state 에서 따로 읽는 활성화 플래그.
 SAM3_ACTIVATION_KEYS = ("sam3_enable", "enabled")
+# 요청 전용 키 — Sam3Args(extra=forbid) 밖에서 process() 가 state 로 읽는다(scripts/!sam3.py SOURCE_STATE_KEY).
+# 단독 SAM3·Refine(backends/webui_backend — core/sam3_args.with_init_source)만 보내고 build_state(생성 안 SAM3)는
+# 보내지 않는다: 생성 안에서는 부모 출력이 곧 결과라 init 이미지로 돌리면 안 된다. 이 키를 모르는 예전 확장도 state 에서
+# 정해진 키만 골라 Sam3Args 에 넘기므로 오류 없이 무시한다(결과에 'SAM3 Source' 가 없어 앱이 정보 알림).
+SAM3_REQUEST_ONLY_KEYS = ("sam3_source_image",)
 SAM3_ENABLE_LABEL = "Enable SAM3"      # script-info args[0].label
 SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam3Args 49 + sam3_enable
 
@@ -630,6 +642,24 @@ SEMANTIC_PINS = (
     {"id": "anima38_status_key", "source": "ast", "file": "scripts/anima_3_8b.py", "name": "STATUS_KEY",
      "expected": "Anima38", "app": "core.sam_extra_notices:KEY_ANIMA38_STATUS",
      "meaning": "3.8B 상태 infotext 키('v2 bundle'·'v1 adapter'·'bypass'·'off: 이유') — 'off' 면 순정 Anima 로 생성됐다"},
+    # 단독 SAM3·Refine 원본 기준 요청 — core/sam3_args·core/sam_extra_notices 가 같은 값을 하드코딩한다. 바뀌면 요청이 조용히
+    # 무시되거나(키·값) 알림이 틀린다(infotext 키·값 — 키가 없으면 '지원 안 함' 정보 알림).
+    {"id": "sam3_source_state_key", "source": "ast", "file": "scripts/!sam3.py", "name": "SOURCE_STATE_KEY",
+     "expected": "sam3_source_image", "app": "core.sam3_args:SOURCE_STATE_KEY",
+     "meaning": "SAM3 state 의 원본 기준 요청 키 — process() 가 Sam3Args 밖에서 읽는다(SAM3_REQUEST_ONLY_KEYS)"},
+    {"id": "sam3_source_init", "source": "ast", "file": "scripts/!sam3.py", "name": "SOURCE_INIT",
+     "expected": "init", "app": "core.sam3_args:SOURCE_INIT",
+     "meaning": "요청 값(공백·대소문자 무시) — 이 값이면 init 이미지로 검출·인페인트, 다른 값은 예전처럼 부모 출력"},
+    {"id": "sam3_source_infotext_key", "source": "ast", "file": "scripts/!sam3.py", "name": "INFOTEXT_SOURCE",
+     "expected": "SAM3 Source", "app": "core.sam_extra_notices:KEY_SAM3_SOURCE",
+     "meaning": "요청했을 때만 남는 infotext 키 — 없으면 요청을 모르는 확장(정보 알림 CODE_SAM3_SOURCE_UNSUPPORTED)"},
+    {"id": "sam3_source_note_init", "source": "ast", "file": "scripts/!sam3.py", "name": "SOURCE_NOTE_INIT",
+     "expected": "init image", "app": "core.sam_extra_notices:SAM3_SOURCE_INIT_NOTE",
+     "meaning": "'SAM3 Source' 값 — init 이미지로 돌았다(마스크 밖이 원본 그대로). 다른 값은 경고"},
+    {"id": "sam3_source_note_output", "source": "ast", "file": "scripts/!sam3.py", "name": "SOURCE_NOTE_OUTPUT",
+     "expected": "output", "app": "core.sam_extra_notices:SAM3_SOURCE_OUTPUT_NOTE",
+     "meaning": "'SAM3 Source: output (<이유>)' 의 머리 — 요청했지만 조건이 안 맞아 부모 출력으로 돌았다(경고 "
+                "CODE_SAM3_SOURCE_FALLBACK 이 괄호 안 이유를 보인다)"},
     {"id": "sam3_hf_checkpoint_name", "source": "ast", "file": "sam3ext/core.py", "name": "HF_CHECKPOINT_NAME",
      "expected": "sam3.pt", "app": "core.sam_extra_notices:HF_CHECKPOINT_NAME",
      "meaning": "로컬에 없으면 생성 중 Hugging Face 에서 받는 기본 체크포인트 이름 — 앱이 생성 전에 경고한다(다-5)"},

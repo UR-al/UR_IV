@@ -6,7 +6,9 @@
 (payload)과 Forge 응답 info(JSON)를 맞대 보고 한국어 알림(``Notice``)을 만든다. 토스트로 띄우는 일은
 ``ui/sam_extra_notices_ui.py`` 가 한다.
 
-- ``result_notices(info, payload)``        생성 뒤: 'SAM3 Error', SAM3 적용 흔적 없음, 'Anima38: off: …',
+- ``result_notices(info, payload)``        생성 뒤: 'SAM3 Error', SAM3 적용 흔적 없음, 원본 기준 SAM3 요청(단독 SAM3·
+                                            Refine)의 'SAM3 Source' 없음(확장 미지원, 정보)·'output (<이유>)'(경고),
+                                            'Anima38: off: …',
                                             PAG/SEG/SLG 를 켰는데 'Anima Perturbation Guidance' 가 없음,
                                             보낸 DoRA 방식의 'DoRA mode'·'DoRA inserted' 가 없음(훅 폴백, P8),
                                             부분 LoRA 추측 변환('Anima sparse LoRA', 정보)
@@ -27,7 +29,7 @@
 - ``NoticedImage``                          단독 SAM3/Refine/ADetailer 결과(base64 str)에 info·알림을 싣는 str
 - ``NoticeThrottle``                        같은 알림을 잠시 한 번만 (자동화·배치에서 토스트 폭주 방지)
 
-infotext 키는 확장 v0.30.0 소스 기준이다: 'SAM3 Error'·'SAM3 Enable'·'SAM3 Version'(scripts/!sam3.py),
+infotext 키는 확장 v0.30.0 소스 기준이다: 'SAM3 Error'·'SAM3 Enable'·'SAM3 Version'·'SAM3 Source'(scripts/!sam3.py),
 'Anima38'(scripts/anima_3_8b.py STATUS_KEY — 옛 이름 'Anima 3.8B', Forge 파서가 자른 '8B' 도 읽는다),
 'Anima Perturbation Guidance'(scripts/anima_safe_pag.py), 'Anima sparse LoRA'(sam3ext/anima_lora_blocks.py
 INFOTEXT_SPARSE_GUESS_KEY). ``tests/test_sam_extra_notices.py`` 가 설치된 확장
@@ -57,6 +59,12 @@ logger = logging.getLogger(__name__)
 KEY_SAM3_ERROR = "SAM3 Error"
 KEY_SAM3_ENABLE = "SAM3 Enable"
 KEY_SAM3_VERSION = "SAM3 Version"
+# 원본 기준 요청(state 'sam3_source_image': 'init' — core/sam3_args.with_init_source)을 받았을 때만 쓴다: 'init image' =
+# init 이미지로 돌았다, 'output (<이유>)' = 조건이 안 맞아 예전처럼 부모 패스 출력으로(scripts/!sam3.py INFOTEXT_SOURCE·
+# SOURCE_NOTE_*, SEMANTIC_PINS 가 지킨다). 요청하지 않은 생성에는 키가 없다.
+KEY_SAM3_SOURCE = "SAM3 Source"
+SAM3_SOURCE_INIT_NOTE = "init image"
+SAM3_SOURCE_OUTPUT_NOTE = "output"
 KEY_ANIMA38_STATUS = "Anima38"                          # v2 bundle / v1 adapter / bypass / off: <이유>
 ANIMA38_LEGACY_STATUS_KEYS = ("Anima 3.8B", "8B")       # 옛 키, Forge 파서가 '.' 에서 자른 이름
 KEY_PAG = "Anima Perturbation Guidance"                 # PAG/SEG/SLG 가 실제로 붙었을 때만 쓴다
@@ -102,8 +110,11 @@ CODE_FORGE_OPTION_MISSING = "forge_option_missing"    # 설정한 Forge 옵션�
 CODE_FORGE_OPTION_UNVERIFIED = "forge_option_unverified"   # 옵션 목록을 확인하지 못해 보내지 않음
 CODE_FORGE_OPTION_REJECTED = "forge_option_rejected"  # Forge 가 앱이 넣은 옵션을 500(KeyError·설정 잠금)으로 거절 → 빼고 다시
 CODE_FORGE_OPTION_FROZEN = "forge_option_frozen"      # 설정 잠금으로 거절됐던 옵션 — 기억해 두고 보내지 않음(P10 검토 3)
+# 단독 SAM3·Refine 의 원본 기준 요청(core/sam3_args.with_init_source) — denoise 0 부모 패스의 VAE 왕복 드리프트
+CODE_SAM3_SOURCE_UNSUPPORTED = "sam3_source_unsupported"   # 결과: 'SAM3 Source' 없음 — 이 sam-extra 는 요청을 모른다(정보)
+CODE_SAM3_SOURCE_FALLBACK = "sam3_source_fallback"         # 결과: 'output (<이유>)' — 요청했지만 부모 출력으로 돌았다(경고)
 
-# 단독 SAM3/Refine 에서 결과가 원본과 같다는 뜻인 알림 (그 결과는 저장하지 않는다)
+# SAM3 가 적용되지 않았다는 뜻인 알림 — 단독 SAM3/Refine 은 그 결과(원본 또는 VAE 왕복본)를 저장하지 않는다
 SAM3_FAILURE_CODES = (CODE_SAM3_ERROR, CODE_SAM3_NOT_APPLIED)
 
 HF_CHECKPOINT_NAME = "sam3.pt"          # sam3ext/core.py HF_CHECKPOINT_NAME
@@ -141,6 +152,9 @@ NOTICE_MIN_TTL_S = {
     CODE_FORGE_OPTION_UNVERIFIED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_FORGE_OPTION_REJECTED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_FORGE_OPTION_FROZEN: PRE_GENERATION_NOTICE_TTL_S,
+    # 원본 기준 SAM3 알림도 확장·설정이 그대로면 장마다 같다(배치 SAM3 100장이 30초마다 다시 띄우지 않게)
+    CODE_SAM3_SOURCE_UNSUPPORTED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_SAM3_SOURCE_FALLBACK: PRE_GENERATION_NOTICE_TTL_S,
 }
 # 띄울 때 GUI 가 기능 스냅샷을 다시 받아야 하는 알림(연결 때 받은 스냅샷이 틀렸다는 뜻) —
 # ui/sam_extra_notices_ui.show_notices 가 _refresh_sam_extra_capabilities(force=True) 를 부른다.
@@ -196,7 +210,8 @@ _KEYED_SETTINGS = ("sam3_cn_module", "sam3_cn_model", "sam3_sampler", "sam3_sche
 class Notice:
     """사용자에게 보일 알림 한 건.
 
-    ``detail`` 은 확장이 남긴 원문(로그·중복 판정용), ``hint`` 는 확인할 설정 한 문장(단독 경로가 자기 문구를
+    ``detail`` 은 확장이 남긴 원문(로그·중복 판정용 — 장마다 숫자만 다른 원문은 ``key`` 가 알림을 억제하지 못하므로
+    종류로 줄여 둔다: CODE_SAM3_SOURCE_FALLBACK), ``hint`` 는 확인할 설정 한 문장(단독 경로가 자기 문구를
     만들 때 쓴다 — ``standalone_failure_text``).
     """
 
@@ -264,8 +279,10 @@ def notices_of(value: Any) -> tuple[Notice, ...]:
 def standalone_sam3_failure(value: Any) -> Optional[Notice]:
     """단독 SAM3/Refine 결과가 'SAM3 가 돌지 않은 원본'인가 — 그렇다면 그 알림 (결과는 저장하지 않는다).
 
-    단독 경로는 부모 img2img 를 denoise 0 으로 통과시키므로 SAM3 가 실패하면 결과가 입력과 같다. 그 파일을
-    '_sam3'·'_refine' 이름으로 저장하면 적용된 것처럼 보이므로 워커가 실패로 알린다.
+    단독 경로는 부모 img2img 를 denoise 0 으로 통과시키므로 SAM3 가 실패하면 결과는 SAM3 가 손대지 않은 이미지다 —
+    확장이 원본 기준 요청('sam3_source_image', ``KEY_SAM3_SOURCE``)을 따랐으면 원본 그대로, 모르는 예전 확장이면
+    VAE 왕복으로 조금 바뀐 원본. 어느 쪽이든 그 파일을 '_sam3'·'_refine' 이름으로 저장하면 적용된 것처럼 보이므로
+    워커가 실패로 알린다.
     """
     return next((n for n in notices_of(value) if n.code in SAM3_FAILURE_CODES), None)
 
@@ -382,6 +399,12 @@ class RequestedFeatures:
     @property
     def anima38_expected(self) -> bool:
         return bool(self.anima38 is not None and self.anima38.enabled and not self.anima38.bypass)
+
+    @property
+    def sam3_init_source(self) -> bool:
+        """원본 기준 SAM3 요청(단독 SAM3·Refine) — 확장 process() 와 같은 규칙(공백·대소문자 무시)."""
+        value = (self.sam3_state or {}).get(sam3_args.SOURCE_STATE_KEY)
+        return str(value or "").strip().lower() == sam3_args.SOURCE_INIT
 
 
 def _sam3_request(block: Optional[Mapping]) -> tuple[bool, dict]:
@@ -674,6 +697,60 @@ def anima38_off_hint(status: str, *, kind: Optional[str] = None) -> str:
 # ── 생성 뒤 알림 ───────────────────────────────────────────────────────────────
 PROPAGATED_SUFFIX = " (메인 생성 설정에서 전달됨)"
 
+_SOURCE_OUTPUT_RE = re.compile(rf"^{re.escape(SAM3_SOURCE_OUTPUT_NOTE)}\s*\((.*)\)\s*$", re.IGNORECASE | re.DOTALL)
+# 'output (<이유>)' 의 이유 → 확인할 것 (사실만 — 그 밖의 이유는 원문만 보인다)
+_SOURCE_FALLBACK_HINTS = (
+    ("size ", "부모 패스 결과의 크기가 원본과 달랐습니다"),
+    ("face restoration", "Forge 의 얼굴 복원(Restore faces) 설정이 켜져 있습니다"),
+    ("init image unreadable", "Forge 가 init 이미지를 읽지 못했습니다 — Forge 콘솔의 '[-] SAM3' 줄을 확인하세요"),
+)
+
+
+def _source_reason_kind(reason: str) -> str:
+    """폴백 이유의 종류(중복 판정용) — 숫자만 다른 이유('size 1199x1601 != 1192x1600')는 한 종류('size #x# != #x#')다.
+
+    ``Notice.key`` 가 detail 을 쓰므로 원문을 detail 로 두면 크기가 다른 이미지마다 억제 키가 새로 생겨,
+    크롭·스크린샷 폴더의 단독 SAM3 배치가 NOTICE_MIN_TTL_S 를 무시하고 장마다 경고를 띄운다. 원문은 문구에 남는다.
+    """
+    return re.sub(r"\d+", "#", " ".join(reason.lower().split()))
+
+
+def _sam3_source_notices(images: Sequence[Mapping]) -> list[Notice]:
+    """원본 기준 SAM3 요청(단독 SAM3·Refine)의 결과 — 확장이 'SAM3 Source' 로 어느 이미지를 썼는지 알린다.
+
+    denoise 0 이어도 부모 img2img 는 VAE 왕복으로 픽셀을 조금씩 바꾼다. 확장이 init 이미지를 쓰면('init image')
+    마스크 밖이 원본 그대로다. 키가 아예 없으면 이 요청을 모르는 예전 sam-extra 다(정보 — 결과는 예전과 같다).
+    'output (<이유>)' 면 요청했지만 조건(img2img·마스크 없음·denoise 0·얼굴 복원 없음·같은 크기 등)이 안 맞아 출력으로
+    돌았다(경고). 경고는 이유의 종류마다 하나다(``_source_reason_kind``). 호출자는 SAM3 가 실제로 적용된 결과('SAM3 Error' 없음, 'SAM3 Enable' 있음)에서만 부른다 —
+    실패는 CODE_SAM3_ERROR·CODE_SAM3_NOT_APPLIED 가 알린다.
+    """
+    values = [str(p.get(KEY_SAM3_SOURCE)).strip() for p in images if p.get(KEY_SAM3_SOURCE) not in (None, "")]
+    if not values:
+        return [Notice(
+            CODE_SAM3_SOURCE_UNSUPPORTED, LEVEL_INFO,
+            "연결된 sam-extra 는 원본 기준 SAM3 를 지원하지 않아, SAM3 가 부모 img2img 패스의 출력(VAE 왕복)을 "
+            "썼습니다 — 마스크 밖도 조금 바뀔 수 있습니다. sam-extra 를 업데이트한 뒤 Forge Settings → Reload UI "
+            "(또는 Forge 재시작)를 하세요.",
+            feature="sam3", detail=KEY_SAM3_SOURCE)]
+    out: list[Notice] = []
+    kinds: set[str] = set()
+    for value in dict.fromkeys(values):
+        if value.lower() == SAM3_SOURCE_INIT_NOTE:
+            continue
+        match = _SOURCE_OUTPUT_RE.match(value)
+        reason = match.group(1).strip() if match else value
+        kind = _source_reason_kind(reason)
+        if kind in kinds:
+            continue            # 한 결과에 크기만 다른 폴백이 여러 장 — 첫 원문 하나로
+        kinds.add(kind)
+        hint = next((text for prefix, text in _SOURCE_FALLBACK_HINTS if reason.lower().startswith(prefix)), "")
+        out.append(Notice(
+            CODE_SAM3_SOURCE_FALLBACK, LEVEL_WARNING,
+            "원본 기준 SAM3 를 요청했지만 확장이 부모 img2img 패스의 출력(VAE 왕복)으로 돌렸습니다 — 마스크 밖도 조금 "
+            f"바뀔 수 있습니다{' — ' + hint if hint else ''}. (이유: {_short(reason, 120)})",
+            feature="sam3", detail=f"{SAM3_SOURCE_OUTPUT_NOTE} ({kind})", hint=hint))
+    return out
+
 
 def _dora_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
     """보낸 DoRA 방식이 결과 infotext 에 없으면 경고 — 확장은 순정이 아닌 방식을 켠 요청마다(LoRA 가 없어도)
@@ -753,6 +830,9 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
             "SAM3 를 켰지만 결과에 SAM3 적용 기록('SAM3 Enable')이 없습니다 — 확장이 설정을 받지 못했을 수 "
             "있습니다(구버전 확장은 설정 검증 실패를 기록 없이 넘깁니다). Forge 콘솔의 '[-] SAM3' 줄을 확인하세요.",
             feature="sam3"))
+    elif request.sam3 and request.sam3_init_source:
+        # 단독 SAM3·Refine 의 원본 기준 요청 — SAM3 가 적용된 결과에서만(실패는 위 두 알림이 말한다)
+        out.extend(_sam3_source_notices(images))
 
     # Anima 3.8B — 'off: …' 는 3.8B 가 켜져야 했을 때(v2 번들 또는 명시적으로 켬)만 남는다.
     statuses = [_anima38_status(p) for p in images]
@@ -1268,8 +1348,9 @@ __all__ = [
     "CODE_FORGE_OPTION_MISSING", "CODE_FORGE_OPTION_REJECTED", "CODE_FORGE_OPTION_UNVERIFIED",
     "CODE_LORA_SPARSE_GUESS", "CODE_PAG_DROPPED", "CODE_PROPAGATION_DROPPED", "CODE_PROPAGATION_RETRIED",
     "CODE_REQUEST_REJECTED", "CODE_SAM3_ERROR", "CODE_SAM3_HF_DOWNLOAD", "CODE_SAM3_NOT_APPLIED",
+    "CODE_SAM3_SOURCE_FALLBACK", "CODE_SAM3_SOURCE_UNSUPPORTED",
     "CODE_SCRIPT_MISSING", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
-    "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",
+    "KEY_SAM3_SOURCE", "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",
     "Notice", "NoticeThrottle", "NoticedImage", "PRE_GENERATION_NOTICE_TTL_S", "PROPAGATED_SUFFIX",
     "REFRESH_CAPABILITIES_CODES", "RESULT_NOTICE_TTL_S", "RequestedFeatures", "anima38_app_default_notice",
     "anima38_comfy_v1_notice", "anima38_off_hint",

@@ -59,7 +59,8 @@ def _sam3_failure(result_b64) -> tuple[str, bool]:
     """Forge 가 'SAM3 Error' 를 남겼거나 SAM3 적용 기록이 없으면 (사용자 문구, 다음 이미지도 같게 실패하는가).
     실패가 아니면 ('', False).
 
-    부모 img2img 가 denoise 0 이라 그 결과는 입력 그대로다 — '_sam3' 로 저장하지 않고 실패로 알린다
+    SAM3 가 아무것도 고치지 않았으므로 결과는 원본(확장이 원본 기준 요청 sam3_source_image 를 따를 때)이거나
+    denoise 0 부모 img2img 의 VAE 왕복본(조금 바뀐 원본)이다 — '_sam3' 로 저장하지 않고 실패로 알린다
     (core/sam_extra_notices.standalone_sam3_failure). ComfyUI 결과(평범한 str)는 알림이 없다.
     """
     from core.sam_extra_notices import sam3_failure_repeats, standalone_failure_text, standalone_sam3_failure

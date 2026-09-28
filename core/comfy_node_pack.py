@@ -29,7 +29,11 @@ PACK_ID = "ai_studio_forge_parity"
 # 1.4.1: DAVE judges its steps by the sigma before Detail Daemon scaled it (optional
 # ``pre_dd_sigma`` input / suite ``guid_dave_pre_dd``, default on); inputs a 1.4.0 pack
 # accepts are unchanged, so the compiler needs no gate.
-PACK_VERSION = "1.4.1"
+# 1.4.2: SAM3 mask preview/convex hull hand OpenCV C-contiguous arrays (OpenCV 5.0 refused
+# VAEDecode's movedim view, so every in-generation SAM3 failed) and DAVE/SLG wrap the
+# ModelPatcher's original block ``forward`` instead of a previous run's wrapper; node
+# inputs are unchanged, so the compiler needs no gate.
+PACK_VERSION = "1.4.2"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

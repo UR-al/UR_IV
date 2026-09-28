@@ -215,6 +215,24 @@ def build_state(settings=None, *, prompt: str = '', negative_prompt: str = '',
     return state
 
 
+# ── 단독 SAM3·Refine 전용: 원본 기준 요청 ─────────────────────────────────────
+# 확장 scripts/!sam3.py 의 SOURCE_STATE_KEY / SOURCE_INIT (core/sam_extra_contract SEMANTIC_PINS 가 지킨다).
+# 단독 경로는 부모 img2img 를 denoise 0 으로 통과시키지만, denoise 0 이어도 VAE 인코드·디코드를 거쳐 픽셀이 조금씩
+# 바뀐다 — SAM3 가 그 출력을 쓰면 마스크 밖까지 원본과 달라진다(드리프트). 이 키가 있으면 확장이 init 이미지로
+# 검출·인페인트하고 infotext 'SAM3 Source' 로 알린다(core/sam_extra_notices). Sam3Args 밖에서 state 로만 읽는 키라
+# 모르는 예전 빌드도 오류 없이 무시한다.
+# ★ SAM3_SPEC·build_state 에는 넣지 않는다 — 생성 안 SAM3(t2i·i2i)는 부모 출력이 곧 결과라 보내면 안 된다.
+SOURCE_STATE_KEY = 'sam3_source_image'
+SOURCE_INIT = 'init'
+
+
+def with_init_source(state) -> dict:
+    """SAM3 state 사본에 원본 기준 요청 키를 더한다 — 단독 SAM3·Refine(backends/webui_backend) 전용."""
+    out = dict(state) if isinstance(state, dict) else {}
+    out[SOURCE_STATE_KEY] = SOURCE_INIT
+    return out
+
+
 def build_alwayson(settings=None, *, prompt: str = '', negative_prompt: str = '',
                    capabilities=None) -> dict:
     """{"SAM3 Mask": {"args": [state]}} 조각 생성."""

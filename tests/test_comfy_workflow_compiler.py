@@ -195,6 +195,51 @@ class TestDefaultCompilation(unittest.TestCase):
                 )
                 self.assertEqual(_node(graph, "LoraLoader")[1]["inputs"]["lora_name"], expected)
 
+    def test_forge_lora_stem_with_dots_resolves_to_its_own_file(self):
+        """(B3) Forge 의 <lora:이름> 은 확장자를 뗀 파일 이름이다. 예전에는 요청 이름에 splitext 를 해
+        'anima_my8t_v1.1-epoch24' 가 'anima_my8t_v1' 이 되었고(사용자 LoRA 295개 중 145개가 점 있는 이름), 없는 LoRA 로
+        건너뛰거나 잘린 이름의 다른 LoRA 를 조용히 골랐다. 요청 이름 전체를 선택지 자신의 stem 과 먼저 비교한다."""
+        dotted = "anima/anima_my8t_v1.1-epoch24.safetensors"
+        match = ComfyWorkflowCompiler._match_choice
+        cases = (
+            # (요청, 선택지, 기대)
+            ("anima_my8t_v1.1-epoch24", (dotted, "styles/ink.safetensors"), dotted),
+            ("ANIMA_My8t_V1.1-Epoch24", (dotted,), dotted),                                # 대소문자
+            ("anima_my8t_v1.1-epoch24.safetensors", (dotted,), dotted),                    # 정확한 파일 이름
+            ("anima/anima_my8t_v1.1-epoch24", (dotted,), dotted),                          # 폴더 + stem
+            ("anima\\anima_my8t_v1.1-epoch24", (dotted,), dotted),
+            ("anima/anima_my8t_v1.1-epoch24.safetensors", (dotted,), dotted),              # 전체 경로
+            # 잘린 이름의 다른 LoRA 가 있어도 점 있는 이름은 자기 파일이다(예전: anima_my8t_v1 을 조용히 골랐다).
+            ("anima_my8t_v1.1-epoch24", ("anima_my8t_v1.safetensors", dotted), dotted),
+            ("anima_my8t_v1", ("anima_my8t_v1.safetensors", dotted), "anima_my8t_v1.safetensors"),
+            ("style_v2.5", ("style_v2.5.pt",), "style_v2.5.pt"),
+            # 다른 확장자로 적은 이름은 예전처럼 잘린 stem 으로 찾는다.
+            ("style_v2.5.ckpt", ("comfy/style_v2.5.safetensors",), "comfy/style_v2.5.safetensors"),
+            ("anima_my8t_v1.1-epoch25", (dotted,), None),
+        )
+        for requested, choices, expected in cases:
+            with self.subTest(requested=requested, choices=choices):
+                self.assertEqual(match(requested, list(choices)), expected)
+        # 같은 stem 이 두 폴더에 있으면 고르지 않는다(기존 모호성 규칙) — 폴더를 적으면 풀린다.
+        twins = ["forge/anima_my8t_v1.1-epoch24.safetensors", "comfy/anima_my8t_v1.1-epoch24.safetensors"]
+        with self.assertRaisesRegex(WorkflowCompileError, "여러.*리소스|리소스.*여러"):
+            match("anima_my8t_v1.1-epoch24", twins)
+        self.assertEqual(match("comfy/anima_my8t_v1.1-epoch24", twins), twins[1])
+        # 프롬프트 태그 그대로(Forge 형식) — 건너뛰지 않고 그 파일을 건다.
+        capabilities = _capabilities()
+        capabilities["LoraLoader"]["input"]["required"]["lora_name"] = _choice(
+            "anima_my8t_v1.safetensors", dotted, "styles/ink.safetensors",
+        )
+        graph = ComfyWorkflowCompiler(capabilities).compile(
+            "txt2img", "checkpoint.safetensors", {
+                "prompt": "portrait, <lora:anima_my8t_v1.1-epoch24:0.8>", "seed": 7,
+            },
+        )
+        self.assertEqual(
+            [node["inputs"]["lora_name"] for node in graph.values() if node["class_type"] == "LoraLoader"],
+            [dotted],
+        )
+
     def test_main_and_hires_modules_preserve_explicit_relative_paths(self):
         capabilities = _capabilities()
         capabilities["CLIPLoader"]["input"]["required"]["clip_name"] = _choice(

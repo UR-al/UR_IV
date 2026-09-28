@@ -31,6 +31,12 @@ unmatched sigma, i.e. step 0).
 and the suite, so the DAVE gate and the positional ``transformer_options``
 fallback are identical in both. The same wrapper also carries the suite's SLG
 block skip, which is not gated by tau (it follows ``forge_neo_slg_active``).
+
+The wrapped ``forward`` comes from ``ModelPatcher.get_model_object`` (the
+ComfyUI convention for object patches, e.g. ``model_sampling``), never from the
+live module: ComfyUI keeps a finished run's object patches applied (switching
+clones only detaches, ``unpatch_all=False``), so ``blocks[i].forward`` can be
+the previous DAVE/SLG wrapper and every run would nest on top of the last.
 """
 
 # The DC edit, the attenuation rule and the tau gate are adapted from
@@ -178,6 +184,28 @@ def dave_gate_active(options: dict[str, Any], tau: Any, pre_dd: bool = False) ->
     return True
 
 
+def _block_forward(patched: Any, blocks: list[Any], index: int) -> Any:
+    """The ``forward`` a new wrapper for block ``index`` must call.
+
+    ``get_model_object`` (comfy/model_patcher.py, 0.36 :751-771) returns this
+    clone's own object patch first (an upstream DAVE/SLG node in the same
+    graph, which the new wrapper then chains onto), then the patcher's backup
+    of the original attribute, and only then the module attribute. The backup
+    dict is shared by every clone of one base model, and ``patch_model`` fills
+    it the first time a key is patched, so while a previous run's wrapper is
+    still set on the module the backup holds the original bound ``forward``.
+    Reading ``blocks[index].forward`` instead returned that stale wrapper
+    (history-dependent results: a tau/pre-DD-off DAVE from the last run kept
+    running inside the new one and could collapse the image).
+    """
+
+    get_model_object = getattr(patched, "get_model_object", None)
+    if callable(get_model_object):
+        return get_model_object(f"diffusion_model.blocks.{index}.forward")
+    # Stand-ins without the ModelPatcher API (tests, non-Comfy callers).
+    return blocks[index].forward
+
+
 def _patch_anima_blocks(
     model: Any,
     *,
@@ -222,7 +250,7 @@ def _patch_anima_blocks(
         raise RuntimeError("SLG has no valid target blocks for this model.")
     tau = float(dave_tau) if dave_on else 0.0
     for index in sorted(dave_targets | slg_targets):
-        original = blocks[index].forward
+        original = _block_forward(patched, blocks, index)
 
         def combined_forward(*args, _index=index, _original=original, **kwargs):
             options = _transformer_options(args, kwargs)

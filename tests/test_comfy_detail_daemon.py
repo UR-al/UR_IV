@@ -653,6 +653,52 @@ class CompilerPassModelTests(unittest.TestCase):
                 self.assertEqual(_one(graph, kind)[1]["inputs"]["model"], [sam_id, 0])
                 self.assertEqual(sam["inputs"]["cfg_scale_override"], 4.0)
 
+    def test_postprocess_parent_pass_dd_only_when_something_reads_it(self):
+        """(B6) 부모 패스의 DD 는 메인 스택을 쓰는 ADetailer 슬롯만 읽는다 — SAM3/Refine 은 자기 DD 를 새로 걸고, LoRA
+        분기 슬롯은 그 노드를 본뜬 복제본을 쓴다. 예전에는 읽는 곳이 없어도 'Anima detail daemon' 노드가 그래프에
+        매달려 있었다. 읽히면 그래프는 예전(노드를 늘 남기던 컴파일)과 바이트 단위로 같다."""
+        def scripts_without(payload, *names):
+            folded = {name.casefold() for name in names}
+            payload["alwayson_scripts"] = {
+                key: value for key, value in payload["alwayson_scripts"].items() if key.casefold() not in folded}
+            return payload
+
+        def branch_slot(payload):
+            payload["alwayson_scripts"]["ADetailer"]["args"][2]["ad_prompt"] = "face, <lora:alice:0.7>"
+            return payload
+
+        cases = {
+            # 이름: (payload, 부모 DD 가 읽히는가, 남아야 할 DD 제목)
+            "SAM3 only": (scripts_without(_dd_payload(enable_hr=False), "ADetailer"), False, {SAM3_DD}),
+            "ADetailer only": (scripts_without(_dd_payload(enable_hr=False), "SAM3 Mask"), True, {BASE_DD}),
+            "ADetailer + SAM3": (_dd_payload(enable_hr=False), True, {BASE_DD, SAM3_DD}),
+            "ADetailer LoRA branch + SAM3": (
+                branch_slot(_dd_payload(enable_hr=False)), False,
+                {SAM3_DD, f"{BASE_DD} (ADetailer LoRA branch)"}),
+        }
+        keep_every_node = mock.patch.object(
+            ComfyWorkflowCompiler, "_drop_unread_node", staticmethod(lambda graph, link: False))
+        for kind in ("ForgeNeoSAM3Detailer", "ForgeNeoSAM3Refine"):
+            for label, (payload, read, titles) in cases.items():
+                payload = dict(payload, seed=7)          # 두 컴파일이 같은 시드를 쓰게(-1 이면 매번 새로 뽑는다)
+                with self.subTest(kind=kind, case=label):
+                    graph = self._postprocess(json.loads(json.dumps(payload)), kind)
+                    with keep_every_node:
+                        before = self._postprocess(json.loads(json.dumps(payload)), kind)
+                    self.assertEqual(set(_dd_by_title(graph)), titles)
+                    outputs = [node_id for node_id, node in graph.items()
+                               if node["class_type"] in {"SaveImage", "PreviewImage"}]
+                    live = set(outputs) | ComfyWorkflowCompiler._upstream_node_ids(
+                        graph, [link for node_id in outputs for link in graph[node_id]["inputs"].values()])
+                    self.assertEqual({node_id for node_id, _ in _nodes(graph, "ForgeNeoAnimaDetailDaemon")} - live,
+                                     set())
+                    if read:
+                        self.assertEqual(json.dumps(graph, sort_keys=True), json.dumps(before, sort_keys=True))
+                    else:
+                        base_id, _ = _dd_by_title(before)[BASE_DD]
+                        self.assertNotIn(base_id, live | set(graph))
+                        self.assertEqual(graph, {key: value for key, value in before.items() if key != base_id})
+
     def test_postprocess_hires_pass_dd_does_not_run(self):
         # dd_hires 켬 — img2img 에는 hires 패스가 없다(보조 전달도 이 블록을 빼지만 저장 문맥 경로도 같게)
         graph = self._postprocess(_dd_payload(hires_pass=True, enable_hr=False))

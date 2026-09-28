@@ -55,6 +55,22 @@ model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
 
+## 1.4.2 changes
+
+- SAM3 on OpenCV 5.0: the IMAGE from `VAEDecode` is a `movedim(1, -1)` view whose strides survive
+  the mask blend, and OpenCV 5.0 refuses such a non-C-contiguous array as a drawing target
+  (`cv2.rectangle`: "Layout of the output array img is incompatible with cv::Mat"), so every
+  in-generation `ForgeNeoSAM3Mask` failed while drawing its preview boxes. The preview, the convex
+  hull (`fillPoly` into a `zeros_like` copy of a transposed mask had the same problem), the
+  edge-aware outline, dilation and the relight blur now hand OpenCV C-contiguous arrays. Results
+  are unchanged for contiguous inputs.
+- DAVE / SLG block wrappers: ComfyUI leaves a finished run's object patches applied, so reading
+  `blocks[i].forward` wrapped the previous run's wrapper and results depended on the run history
+  (a previous DAVE with a different tau or pre-DD setting kept running inside the new one). The
+  wrapped `forward` now comes from `ModelPatcher.get_model_object`, i.e. the original block
+  method, or an upstream DAVE/SLG node's patch in the same graph, which is chained like every
+  ComfyUI object patch.
+
 ## 1.4.1 changes
 
 - DAVE + Detail Daemon: Detail Daemon hands the model a scaled sigma, which is on no schedule, so
