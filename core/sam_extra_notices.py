@@ -173,10 +173,11 @@ SAM_EXTRA_FEATURES = {
     _TITLE_DORA.lower(): ("dora", "DoRA 추론 방식"),
     _TITLE_VAE2X.lower(): ("vae2x", "VAE 2x"),
 }
-# sam-extra 밖 확장: 소문자 제목 → (기능, 확장 이름)
+# 기능 스냅샷(SAM_EXTRA_FEATURES) 밖 제목: 소문자 제목 → (기능, 제공 확장 이름). NegPiP 는 2026-09-30 부터 sam-extra 에
+# 내장(sd-forge-negpip 편입)됐지만 스냅샷 기능이 아니므로 여기 둔다.
 OTHER_EXTENSIONS = {
     "adetailer": ("adetailer", "ADetailer 확장(Bing-su/adetailer)"),
-    "negpip": ("negpip", "NegPiP 확장(sd-webui-negpip)"),
+    "negpip": ("negpip", "sam-extra 확장(forge_sam3_extension)의 내장 NegPiP (예전 sd-forge-negpip)"),
     "controlnet": ("controlnet", "ControlNet(Forge 내장 sd_forge_controlnet)"),
 }
 

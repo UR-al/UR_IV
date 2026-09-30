@@ -15,7 +15,7 @@
 | `tests/_sam_extra_ext.py` | 확장 위치 찾기와 skip 규칙을 가드 테스트끼리 공유한다 (`test_sam3_args`, `test_anima_guidance` 도 쓴다). |
 | `core/sam_extra_notices.py` · `tests/test_sam_extra_notices.py` | 결과 infotext(`SAM3 Error`, `Anima38: off: …`, `Anima Perturbation Guidance` 누락)와 생성 전 조건(CFG≈1 의 SMC/APG/CWM, `sam3.pt` 자동 다운로드, 없는 스크립트), HTTP 422 본문을 사용자 알림으로 바꾼다(P4). 테스트의 `ExtensionSourceTests` 가 이 infotext 키와 가드 함수가 설치된 확장에 그대로 있는지 본다. |
 
-레지스트리가 다루는 범위는 다음과 같다. always-on 스크립트 제목(10개), 스크립트별 `ui()` 반환 순서와 `ARG_NAMES`, API 경로가 `_arg(N)` 으로 읽는 인덱스, `Sam3Args` 필드·기본값·어노테이션 범위와 `process()` 가 state 에서 읽는 키, Forge 옵션 키(15개 — 그중 8개는 요청마다 덮어쓸 수 있다, `core/forge_override_settings.SPECS`), FastAPI 라우트, XYZ 축 라벨(104개), Gradio 전용 이름 엔드포인트(앱이 기대면 안 되는 것), 모듈 파일 단위, `preload.py` 명령줄 플래그, 의미 핀(Detail Daemon 배율, 공유 메모 스키마·한도, LoRA Manager `_BRIDGE_JS` 메시지 모양 등), 앱 spec 과 라이브 값의 알려진 차이.
+레지스트리가 다루는 범위는 다음과 같다. always-on 스크립트 제목(script-info 에 나오는 11개와 `ui()` 가 None 이라 나오지 않는 NegPiP — `script_info=False`), 스크립트별 `ui()` 반환 순서와 `ARG_NAMES`, API 경로가 `_arg(N)` 으로 읽는 인덱스, `Sam3Args` 필드·기본값·어노테이션 범위와 `process()` 가 state 에서 읽는 키, Forge 옵션 키(18개 — 그중 8개는 요청마다 덮어쓸 수 있다, `core/forge_override_settings.SPECS`), FastAPI 라우트, XYZ 축 라벨(104개), Gradio 전용 이름 엔드포인트(앱이 기대면 안 되는 것), 모듈 파일 단위, `preload.py` 명령줄 플래그, 의미 핀(Detail Daemon 배율, 공유 메모 스키마·한도, LoRA Manager `_BRIDGE_JS` 메시지 모양 등), 앱 spec 과 라이브 값의 알려진 차이.
 
 ### 소스와 픽스처를 둘 다 보는 이유
 
@@ -35,6 +35,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
 - **mapped**: 앱이 쓴다. `app` 에 `"파일:심볼"` 을 적는다. 테스트가 그 파일에 그 심볼이 실제로 있는지 확인한다. 앱 코드를 옮기면 여기도 함께 고친다. 알려진 빈틈은 `gaps` 에 작업 패키지 id 와 함께 적는다.
 - **ignored**: 앱과 무관하다. Forge 화면 전용이거나 해당 없는 항목이다. `reason` 이 필요하다.
 - **deferred**: 아직 앱에 없다. `package`(gap matrix 의 P1-P21, 보류 항목은 `HOLD`)와 `reason` 이 필요하다.
+- 스크립트의 `script_info=False` 는 `ui()` 가 None 인 always-on 스크립트(NegPiP)에만 쓴다. Forge 가 `api_info` 를 만들지 않아 script-info·픽스처에 없고 shape 도 없다. 계약 테스트는 `ui()` 의 모든 return 이 None 인지 AST 로 본다.
 - `optional=True` 는 병렬로 들어오는 중인 항목에만 쓴다. 확장이나 앱 한쪽에 아직 없어도 통과한다. 양쪽이 자리 잡으면 표시를 지운다. 지금은 쓰는 항목이 없다(공유 메모 라우트와 파일은 양쪽이 자리 잡아 표시를 지웠다).
 - mapped 의 앱 참조는 파이썬 파일이면 심볼이 코드 식별자로 있어야 한다. 주석이나 문자열에만 남은 이름은 인정하지 않는다.
 

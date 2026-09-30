@@ -76,8 +76,12 @@ class SpecTests(unittest.TestCase):
         for key in fos.OPTION_KEYS:
             with self.subTest(key=key):
                 self.assertIn("core/forge_override_settings.py:SPECS", reg.OPTIONS[key]["app"])
-        deferred = {key for key, entry in reg.OPTIONS.items() if entry["status"] == reg.DEFERRED}
-        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy", "sam3_anima38_reference_ipa"})   # P20
+        deferred = {key: entry["package"] for key, entry in reg.OPTIONS.items() if entry["status"] == reg.DEFERRED}
+        self.assertEqual(deferred, {
+            "sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20",
+            # VAE DeGrid — 앱에 둘지 사용자 결정 대기(보류). 둔다면 bool 인 keep_loaded 만 요청 override 후보다
+            "sam3_degrid_device": reg.HOLD, "sam3_degrid_gpu_precision": reg.HOLD, "sam3_degrid_keep_loaded": reg.HOLD,
+        })
         self.assertNotIn("P10", {entry.get("package") for entry in reg.OPTIONS.values()})
 
     def test_sparse_infotext_is_the_same_key_the_result_notice_reads(self):

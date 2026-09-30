@@ -26,9 +26,10 @@ Anima38 블록을 422 로 거절했을 때 알림 수준을 정한다: 앱 기�
 체크포인트를 지정하지 않아 Forge 에 지금 걸린 체크포인트로 돌고, Comfy 단독 후처리는 저장된 문맥의 모델로 돈다.
 실제 모델을 모르거나 다르면 뺀다(정보 로그).
 
-NegPiP 은 Forge 에 보조 전달하지 않는다: sd-forge-negpip 은 ``ui()`` 가 None 이라 인자가 0개이고 always-on 이라
-요청과 무관하게 돈다(extensions/sd-forge-negpip/scripts/negpip.py:91-92, modules/api/api.py:350-354). 보내도 효과는
-없고 설치 안 된 Forge 에서 422 만 생긴다. Comfy 는 ``_add_negpip`` 로 적용하므로 보낸다. 손 재구성은 메인 경로
+NegPiP 은 Forge 에 보조 전달하지 않는다: sam-extra 내장 NegPiP(2026-09-30 sd-forge-negpip 편입,
+extensions/forge_sam3_extension/scripts/negpip.py — 예전 extensions/sd-forge-negpip/scripts/negpip.py 와 파일 이름·제목·
+계약이 같아 ADetailer 가 파일 이름 'negpip' 으로 자기 패스에 넣는 것도 그대로)은 ``ui()`` 가 None 이라 인자가 0개이고 always-on 이라 요청과 무관하게 돈다(modules/api/api.py:350-354). 보내도
+효과는 없고 NegPiP 가 없는 Forge 에서 422 만 생긴다. Comfy 는 ``_add_negpip`` 로 적용하므로 보낸다. 손 재구성은 메인 경로
 (``WebUIBackend._generate``)에 메인 T2I 스냅샷을 그대로 쓰므로 메인 생성처럼 보낸다.
 """
 from __future__ import annotations
@@ -104,7 +105,7 @@ class Rule:
 
     passes         이 블록을 받는 보조 패스
     backends       보조 패스에 보내는 백엔드(메인 체인은 이 표로 거르지 않는다)
-    feature        기능 스냅샷 이름. None = sam-extra 밖(NegPiP) — 게이트하지 않는다
+    feature        기능 스냅샷 이름. None = 스냅샷 기능이 아님(NegPiP — sam-extra 내장이지만 스냅샷에 없다) — 게이트하지 않는다
     when_unknown   스냅샷을 모를 때 출처별 SEND/SKIP
     reason         이 행의 근거(비면 테스트 실패)
     package        블록 생산자가 아직 없으면 그 패키지 id (생산자가 머지되면 지운다 — 지금은 없다)
@@ -141,8 +142,9 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
         passes=frozenset(AUX_PASSES), backends=frozenset({BACKEND_COMFY}), feature=None,
         when_unknown=_unknown(),
         pass_backends=MappingProxyType({AUX_HAND: _ALL_BACKENDS}),
-        reason="sam-extra 밖(sd-forge-negpip). Forge 판은 인자 0개·always-on 이라 보조 요청에 넣어도 효과가 없고 "
-               "설치 안 된 Forge 에서 422 만 난다 — Comfy(_add_negpip)에만 보낸다. 손 재구성은 메인 경로라 메인 T2I 처럼"),
+        reason="기능 스냅샷 밖(sam-extra 내장 NegPiP, 예전 sd-forge-negpip). Forge 판은 인자 0개·always-on 이라 보조 "
+               "요청에 넣어도 효과가 없고 NegPiP 가 없는 Forge 에서 422 만 난다 — Comfy(_add_negpip)에만 보낸다. 손 재구성은 "
+               "메인 경로라 메인 T2I 처럼"),
     anima_guidance.SCRIPT_PERTURBATION: Rule(
         passes=frozenset(AUX_PASSES), backends=_ALL_BACKENDS, feature="anima_guidance", when_unknown=_unknown(),
         reason="SAM3 p2 는 SAM3 만 빼고 바깥 alwayson 을 그대로 돌린다(sam3ext/inpaint_core.py:142-158) — 생성 안 "
@@ -178,6 +180,8 @@ NEVER: Mapping[str, str] = MappingProxyType({
                            "인페인트한다(Forge 도 파생 패스에서 스스로 뺀다: inpaint_core.py:56, !sam3.py:394-397)",
     "ADetailer": "이미지 패스 — 복사하면 부모 패스 뒤에 T2I 얼굴 보정이 한 번 더 돈다(_ad_disabled 는 SAM3 p2 에만)",
     "Anima VAE 2x (spacepxl decoder)": "HOLD(M9) — 앱이 만들지 않는다. 2x 디코더가 인페인트 패스 출력 크기를 바꿀 수 있다",
+    "Anima VAE DeGrid (NAFNet)": "HOLD(앱 노출 여부 사용자 결정 대기) — 앱이 만들지 않는다. 이미지 후처리라 보조 패스에 "
+                                 "복사하면 한 번 더 걸린다(확장도 _sam3_inner·_ad_inner 내부 패스에서는 돌지 않는다)",
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",

@@ -34,7 +34,11 @@ EXT_VERSION_AUDITED = "0.30.0"
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
 # 작업 트리는 깨끗했다. v0.30.0 은 아직 릴리스 전이라 같은 버전 문자열 안에서 코드가 바뀌었다(818b8fe 도 0.30.0).
-EXT_COMMIT_AUDITED = "0059da8"
+# 2026-09-30 이어서: VAE DeGrid(3a74dd8..1dd1a98 — SCRIPTS·OPTIONS·MODULES 를 HOLD 로 분류, 앱 노출은 사용자 결정 대기),
+# 새 Forge 텍스트 엔진 대응(3e35f1e — sam3ext/anima38 내부, 인자·infotext 계약 그대로), NegPiP 내장(0f2a98a — SCRIPTS["NegPiP"]
+# mapped·script_info=False, sam3ext/negpip/ ignored; 3.8B 가 Forge 표준 infotext "Emphasis" 를 엔진 규칙대로 남긴다),
+# NegPiP 내부 수정(395854b — 제목·인자 0개·always-on·파일 이름 그대로, 앱 계약 변화 없음)까지.
+EXT_COMMIT_AUDITED = "395854b"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -57,7 +61,7 @@ def deferred(package: str, reason: str) -> dict:
 def _script(*, file: str, form: str, live_argc: int, shape: str, classification: dict,
             ui_return=None, api_reads: str | None = "", arg_names: tuple | None = None,
             runtime_choices: tuple = (), app_title: str = "", app_spec: tuple | None = None,
-            app_arg_names: str = "", api_note: str = "") -> dict:
+            app_arg_names: str = "", api_note: str = "", script_info: bool = True) -> dict:
     """스크립트 항목.
 
     form        dict / positional / positional_or_dict / none (API 가 받는 모양)
@@ -67,14 +71,17 @@ def _script(*, file: str, form: str, live_argc: int, shape: str, classification:
     api_reads   API 경로가 _arg(N)/args[N] 로 읽는 인덱스('0-10,12-61'). None = 위치로 읽지 않음(dict).
     shape       script-info 인자 모양 해시(core.sam_extra_diff.shape_hash). 라벨·기본값·범위·선택지가 바뀌면 깨진다.
     runtime_choices  실행 시점 목록이라 해시·비교에서 선택지와 기본값을 빼는 인덱스(파일 목록 등).
+    script_info False = ui() 가 None 을 돌려줘 Forge 가 api_info 를 만들지 않는다(modules/scripts.py
+                create_script_ui_inner) — script-info·픽스처에 없고 shape 도 없다. 제목으로는 여전히 alwayson_scripts 에
+                받는다(api.py script_name_to_index 가 title() 로 찾는다). 계약 테스트는 ui() 가 None 인지를 AST 로 본다.
     """
     return {"file": file, "form": form, "live_argc": live_argc, "shape": shape, "ui_return": ui_return,
             "api_reads": api_reads, "arg_names": arg_names, "runtime_choices": tuple(runtime_choices),
             "app_title": app_title, "app_spec": app_spec, "app_arg_names": app_arg_names,
-            "api_note": api_note, **classification}
+            "api_note": api_note, "script_info": script_info, **classification}
 
 
-# ── always-on 스크립트 (제목 = alwayson_scripts 키, 라이브 10개) ─────────────────────
+# ── always-on 스크립트 (제목 = alwayson_scripts 키, script-info 에 11개 + ui() None 인 NegPiP) ──────
 SCRIPTS = MappingProxyType({
     "SAM3 Mask": _script(
         file="scripts/!sam3.py", form="dict", live_argc=2, shape="9702cc627a8c",
@@ -288,6 +295,18 @@ SCRIPTS = MappingProxyType({
         api_note="위치 인자 list 만 받는다 — dict 로 보내면 조용히 아무 일도 하지 않는다. arg1 은 파일 목록.",
         classification=deferred(HOLD, "M9 보류 — 12채널 VAE 가 설치돼 있지 않다. Comfy 노드는 있으나 "
                                       "컴파일러에 연결 안 됨")),
+    # 확장 3a74dd8..1dd1a98(0.30.0 안) — NAFNet 잔차로 Anima(Qwen·Wan VAE) 격자 무늬를 지운다. 모든 후처리 뒤·저장 직전
+    # (postprocess_image_after_composite) 이미지마다 한 번, SAM3·ADetailer 내부 패스(_sam3_inner·_ad_inner)에서는 돌지 않는다.
+    "Anima VAE DeGrid (NAFNet)": _script(
+        file="scripts/anima_vae_degrid.py", form="positional_or_dict", live_argc=5, shape="41e41dac20fc",
+        runtime_choices=(1,),
+        api_note="위치 인자 [enabled, model, mode, strength, tile] 또는 그 키의 dict 한 개(sam3ext/ui_vae_degrid.py "
+                 "ARG_NAMES·coerce_args — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 읽힌다). ui() 가 build_controls 의 "
+                 "튜플을 list() 로 돌려줘 반환 순서도 정적으로 못 읽는다. 뒤 인자는 빼도 기본값. arg1(모델)은 "
+                 "models/ESRGAN·models/DeGrid 의 실행 시점 목록 — 비우거나 'None'/'auto' 면 첫 파일.",
+        classification=deferred(HOLD, "앱에 없다 — 앱에 노출할지는 사용자 결정 대기(보류). 앱이 블록을 만들지 않으므로 "
+                                      "Forge 에서는 늘 꺼져 있다(기본 enabled=False). Extras 탭 판(scripts/"
+                                      "anima_vae_degrid_extras.py, 'Anima VAE DeGrid (NAFNet, Extras)')도 같다")),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -302,6 +321,20 @@ SCRIPTS = MappingProxyType({
         file="scripts/lora_manager.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N8 — alwayson 인자 0개인 숨은 Gradio 브리지. 앱은 ROUTES 의 /sam3-lora/* 를 "
                                "쓴다")),
+    # 2026-09-30 sd-forge-negpip(상류 0585496, AGPL-3.0) 편입 — 파일 이름·제목·인자 0개·always-on 이 독립 확장과 같다.
+    "NegPiP": _script(
+        file="scripts/negpip.py", form="none", live_argc=0, shape="", ui_return=None, script_info=False,
+        app_title="core.alwayson_propagation:TITLE_NEGPIP",
+        api_note="ui() 가 None 이라 인자 0개이고 script-info 에 나오지 않는다(독립 확장 때도 같았다). 앱이 보내는 "
+                 "{'args': [True]} 는 효과가 없고 always-on 이라 늘 돈다. ADetailer 는 파일 이름(stem) 'negpip' 으로 자기 "
+                 "패스에 넣는다(ad_script_names 기본값).",
+        classification=mapped(
+            "core/alwayson_propagation.py:TITLE_NEGPIP", "ui/generator_generation.py:apply_alwayson_extensions",
+            "ui/sampling_blocks.py:_negpip", "core/sam_extra_notices.py:OTHER_EXTENSIONS",
+            comfy=("core/comfy_workflow_compiler.py:_add_negpip",),
+            note="Forge 는 NegPiP 체크와 상관없이 always-on 으로 돈다(프롬프트에 음수 가중치가 있을 때만 켜짐). 보조 패스 "
+                 "전달 규칙은 core/alwayson_propagation PROPAGATION[TITLE_NEGPIP](Comfy 만). 기능 스냅샷 밖이라 알림은 "
+                 "OTHER_EXTENSIONS 의 'negpip' 이 맡는다")),
 })
 
 # ── SAM3 state 계약 (dict 형태라 위치 대신 키로 맞춘다) ─────────────────────────────
@@ -315,7 +348,7 @@ SAM3_REQUEST_ONLY_KEYS = ("sam3_source_image",)
 SAM3_ENABLE_LABEL = "Enable SAM3"      # script-info args[0].label
 SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam3Args 49 + sam3_enable
 
-# ── Forge 옵션 (shared.opts.add_option, 라이브 15개) ───────────────────────────────
+# ── Forge 옵션 (shared.opts.add_option, 라이브 18개) ───────────────────────────────
 # 주의(나-7): override_settings 에 모르는 키가 있으면 Forge classic 은 KeyError 로 요청 전체를 실패시킨다.
 # P10: 요청마다 덮어쓰는 8개(core/forge_override_settings.SPECS) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
 # 기능 스냅샷의 has_option 이 True 일 때만 보내고, 거절(500 KeyError·설정 잠금)되면 앱 키를 빼고 한 번 더 보낸다.
@@ -353,6 +386,11 @@ OPTIONS = MappingProxyType({
         "OPT_DAVE_PRE_DD", "DAVE+Detail Daemon 우회(기본 켬, 결과가 달라짐 — infotext 'Anima DAVE pre-DD sigma'). 끄면 원본 "
                            "노드 조합처럼 DAVE 가 모든 스텝에 걸려 무너진다. 앱 Comfy 팩은 같은 기본값(guid_dave_pre_dd, 팩 "
                            "1.4.1)"),
+    "sam3_degrid_device": deferred(HOLD, "VAE DeGrid 계산 장치(auto/cpu, 결과 같음) — SCRIPTS['Anima VAE DeGrid "
+                                         "(NAFNet)'] 를 앱에 둘지 사용자 결정 대기(보류)"),
+    "sam3_degrid_gpu_precision": deferred(HOLD, "VAE DeGrid GPU 정밀도(fp32 기본/fp16 autocast — 결과가 아주 미세하게 "
+                                                "다름, infotext 'Anima DeGrid precision') — 기능 보류와 함께"),
+    "sam3_degrid_keep_loaded": deferred(HOLD, "VAE DeGrid 모델 VRAM 상주(bool, 결과 같음) — 기능 보류와 함께"),
     "sam3_appearance_theme": ignored("N3 — Forge 화면 테마. 앱은 자체 디자인 토큰을 쓴다"),
     "sam3_layout_sections": ignored("N4 — txt2img 섹션 CSS 재배치, 인자 순서와 무관"),
     "sam3_fast_dropdown_visible_choices": ignored("N3 — Forge 빠른 드롭다운 표시 개수"),
@@ -483,6 +521,11 @@ MODULES = MappingProxyType({
                                          note="SCRIPTS['DoRA Inference Mode'] — 라벨·infotext 'DoRA inserted' 는 "
                                               "SEMANTIC_PINS dora_*_labels·dora_infotext_insert_key"),
     "scripts/anima_vae_2x.py": deferred(HOLD, "SCRIPTS['Anima VAE 2x (spacepxl decoder)'] — M9 보류"),
+    "scripts/anima_vae_degrid.py": deferred(HOLD, "SCRIPTS['Anima VAE DeGrid (NAFNet)'] — 앱 노출 여부 사용자 결정 대기. "
+                                                  "옵션 sam3_degrid_* 도 여기서 등록한다(OPTIONS)"),
+    "scripts/anima_vae_degrid_extras.py": deferred(HOLD, "VAE DeGrid Extras 탭(ScriptPostprocessing, 'Anima VAE DeGrid "
+                                                         "(NAFNet, Extras)') — 기능 보류와 함께. Settings 에서 메인 탭에도 "
+                                                         "켜면 이 이름으로 always-on 이 하나 더 생긴다(기본 꺼짐)"),
     "scripts/anima_lora_blocks.py": mapped(
         "core/sam_extra_notices.py:KEY_SPARSE_LORA_GUESS",
         note="N7 — 자동 훅(인자 0개)이라 페이로드는 없다. 이 스크립트가 남기는 infotext 'Anima sparse LoRA'(추측 변환)만 "
@@ -492,6 +535,7 @@ MODULES = MappingProxyType({
     "scripts/anima_ref_poc.py": ignored("N9 — 디버그"),
     "scripts/lora_manager.py": ignored("N8 — 숨은 Gradio 브리지와 옵션 두 개(N2)"),
     "scripts/appearance_theme.py": ignored("N3 — Forge 화면 테마 옵션"),
+    "scripts/negpip.py": mapped("core/alwayson_propagation.py:TITLE_NEGPIP", note="SCRIPTS['NegPiP'] (sd-forge-negpip 편입)"),
     # sam3ext/
     "sam3ext/__init__.py": ignored("패키지 지연 import — 공개 이름(SAM3_NAME, Sam3Args)은 SCRIPTS 가 본다"),
     "sam3ext/__version__.py": mapped("core/sam_extra_contract.py:EXT_VERSION_AUDITED",
@@ -546,6 +590,15 @@ MODULES = MappingProxyType({
     "sam3ext/anima_ipa/": deferred("P20", "R2 IP-Adapter(SigLIP2 → DiT K/V)"),
     "sam3ext/ui_tipo.py": deferred("P19", "T1 TIPO 마술봉"),
     "sam3ext/tipo/": deferred("P19", "T1/T2 TIPO 런타임·모델"),
+    "sam3ext/vae_degrid.py": deferred(HOLD, "VAE DeGrid 계산(NAFNet 잔차·모드·강도·타일) — 기능 보류와 함께"),
+    "sam3ext/vae_degrid_models.py": deferred(HOLD, "VAE DeGrid 모델 찾기·불러오기(models/ESRGAN·models/DeGrid) — 기능 "
+                                                   "보류와 함께"),
+    "sam3ext/vae_degrid_runtime.py": deferred(HOLD, "VAE DeGrid 장치·정밀도·Forge 메모리 관리(옵션 sam3_degrid_*) — 기능 "
+                                                    "보류와 함께"),
+    "sam3ext/ui_vae_degrid.py": deferred(HOLD, "VAE DeGrid 인자 해석(ARG_NAMES·coerce_args)·infotext 'Anima DeGrid …'·"
+                                               "Gradio 컨트롤 — 기능 보류와 함께"),
+    "sam3ext/negpip/": ignored("편입한 NegPiP 런타임(SD1/SDXL·Anima 훅, 마스크, 독립 확장과의 공존 가드) — 앱은 "
+                               "SCRIPTS['NegPiP'] 제목만 쓴다. 앱이 읽는 infotext·옵션·라우트가 없다"),
     "sam3ext/anima38/": mapped("core/anima38.py:parse_args", "core/anima_model_kind.py:BUNDLE_ARCHITECTURE",
                                "core/anima_model_kind.py:V1_ADAPTER_ARCHITECTURE",
                                note="Qwen3.5 커넥터 런타임 — 앱은 제목·인자와 번들·v1 어댑터 판별 메타데이터(files.py, "

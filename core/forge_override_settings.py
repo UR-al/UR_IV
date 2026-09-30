@@ -81,7 +81,7 @@ class ForgeOptionSpec:
 
 
 # 순서 = 카드 순서. 모두 bool — 레퍼런스 IP-Adapter 옵션 둘은 자기 잡이라 요청 override 가 닿지 않는다(P20), 나머지
-# 다섯은 Forge 화면 전용이다(core/sam_extra_contract OPTIONS).
+# 다섯은 Forge 화면 전용이다. VAE DeGrid 옵션 셋은 기능이 보류(HOLD)라 앱에 없다(core/sam_extra_contract OPTIONS).
 SPECS: tuple[ForgeOptionSpec, ...] = (
     ForgeOptionSpec(OPT_KEEP_RESIDENT, "Anima 3.8B 모델 VRAM 상주", True, MEMORY, feature="anima38"),
     ForgeOptionSpec(OPT_CONNECTOR_FP32, "Anima 3.8B 커넥터 fp32 상주", True, MEMORY, feature="anima38"),

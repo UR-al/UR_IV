@@ -319,12 +319,22 @@ class TestScriptInfoFixture(unittest.TestCase):
                          f"{SYNC_DOC} 의 순서대로 둘을 맞춰라.")
 
     def test_fixture_scripts_match_registry(self):
-        registered = {title.lower() for title in reg.SCRIPTS}
+        registered = {title.lower() for title, entry in reg.SCRIPTS.items() if entry["script_info"]}
         message = _set_mismatch("script-info 스크립트(소문자 제목)", registered, set(self.by_title))
         self.assertFalse(message, message)
 
+    def test_scripts_outside_script_info_have_no_live_entry(self):
+        """script_info=False(ui() None — Forge 가 api_info 를 만들지 않는다)는 script-info 에 나올 수 없다."""
+        for title, entry in reg.SCRIPTS.items():
+            if not entry["script_info"]:
+                with self.subTest(script=title):
+                    self.assertNotIn(title.lower(), self.by_title)
+                    self.assertEqual((entry["live_argc"], entry["shape"], entry["ui_return"]), (0, "", None))
+
     def test_live_arg_counts(self):
         for title, entry in reg.SCRIPTS.items():
+            if not entry["script_info"]:
+                continue
             with self.subTest(script=title):
                 modes = self._modes(title)
                 self.assertEqual(set(modes), {False, True}, "txt2img·img2img 항목이 모두 있어야 한다")
@@ -336,6 +346,8 @@ class TestScriptInfoFixture(unittest.TestCase):
 
     def test_arg_shapes(self):
         for title, entry in reg.SCRIPTS.items():
+            if not entry["script_info"]:
+                continue
             with self.subTest(script=title):
                 for is_img2img, args in self._modes(title).items():
                     current = shape_hash(args, entry["runtime_choices"])
@@ -497,6 +509,23 @@ class TestInstalledExtension(unittest.TestCase):
 
     def test_script_titles(self):
         self._assert_sets("always-on 스크립트 제목", reg.SCRIPTS, self.scripts)
+
+    def test_scripts_outside_script_info_return_none_from_ui(self):
+        """script_info=False 항목은 ui() 의 모든 return 이 None 이어야 한다 — 목록을 돌려주면 script-info 에 나와
+        인자 계약이 생긴다(레지스트리를 script_info=True 로 옮기고 픽스처를 갱신한다)."""
+        for title, entry in reg.SCRIPTS.items():
+            info = self.scripts.get(title)
+            if entry["script_info"] or info is None:
+                continue
+            with self.subTest(script=title):
+                tree = ast.parse((EXT_ROOT / info.file).read_text(encoding="utf-8"))
+                cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == info.cls)
+                ui = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "ui")
+                returns = [n for n in ast.walk(ui) if isinstance(n, ast.Return)]
+                self.assertTrue(returns, f"{info.file} {info.cls}.ui() 에 return 이 없다")
+                for ret in returns:
+                    self.assertTrue(ret.value is None or (isinstance(ret.value, ast.Constant) and ret.value.value is None),
+                                    f"{info.file}:{ret.lineno} ui() 가 None 이 아닌 값을 돌려준다")
 
     def test_script_files(self):
         for title, info in self.scripts.items():

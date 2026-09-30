@@ -175,7 +175,9 @@ def main(argv=None) -> int:
     captured = {str(entry.get("name") or "").strip().lower() for entry in fixture["scripts"]}
     try:
         from core.sam_extra_contract import SCRIPTS
-        missing = sorted(title for title in SCRIPTS if title.lower() not in captured)
+        # script_info=False(ui() None — NegPiP)는 Forge 가 script-info 에 넣지 않는다
+        missing = sorted(title for title, entry in SCRIPTS.items()
+                         if entry.get("script_info", True) and title.lower() not in captured)
     except Exception:  # 레지스트리가 깨져도 픽스처는 받을 수 있어야 한다
         missing = []
     if missing:

@@ -1,15 +1,15 @@
 {
  "schema": 1,
  "source": "GET /sdapi/v1/script-info (tools/refresh_sam_extra_fixture.py)",
- "captured_at": "2026-09-26T00:39:21+00:00",
- "api_url": "http://127.0.0.1:7860",
+ "captured_at": "2026-09-30T13:07:01+00:00",
+ "api_url": "http://127.0.0.1:7861",
  "ext_version": "0.30.0",
  "extension": {
   "name": "forge_sam3_extension",
   "branch": "feat/anima-character-reference",
-  "commit_hash": "a2114b5b0943fb1c3869d379ca2272f20f7dc40d",
-  "commit_date": 1790372381,
-  "version": "a2114b5b"
+  "commit_hash": "3e35f1e3e7fe07b75c3cf4c0403084f022c0441b",
+  "commit_date": 1790768986,
+  "version": "3e35f1e3"
  },
  "scripts": [
   {
@@ -1726,6 +1726,114 @@
      "minimum": null,
      "maximum": null,
      "step": null,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima vae degrid (nafnet)",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Anima VAE DeGrid (NAFNet)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "DeGrid 모델 (NAFNet)",
+     "value": "qwenVAEDegridNafnet_v11",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "qwenVAEDegridNafnet_v11",
+      "NAFNet-QwenVAE-DeGrid"
+     ]
+    },
+    {
+     "label": "적용 방식",
+     "value": "Full (전체)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Full (전체)",
+      "Dark Pixels Mainly (어두운 점 위주)",
+      "Bright Pixels Mainly (밝은 점 위주)"
+     ]
+    },
+    {
+     "label": "강도 (잔차 배율)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.5,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "타일 크기 (0 = 나누지 않음, 128~4096)",
+     "value": 512,
+     "minimum": 0,
+     "maximum": 4096,
+     "step": 128,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima vae degrid (nafnet)",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Anima VAE DeGrid (NAFNet)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "DeGrid 모델 (NAFNet)",
+     "value": "qwenVAEDegridNafnet_v11",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "qwenVAEDegridNafnet_v11",
+      "NAFNet-QwenVAE-DeGrid"
+     ]
+    },
+    {
+     "label": "적용 방식",
+     "value": "Full (전체)",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Full (전체)",
+      "Dark Pixels Mainly (어두운 점 위주)",
+      "Bright Pixels Mainly (밝은 점 위주)"
+     ]
+    },
+    {
+     "label": "강도 (잔차 배율)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.5,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "타일 크기 (0 = 나누지 않음, 128~4096)",
+     "value": 512,
+     "minimum": 0,
+     "maximum": 4096,
+     "step": 128,
      "choices": null
     }
    ]

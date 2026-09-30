@@ -71,13 +71,14 @@ TITLE_DETAIL_DAEMON = anima_guidance.SCRIPT_DETAIL_DAEMON.lower()
 TITLE_ANIMA38 = anima38.SCRIPT_NAME.lower()
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME.lower()    # scripts/dora_infer_mode.py (DORA_INFER_NAME)
 TITLE_VAE2X = "anima vae 2x (spacepxl decoder)"     # scripts/anima_vae_2x.py
+TITLE_DEGRID = "anima vae degrid (nafnet)"          # scripts/anima_vae_degrid.py (앱 미노출, 레지스트리 HOLD)
 TITLE_LORA_BRIDGE = "sam3 lora manager bridge"      # scripts/lora_manager.py (인자 0개)
 TITLE_SPARSE_LORA = "sam extra anima sparse lora"   # scripts/anima_lora_blocks.py (인자 0개)
 TITLE_REFERENCE_POC = "anima reference poc (shape logger)"  # 디버그
 
 SAM_EXTRA_TITLES = (
     TITLE_SAM3, TITLE_PAG, TITLE_SKIMMED, TITLE_DETAIL_DAEMON, TITLE_ANIMA38, TITLE_DORA,
-    TITLE_VAE2X, TITLE_LORA_BRIDGE, TITLE_SPARSE_LORA, TITLE_REFERENCE_POC,
+    TITLE_VAE2X, TITLE_DEGRID, TITLE_LORA_BRIDGE, TITLE_SPARSE_LORA, TITLE_REFERENCE_POC,
 )
 # 확장 폴더 이름 — 앱 설치기는 sam-extra, 수동 클론은 forge_sam3_extension (core/sam3_assets.py 와 같다)
 EXTENSION_FOLDERS = ("forge_sam3_extension", "sam-extra")
