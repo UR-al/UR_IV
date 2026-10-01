@@ -64,6 +64,7 @@
         <div class="file-count" v-if="upscaleFiles.length">{{ upscaleFiles.length }}개 파일</div>
         <label class="s-label">업스케일러</label>
         <CustomSelect v-model="upscaler" :options="upscalers" placeholder="업스케일러 선택..." />
+        <p v-if="upscalerDegridWarning" class="upscaler-warn" role="alert">{{ upscalerDegridWarning }}</p>
         <label class="s-label">배율</label>
         <div class="slider-row">
           <input type="range" min="1" max="4" step="0.5" v-model.number="scaleFactor" />
@@ -472,6 +473,7 @@ import { jobPercent, jobProgressText, parseBatchJobState } from '../utils/batchJ
 import { sam3CnDefaults, sam3CnSettings } from '../utils/sam3ControlNet'
 import { createExifWarningNotice } from '../utils/exifWarningNotice'
 import { createSam3ErrorToasts, sam3ResultOutcome } from '../utils/sam3BatchResult'
+import { useUpscalerDegridWarning } from '../composables/useUpscalerDegridWarning'
 import CustomSelect from '../components/CustomSelect.vue'
 import Sam3ControlNetPanel from '../components/Sam3ControlNetPanel.vue'
 import type {
@@ -548,6 +550,8 @@ const upscaleFiles = ref<string[]>([])
 // 백엔드 목록이 오기 전 기본값 — Lanczos 는 Forge·ComfyUI 둘 다 모델 없이 된다.
 const upscaler = ref('Lanczos')
 const upscalers = ref<string[]>(['Lanczos', 'R-ESRGAN 4x+', 'R-ESRGAN 4x+ Anime6B'])
+// 업스케일러 목록에는 DeGrid NAFNet 도 올라온다(Forge models/ESRGAN·ComfyUI upscale_models) — Hires.fix 카드와 같은 경고
+const upscalerDegridWarning = useUpscalerDegridWarning(() => upscaler.value)
 const scaleFactor = ref(2)
 
 function onDropUpscale(e: DragEvent) {
@@ -1675,6 +1679,7 @@ onUnmounted(() => {
 .cap-status { font-size: var(--fs-label); font-weight: var(--fw-bold); padding: 1px 6px; border-radius: 7px; flex-shrink: 0; }
 /* 옅은 틴트 위의 '글자'라 채움용(--state-*)이 아니라 글자용(--state-*-fg) */
 .cap-status.pending { background: rgba(251,191,36,0.18); color: var(--state-warn-fg); }
+.upscaler-warn { margin: 4px 0 0; color: var(--state-warn-fg); font-size: var(--fs-label); line-height: 1.4; }
 .cap-status.done { background: rgba(74,222,128,0.18); color: var(--state-ok-fg); }
 .cap-status.error { background: rgba(248,113,113,0.18); color: var(--state-alert-fg); }
 .cap-status.skip { background: var(--bg-button); color: var(--text-muted); }

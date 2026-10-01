@@ -421,6 +421,15 @@ class _OwnedProcess:
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
+# 엔진별 모델 폴더 카테고리(ComfyUI folder_paths 이름) — ``_model_paths``·``_combined_model_paths`` 가 같은 표를 쓴다
+# (따로 적힌 두 dict 가 어긋나면 ``seen[category]`` 가 KeyError). ComfyUI 는 이 이름 그대로 extra_model_paths 를
+# 읽고(모르는 카테고리도 등록한다), Forge 실행 인자(--ckpt-dirs 등)는 자기 표에 있는 것만 쓴다. ``degrid`` 는 앱
+# 노드 팩 1.5.0 의 VAE DeGrid 모델 카테고리다(Forge 쪽은 models/DeGrid).
+MODEL_PATH_CATEGORIES = (
+    "checkpoints", "diffusion_models", "loras", "vae", "text_encoders", "upscale_models", "degrid",
+)
+
+
 class BackendRuntimeManager:
     """Deep module owning both managed engine lifecycles behind one interface."""
 
@@ -1183,14 +1192,7 @@ class BackendRuntimeManager:
         location: RuntimeLocation | None,
     ) -> dict[str, list[str]]:
         """Return configured, runtime-local, and final fallback model directories."""
-        paths: dict[str, list[Path]] = {
-            "checkpoints": [],
-            "diffusion_models": [],
-            "loras": [],
-            "vae": [],
-            "text_encoders": [],
-            "upscale_models": [],
-        }
+        paths: dict[str, list[Path]] = {category: [] for category in MODEL_PATH_CATEGORIES}
         app_fallback_paths: dict[str, Path] = {}
         if engine == "forge":
             # Preserve the pre-existing Settings contract and its priority.
@@ -1241,6 +1243,12 @@ class BackendRuntimeManager:
                 paths["upscale_models"], model_root,
                 ("ESRGAN", "upscale_models") if engine == "forge" else ("upscale_models",),
             )
+            # VAE DeGrid NAFNet: Forge 확장은 models/ESRGAN(위 upscale_models)과 models/DeGrid 를, 앱 노드 팩은
+            # upscale_models 와 자기가 등록한 degrid 카테고리를 본다 — DeGrid 폴더를 ComfyUI 의 degrid 로 비춘다.
+            self._append_existing_paths(
+                paths["degrid"], model_root,
+                ("DeGrid", "degrid") if engine == "forge" else ("degrid",),
+            )
             if engine == "forge":
                 self._append_existing_paths(
                     paths["checkpoints"], model_root, ("Stable-diffusion", "checkpoints")
@@ -1279,14 +1287,7 @@ class BackendRuntimeManager:
         return (primary,) + tuple(key for key in ENGINE_DEFINITIONS if key != primary)
 
     def _combined_model_paths(self) -> dict[str, list[str]]:
-        combined = {
-            "checkpoints": [],
-            "diffusion_models": [],
-            "loras": [],
-            "vae": [],
-            "text_encoders": [],
-            "upscale_models": [],
-        }
+        combined: dict[str, list[str]] = {category: [] for category in MODEL_PATH_CATEGORIES}
         seen = {category: set() for category in combined}
         for engine in self._model_engine_order():
             own = self._model_paths(engine, self._runtime_location(engine))

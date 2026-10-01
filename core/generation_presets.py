@@ -25,7 +25,7 @@ PROMPT_KEYS: tuple[str, ...] = (
     'exclude_prompt_local',
 )
 
-#: 생성 파라미터 — 모델·모듈·샘플링·해상도·Hires·ADetailer·SAM3·Anima 가이던스·DoRA 추론 방식·Anima 3.8B.
+#: 생성 파라미터 — 모델·모듈·샘플링·해상도·Hires·ADetailer·SAM3·Anima 가이던스·DoRA 추론 방식·Anima 3.8B·VAE DeGrid.
 GENERATION_KEYS: tuple[str, ...] = (
     'model', 'vae_main', 'te_main', 'sampler', 'scheduler',
     'steps', 'cfg', 'shift', 'seed', 'width', 'height',
@@ -39,6 +39,7 @@ GENERATION_KEYS: tuple[str, ...] = (
     'anima_guidance_settings',
     'dora_infer_settings',     # core/dora_infer_mode.SETTINGS_KEY
     'anima38_settings',        # core/anima38.SETTINGS_KEY
+    'vae_degrid_settings',     # core/vae_degrid.SETTINGS_KEY
 )
 
 PRESET_KEYS: tuple[str, ...] = PROMPT_KEYS + GENERATION_KEYS

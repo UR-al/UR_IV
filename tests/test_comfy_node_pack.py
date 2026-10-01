@@ -46,7 +46,16 @@ COMPILER_BUILT_NODES = frozenset({
     "ForgeNeoADetailer",
     "ForgeNeoH3ConditioningCachePrepare",
     "ForgeNeoH3ConditioningCacheLoad",
+    "ForgeNeoAnimaVAEDeGrid",
 })
+# 컴파일러가 따옴표 리터럴이 아니라 앱 상수로 만드는 노드 — (그 상수를 정의한 모듈, 상수 이름).
+# 컴파일러 소스는 ``<모듈 이름>.<상수>`` 로 참조해야 하고, 상수 값은 노드 ID 와 같아야 한다.
+COMPILER_NODE_CONSTANTS = {
+    "ForgeNeoAnimaVAEDeGrid": ("core/vae_degrid.py", "COMFY_NODE_CLASS"),
+}
+# 팩에 먼저 들어온 컴파일러용 노드 → 사유(필수). 컴파일러가 아직 만들지 않으므로 소스 검사를 건너뛰고,
+# 컴파일러 소스에 나타나면(리터럴이든 상수 참조든) 낡은 항목으로 실패한다 — 그때 여기서 지운다.
+PENDING_COMPILER_NODES: dict[str, str] = {}
 CUSTOM_WORKFLOW_NODES = frozenset({
     "ForgeNeoAnimaLoraLoaderModelOnly",
     "ForgeNeoAnimaDAVE",
@@ -143,7 +152,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 36)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 37)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
@@ -158,9 +167,24 @@ class TestBundledComfyNodePack(unittest.TestCase):
                 "core/creator_workflows.py",
             )
         )
-        for name in sorted(COMPILER_BUILT_NODES):
+        for name, reason in PENDING_COMPILER_NODES.items():
+            with self.subTest(pending=name):
+                self.assertIn(name, COMPILER_BUILT_NODES)
+                self.assertTrue(reason.strip())
+                module, constant = COMPILER_NODE_CONSTANTS.get(name, ("", ""))
+                reference = f"{Path(module).stem}.{constant}" if module else None
+                self.assertNotIn(f'"{name}"', sources, "낡은 PENDING 항목 — 컴파일러가 이미 만든다")
+                if reference:
+                    self.assertNotIn(reference, sources, "낡은 PENDING 항목 — 컴파일러가 이미 만든다")
+        for name in sorted(COMPILER_BUILT_NODES - set(PENDING_COMPILER_NODES)):
             with self.subTest(node=name):
-                self.assertIn(f'"{name}"', sources)
+                if name not in COMPILER_NODE_CONSTANTS:
+                    self.assertIn(f'"{name}"', sources)
+                    continue
+                module, constant = COMPILER_NODE_CONSTANTS[name]
+                defined = (root / module).read_text(encoding="utf-8")
+                self.assertRegex(defined, rf'(?m)^{constant}\s*=\s*"{name}"')
+                self.assertIn(f"{Path(module).stem}.{constant}", sources)
         readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(
             encoding="utf-8"
         )

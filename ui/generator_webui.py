@@ -919,6 +919,13 @@ class WebUIMixin:
             push_comfy_adapters(self, info.get('anima38_adapters'))
         except Exception as exc:
             print(f"[Models] Anima v1 어댑터 선택지 전달 실패: {exc}")
+        # ComfyUI 의 VAE DeGrid 모델 선택지(노드 object_info) — Forge·옛 팩은 None 이라 카드가 기능 스냅샷·팩 안내로
+        try:
+            from ui.vae_degrid_ui import push_comfy_models
+
+            push_comfy_models(self, info.get('degrid_models'))
+        except Exception as exc:
+            print(f"[Models] VAE DeGrid 모델 선택지 전달 실패: {exc}")
 
         # 샘플러
         samplers = info.get('samplers', [])
@@ -1118,6 +1125,12 @@ class WebUIMixin:
             from ui.anima38_ui import push_comfy_adapters
 
             push_comfy_adapters(self, None)   # 끊긴 ComfyUI 의 v1 어댑터 선택지도 지운다
+        except Exception:
+            pass
+        try:
+            from ui.vae_degrid_ui import push_comfy_models
+
+            push_comfy_models(self, None)   # 끊긴 ComfyUI 의 DeGrid 모델 목록도 지운다
         except Exception:
             pass
 

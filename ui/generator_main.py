@@ -1211,7 +1211,8 @@ class GeneratorMainUI(
                     # Anima Guard 값은 파일에 쓰기 전에 안전 범위/8배수로 정규화.
                     from core.resolution_guard import normalize_anima_guard_prefs
                     prefs.update(normalize_anima_guard_prefs(prefs))
-                    # sam-extra Forge 옵션 덮어쓰기(P10) — 스펙 키·진짜 bool 만 남긴다. Vue 는 dict 전체를 보낸다
+                    # sam-extra Forge 옵션 덮어쓰기(P10) — 스펙 키와 그 스펙이 받는 값(체크박스 진짜 bool·라디오
+                    # 선택지 문자열)만 남긴다. Vue 는 dict 전체를 보낸다
                     # ('Forge 설정 따름' = 키 없음). 모두 따름이면 키를 지워 기본 파일 모양을 그대로 둔다.
                     from core.forge_override_settings import PREF_KEY as FORGE_OPTIONS_KEY, normalize_overrides
                     if FORGE_OPTIONS_KEY in prefs:

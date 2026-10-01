@@ -294,6 +294,11 @@ class ComfyUIBackend(AbstractBackend):
         # Generation API profile jobs: per-endpoint snapshots shared across the
         # per-job backend instances (tests swap in an isolated registry).
         self._external_object_info_caches = EXTERNAL_OBJECT_INFO
+        # Compile-warning causes (VAE DeGrid left out) already checked against a
+        # live /object_info for one URL — ``_compile_graph`` refetches the
+        # schema at most once per distinct cause (see _schema_checked_causes).
+        self._schema_causes_url = ""
+        self._schema_causes: set = set()
 
     def _configured_workflow_path(self, mode: str) -> str:
         if mode == 'img2img':
@@ -438,6 +443,10 @@ class ComfyUIBackend(AbstractBackend):
         # Anima 3.8B 카드의 v1 어댑터 선택지 — Forge 기능 스냅샷(choices.anima38_adapters)의 ComfyUI 짝(P9 리뷰 2)
         from core.anima38 import comfy_adapter_choices
         info.anima38_adapters = comfy_adapter_choices(obj_info)
+        # VAE DeGrid 카드의 모델 선택지 — Forge 기능 스냅샷(choices.degrid_models)의 ComfyUI 짝. 노드가 없으면(팩 1.5.0
+        # 이전) None 이라 카드가 '팩 업데이트 필요' 를 보이고, 컴파일러는 DeGrid 를 빼고 알린다
+        from core.vae_degrid import comfy_model_choices
+        info.degrid_models = comfy_model_choices(obj_info)
 
         return info
 
@@ -570,6 +579,7 @@ class ComfyUIBackend(AbstractBackend):
             # The node set/schema changes with the new pack (after a restart):
             # never compile against the pre-install snapshot.
             self._object_info_cache.invalidate()
+            self._forget_schema_causes()
             if bool(engine.get('owned')) and bool(engine.get('running')):
                 # Comfy imports custom nodes only during startup.  Restart only
                 # the process owned by this runtime manager; an external
@@ -582,6 +592,7 @@ class ComfyUIBackend(AbstractBackend):
                 if restarted_url:
                     self.api_url = restarted_url.rstrip('/')
                 self._object_info_cache.invalidate()
+                self._forget_schema_causes()
                 _logger.info("관리형 ComfyUI 재시작으로 번들 노드 팩 적용 완료")
             else:
                 raise RuntimeError(
@@ -611,24 +622,78 @@ class ComfyUIBackend(AbstractBackend):
             object_info_cached=cached,
         )
 
-    def _compile_graph(self, build: Callable):
+    def _compile_graph(self, build: Callable, warnings: Optional[list] = None):
         """Compile with ``build(compiler)``; retry once on a fresh schema.
 
         A snapshot can predate a model/LoRA the user just added or a node
         pack reload, so a compile error raised while using the cached
         document is retried once against a live ``/object_info``.  Errors on
         a fresh document are real and propagate unchanged.
+
+        ``warnings`` is the list ``build`` hands to ``compile(warnings=...)``
+        (a feature left out instead of failing: VAE DeGrid).  A cached
+        compile is recompiled on a live schema only for warnings a schema
+        can change (``core.comfy_degrid_report.schema_fixable_causes``: node
+        class missing, input contract mismatch, model not listed) — never for
+        a custom workflow without a place for the node — and at most once per
+        distinct cause: a cause already seen on a live document is not
+        refetched again (an old pack would otherwise cost one multi-MB
+        download per generation).  ``build`` clears the list itself, so only
+        the last compile's warnings remain.
         """
         from core.comfy_workflow_compiler import WorkflowCompileError
 
         compiler = self._workflow_compiler()
+        cached = getattr(compiler, 'object_info_cached', False) is True
         try:
-            return build(compiler)
+            graph = build(compiler)
         except WorkflowCompileError as exc:
-            if getattr(compiler, 'object_info_cached', False) is not True:
+            if not cached:
                 raise
             _logger.info("캐시된 ComfyUI 스키마로 컴파일 실패 → 새로 받아 1회 재시도: %s", exc)
             return build(self._workflow_compiler(fresh=True))
+        if warnings is None:
+            return graph
+        from core.comfy_degrid_report import schema_fixable_causes
+
+        causes = schema_fixable_causes(warnings)
+        if not cached:
+            self._remember_schema_causes(causes)   # seen on a live document already
+            return graph
+        unchecked = causes - self._schema_checked_causes()
+        if not unchecked:
+            if causes:
+                _logger.debug("ComfyUI 스키마에서 이미 확인한 원인이라 다시 받지 않음: %s",
+                              "; ".join(reason for _cause, reason in sorted(causes)))
+            return graph
+        _logger.info(
+            "캐시된 ComfyUI 스키마로 일부 기능을 뺐음 → 새로 받아 1회 다시 컴파일: %s",
+            "; ".join(reason for _cause, reason in sorted(unchecked)),
+        )
+        graph = build(self._workflow_compiler(fresh=True))
+        self._remember_schema_causes(causes | schema_fixable_causes(warnings))
+        return graph
+
+    def _schema_checked_causes(self) -> set:
+        """Causes (``(cause, reason)``) already checked on a live schema of this URL."""
+        url = str(self.api_url or '').strip().rstrip('/')
+        if getattr(self, '_schema_causes_url', '') != url:
+            return set()
+        return set(getattr(self, '_schema_causes', ()) or ())
+
+    def _remember_schema_causes(self, causes) -> None:
+        if not causes:
+            return
+        url = str(self.api_url or '').strip().rstrip('/')
+        known = self._schema_checked_causes()
+        if len(known) >= 64:
+            known = set()   # bound: distinct model names only grow
+        known.update(causes)
+        self._schema_causes_url, self._schema_causes = url, known
+
+    def _forget_schema_causes(self) -> None:
+        """A new pack/restart can fix every cause — check each once more."""
+        self._schema_causes_url, self._schema_causes = "", set()
 
     def get_system_stats(self) -> dict:
         """GPU/VRAM 상태 조회"""
@@ -1341,10 +1406,16 @@ class ComfyUIBackend(AbstractBackend):
             controls = generation_workflow_controls(
                 self.api_url, self._configured_workflow_path('txt2img'), custom_workflow, payload, 'txt2img',
             )
-            workflow = self._compile_graph(lambda compiler: compiler.compile(
-                'txt2img', model_name, job_payload, workflow=custom_workflow,
-                workflow_controls=controls,
-            ))
+            compile_warnings: List[dict] = []
+
+            def build(compiler):
+                compile_warnings.clear()   # 재시도(새 스키마)한 마지막 컴파일의 경고만
+                return compiler.compile(
+                    'txt2img', model_name, job_payload, workflow=custom_workflow,
+                    workflow_controls=controls, warnings=compile_warnings,
+                )
+
+            workflow = self._compile_graph(build, compile_warnings)
             self._last_generation_context = {
                 'model_name': model_name, 'payload': copy.deepcopy(dict(payload)),
             }
@@ -1352,7 +1423,8 @@ class ComfyUIBackend(AbstractBackend):
                 result = self._queue_and_wait(workflow, progress_callback)
             else:
                 result = self._queue_and_wait(workflow, progress_callback, cancel_check)
-            return self._with_reported_seed(result, workflow, job_payload)
+            result = self._with_reported_seed(result, workflow, job_payload)
+            return self._with_degrid_notices(result, job_payload, compile_warnings)
 
         except FileNotFoundError as e:
             _logger.error(f"워크플로우 파일 없음: {e}")
@@ -1386,6 +1458,25 @@ class ComfyUIBackend(AbstractBackend):
             info = dict(result.info or {})
             info['seed'] = seed
             result.info = info
+        return result
+
+    @staticmethod
+    def _with_degrid_notices(result: GenerationResult, payload: Dict,
+                             compile_warnings: List[dict]) -> GenerationResult:
+        """VAE DeGrid 결과를 Forge 결과처럼 알린다(info 의 sam-extra 알림 — UI 가 토스트로 띄운다).
+
+        컴파일러가 노드를 뺐으면(팩 1.5.0 이전·모델 없음·사용자 워크플로에 자리 없음) 그 이유를, 노드가 돌았으면
+        이미지마다 리포트(``ui.ai_studio_degrid`` — 실패해도 이미지는 그대로 저장된다)를 Forge 와 같은 규칙으로
+        읽는다(core/comfy_degrid_report). 실패한 생성에는 붙이지 않는다(오류가 따로 보인다).
+        """
+        if not isinstance(result, GenerationResult) or not result.success:
+            return result
+        from core import comfy_degrid_report
+
+        info = result.info if isinstance(result.info, dict) else {}
+        notices = comfy_degrid_report.result_notices(payload, info.get('node_outputs'), compile_warnings)
+        if notices:
+            result.info = comfy_degrid_report.merge_into_info(info, notices)
         return result
 
     def _upload_image(self, image_b64: str,
@@ -1477,11 +1568,17 @@ class ComfyUIBackend(AbstractBackend):
             controls = generation_workflow_controls(
                 self.api_url, self._configured_workflow_path('img2img'), custom_workflow, payload, 'img2img',
             )
-            workflow = self._compile_graph(lambda compiler: compiler.compile(
-                mode, model_name, job_payload, workflow=custom_workflow,
-                uploaded_image=uploaded_filename, uploaded_mask=uploaded_mask,
-                workflow_controls=controls,
-            ))
+            compile_warnings: List[dict] = []
+
+            def build(compiler):
+                compile_warnings.clear()   # 재시도(새 스키마)한 마지막 컴파일의 경고만
+                return compiler.compile(
+                    mode, model_name, job_payload, workflow=custom_workflow,
+                    uploaded_image=uploaded_filename, uploaded_mask=uploaded_mask,
+                    workflow_controls=controls, warnings=compile_warnings,
+                )
+
+            workflow = self._compile_graph(build, compile_warnings)
             self._last_generation_context = {
                 'model_name': model_name, 'payload': copy.deepcopy(dict(payload)),
             }
@@ -1490,7 +1587,8 @@ class ComfyUIBackend(AbstractBackend):
                 result = self._queue_and_wait(workflow, progress_callback)
             else:
                 result = self._queue_and_wait(workflow, progress_callback, cancel_check)
-            return self._with_reported_seed(result, workflow, job_payload)
+            result = self._with_reported_seed(result, workflow, job_payload)
+            return self._with_degrid_notices(result, job_payload, compile_warnings)
 
         except RuntimeError as e:
             _logger.error(f"img2img 오류: {e}")
@@ -1633,8 +1731,14 @@ class ComfyUIBackend(AbstractBackend):
         # bypass/semantic negative, NegPiP, guidance, Detail Daemon) come from the
         # envelope — the T2I panel at click time, same as the Forge path (P7) —
         # or, without one (API callers), from the saved generation context.
+        # 최종 이미지 블록(VAE DeGrid — Rule.passes 가 빈 행)은 메인 생성 결과에만 한 번: 봉투 없는 API 호출자의
+        # 저장 문맥에서도 뗀다(봉투가 있으면 _replace_sampling_blocks 가 PROPAGATION 제목을 모두 뗀다). 명시
+        # settings['alwayson_scripts'] 로 다시 넣어도 compile_postprocess 는 DeGrid 를 만들지 않는다(D1).
+        from core.alwayson_propagation import canonical_title, final_image_titles
+        final_only = set(final_image_titles())
         scripts = {name: block for name, block in payload['alwayson_scripts'].items()
-                   if str(name).strip().casefold() not in {'adetailer', 'sam3 mask'}}
+                   if str(name).strip().casefold() not in {'adetailer', 'sam3 mask'}
+                   and canonical_title(name) not in final_only}
         if envelope is not None:
             scripts = self._replace_sampling_blocks(scripts, envelope, kind, settings, model_name)
         if kind == 'adetailer':

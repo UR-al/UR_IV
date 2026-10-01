@@ -10,6 +10,12 @@ from .anima_lllite import (
     NODE_DISPLAY_NAME_MAPPINGS as _ANIMA_LLLITE_DISPLAY_NAMES,
 )
 from .anima_lora_nodes import NODE_CLASS_MAPPINGS as _ANIMA_LORA_NODES
+from .degrid_nodes import (
+    NODE_CLASS_MAPPINGS as _DEGRID_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _DEGRID_DISPLAY_NAMES,
+    install_unload_release_hook as _install_degrid_unload_release_hook,
+    register_degrid_folder as _register_degrid_folder,
+)
 from .generation import NODE_CLASS_MAPPINGS as _GENERATION_NODES
 from .guidance import NODE_CLASS_MAPPINGS as _GUIDANCE_NODES
 from .h3_cache_nodes import NODE_CLASS_MAPPINGS as _H3_CACHE_NODES
@@ -21,12 +27,17 @@ from .sam3_nodes import (
 )
 
 
-__version__ = "1.4.2"
+__version__ = "1.5.0"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside
 # ComfyUI (the app imports the relight module from this package).
 _install_sam3_unload_release_hook()
+# The same for the cached VAE DeGrid NAFNet, and ComfyUI's ``degrid`` model
+# folder (ComfyUI/models/degrid, merged into an existing entry). Both no-op
+# outside ComfyUI.
+_install_degrid_unload_release_hook()
+_register_degrid_folder()
 
 
 def _merge_node_maps(*maps):
@@ -49,6 +60,7 @@ NODE_CLASS_MAPPINGS = _merge_node_maps(
     _H3_CACHE_NODES,
     _RELIGHT_NODES,
     _ANIMA_LLLITE_NODES,
+    _DEGRID_NODES,
 )
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -58,6 +70,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS.update(_SAM3_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_ANIMA38_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_ANIMA_LLLITE_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_DEGRID_DISPLAY_NAMES)
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

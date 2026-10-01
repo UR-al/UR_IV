@@ -1,9 +1,10 @@
 # ui/aux_pass_snapshot.py
 """보조 패스(Refine·단독/배치 SAM3·단독/배치 ADetailer)에 메인 생성 설정을 싣는다 — GUI 스레드에서만(P7).
 
-- ``attach_sampling_snapshot(host, settings)``  클릭한 순간의 T2I 패널 샘플링 블록(NegPiP·가이던스·Anima38·DoRA)을
-  봉투(core/alwayson_propagation.envelope)로 settings **사본**에 싣는다. 워커는 settings 를 그대로 백엔드에 넘기고,
-  백엔드가 요청 직전에 패스·백엔드 규칙과 기능 스냅샷으로 걸러 넣는다(WebUIBackend._propagate,
+- ``attach_sampling_snapshot(host, settings)``  클릭한 순간의 T2I 패널 샘플링 블록(NegPiP·가이던스·Anima38·DoRA·
+  VAE DeGrid)을 봉투(core/alwayson_propagation.envelope)로 settings **사본**에 싣는다. 봉투는 메인 체인과 같다(T15) —
+  DeGrid 도 실리지만 전달 규칙이 passes=() 라(최종 이미지 블록) 어느 보조 패스에도 건너가지 않는다.
+  워커는 settings 를 그대로 백엔드에 넘기고, 백엔드가 요청 직전에 패스·백엔드 규칙과 기능 스냅샷으로 걸러 넣는다(WebUIBackend._propagate,
   ComfyUIBackend._standalone_detail). 봉투 키는 Forge/Comfy 요청 JSON 으로 나가지 않는다.
   출처는 '클릭한 순간의 T2I 패널'이다 — Forge 생성 안의 SAM3 패스·🎯 퀵 버튼과 같은 의미(확장 Refine 패널은
   img2img 탭 초기값이라 다르다). 위젯은 이 스레드에서만 읽고, 봉투는 JSON 원시값의 깊은 복사라 워커와 공유하는

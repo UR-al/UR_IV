@@ -22,7 +22,8 @@ AST 로 읽는 것과 못 읽는 것: 설치된 확장 소스에서 ui() 컴포�
 gap matrix 5-(a) 가운데 아직 없는 검사: 5번 중 ``wire_tipo`` 입력 순서·``MODES``/``LENGTHS``·
 ``REFERENCE_ARG_KEYS``(P19·P20 이 Gradio 방식을 고를 때), 6번 앱 내부 커버리지(SAM3_KEYS → 설정·프록시·저장·
 Vue 바인딩, 위치 spec 키 → components/guidance/*Section.vue), 7번 Comfy 검사(mapped 제목마다 컴파일러가 쓰거나 unsupported
-선언, SEMANTIC_PINS 의 Comfy 미러). Comfy 참조(``comfy=``)는 파일·심볼이 있는지만 본다. UI_ONLY_FEATURES 는
+선언). SEMANTIC_PINS 의 Comfy 미러는 핀마다 손으로 건다(``*_comfy`` — 팩 상수를 ``app`` 으로 보는 두 번째 핀, DD·DeGrid) — 빠진
+미러를 자동으로 찾지는 않는다. Comfy 참조(``comfy=``)는 파일·심볼이 있는지만 본다. UI_ONLY_FEATURES 는
 등록된 함수가 그 파일에 있는지만 보는 한 방향 검사다(새 Gradio 이름 엔드포인트는 잡지 않는다).
 """
 from __future__ import annotations
@@ -38,6 +39,8 @@ EXT_VERSION_AUDITED = "0.30.0"
 # 새 Forge 텍스트 엔진 대응(3e35f1e — sam3ext/anima38 내부, 인자·infotext 계약 그대로), NegPiP 내장(0f2a98a — SCRIPTS["NegPiP"]
 # mapped·script_info=False, sam3ext/negpip/ ignored; 3.8B 가 Forge 표준 infotext "Emphasis" 를 엔진 규칙대로 남긴다),
 # NegPiP 내부 수정(395854b — 제목·인자 0개·always-on·파일 이름 그대로, 앱 계약 변화 없음)까지.
+# 2026-10-01 VAE DeGrid 앱 노출(확장은 그대로 395854b): SCRIPTS·MODULES 를 HOLD → mapped(Extras 판은 ignored — API 없음),
+# 옵션 셋은 P10 라디오 덮어쓰기(OPTIONS mapped), 상수 계약은 SEMANTIC_PINS degrid_*(앱·Comfy 팩 거울).
 EXT_COMMIT_AUDITED = "395854b"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
@@ -297,16 +300,60 @@ SCRIPTS = MappingProxyType({
                                       "컴파일러에 연결 안 됨")),
     # 확장 3a74dd8..1dd1a98(0.30.0 안) — NAFNet 잔차로 Anima(Qwen·Wan VAE) 격자 무늬를 지운다. 모든 후처리 뒤·저장 직전
     # (postprocess_image_after_composite) 이미지마다 한 번, SAM3·ADetailer 내부 패스(_sam3_inner·_ad_inner)에서는 돌지 않는다.
+    # 2026-10-01 앱 노출(보류 → mapped): 카드·샘플링 블록 기여자·최종 이미지 전달 규칙·결과 알림·Forge 옵션 셋(P10)·
+    # ComfyUI 팩 1.5.0 노드(원본 대조 골든). 상수 계약은 SEMANTIC_PINS degrid_*.
     "Anima VAE DeGrid (NAFNet)": _script(
         file="scripts/anima_vae_degrid.py", form="positional_or_dict", live_argc=5, shape="41e41dac20fc",
-        runtime_choices=(1,),
+        runtime_choices=(1,), app_title="core.vae_degrid:SCRIPT_NAME",
         api_note="위치 인자 [enabled, model, mode, strength, tile] 또는 그 키의 dict 한 개(sam3ext/ui_vae_degrid.py "
-                 "ARG_NAMES·coerce_args — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 읽힌다). ui() 가 build_controls 의 "
-                 "튜플을 list() 로 돌려줘 반환 순서도 정적으로 못 읽는다. 뒤 인자는 빼도 기본값. arg1(모델)은 "
-                 "models/ESRGAN·models/DeGrid 의 실행 시점 목록 — 비우거나 'None'/'auto' 면 첫 파일.",
-        classification=deferred(HOLD, "앱에 없다 — 앱에 노출할지는 사용자 결정 대기(보류). 앱이 블록을 만들지 않으므로 "
-                                      "Forge 에서는 늘 꺼져 있다(기본 enabled=False). Extras 탭 판(scripts/"
-                                      "anima_vae_degrid_extras.py, 'Anima VAE DeGrid (NAFNet, Extras)')도 같다")),
+                 "ARG_NAMES·coerce_args — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 읽힌다, 핀 degrid_arg_names). ui() 가 "
+                 "build_controls 의 튜플을 list() 로 돌려줘 반환 순서도 정적으로 못 읽는다. 뒤 인자는 빼도 기본값. "
+                 "arg1(모델)은 models/ESRGAN·models/DeGrid 의 실행 시점 목록 — 비우거나 'None'/'auto' 면 modelspec.version "
+                 "이 가장 높은 파일. 모르는 mode 는 Full, 강도 0-1.5(NaN 은 1), 타일 0 또는 128-4096(1-127 은 128).",
+        classification=mapped(
+            "core/vae_degrid.py:SCRIPT_NAME", "core/vae_degrid.py:ARG_NAMES", "core/vae_degrid.py:parse_settings",
+            "core/vae_degrid.py:as_block", "core/vae_degrid.py:plan", "core/vae_degrid.py:live_models",
+            "core/vae_degrid.py:from_infotext",
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용 — 보조 패스에는 건너가지 않는다)와 최종 이미지 전달 규칙
+            "ui/vae_degrid_ui.py:contribute", "ui/vae_degrid_ui.py:apply_saved_settings", "ui/sampling_blocks.py:CONTRIBUTORS",
+            "core/alwayson_propagation.py:TITLE_DEGRID", "core/alwayson_propagation.py:final_image_titles",
+            # 기능 스냅샷(스크립트·모델 목록 — 'None' 자리 표시는 빼고 degrid_no_model 진단)
+            "core/sam_extra_capabilities.py:TITLE_DEGRID",
+            # 결과 infotext 'Anima DeGrid error'(이미지마다 n/m 장)·보냈는데 흔적 없음 → 알림(P4 규칙)
+            "core/sam_extra_notices.py:CODE_DEGRID_ERROR", "core/sam_extra_notices.py:CODE_DEGRID_NOT_APPLIED",
+            "core/sam_extra_notices.py:degrid_result_notices",
+            # 결과 infotext 6키를 확장 그룹으로(PNG Info·갤러리·히스토리)
+            "core/image_metadata.py:_EXTENSION_MARKERS",
+            "frontend/src/components/params/VaeDegridCard.vue",
+            "frontend/src/utils/vaeDegrid.ts:cardStatus",
+            # 업스케일러 칸(Hires.fix·배치 업스케일)의 'DeGrid 모델은 업스케일러가 아님' 경고 — 두 백엔드 목록
+            "frontend/src/composables/useUpscalerDegridWarning.ts:useUpscalerDegridWarning",
+            comfy=("comfy_custom_nodes/ai_studio_forge_parity/degrid_nodes.py:ForgeNeoAnimaVAEDeGrid",
+                   "core/comfy_workflow_compiler.py:_add_degrid", "core/comfy_workflow_compiler.py:_degrid_state",
+                   "core/comfy_degrid_report.py:result_notices", "core/comfy_metadata.py:_degrid_parameters",
+                   "core/comfy_workflow_controls.py:feature_preflight", "core/vae_degrid.py:comfy_model_choices",
+                   "ui/vae_degrid_ui.py:push_comfy_models", "ui/vae_degrid_ui.py:refresh_comfy_models"),
+            note="dict 한 개(5키)로 보낸다 — Forge 가 캐시한 위치 기본값과 무관하다. 메인 요청만: T2I·대기열·XYZ·시드 탐색·"
+                 "채팅·만화 컷, I2I·인페인트·채팅 편집은 카드 토글(기본 끔 — Forge img2img 아코디언도 꺼짐). Refine·단독/배치 "
+                 "SAM3·단독/배치 ADetailer·손 재구성에는 보내지 않는다(PROPAGATION passes=() — 최종 이미지 블록). 사용자가 켠 "
+                 "블록이라 기능 스냅샷이 없다고 하면 빼고 block_not_sent 알림, 모르면 보낸다(main_retry 없음 — 없는 Forge 는 "
+                 "422 안내). 모델 기본값 ''(자동). Krea2 는 보내지 않는다. 실패는 HTTP 오류가 아니라 이미지마다 'Anima DeGrid "
+                 "error' 로만 남아(이미지는 DeGrid 없이 저장) 결과 알림으로 띄운다. Forge 옵션 셋(장치·정밀도·VRAM 상주)은 "
+                 "OPTIONS 의 P10 덮어쓰기(Forge 전용). ComfyUI: 팩 노드 ForgeNeoAnimaVAEDeGrid(1.5.0+)를 Save/Preview 바로 "
+                 "앞(_add_image_extensions 뒤)에 한 번 — 장치·정밀도·상주는 확장 기본값 auto·fp32·끔(COMFY_OPTIONS), "
+                 "forge_quantize 켬(Forge 8비트 저장과 같은 바이트, 원본 대조 골든 tests/test_comfy_degrid_origin.py). 모델이 "
+                 "없거나 노드가 없으면(옛 팩·입력 계약 불일치) 노드를 빼고 생성하며 컴파일 경고 → 알림. 노드 리포트"
+                 "(ui.ai_studio_degrid)는 Forge infotext 와 같은 규칙으로 알림이 된다",
+            gaps=("P16: 결과 infotext 'Anima DeGrid …' 붙여 넣기(core/vae_degrid.from_infotext 는 준비됨)",
+                  "HOLD: 이미 만든 이미지의 DeGrid(Extras 탭 판)는 API 가 없다 — MODULES scripts/anima_vae_degrid_extras.py",
+                  "HOLD: Forge script-info 의 모델 목록은 Forge 시작 때 스냅샷 — 생성은 파일을 다시 찾으므로 목록에 없는 "
+                  "모델도 보내고 로그만 남긴다(결과 infotext 가 정답)",
+                  "P16: ComfyUI PNG 메타데이터는 요청한 DeGrid 값을 적는다 — 노드가 건너뛴 이미지에도 남는다(Forge 는 실패하면 "
+                  "성공 키 대신 'Anima DeGrid error' 만 남긴다). 실행 결과는 알림으로만 보인다",
+                  "HOLD: 사용자의 포터블 ComfyUI extra_model_paths.yaml 은 upscale_models 만 Forge models/ESRGAN 으로 비춘다 — "
+                  "Forge models/DeGrid 의 파일은 ComfyUI/models/degrid(팩이 등록하는 폴더)에 따로 두거나 경로를 더해야 "
+                  "보인다(관리형 ComfyUI 는 앱이 degrid 카테고리를 적는다 — core/backend_runtime.MODEL_PATH_CATEGORIES)",
+                  "HOLD: 모델 내려받기 카탈로그 항목이 없다 — NAFNet 파일은 사용자가 직접 넣는다"))),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -350,7 +397,7 @@ SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam
 
 # ── Forge 옵션 (shared.opts.add_option, 라이브 18개) ───────────────────────────────
 # 주의(나-7): override_settings 에 모르는 키가 있으면 Forge classic 은 KeyError 로 요청 전체를 실패시킨다.
-# P10: 요청마다 덮어쓰는 8개(core/forge_override_settings.SPECS) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
+# P10: 요청마다 덮어쓰는 11개(core/forge_override_settings.SPECS — 체크박스는 bool, 라디오는 선택지 문자열) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
 # 기능 스냅샷의 has_option 이 True 일 때만 보내고, 거절(500 KeyError·설정 잠금)되면 앱 키를 빼고 한 번 더 보낸다.
 _P10_APP = ("core/forge_override_settings.py:SPECS", "core/forge_override_settings.py:merge_into_payload",
             "backends/webui_backend.py:_forge_option_parts", "frontend/src/components/ForgeOptionOverridesSettings.vue")
@@ -386,11 +433,19 @@ OPTIONS = MappingProxyType({
         "OPT_DAVE_PRE_DD", "DAVE+Detail Daemon 우회(기본 켬, 결과가 달라짐 — infotext 'Anima DAVE pre-DD sigma'). 끄면 원본 "
                            "노드 조합처럼 DAVE 가 모든 스텝에 걸려 무너진다. 앱 Comfy 팩은 같은 기본값(guid_dave_pre_dd, 팩 "
                            "1.4.1)"),
-    "sam3_degrid_device": deferred(HOLD, "VAE DeGrid 계산 장치(auto/cpu, 결과 같음) — SCRIPTS['Anima VAE DeGrid "
-                                         "(NAFNet)'] 를 앱에 둘지 사용자 결정 대기(보류)"),
-    "sam3_degrid_gpu_precision": deferred(HOLD, "VAE DeGrid GPU 정밀도(fp32 기본/fp16 autocast — 결과가 아주 미세하게 "
-                                                "다름, infotext 'Anima DeGrid precision') — 기능 보류와 함께"),
-    "sam3_degrid_keep_loaded": deferred(HOLD, "VAE DeGrid 모델 VRAM 상주(bool, 결과 같음) — 기능 보류와 함께"),
+    # VAE DeGrid 옵션 셋 — Forge 전용(ComfyUI 노드는 확장 기본값 auto·fp32·끔, core/vae_degrid.COMFY_OPTIONS). 라디오
+    # 둘은 P10 이 선택지 값 문자열로 보낸다(ForgeOptionSpec.choices — 계약 테스트가 설치된 소스의 선택지와 대조)
+    "sam3_degrid_device": _p10(
+        "OPT_DEGRID_DEVICE", "VAE DeGrid 계산 장치(Radio auto/cpu, 결과 같음). cpu 는 VRAM 을 쓰지 않는다 — 같은 GPU 로 "
+                             "학습 중일 때(한 장에 몇 초 더). Forge 전용: ComfyUI 노드는 auto"),
+    "sam3_degrid_gpu_precision": _p10(
+        "OPT_DEGRID_GPU_PRECISION", "VAE DeGrid GPU 정밀도(Radio fp32 기본/fp16 autocast — 결과가 아주 미세하게 다름). "
+                                    "결과 기록 'Anima DeGrid precision' 은 런타임이 쓰는 값이지 OptionInfo infotext 가 "
+                                    "아니다(스펙 infotext=''). 옛 키 sam3_degrid_precision 은 확장이 읽지 않는다. Forge "
+                                    "전용: ComfyUI 노드는 fp32"),
+    "sam3_degrid_keep_loaded": _p10(
+        "OPT_DEGRID_KEEP_LOADED", "VAE DeGrid 모델 VRAM 상주(Checkbox, 약 117 MB, 결과 같음). Forge 전용: ComfyUI "
+                                  "노드는 끔(이미지마다 올렸다가 내림)"),
     "sam3_appearance_theme": ignored("N3 — Forge 화면 테마. 앱은 자체 디자인 토큰을 쓴다"),
     "sam3_layout_sections": ignored("N4 — txt2img 섹션 CSS 재배치, 인자 순서와 무관"),
     "sam3_fast_dropdown_visible_choices": ignored("N3 — Forge 빠른 드롭다운 표시 개수"),
@@ -521,11 +576,15 @@ MODULES = MappingProxyType({
                                          note="SCRIPTS['DoRA Inference Mode'] — 라벨·infotext 'DoRA inserted' 는 "
                                               "SEMANTIC_PINS dora_*_labels·dora_infotext_insert_key"),
     "scripts/anima_vae_2x.py": deferred(HOLD, "SCRIPTS['Anima VAE 2x (spacepxl decoder)'] — M9 보류"),
-    "scripts/anima_vae_degrid.py": deferred(HOLD, "SCRIPTS['Anima VAE DeGrid (NAFNet)'] — 앱 노출 여부 사용자 결정 대기. "
-                                                  "옵션 sam3_degrid_* 도 여기서 등록한다(OPTIONS)"),
-    "scripts/anima_vae_degrid_extras.py": deferred(HOLD, "VAE DeGrid Extras 탭(ScriptPostprocessing, 'Anima VAE DeGrid "
-                                                         "(NAFNet, Extras)') — 기능 보류와 함께. Settings 에서 메인 탭에도 "
-                                                         "켜면 이 이름으로 always-on 이 하나 더 생긴다(기본 꺼짐)"),
+    "scripts/anima_vae_degrid.py": mapped(
+        "core/vae_degrid.py:SCRIPT_NAME", "core/forge_override_settings.py:OPT_DEGRID_DEVICE",
+        note="SCRIPTS['Anima VAE DeGrid (NAFNet)'] — 옵션 sam3_degrid_* 셋도 여기서 등록한다(OPTIONS, P10 Forge 전용). "
+             "postprocess_image_after_composite 에서 이미지마다 한 번, SAM3·ADetailer 내부 패스에서는 돌지 않는다"),
+    "scripts/anima_vae_degrid_extras.py": ignored(
+        "Extras 탭 전용(ScriptPostprocessing, 'Anima VAE DeGrid (NAFNet, Extras)') — Forge extras API(/sdapi/v1/extra-"
+        "single-image)는 Upscale·GFPGAN·CodeFormer 인자만 만들어(modules/postprocessing.py run_extras) 앱이 부를 API 가 없다. 이미 만든 이미지의 DeGrid 는 "
+        "확장 라우트가 생길 때(HOLD). Settings 에서 메인 탭에도 켜면 이 이름으로 always-on 이 하나 더 생겨 앱 블록과 두 번 "
+        "걸린다 — 카드 도움말이 알린다", package=HOLD),
     "scripts/anima_lora_blocks.py": mapped(
         "core/sam_extra_notices.py:KEY_SPARSE_LORA_GUESS",
         note="N7 — 자동 훅(인자 0개)이라 페이로드는 없다. 이 스크립트가 남기는 infotext 'Anima sparse LoRA'(추측 변환)만 "
@@ -590,13 +649,28 @@ MODULES = MappingProxyType({
     "sam3ext/anima_ipa/": deferred("P20", "R2 IP-Adapter(SigLIP2 → DiT K/V)"),
     "sam3ext/ui_tipo.py": deferred("P19", "T1 TIPO 마술봉"),
     "sam3ext/tipo/": deferred("P19", "T1/T2 TIPO 런타임·모델"),
-    "sam3ext/vae_degrid.py": deferred(HOLD, "VAE DeGrid 계산(NAFNet 잔차·모드·강도·타일) — 기능 보류와 함께"),
-    "sam3ext/vae_degrid_models.py": deferred(HOLD, "VAE DeGrid 모델 찾기·불러오기(models/ESRGAN·models/DeGrid) — 기능 "
-                                                   "보류와 함께"),
-    "sam3ext/vae_degrid_runtime.py": deferred(HOLD, "VAE DeGrid 장치·정밀도·Forge 메모리 관리(옵션 sam3_degrid_*) — 기능 "
-                                                    "보류와 함께"),
-    "sam3ext/ui_vae_degrid.py": deferred(HOLD, "VAE DeGrid 인자 해석(ARG_NAMES·coerce_args)·infotext 'Anima DeGrid …'·"
-                                               "Gradio 컨트롤 — 기능 보류와 함께"),
+    "sam3ext/vae_degrid.py": mapped(
+        "core/vae_degrid.py:MODES", "core/vae_degrid.py:coerce_strength", "core/vae_degrid.py:coerce_tile",
+        "comfy_custom_nodes/ai_studio_forge_parity/degrid_math.py:PAD_MULTIPLE",
+        note="NAFNet 잔차·모드·강도·타일·판정 문턱 — 앱은 정규화 규칙을 거울로 두고(core/vae_degrid), Comfy 팩은 같은 계산을 "
+             "따로 쓴다(degrid_math·degrid_runner, 확장 코드를 실행한 골든으로 대조). 상수는 SEMANTIC_PINS degrid_*"),
+    "sam3ext/vae_degrid_models.py": mapped(
+        "core/vae_degrid.py:NONE_NAME", "core/vae_degrid.py:MODEL_FOLDERS", "core/vae_degrid.py:resolve_name",
+        "comfy_custom_nodes/ai_studio_forge_parity/degrid_files.py",
+        note="모델 찾기(models/ESRGAN·models/DeGrid, NAFNet 키 검사, modelspec.version 순 자동, 겹치면 '폴더/이름') — 앱은 "
+             "목록의 'None' 자리 표시를 빼고 이름 규칙만 쓴다. Comfy 팩은 같은 규칙으로 upscale_models·degrid 를 읽는다"
+             "(헤더만, torch.load 없음). 핀 degrid_none_name·degrid_model_folders·degrid_nafnet_keys"),
+    "sam3ext/vae_degrid_runtime.py": mapped(
+        "core/forge_override_settings.py:OPT_DEGRID_DEVICE", "core/forge_override_settings.py:OPT_DEGRID_GPU_PRECISION",
+        "core/forge_override_settings.py:OPT_DEGRID_KEEP_LOADED", "core/vae_degrid.py:EXTENSION_OPTION_DEFAULTS",
+        note="장치·정밀도·Forge 메모리 관리 — 앱은 옵션 셋을 P10 덮어쓰기로만 다루고(Forge 전용), ComfyUI 노드는 확장 "
+             "기본값(auto·fp32·끔)으로 같은 계산을 한다. 옛 키 sam3_degrid_precision 은 확장이 읽지 않아 앱도 보내지 않는다. "
+             "핀 degrid_opt_*·degrid_device_*·degrid_precision_*·degrid_default_*"),
+    "sam3ext/ui_vae_degrid.py": mapped(
+        "core/vae_degrid.py:ARG_NAMES", "core/vae_degrid.py:MODE_CHOICES", "core/vae_degrid.py:KEY_ERROR",
+        "core/vae_degrid.py:EXTRAS_TITLE",
+        note="인자 해석(ARG_NAMES·coerce_args)·infotext 'Anima DeGrid …'·Gradio 컨트롤 — 앱은 dict 키·라벨·infotext 키를 "
+             "같은 값으로 둔다(핀 degrid_arg_names·degrid_mode_choices·degrid_key_*·degrid_title·degrid_extras_title)"),
     "sam3ext/negpip/": ignored("편입한 NegPiP 런타임(SD1/SDXL·Anima 훅, 마스크, 독립 확장과의 공존 가드) — 앱은 "
                                "SCRIPTS['NegPiP'] 제목만 쓴다. 앱이 읽는 infotext·옵션·라우트가 없다"),
     "sam3ext/anima38/": mapped("core/anima38.py:parse_args", "core/anima_model_kind.py:BUNDLE_ARCHITECTURE",
@@ -650,6 +724,153 @@ CLI_FLAGS = MappingProxyType({
 # source=fixture: script-info 인자 필드, source=ast: 확장 모듈 상수.
 # ast 핀은 ``expected``(값이 같아야 한다) 또는 ``patterns``(문자열 상수에 정규식이 모두 있어야 한다) 중 하나.
 # ``app`` 이 있으면 그 앱 상수('모듈:이름')도 ``expected`` 와 같아야 한다(확장 없이도 도는 레지스트리 테스트).
+# VAE DeGrid 상수 계약 — 앱(core/vae_degrid·core/forge_override_settings)과 Comfy 팩(degrid_math·degrid_nodes·degrid_runner)이
+# 같은 값을 하드코딩한다. 핀 하나에 앱 상수 하나라(``app``), 둘 다 가진 값은 '<id>' 와 '<id>_comfy' 두 핀이 된다.
+_DEGRID_UI = "sam3ext/ui_vae_degrid.py"
+_DEGRID_CORE = "sam3ext/vae_degrid.py"
+_DEGRID_MODELS = "sam3ext/vae_degrid_models.py"
+_DEGRID_RUNTIME = "sam3ext/vae_degrid_runtime.py"
+_DEGRID_TITLE = "Anima VAE DeGrid (NAFNet)"
+_APP_DEGRID = "core.vae_degrid"
+_PACK = "comfy_custom_nodes.ai_studio_forge_parity"
+
+
+def _degrid_pins(pin_id: str, file: str, name: str, expected, meaning: str, *, app: str = "",
+                 comfy: str = "") -> tuple:
+    """확장 ``file:name`` 핀 — ``app``/``comfy`` 는 '모듈:이름'(각각 핀 하나, 비우면 확장 값만 본다)."""
+    base = {"source": "ast", "file": file, "name": name, "expected": expected, "meaning": meaning}
+    pins = [{"id": pin_id, **base, **({"app": app} if app else {})}]
+    if comfy:
+        pins.append({"id": f"{pin_id}_comfy", **base, "app": comfy,
+                     "meaning": meaning + " — Comfy 팩 노드(ForgeNeoAnimaVAEDeGrid)도 같은 값이어야 Forge 와 같은 결과"})
+    return tuple(pins)
+
+
+_DEGRID_INFOTEXT = (
+    ("model", "KEY_MODEL", "Anima DeGrid model", "쓴 모델(성공 때만) — 붙여 넣기(from_infotext)는 이 키가 있어야 켠다"),
+    ("mode", "KEY_MODE", "Anima DeGrid mode", "모드 이름(MODE_LABELS 값)"),
+    ("strength", "KEY_STRENGTH", "Anima DeGrid strength", "강도(format_strength)"),
+    ("tile", "KEY_TILE", "Anima DeGrid tile", "실제로 쓴 타일(OOM 으로 줄였으면 줄인 값)"),
+    ("precision", "KEY_PRECISION", "Anima DeGrid precision", "정밀도 기록(fp32·fp16-autocast) — 설정이라 붙여 넣지 않는다"),
+    ("error", "KEY_ERROR", "Anima DeGrid error",
+     "실패 이유(쉼표가 들어 있어 따옴표로 묶일 수 있다) — 이 키만 남으면 그 이미지는 DeGrid 없이 저장됐다. 앱 결과 "
+     "알림(CODE_DEGRID_ERROR)이 이 키를 읽는다"),
+)
+_DEGRID_GUARDS = (
+    ("IMAGE_LIKE_MIN_ABS_MEAN", 2 / 255), ("IMAGE_LIKE_CORRELATION", 0.9), ("IMAGE_LIKE_ABS_MEAN", 25 / 255),
+    ("IMAGE_LIKE_LARGE_CORRELATION", 0.5), ("IMAGE_LIKE_DC_MEAN", 25 / 255), ("IMAGE_LIKE_DC_SIGN", 0.8),
+    ("IMAGE_LIKE_DC_RATIO", 0.5), ("RESIDUAL_BLOWUP_ABS_MEAN", 100 / 255),
+)
+
+_DEGRID_PINS = (
+    *_degrid_pins("degrid_title", _DEGRID_UI, "TITLE", _DEGRID_TITLE,
+                  "alwayson_scripts 키 — 앱 블록·기능 스냅샷·전달 규칙·알림 표의 제목이 모두 이 상수 하나에서 나온다",
+                  app=f"{_APP_DEGRID}:SCRIPT_NAME"),
+    *_degrid_pins("degrid_extras_title", _DEGRID_UI, "EXTRAS_TITLE", "Anima VAE DeGrid (NAFNet, Extras)",
+                  "Extras 판 제목 — 메인 탭에도 켜면 이 이름의 always-on 이 하나 더 생긴다(앱은 보내지 않는다)",
+                  app=f"{_APP_DEGRID}:EXTRAS_TITLE"),
+    *_degrid_pins("degrid_arg_names", _DEGRID_UI, "ARG_NAMES", ("enabled", "model", "mode", "strength", "tile"),
+                  "API dict 키(뒤에만 덧붙인다) — 앱은 dict 한 개로 보내므로 이름이 바뀌면 값이 조용히 기본값이 된다",
+                  app=f"{_APP_DEGRID}:ARG_NAMES"),
+    *_degrid_pins("degrid_mode_choices", _DEGRID_UI, "MODE_CHOICES",
+                  ("Full (전체)", "Dark Pixels Mainly (어두운 점 위주)", "Bright Pixels Mainly (밝은 점 위주)"),
+                  "카드 라벨·순서 — script-info 기본값과 위치 인자로 보낸 라벨을 앱이 모드 키로 읽는다(normalize_mode)",
+                  app=f"{_APP_DEGRID}:MODE_CHOICES"),
+    *(pin for short, const, value, meaning in _DEGRID_INFOTEXT
+      for pin in _degrid_pins(f"degrid_key_{short}", _DEGRID_UI, const, value, "결과 infotext 키: " + meaning,
+                              app=f"{_APP_DEGRID}:{const}")),
+    *_degrid_pins("degrid_tile_step", _DEGRID_UI, "TILE_SLIDER_STEP", 128,
+                  "타일 슬라이더 단위(0 과 128 단위) — 카드 입력 step", app=f"{_APP_DEGRID}:TILE_STEP"),
+    *_degrid_pins("degrid_modes", _DEGRID_CORE, "MODES", ("full", "dark", "bright"),
+                  "API mode 키 — 모르는 값은 Full 로 읽힌다(coerce_args)",
+                  app=f"{_APP_DEGRID}:MODES", comfy=f"{_PACK}.degrid_math:MODES"),
+    *_degrid_pins("degrid_mode_labels", _DEGRID_CORE, "MODE_LABELS",
+                  {"full": "Full", "dark": "Dark Pixels Mainly", "bright": "Bright Pixels Mainly"},
+                  "infotext 'Anima DeGrid mode' 값 = 노드 팩 이름 — Comfy 노드 mode 선택지·메타데이터도 이 이름",
+                  app=f"{_APP_DEGRID}:MODE_LABELS", comfy=f"{_PACK}.degrid_math:MODE_LABELS"),
+    *_degrid_pins("degrid_default_mode", _DEGRID_CORE, "DEFAULT_MODE", "full", "모드 기본값",
+                  app=f"{_APP_DEGRID}:DEFAULT_MODE", comfy=f"{_PACK}.degrid_math:DEFAULT_MODE"),
+    *_degrid_pins("degrid_default_strength", _DEGRID_CORE, "DEFAULT_STRENGTH", 1.0,
+                  "강도 기본값(NaN·읽을 수 없는 값도 이 값)",
+                  app=f"{_APP_DEGRID}:DEFAULT_STRENGTH", comfy=f"{_PACK}.degrid_math:DEFAULT_STRENGTH"),
+    *_degrid_pins("degrid_strength_min", _DEGRID_CORE, "STRENGTH_MIN", 0.0, "강도 하한(자르기) — 0 이면 원본 그대로",
+                  app=f"{_APP_DEGRID}:STRENGTH_MIN", comfy=f"{_PACK}.degrid_math:STRENGTH_MIN"),
+    *_degrid_pins("degrid_strength_max", _DEGRID_CORE, "STRENGTH_MAX", 1.5, "강도 상한(자르기)",
+                  app=f"{_APP_DEGRID}:STRENGTH_MAX", comfy=f"{_PACK}.degrid_math:STRENGTH_MAX"),
+    *_degrid_pins("degrid_default_tile", _DEGRID_CORE, "DEFAULT_TILE", 512, "타일 기본값(노드 팩 nafnet_node.py 값)",
+                  app=f"{_APP_DEGRID}:DEFAULT_TILE", comfy=f"{_PACK}.degrid_math:DEFAULT_TILE"),
+    *_degrid_pins("degrid_tile_overlap", _DEGRID_CORE, "TILE_OVERLAP", 32, "타일 겹침 — 바뀌면 타일 경계의 결과가 달라진다",
+                  app=f"{_APP_DEGRID}:TILE_OVERLAP", comfy=f"{_PACK}.degrid_math:TILE_OVERLAP"),
+    *_degrid_pins("degrid_min_tile", _DEGRID_CORE, "MIN_TILE", 128,
+                  "타일 하한(1-127 은 128, OOM 으로 줄이다 이 아래면 포기)",
+                  app=f"{_APP_DEGRID}:MIN_TILE", comfy=f"{_PACK}.degrid_math:MIN_TILE"),
+    *_degrid_pins("degrid_max_tile", _DEGRID_CORE, "MAX_TILE", 4096, "타일 상한(API·붙여 넣기 범위)",
+                  app=f"{_APP_DEGRID}:MAX_TILE", comfy=f"{_PACK}.degrid_math:MAX_TILE"),
+    *_degrid_pins("degrid_pad_multiple", _DEGRID_CORE, "PAD_MULTIPLE", 16, "NAFNet 입력 reflect 패딩 배수",
+                  comfy=f"{_PACK}.degrid_math:PAD_MULTIPLE"),
+    *(pin for name, value in _DEGRID_GUARDS
+      for pin in _degrid_pins(f"degrid_guard_{name.lower()}", _DEGRID_CORE, name, value,
+                              "잔차가 아닌 모델(이미지를 내는 업스케일러)·터진 출력을 건너뛰는 판정 문턱 — 'not a DeGrid "
+                              "residual model'·'output blew up' 오류가 같은 이미지에서 나야 한다",
+                              comfy=f"{_PACK}.degrid_math:{name}")),
+    *_degrid_pins("degrid_none_name", _DEGRID_MODELS, "NONE_NAME", "None",
+                  "모델이 하나도 없을 때 목록의 자리 표시 — 앱은 어디서나 이 값을 모델로 치지 않는다(degrid_no_model 진단)",
+                  app=f"{_APP_DEGRID}:NONE_NAME"),
+    *_degrid_pins("degrid_model_folders", _DEGRID_MODELS, "MODEL_FOLDERS", ("ESRGAN", "DeGrid"),
+                  "모델 폴더와 이름이 겹칠 때 붙는 접두('ESRGAN/…'·'DeGrid/…') — Comfy 이름 ↔ Forge 이름 변환이 쓴다",
+                  app=f"{_APP_DEGRID}:MODEL_FOLDERS"),
+    *_degrid_pins("degrid_model_extensions", _DEGRID_MODELS, "MODEL_EXTENSIONS", (".safetensors", ".pth", ".pt"),
+                  "모델 파일 확장자", comfy=f"{_PACK}.degrid_math:MODEL_EXTENSIONS"),
+    *_degrid_pins("degrid_nafnet_keys", _DEGRID_MODELS, "NAFNET_KEYS", (
+        "intro.weight", "ending.weight", "ups.0.0.weight", "downs.0.weight", "middle_blks.0.beta",
+        "middle_blks.0.gamma", "middle_blks.0.conv1.weight", "middle_blks.0.conv2.weight",
+        "middle_blks.0.conv3.weight", "middle_blks.0.sca.1.weight", "middle_blks.0.conv4.weight",
+        "middle_blks.0.conv5.weight", "middle_blks.0.norm1.weight", "middle_blks.0.norm2.weight",
+        "encoders.0.0.beta", "encoders.0.0.gamma", "decoders.0.0.beta", "decoders.0.0.gamma"),
+                  "NAFNet 판별 키 — 목록에 오르는 파일(=모델 선택지·자동 선택)이 같아야 한다",
+                  comfy=f"{_PACK}.degrid_math:NAFNET_KEYS"),
+    *_degrid_pins("degrid_opt_device", _DEGRID_RUNTIME, "OPT_DEVICE", "sam3_degrid_device",
+                  "이미지마다 읽는 장치 옵션 — 이름이 바뀌면 앱 P10 덮어쓰기가 조용히 아무 일도 하지 않는다",
+                  app="core.forge_override_settings:OPT_DEGRID_DEVICE"),
+    *_degrid_pins("degrid_opt_precision", _DEGRID_RUNTIME, "OPT_PRECISION", "sam3_degrid_gpu_precision",
+                  "이미지마다 읽는 GPU 정밀도 옵션(옛 키 sam3_degrid_precision 은 읽지 않는다)",
+                  app="core.forge_override_settings:OPT_DEGRID_GPU_PRECISION"),
+    *_degrid_pins("degrid_opt_keep_loaded", _DEGRID_RUNTIME, "OPT_KEEP_LOADED", "sam3_degrid_keep_loaded",
+                  "실행 뒤 읽는 VRAM 상주 옵션", app="core.forge_override_settings:OPT_DEGRID_KEEP_LOADED"),
+    *_degrid_pins("degrid_device_auto", _DEGRID_RUNTIME, "DEVICE_AUTO", "auto", "장치 라디오 값(P10 이 이 문자열을 보낸다)",
+                  app=f"{_APP_DEGRID}:DEVICE_AUTO", comfy=f"{_PACK}.degrid_nodes:DEVICE_AUTO"),
+    *_degrid_pins("degrid_device_cpu", _DEGRID_RUNTIME, "DEVICE_CPU", "cpu", "장치 라디오 값 — VRAM 을 쓰지 않는다",
+                  app=f"{_APP_DEGRID}:DEVICE_CPU", comfy=f"{_PACK}.degrid_nodes:DEVICE_CPU"),
+    *_degrid_pins("degrid_precision_fp32", _DEGRID_RUNTIME, "PRECISION_FP32", "fp32", "정밀도 라디오 값(기본)",
+                  app=f"{_APP_DEGRID}:PRECISION_FP32", comfy=f"{_PACK}.degrid_runner:PRECISION_FP32"),
+    *_degrid_pins("degrid_precision_fp16", _DEGRID_RUNTIME, "PRECISION_FP16", "fp16",
+                  "정밀도 라디오 값 — fp16 autocast(결과가 아주 미세하게 다름)",
+                  app=f"{_APP_DEGRID}:PRECISION_FP16", comfy=f"{_PACK}.degrid_runner:PRECISION_FP16"),
+    *_degrid_pins("degrid_default_device", _DEGRID_RUNTIME, "DEFAULT_DEVICE", "auto",
+                  "옵션 기본값 — ComfyUI 노드가 쓰는 값(COMFY_OPTIONS, Forge 설정은 ComfyUI 에 해당 없음)",
+                  app=f"{_APP_DEGRID}:DEFAULT_DEVICE"),
+    *_degrid_pins("degrid_default_precision", _DEGRID_RUNTIME, "DEFAULT_PRECISION", "fp32",
+                  "옵션 기본값 — ComfyUI 노드가 쓰는 값(COMFY_OPTIONS)", app=f"{_APP_DEGRID}:DEFAULT_PRECISION"),
+    *_degrid_pins("degrid_default_keep_loaded", _DEGRID_RUNTIME, "DEFAULT_KEEP_LOADED", False,
+                  "옵션 기본값 — ComfyUI 노드가 쓰는 값(COMFY_OPTIONS)", app=f"{_APP_DEGRID}:DEFAULT_KEEP_LOADED"),
+    *_degrid_pins("degrid_bytes_per_pixel", _DEGRID_RUNTIME, "BYTES_PER_PIXEL", 1536,
+                  "GPU 여유 메모리로 첫 타일 크기를 고르는 추정치 — 바뀌면 쓴 타일(infotext 'Anima DeGrid tile')이 달라진다",
+                  comfy=f"{_PACK}.degrid_nodes:BYTES_PER_PIXEL"),
+    # script-info(픽스처) — 카드 입력 범위·step 이 Forge UI 와 같다
+    {"id": "degrid_ui_strength_step", "source": "fixture", "script": _DEGRID_TITLE, "index": 3,
+     "field": "step", "expected": 0.05, "app": f"{_APP_DEGRID}:STRENGTH_STEP",
+     "meaning": "강도 슬라이더 step — 카드(frontend/src/utils/vaeDegrid.ts STRENGTH_RANGE)도 같다"},
+    {"id": "degrid_ui_strength_max", "source": "fixture", "script": _DEGRID_TITLE, "index": 3,
+     "field": "maximum", "expected": 1.5, "app": f"{_APP_DEGRID}:STRENGTH_MAX",
+     "meaning": "강도 슬라이더 최대 = API 자르기 상한(STRENGTH_MAX)"},
+    {"id": "degrid_ui_tile_max", "source": "fixture", "script": _DEGRID_TITLE, "index": 4,
+     "field": "maximum", "expected": 4096, "app": f"{_APP_DEGRID}:MAX_TILE",
+     "meaning": "타일 슬라이더 최대 = API·붙여 넣기 범위(MAX_TILE)"},
+    {"id": "degrid_ui_tile_min", "source": "fixture", "script": _DEGRID_TITLE, "index": 4,
+     "field": "minimum", "expected": 0,
+     "meaning": "타일 슬라이더 최소 0 = 나누지 않음 — 카드 TILE_RANGE.min 도 0(그 위는 128 단위)"},
+)
+
 SEMANTIC_PINS = (
     {"id": "dd_amount_max", "source": "fixture", "script": "Anima Detail Daemon", "index": 2,
      "field": "maximum", "expected": 5.0,
@@ -834,6 +1055,8 @@ SEMANTIC_PINS = (
      "name": "INFOTEXT_SPARSE_GUESS_KEY", "expected": "Anima sparse LoRA",
      "app": "core.forge_override_settings:INFOTEXT_SPARSE_GUESS",
      "meaning": "추측 변환한 생성에만 남는 infotext 이름(붙여 넣으면 이 옵션을 켜는 덮어쓰기가 된다)"},
+    # VAE DeGrid — 위 _DEGRID_PINS(앱·Comfy 팩 거울)
+    *_DEGRID_PINS,
 )
 
 # ── ui() 컴포넌트에서 AST 로 못 읽는 칸 (script, index) → 필드와 사유 ─────────────────────

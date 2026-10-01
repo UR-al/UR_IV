@@ -443,7 +443,8 @@ def _parse_webui_parameters(text: str, meta: ImageMetadata) -> None:
 _GROUP_GENERATION = ("Steps", "Sampler", "Schedule type")
 _GROUP_CORE = ("CFG scale", "Seed", "Size")
 _GROUP_MODEL = ("Model", "Model hash", "VAE", "Clip skip")
-_EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled")
+# 'degrid': sam-extra VAE DeGrid 의 'Anima DeGrid model/mode/strength/tile/precision/error'(core/vae_degrid KEY_*)
+_EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled", "degrid")
 
 
 def group_parameters(params: dict) -> dict[str, str]:

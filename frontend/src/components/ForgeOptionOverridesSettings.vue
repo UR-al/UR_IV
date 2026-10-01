@@ -19,8 +19,8 @@
           <small v-if="spec.infotext" class="fo-infotext">결과 infotext: {{ spec.infotext }}</small>
         </div>
         <div class="fo-control">
-          <CustomSelect :model-value="choiceLabel(choiceOf(overrides, spec.key))" :options="choiceLabels"
-            @update:model-value="setChoice(spec.key, $event)" />
+          <CustomSelect :model-value="choiceLabel(spec, choiceOf(overrides, spec.key))"
+            :options="rowChoices(spec).map(choice => choice.label)" @update:model-value="setChoice(spec, $event)" />
         </div>
         <div class="fo-meta">
           <span class="fo-status" :class="{ 'fo-alert': blocked(spec.key) }">{{ statusOf(spec.key).text }}</span>
@@ -34,8 +34,9 @@
 
 <script setup lang="ts">
 /**
- * 설정 › Forge — sam-extra Forge 옵션 요청별 덮어쓰기(P10). 값은 ui_prefs.forgeOptionOverrides({키: boolean}, 키 없음 =
- * 'Forge 설정 따름')이고 저장은 기존 save_ui_prefs, 읽기는 getUiPrefs + uiPrefsLoaded(SpectrumSettings 와 같은 방식 —
+ * 설정 › Forge — sam-extra Forge 옵션 요청별 덮어쓰기(P10). 값은 ui_prefs.forgeOptionOverrides({키: boolean | 선택지
+ * 문자열}, 키 없음 = 'Forge 설정 따름')이다. 줄마다 선택지는 스펙이 정한다(rowChoices — 체크박스 켬/끔, 라디오 확장
+ * 선택지). 그리고 저장은 기존 save_ui_prefs, 읽기는 getUiPrefs + uiPrefsLoaded(SpectrumSettings 와 같은 방식 —
  * 새 브리지 이름 없음). 보낼지·병합·거절 시 다시 보내기는 파이썬 백엔드(core/forge_override_settings)가 정한다.
  * 상태 한 줄은 sam-extra 기능 스냅샷(options·options_known)으로 표시만 한다.
  */
@@ -45,14 +46,14 @@ import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
 import { useSamExtraCapabilities } from '../composables/useSamExtraCapabilities'
 import {
-  CHOICES, DESCRIPTIONS, GROUPS, PREF_KEY, choiceFromLabel, choiceLabel, choiceOf, isBlocked, normalizeOverrides,
-  optionStatus, rowWarning, specsOf, summary, withChoice, type OptionStatus, type Overrides,
+  DESCRIPTIONS, GROUPS, PREF_KEY, choiceFromLabel, choiceLabel, choiceOf, isBlocked, normalizeOverrides,
+  optionStatus, rowChoices, rowWarning, specsOf, summary, withChoice,
+  type ForgeOptionSpec, type OptionStatus, type Overrides,
 } from '../utils/forgeOptionOverrides'
 
 const { capabilities } = useSamExtraCapabilities()
 const overrides = ref<Overrides>({})
 const error = ref('')
-const choiceLabels = CHOICES.map(choice => choice.label)
 let edited = false
 let disposed = false
 let disconnect: (() => void) | undefined
@@ -84,9 +85,9 @@ function apply(raw: string) {
   }
 }
 
-function setChoice(key: string, label: string | number) {
+function setChoice(spec: ForgeOptionSpec, label: string | number) {
   edited = true
-  overrides.value = withChoice(overrides.value, key, choiceFromLabel(label))
+  overrides.value = withChoice(overrides.value, spec.key, choiceFromLabel(spec, label))
   // dict 전체를 보낸다 — 'Forge 설정 따름'은 키를 지운 dict 로 파일 값을 바꾼다(prefs.update).
   requestAction('save_ui_prefs', { [PREF_KEY]: { ...overrides.value } })
 }

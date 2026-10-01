@@ -19,6 +19,7 @@ from core.backend_runtime import (
     BackendRuntimeManager,
     CommandResult,
     LocalRuntimeAdapter,
+    MODEL_PATH_CATEGORIES,
 )
 
 
@@ -1053,7 +1054,10 @@ class BackendRuntimeLinkedInstallTests(BackendRuntimeTestCase):
             comfy_root / "models" / "upscale_models",
             self.runtime_root / "comfyui" / "data" / "models" / "upscale_models",
         ]
-        for path in forge_upscale + comfy_upscale:
+        # VAE DeGrid NAFNet: Forge 확장의 models/DeGrid ↔ 앱 노드 팩(1.5.0)의 ComfyUI degrid 카테고리
+        forge_degrid = [forge_root / "models" / "DeGrid"]
+        comfy_degrid = [comfy_root / "models" / "degrid"]
+        for path in forge_upscale + comfy_upscale + forge_degrid + comfy_degrid:
             path.mkdir(parents=True)
         # Explicit installed roots, not the developer machine's model fallback.
         root_patch = patch("core.forge_modules.get_forge_root", return_value=forge_root / "models")
@@ -1071,13 +1075,20 @@ class BackendRuntimeLinkedInstallTests(BackendRuntimeTestCase):
         snapshot = selected["snapshot"]
         self.assertEqual(snapshot["primaryModelEngine"], "comfyui")
         self.assertEqual(snapshot["activeEngine"], "")
-        self.assertEqual(
-            set(snapshot["engines"]["comfyui"]["modelPaths"]),
-            {"checkpoints", "diffusion_models", "loras", "vae", "text_encoders", "upscale_models"},
-        )
+        for engine in ("forge", "comfyui"):
+            self.assertEqual(
+                set(snapshot["engines"][engine]["modelPaths"]),
+                {"checkpoints", "diffusion_models", "loras", "vae", "text_encoders", "upscale_models", "degrid"},
+            )
+        self.assertEqual(MODEL_PATH_CATEGORIES, tuple(snapshot["engines"]["comfyui"]["modelPaths"]))
         for engine, expected in (("forge", forge_upscale), ("comfyui", comfy_upscale)):
             self.assertEqual(
                 snapshot["engines"][engine]["modelPaths"]["upscale_models"],
+                [str(path.resolve()) for path in expected],
+            )
+        for engine, expected in (("forge", forge_degrid), ("comfyui", comfy_degrid)):
+            self.assertEqual(
+                snapshot["engines"][engine]["modelPaths"]["degrid"],
                 [str(path.resolve()) for path in expected],
             )
 
@@ -1108,6 +1119,13 @@ class BackendRuntimeLinkedInstallTests(BackendRuntimeTestCase):
             config["aistudio_shared"]["upscale_models"].splitlines(),
             [str(path.resolve()) for path in comfy_upscale + forge_upscale],
         )
+        # ComfyUI 는 모르는 카테고리도 등록한다 — 팩 1.5.0 이 같은 'degrid' 에 자기 기본 폴더를 더한다
+        self.assertEqual(
+            config["aistudio_shared"]["degrid"].splitlines(),
+            [str(path.resolve()) for path in comfy_degrid + forge_degrid],
+        )
+        # Forge 실행 인자에는 DeGrid 폴더가 없다(확장은 models/DeGrid 를 직접 본다)
+        self.assertNotIn(str(forge_degrid[0].resolve()), forge_argv)
 
         # Changing the primary library must update the actual Comfy path file.
         self.manager.execute("forge", "set_primary_model_engine")

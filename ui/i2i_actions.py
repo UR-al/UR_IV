@@ -225,7 +225,7 @@ def _on_finished(mw, worker, result, gen_info) -> None:
                 logger.warning("i2i send_image failed: %s", exc)
         notify(mw, 'success', 'I2I 생성 완료')
         from ui.sam_extra_notices_ui import show_result_notices
-        show_result_notices(mw, info)   # 'SAM3 Error'·'Anima38: off'·PAG 누락
+        show_result_notices(mw, info)   # 'SAM3 Error'·'Anima38: off'·PAG 누락·DoRA·VAE DeGrid(Forge infotext·ComfyUI 리포트)
         return
     if info.get('cancelled'):
         notify(mw, 'info', 'I2I 생성이 취소되었습니다')

@@ -18,6 +18,9 @@ class BackendInfo:
     # ComfyUI: Anima 3.8B 카드의 v1 어댑터 선택지(core.anima38.comfy_adapter_choices). Forge·모름 = None
     # (Forge 는 sam-extra 기능 스냅샷 choices.anima38_adapters 를 쓴다)
     anima38_adapters: Optional[List[str]] = None
+    # ComfyUI: VAE DeGrid 카드의 모델 선택지(core.vae_degrid.comfy_model_choices — Forge 식 이름). Forge·모름·옛 팩
+    # (노드 없음) = None (Forge 는 sam-extra 기능 스냅샷 choices.degrid_models 를 쓴다)
+    degrid_models: Optional[List[str]] = None
 
 
 @dataclass

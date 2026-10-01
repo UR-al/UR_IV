@@ -11,6 +11,9 @@
     스냅샷이 다음 연결까지 남는다.)
   - refresh 는 웹 클라이언트도 보낼 수 있어서 ``ACTION_REFRESH_MIN_INTERVAL_S`` 간격으로 제한한다.
     이 수동 새로고침만 ``/sdapi/v1/extensions`` (Forge 가 확장 목록을 다시 스캔하는 GET) 캐시를 버린다.
+  - ComfyUI 백엔드의 스냅샷은 늘 'not_applicable' 이다. 대신 수동 새로고침(카드 ↻)은 ComfyUI 의 /object_info 를
+    새로 받아 VAE DeGrid 모델 목록(``_degrid_model`` 의 ``comfyModels``)을 다시 보낸다(ui/vae_degrid_ui
+    ``refresh_comfy_models`` — 같은 액션·같은 간격 제한, 새 브리지 이름 없음).
 - 백엔드 변경(BACKEND_CHANGED / BACKEND_URL_CHANGED)은 스냅샷과 공용 스냅샷 캐시를 버린다 —
   재연결 뒤 캐시가 바뀌기 전 스냅샷을 내주지 않게.
 """
@@ -136,8 +139,11 @@ class SamExtraCapabilitiesActionsMixin:
         with self._sam_extra_lock:
             self._sam_extra_serial += 1
             serial = self._sam_extra_serial
-        if get_backend_type() != BackendType.WEBUI:
+        backend_type = get_backend_type()
+        if backend_type != BackendType.WEBUI:
             self._store_sam_extra_capabilities(unknown_capabilities(STATUS_NOT_APPLICABLE), serial)
+            if manual and backend_type == BackendType.COMFYUI:
+                self._refresh_comfy_degrid_models()
             return
         base_url = str(getattr(get_backend(), "api_url", "") or "")
         if not base_url:
@@ -169,3 +175,12 @@ class SamExtraCapabilitiesActionsMixin:
             self._sam_extra_worker = worker
             self._sam_extra_worker_serial = serial
         worker.start()
+
+    def _refresh_comfy_degrid_models(self):
+        """ComfyUI 의 카드 ↻ — DeGrid 모델 목록을 /object_info 에서 다시 받는다(워커, GUI 스레드는 기다리지 않는다)."""
+        try:
+            from ui.vae_degrid_ui import refresh_comfy_models
+
+            self._degrid_models_worker = refresh_comfy_models(self)
+        except Exception as exc:  # 표시 전용 — 실패해도 지난 목록이 남는다
+            print(f"[sam-extra] ComfyUI DeGrid 모델 목록 새로고침 시작 실패(무시): {exc}", flush=True)

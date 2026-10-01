@@ -11,6 +11,8 @@
                                             'Anima38: off: …',
                                             PAG/SEG/SLG 를 켰는데 'Anima Perturbation Guidance' 가 없음,
                                             보낸 DoRA 방식의 'DoRA mode'·'DoRA inserted' 가 없음(훅 폴백, P8),
+                                            VAE DeGrid 'Anima DeGrid error'(장마다 — 모델 없음·일반 NAFNet·폭주)·
+                                            기록 없음(옛 sam-extra),
                                             부분 LoRA 추측 변환('Anima sparse LoRA', 정보)
 - ``pre_generation_notices(payload, …)``   생성 전: CFG 1 에서 켠 SMC/APG/CWM(Forge 는 CFG 1 에 네거티브를
                                             인코딩하지 않아 v0.30 은 어느 빌드든 건너뜀, 가드 없는 v0.21.2 계열은
@@ -20,6 +22,8 @@
   (``missing_script_title`` 은 같은 규칙으로 제목만 — 보조 패스 재시도 판정 core/forge_optional_parts)
 - ``block_*_notice``/``propagation_*_notice``  샘플링 블록 게이트·보조 패스 전달(P7, core/alwayson_propagation)
 - ``dora_*_notice``                         DoRA 추론 방식 — Comfy 순정 안내·라이브 선택지 불일치·첫 로드 앱 기본값(P8)
+- ``degrid_result_notices``/``degrid_comfy_unavailable_notice``  VAE DeGrid — Comfy 백엔드가 노드 리포트를 Forge 와 같은
+                                            infotext 키로 바꿔 같은 규칙으로 알린다(core/vae_degrid.report_params)
 - ``anima38_*_notice``                      Anima 3.8B — 첫 로드 앱 기본값(부정 커넥터 켬)·Comfy v1 자동 켜짐 폐지 안내(P9).
                                             'off: install failed (RuntimeError)' 힌트는 결과 모델 종류(비 Anima)를 먼저 본다
 - ``app_block_retried_notice``/``block_retried_notice``  메인 생성 재시도(DoRA·Anima38 422 — 앱 기본값이면 정보, 사용자
@@ -51,7 +55,7 @@ from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 from urllib.parse import urlsplit
 
-from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, sam3_args
+from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, sam3_args, vae_degrid
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,9 @@ KEY_PAG = "Anima Perturbation Guidance"                 # PAG/SEG/SLG 가 실제
 # (sam3ext/anima_lora_blocks.py INFOTEXT_SPARSE_GUESS_KEY, 기록은 scripts/anima_lora_blocks.py). 건너뛴 부분 LoRA
 # 는 gr.Warning 만 남겨 API 응답에 흔적이 없다 — 앱은 알 수 없다(gap matrix M4).
 KEY_SPARSE_LORA_GUESS = "Anima sparse LoRA"
+# VAE DeGrid(sam3ext/ui_vae_degrid.py) — 성공이면 model·mode·strength·tile(+precision), 실패면 error 하나만(장마다)
+KEY_DEGRID_MODEL = vae_degrid.KEY_MODEL
+KEY_DEGRID_ERROR = vae_degrid.KEY_ERROR
 
 # generation info 에 알림을 싣는 키 (list[dict]) — 백엔드가 넣고 UI 가 읽는다. '_' 로 시작해 메타데이터로 새지 않는다.
 INFO_KEY = "_sam_extra_notices"
@@ -103,6 +110,10 @@ CODE_DORA_APP_DEFAULT = "dora_app_default"            # 첫 로드: 옛 설정�
 # Anima 3.8B(P9, core/anima38)
 CODE_ANIMA38_APP_DEFAULT = "anima38_app_default"      # 첫 로드: 옛 설정에 키가 없어 앱 기본값(부정 커넥터 켬)으로 시작
 CODE_ANIMA38_COMFY_V1 = "anima38_comfy_v1"            # 생성 전(Comfy): Qwen3.5·어댑터 모듈 쌍이 있어도 v1 은 카드에서 켤 때만
+# VAE DeGrid(core/vae_degrid)
+CODE_DEGRID_ERROR = "degrid_error"                    # 결과: 'Anima DeGrid error' — 그 이미지는 DeGrid 없이 저장(경고)
+CODE_DEGRID_NOT_APPLIED = "degrid_not_applied"        # 결과: 보냈는데 'Anima DeGrid model'·'error' 가 모두 없음(옛 sam-extra)
+CODE_DEGRID_COMFY_UNAVAILABLE = "degrid_comfy_unavailable"   # ComfyUI: 노드(팩 1.5.0)·출력 연결이 없어 빼고 생성(경고)
 # 메인 생성 재시도·Forge 옵션 덮어쓰기(P10, core/forge_override_settings·core/forge_optional_parts)
 CODE_APP_BLOCK_RETRIED = "app_block_retried"          # 메인 생성: 앱이 넣은 블록(DoRA·Anima38)을 Forge 가 422 로 거절 → 빼고 다시
 CODE_BLOCK_RETRIED = "block_retried"                  # 메인 생성: 사용자 값(또는 출처 모름) 블록을 422 로 거절 → 빼고 다시(경고)
@@ -155,6 +166,10 @@ NOTICE_MIN_TTL_S = {
     # 원본 기준 SAM3 알림도 확장·설정이 그대로면 장마다 같다(배치 SAM3 100장이 30초마다 다시 띄우지 않게)
     CODE_SAM3_SOURCE_UNSUPPORTED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_SAM3_SOURCE_FALLBACK: PRE_GENERATION_NOTICE_TTL_S,
+    # VAE DeGrid 도 모델·확장이 그대로면 장마다·요청마다 같다(배치 100장이 30초마다 다시 띄우지 않게)
+    CODE_DEGRID_ERROR: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_DEGRID_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_DEGRID_COMFY_UNAVAILABLE: PRE_GENERATION_NOTICE_TTL_S,
 }
 # 띄울 때 GUI 가 기능 스냅샷을 다시 받아야 하는 알림(연결 때 받은 스냅샷이 틀렸다는 뜻) —
 # ui/sam_extra_notices_ui.show_notices 가 _refresh_sam_extra_capabilities(force=True) 를 부른다.
@@ -163,6 +178,7 @@ REFRESH_CAPABILITIES_CODES = frozenset({CODE_PROPAGATION_RETRIED, CODE_APP_BLOCK
 
 # ── alwayson 제목 → 사람이 읽는 이름 ─────────────────────────────────────────
 _TITLE_DORA = dora_infer_mode.SCRIPT_NAME
+_TITLE_DEGRID = vae_degrid.SCRIPT_NAME
 _TITLE_VAE2X = "Anima VAE 2x (spacepxl decoder)"
 SAM_EXTRA_FEATURES = {
     sam3_args.SCRIPT_SAM3.lower(): ("sam3", "SAM3 Mask"),
@@ -172,6 +188,7 @@ SAM_EXTRA_FEATURES = {
     anima38.SCRIPT_NAME.lower(): ("anima38", "Anima 3.8B"),
     _TITLE_DORA.lower(): ("dora", "DoRA 추론 방식"),
     _TITLE_VAE2X.lower(): ("vae2x", "VAE 2x"),
+    _TITLE_DEGRID.lower(): ("degrid", "VAE DeGrid"),
 }
 # 기능 스냅샷(SAM_EXTRA_FEATURES) 밖 제목: 소문자 제목 → (기능, 제공 확장 이름). NegPiP 는 2026-09-30 부터 sam-extra 에
 # 내장(sd-forge-negpip 편입)됐지만 스냅샷 기능이 아니므로 여기 둔다.
@@ -380,6 +397,7 @@ class RequestedFeatures:
     cfg_bases: tuple = ()                     # ('SMC', 'APG', 'CWM') 중 실제로 거는 것(CWM 은 alpha ≠ 0)
     anima38: Optional[anima38.Anima38Settings] = None   # 블록을 보냈을 때만
     dora: Optional[dora_infer_mode.DoraSettings] = None   # 블록을 보냈을 때만(확장이 읽는 규칙 — parse_script_block)
+    degrid: Optional[vae_degrid.DegridSettings] = None     # 블록을 보냈을 때만(확장 coerce_args 규칙)
     cfg_scale: Optional[float] = None
     hires: bool = False
     hires_cfg: Optional[float] = None         # 요청에 hr_cfg 가 있을 때만
@@ -488,6 +506,7 @@ def requested_features(payload: Any, *, live_pag_argc: Optional[int] = None) -> 
         scripts=titles, sam3=sam3_on, sam3_state=sam3_state, pag=pag, pag_parts=parts, cfg_bases=bases,
         anima38=anima38.parse_script_block(block38) if block38 is not None else None,
         dora=dora_infer_mode.parse_script_block(_script_block(payload, dora_infer_mode.SCRIPT_NAME)),
+        degrid=vae_degrid.parse_script_block(_script_block(payload, vae_degrid.SCRIPT_NAME)),
         cfg_scale=_number(payload.get("cfg_scale")),
         hires=hires, hires_cfg=_number(payload.get("hr_cfg")) if hires and "hr_cfg" in payload else None,
         # 키가 있으면 img2img 요청이다 — 재인코딩하는 I2I 는 워커가 채울 때까지 init_images=[] 로 둔다
@@ -789,6 +808,112 @@ def _dora_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) 
     return out
 
 
+# VAE DeGrid 실패 이유 → 확인할 것. 확장 문구의 앞부분(종류)만 본다(core/vae_degrid.ERROR_*) — 문구는 앱이 다시 쓴다.
+# 확인할 것(hint) — 알림 문장 "VAE DeGrid 가 … DeGrid 없이 저장됐습니다 — {hint}. (원인: …)" 의 뒤 절이다. 앞 절이 이미
+# '— ' 로 이어지므로 hint 안에서는 줄표를 다시 쓰지 않고 문장('. ')으로 나눈다. 이미지를 그대로 저장했다는 말도 앞 절에 있다.
+_DEGRID_HINTS = (
+    (vae_degrid.ERROR_MODEL_NOT_FOUND,
+     "모델 파일을 Forge 의 models/ESRGAN 또는 models/DeGrid 에 두세요. 카드의 Forge 목록은 Forge 시작 때 만들어지고, "
+     "생성할 때는 새 파일도 찾습니다"),
+    (vae_degrid.ERROR_NOT_RESIDUAL,
+     "고른 모델은 이미지를 내는 일반 복원 NAFNet 이라 확장이 적용하지 않았습니다. VAE DeGrid 모델"
+     "(예: qwenVAEDegridNafnet_v11)을 고르세요"),
+    (vae_degrid.ERROR_BLEW_UP,
+     "이 이미지의 무늬(화면을 채운 1px 줄무늬·체커 등)에서 모델이 비정상적으로 큰 보정을 내 확장이 적용하지 않았습니다"),
+)
+_DEGRID_OOM_HINT = "VRAM 부족입니다. 타일 크기를 줄이거나 설정 › Forge 에서 VAE DeGrid 계산 장치를 CPU 로 바꾸세요"
+_DEGRID_OTHER_HINT = "Forge 콘솔의 '[AnimaDeGrid]' 줄에서 원인을 확인하세요"
+# ComfyUI(ai_studio_forge_parity 노드)에서 같은 종류 — 건너뛴 것은 Forge 확장이 아니라 앱 노드이고, 모델 폴더·콘솔 줄·
+# 장치 설정이 다르다(노드는 auto·fp32·끔 고정). 키(묶음·억제)는 Forge 와 같다.
+_DEGRID_COMFY_HINTS = {
+    vae_degrid.ERROR_MODEL_NOT_FOUND:
+        "모델 파일을 ComfyUI 의 models/upscale_models 또는 models/degrid 에 두세요. 카드의 ComfyUI 목록은 연결할 때와 ↻ 를 "
+        "누를 때 받고, 생성할 때 다시 확인합니다",
+    vae_degrid.ERROR_NOT_RESIDUAL:
+        "고른 모델은 이미지를 내는 일반 복원 NAFNet 이라 ComfyUI 노드가 이 단계를 건너뛰었습니다. VAE DeGrid 모델"
+        "(예: qwenVAEDegridNafnet_v11)을 고르세요",
+    vae_degrid.ERROR_BLEW_UP:
+        "이 이미지의 무늬(화면을 채운 1px 줄무늬·체커 등)에서 모델이 비정상적으로 큰 보정을 내 ComfyUI 노드가 이 단계를 "
+        "건너뛰었습니다",
+}
+_DEGRID_COMFY_OOM_HINT = ("VRAM 부족입니다. 타일 크기를 줄이세요(ComfyUI 노드는 Forge 의 VAE DeGrid 장치·정밀도 설정을 "
+                          "쓰지 않습니다)")
+_DEGRID_COMFY_OTHER_HINT = "ComfyUI 콘솔의 'AI Studio VAE DeGrid' 줄에서 원인을 확인하세요"
+_EXCEPTION_PREFIX_RE = re.compile(r"^([A-Za-z_][\w.]*(?:Error|Exception|Warning)):")
+
+
+def degrid_error_kind(reason: Any, *, comfy: bool = False) -> tuple[str, str]:
+    """'Anima DeGrid error' 원문 → (묶음·억제 키, 확인할 것). 숫자만 다른 문구(잔차 크기·상관)는 같은 키다 —
+    ``Notice.key`` 가 detail 을 쓰므로 원문을 그대로 두면 장마다 알림이 새로 뜬다. 'model not found: <이름|auto>' 는
+    이름까지가 키다(다른 모델이면 다른 알림). ``comfy``: ComfyUI 노드 리포트 — 키는 같고 확인할 것만 ComfyUI 말로."""
+    text = " ".join(str(reason or "").split())
+    lower = text.lower()
+    if lower.startswith(vae_degrid.ERROR_MODEL_NOT_FOUND):
+        hint = _DEGRID_COMFY_HINTS[vae_degrid.ERROR_MODEL_NOT_FOUND] if comfy else _DEGRID_HINTS[0][1]
+        return text, hint
+    for prefix, hint in _DEGRID_HINTS[1:]:
+        if lower.startswith(prefix.lower()):
+            return prefix, _DEGRID_COMFY_HINTS.get(prefix, hint) if comfy else hint
+    if "out of memory" in lower or "outofmemory" in lower:
+        return "out of memory", _DEGRID_COMFY_OOM_HINT if comfy else _DEGRID_OOM_HINT
+    other = _DEGRID_COMFY_OTHER_HINT if comfy else _DEGRID_OTHER_HINT
+    match = _EXCEPTION_PREFIX_RE.match(text)
+    if match:
+        return match.group(1), other
+    return re.sub(r"\d+", "#", lower), other
+
+
+def _degrid_result_notices(request: RequestedFeatures, images: Sequence[Mapping], *,
+                           comfy: bool = False) -> list[Notice]:
+    """보낸 VAE DeGrid 블록의 결과 — 확장은 실패해도 이미지를 그대로 저장하고 그 장의 infotext 에 'Anima DeGrid error'
+    만 남긴다(scripts/anima_vae_degrid.py — HTTP 오류가 없다). 장마다 읽어 이유의 종류마다 한 번 알린다(SAM3 처럼
+    'n/m장'). 성공 기록('Anima DeGrid model')도 오류도 없는 결과는 DeGrid 를 모르는 옛 sam-extra 다(경고).
+    읽을 결과가 없으면(ComfyUI 리포트 없음) 아무것도 말하지 않는다."""
+    sent = request.degrid
+    if sent is None or not sent.enabled or not images:
+        return []
+    total = len(images)
+    errors = [reason for reason in (vae_degrid.infotext_error(p) for p in images) if reason]
+    out: list[Notice] = []
+    if errors:
+        groups: dict[str, list] = {}
+        for reason in errors:
+            key, hint = degrid_error_kind(reason, comfy=comfy)
+            groups.setdefault(key, [reason, hint, 0])[2] += 1
+        for key, (reason, hint, count) in groups.items():
+            scope = f"{count}/{total}장이 " if total > 1 else ""
+            out.append(Notice(
+                CODE_DEGRID_ERROR, LEVEL_WARNING,
+                f"VAE DeGrid 가 {scope}적용되지 않아 DeGrid 없이 저장됐습니다 — {hint}. (원인: {_short(reason, 140)})",
+                feature="degrid", detail=key, hint=hint))
+        return out
+    if not any(KEY_DEGRID_MODEL in p for p in images):
+        out.append(Notice(
+            CODE_DEGRID_NOT_APPLIED, LEVEL_WARNING,
+            f"VAE DeGrid 를 켰지만 결과에 '{KEY_DEGRID_MODEL}' 기록이 없습니다 — 연결된 sam-extra 가 DeGrid 를 모르는 "
+            "옛 버전일 수 있습니다. sam-extra 를 업데이트하고 Forge 콘솔의 '[AnimaDeGrid]' 줄을 확인하세요.",
+            feature="degrid", detail=KEY_DEGRID_MODEL))
+    return out
+
+
+def degrid_result_notices(payload: Any, params_list: Iterable[Any], *, comfy: bool = False) -> list[Notice]:
+    """보낸 페이로드 + 이미지마다 infotext 식 파라미터 → VAE DeGrid 결과 알림(Forge 와 같은 규칙).
+
+    ComfyUI 백엔드가 노드 리포트를 ``core/vae_degrid.report_params`` 로 바꿔 부른다(A9, core/comfy_degrid_report —
+    ``comfy=True`` 면 확인할 것을 ComfyUI 말로). 페이로드에 켜진 DeGrid 블록이 없거나 파라미터가 없으면 빈 목록."""
+    images = [dict(p) for p in (params_list or ()) if isinstance(p, Mapping)]
+    return _degrid_result_notices(requested_features(payload), images, comfy=comfy)
+
+
+def degrid_comfy_unavailable_notice(reason: str) -> Notice:
+    """ComfyUI: DeGrid 노드를 넣을 수 없어(팩 1.5.0 이 아님·노드 입력이 다름·출력 연결 없음) 빼고 생성했다(경고)."""
+    text = " ".join(str(reason or "").split())
+    return Notice(
+        CODE_DEGRID_COMFY_UNAVAILABLE, LEVEL_WARNING,
+        f"ComfyUI 에서 VAE DeGrid 를 넣을 수 없어 DeGrid 없이 생성했습니다 — {text}.",
+        feature="degrid", detail=text)
+
+
 def result_notices(info: Any, payload: Any = None, *, capabilities: Any = None,
                    propagated_titles: Iterable[str] = ()) -> list[Notice]:
     """Forge 응답 info + 보낸 payload → 결과 알림. 판단할 재료가 없으면 빈 목록.
@@ -880,6 +1005,7 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
                 feature="anima_guidance", detail=f"{missing}/{total}"))
 
     out.extend(_dora_result_notices(request, images))
+    out.extend(_degrid_result_notices(request, images))
 
     # 부분 Anima LoRA 추측 변환 — Forge 설정을 켠 사용자에게 블록 대응이 틀릴 수 있음을 알린다(확장의 gr.Info 대응).
     guesses = list(dict.fromkeys(str(p[KEY_SPARSE_LORA_GUESS]).strip() for p in images
@@ -1344,18 +1470,20 @@ class NoticeThrottle:
 __all__ = [
     "CODE_ANIMA38_APP_DEFAULT", "CODE_ANIMA38_COMFY_V1", "CODE_ANIMA38_NOT_APPLIED", "CODE_ANIMA38_OFF",
     "CODE_APP_BLOCK_RETRIED", "CODE_BLOCK_DEFERRED",
-    "CODE_BLOCK_NOT_SENT", "CODE_BLOCK_RETRIED", "CODE_CFG1_CFG_BASE", "CODE_DORA_APP_DEFAULT", "CODE_DORA_CHOICE",
+    "CODE_BLOCK_NOT_SENT", "CODE_BLOCK_RETRIED", "CODE_CFG1_CFG_BASE", "CODE_DEGRID_COMFY_UNAVAILABLE",
+    "CODE_DEGRID_ERROR", "CODE_DEGRID_NOT_APPLIED", "CODE_DORA_APP_DEFAULT", "CODE_DORA_CHOICE",
     "CODE_DORA_COMFY_STOCK", "CODE_DORA_NOT_APPLIED", "CODE_EXTENSION_MISSING", "CODE_FORGE_OPTION_FROZEN",
     "CODE_FORGE_OPTION_MISSING", "CODE_FORGE_OPTION_REJECTED", "CODE_FORGE_OPTION_UNVERIFIED",
     "CODE_LORA_SPARSE_GUESS", "CODE_PAG_DROPPED", "CODE_PROPAGATION_DROPPED", "CODE_PROPAGATION_RETRIED",
     "CODE_REQUEST_REJECTED", "CODE_SAM3_ERROR", "CODE_SAM3_HF_DOWNLOAD", "CODE_SAM3_NOT_APPLIED",
     "CODE_SAM3_SOURCE_FALLBACK", "CODE_SAM3_SOURCE_UNSUPPORTED",
     "CODE_SCRIPT_MISSING", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
-    "KEY_SAM3_SOURCE", "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",
+    "KEY_DEGRID_ERROR", "KEY_DEGRID_MODEL", "KEY_SAM3_SOURCE", "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",
     "Notice", "NoticeThrottle", "NoticedImage", "PRE_GENERATION_NOTICE_TTL_S", "PROPAGATED_SUFFIX",
     "REFRESH_CAPABILITIES_CODES", "RESULT_NOTICE_TTL_S", "RequestedFeatures", "anima38_app_default_notice",
     "anima38_comfy_v1_notice", "anima38_off_hint",
     "app_block_retried_notice", "block_deferred_notice", "block_not_sent_notice", "block_retried_notice",
+    "degrid_comfy_unavailable_notice", "degrid_error_kind", "degrid_result_notices",
     "dora_app_default_notice", "dora_choice_notice", "dora_comfy_stock_notice", "explain_rejected_request",
     "forge_option_frozen_notice", "forge_option_missing_notice", "forge_option_rejected_notice",
     "forge_option_unverified_notice", "image_parameters", "is_loopback_url", "missing_script_title", "notice_ttl",

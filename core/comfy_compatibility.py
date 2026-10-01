@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from core import vae_degrid
 from core.storage_paths import PROJECT_ROOT, config_file
 from utils.atomic_json import atomic_write_json
 
@@ -47,6 +48,15 @@ RECIPES = [
                "DiTSpectrumPatch": {"model": "MODEL"}}, "models": [],
      "repoUrl": "https://github.com/sorryhyun/ComfyUI-Spectrum-KSampler",
      "note": "외부 노드가 필요합니다. 기준 커밋과 달라도 즉시 불호환은 아니며, A/B 속도·품질 검증 없이 가속을 보장하지 않습니다."},
+    {"id": "degrid", "title": vae_degrid.SCRIPT_NAME, "scope": "앱 기본 Comfy 워크플로 · 최종 이미지 후처리",
+     "nodes": {vae_degrid.COMFY_NODE_CLASS: {"image": "IMAGE", "model_name": "CHOICE", "mode": "CHOICE",
+                                             "strength": "FLOAT", "tile": "INT", "device": "CHOICE",
+                                             "precision": "CHOICE", "keep_loaded": "BOOLEAN",
+                                             "forge_quantize": "BOOLEAN"}},
+     "models": ["degrid"], "repoUrl": "",
+     "note": f"번들 노드 팩 {vae_degrid.COMFY_MIN_PACK_VERSION} 이상이 필요합니다(없으면 앱이 DeGrid 를 빼고 생성하며 알립니다). "
+             "모델은 ComfyUI 의 models/upscale_models 또는 models/degrid 의 NAFNet 파일입니다. Forge 의 장치·정밀도·VRAM "
+             "상주 설정은 적용되지 않고 auto · fp32 · 끔으로 계산합니다. 목록 확인만으로 화질·VRAM 은 검증되지 않습니다."},
     {"id": "relight", "title": "조명·그림자 보정", "scope": "실험 · 독립 번들 알고리즘",
      "nodes": {"AIStudioRelight": {"image": "IMAGE"}}, "models": [], "repoUrl": "",
      "note": "깊이·법선 맵은 선택 입력입니다. DepthAnything/DSINE 같은 외부 추정 노드는 사용자 워크플로에서 별도로 연결하며 자동 설치·추론하지 않습니다."},
@@ -55,8 +65,11 @@ MODEL_FIELDS = {
     "diffusion": [("UNETLoader", "unet_name"), ("CheckpointLoaderSimple", "ckpt_name")],
     "text_encoder": [("CLIPLoader", "clip_name"), ("DualCLIPLoader", "clip_name1")],
     "vae": [("VAELoader", "vae_name")],
+    "degrid": [(vae_degrid.COMFY_NODE_CLASS, "model_name")],
 }
-MODEL_LABELS = {"diffusion": "생성 모델", "text_encoder": "텍스트 인코더", "vae": "VAE"}
+MODEL_LABELS = {"diffusion": "생성 모델", "text_encoder": "텍스트 인코더", "vae": "VAE", "degrid": "VAE DeGrid 모델"}
+# 모델 목록의 자리 표시 선택지(파일이 아니다) — 개수에서 뺀다. DeGrid 노드는 늘 'auto' 를 첫 선택지로 둔다.
+MODEL_PLACEHOLDERS = {"degrid": frozenset({vae_degrid.COMFY_AUTO, vae_degrid.NONE_NAME.lower()})}
 
 
 def _digest(value) -> str:
@@ -75,13 +88,14 @@ def _fields(node) -> dict:
             **(raw.get("optional") if isinstance(raw.get("optional"), dict) else {})}
 
 
-def _choice_count(schema: Mapping, candidates: list) -> int | None:
+def _choice_count(schema: Mapping, candidates: list, placeholders: frozenset = frozenset()) -> int | None:
     found, values = False, set()
     for node_id, field in candidates:
         spec = _fields(schema.get(node_id)).get(field)
         if isinstance(spec, (list, tuple)) and spec and isinstance(spec[0], list):
             found = True
-            values.update(str(value) for value in spec[0] if isinstance(value, str) and value.strip())
+            values.update(str(value) for value in spec[0] if isinstance(value, str) and value.strip()
+                          and value.strip().lower() not in placeholders)
     return len(values) if found else None
 
 
@@ -112,7 +126,8 @@ def check_recipes(schema: Mapping | None) -> list[dict]:
             checks.append({"label": node_id, "status": "mismatch" if problems else "available",
                            "detail": "; ".join(problems) if problems else "노드 및 주요 입력 타입 확인"})
         for kind in recipe["models"]:
-            count = _choice_count(schema, MODEL_FIELDS[kind]) if schema is not None else None
+            count = (_choice_count(schema, MODEL_FIELDS[kind], MODEL_PLACEHOLDERS.get(kind, frozenset()))
+                     if schema is not None else None)
             checkpoint_count = _choice_count(schema, [("CheckpointLoaderSimple", "ckpt_name")]) if schema else None
             if kind in {"text_encoder", "vae"} and not count and checkpoint_count:
                 checks.append({"label": MODEL_LABELS[kind], "status": "unknown",

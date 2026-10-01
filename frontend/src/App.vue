@@ -71,6 +71,9 @@
             <PromptFilterCard :rating="rating" />
             <AdetailerCard :model-items="adModelItems" />
             <Sam3MaskCard />
+            <!-- VAE DeGrid(NAFNet) — 모든 후처리 뒤 이미지마다 한 번(메인 요청만). 카드가 위젯 스토어(_degrid_*)와
+                 _degrid_model 의 comfyModels 속성을 직접 읽는다(destructure 없음) -->
+            <VaeDegridCard />
 
             <!-- Anima 3.8B(Qwen3.5 커넥터·v2 번들) — 가이던스 패널과 별도 카드. 카드가 위젯 스토어(_a38_*)와
                  model_combo 의 animaKinds 속성을 직접 읽는다(destructure 없음) -->
@@ -390,6 +393,7 @@ import Sam3MaskCard from './components/params/Sam3MaskCard.vue'
 import LoraStackCard from './components/params/LoraStackCard.vue'
 import DoraModeCard from './components/params/DoraModeCard.vue'
 import Anima38Card from './components/params/Anima38Card.vue'
+import VaeDegridCard from './components/params/VaeDegridCard.vue'
 import PresetManagerModal from './components/managers/PresetManagerModal.vue'
 import WeightManagerModal from './components/managers/WeightManagerModal.vue'
 import WildcardManagerModal from './components/managers/WildcardManagerModal.vue'

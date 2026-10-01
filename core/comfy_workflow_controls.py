@@ -315,6 +315,8 @@ def controls_for_wire(binding: Mapping | None, schema: Mapping) -> dict | None:
 
 def feature_preflight(compiler, model_name: str, payload: Mapping, *, workflow=None, workflow_controls=None) -> dict:
     """Dry compilation: no /prompt, model loads, downloads or generation calls."""
+    from core import vae_degrid
+
     sam = compiler._sam3_state(payload)
     requested = [
         ("hires", "Hires.fix 업스케일", bool(payload.get("enable_hr")), "ForgeNeoHiresFix"),
@@ -322,6 +324,9 @@ def feature_preflight(compiler, model_name: str, payload: Mapping, *, workflow=N
         ("sam3", "SAM3 영역 보정", sam is not None, "ForgeNeoSAM3Mask"),
         ("negpip", "NegPiP", bool(compiler._script(payload, "NegPiP")), "ForgeNeoNegPip"),
         ("spectrum", "Spectrum 실험 가속", bool(payload.get("spectrum_enabled")), "ForgeNeoKSamplerCNS"),
+        # 최종 이미지 후처리 — 노드(팩 1.5.0)·모델·출력 자리가 없으면 컴파일러가 빼고 생성한다(경고). 그 행은
+        # '건너뜀'(skipped)이라 검증 실패가 아니다(core/comfy_workflow_compiler._add_degrid).
+        ("degrid", "VAE DeGrid", compiler._degrid_state(payload) is not None, vae_degrid.COMFY_NODE_CLASS),
     ]
     if sam is not None:
         requested.append(("sam3_targets", f"SAM3 대상: {sam.get('sam3_prompt', 'face')}", True, "ForgeNeoSAM3Mask"))
@@ -330,14 +335,24 @@ def feature_preflight(compiler, model_name: str, payload: Mapping, *, workflow=N
     rows = [{"id": key, "label": label, "requested": enabled, "state": "pending" if enabled else "off"}
             for key, label, enabled, _ in requested]
     try:
-        graph = compiler.compile("txt2img", model_name, payload, workflow=workflow, workflow_controls=workflow_controls)
+        warnings: list = []
+        graph = compiler.compile("txt2img", model_name, payload, workflow=workflow,
+                                 workflow_controls=workflow_controls, warnings=warnings)
         classes = {node.get("class_type") for node in graph.values()}
         sam_masks = [node for node in graph.values() if node.get("class_type") == "ForgeNeoSAM3Mask"]
         if sam is not None and len(sam_masks) < 1 + len(payload.get("_comfy_detail_passes", [])):
             raise WorkflowControlError("요청한 SAM3 보정 패스가 최종 그래프에 모두 포함되지 않았습니다")
+        skipped = {str(item.get("feature")): str(item.get("reason") or "") for item in warnings
+                   if isinstance(item, Mapping) and item.get("feature")}
         for row, (_, _, enabled, class_type) in zip(rows, requested):
-            if enabled:
-                row["state"] = "ready" if class_type in classes else "missing"
+            if not enabled:
+                continue
+            if class_type in classes:
+                row["state"] = "ready"
+            elif row["id"] in skipped:
+                row["state"], row["reason"] = "skipped", skipped[row["id"]]
+            else:
+                row["state"] = "missing"
         if any(row["state"] == "missing" for row in rows):
             raise WorkflowControlError("선택한 기능이 최종 워크플로에 포함되지 않았습니다")
         return {"ok": True, "features": rows, "nodeCount": len(graph),

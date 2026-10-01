@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core import vae_degrid
 from core.comfy_node_classes import SAMPLER_NODES
 
 
@@ -29,6 +30,8 @@ _WIDGETS = {
     "KSamplerSelect": ("sampler_name",), "BasicScheduler": ("scheduler", "steps", "denoise"),
     "FluxGuidance": ("guidance",), "PrimitiveString": ("value",),
     "PrimitiveStringMultiline": ("value",), "PrimitiveNode": ("value",),
+    # 앱 노드 팩 VAE DeGrid — image 는 연결, 나머지는 위젯(입력 계약 순서 core/vae_degrid.COMFY_INPUTS)
+    vae_degrid.COMFY_NODE_CLASS: tuple(name for name in vae_degrid.COMFY_INPUTS if name != "image"),
 }
 
 
@@ -224,6 +227,36 @@ class _Reader:
         return inputs
 
 
+def _degrid_parameters(reader: _Reader, active: set) -> dict:
+    """그래프에 켜진 VAE DeGrid 노드(앱 노드 팩)가 출력에 닿으면 Forge infotext 와 같은 키로 그 **요청** 값.
+
+    Forge 는 실제로 쓴 값을 남기고 실패하면 'Anima DeGrid error' 만 남기지만, ComfyUI PNG 에는 큐에 넣은 그래프만
+    있다 — 노드가 건너뛴 이미지도 요청 값이 보인다(레지스트리 gap). 모델 'auto' 는 그대로 둔다(붙여 넣으면 자동).
+    노드가 여럿이고 값이 다르면 고르지 않는다."""
+    found = []
+    for key in sorted(active):
+        node = reader.graph.get(key) or {}
+        if node.get("class_type") != vae_degrid.COMFY_NODE_CLASS:
+            continue
+        inputs = node["inputs"]
+        if inputs.get("enabled") is not True or not _link(inputs.get("image")):
+            continue
+        model = str(inputs.get("model_name") or "").strip()
+        params = {
+            vae_degrid.KEY_MODEL: (vae_degrid.COMFY_AUTO if vae_degrid.normalize_model(model) == vae_degrid.AUTO
+                                   else vae_degrid.comfy_stem(model)),
+            vae_degrid.KEY_MODE: vae_degrid.MODE_LABELS[vae_degrid.coerce_mode(inputs.get("mode"))],
+            vae_degrid.KEY_STRENGTH: vae_degrid.format_strength(vae_degrid.coerce_strength(inputs.get("strength"))),
+            vae_degrid.KEY_TILE: vae_degrid.coerce_tile(inputs.get("tile")),
+        }
+        if params not in found:
+            found.append(params)
+    if len(found) > 1:
+        reader.warn("VAE DeGrid 노드가 여럿이고 설정이 달라 DeGrid 값을 고르지 않았습니다.")
+        return {}
+    return found[0] if found else {}
+
+
 def parse_comfy_metadata(prompt_graph: Any = None, workflow: Any = None) -> dict:
     result = {"prompt": "", "negative_prompt": "", "parameters": {}, "warnings": [], "candidates": [], "complete": False}
     graph = {str(key): node for key, node in (prompt_graph.items() if isinstance(prompt_graph, dict) and len(prompt_graph) <= MAX_NODES else [])
@@ -265,6 +298,7 @@ def parse_comfy_metadata(prompt_graph: Any = None, workflow: Any = None) -> dict
                                 if all(candidate["parameters"].get(key) == value for candidate in candidates)}
     else:
         reader.warn("지원하는 샘플러 연결을 찾지 못했습니다. 텍스트 노드 순서로 프롬프트를 추정하지 않았습니다.")
+    result["parameters"].update(_degrid_parameters(reader, active))
     result["warnings"] = reader.warnings
     result["complete"] = True
     return result

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import itertools
+import operator
 import os
 import re
 from collections.abc import Iterable, Mapping
@@ -29,6 +30,9 @@ REQUIRE_EXTENSION_ENV = "AISTUDIO_REQUIRE_FORGE_EXT"
 _ROUTE_METHOD_CALLS = {"get": "GET", "put": "PUT", "post": "POST", "delete": "DELETE", "patch": "PATCH"}
 _AXIS_CALLS = {"AxisOption", "AxisOptionImg2Img", "AxisOptionTxt2Img"}
 _MAX_DEPTH = 24
+# 숫자 상수식으로 푸는 연산(덧셈은 문자열·튜플 이어 붙이기도 해서 따로 다룬다)
+_NUMERIC_BINOPS = {ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+                   ast.FloorDiv: operator.floordiv, ast.LShift: operator.lshift}
 
 # script-info 인자 항목과 같은 필드. ui() 컴포넌트에서 AST 로 읽어 픽스처와 비교한다.
 UI_FIELDS = ("label", "value", "minimum", "maximum", "step", "choices")
@@ -57,6 +61,11 @@ _PYDANTIC_NUMERIC_TYPES = {
 
 
 # ── 설치 위치 ───────────────────────────────────────────────────────────────
+def _is_number(value) -> bool:
+    """int·float 만(bool 은 숫자로 치지 않는다)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def is_extension_dir(path) -> bool:
     """sam-extra 작업 사본처럼 보이는 폴더인가(scripts/ 와 sam3ext/ 가 둘 다 있다)."""
     try:
@@ -312,6 +321,17 @@ class ExtensionSource:
             left = self._values(path, node.left, scope, env, nxt)
             right = self._values(path, node.right, scope, env, nxt)
             return [a + b for a, b in itertools.product(left, right)]
+        if isinstance(node, ast.BinOp) and type(node.op) in _NUMERIC_BINOPS:
+            # 숫자 상수식(VAE DeGrid 판정 문턱 ``2 / 255`` 등) — 파이썬과 같은 값. 숫자가 아니면(문자열 반복 등) 못 푼다
+            left = self._values(path, node.left, scope, env, nxt)
+            right = self._values(path, node.right, scope, env, nxt)
+            combos = list(itertools.product(left, right))
+            if not combos or not all(_is_number(a) and _is_number(b) for a, b in combos):
+                raise _Unresolved("numeric binop")
+            try:
+                return [_NUMERIC_BINOPS[type(node.op)](a, b) for a, b in combos]
+            except ArithmeticError as exc:
+                raise _Unresolved("numeric binop") from exc
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             inner = self._values(path, node.operand, scope, env, nxt)
             return [-v if isinstance(node.op, ast.USub) else v for v in inner if isinstance(v, (int, float))]
@@ -655,7 +675,9 @@ class ExtensionSource:
         """``add_option(KEY, OptionInfo(default, label, component, …).info(…))`` → {키: 속성} (P10 계약 테스트용).
 
         속성: ``file``, ``default``(정적으로 못 풀면 None), ``component``(``gr.Checkbox`` → 'Checkbox'), ``infotext``
-        (키워드가 없으면 ''), ``onchange``(콜백을 넘겼나). ``.info()``·``.needs_reload_ui()`` 같은 체인 호출은 벗긴다.
+        (키워드가 없으면 ''), ``onchange``(콜백을 넘겼나), ``choices``(``component_args``(4번째 위치 인자 또는 키워드)
+        dict 의 ``"choices"`` — ``(라벨, 값)`` 쌍이면 값, 그냥 값이면 그 값의 튜플. 선택지가 없으면 (), 정적으로 못 풀면
+        None — 함수로 넘긴 component_args 등). ``.info()``·``.needs_reload_ui()`` 같은 체인 호출은 벗긴다.
         못 푸는 칸은 None 으로 두고 ``unresolved`` 에 적지 않는다(키 존재는 ``option_keys`` 가 본다)."""
         found: dict[str, dict] = {}
         for path, call in self._calls(lambda name: name == "add_option"):
@@ -676,6 +698,7 @@ class ExtensionSource:
 
             keywords = {kw.arg: kw.value for kw in info.keywords if kw.arg}
             component = info.args[2] if len(info.args) > 2 else keywords.get("component")
+            component_args = info.args[3] if len(info.args) > 3 else keywords.get("component_args")
             onchange = keywords.get("onchange")
             infotext = value_of(keywords.get("infotext"))
             attrs = {
@@ -684,6 +707,7 @@ class ExtensionSource:
                 "component": _call_name(component) if component is not None else None,
                 "infotext": infotext if isinstance(infotext, str) else "",
                 "onchange": onchange is not None and not (isinstance(onchange, ast.Constant) and onchange.value is None),
+                "choices": _option_choices(component_args, value_of),
             }
             for key, _env in self._resolve_arg(path, call, 0, "key", "옵션 키", report=False):
                 found[key] = dict(attrs)
@@ -907,6 +931,31 @@ def _call_name(node: ast.AST | None) -> str | None:
     if isinstance(node, ast.Name):
         return node.id
     return None
+
+
+def _option_choices(component_args: ast.AST | None, value_of) -> tuple | None:
+    """OptionInfo ``component_args`` → 선택지 값 튜플(Radio·Dropdown). 인자가 없거나 dict 에 ``choices`` 가 없으면 ().
+
+    Gradio 선택지는 ``(라벨, 값)`` 쌍 또는 값 자체다 — 값만 모은다. ``value_of`` 가 dict 를 못 풀면(함수·lambda 로 넘긴
+    component_args, 이름을 못 따라간 상수) None."""
+    if component_args is None or (isinstance(component_args, ast.Constant) and component_args.value is None):
+        return ()
+    args = value_of(component_args)
+    if not isinstance(args, dict):
+        return None
+    if "choices" not in args:
+        return ()
+    choices = args["choices"]
+    if not isinstance(choices, (tuple, list)):
+        return None
+    values = []
+    for item in choices:
+        if isinstance(item, (tuple, list)):
+            if len(item) != 2:
+                return None
+            item = item[1]
+        values.append(item)
+    return tuple(values)
 
 
 def _is_always_visible(node: ast.AST | None) -> bool:

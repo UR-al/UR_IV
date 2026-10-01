@@ -5,7 +5,7 @@ import {
 } from './samExtraCapabilities'
 
 const FLAGS: SamExtraFeature[] = [
-  'sam3', 'anima_guidance', 'skimmed_cfg', 'detail_daemon', 'anima38', 'dora', 'vae2x',
+  'sam3', 'anima_guidance', 'skimmed_cfg', 'detail_daemon', 'anima38', 'dora', 'vae2x', 'degrid',
   'lora_manager', 'memo_routes', 'tipo_route', 'reference_route', 'contract_route',
   'tile_repair_route',
 ]

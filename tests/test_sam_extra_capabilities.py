@@ -53,17 +53,58 @@ def _with_current_dd_shape(script_info):
     return script_info
 
 
+def _with_degrid_scripts(scripts):
+    """/sdapi/v1/scripts 녹화(2026-09-25)는 VAE DeGrid(확장 3a74dd8..1dd1a98) 전이다 — script-info 픽스처(2026-09-30
+    다시 녹화)에는 이미 있다. 다시 녹화하기 전까지 지금 확장처럼 txt2img·img2img 목록에 제목을 더한다(있으면 그대로).
+    refresh 도구는 script-info 만 기록한다(tools/refresh_sam_extra_fixture.py)."""
+    for tab in ("txt2img", "img2img"):
+        titles = scripts.get(tab)
+        if isinstance(titles, list) and caps_mod.TITLE_DEGRID not in titles:
+            titles.append(caps_mod.TITLE_DEGRID)
+    return scripts
+
+
+# ── 녹화 위 덧씌우기(OVERLAY) — 녹화가 아니다 ───────────────────────────────────────────────────────────────────────
+# Gradio /config 녹화(sam_extra_live_gradio_config.json, 2026-09-26 — sam3_* 설정 컴포넌트만 남긴 사본)는 VAE DeGrid 의
+# Forge 설정 셋(확장 scripts/anima_vae_degrid.py on_ui_settings — sam3_degrid_device·_gpu_precision·_keep_loaded) 전이다.
+# 이 녹화를 다시 만드는 도구는 없다(tools/refresh_sam_extra_fixture.py 는 script-info 만 쓴다). 그래서 지어낸 캡처를
+# 픽스처에 넣지 않고, 테스트 경로에서만 지금 확장의 모양(elem_id 'setting_<키>', 값 = 확장 기본값 — 사용자 Forge 의
+# 설정도 기본값이다)으로 덧씌운다. id 는 녹화 값이 아니라서 넣지 않는다(파서는 id 를 읽지 않는다).
+# TODO(픽스처): Forge 가 한가할 때 7861 에 GET /config 를 한 번 보내 sam3_* 컴포넌트를 다시 녹화하면 이 덧씌우기는
+# 아무것도 하지 않게 된다(이미 있으면 그대로 둔다) — 그때 이 함수와 GradioConfigOverlayTests 의 '녹화 전' 확인을 지운다.
+def _degrid_option_overlay() -> tuple:
+    from core import vae_degrid as vdg
+    return (
+        {"type": "radio", "props": {"elem_id": f"setting_{vdg.OPT_DEVICE}", "value": vdg.DEFAULT_DEVICE},
+         "_overlay": "tests only — not recorded"},
+        {"type": "radio", "props": {"elem_id": f"setting_{vdg.OPT_GPU_PRECISION}", "value": vdg.DEFAULT_PRECISION},
+         "_overlay": "tests only — not recorded"},
+        {"type": "checkbox", "props": {"elem_id": f"setting_{vdg.OPT_KEEP_LOADED}", "value": vdg.DEFAULT_KEEP_LOADED},
+         "_overlay": "tests only — not recorded"},
+    )
+
+
+def _with_degrid_options(config):
+    """Gradio /config 녹화에 DeGrid 설정 셋을 덧씌운다(위 OVERLAY 설명). 같은 elem_id 가 이미 있으면 그대로 둔다."""
+    components = config.setdefault("components", [])
+    present = {(c.get("props") or {}).get("elem_id") for c in components if isinstance(c, dict)}
+    for component in _degrid_option_overlay():
+        if component["props"]["elem_id"] not in present:
+            components.append(component)
+    return config
+
+
 def live_bodies():
-    """경로 → 녹화된 본문 (없는 라우트는 상태 코드만)."""
+    """경로 → 녹화된 본문 (없는 라우트는 상태 코드만). DeGrid 는 녹화 뒤라 /scripts·/config 에 덧씌운다(위 두 함수)."""
     status = _fixture("probe_status")["status"]
     return {
-        EP_SCRIPTS: _fixture("scripts"),
+        EP_SCRIPTS: _with_degrid_scripts(_fixture("scripts")),
         EP_SCRIPT_INFO: _script_info_fixture(),
         EP_EXTENSIONS: _fixture("extensions"),
         EP_CN_MODELS: _fixture("cn_models"),
         EP_CN_MODULES: _fixture("cn_modules"),
         EP_LORA_CONFIG: _fixture("lora_config"),
-        EP_GRADIO_CONFIG: _fixture("gradio_config"),
+        EP_GRADIO_CONFIG: _with_degrid_options(_fixture("gradio_config")),
         EP_MEMOS: status[EP_MEMOS],
         EP_TIPO: status[EP_TIPO],
         EP_REFERENCE: status[EP_REFERENCE],
@@ -119,7 +160,7 @@ class LiveFixtureTests(unittest.TestCase):
         self.assertEqual(c.status, "ok")
         self.assertTrue(c.known and c.installed)
         for flag in ("sam3", "anima_guidance", "skimmed_cfg", "detail_daemon", "anima38", "dora",
-                     "vae2x", "lora_manager"):
+                     "vae2x", "degrid", "lora_manager"):
             self.assertTrue(getattr(c, flag), flag)
         # 녹화 시점엔 아직 없는 라우트 (메모·TIPO·레퍼런스·계약)
         for flag in ("memo_routes", "tipo_route", "reference_route", "contract_route"):
@@ -164,7 +205,7 @@ class LiveFixtureTests(unittest.TestCase):
 
     def test_options_from_gradio_config(self):
         self.assertTrue(self.caps.options_known)
-        self.assertEqual(len(self.caps.options), 14)
+        self.assertEqual(len(self.caps.options), 14 + 3)       # 녹화 14 + DeGrid 덧씌우기 3(_with_degrid_options)
         self.assertIs(self.caps.options["sam3_unload_keep_in_ram"], True)
         self.assertTrue(self.caps.has_option("sam3_anima38_keep_resident"))
         self.assertFalse(self.caps.has_option("sam3_not_an_option"))
@@ -675,6 +716,94 @@ class ExtensionsCacheTests(unittest.TestCase):
             self.assertEqual(self._count(fake), 2)
 
 
+class GradioConfigOverlayTests(unittest.TestCase):
+    """P10 의 DeGrid 옵션 셋이 실제 수집 경로(probe.fetch_capabilities → Gradio /config 파싱)로 확인되는지 — 가짜 스냅샷
+    (caps(options=…))이 아니라 녹화 본문 + 표시된 덧씌우기로 본다."""
+
+    KEYS = ("sam3_degrid_device", "sam3_degrid_gpu_precision", "sam3_degrid_keep_loaded")
+
+    def test_the_recording_predates_the_degrid_options_and_the_overlay_is_marked(self):
+        recorded = _fixture("gradio_config")
+        ids = {(c.get("props") or {}).get("elem_id") for c in recorded["components"]}
+        # 다시 녹화해 이 단정이 깨지면: 덧씌우기가 할 일이 없어진 것이다 — 위 OVERLAY 주석대로 지운다
+        self.assertFalse({f"setting_{key}" for key in self.KEYS} & ids, "녹화가 새로 됐다 — 덧씌우기를 지울 때")
+        overlaid = _with_degrid_options(_fixture("gradio_config"))["components"]
+        added = overlaid[len(recorded["components"]):]
+        self.assertEqual([c["props"]["elem_id"] for c in added], [f"setting_{key}" for key in self.KEYS])
+        self.assertTrue(all(c["_overlay"].startswith("tests only") and "id" not in c for c in added))
+        self.assertEqual(_with_degrid_options(copy.deepcopy({"components": overlaid}))["components"], overlaid)
+
+    def test_probe_reads_the_three_options_with_the_extension_defaults(self):
+        from core import forge_override_settings as fos
+        from core import vae_degrid as vdg
+        self.assertEqual(self.KEYS, (fos.OPT_DEGRID_DEVICE, fos.OPT_DEGRID_GPU_PRECISION, fos.OPT_DEGRID_KEEP_LOADED))
+        caps, _ = build(live_bodies())
+        self.assertTrue(all(caps.has_option(key) for key in self.KEYS))
+        self.assertEqual([caps.options[key] for key in self.KEYS],
+                         [vdg.DEFAULT_DEVICE, vdg.DEFAULT_PRECISION, vdg.DEFAULT_KEEP_LOADED])
+        # P10: 앱 덮어쓰기가 이 스냅샷으로는 '있음'이라 보내진다(가짜 스냅샷 없이)
+        plan = fos.plan_overrides({fos.OPT_DEGRID_DEVICE: "cpu", fos.OPT_DEGRID_GPU_PRECISION: "fp16",
+                                   fos.OPT_DEGRID_KEEP_LOADED: True}, caps)
+        self.assertEqual((dict(plan.send), plan.missing, plan.unverified),
+                         ({fos.OPT_DEGRID_DEVICE: "cpu", fos.OPT_DEGRID_GPU_PRECISION: "fp16",
+                           fos.OPT_DEGRID_KEEP_LOADED: True}, (), ()))
+
+    def test_without_the_overlay_the_recording_reports_them_missing(self):
+        from core import forge_override_settings as fos
+        bodies = live_bodies()
+        bodies[EP_GRADIO_CONFIG] = _fixture("gradio_config")          # 녹화 그대로(DeGrid 전 sam-extra 와 같다)
+        caps, _ = build(bodies)
+        self.assertTrue(caps.options_known)
+        self.assertFalse(any(caps.has_option(key) for key in self.KEYS))
+        plan = fos.plan_overrides({fos.OPT_DEGRID_DEVICE: "cpu"}, caps)
+        self.assertEqual((dict(plan.send), plan.missing), ({}, (fos.OPT_DEGRID_DEVICE,)))
+
+
+class DegridCapabilityTests(unittest.TestCase):
+    """VAE DeGrid 기능 플래그·모델 목록(core/vae_degrid 가 읽는다)."""
+
+    def test_flag_and_raw_model_list_from_the_recording(self):
+        caps, _ = build(live_bodies())
+        self.assertTrue(caps.degrid and caps.may_use("degrid"))
+        self.assertEqual(caps.choices["degrid_models"], ("qwenVAEDegridNafnet_v11", "NAFNet-QwenVAE-DeGrid"))
+        detail = caps.script("Anima VAE DeGrid (NAFNet)")
+        self.assertTrue(detail["present"] and detail["img2img"])
+        self.assertIsNone(detail["spec_argc"])                     # dict 한 개로 보낸다 — 인자 수 비교 없음
+        self.assertNotIn("degrid_no_model", _codes(caps))
+        self.assertEqual([w for w in caps.warnings if w["feature"] == "degrid"], [])
+
+    def test_missing_script_is_reported_and_unknown_never_blocks(self):
+        bodies = live_bodies()
+        for tab in ("txt2img", "img2img"):
+            bodies[EP_SCRIPTS][tab].remove(caps_mod.TITLE_DEGRID)
+        bodies[EP_SCRIPT_INFO] = [s for s in bodies[EP_SCRIPT_INFO] if s["name"] != caps_mod.TITLE_DEGRID]
+        caps, _ = build(bodies)
+        self.assertFalse(caps.degrid or caps.may_use("degrid"))
+        self.assertEqual([w["feature"] for w in caps.warnings if w["code"] == "script_missing"], ["degrid"])
+        self.assertNotIn("degrid_models", caps.choices)
+        self.assertTrue(unknown_capabilities().may_use("degrid"))
+
+    def test_empty_forge_list_is_a_diagnostic_warning_and_the_raw_list_is_kept(self):
+        for choices in (["None"], []):
+            with self.subTest(choices=choices):
+                bodies = live_bodies()
+                for entry in bodies[EP_SCRIPT_INFO]:
+                    if entry["name"] == caps_mod.TITLE_DEGRID:
+                        entry["args"][1]["choices"] = list(choices)
+                caps, _ = build(bodies)
+                self.assertEqual(caps.choices["degrid_models"], tuple(choices))   # 원문 — 소비자가 'None' 을 뺀다
+                warned = [w for w in caps.warnings if w["code"] == "degrid_no_model"]
+                self.assertEqual([w["feature"] for w in warned], ["degrid"])
+                self.assertIn("models/DeGrid", warned[0]["message"])
+                self.assertTrue(caps.degrid)                                       # 스크립트는 있다
+
+    def test_to_dict_carries_the_flag(self):
+        caps, _ = build(live_bodies())
+        data = caps.to_dict()
+        self.assertIs(data["features"]["degrid"], True)
+        self.assertEqual(data["choices"]["degrid_models"], ["qwenVAEDegridNafnet_v11", "NAFNet-QwenVAE-DeGrid"])
+
+
 class FrontendMirrorTests(unittest.TestCase):
     """Vue 토스트의 '켜짐' 판단 표가 파이썬 활성화 키와 같아야 한다."""
 
@@ -694,8 +823,22 @@ class FrontendMirrorTests(unittest.TestCase):
     def test_feature_flags_match_typescript_union(self):
         with open(os.path.join(ROOT, "frontend", "src", "types", "bridge.d.ts"), encoding="utf-8") as f:
             text = f.read()
-        union = re.search(r"export type SamExtraFeature =(.*?)\n\n", text, re.S).group(1)
+        union = re.search(r"export type SamExtraFeature =(.*?)\n\n", text.replace("\r\n", "\n"), re.S).group(1)
         self.assertEqual(tuple(re.findall(r"'(\w+)'", union)), caps_mod.FEATURE_FLAGS)
+
+    def test_ts_feature_labels_match_python_and_degrid_is_not_a_widget_gate(self):
+        """TS FEATURE_LABELS 의 이름은 파이썬 _FEATURE_LABELS 와 같다. DeGrid 는 켜짐 위젯 표에 넣지 않는다(C13 —
+        없으면 게이트가 빼고 경고한다, DoRA·Anima38 과 같다)."""
+        path = os.path.join(ROOT, "frontend", "src", "utils", "samExtraCapabilities.ts")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        labels = re.search(r"export const FEATURE_LABELS[^{]*\{(.*?)\n\}", text, re.S).group(1)
+        ts = dict(re.findall(r"^\s*(\w+):\s*'([^']*)'", labels, re.M))
+        self.assertEqual(ts["degrid"], caps_mod._FEATURE_LABELS["degrid"])
+        gates = re.search(r"export const FEATURE_ENABLE_WIDGETS[^{]*\{(.*?)\n\}", text, re.S).group(1)
+        self.assertNotIn("degrid", gates)
+        for name in ts:
+            self.assertIn(name, caps_mod.FEATURE_FLAGS)
 
 
 class ActionsMixinTests(unittest.TestCase):

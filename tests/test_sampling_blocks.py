@@ -10,7 +10,7 @@ from backends import BackendType
 from core import alwayson_propagation as ap
 from core import anima38, anima_guidance
 from core import sam_extra_notices as sn
-from tests.test_alwayson_propagation import A38, DD, DORA, PAG, SKIM, caps
+from tests.test_alwayson_propagation import A38, DD, DEGRID, DORA, PAG, SKIM, caps
 from tests.test_chat_generation_snapshot import ReadOnlyWidget, SnapshotHost
 from ui import sampling_blocks as sb
 from ui.generator_generation import GenerationMixin
@@ -194,6 +194,35 @@ class EnvelopeParityTests(unittest.TestCase):
         self.assertEqual(json.dumps(main), json.dumps(env["blocks"]))
         self.assertEqual(env["model"], "Anima-3.8B-v1.1.safetensors")
         self.assertEqual(env["backend"], ap.BACKEND_WEBUI)
+
+    def test_t15_with_degrid_on(self):
+        """(C5) DeGrid 를 켜도 봉투 = 메인 체인. 봉투에는 실리지만 어느 보조 패스에도 가지 않고(passes=()), 봉투를 찍는
+        클릭(보조 패스)에서 DeGrid 알림도 없다. 메인 체인은 게이트하므로 스냅샷이 DeGrid 를 아는 경우로 본다."""
+        from core import vae_degrid as vdg
+        from ui.aux_pass_snapshot import capture_sampling_envelope
+
+        class _Proxy:
+            def __init__(self, value):
+                self.value = value
+
+            def text(self):
+                return self.value
+
+        values = vdg.widget_values(vdg.DegridSettings(enabled=True, model="qwenVAEDegridNafnet_v11", mode="dark"))
+        host = ChainHost(capabilities=caps(present=(PAG, SKIM, DD, A38, DORA, DEGRID)))
+        host.degrid_widgets = {key: _Proxy(value) for key, value in values.items()}
+        payload, _ = host._build_generation_payload(snapshot=True)
+        main = {k: v for k, v in payload["alwayson_scripts"].items() if ap.canonical_title(k) in ap.PROPAGATION}
+        self.assertEqual(list(main)[-1], DEGRID)
+        with mock.patch("ui.sam_extra_notices_ui.show_notices") as shown:
+            env = capture_sampling_envelope(host)
+        shown.assert_not_called()                                         # 보조 패스 클릭에 DeGrid 안내 없음
+        self.assertEqual(json.dumps(main), json.dumps(env["blocks"]))
+        self.assertEqual(env["provenance"][DEGRID], ap.PROVENANCE_USER)
+        for aux in ap.AUX_PASSES:
+            for backend in (ap.BACKEND_WEBUI, ap.BACKEND_COMFY):
+                with self.subTest(aux=aux, backend=backend):
+                    self.assertNotIn(DEGRID, ap.blocks_for(env, aux, backend=backend))
 
 
 class NoticeRoutingTests(unittest.TestCase):

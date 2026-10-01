@@ -12,7 +12,9 @@ from core.sam_extra_capabilities import SamExtraCapabilities, _freeze
 PAG, SKIM, DD = (anima_guidance.SCRIPT_PERTURBATION, anima_guidance.SCRIPT_SKIMMED_CFG,
                  anima_guidance.SCRIPT_DETAIL_DAEMON)
 A38, DORA, NEGPIP = anima38.SCRIPT_NAME, ap.TITLE_DORA, ap.TITLE_NEGPIP
-SAMPLING = (NEGPIP, PAG, SKIM, DD, A38, DORA)
+DEGRID = ap.TITLE_DEGRID
+SAMPLING = (NEGPIP, PAG, SKIM, DD, A38, DORA, DEGRID)
+DEGRID_BLOCK = {"args": [{"enabled": True, "model": "", "mode": "full", "strength": 1.0, "tile": 512}]}
 
 
 def dd_block(hires=False, argc=14):
@@ -23,15 +25,17 @@ def dd_block(hires=False, argc=14):
 def all_blocks(**overrides):
     blocks = {NEGPIP: {"args": [True]}, PAG: {"args": [True, 4.0]}, SKIM: {"args": [True, 7.0]},
               DD: dd_block(), A38: {"args": [{"negative": True}]}, DORA: {"args": [{"enabled": True}]},
+              DEGRID: copy.deepcopy(DEGRID_BLOCK),
               "SAM3 Mask": {"args": [{"sam3_prompt": "face"}]}, "ADetailer": {"args": [True, True, {}]}}
     blocks.update(overrides)
     return blocks
 
 
 def caps(present=(), img2img=None, *, status="ok"):
-    """known 스냅샷 — present(txt2img)·img2img 목록. img2img None 이면 present 와 같다."""
+    """known 스냅샷 — present(txt2img)·img2img 목록. img2img None 이면 present 와 같다. 앱이 만드는 샘플링 제목은
+    목록에 없으면 '없음'으로 확정한다(스냅샷이 아는 제목)."""
     img2img = present if img2img is None else img2img
-    titles = {t.lower() for t in (*present, *img2img)} | {t.lower() for t in (PAG, SKIM, DD, A38, DORA)}
+    titles = {t.lower() for t in (*present, *img2img)} | {t.lower() for t in (PAG, SKIM, DD, A38, DORA, DEGRID)}
     scripts = {t: {"present": t in {p.lower() for p in present}, "img2img": t in {p.lower() for p in img2img}}
                for t in titles}
     return SamExtraCapabilities(status=status, installed=True, scripts=_freeze(scripts))
@@ -116,6 +120,60 @@ class ClassificationTests(unittest.TestCase):
                             and isinstance(node.value, str) and node.value.strip().lower() == "dora inference mode"]
                 self.assertEqual(literals, [])
 
+    def test_degrid_title_is_the_single_app_constant(self):
+        """(C15) 제목 사본은 core.vae_degrid.SCRIPT_NAME 하나 — 전달 표·기능 스냅샷·알림 표가 같은 값을 쓴다."""
+        from core import sam_extra_capabilities as caps_mod
+        from core import vae_degrid
+        self.assertIs(ap.TITLE_DEGRID, vae_degrid.SCRIPT_NAME)
+        self.assertEqual(caps_mod.TITLE_DEGRID, vae_degrid.SCRIPT_NAME.lower())
+        self.assertIs(sn._TITLE_DEGRID, vae_degrid.SCRIPT_NAME)
+        self.assertIn(DEGRID.lower(), sn.SAM_EXTRA_FEATURES)
+        self.assertIn(DEGRID, reg.SCRIPTS)
+        self.assertNotIn(DEGRID, ap.NEVER)
+
+    def test_degrid_title_copies_are_derived_from_script_name_in_the_source(self):
+        """(C15) 소문자 사본까지 — 세 모듈의 대입식이 SCRIPT_NAME 에서 나오고 제목 문자열 리터럴이 없다(AST)."""
+        import ast
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        expected = {
+            "core/sam_extra_capabilities.py": ("TITLE_DEGRID", "vae_degrid.SCRIPT_NAME.lower()"),
+            "core/alwayson_propagation.py": ("TITLE_DEGRID", "vae_degrid.SCRIPT_NAME"),
+            "core/sam_extra_notices.py": ("_TITLE_DEGRID", "vae_degrid.SCRIPT_NAME"),
+        }
+        for rel, (name, source) in expected.items():
+            with self.subTest(module=rel):
+                tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+                values = [ast.unparse(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+                self.assertEqual(values, [source])
+                literals = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
+                            and isinstance(node.value, str)
+                            and node.value.strip().lower() == "anima vae degrid (nafnet)"]
+                self.assertEqual(literals, [])
+
+    def test_degrid_is_a_final_image_block(self):
+        """(D2·D3) passes=() — 어느 보조 패스에도 주지 않는다. 사용자 값이라 모를 때는 보내고(앱 기본값이면 안 보냄),
+        메인 422 재시도는 없다(Rule 문서의 규칙: 앱이 스스로 넣는 블록만)."""
+        rule = ap.PROPAGATION[DEGRID]
+        self.assertEqual(rule.passes, frozenset())
+        self.assertEqual(rule.feature, "degrid")
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_USER), ap.SEND)
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_APP_DEFAULT), ap.SKIP)
+        self.assertFalse(rule.main_retry)
+        self.assertFalse(rule.model_bound)
+        self.assertEqual(ap.final_image_titles(), (DEGRID,))
+        self.assertEqual(ap.canonical_title("  anima vae degrid (NAFNET) "), DEGRID)
+        source = ap.envelope(all_blocks(), source="t2i_panel", backend=ap.BACKEND_WEBUI)
+        self.assertEqual(source["blocks"][DEGRID], DEGRID_BLOCK)                # 봉투에는 실린다(T15)
+        for aux in ap.AUX_PASSES:
+            for backend in (ap.BACKEND_WEBUI, ap.BACKEND_COMFY, ap.BACKEND_KREA2):
+                for src in (source, all_blocks(), {"anima vae degrid (nafnet)": DEGRID_BLOCK}):
+                    with self.subTest(aux=aux, backend=backend):
+                        self.assertNotIn(DEGRID, ap.blocks_for(src, aux, backend=backend))
+                        self.assertNotIn("anima vae degrid (nafnet)", ap.blocks_for(src, aux, backend=backend))
+
     def test_dora_is_skipped_when_unknown_for_both_provenances(self):
         """(A2) 모를 때는 사용자 값이어도 보내지 않는다(메인 생성엔 422 재시도가 없다)."""
         rule = ap.PROPAGATION[DORA]
@@ -135,6 +193,8 @@ class ClassificationTests(unittest.TestCase):
             (NEGPIP, comfy): set(ap.AUX_PASSES),
             (DORA, webui): set(ap.AUX_PASSES),
             (DORA, comfy): set(),                                    # Comfy 는 만들지 않는다(P8)
+            (DEGRID, webui): set(),                                  # 최종 이미지 블록 — 메인 요청만
+            (DEGRID, comfy): set(),
         }
         for title in (PAG, SKIM, DD, A38):
             expected[(title, webui)] = set(ap.AUX_PASSES)
@@ -233,6 +293,32 @@ class GateTests(unittest.TestCase):
         none = ap.gate(self.blocks, caps(present=()), img2img=True)
         self.assertEqual(list(none.kept), [NEGPIP])
         self.assertEqual(set(none.dropped_missing), {PAG, DD, A38, DORA})
+
+    def test_degrid_is_dropped_when_missing_and_sent_when_unknown(self):
+        blocks = {PAG: {"args": [1]}, DEGRID: DEGRID_BLOCK}
+        missing = ap.gate(blocks, caps(present=(PAG,)), img2img=False)
+        self.assertEqual(list(missing.kept), [PAG])
+        self.assertEqual(missing.dropped_missing, (DEGRID,))
+        notices = ap.gate_notices(missing, img2img=False)
+        self.assertEqual([(n.code, n.feature, n.detail) for n in notices],
+                         [(sn.CODE_BLOCK_NOT_SENT, "degrid", f"{DEGRID}@txt2img")])
+        self.assertIn("VAE DeGrid", notices[0].message)
+        present = ap.gate(blocks, caps(present=(PAG, DEGRID), img2img=(PAG,)), img2img=True)
+        self.assertEqual(present.dropped_missing, (DEGRID,))                     # img2img 목록으로
+        for unknown in (None, SamExtraCapabilities(), SimpleNamespace(known=True)):
+            with self.subTest(caps=unknown):
+                user = ap.gate(blocks, unknown, img2img=False)
+                self.assertEqual(list(user.kept), [PAG, DEGRID])                 # 사용자 값 — 모르면 보낸다(D3)
+                app = ap.gate(blocks, unknown, img2img=False, provenance={DEGRID: ap.PROVENANCE_APP_DEFAULT})
+                self.assertEqual(app.dropped_unknown, (DEGRID,))
+
+    def test_frozen_payload_regate_drops_degrid_only_when_known_missing(self):
+        payload = {"alwayson_scripts": {DEGRID: DEGRID_BLOCK, "SAM3 Mask": {"args": []}}}
+        self.assertEqual(ap.drop_missing(payload, None, img2img=False), ())
+        self.assertIn(DEGRID, payload["alwayson_scripts"])
+        self.assertEqual(ap.drop_missing(payload, caps(present=(DEGRID,)), img2img=False), ())
+        self.assertEqual(ap.drop_missing(payload, caps(present=()), img2img=False), (DEGRID,))
+        self.assertEqual(list(payload["alwayson_scripts"]), ["SAM3 Mask"])
 
     def test_case_insensitive_titles_and_non_sampling_titles_pass_through(self):
         blocks = {"anima perturbation guidance": {"args": [1]}, "SAM3 Mask": {"args": []}, "Other": {}}
@@ -354,7 +440,8 @@ class MainRetryTitleTests(unittest.TestCase):
 
     def test_titles_are_read_from_the_payload_as_spelled(self):
         payload = {"alwayson_scripts": {PAG: {"args": [1]}, "dora inference mode": {"args": [{}]},
-                                        A38: {"args": [{}]}, "SAM3 Mask": {"args": [{}]}, "Unknown": {}}}
+                                        A38: {"args": [{}]}, "SAM3 Mask": {"args": [{}]}, "Unknown": {},
+                                        DEGRID: DEGRID_BLOCK}}
         self.assertEqual(ap.main_retry_titles(payload), ("dora inference mode", A38))
         for bad in (None, {}, {"alwayson_scripts": None}, {"alwayson_scripts": [DORA]}):
             with self.subTest(payload=bad):

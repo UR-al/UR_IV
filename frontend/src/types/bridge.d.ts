@@ -120,13 +120,13 @@ export type SamExtraStatus = 'ok' | 'unknown' | 'unreachable' | 'error' | 'not_a
 
 /** 기능 플래그 이름 — 파이썬 FEATURE_FLAGS 와 같은 순서·철자. */
 export type SamExtraFeature =
-  | 'sam3' | 'anima_guidance' | 'skimmed_cfg' | 'detail_daemon' | 'anima38' | 'dora' | 'vae2x'
+  | 'sam3' | 'anima_guidance' | 'skimmed_cfg' | 'detail_daemon' | 'anima38' | 'dora' | 'vae2x' | 'degrid'
   | 'lora_manager' | 'memo_routes' | 'tipo_route' | 'reference_route' | 'contract_route'
   | 'tile_repair_route'
 
 export interface SamExtraWarning {
   /** 예: extension_missing · script_missing · args_fewer · args_more · pag_smc_auto_old_build ·
-   *  sam3_keys_unknown_to_extension · sam3_cn_module_not_live · dora_choices_unknown */
+   *  sam3_keys_unknown_to_extension · sam3_cn_module_not_live · dora_choices_unknown · degrid_no_model */
   code: string
   /** 기능 플래그 이름 또는 'sam_extra'(확장 전체) */
   feature: string
@@ -172,7 +172,8 @@ export interface SamExtraCapabilitiesEvent {
   options_known: boolean
   gradio_api: string[]
   /** controlnet_models · controlnet_modules · clip_l · smc_presets · anima38_adapters ·
-   *  vae2x_decoders · dora_modes · dora_insert_policies · dora_weak_scopes (받은 것만) */
+   *  vae2x_decoders · dora_modes · dora_insert_policies · dora_weak_scopes · degrid_models (받은 것만 —
+   *  degrid_models 는 Forge 원문이라 파일이 없으면 ['None'] 이다. 쓰는 쪽이 'None' 을 뺀다) */
   choices: Record<string, string[]>
   warnings: SamExtraWarning[]
   errors: Record<string, string>

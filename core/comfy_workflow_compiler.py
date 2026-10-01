@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from core import anima38
 from core import anima_model_kind
+from core import vae_degrid
 from core.comfy_node_classes import (
     CHECKPOINT_LOADER_NODES,
     CUSTOM_SAMPLER_NODES,
@@ -29,6 +31,9 @@ from core.comfy_node_classes import (
 )
 from core.comfy_seed import concrete_seed
 from core.lenient_numbers import finite_float as _float, lenient_int as _int
+
+
+_logger = logging.getLogger(__name__)
 
 
 class WorkflowCompileError(RuntimeError):
@@ -496,7 +501,20 @@ class ComfyWorkflowCompiler:
         workflow_controls: Optional[Mapping[str, Any]] = None,
         uploaded_image: str = "",
         uploaded_mask: str = "",
+        warnings: Optional[list] = None,
     ) -> dict:
+        """Compile one generation request.
+
+        ``warnings``: a list the caller owns.  A feature that is left out of
+        the graph on purpose instead of failing the job (today only VAE DeGrid,
+        a final-image post-process whose node, model or output link is
+        missing — ``_add_degrid``) appends a ``{"code", "reason", "feature",
+        "cause"}`` dict so the backend can tell the user
+        (core/comfy_degrid_report).  ``cause`` is one of
+        ``vae_degrid.COMFY_OMIT_*``; only ``vae_degrid.COMFY_SCHEMA_FIXABLE``
+        causes can change with a fresh ``/object_info``.
+        ``None`` builds the same graph and only logs.
+        """
         normalized = {
             "t2i": "txt2img", "txt2img": "txt2img",
             "i2i": "img2img", "img2img": "img2img",
@@ -543,13 +561,13 @@ class ComfyWorkflowCompiler:
             graph = self._compile_default(
                 normalized, model_name, local_payload, loras, anima_plan,
                 uploaded_image=uploaded_image, uploaded_mask=uploaded_mask,
-                prompt_loras=prompt_loras, main_prompt=main_prompt,
+                prompt_loras=prompt_loras, main_prompt=main_prompt, warnings=warnings,
             )
         else:
             custom = self._compile_custom(
                 normalized, rewrite_model, local_payload, loras, workflow, anima_plan,
                 uploaded_image=uploaded_image, uploaded_mask=uploaded_mask,
-                prompt_loras=prompt_loras, main_prompt=main_prompt,
+                prompt_loras=prompt_loras, main_prompt=main_prompt, warnings=warnings,
             )
             graph = custom.nodes
             for copy_id, origin in custom.copied_from.items():
@@ -964,6 +982,7 @@ class ComfyWorkflowCompiler:
         uploaded_mask: str,
         prompt_loras: Sequence[LoraSpec] = (),
         main_prompt: str = "",
+        warnings: Optional[list] = None,
     ) -> dict:
         graph = _Graph()
         (model, clip, vae, positive_ref, negative_ref,
@@ -997,6 +1016,11 @@ class ComfyWorkflowCompiler:
             graph, image, model, clip, vae, positive_ref, negative_ref, payload,
             last_pass_model=pass_model, pass_lora_base=pass_lora_base,
         )
+        # VAE DeGrid: Forge 는 모든 후처리(ADetailer·SAM3·순차 SAM3 패스) 뒤, 저장 직전에 이미지마다 한 번 돈다
+        # (postprocess_image_after_composite) — 그래서 _add_image_extensions(패스마다 재귀) 밖에서 한 번만 넣는다.
+        degrid = self._degrid_state(payload)
+        if degrid is not None:
+            image = self._add_degrid(graph, image, degrid, warnings)
         self._add_output_image(
             graph, image, payload, "AIStudio/generated", "Save generated image",
         )
@@ -2383,6 +2407,7 @@ class ComfyWorkflowCompiler:
         *, uploaded_image: str, uploaded_mask: str,
         prompt_loras: Sequence[LoraSpec] = (),
         main_prompt: str = "",
+        warnings: Optional[list] = None,
     ) -> _Graph:
         """Compile ``workflow`` with the app's settings.
 
@@ -2596,9 +2621,19 @@ class ComfyWorkflowCompiler:
             }.items():
                 inputs[key] = sampler_options.get(key, payload.get(key, default))
 
+        # VAE DeGrid 는 VAE 가 필요 없는 최종 이미지 후처리라 _has_image_scripts(needs_vae·compile_postprocess 조건)에
+        # 넣지 않고 아래 두 출력 자리에만 더한다(D11). 넣을 자리가 없으면 생성을 막지 않고 빼고 알린다(A8) —
+        # ADetailer/SAM3 도 켰으면 그 기존 오류가 그대로 난다.
+        degrid = self._degrid_state(payload)
+        image_scripts = self._has_image_scripts(payload)
         if not decode_id:
-            if _bool(payload.get("enable_hr")) or self._has_image_scripts(payload):
+            if _bool(payload.get("enable_hr")) or image_scripts:
                 raise WorkflowCompileError("Hires/ADetailer/SAM3 삽입에 필요한 VAEDecode를 custom workflow에서 찾지 못했습니다.")
+            if degrid is not None:
+                self._degrid_warning(
+                    warnings, vae_degrid.COMFY_OMIT_PLACEMENT,
+                    "사용자 워크플로에서 sampler 뒤의 VAEDecode 를 찾지 못해 넣을 자리가 없습니다",
+                )
             return graph
         decode = graph.nodes[decode_id]
         samples = decode.get("inputs", {}).get("samples")
@@ -2613,23 +2648,41 @@ class ComfyWorkflowCompiler:
             )
             decode.setdefault("inputs", {})["samples"] = samples
             decode["inputs"]["vae"] = decode_vae
-        if self._has_image_scripts(payload):
+        if image_scripts or degrid is not None:
             outputs = self._find_outputs_after(graph.nodes, decode_id)
-            if not outputs:
-                raise WorkflowCompileError(
-                    "ADetailer/SAM3 삽입 대상인 custom workflow 출력 노드를 찾지 못했습니다."
-                )
             source_links = {tuple(link[:2]) for _node_id, _key, link in outputs}
-            if len(source_links) != 1:
-                raise WorkflowCompileError(
-                    "custom workflow의 선택 분기에 서로 다른 이미지 출력이 여러 개입니다. "
-                    "ADetailer/SAM3 자동 삽입 대상을 하나로 줄여주세요."
+            features = "ADetailer/SAM3" + ("/VAE DeGrid" if degrid is not None else "")
+            if not outputs:
+                if image_scripts:
+                    raise WorkflowCompileError(
+                        f"{features} 삽입 대상인 custom workflow 출력 노드를 찾지 못했습니다."
+                    )
+                self._degrid_warning(
+                    warnings, vae_degrid.COMFY_OMIT_PLACEMENT,
+                    "사용자 워크플로에서 VAEDecode 뒤의 이미지 출력(저장·미리보기) 노드를 찾지 못했습니다",
                 )
+                return graph
+            if len(source_links) != 1:
+                if image_scripts:
+                    raise WorkflowCompileError(
+                        "custom workflow의 선택 분기에 서로 다른 이미지 출력이 여러 개입니다. "
+                        f"{features} 자동 삽입 대상을 하나로 줄여주세요."
+                    )
+                self._degrid_warning(
+                    warnings, vae_degrid.COMFY_OMIT_PLACEMENT,
+                    "사용자 워크플로의 선택 분기에 서로 다른 이미지 출력이 여러 개라 넣을 자리를 정할 수 없습니다",
+                )
+                return graph
             image = list(next(iter(source_links)))
-            post = self._add_image_extensions(
-                graph, image, model, clip, vae, positive, negative, payload,
-                last_pass_model=pass_model, pass_lora_base=pass_lora_base,
-            )
+            post = image
+            if image_scripts:
+                post = self._add_image_extensions(
+                    graph, image, model, clip, vae, positive, negative, payload,
+                    last_pass_model=pass_model, pass_lora_base=pass_lora_base,
+                )
+            if degrid is not None:
+                # 기본 그래프와 같은 자리 — 모든 후처리 뒤, 출력 노드 바로 앞(_compile_default)
+                post = self._add_degrid(graph, post, degrid, warnings)
             if post != image:
                 for output_id, key, _source in outputs:
                     graph.nodes[output_id].setdefault("inputs", {})[key] = post
@@ -3782,6 +3835,120 @@ class ComfyWorkflowCompiler:
             ):
                 outputs.append((str(node_id), key, list(link)))
         return outputs
+
+    # ---- VAE DeGrid (final-image post-process) ---------------------------
+
+    @classmethod
+    def _degrid_state(cls, payload: Mapping[str, Any]) -> Optional[vae_degrid.DegridSettings]:
+        """The enabled VAE DeGrid request of ``payload`` (extension coerce rules), else None.
+
+        The block title is the app constant (``vae_degrid.SCRIPT_NAME``, matched
+        case-insensitively like Forge).  Only main generations carry it — the
+        contributor/propagation rule never hands it to a post-processing pass,
+        and ``compile_postprocess``/``compile_upscale``/``compile_sam3_mask_only``
+        never build it (D1).
+        """
+        settings = vae_degrid.parse_script_block(cls._script(payload, vae_degrid.SCRIPT_NAME))
+        return settings if settings is not None and settings.enabled else None
+
+    @staticmethod
+    def _degrid_warning(warnings: Optional[list], cause: str, reason: str) -> None:
+        """Record why DeGrid was left out (``cause``: a ``vae_degrid.COMFY_OMIT_*``).
+
+        The codes are the notice codes (core/sam_extra_notices), so the backend
+        turns them into the same notices a Forge result produces: a missing
+        model reads like Forge's ``model not found`` result, every other cause
+        is the "unavailable" notice.  ``cause`` tells the backend whether a
+        fresh ``/object_info`` could change the outcome
+        (``COMFY_SCHEMA_FIXABLE``) — a custom workflow without a place for the
+        node never can.
+        """
+        from core import sam_extra_notices as notices
+
+        code = (notices.CODE_DEGRID_ERROR if cause == vae_degrid.COMFY_OMIT_MODEL_MISSING
+                else notices.CODE_DEGRID_COMFY_UNAVAILABLE)
+        _logger.warning("[DeGrid] ComfyUI 그래프에서 뺌 — %s", reason)
+        if warnings is not None:
+            warnings.append({"code": code, "reason": reason, "feature": "degrid", "cause": cause})
+
+    def _degrid_model_choice(
+        self, settings: vae_degrid.DegridSettings, warnings: Optional[list],
+    ) -> Optional[str]:
+        """The node's ``model_name`` value for ``settings``, or None when DeGrid must be left out.
+
+        Without a capability document (offline compile) or with a class-only
+        probe the requested name is used as-is (``auto`` for automatic).  With
+        a live document a missing class or an input contract other than
+        ``vae_degrid.COMFY_INPUTS`` (a pack before 1.5.0) leaves DeGrid out
+        instead of failing the job (D8 — ``validate`` would refuse the class),
+        and so does a model the node does not list, in Forge's own
+        ``model not found: <name|auto>`` wording.  ComfyUI validates the model
+        combo for the whole prompt, so an unlisted name must never reach
+        /prompt.
+        """
+        node_class = vae_degrid.COMFY_NODE_CLASS
+        unchecked = settings.model or vae_degrid.COMFY_AUTO
+        if self.object_info is None:
+            return unchecked
+        schema = self.object_info.get(node_class)
+        if not isinstance(schema, Mapping):
+            self._degrid_warning(
+                warnings, vae_degrid.COMFY_OMIT_NODE_MISSING,
+                f"ComfyUI 에 {node_class} 노드가 없습니다(AI Studio Forge Parity 노드 팩 "
+                f"{vae_degrid.COMFY_MIN_PACK_VERSION} 이상 필요, 팩을 갱신했으면 ComfyUI 를 재시작하세요)",
+            )
+            return None
+        inputs = schema.get("input")
+        required = inputs.get("required") if isinstance(inputs, Mapping) else None
+        optional = inputs.get("optional") if isinstance(inputs, Mapping) else None
+        if isinstance(required, Mapping) and not required and not optional:
+            return unchecked  # lightweight capability probe: class names only (validate() skips it too)
+        choices = vae_degrid.comfy_node_choices(self.object_info)
+        if choices is None:
+            self._degrid_warning(
+                warnings, vae_degrid.COMFY_OMIT_NODE_CONTRACT,
+                f"ComfyUI 의 {node_class} 노드 입력이 앱과 다릅니다(번들 노드 팩 "
+                f"{vae_degrid.COMFY_MIN_PACK_VERSION} 이상을 다시 설치하고 ComfyUI 를 재시작하세요)",
+            )
+            return None
+        installed = vae_degrid.comfy_model_choices(self.object_info) or []
+        resolved = vae_degrid.comfy_file_for(settings.model, choices)
+        if resolved is None or (resolved == vae_degrid.COMFY_AUTO and not installed):
+            self._degrid_warning(
+                warnings, vae_degrid.COMFY_OMIT_MODEL_MISSING,
+                f"{vae_degrid.ERROR_MODEL_NOT_FOUND}: {settings.model or vae_degrid.COMFY_AUTO}",
+            )
+            return None
+        return resolved
+
+    def _add_degrid(
+        self, graph: _Graph, image: list, settings: vae_degrid.DegridSettings,
+        warnings: Optional[list],
+    ) -> list:
+        """``ForgeNeoAnimaVAEDeGrid`` on the final image; the image unchanged when left out.
+
+        Device/precision/residency are the extension defaults (auto, fp32,
+        off): Forge's ``sam3_degrid_*`` options are Forge-only (D6).  The input
+        is floored to Forge's 8-bit image and the output snapped to the 8-bit
+        grid (``forge_quantize``, D9), so the saved PNG equals Forge's.
+        """
+        model_name = self._degrid_model_choice(settings, warnings)
+        if model_name is None:
+            return image
+        options = vae_degrid.COMFY_OPTIONS
+        node = graph.add(vae_degrid.COMFY_NODE_CLASS, {
+            "image": image,
+            "enabled": True,
+            "model_name": model_name,
+            "mode": vae_degrid.MODE_LABELS[vae_degrid.coerce_mode(settings.mode)],
+            "strength": vae_degrid.coerce_strength(settings.strength),
+            "tile": vae_degrid.coerce_tile(settings.tile),
+            "device": options["device"],
+            "precision": options["precision"],
+            "keep_loaded": bool(options["keep_loaded"]),
+            "forge_quantize": bool(vae_degrid.COMFY_FORGE_QUANTIZE),
+        }, "VAE DeGrid (final image)")
+        return [node, 0]
 
     @staticmethod
     def _has_image_scripts(payload: Mapping[str, Any]) -> bool:

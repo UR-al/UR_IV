@@ -30,6 +30,9 @@ read back the same way. Creator workflows keep their own `SaveImage` nodes.
   `ForgeNeoSAM3Refine`
 - Creator H3 conditioning cache: `ForgeNeoH3ConditioningCachePrepare`,
   `ForgeNeoH3ConditioningCacheLoad`
+- Final image post-process: `ForgeNeoAnimaVAEDeGrid` (pack 1.5.0+; after the
+  last image extension, before the save/preview node, main generations only —
+  see "Anima VAE DeGrid")
 
 ### Custom ComfyUI workflows only
 
@@ -54,6 +57,17 @@ When the app generates from an ANIMA custom workflow it keeps
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.5.0 changes
+
+- New `ForgeNeoAnimaVAEDeGrid`: the sam-extra Forge extension's "Anima VAE DeGrid
+  (NAFNet)" step as a ComfyUI node (see "Anima VAE DeGrid"). It is a local
+  implementation checked against numbers produced by the extension itself
+  (`tests/test_comfy_degrid_origin.py`); no extension code is included.
+- The pack registers a `degrid` model folder (`ComfyUI/models/degrid`, merged into
+  an existing `degrid` entry from `extra_model_paths.yaml` or another pack).
+- Packs before 1.5.0 do not have the node; the app then leaves DeGrid out of the
+  graph with a notice instead of failing the generation.
 
 ## 1.4.2 changes
 
@@ -195,6 +209,48 @@ Forge's vendored Anima/PiD/LLLite Tile Repair stack is not presented as the
 same feature: `SAM3 Region Repair (Comfy)` handles the portable masked-region
 subset, while Forge-only Tile Repair settings fail with an explicit dependency
 message instead of silently running a different pipeline.
+
+## Anima VAE DeGrid (pack 1.5.0+)
+
+`ForgeNeoAnimaVAEDeGrid` removes the Qwen/Wan VAE grid pattern with a
+DraconicDragon NAFNet-VAE-DeGrid model, the way the sam-extra Forge script
+"Anima VAE DeGrid (NAFNet)" does it (extension commit `395854b`):
+
+- The model's raw forward output is a residual that is added to the image:
+  `Full` = `x + s·δ`, `Dark Pixels Mainly` = `x + s·max(δ, 0)`,
+  `Bright Pixels Mainly` = `x + s·min(δ, 0)`, then one clamp to [0, 1].
+  Strength 0-1.5 (0 = recorded but nothing runs, like Forge).
+- Tiles of `tile` pixels (default 512; 1-127 become 128; 0 = one piece) with a
+  32-pixel linear-ramp overlap — the same positions and weights as ComfyUI's
+  `tiled_scale` and the extension's port of it. Each tile is reflect-padded to the
+  model's multiple (16) and cropped back. Out of memory halves the tile down to
+  128 (tile 0 starts at half the long side); the report gives the tile used.
+- `forge_quantize` (default on) floors the incoming IMAGE to 8-bit levels like
+  Forge's `uint8(255·x)` before the model and rounds the result to 8-bit levels
+  like the extension's saved PNG, so ComfyUI's savers write the same bytes as
+  Forge (checked bit for bit on CPU with the v1.1 model).
+- Residual guard: an output that follows the input like an image (a denoise or
+  deblur NAFNet) is refused with `not a DeGrid residual model: …`; a residual
+  whose mean exceeds 100/255 is skipped with `output blew up: …`; a missing file
+  gives `model not found: <name>`. Skips and any other error keep that image as
+  it was and are reported — never fatal. A user cancel still cancels.
+- Models: NAFNet files (all spandrel NAFNet detection keys; safetensors headers
+  and zip `data.pkl` key names are read without `torch.load`; legacy pickles are
+  skipped) directly in `upscale_models` (Forge `models/ESRGAN`) and `degrid`.
+  `auto` = the highest `modelspec.version`, then folder, then name. A file name in
+  both folders gets its folder as prefix. Reports name models like Forge's
+  infotext (stem; `ESRGAN/<stem>` or `DeGrid/<stem>` on a clash).
+- `device` auto/cpu, `precision` fp32/fp16 (fp16 = autocast on CUDA with fp32
+  weights; a tile that overflows is redone in fp32; CPU always fp32),
+  `keep_loaded` (default off: unloaded after the batch). The app sends the
+  extension defaults auto/fp32/off; the Forge settings `sam3_degrid_device`,
+  `sam3_degrid_gpu_precision` and `sam3_degrid_keep_loaded` do not apply to
+  ComfyUI. On a GPU the model goes through ComfyUI's `load_models_gpu`; ComfyUI's
+  unload-all (`/free`) also drops the cached model.
+- Outputs: the IMAGE and `report_json`; the same per-image reports are in the
+  node's UI output `ai_studio_degrid`: `status` (ok/skipped/off), `model`,
+  `mode` (label), `strength`, `tile` (used), `precision` (`fp32`,
+  `fp16-autocast`, `-` when nothing ran), `error`.
 
 ## Anima ControlNet-LLLite (pack 1.4.0+)
 

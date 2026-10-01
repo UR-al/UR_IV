@@ -33,7 +33,11 @@ PACK_ID = "ai_studio_forge_parity"
 # VAEDecode's movedim view, so every in-generation SAM3 failed) and DAVE/SLG wrap the
 # ModelPatcher's original block ``forward`` instead of a previous run's wrapper; node
 # inputs are unchanged, so the compiler needs no gate.
-PACK_VERSION = "1.4.2"
+# 1.5.0: new ForgeNeoAnimaVAEDeGrid (sam-extra "Anima VAE DeGrid (NAFNet)" as a node, local
+# implementation checked against the extension's own numbers) and a ``degrid`` model folder.
+# Older packs lack the class: the compiler leaves DeGrid out of the graph and the backend
+# tells the user (core/comfy_workflow_compiler._add_degrid) — the generation itself runs.
+PACK_VERSION = "1.5.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

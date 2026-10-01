@@ -21,6 +21,12 @@ def _anima38_settings(host) -> dict:
     return get_settings(host)
 
 
+def _degrid_settings(host) -> dict:
+    """VAE DeGrid 카드 값(ui/vae_degrid_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
+    from ui.vae_degrid_ui import get_settings
+    return get_settings(host)
+
+
 def migrate_legacy_gallery_folder(
     settings: dict,
     *,
@@ -173,6 +179,8 @@ class SettingsMixin:
             "dora_infer_settings": _dora_settings(self),
             # Anima 3.8B 카드(core/anima38.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
             "anima38_settings": _anima38_settings(self),
+            # VAE DeGrid 카드(core/vae_degrid.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
+            "vae_degrid_settings": _degrid_settings(self),
             
             
             "remove_artist": self.chk_remove_artist.isChecked(),

@@ -13,13 +13,13 @@
 | `tests/fixtures/sam_extra_script_info.json` | 라이브 `GET /sdapi/v1/script-info` 에서 sam-extra 항목만 저장한 픽스처. AST 로는 못 읽는 기본값, 범위, 선택지의 출처다. |
 | `tools/refresh_sam_extra_fixture.py` | 픽스처를 갱신하는 도구. 실행 중인 Forge 에 읽기 전용 GET 두 번만 보낸다. |
 | `tests/_sam_extra_ext.py` | 확장 위치 찾기와 skip 규칙을 가드 테스트끼리 공유한다 (`test_sam3_args`, `test_anima_guidance` 도 쓴다). |
-| `core/sam_extra_notices.py` · `tests/test_sam_extra_notices.py` | 결과 infotext(`SAM3 Error`, `Anima38: off: …`, `Anima Perturbation Guidance` 누락)와 생성 전 조건(CFG≈1 의 SMC/APG/CWM, `sam3.pt` 자동 다운로드, 없는 스크립트), HTTP 422 본문을 사용자 알림으로 바꾼다(P4). 테스트의 `ExtensionSourceTests` 가 이 infotext 키와 가드 함수가 설치된 확장에 그대로 있는지 본다. |
+| `core/sam_extra_notices.py` · `tests/test_sam_extra_notices.py` | 결과 infotext(`SAM3 Error`, `Anima38: off: …`, `Anima Perturbation Guidance` 누락, 이미지마다의 `Anima DeGrid error`)와 생성 전 조건(CFG≈1 의 SMC/APG/CWM, `sam3.pt` 자동 다운로드, 없는 스크립트), HTTP 422 본문을 사용자 알림으로 바꾼다(P4). 테스트의 `ExtensionSourceTests` 가 이 infotext 키와 가드 함수가 설치된 확장에 그대로 있는지 본다. |
 
-레지스트리가 다루는 범위는 다음과 같다. always-on 스크립트 제목(script-info 에 나오는 11개와 `ui()` 가 None 이라 나오지 않는 NegPiP — `script_info=False`), 스크립트별 `ui()` 반환 순서와 `ARG_NAMES`, API 경로가 `_arg(N)` 으로 읽는 인덱스, `Sam3Args` 필드·기본값·어노테이션 범위와 `process()` 가 state 에서 읽는 키, Forge 옵션 키(18개 — 그중 8개는 요청마다 덮어쓸 수 있다, `core/forge_override_settings.SPECS`), FastAPI 라우트, XYZ 축 라벨(104개), Gradio 전용 이름 엔드포인트(앱이 기대면 안 되는 것), 모듈 파일 단위, `preload.py` 명령줄 플래그, 의미 핀(Detail Daemon 배율, 공유 메모 스키마·한도, LoRA Manager `_BRIDGE_JS` 메시지 모양 등), 앱 spec 과 라이브 값의 알려진 차이.
+레지스트리가 다루는 범위는 다음과 같다. always-on 스크립트 제목(script-info 에 나오는 11개와 `ui()` 가 None 이라 나오지 않는 NegPiP — `script_info=False`), 스크립트별 `ui()` 반환 순서와 `ARG_NAMES`, API 경로가 `_arg(N)` 으로 읽는 인덱스, `Sam3Args` 필드·기본값·어노테이션 범위와 `process()` 가 state 에서 읽는 키, Forge 옵션 키(18개 — 그중 11개는 요청마다 덮어쓸 수 있다. 체크박스는 bool, 라디오는 선택지 값 문자열, `core/forge_override_settings.SPECS`), FastAPI 라우트, XYZ 축 라벨(104개), Gradio 전용 이름 엔드포인트(앱이 기대면 안 되는 것), 모듈 파일 단위, `preload.py` 명령줄 플래그, 의미 핀(Detail Daemon 배율, 공유 메모 스키마·한도, LoRA Manager `_BRIDGE_JS` 메시지 모양, VAE DeGrid 상수 계약 등), 앱 spec 과 라이브 값의 알려진 차이.
 
 ### 소스와 픽스처를 둘 다 보는 이유
 
-픽스처 테스트(shape 해시, 앱 spec 비교, 의미 핀)는 저장된 script-info 만 본다. 그래서 확장 소스에서 슬라이더 범위나 기본값만 바꾸면(인자 수는 그대로) Forge 를 다시 시작해 픽스처를 갱신하기 전까지 통과한다. 이를 막으려고 계약 테스트는 설치된 소스의 `ui()` 컴포넌트에서 라벨, 기본값, 범위, step, 선택지를 AST 로 읽어 픽스처와 비교한다(`test_fixture_matches_installed_source`). 모듈 상수, `CONST[1:]` 슬라이스, 지역 변수, `with InputAccordion(...) as x` 도 따라간다. 실행 시점 목록(파일, 어댑터, CLIP-L)은 읽지 않는다. 픽스처에는 값이 있는데 AST 로 못 읽는 칸은 `UI_UNREAD` 에 사유와 함께 적는다. 새로 못 읽게 된 칸도, 이제 읽히는 칸도 실패한다.
+픽스처 테스트(shape 해시, 앱 spec 비교, 의미 핀)는 저장된 script-info 만 본다. 그래서 확장 소스에서 슬라이더 범위나 기본값만 바꾸면(인자 수는 그대로) Forge 를 다시 시작해 픽스처를 갱신하기 전까지 통과한다. 이를 막으려고 계약 테스트는 설치된 소스의 `ui()` 컴포넌트에서 라벨, 기본값, 범위, step, 선택지를 AST 로 읽어 픽스처와 비교한다(`test_fixture_matches_installed_source`). 모듈 상수, `CONST[1:]` 슬라이스, 숫자 상수식(`2 / 255`, `64 << 20` — 의미 핀 `degrid_guard_*`), 지역 변수, `with InputAccordion(...) as x` 도 따라간다. 실행 시점 목록(파일, 어댑터, CLIP-L)은 읽지 않는다. 픽스처에는 값이 있는데 AST 로 못 읽는 칸은 `UI_UNREAD` 에 사유와 함께 적는다. 새로 못 읽게 된 칸도, 이제 읽히는 칸도 실패한다.
 
 ### 아직 없는 검사
 
@@ -27,7 +27,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
 
 - 5번 메시지 계약 중 `wire_tipo` 입력 순서, `MODES`/`LENGTHS`, `REFERENCE_ARG_KEYS` (P19·P20 이 Gradio 방식을 고를 때 추가). `_BRIDGE_JS` 의 `sam3-add-lora` 메시지 모양은 의미 핀 `lora_bridge_message` 가 본다.
 - 6번 앱 내부 커버리지: 모든 `SAM3_KEYS` 가 `_build_sam3_settings` 에서 읽히고, 프록시가 있고, 저장·복원되고, `Sam3MaskCard.vue` 나 `Sam3ControlNetPanel.vue` 에 바인딩되는지. 위치 spec 키가 `components/guidance/*Section.vue`(P0-B 분할 뒤 칸이 있는 곳, `AnimaGuidancePanel.vue` 는 섹션을 놓는 틀) 에 모두 바인딩되는지. 지금 레지스트리는 섹션마다 켜기 키 하나만 참조로 본다.
-- 7번 Comfy: mapped 제목마다 `comfy_workflow_compiler` 가 블록을 쓰거나 unsupported 로 선언하는지, `SEMANTIC_PINS` 가 Comfy 미러에도 반영됐는지. 지금 `comfy=` 참조는 파일과 심볼이 있는지만 본다.
+- 7번 Comfy: mapped 제목마다 `comfy_workflow_compiler` 가 블록을 쓰거나 unsupported 로 선언하는지. 지금 `comfy=` 참조는 파일과 심볼이 있는지만 본다. `SEMANTIC_PINS` 의 Comfy 미러는 핀마다 손으로 건다(`dd_sigma_scale_comfy`, `degrid_*_comfy` — 팩 상수를 `app` 으로 보는 두 번째 핀). 미러가 빠진 핀을 자동으로 찾지는 않는다.
 - `UI_ONLY_FEATURES` 는 등록된 함수가 그 파일에 있는지만 보는 한 방향 검사다. 새 Gradio 이름 엔드포인트는 잡지 않는다.
 
 ### 분류 규칙
@@ -66,7 +66,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
    확장이 다른 곳에 있으면 `$env:AISTUDIO_FORGE_EXTENSION_DIR = '<확장 루트>'` 로 지정한다. 지정하면 그 경로만 본다. 경로가 틀리면 다른 설치로 대신하지 않고 skip 한다(강제 모드면 실패). skip 이유에 지정한 경로가 나온다.
 
 4. **실패 항목을 하나씩 처리한다.** 메시지의 `+` 는 새 항목, `-` 는 사라진 항목이다.
-   - **새 항목**(스크립트, 인자, 라우트, 옵션, 축, 파일, 플래그): 레지스트리에 mapped, ignored(사유), deferred(패키지와 사유) 중 하나로 적는다. mapped 로 적는다면 앱 spec, 카드 UI, 페이로드, Comfy 미러까지 함께 고친다. alwayson 스크립트면 `core/alwayson_propagation.py` 의 `PROPAGATION`(보조 패스에 보냄 — 패스·백엔드·모를 때 규칙과 사유)이나 `NEVER`(보내지 않음 — 사유) 중 한 곳에 분류한다(`tests/test_alwayson_propagation.py` 가 빠진 제목을 잡는다). 샘플링 블록은 `ui/sampling_blocks.py` 의 기여자로 만든다. Forge 옵션이면 요청 중에 읽는 bool 옵션인지 보고, 앱이 요청마다 덮어쓸 것이면 `core/forge_override_settings.SPECS`·`frontend/src/utils/forgeOptionOverrides.ts` 에 한 줄씩 더하고(기본은 'Forge 설정 따름' — 키를 보내지 않는다) 읽는 쪽 상수를 `SEMANTIC_PINS` 에 건다. `test_p10_option_specs_match_installed_source` 가 기본값·infotext·체크박스·onchange 를 소스와 맞대 본다.
+   - **새 항목**(스크립트, 인자, 라우트, 옵션, 축, 파일, 플래그): 레지스트리에 mapped, ignored(사유), deferred(패키지와 사유) 중 하나로 적는다. mapped 로 적는다면 앱 spec, 카드 UI, 페이로드, Comfy 미러까지 함께 고친다. alwayson 스크립트면 `core/alwayson_propagation.py` 의 `PROPAGATION`(보조 패스에 보냄 — 패스·백엔드·모를 때 규칙과 사유)이나 `NEVER`(보내지 않음 — 사유) 중 한 곳에 분류한다(`tests/test_alwayson_propagation.py` 가 빠진 제목을 잡는다). 샘플링 블록은 `ui/sampling_blocks.py` 의 기여자로 만든다. Forge 옵션이면 요청 중에 읽는 옵션인지(체크박스 = bool, 라디오 = 선택지 값 문자열) 보고, 앱이 요청마다 덮어쓸 것이면 `core/forge_override_settings.SPECS`·`frontend/src/utils/forgeOptionOverrides.ts` 에 한 줄씩 더하고(기본은 'Forge 설정 따름' — 키를 보내지 않는다. 라디오는 `choices` 에 확장 순서대로 (값, 앱 라벨)을 적는다) 읽는 쪽 상수를 `SEMANTIC_PINS` 에 건다. `test_p10_option_specs_match_installed_source` 가 기본값·infotext·컴포넌트(Checkbox/Radio)·라디오 선택지 값(순서까지)·onchange 를 소스와 맞대 본다. 확장 OptionInfo 에 `infotext=` 가 없으면 스펙도 `''` 다(런타임이 직접 쓰는 infotext 키와 헷갈리지 않는다 — VAE DeGrid 정밀도). 라디오 값은 앱 상수에서 가져오고 그 상수를 핀으로 건다(`degrid_device_*`·`degrid_precision_*`).
    - **사라진 항목**: 앱 UI, 페이로드, 저장된 설정값에서 쓰는 곳을 정리한다. 옛 저장값을 어떻게 옮길지 정한 뒤 레지스트리에서 지운다.
    - **기본값, 범위, 선택지, 라벨이 바뀜**(`test_arg_shapes`, 스펙 비교 테스트): CHANGELOG 와 코드로 **의미**가 바뀌었는지 먼저 확인한다. 그다음 앱 spec 을 고치거나, 일부러 다르게 두는 것이면 `KNOWN_DIFFS` 에 사유와 함께 적는다. 확인이 끝나면 메시지가 알려 준 새 해시로 `shape` 를 바꾼다.
    - **`KNOWN_DIFFS` 에 있는데 더는 차이가 없음**: 작업 패키지가 고쳤다는 뜻이다. 그 항목을 지운다.
@@ -76,6 +76,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
    - **위치 읽기 인덱스가 바뀜**(`test_positional_reads`): API 가 어떤 인자를 새로 읽거나 더는 읽지 않는다는 뜻이다. Detail Daemon 의 arg1(preset)을 API 가 무시하게 된 변화가 이 경우다.
    - **의미 핀이 깨짐**(`SEMANTIC_PINS`): 인자 모양은 같은데 의미가 바뀐 경우다. 예: Detail Daemon arg2 의 범위(±5)와 `_SIGMA_SCALE`(0.1)은 원본 노드(Jonseed/ComfyUI-Detail-Daemon) 값이다. 앱은 노드 단위를 변환 없이 보내므로(`core/anima_guidance.py` `DETAIL_DAEMON_SPEC`), 확장이 원본과 다른 단위·범위를 쓰게 되면 원본 대조 테스트(`tests/test_detail_daemon_origin.py`)와 Comfy 미러(`DD_SIGMA_SCALE`, `tests/test_comfy_detail_daemon.py`)부터 확인한다. 핀에 `app` 이 붙은 항목은 앱 상수가 다르면 확장 없이도 실패한다.
    - **`process()` 키 테스트가 깨짐**: 확장이 SAM3 state 키 이름을 바꿨다. 앱이 보내는 값이 조용히 버려지고 있으므로 가장 먼저 고친다.
+   - **VAE DeGrid 핀이 깨짐**(핀 `degrid_*`): 앱(`core/vae_degrid.py`, P10 옵션 키 `core/forge_override_settings.py`)과 ComfyUI 팩(`comfy_custom_nodes/ai_studio_forge_parity/degrid_math.py`·`degrid_nodes.py`·`degrid_runner.py`)이 확장 값을 하드코딩한 곳이다. `_comfy` 로 끝나는 핀은 팩 상수다. 인자 키·모드 라벨·infotext 키가 바뀌면 앱 블록이 조용히 기본값으로 읽히거나 결과 알림이 멈춘다. 계산 상수(타일·패딩·판정 문턱·`BYTES_PER_PIXEL`)가 바뀌면 Comfy 결과가 Forge 와 갈라진다 — 앱·팩 상수를 고친 뒤 원본 골든(`tests/fixtures/degrid_origin_golden.json`)을 다시 만든다(아래 'ComfyUI 동등성' 5번). TS 거울(`frontend/src/utils/vaeDegrid.ts`)은 `tests/test_vae_degrid_card_mirror.py` 가 앱 상수와 맞대 본다.
    - **Anima 3.8B 모델 종류 핀이 깨짐**(핀 `anima38_bundle_architecture`·`anima38_bundle_format`·`anima38_v1_architecture`·`anima38_default_adapter`): 확장이 v2 번들·v1 어댑터를 가리는 메타데이터나 기본 어댑터 이름을 바꿨다. 앱은 체크포인트 헤더를 같은 규칙으로 읽어 모델 종류를 정하고(`core/anima_model_kind.py`), 그 종류로 Anima38 블록을 보낼지 정한다(`core/anima38.py` `effective`·`plan`). 그대로 두면 3.8B 모델이 'Anima'나 '모름'으로 보여 부정 커넥터 앱 기본값이 조용히 빠진다. 앱 상수와 `frontend/src/utils/anima38Card.ts` 를 함께 고친다.
    - **알림 키 테스트가 깨짐**(`tests.test_sam_extra_notices.ExtensionSourceTests`, 핀 `anima38_status_key`·`sam3_hf_checkpoint_*`): 확장이 실패 흔적을 남기는 infotext 키나 CFG 1 가드·OOM 폴백 함수를 바꿨다. 그대로 두면 사용자 알림이 조용히 멈춘다. `core/sam_extra_notices.py` 의 `KEY_*` 상수와 원인 → 설정 힌트(`sam3_error_hint`, `anima38_off_hint`)를 새 문구에 맞춘다.
    - **정적으로 풀지 못한 항목**(`test_everything_was_resolved_statically`): 확장이 새 방식으로 상수를 만든다. `core/sam_extra_scan.py` 를 보강하거나, 그 항목을 레지스트리에 직접 분류한다.
@@ -92,6 +93,29 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
 7. **결과 픽셀이 바뀌는 항목은 GPU 로 확인한다.** 기본값, 배율, 인자 의미가 바뀐 기능(가이던스, SAM3 인페인트, Anima 3.8B, DoRA 등)은 같은 시드로 Forge UI 결과와 앱 결과를 비교해야 한다. 이 PC 의 GPU 는 학습 작업으로 바쁜 경우가 많다. **실행하기 전에 사용자에게 묻고, 쓸 VRAM 을 먼저 밝힌다.** 실행 중인 학습 프로세스는 건드리지 않는다.
 
 8. **커밋한다.** `/ship` 으로 한국어 conventional 메시지를 쓴다. 예: `feat: sam-extra 0.31.0 동기화 — …`. 픽스처, 레지스트리, 앱 수정을 같은 커밋에 넣어 기준 버전이 어긋나지 않게 한다.
+
+## 새 always-on 스크립트를 앱에 노출할 때
+
+VAE DeGrid(2026-10-01, 보류 → mapped)를 예로 든다. 같은 순서를 따르면 Forge 와 ComfyUI 가 같은 결과를 낸다.
+
+### 샘플링 블록과 전달 규칙
+
+- 블록은 `ui/sampling_blocks.py` 의 기여자(`CONTRIBUTORS`)로 만든다. 메인 체인(T2I·I2I·인페인트·채팅·만화 컷·XYZ·시드 탐색·대기열)과 보조 패스 봉투가 같은 빌더를 쓴다.
+- 제목은 `core/alwayson_propagation.py` 의 `PROPAGATION` 이나 `NEVER` 에 둔다. 제목 문자열은 앱 상수 하나에서만 나오게 한다(`core.vae_degrid.SCRIPT_NAME` — 기능 스냅샷·알림 표·컴파일러는 그 상수를 쓰고, AST 테스트가 리터럴 사본을 잡는다).
+- **`PROPAGATION` 의 `passes=frozenset()` = 최종 이미지 블록.** 확장이 저장 직전에 이미지마다 한 번 도는 후처리(`postprocess_image_after_composite`)라 메인 요청에만 싣는다. 보조 패스(Refine·단독/배치 SAM3·ADetailer·손 재구성)는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸린다. `blocks_for` 는 어느 보조 패스에도 주지 않고, `final_image_titles()` 가 이 제목들을 돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때). 그래도 `PROPAGATION` 행이라 메인 게이트·동결 재게이트·봉투 모양(T15 — 메인 체인과 같은 봉투)은 다른 샘플링 블록과 같다. 기여자는 보조 봉투용 호출에도 메인과 같은 블록을 알림 없이 돌려준다.
+- 사용자가 켠 블록은 문서화된 규칙을 따른다: 기능 스냅샷이 '없다'고 하면 게이트가 빼고 `block_not_sent` 알림, 모르면 보낸다(`when_unknown user=SEND`, `main_retry=False` — 없는 Forge 는 422 설명). 앱 기본값으로 넣는 블록만 모를 때 빼고 422 재시도(`main_retry`)를 쓴다(DoRA·Anima38).
+- 실패가 HTTP 오류가 아니라 infotext 에만 남는 기능은 이미지마다 결과 알림을 만든다(`core/sam_extra_notices.py` — `n/m 장`, 오류 종류별로 묶음). 결과 infotext 키는 `core/image_metadata._EXTENSION_MARKERS` 로 확장 그룹에 넣는다.
+
+### ComfyUI 동등성(이미지 후처리)
+
+1. 노드는 앱 팩 `comfy_custom_nodes/ai_studio_forge_parity` 에 직접 쓴다(확장 코드 복사 금지 — GPL). 모듈 최상위에서 torch·comfy·spandrel·folder_paths 를 import 하지 않는다(`tests/test_comfy_node_pack.py` 가 앱 venv 에서 팩을 import 한다). 입력 이름·순서는 앱 상수(`core/vae_degrid.COMFY_INPUTS`)와 같게 둔다.
+2. 컴파일러는 노드를 `_add_image_extensions` 가 돌려준 뒤, Save/Preview 바로 앞에 **한 번** 넣는다(그 안에 넣으면 SAM3 추가 패스마다 반복된다). 사용자 워크플로는 출력 연결을 다시 잇되, VAE 링크가 필요 없는 후처리는 `_has_image_scripts` 에 넣지 않는다(`needs_vae`·`compile_postprocess` 조건이 바뀐다).
+3. 노드 클래스가 없거나(옛 팩) 입력 계약이 다르거나 모델이 없으면 **노드를 빼고 생성한다** — `compile(..., warnings=list)` 경고 → 백엔드가 Forge 결과 알림과 같은 문구로 바꾼다(`core/comfy_degrid_report.py`). 기능 사전 점검(`feature_preflight`)은 '건너뜀(생성은 진행)'으로 보인다. 경고마다 원인(`cause` — `vae_degrid.COMFY_OMIT_*`)이 붙는다. 캐시한 `/object_info` 로 뺐고 새 스키마가 바꿀 수 있는 원인(`COMFY_SCHEMA_FIXABLE` — 노드 없음·입력 다름·모델 없음)이면 새로 받아 한 번 더 컴파일한다. 같은 원인은 URL 마다 한 번만 다시 받는다(옛 팩이면 생성마다 수 MB 를 받게 된다). 사용자 워크플로에 넣을 자리가 없는 경고는 다시 받지 않는다. 카드 ↻ 는 ComfyUI 면 `/object_info` 를 다시 받아 `comfyModels` 를 다시 보낸다(`ui/vae_degrid_ui.refresh_comfy_models`, 같은 액션).
+4. Forge 전용 설정(P10 옵션)은 ComfyUI 에 해당 없다 — 노드는 확장 기본값과 같은 계산을 하고(`COMFY_OPTIONS`), 카드가 그렇다고 말한다.
+5. 결과 동등성은 확장 코드를 CPU 로 실행해 만든 골든으로 본다(`tests/fixtures/degrid_origin_golden.json`, 숫자·체크섬·오류 종류만 — 확장 문구는 담지 않는다). 생성기는 Forge venv 에서 `CUDA_VISIBLE_DEVICES=-1` 로 돌리고 Forge 프로세스는 띄우지 않는다. 실제 ComfyUI 런타임 대조는 `AISTUDIO_COMFY_TEST_ROOT` 를 준 포터블 python 으로 CPU 에서 돈다(`tests/test_comfy_degrid_origin.py` 맨 위 설명).
+6. 노드를 더하면 `core/comfy_node_pack.PACK_VERSION` 과 팩 `__version__` 을 함께 올리고(`tests/test_comfy_node_pack.py`), 팩 README 의 변경 기록과 `THIRD_PARTY_NOTICES.md` 를 적는다. 사용자는 팩을 다시 설치하고 ComfyUI 를 재시작해야 한다(관리형 ComfyUI 는 앱이 처음 생성할 때 복사한다).
+7. 모델 폴더 카테고리가 새로 필요하면 `core/backend_runtime.MODEL_PATH_CATEGORIES` 한 곳에 더한다(두 경로 표가 같은 튜플을 쓴다 — 따로 적으면 `_combined_model_paths` 가 KeyError).
+8. ComfyUI PNG 메타데이터(`core/comfy_metadata.py`)는 그래프의 요청 값을 Forge infotext 키로 적는다. 노드가 실행 중 건너뛴 것은 메타데이터에 남지 않고 알림으로만 보인다(레지스트리 gaps 에 적는다).
 
 ## 참고
 

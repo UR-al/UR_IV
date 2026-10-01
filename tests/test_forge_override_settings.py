@@ -14,6 +14,7 @@ from unittest import mock
 import core.forge_override_settings as fos
 from core import sam_extra_contract as reg
 from core import sam_extra_notices as sn
+from core import vae_degrid as vdg
 from core.sam_extra_capabilities import SamExtraCapabilities, _freeze, unknown_capabilities
 
 REPO = Path(__file__).resolve().parent.parent
@@ -23,6 +24,7 @@ SETTINGS_VIEW = REPO / "frontend" / "src" / "views" / "SettingsView.vue"
 
 DEDUP, SEP, DAVE = fos.OPT_PREFIX_DEDUP, fos.OPT_SEG_SEPARABLE, fos.OPT_DAVE_PRE_DD
 KEEP_RESIDENT, KEEP_IN_RAM, SPARSE = fos.OPT_KEEP_RESIDENT, fos.OPT_UNLOAD_KEEP_IN_RAM, fos.OPT_SPARSE_FORGE_GUESS
+DEVICE, PRECISION, KEEP_LOADED = fos.OPT_DEGRID_DEVICE, fos.OPT_DEGRID_GPU_PRECISION, fos.OPT_DEGRID_KEEP_LOADED
 
 
 def known_caps(options=None, *, options_known=True):
@@ -47,25 +49,74 @@ def isolate_pushed_setting(case: unittest.TestCase) -> None:
 
 
 class SpecTests(unittest.TestCase):
-    def test_eight_bool_options_in_card_order(self):
-        self.assertEqual(len(fos.SPECS), 8)
+    def test_options_in_card_order(self):
+        """체크박스(bool)와 라디오(선택지 문자열) 11개. 기본값은 스펙이 받는 값이고, 컴포넌트는 선택지 유무로 정해진다."""
+        self.assertEqual(len(fos.SPECS), 11)
         self.assertEqual(fos.OPTION_KEYS, tuple(spec.key for spec in fos.SPECS))
-        self.assertEqual(len(set(fos.OPTION_KEYS)), 8)
+        self.assertEqual(len(set(fos.OPTION_KEYS)), 11)
         for spec in fos.SPECS:
             with self.subTest(key=spec.key):
-                self.assertIsInstance(spec.default, bool)
+                self.assertTrue(spec.accepts(spec.default), spec.default)
                 self.assertIn(spec.effect, fos.GROUPS)
                 self.assertTrue(spec.label.strip())
                 self.assertIs(fos.SPEC_BY_KEY[spec.key], spec)
+                if spec.choices:
+                    self.assertEqual(spec.component, "Radio")
+                    self.assertIsInstance(spec.default, str)
+                    self.assertIn(spec.default, spec.values)
+                    self.assertEqual(len(set(spec.values)), len(spec.values))
+                    for value, label in spec.choices:
+                        self.assertIsInstance(value, str)
+                        self.assertTrue(label.strip())
+                else:
+                    self.assertEqual(spec.component, "Checkbox")
+                    self.assertIsInstance(spec.default, bool)
+                    self.assertEqual(spec.values, (True, False))
         # 묶음 순서대로 붙어 있다(카드가 묶음 → 스펙 순서로 그린다)
         order = [fos.GROUPS.index(spec.effect) for spec in fos.SPECS]
         self.assertEqual(order, sorted(order))
+        self.assertEqual({s.key for s in fos.SPECS if s.choices}, {DEVICE, PRECISION})
 
     def test_dave_pre_dd_is_the_eighth_option_in_the_result_group(self):
         spec = fos.SPEC_BY_KEY[DAVE]
         self.assertEqual((spec.effect, spec.default, spec.infotext), (fos.RESULT, True, "Anima DAVE pre-DD sigma"))
         self.assertEqual(fos.SPEC_BY_KEY[SPARSE].effect, fos.RESULT)
-        self.assertEqual({s.key for s in fos.SPECS if s.effect == fos.RESULT_MINOR}, {DEDUP, SEP})
+        self.assertEqual({s.key for s in fos.SPECS if s.effect == fos.RESULT_MINOR}, {DEDUP, SEP, PRECISION})
+        self.assertEqual([s.key for s in fos.SPECS if s.effect == fos.RESULT], [SPARSE, DAVE])
+
+    def test_degrid_options_mirror_core_vae_degrid(self):
+        """VAE DeGrid 옵션 셋 — 키·기본값·선택지 값은 core/vae_degrid 한 곳에서 온다. GPU 정밀도는 결과가 아주 미세하게
+        다른 묶음이고, 결과 기록 'Anima DeGrid precision' 은 확장 런타임이 쓰는 값이라 OptionInfo infotext 가 없다
+        (critic C1 — 계약 테스트가 설치된 소스의 infotext '' 와 대조한다). ComfyUI 는 같은 확장 기본값으로 돈다(D6)."""
+        self.assertEqual((DEVICE, PRECISION, KEEP_LOADED), (vdg.OPT_DEVICE, vdg.OPT_GPU_PRECISION, vdg.OPT_KEEP_LOADED))
+        device, precision, keep = (fos.SPEC_BY_KEY[key] for key in (DEVICE, PRECISION, KEEP_LOADED))
+        self.assertEqual((device.effect, precision.effect, keep.effect), (fos.MEMORY, fos.RESULT_MINOR, fos.MEMORY))
+        self.assertEqual({device.feature, precision.feature, keep.feature}, {"degrid"})
+        self.assertEqual((device.values, precision.values), (vdg.DEVICE_CHOICES, vdg.PRECISION_CHOICES))
+        self.assertEqual({"device": device.default, "precision": precision.default, "keep_loaded": keep.default},
+                         dict(vdg.EXTENSION_OPTION_DEFAULTS))
+        self.assertEqual(dict(vdg.COMFY_OPTIONS), dict(vdg.EXTENSION_OPTION_DEFAULTS))
+        self.assertEqual((device.infotext, precision.infotext, keep.infotext), ("", "", ""))
+        self.assertNotIn(vdg.KEY_PRECISION, {spec.infotext for spec in fos.SPECS})
+        self.assertFalse(any(spec.onchange for spec in (device, precision, keep)))
+        # DeGrid 행은 묶음 안에서 기존 행 뒤에 붙는다(카드 순서)
+        self.assertEqual(fos.OPTION_KEYS.index(DEVICE), fos.OPTION_KEYS.index(KEEP_IN_RAM) + 1)
+        self.assertEqual(fos.OPTION_KEYS.index(KEEP_LOADED), fos.OPTION_KEYS.index(DEVICE) + 1)
+        self.assertEqual(fos.OPTION_KEYS.index(PRECISION), fos.OPTION_KEYS.index(SEP) + 1)
+
+    def test_accepts_and_choice_labels(self):
+        device, keep = fos.SPEC_BY_KEY[DEVICE], fos.SPEC_BY_KEY[KEEP_LOADED]
+        for value, want in (("auto", True), ("cpu", True), ("CPU", False), ("gpu", False), ("", False),
+                            (True, False), (False, False), (None, False), (0, False)):
+            with self.subTest(radio=value):
+                self.assertIs(device.accepts(value), want)
+        for value, want in ((True, True), (False, True), ("false", False), ("True", False), (1, False),
+                            (None, False), ("auto", False)):
+            with self.subTest(checkbox=value):
+                self.assertIs(keep.accepts(value), want)
+        self.assertEqual(device.choice_label("cpu"), "CPU (VRAM 안 씀, 느림)")
+        self.assertEqual(device.choice_label("weird"), "weird")
+        self.assertEqual((keep.choice_label(True), keep.choice_label(False)), ("켬", "끔"))
 
     def test_only_keep_in_ram_has_an_onchange_callback(self):
         self.assertEqual({s.key for s in fos.SPECS if s.onchange}, {KEEP_IN_RAM})
@@ -77,11 +128,14 @@ class SpecTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn("core/forge_override_settings.py:SPECS", reg.OPTIONS[key]["app"])
         deferred = {key: entry["package"] for key, entry in reg.OPTIONS.items() if entry["status"] == reg.DEFERRED}
-        self.assertEqual(deferred, {
-            "sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20",
-            # VAE DeGrid — 앱에 둘지 사용자 결정 대기(보류). 둔다면 bool 인 keep_loaded 만 요청 override 후보다
-            "sam3_degrid_device": reg.HOLD, "sam3_degrid_gpu_precision": reg.HOLD, "sam3_degrid_keep_loaded": reg.HOLD,
-        })
+        # VAE DeGrid 옵션 셋은 P10 이 맡는다(라디오 둘은 선택지 문자열) — 남은 보류는 레퍼런스 IP-Adapter 둘(P20)뿐
+        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20"})
+        for key, const in ((DEVICE, "OPT_DEGRID_DEVICE"), (PRECISION, "OPT_DEGRID_GPU_PRECISION"),
+                           (KEEP_LOADED, "OPT_DEGRID_KEEP_LOADED")):
+            with self.subTest(key=key):
+                self.assertEqual(getattr(fos, const), key)
+                self.assertIn(f"core/forge_override_settings.py:{const}", reg.OPTIONS[key]["app"])
+                self.assertIn("Forge 전용", reg.OPTIONS[key]["note"])
         self.assertNotIn("P10", {entry.get("package") for entry in reg.OPTIONS.values()})
 
     def test_sparse_infotext_is_the_same_key_the_result_notice_reads(self):
@@ -100,6 +154,23 @@ class NormalizeTests(unittest.TestCase):
             with self.subTest(raw=bad):
                 self.assertEqual(fos.normalize_overrides(bad), {})
         self.assertEqual(fos.normalize_overrides(MappingProxyType({SEP: False})), {SEP: False})
+
+    def test_enum_options_keep_only_their_choice_strings(self):
+        """라디오 옵션은 선택지 값 문자열만 — bool·모르는 문자열·대소문자가 다른 값은 버린다(= 따름). 체크박스에 문자열은
+        여전히 버린다. 순서는 스펙 순서."""
+        raw = {PRECISION: "fp16", DEVICE: "cpu", KEEP_LOADED: True, DEDUP: "auto"}
+        self.assertEqual(fos.normalize_overrides(raw), {DEVICE: "cpu", KEEP_LOADED: True, PRECISION: "fp16"})
+        self.assertEqual(list(fos.normalize_overrides(raw)), [DEVICE, KEEP_LOADED, PRECISION])
+        for bad in ({DEVICE: True}, {DEVICE: "gpu"}, {DEVICE: "CPU"}, {DEVICE: ""}, {DEVICE: None},
+                    {PRECISION: "fp64"}, {PRECISION: False}, {KEEP_LOADED: "true"}, {KEEP_LOADED: "auto"}):
+            with self.subTest(raw=bad):
+                self.assertEqual(fos.normalize_overrides(bad), {})
+
+    def test_old_prefs_with_bool_values_only_are_unchanged(self):
+        """P10 을 bool 만 받던 때 저장된 파일 — 그대로 읽힌다(DeGrid 키가 없으면 따름)."""
+        old = {KEEP_RESIDENT: False, DEDUP: True, SEP: False, SPARSE: True, DAVE: False, KEEP_IN_RAM: True}
+        self.assertEqual(fos.normalize_overrides(old), {KEEP_RESIDENT: False, KEEP_IN_RAM: True, DEDUP: True,
+                                                        SEP: False, SPARSE: True, DAVE: False})
 
 
 class PlanTests(unittest.TestCase):
@@ -129,6 +200,24 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(dict(plan.send), {DEDUP: False})
         self.assertEqual(plan.missing, (KEEP_RESIDENT, DAVE))
         self.assertEqual(plan.unverified, ())
+
+    def test_enum_values_pass_through_like_bools(self):
+        """계획·잠금·알림은 값을 보지 않는다 — 라디오 문자열도 bool 과 같은 규칙(키 존재 확인)으로 간다. /config 의 Radio
+        시작값은 문자열이라 스냅샷 options 에 문자열로 온다."""
+        wanted = {DEVICE: "cpu", PRECISION: "fp16", KEEP_LOADED: True}
+        plan = fos.plan_overrides(wanted, known_caps({DEVICE: "auto", KEEP_LOADED: False}))
+        self.assertEqual(dict(plan.send), {DEVICE: "cpu", KEEP_LOADED: True})
+        self.assertEqual(plan.missing, (PRECISION,))
+        (missing,) = fos.plan_notices(plan)
+        self.assertIn("VAE DeGrid GPU 정밀도", missing.message)
+        early = fos.plan_overrides(wanted, None)
+        self.assertEqual((dict(early.send), early.unverified), ({}, (DEVICE, KEEP_LOADED, PRECISION)))
+        locked = fos.plan_overrides(wanted, known_caps(dict.fromkeys(wanted, "x")), frozen={DEVICE})
+        self.assertEqual((dict(locked.send), locked.frozen), ({KEEP_LOADED: True, PRECISION: "fp16"}, (DEVICE,)))
+        merged, sent = fos.merge_into_payload({"prompt": "p"}, plan)
+        self.assertEqual(merged["override_settings"], {DEVICE: "cpu", KEEP_LOADED: True})
+        self.assertEqual(sent, (DEVICE, KEEP_LOADED))
+        self.assertEqual(fos.without_app_keys(merged, sent), {"prompt": "p"})
 
 
 class FrozenVerdictTests(unittest.TestCase):
@@ -224,9 +313,15 @@ class MergeTests(unittest.TestCase):
 
     def test_out_of_spec_keys_and_non_bool_values_can_not_be_sent(self):
         plan = fos.OverridePlan(send={"sd_model_checkpoint": "x", "forge_additional_modules": [],
-                                      DEDUP: "False"})
+                                      DEDUP: "False", DEVICE: True, PRECISION: "fp64", KEEP_LOADED: "true"})
         merged, sent = fos.merge_into_payload({}, plan)
         self.assertEqual((sent, "override_settings" in merged), ((), False))
+
+    def test_a_valid_enum_value_is_sent_next_to_rejected_ones(self):
+        plan = fos.OverridePlan(send={DEVICE: "cpu", PRECISION: "FP16", DEDUP: False})
+        merged, sent = fos.merge_into_payload({"override_settings": {"sd_vae": "v"}}, plan)
+        self.assertEqual(merged["override_settings"], {"sd_vae": "v", DEVICE: "cpu", DEDUP: False})
+        self.assertEqual(sent, (DEVICE, DEDUP))
 
     def test_non_mapping_caller_value_is_left_alone(self):
         merged, sent = fos.merge_into_payload({"override_settings": "weird"}, self.plan(**{DEDUP: False}))
@@ -348,6 +443,24 @@ class PushedSettingTests(unittest.TestCase):
                 self.assertEqual(fos.forge_option_overrides_setting(), {})
             bridge.showNotification.emit.assert_not_called()
 
+    def test_save_ui_prefs_keeps_enum_choices_and_drops_bad_values(self):
+        from tests.test_vue_bridge_caption import _PrefsHost
+        with tempfile.TemporaryDirectory() as tmp:
+            prefs_path = Path(tmp) / "config" / "ui_prefs.json"
+            prefs_path.parent.mkdir(parents=True)
+            prefs_path.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+            bridge = SimpleNamespace(approved_caption_out_dirs=lambda: [], showNotification=mock.Mock())
+            host = _PrefsHost(bridge)
+            with mock.patch("core.ui_prefs.ui_prefs_path", return_value=str(prefs_path)), \
+                 mock.patch("core.forge_output_policy.update_forge_save_outputs_from_prefs"), \
+                 mock.patch.object(fos, "forge_option_overrides_from_prefs_file", return_value={}):
+                host.handle("save_ui_prefs", {fos.PREF_KEY: {DEVICE: "cpu", PRECISION: "fp64", KEEP_LOADED: True,
+                                                             DEDUP: "auto"}})
+                stored = json.loads(prefs_path.read_text(encoding="utf-8"))
+                self.assertEqual(stored[fos.PREF_KEY], {DEVICE: "cpu", KEEP_LOADED: True})
+                self.assertEqual(fos.forge_option_overrides_setting(), {DEVICE: "cpu", KEEP_LOADED: True})
+            bridge.showNotification.emit.assert_not_called()
+
     def test_workers_read_only_the_pushed_setting(self):
         source = (REPO / "backends" / "webui_backend.py").read_text(encoding="utf-8")
         self.assertIn("forge_option_overrides_setting()", source)
@@ -367,16 +480,31 @@ class FrontendMirrorTests(unittest.TestCase):
         cls.card = CARD.read_text(encoding="utf-8")
         cls.view = SETTINGS_VIEW.read_text(encoding="utf-8")
 
+    @staticmethod
+    def _ts_default(value):
+        return ("true" if value else "false") if isinstance(value, bool) else f"'{value}'"
+
     def test_ts_specs_match_python(self):
-        rows = re.findall(r"\{ key: '([^']+)', label: '([^']+)', group: '([^']+)', default: (true|false), "
-                          r"infotext: '([^']*)' \}", self.ts)
-        expected = [(s.key, s.label, s.effect, "true" if s.default else "false", s.infotext) for s in fos.SPECS]
-        self.assertEqual(rows, expected)
+        """한 줄 모양: { key, label, group, default: true|false|'값', infotext, choices: [['값', '라벨'], …] }."""
+        rows = re.findall(r"\{ key: '([^']+)', label: '([^']+)', group: '([^']+)', default: (true|false|'[^']*'), "
+                          r"infotext: '([^']*)', choices: \[(.*?)\] \}", self.ts)
+        parsed = [(key, label, group, default, infotext, tuple(re.findall(r"\['([^']+)', '([^']+)'\]", choices)))
+                  for key, label, group, default, infotext, choices in rows]
+        expected = [(s.key, s.label, s.effect, self._ts_default(s.default), s.infotext, tuple(s.choices))
+                    for s in fos.SPECS]
+        self.assertEqual(parsed, expected)
         groups = re.findall(r"\{ id: '(memory|result_minor|result)', title: '[^']+' \}", self.ts)
         self.assertEqual(tuple(groups), fos.GROUPS)
         self.assertIn(f"export const PREF_KEY = '{fos.PREF_KEY}'", self.ts)
         for key in fos.OPTION_KEYS:
             self.assertRegex(self.ts, rf"(?m)^  {key}: ['\"]", f"DESCRIPTIONS 에 {key} 가 없다")
+
+    def test_card_builds_each_row_from_its_spec(self):
+        """라디오 행은 선택지 라벨을 그린다 — 카드가 줄마다 rowChoices(spec)로 목록을 만들고 spec 으로 값을 바꾼다."""
+        self.assertIn("rowChoices(spec)", self.card)
+        self.assertIn("setChoice(spec, $event)", self.card)
+        self.assertIn("export function rowChoices(", self.ts)
+        self.assertIn("export type Overrides = Record<string, boolean | string>", self.ts)
 
     def test_card_uses_the_existing_prefs_bridge_only(self):
         """SpectrumSettings 와 같은 방식(critic C): save_ui_prefs + getUiPrefs + uiPrefsLoaded, 새 브리지 이름 없음."""

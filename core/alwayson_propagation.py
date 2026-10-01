@@ -1,5 +1,5 @@
 # core/alwayson_propagation.py
-"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
+"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
 
 메인 생성은 T2I 패널의 샘플링 블록을 ``alwayson_scripts`` 로 보낸다. 보조 패스(Refine·단독/배치 SAM3·단독 ADetailer·
 손 재구성)도 같은 블록을 받아야 Forge 생성 안의 SAM3 패스·🎯 퀵 버튼과 결과가 같다(P7). 이 모듈은
@@ -26,6 +26,12 @@ Anima38 블록을 422 로 거절했을 때 알림 수준을 정한다: 앱 기�
 체크포인트를 지정하지 않아 Forge 에 지금 걸린 체크포인트로 돌고, Comfy 단독 후처리는 저장된 문맥의 모델로 돈다.
 실제 모델을 모르거나 다르면 뺀다(정보 로그).
 
+**최종 이미지 블록**(``Rule.passes`` 가 빈 행 → 메인 요청만 — VAE DeGrid): 확장이 이미지마다 저장 직전에 한 번 도는
+후처리(``postprocess_image_after_composite``)라 메인 요청에만 싣는다. 보조 패스는 각자 새 요청이라 넣으면 이미 처리된
+이미지에 한 번 더 걸린다 — ``blocks_for`` 는 어느 보조 패스에도 주지 않는다. 그래도 PROPAGATION 행이라 메인 게이트·동결
+재게이트·봉투(메인 체인과 같은 모양, T15)는 다른 샘플링 블록과 같은 규칙을 탄다. ``final_image_titles`` 가 이 제목들을
+돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때 — 봉투 없는 API 호출).
+
 NegPiP 은 Forge 에 보조 전달하지 않는다: sam-extra 내장 NegPiP(2026-09-30 sd-forge-negpip 편입,
 extensions/forge_sam3_extension/scripts/negpip.py — 예전 extensions/sd-forge-negpip/scripts/negpip.py 와 파일 이름·제목·
 계약이 같아 ADetailer 가 파일 이름 'negpip' 으로 자기 패스에 넣는 것도 그대로)은 ``ui()`` 가 None 이라 인자가 0개이고 always-on 이라 요청과 무관하게 돈다(modules/api/api.py:350-354). 보내도
@@ -40,7 +46,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
 
-from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, sam3_args
+from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, sam3_args, vae_degrid
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,7 @@ ENVELOPE_VERSION = 1
 
 TITLE_NEGPIP = "NegPiP"
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME   # 확장 scripts/dora_infer_mode.py DORA_INFER_NAME
+TITLE_DEGRID = vae_degrid.SCRIPT_NAME      # 확장 sam3ext/ui_vae_degrid.py TITLE (앱 노출)
 
 _AUX_LABELS = {AUX_REFINE: "Refine", AUX_SAM3: "SAM3", AUX_ADETAILER: "ADetailer", AUX_HAND: "손 재구성"}
 
@@ -103,7 +110,7 @@ _ALL_BACKENDS = frozenset({BACKEND_WEBUI, BACKEND_COMFY})
 class Rule:
     """한 제목의 전달 규칙.
 
-    passes         이 블록을 받는 보조 패스
+    passes         이 블록을 받는 보조 패스. 비면 최종 이미지 블록 — 메인 요청에만 싣는다(VAE DeGrid)
     backends       보조 패스에 보내는 백엔드(메인 체인은 이 표로 거르지 않는다)
     feature        기능 스냅샷 이름. None = 스냅샷 기능이 아님(NegPiP — sam-extra 내장이지만 스냅샷에 없다) — 게이트하지 않는다
     when_unknown   스냅샷을 모를 때 출처별 SEND/SKIP
@@ -173,6 +180,13 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
                "A2 — 사용자가 바꾼 값도: 모를 때 보내지 않는 것은 결과가 순정일 뿐 요청은 성공하고, 보냈다가 422 면 생성 "
                "전체가 실패한다 — 보조 패스는 전달 블록 422 를, 메인 생성은 main_retry 로 이 블록 422 를 빼고 한 번 더 보낸다). "
                "Comfy 컴파일러는 모르는 제목을 무시하므로 만들지 않는다(core/dora_infer_mode.plan)"),
+    TITLE_DEGRID: Rule(
+        passes=frozenset(), backends=_ALL_BACKENDS, feature="degrid",
+        when_unknown=_unknown(user=SEND, app_default=SKIP),   # main_retry 기본 False — Rule 문서의 규칙(사용자가 켠 블록)
+        reason="최종 이미지 후처리(postprocess_image_after_composite) — 메인 요청 결과에만 이미지마다 한 번. 보조 패스"
+               "(Refine·단독/배치 SAM3·ADetailer·손 재구성)는 각자 새 요청이라 넣으면 이미 DeGrid 된 이미지에 한 번 더 "
+               "걸린다(확장도 _sam3_inner·_ad_inner 에서는 돌지 않는다). 사용자가 켠 값이라 모를 때는 보내고, 스크립트가 "
+               "없으면 가이던스처럼 422 를 설명한다(main_retry 없음 — Rule 문서의 규칙)"),
 })
 
 NEVER: Mapping[str, str] = MappingProxyType({
@@ -180,8 +194,6 @@ NEVER: Mapping[str, str] = MappingProxyType({
                            "인페인트한다(Forge 도 파생 패스에서 스스로 뺀다: inpaint_core.py:56, !sam3.py:394-397)",
     "ADetailer": "이미지 패스 — 복사하면 부모 패스 뒤에 T2I 얼굴 보정이 한 번 더 돈다(_ad_disabled 는 SAM3 p2 에만)",
     "Anima VAE 2x (spacepxl decoder)": "HOLD(M9) — 앱이 만들지 않는다. 2x 디코더가 인페인트 패스 출력 크기를 바꿀 수 있다",
-    "Anima VAE DeGrid (NAFNet)": "HOLD(앱 노출 여부 사용자 결정 대기) — 앱이 만들지 않는다. 이미지 후처리라 보조 패스에 "
-                                 "복사하면 한 번 더 걸린다(확장도 _sam3_inner·_ad_inner 내부 패스에서는 돌지 않는다)",
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
@@ -396,6 +408,12 @@ def has_model_bound(blocks: Mapping) -> bool:
     return False
 
 
+def final_image_titles() -> tuple:
+    """최종 이미지 블록의 정식 제목(``Rule.passes`` 가 빈 행 — 메인 요청에만 싣는다). 보조 경로가 저장된 문맥·호출자
+    페이로드에서 뗄 때 쓴다(PROPAGATION 순서)."""
+    return tuple(title for title, rule in PROPAGATION.items() if not rule.passes)
+
+
 def main_retry_titles(payload: Any) -> tuple:
     """메인 생성 요청에서 Forge 가 422 로 거절하면 빼고 다시 보낼 제목(``Rule.main_retry``) — payload 에 적힌 표기 그대로.
 
@@ -461,8 +479,9 @@ __all__ = [
     "AUX_ADETAILER", "AUX_HAND", "AUX_PASSES", "AUX_REFINE", "AUX_SAM3", "BACKEND_COMFY", "BACKEND_KREA2",
     "BACKEND_WEBUI", "ENVELOPE_VERSION", "GateResult", "NEVER", "PROPAGATION", "PROVENANCES",
     "PROVENANCE_APP_DEFAULT", "PROVENANCE_KEY", "PROVENANCE_USER", "Rule", "SEND", "SETTINGS_KEY", "SKIP", "TARGETS",
-    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_DORA", "TITLE_NEGPIP", "apply", "aux_label",
-    "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance", "gate",
+    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_DEGRID", "TITLE_DORA", "TITLE_NEGPIP", "apply", "aux_label",
+    "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance",
+    "final_image_titles", "gate",
     "gate_notices", "has_model_bound", "is_envelope", "main_retry_titles", "mark_provenance", "provenance_of", "script_available",
     "take_envelope", "take_provenance",
 ]

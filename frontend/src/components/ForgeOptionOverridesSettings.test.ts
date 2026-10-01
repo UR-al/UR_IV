@@ -15,7 +15,7 @@ const SelectStub = Vue.defineComponent({
   props: { modelValue: { type: [String, Number], default: '' }, options: { type: Array, default: () => [] } },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
-    return () => Vue.h('csel', { value: props.modelValue, onPick: (label: string) => emit('update:modelValue', label) })
+    return () => Vue.h('csel', { value: props.modelValue, options: props.options, onPick: (label: string) => emit('update:modelValue', label) })
   },
 })
 const output: { default?: any } = {}
@@ -57,10 +57,11 @@ const selectFor = (root: Node, key: string) => all(root, 'csel')[table.SPECS.fin
 afterEach(() => { app?.unmount(); app = undefined; caps.value = null })
 
 const DEDUP = 'sam3_guidance_pag_prefix_dedup', DAVE = 'sam3_guidance_dave_pre_dd_sigma'
+const DEVICE = 'sam3_degrid_device', PRECISION = 'sam3_degrid_gpu_precision'
 
 it('mount reads prefs and never saves (default = Forge 설정 따름, nothing sent)', async () => {
   const root = await mount()
-  expect(all(root, 'csel')).toHaveLength(8)
+  expect(all(root, 'csel')).toHaveLength(11)
   expect(all(root, 'csel').every(sel => sel.props.value === 'Forge 설정 따름')).toBe(true)
   expect(action).not.toHaveBeenCalled()
   expect(prefsEvent).toBeTypeOf('function')
@@ -80,6 +81,21 @@ it('shows saved values and writes the whole dict; follow removes the key', async
   prefsEvent!(JSON.stringify({ forgeOptionOverrides: {} }))
   await Vue.nextTick()
   expect(selectFor(root, DAVE).props.value).toBe('켬')
+})
+
+it('radio rows list their own choices and save the choice string', async () => {
+  const root = await mount(JSON.stringify({ forgeOptionOverrides: { [PRECISION]: 'fp16', [DEVICE]: true } }))
+  expect(selectFor(root, PRECISION).props.value).toBe('fp16 autocast')
+  expect(selectFor(root, DEVICE).props.value).toBe('Forge 설정 따름')       // bool 은 라디오 값이 아니다(따름)
+  expect(selectFor(root, DEVICE).props.options).toEqual(['Forge 설정 따름', 'GPU (Forge 장치)', 'CPU (VRAM 안 씀, 느림)'])
+  expect(selectFor(root, DEDUP).props.options).toEqual(['Forge 설정 따름', '켬', '끔'])
+  selectFor(root, DEVICE).props.onPick('CPU (VRAM 안 씀, 느림)')
+  await Vue.nextTick()
+  expect(action).toHaveBeenLastCalledWith('save_ui_prefs', { forgeOptionOverrides: { [DEVICE]: 'cpu', [PRECISION]: 'fp16' } })
+  expect(text(root)).toContain('6.5초')
+  selectFor(root, PRECISION).props.onPick('Forge 설정 따름')
+  await Vue.nextTick()
+  expect(action).toHaveBeenLastCalledWith('save_ui_prefs', { forgeOptionOverrides: { [DEVICE]: 'cpu' } })
 })
 
 it('status line follows the capability snapshot; ComfyUI shows the not-applicable note', async () => {

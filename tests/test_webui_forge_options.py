@@ -192,6 +192,24 @@ class MainGenerationTests(_ForgeCase):
         self.assertEqual(payload["override_settings"], {"sd_vae": "v.safetensors", DAVE: True})
         self.assertEqual(self.notice_codes(result), [sn.CODE_FORGE_OPTION_MISSING])   # SEG 분리 블러는 이 Forge 에 없다
 
+    def test_degrid_radio_options_are_sent_as_their_choice_strings(self):
+        """VAE DeGrid 장치·정밀도(라디오)는 선택지 문자열 그대로, VRAM 상주는 bool 로 — 스냅샷이 확인한 키만. 거절되면
+        bool 옵션처럼 앱 키를 빼고 한 번 더 보낸다."""
+        device, precision, keep = fos.OPT_DEGRID_DEVICE, fos.OPT_DEGRID_GPU_PRECISION, fos.OPT_DEGRID_KEEP_LOADED
+        fos.set_forge_option_overrides({device: "cpu", precision: "fp16", keep: True})
+        self.caps = caps(options=(device, precision, keep))
+        result = self.run_main(self.payload(), [ok()])
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(self.sent[0]["override_settings"], {device: "cpu", keep: True, precision: "fp16"})
+        self.assertEqual(self.notice_codes(result), [])
+        self.sent.clear()
+        result = self.run_main(self.payload(), [key_error(device), ok()])
+        self.assertTrue(result.success, result.error)
+        self.assertEqual(len(self.sent), 2)
+        self.assertNotIn("override_settings", self.sent[1])
+        self.assertEqual(self.notice_codes(result), [sn.CODE_FORGE_OPTION_REJECTED])
+        self.assertIn("VAE DeGrid 계산 장치", sn.notices_from_info(result.info)[0].message)
+
     def test_unread_config_sends_nothing(self):
         fos.set_forge_option_overrides({DEDUP: False})
         self.caps = caps(options_known=False)

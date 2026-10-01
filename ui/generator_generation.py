@@ -617,7 +617,8 @@ class GenerationMixin:
             self._auto_retry_count = 0   # 성공 — 자동화 재시도 카운터 리셋
             self._process_new_image(result, gen_info)
             self.show_status("✅ 이미지 생성 완료!")
-            # sam-extra 결과 알림('SAM3 Error'·'Anima38: off'·PAG 누락) — 백엔드가 info 에 실어 둔 것
+            # sam-extra 결과 알림('SAM3 Error'·'Anima38: off'·PAG 누락·DoRA·'Anima DeGrid error', ComfyUI 는 DeGrid 노드 리포트·
+            # 컴파일 경고) — 백엔드가 info 에 실어 둔 것
             from ui.sam_extra_notices_ui import show_result_notices
             show_result_notices(self, gen_info)
 

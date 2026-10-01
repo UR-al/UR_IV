@@ -19,7 +19,7 @@
     </fieldset>
     <div v-if="preflight" class="preflight" role="status">
       <strong>{{ preflight.ok ? '생성 그래프 검증 완료' : '생성 전 해결할 항목이 있습니다' }}</strong>
-      <ul><li v-for="feature in preflight.features" :key="feature.id">{{ feature.label }} — {{ stateLabel(feature.state) }}</li></ul>
+      <ul><li v-for="feature in preflight.features" :key="feature.id">{{ feature.label }} — {{ stateLabel(feature.state) }}<span v-if="feature.reason" class="hint"> ({{ feature.reason }})</span></li></ul>
       <p v-if="preflight.error" class="error">{{ preflight.error }}</p><p class="hint">{{ preflight.note }}</p>
     </div>
     <details>
@@ -71,7 +71,7 @@ const ready = ref(false), busy = ref(false), error = ref(''), warning = ref(''),
 const mode = ref('txt2img'), targets = ref('face'), search = ref('')
 const schema = ref<WorkflowSchema | null>(null)
 const entries = reactive<Record<string, { enabled: boolean; value: string | number | boolean }>>({})
-const preflight = ref<{ ok: boolean; features: { id: string; label: string; state: string }[]; error?: string; note?: string } | null>(null)
+const preflight = ref<{ ok: boolean; features: { id: string; label: string; state: string; reason?: string }[]; error?: string; note?: string } | null>(null)
 let requestId = '', disposed = false, disconnect: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined
 const filteredNodes = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
@@ -84,7 +84,8 @@ const validationError = computed(() => {
   if (!schema.value) return ''
   try { buildWorkflowBinding(schema.value, entries); return '' } catch (problem) { return String((problem as Error).message) }
 })
-const stateLabel = (state: string) => ({ ready: '그래프에 적용됨', off: '꺼짐', blocked: '검증 실패', missing: '그래프에서 누락' }[state] || state)
+// skipped: 생성을 막지 않고 빼는 기능(VAE DeGrid — 노드·모델·출력 자리가 없을 때, core/comfy_workflow_controls.feature_preflight)
+const stateLabel = (state: string) => ({ ready: '그래프에 적용됨', off: '꺼짐', blocked: '검증 실패', missing: '그래프에서 누락', skipped: '건너뜀(생성은 진행)' }[state] || state)
 function resetSchema() { schema.value = null; warning.value = ''; for (const key of Object.keys(entries)) delete entries[key] }
 function acceptSchema(next: WorkflowSchema, binding?: WorkflowBinding | null) {
   resetSchema(); schema.value = next

@@ -1140,5 +1140,140 @@ class MainRetryAndForgeOptionNoticeTests(unittest.TestCase):
         self.assertIn(sn.CODE_BLOCK_RETRIED, sn.REFRESH_CAPABILITIES_CODES)
 
 
+
+# ── VAE DeGrid 결과 알림 (core/vae_degrid) ─────────────────────────────────────
+def degrid_payload(enabled=True, **arg):
+    from core import vae_degrid
+    block = vae_degrid.as_block(vae_degrid.DegridSettings(enabled=enabled, **arg))
+    return {"prompt": "1girl", "cfg_scale": 4.5, "alwayson_scripts": {vae_degrid.SCRIPT_NAME: block}}
+
+
+DEGRID_OK = _HEAD + ("Anima DeGrid model: qwenVAEDegridNafnet_v11, Anima DeGrid mode: Full, Anima DeGrid strength: 1, "
+                     "Anima DeGrid tile: 512, Anima DeGrid precision: fp32, ") + _TAIL
+DEGRID_ZERO = _HEAD + ("Anima DeGrid model: qwenVAEDegridNafnet_v11, Anima DeGrid mode: Full, Anima DeGrid strength: 0, "
+                       "Anima DeGrid tile: 512, ") + _TAIL          # 강도 0 — 기록하되 정밀도 없음(건너뜀)
+DEGRID_NOT_FOUND = _HEAD + "Anima DeGrid error: model not found: auto, " + _TAIL
+# 쉼표가 든 값은 따옴표로(create_infotext). 숫자는 장마다 다르다
+_NOT_RESIDUAL = ("not a DeGrid residual model: restore_x output does not look like a residual - it follows the input "
+                 "like an image (mean |output| {:.1f}/255; correlation with the input +0.97) - use a VAE DeGrid NAFNet")
+DEGRID_NOT_RESIDUAL = [_HEAD + f'Anima DeGrid error: "{_NOT_RESIDUAL.format(v)}", ' + _TAIL for v in (80.2, 91.7)]
+DEGRID_BLEW_UP = _HEAD + ('Anima DeGrid error: "output blew up (mean |residual| 183.0/255 > 100/255 - v11 does not handle '
+                          'this image, e.g. full-frame 1px stripes) - image kept without DeGrid", ') + _TAIL
+
+
+class DegridResultNoticeTests(_QuietAssumption):
+    def test_success_strength_zero_off_and_absent_blocks_are_quiet(self):
+        for info, payload in ((info_of(DEGRID_OK), degrid_payload()), (info_of(DEGRID_ZERO), degrid_payload(strength=0)),
+                              (info_of(NO_EXTENSION_TRACE), degrid_payload(enabled=False)),
+                              (info_of(DEGRID_NOT_FOUND), {"prompt": "x"}),          # 보내지 않았다
+                              (info_of(DEGRID_OK, DEGRID_OK), degrid_payload())):
+            with self.subTest(info=info[:60]):
+                self.assertEqual([n for n in sn.result_notices(info, payload) if n.feature == "degrid"], [])
+
+    def test_error_only_infotext_warns_with_the_model_hint(self):
+        [notice] = sn.result_notices(info_of(DEGRID_NOT_FOUND), degrid_payload())
+        self.assertEqual((notice.code, notice.level, notice.feature), (sn.CODE_DEGRID_ERROR, sn.LEVEL_WARNING, "degrid"))
+        self.assertIn("models/ESRGAN", notice.hint)
+        self.assertIn("model not found: auto", notice.message)
+        self.assertNotIn("장이", notice.message)                                 # 한 장이면 개수 없음
+
+    def test_batch_counts_per_image_and_groups_numbers_only_differences(self):
+        info = info_of(DEGRID_NOT_RESIDUAL[0], DEGRID_OK, DEGRID_NOT_RESIDUAL[1])
+        [notice] = sn.result_notices(info, degrid_payload())
+        self.assertIn("2/3장이", notice.message)
+        self.assertEqual(notice.detail, "not a DeGrid residual model")         # 숫자는 억제 키에 들지 않는다
+        self.assertIn("일반 복원 NAFNet", notice.hint)
+        mixed = sn.result_notices(info_of(DEGRID_NOT_FOUND, DEGRID_BLEW_UP), degrid_payload())
+        self.assertEqual([(n.code, n.detail) for n in mixed], [(sn.CODE_DEGRID_ERROR, "model not found: auto"),
+                                                               (sn.CODE_DEGRID_ERROR, "output blew up")])
+        self.assertTrue(all("1/2장이" in n.message for n in mixed))
+
+    def test_quoted_error_with_commas_is_read_whole(self):
+        params = sn.image_parameters(info_of(DEGRID_BLEW_UP))
+        self.assertTrue(params[0][sn.KEY_DEGRID_ERROR].startswith("output blew up (mean |residual| 183.0/255"))
+        self.assertTrue(params[0][sn.KEY_DEGRID_ERROR].endswith("image kept without DeGrid"))
+
+    def test_error_kinds(self):
+        cases = {"model not found: DeGrid/x": ("model not found: DeGrid/x", "models/DeGrid"),
+                 "OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB": ("out of memory", "CPU"),
+                 "RuntimeError: boom 12": ("RuntimeError", "[AnimaDeGrid]"),
+                 "strange 12 thing": ("strange # thing", "[AnimaDeGrid]")}
+        for reason, (key, hint_part) in cases.items():
+            with self.subTest(reason=reason):
+                got_key, hint = sn.degrid_error_kind(reason)
+                self.assertEqual(got_key, key)
+                self.assertIn(hint_part, hint)
+
+    def test_sent_but_no_trace_means_an_old_sam_extra(self):
+        [notice] = sn.result_notices(info_of(NO_EXTENSION_TRACE, NO_EXTENSION_TRACE), degrid_payload())
+        self.assertEqual((notice.code, notice.level), (sn.CODE_DEGRID_NOT_APPLIED, sn.LEVEL_WARNING))
+        self.assertIn(sn.KEY_DEGRID_MODEL, notice.message)
+
+    def test_requested_features_read_the_block_like_the_extension(self):
+        from core import vae_degrid
+        request = sn.requested_features(degrid_payload(mode="dark", tile=64))
+        self.assertEqual(request.degrid, vae_degrid.DegridSettings(True, "", "dark", 1.0, 128))
+        positional = {"alwayson_scripts": {"anima vae degrid (nafnet)": {"args": [True, "None", "Bright"]}}}
+        self.assertEqual(sn.requested_features(positional).degrid.mode, "bright")
+        self.assertIsNone(sn.requested_features({"prompt": "x"}).degrid)
+
+    def test_comfy_reports_use_the_same_rules(self):
+        """(A9) ComfyUI 노드 리포트 → Forge infotext 키 → 같은 알림."""
+        from core import vae_degrid
+        reports = [{"status": "ok", "model": "v11", "mode": "Full", "strength": 1.0, "tile": 512, "precision": "fp32",
+                    "error": ""},
+                   {"status": "skipped", "model": "restore_x", "mode": "Full", "strength": 1.0, "tile": 512,
+                    "precision": "-", "error": _NOT_RESIDUAL.format(80.2)}]
+        params = [vae_degrid.report_params(r) for r in reports]
+        [notice] = sn.degrid_result_notices(degrid_payload(), params)
+        self.assertEqual((notice.code, notice.detail), (sn.CODE_DEGRID_ERROR, "not a DeGrid residual model"))
+        self.assertIn("1/2장이", notice.message)
+        self.assertEqual(sn.degrid_result_notices(degrid_payload(), []), [])     # 리포트가 없으면 말하지 않는다
+        self.assertEqual(sn.degrid_result_notices({"prompt": "x"}, params), [])
+        self.assertEqual(sn.degrid_result_notices(degrid_payload(), [vae_degrid.report_params(reports[0])]), [])
+
+    def test_comfy_unavailable_notice_and_throttling(self):
+        notice = sn.degrid_comfy_unavailable_notice("ComfyUI 팩 1.5.0 필요")
+        self.assertEqual((notice.code, notice.level, notice.feature),
+                         (sn.CODE_DEGRID_COMFY_UNAVAILABLE, sn.LEVEL_WARNING, "degrid"))
+        self.assertIn("팩 1.5.0", notice.message)
+        for name in ("CODE_DEGRID_ERROR", "CODE_DEGRID_NOT_APPLIED", "CODE_DEGRID_COMFY_UNAVAILABLE"):
+            with self.subTest(code=name):
+                notice = sn.Notice(getattr(sn, name), sn.LEVEL_WARNING, "m")
+                self.assertEqual(sn.notice_ttl(notice, sn.RESULT_NOTICE_TTL_S), sn.PRE_GENERATION_NOTICE_TTL_S)
+                self.assertIn(name, sn.__all__)
+
+    def test_rejected_request_and_gate_notices_name_the_feature(self):
+        text = sn.explain_rejected_request(
+            422, {"detail": "always on script Anima VAE DeGrid (NAFNet) not found"}, degrid_payload())
+        self.assertIn("켠 기능: VAE DeGrid", text)
+        self.assertIn("sam-extra", text)
+        self.assertEqual(sn.block_not_sent_notice("Anima VAE DeGrid (NAFNet)", img2img=True).feature, "degrid")
+
+
+@requires_extension
+class DegridExtensionSourceTests(unittest.TestCase):
+    """DeGrid 알림이 기대는 infotext 키·실패 문구 앞부분이 설치된 확장에 그대로 있는가."""
+
+    def test_infotext_keys_and_failure_prefixes(self):
+        from core import vae_degrid
+        from core.sam_extra_scan import ExtensionSource
+        src = ExtensionSource(EXT_ROOT)
+        for name, value in (("KEY_MODEL", sn.KEY_DEGRID_MODEL), ("KEY_ERROR", sn.KEY_DEGRID_ERROR),
+                            ("KEY_MODE", vae_degrid.KEY_MODE), ("KEY_STRENGTH", vae_degrid.KEY_STRENGTH),
+                            ("KEY_TILE", vae_degrid.KEY_TILE), ("KEY_PRECISION", vae_degrid.KEY_PRECISION),
+                            ("TITLE", vae_degrid.SCRIPT_NAME)):
+            with self.subTest(name=name):
+                self.assertEqual(src.module_constant("sam3ext/ui_vae_degrid.py", name), value)
+        texts = []
+        for rel in ("sam3ext/vae_degrid_runtime.py", "scripts/anima_vae_degrid.py"):
+            with open(os.path.join(EXT_ROOT, *rel.split("/")), encoding="utf-8") as fh:
+                texts.append(fh.read())
+        joined = "\n".join(texts)
+        for prefix in (vae_degrid.ERROR_MODEL_NOT_FOUND, vae_degrid.ERROR_NOT_RESIDUAL, vae_degrid.ERROR_BLEW_UP):
+            with self.subTest(prefix=prefix):
+                self.assertIn(f'"{prefix}', joined.replace("f\"", "\""))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@
 
 **왜 필요한가** (gap matrix 5-(b), 라-8): 확장이 없거나 스크립트 제목이 바뀌면 Forge 가
 422 로 생성 전체를 거절하고, 구버전이면 뒤쪽 위치 인자가 잘려 조용히 무시된다. 이 스냅샷은
-그것을 **요청 전에** 알 수 있게 한다. 이 모듈은 판단 재료만 만든다 — 샘플링 블록(가이던스·Anima38·DoRA)을
+그것을 **요청 전에** 알 수 있게 한다. 이 모듈은 판단 재료만 만든다 — 샘플링 블록(가이던스·Anima38·DoRA·DeGrid)을
 실제로 거르는 일은 core/alwayson_propagation.gate 가 제목별 규칙(모를 때 SEND/SKIP)으로 하고, 그 밖의 소비자는
 ``may_use()``(모르면 True)를 쓴다.
 
@@ -35,7 +35,7 @@ from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional
 from urllib.parse import urlsplit, urlunsplit
 
-from core import anima38, anima_guidance, dora_infer_mode, sam3_args
+from core import anima38, anima_guidance, dora_infer_mode, sam3_args, vae_degrid
 
 # ── GET 경로 ────────────────────────────────────────────────────────────────
 EP_SCRIPTS = "/sdapi/v1/scripts"
@@ -71,7 +71,7 @@ TITLE_DETAIL_DAEMON = anima_guidance.SCRIPT_DETAIL_DAEMON.lower()
 TITLE_ANIMA38 = anima38.SCRIPT_NAME.lower()
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME.lower()    # scripts/dora_infer_mode.py (DORA_INFER_NAME)
 TITLE_VAE2X = "anima vae 2x (spacepxl decoder)"     # scripts/anima_vae_2x.py
-TITLE_DEGRID = "anima vae degrid (nafnet)"          # scripts/anima_vae_degrid.py (앱 미노출, 레지스트리 HOLD)
+TITLE_DEGRID = vae_degrid.SCRIPT_NAME.lower()       # scripts/anima_vae_degrid.py (앱 노출 — core/vae_degrid)
 TITLE_LORA_BRIDGE = "sam3 lora manager bridge"      # scripts/lora_manager.py (인자 0개)
 TITLE_SPARSE_LORA = "sam extra anima sparse lora"   # scripts/anima_lora_blocks.py (인자 0개)
 TITLE_REFERENCE_POC = "anima reference poc (shape logger)"  # 디버그
@@ -86,7 +86,7 @@ EXTENSION_FOLDERS = ("forge_sam3_extension", "sam-extra")
 # 앱이 위치 인자로 보내는 스크립트 → 앱 스펙 키 순서. 인자 수 비교와 '잘려서 무시될 키' 계산에 쓴다.
 # SAM3 는 dict 한 개로 보내므로 인자 수 대신 키 집합을 비교한다. DoRA 는 이름 붙은 dict 한 개로 보내므로(인자를 뒤에만
 # 덧붙이는 확장이라 인자 수와 무관) 여기 없고 라이브 선택지로 검사한다(dora_choices_unknown·core/dora_infer_mode).
-# VAE 2x 는 앱이 보내지 않는다.
+# VAE 2x 는 앱이 보내지 않는다. VAE DeGrid 도 dict 한 개로 보낸다(모델 목록은 degrid_models 선택지).
 POSITIONAL_SPECS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     TITLE_PAG: tuple(key for key, *_ in anima_guidance.PERTURBATION_SPEC),
     TITLE_SKIMMED: tuple(key for key, *_ in anima_guidance.SKIMMED_SPEC),
@@ -100,19 +100,19 @@ PAG_OLD_BUILD_ARGC = 57
 DD_HIRES_INDEX = POSITIONAL_SPECS[TITLE_DETAIL_DAEMON].index("dd_hires")
 # 앱 기능 이름 → 스냅샷 플래그. Vue 도 같은 이름을 쓴다(frontend/src/utils/samExtraCapabilities.ts).
 FEATURE_FLAGS = (
-    "sam3", "anima_guidance", "skimmed_cfg", "detail_daemon", "anima38", "dora", "vae2x",
+    "sam3", "anima_guidance", "skimmed_cfg", "detail_daemon", "anima38", "dora", "vae2x", "degrid",
     "lora_manager", "memo_routes", "tipo_route", "reference_route", "contract_route",
     "tile_repair_route",
 )
 _SCRIPT_FEATURES = (
     ("sam3", TITLE_SAM3), ("anima_guidance", TITLE_PAG), ("skimmed_cfg", TITLE_SKIMMED),
     ("detail_daemon", TITLE_DETAIL_DAEMON), ("anima38", TITLE_ANIMA38), ("dora", TITLE_DORA),
-    ("vae2x", TITLE_VAE2X),
+    ("vae2x", TITLE_VAE2X), ("degrid", TITLE_DEGRID),
 )
 _FEATURE_LABELS = {
     "sam3": "SAM3 Mask", "anima_guidance": "Anima 가이던스(PAG)", "skimmed_cfg": "Skimmed CFG",
     "detail_daemon": "Detail Daemon", "anima38": "Anima 3.8B", "dora": "DoRA 추론 방식",
-    "vae2x": "VAE 2x", "lora_manager": "LoRA Manager", "memo_routes": "메모 동기화",
+    "vae2x": "VAE 2x", "degrid": "VAE DeGrid", "lora_manager": "LoRA Manager", "memo_routes": "메모 동기화",
     "tipo_route": "TIPO", "reference_route": "레퍼런스", "tile_repair_route": "Tile & Repair",
 }
 # 있고 없음만 보는 라우트: 기능 이름 → (경로, 있음으로 보는 상태). POST 전용 라우트는 GET 405 도 있음이다.
@@ -137,6 +137,8 @@ _CHOICE_SOURCES = (
     ("dora_modes", TITLE_DORA, 1, None),
     ("dora_insert_policies", TITLE_DORA, 2, None),
     ("dora_weak_scopes", TITLE_DORA, 4, None),
+    # 'None' 자리 표시까지 그대로 둔다(원문) — 소비자는 core/vae_degrid.live_models 로 뺀다
+    ("degrid_models", TITLE_DEGRID, 1, "degrid"),
 )
 
 _EMPTY: Mapping[str, Any] = MappingProxyType({})
@@ -187,6 +189,7 @@ class SamExtraCapabilities:
     anima38: bool = False
     dora: bool = False
     vae2x: bool = False
+    degrid: bool = False
     lora_manager: bool = False
     memo_routes: bool = False
     tipo_route: bool = False
@@ -588,6 +591,14 @@ def build_capabilities(responses: Mapping[str, HttpResult], *,
             warnings.append(_warning("dora_choices_unknown", "dora",
                                      "앱이 아직 모르는 DoRA 추론 방식 선택지가 있습니다(앱에서는 고를 수 없음): "
                                      + ", ".join(labels)))
+    # VAE DeGrid: Forge 가 시작할 때 NAFNet 파일을 하나도 못 찾으면 목록이 ['None'] 이다 — 진단만(생성은 확장이
+    # 그때 다시 찾는다. 카드가 상태로 말하고, 결과 알림이 'model not found' 를 알린다).
+    degrid_models = choices.get("degrid_models")
+    if flags["degrid"] and degrid_models is not None and not [
+            name for name in degrid_models if name.strip() and name != vae_degrid.NONE_NAME]:
+        warnings.append(_warning("degrid_no_model", "degrid",
+                                 "VAE DeGrid 모델이 Forge 목록에 없습니다 — NAFNet DeGrid 파일을 models/ESRGAN 또는 "
+                                 "models/DeGrid 에 두세요(목록은 Forge 시작 때 만들어집니다)."))
     live_modules = choices.get("controlnet_modules")
     if flags["sam3"] and live_modules:
         unknown = [m for m in sam3_args.CN_MODULES if m not in live_modules]

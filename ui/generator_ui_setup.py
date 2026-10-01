@@ -502,6 +502,11 @@ class UISetupMixin:
         from ui.anima38_ui import init_anima38_proxies
         self.anima38_widgets = init_anima38_proxies(b)
 
+        # ── VAE DeGrid(sam-extra Anima VAE DeGrid (NAFNet)) — _degrid_<key> 프록시, 초기값은 앱 기본값
+        #    (= 확장 기본값: 꺼짐·자동·Full·1·512). 판정·정규화는 core/vae_degrid.py.
+        from ui.vae_degrid_ui import init_degrid_proxies
+        self.degrid_widgets = init_degrid_proxies(b)
+
         # 제거 옵션
         self.chk_remove_artist = CheckBoxProxy(b, 'chk_remove_artist')
         self.chk_remove_copyright = CheckBoxProxy(b, 'chk_remove_copyright')

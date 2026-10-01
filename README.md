@@ -181,6 +181,9 @@ python -m core.fetch_data
     고른 파일에 필요한 패키지가 없으면 SAM3로 넘어가지 않고 YOLO 박스 마스크를 쓰므로, 그럴 때는 `SAM3`를 직접 선택하세요.
 - **SAM3 어휘 파일**(`bpe_simple_vocab_16e6.txt.gz`)은 처음 필요할 때 `facebook/sam3`에서 `image_cache/sam3_assets`로 자동으로 내려받습니다.
 - **생성 중 SAM3 Mask**(Forge/ComfyUI)의 체크포인트 목록은 `Editor_models`가 아니라 위 공용 모델 루트의 `sam3` 폴더에서 읽습니다.
+- **VAE DeGrid**(NAFNet, Anima 격자 무늬 제거 카드) 모델은 Forge의 `models/ESRGAN` 또는 `models/DeGrid`에 넣습니다(sam-extra 확장이 읽습니다).
+  ComfyUI에서는 `models/upscale_models` 또는 동봉 노드 팩(1.5.0 이상)이 등록하는 `models/degrid`에서 읽고, 앱이 관리하는 ComfyUI는 Forge 쪽 `models/DeGrid`도 `degrid` 카테고리로 연결합니다.
+  업스케일러가 아니므로 Hires.fix나 배치 업스케일의 업스케일러로 고르면 경고가 나옵니다.
 - **CAFormer 캡션 모델**(`animetimm/caformer_s18.dbv4-full`)은 자동으로 내려받지 않으니 로컬 HF 캐시나 직접 지정한 폴더에 미리 받아 두세요.
   ToriiGate 캡션에는 Ollama 모델 `hf.co/DraconicDragon/ToriiGate-0.5-GGUF:BF16`을 사용합니다.
 

@@ -31,6 +31,8 @@ export const FEATURE_LABELS: Readonly<Partial<Record<SamExtraFeature, string>>> 
   anima_guidance: 'Anima 가이던스',
   skimmed_cfg: 'Skimmed CFG',
   detail_daemon: 'Detail Daemon',
+  // FEATURE_ENABLE_WIDGETS 에는 넣지 않는다 — 없을 때는 게이트가 빼고 경고한다(DoRA·Anima38 과 같다)
+  degrid: 'VAE DeGrid',
 }
 
 /** 시그널 페이로드(JSON 문자열) → 이벤트. 깨졌거나 모양이 다르면 null. */

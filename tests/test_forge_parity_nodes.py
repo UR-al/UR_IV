@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 from comfy_custom_nodes.ai_studio_forge_parity import compat
+from comfy_custom_nodes.ai_studio_forge_parity import degrid_nodes
 from comfy_custom_nodes.ai_studio_forge_parity import generation
 from comfy_custom_nodes.ai_studio_forge_parity import guidance
 from comfy_custom_nodes.ai_studio_forge_parity import guidance_dave
@@ -39,6 +40,11 @@ class TestForgeParityContracts(unittest.TestCase):
         }
         self.assertEqual(set(guidance.NODE_CLASS_MAPPINGS), expected_guidance)
         self.assertEqual(set(generation.NODE_CLASS_MAPPINGS), expected_generation)
+        self.assertEqual(set(degrid_nodes.NODE_CLASS_MAPPINGS), {"ForgeNeoAnimaVAEDeGrid"})
+        self.assertEqual(
+            degrid_nodes.NODE_DISPLAY_NAME_MAPPINGS,
+            {"ForgeNeoAnimaVAEDeGrid": "Forge Neo Anima VAE DeGrid (NAFNet)"},
+        )
 
     def test_compiler_facing_suite_and_daemon_contracts(self):
         suite = guidance.ForgeNeoAnimaGuidanceSuite

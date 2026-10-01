@@ -134,3 +134,24 @@ code is copied. See
 upstream files, and the local integration boundary. No LLLite or other model
 weight is included. This notice does not replace or modify the upstream
 license.
+
+## Anima VAE DeGrid
+
+`degrid_math.py`, `degrid_files.py`, `degrid_runner.py` and `degrid_nodes.py`
+(`ForgeNeoAnimaVAEDeGrid`) are local implementation code. They reproduce the
+behaviour of the "Anima VAE DeGrid (NAFNet)" script of the user's sam-extra Forge
+extension (`forge_sam3_extension`, GPL-3.0) without copying its code: only
+behavioural facts are shared — mode meanings, value ranges, tile/overlap sizes,
+the padding multiple, residual-guard thresholds (plain numbers) and the leading
+error-category words. `tests/fixtures/degrid_origin_golden.json` holds only
+numbers and checksums produced by running that extension on CPU.
+
+The NAFNet detection key list is the one spandrel (MIT) uses to recognise the
+architecture. spandrel itself (model loading), `comfy.utils.load_torch_file` and
+ComfyUI's model management are called from the ComfyUI runtime at execution
+time; none of their code is included. The tile blend has the same positions and
+weights as ComfyUI's `tiled_scale` and is written here independently.
+
+No model weight is included. The DraconicDragon NAFNet-VAE-DeGrid weights
+(Apache-2.0) and any other NAFNet file must be supplied by the user and remain
+subject to their own licenses.

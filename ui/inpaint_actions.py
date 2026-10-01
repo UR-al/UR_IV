@@ -131,7 +131,7 @@ def _on_finished(mw, worker, result, gen_info) -> None:
                 logger.warning("inpaint send_image failed: %s", exc)
         _notify(mw, 'success', '인페인트 생성 완료')
         from ui.sam_extra_notices_ui import show_result_notices
-        show_result_notices(mw, info)   # 'SAM3 Error'·'Anima38: off'·PAG 누락
+        show_result_notices(mw, info)   # 'SAM3 Error'·'Anima38: off'·PAG 누락·DoRA·VAE DeGrid(Forge infotext·ComfyUI 리포트)
         return
     if info.get('cancelled'):
         _notify(mw, 'info', '인페인트가 취소되었습니다')

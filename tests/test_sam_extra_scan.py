@@ -266,6 +266,112 @@ class Probe(scripts.Script):
 '''
 
 
+class TestOptionInfoChoices(unittest.TestCase):
+    """P10 라디오 옵션 — ``component_args`` 의 선택지 값(라벨·값 쌍이면 값)을 정적으로 읽는다(계약 테스트가 앱 스펙과
+    대조). 체크박스는 (), 함수로 넘긴 component_args 는 None(못 읽음)."""
+
+    FILES = {
+        "sam3ext/__init__.py": "",
+        "sam3ext/runtime.py": '''
+            OPT_DEVICE = "fake_device"
+            DEVICE_A = "a"
+            DEVICE_B = "b"
+        ''',
+        "scripts/opts.py": '''
+            import gradio as gr
+            from modules import shared
+            from sam3ext import runtime as rt
+
+            def on_ui_settings():
+                shared.opts.add_option(rt.OPT_DEVICE, shared.OptionInfo(
+                    rt.DEVICE_A, "device", gr.Radio, {"choices": [("A label", rt.DEVICE_A), ("B", rt.DEVICE_B)]},
+                    section=("x", "X")).info("help"))
+                shared.opts.add_option("fake_plain", shared.OptionInfo(
+                    "p", "plain", gr.Radio, component_args={"choices": ["p", "q"]}))
+                shared.opts.add_option("fake_flag", shared.OptionInfo(False, "flag", gr.Checkbox, section=("x", "X")))
+                shared.opts.add_option("fake_slider", shared.OptionInfo(
+                    3, "n", gr.Slider, {"minimum": 1, "maximum": 9, "step": 1}))
+                shared.opts.add_option("fake_dynamic", shared.OptionInfo(
+                    "a", "dyn", gr.Dropdown, lambda: {"choices": list_things()}))
+        ''',
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name) / "forge_sam3_extension"
+        for rel, text in cls.FILES.items():
+            target = cls.root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
+        cls.infos = ExtensionSource(cls.root).option_infos()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_radio_choice_values_follow_constants(self):
+        info = self.infos["fake_device"]
+        self.assertEqual((info["default"], info["component"], info["choices"]), ("a", "Radio", ("a", "b")))
+        self.assertEqual(self.infos["fake_plain"]["choices"], ("p", "q"))
+
+    def test_components_without_choices_and_unreadable_ones(self):
+        self.assertEqual(self.infos["fake_flag"]["choices"], ())
+        self.assertEqual(self.infos["fake_flag"]["component"], "Checkbox")
+        self.assertEqual(self.infos["fake_slider"]["choices"], ())
+        self.assertIsNone(self.infos["fake_dynamic"]["choices"])
+
+
+class TestNumericConstantExpressions(unittest.TestCase):
+    """VAE DeGrid 판정 문턱처럼 숫자 상수식(``2 / 255``·``64 << 20``·``A * 2``)으로 정의한 모듈 상수 — 의미 핀
+    (core/sam_extra_contract SEMANTIC_PINS degrid_guard_*)이 파이썬과 같은 값으로 읽는다. 숫자가 아닌 피연산자·0 으로
+    나누기는 못 푼다(KeyError — 계약 테스트가 '정적으로 풀지 못함' 으로 실패한다)."""
+
+    FILES = {
+        "sam3ext/__init__.py": "",
+        "sam3ext/math_consts.py": '''
+            BASE = 25
+            THRESHOLD = 2 / 255
+            SCALED = BASE / 255
+            PRODUCT = BASE * 2 - 1
+            SHIFTED = 64 << 20
+            FLOORED = 7 // 2
+            NEGATED = -(1 / 4)
+            WORDS = "ab" * 2
+            BROKEN = 1 / 0
+            FLAG_SUM = True * 2
+        ''',
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls._tmp.name) / "forge_sam3_extension"
+        for rel, text in cls.FILES.items():
+            target = cls.root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
+        cls.src = ExtensionSource(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_numeric_expressions_have_python_values(self):
+        rel = "sam3ext/math_consts.py"
+        self.assertEqual(self.src.module_constant(rel, "THRESHOLD"), 2 / 255)
+        self.assertEqual(self.src.module_constant(rel, "SCALED"), 25 / 255)
+        self.assertEqual(self.src.module_constant(rel, "PRODUCT"), 49)
+        self.assertEqual(self.src.module_constant(rel, "SHIFTED"), 64 << 20)
+        self.assertEqual(self.src.module_constant(rel, "FLOORED"), 3)
+        self.assertEqual(self.src.module_constant(rel, "NEGATED"), -0.25)
+
+    def test_non_numeric_operands_and_division_by_zero_stay_unresolved(self):
+        for name in ("WORDS", "BROKEN", "FLAG_SUM"):
+            with self.subTest(name=name), self.assertRaises(KeyError):
+                self.src.module_constant("sam3ext/math_consts.py", name)
+
+
 class TestUiReturnPerMode(unittest.TestCase):
     """ui() 의 모든 return 갈래를 모드별로 읽는다 — 마지막 return 만 보면 한 모드의 인자 증감을 놓친다."""
 

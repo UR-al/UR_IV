@@ -328,6 +328,10 @@ def apply_generation_settings(host, settings: Mapping[str, Any], *, only_present
     from ui.anima38_ui import apply_saved_settings as _apply_anima38_settings
     _apply_anima38_settings(host, settings, only_present=only_present)
 
+    # VAE DeGrid — 키가 없으면 프리셋은 그대로, 옛 설정은 앱 기본값(꺼짐 — 동작이 같아 안내 없음)
+    from ui.vae_degrid_ui import apply_saved_settings as _apply_degrid_settings
+    _apply_degrid_settings(host, settings, only_present=only_present)
+
     if unavailable:
         warnings.append(unavailable_message(unavailable))
     return warnings

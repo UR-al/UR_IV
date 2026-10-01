@@ -268,9 +268,11 @@ class TestRegistry(unittest.TestCase):
     def test_app_constants_follow_pinned_extension_constants(self):
         """공유 계약 값(메모 스키마·한도 등)을 앱이 하드코딩한 곳 — 확장 핀과 같아야 한다."""
         for pin in (p for p in reg.SEMANTIC_PINS if "app" in p):
+            where = (f"{pin['file']}:{pin['name']}" if pin["source"] == "ast"
+                     else f"script-info '{pin['script']}'[{pin['index']}].{pin['field']}")
             with self.subTest(pin=pin["id"]):
                 self.assertEqual(_load(pin["app"]), pin["expected"],
-                                 f"\n{pin['app']} ≠ 확장 {pin['file']}:{pin['name']} 핀 {pin['expected']!r}.\n"
+                                 f"\n{pin['app']} ≠ 확장 {where} 핀 {pin['expected']!r}.\n"
                                  f"  뜻: {pin['meaning']}")
 
     def test_ui_unread_is_well_formed(self):
@@ -296,6 +298,71 @@ class TestRegistry(unittest.TestCase):
             if entry["api_reads"]:
                 self.assertEqual(format_index_set(parse_index_set(entry["api_reads"])), entry["api_reads"])
 
+
+    def test_degrid_is_mapped_for_main_requests_with_comfy_parity(self):
+        """VAE DeGrid 앱 노출(보류 → mapped): 스크립트·옵션 셋·모듈 6개가 모두 분류됐고 DEFERRED 로 남은 것이 없다.
+        Extras 판은 API 가 없어 ignored(HOLD 사유). 앱 제목 상수·Comfy 노드·컴파일러 참조가 레지스트리에 있다."""
+        from core import vae_degrid as vdg
+        entry = reg.SCRIPTS[vdg.SCRIPT_NAME]
+        self.assertEqual(entry["status"], reg.MAPPED)
+        self.assertEqual(entry["app_title"], "core.vae_degrid:SCRIPT_NAME")
+        self.assertEqual((entry["form"], entry["live_argc"], entry["runtime_choices"]), ("positional_or_dict", 5, (1,)))
+        self.assertIsNone(entry["arg_names"], "ARG_NAMES 는 스크립트 모듈 밖(sam3ext/ui_vae_degrid.py) — 핀 degrid_arg_names")
+        for ref in ("ui/vae_degrid_ui.py:contribute", "ui/sampling_blocks.py:CONTRIBUTORS",
+                    "core/alwayson_propagation.py:TITLE_DEGRID", "core/sam_extra_notices.py:CODE_DEGRID_ERROR",
+                    "frontend/src/components/params/VaeDegridCard.vue"):
+            self.assertIn(ref, entry["app"])
+        self.assertIn(f"comfy_custom_nodes/ai_studio_forge_parity/degrid_nodes.py:{vdg.COMFY_NODE_CLASS}", entry["comfy"])
+        self.assertIn("core/comfy_workflow_compiler.py:_add_degrid", entry["comfy"])
+        self.assertIn("ui/vae_degrid_ui.py:push_comfy_models", entry["comfy"])
+        self.assertTrue(any(gap.startswith("P16") and "from_infotext" in gap for gap in entry["gaps"]))
+        degrid_rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
+                       for key, row in table.items() if "degrid" in key.lower()}
+        self.assertEqual(len(degrid_rows), 1 + 3 + 6, sorted(degrid_rows))
+        self.assertEqual(sorted(k for k, row in degrid_rows.items() if row["status"] == reg.DEFERRED), [])
+        extras = reg.MODULES["scripts/anima_vae_degrid_extras.py"]
+        self.assertEqual((extras["status"], extras["package"]), (reg.IGNORED, reg.HOLD))
+        self.assertNotIn(vdg.EXTRAS_TITLE, reg.SCRIPTS, "Extras 판은 always-on 스크립트가 아니다(ScriptPostprocessing)")
+
+    def test_degrid_pins_mirror_every_shared_constant(self):
+        """앱과 Comfy 팩이 확장 값을 하드코딩한 곳마다 핀이 있다 — 앱 상수(core.vae_degrid·P10 옵션 키)와 팩 상수
+        (degrid_math·degrid_nodes·degrid_runner)가 핀 하나씩 갖는다. 핀이 빠지면 확장이 바뀌어도 한쪽만 조용히 어긋난다."""
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("degrid_")}
+        apps = {pin["app"] for pin in pins.values() if "app" in pin}
+        core = ("SCRIPT_NAME", "EXTRAS_TITLE", "ARG_NAMES", "MODE_CHOICES", "MODES", "MODE_LABELS", "DEFAULT_MODE",
+                "DEFAULT_STRENGTH", "STRENGTH_MIN", "STRENGTH_MAX", "STRENGTH_STEP", "DEFAULT_TILE", "TILE_OVERLAP",
+                "MIN_TILE", "MAX_TILE", "TILE_STEP", "NONE_NAME", "MODEL_FOLDERS", "KEY_MODEL", "KEY_MODE",
+                "KEY_STRENGTH", "KEY_TILE", "KEY_PRECISION", "KEY_ERROR", "DEVICE_AUTO", "DEVICE_CPU",
+                "PRECISION_FP32", "PRECISION_FP16", "DEFAULT_DEVICE", "DEFAULT_PRECISION", "DEFAULT_KEEP_LOADED")
+        pack = {"degrid_math": ("MODES", "MODE_LABELS", "DEFAULT_MODE", "DEFAULT_STRENGTH", "STRENGTH_MIN",
+                                "STRENGTH_MAX", "DEFAULT_TILE", "TILE_OVERLAP", "MIN_TILE", "MAX_TILE", "PAD_MULTIPLE",
+                                "NAFNET_KEYS", "MODEL_EXTENSIONS", "IMAGE_LIKE_MIN_ABS_MEAN", "IMAGE_LIKE_CORRELATION",
+                                "IMAGE_LIKE_ABS_MEAN", "IMAGE_LIKE_LARGE_CORRELATION", "IMAGE_LIKE_DC_MEAN",
+                                "IMAGE_LIKE_DC_SIGN", "IMAGE_LIKE_DC_RATIO", "RESIDUAL_BLOWUP_ABS_MEAN"),
+                "degrid_nodes": ("DEVICE_AUTO", "DEVICE_CPU", "BYTES_PER_PIXEL"),
+                "degrid_runner": ("PRECISION_FP32", "PRECISION_FP16")}
+        wanted = {f"core.vae_degrid:{name}" for name in core}
+        wanted |= {f"core.forge_override_settings:{name}" for name in (
+            "OPT_DEGRID_DEVICE", "OPT_DEGRID_GPU_PRECISION", "OPT_DEGRID_KEEP_LOADED")}
+        wanted |= {f"comfy_custom_nodes.ai_studio_forge_parity.{module}:{name}"
+                   for module, names in pack.items() for name in names}
+        self.assertEqual(sorted(wanted - apps), [], "핀이 없는 앱·팩 상수")
+        # 확장 파일 4개 모두 — 런타임 장치·정밀도 이름까지(P10 이 보내는 문자열)
+        self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
+                         {"sam3ext/ui_vae_degrid.py", "sam3ext/vae_degrid.py", "sam3ext/vae_degrid_models.py",
+                          "sam3ext/vae_degrid_runtime.py"})
+        # P10 스펙의 라디오 선택지·기본값도 같은 핀 값에서 나온다(앱 상수 → SPECS)
+        from core import forge_override_settings as fos
+        device = fos.SPEC_BY_KEY[fos.OPT_DEGRID_DEVICE]
+        precision = fos.SPEC_BY_KEY[fos.OPT_DEGRID_GPU_PRECISION]
+        keep = fos.SPEC_BY_KEY[fos.OPT_DEGRID_KEEP_LOADED]
+        self.assertEqual(device.values, (pins["degrid_device_auto"]["expected"], pins["degrid_device_cpu"]["expected"]))
+        self.assertEqual(precision.values, (pins["degrid_precision_fp32"]["expected"],
+                                            pins["degrid_precision_fp16"]["expected"]))
+        self.assertEqual((device.default, precision.default, keep.default),
+                         (pins["degrid_default_device"]["expected"], pins["degrid_default_precision"]["expected"],
+                          pins["degrid_default_keep_loaded"]["expected"]))
+        self.assertEqual(precision.infotext, "", "확장 OptionInfo 에 infotext 가 없다 — 'Anima DeGrid precision' 은 런타임 기록")
 
 # ── 2) 라이브 script-info 픽스처 ─────────────────────────────────────────────────
 class TestScriptInfoFixture(unittest.TestCase):
@@ -454,6 +521,48 @@ class TestScriptInfoFixture(unittest.TestCase):
                     self.assertEqual(tuple(labels), tuple(label for _k, label in options))
                     self.assertEqual([normalize(label) for label in labels], [key for key, _l in options])
 
+    def test_degrid_live_defaults_match_app(self):
+        """VAE DeGrid 라이브 기본값(t2i·i2i arg0-4)을 앱 규칙으로 읽으면 EXTENSION_DEFAULTS 이고(모델 arg1 은 실행 시점
+        목록 — 앱 기본값은 '' = 자동, 확장도 목록의 첫 파일), 앱 기본값(APP_DEFAULTS — 사용자 Forge ui-config 도 꺼짐·
+        Full·1·512)과의 차이는 KNOWN_DIFFS 에 적힌 것뿐이다(지금은 없다 — 앱 기본값 출처 표시도 없다)."""
+        from core import vae_degrid as vdg
+        title = vdg.SCRIPT_NAME
+        runtime = reg.SCRIPTS[title]["runtime_choices"]
+        observed = {}
+        for is_img2img, args in self._modes(title).items():
+            with self.subTest(img2img=is_img2img):
+                live = dict(zip(vdg.ARG_NAMES, (arg.get("value") for arg in args)))
+                self.assertIsInstance(live["enabled"], bool)
+                self.assertIsNotNone(vdg.normalize_mode(live["mode"]), f"모르는 모드 라벨 {live['mode']!r}")
+                parsed = vdg.DegridSettings(
+                    enabled=live["enabled"], model=vdg.AUTO, mode=vdg.coerce_mode(live["mode"]),
+                    strength=vdg.coerce_strength(live["strength"]), tile=vdg.coerce_tile(live["tile"]))
+                self.assertEqual(parsed, vdg.EXTENSION_DEFAULTS)
+                self.assertEqual(vdg.ARG_NAMES.index("model"), 1)
+                self.assertEqual(runtime, (vdg.ARG_NAMES.index("model"),))
+                for name in vdg.ARG_NAMES:
+                    if vdg.ARG_NAMES.index(name) in runtime:
+                        continue
+                    app, value = getattr(vdg.APP_DEFAULTS, name), getattr(parsed, name)
+                    if not same_value(app, value):
+                        observed[(title, name, "default")] = (app, live[name])
+        self.assertFalse(vdg.APP_DEFAULTS.apply_img2img, "I2I·인페인트 토글 기본 끔(D4)")
+        problems = _diff_problems(observed, _known("fixture", title))
+        self.assertEqual(problems, [], "\nVAE DeGrid 앱 기본값과 라이브 기본값:\n" + "\n".join(problems))
+
+    def test_degrid_live_mode_choices_normalize_to_app_keys_in_extension_order(self):
+        """라이브 모드 라벨(카드 MODE_CHOICES) → 서로 다른 앱 키(확장 라디오 순서 = MODES). 모르는 라벨이 생기면 위치
+        인자 라벨이나 붙여 넣은 값이 조용히 Full 이 된다. 모델 선택지에는 'None' 자리 표시가 아닌 실제 이름만 있다."""
+        from core import vae_degrid as vdg
+        for args in self._modes(vdg.SCRIPT_NAME).values():
+            labels = tuple(args[vdg.ARG_NAMES.index("mode")].get("choices") or ())
+            self.assertEqual(labels, vdg.MODE_CHOICES)
+            self.assertEqual([vdg.normalize_mode(label) for label in labels], list(vdg.MODES))
+            self.assertEqual([vdg.normalize_mode(vdg.MODE_LABELS[key]) for key in vdg.MODES], list(vdg.MODES))
+            models = args[vdg.ARG_NAMES.index("model")].get("choices") or []
+            self.assertTrue(models, "픽스처를 받은 Forge 에 DeGrid 모델이 있었다(없으면 ['None'])")
+            self.assertNotIn(vdg.NONE_NAME, models)
+
     def test_semantic_pins_on_live_values(self):
         for pin in (p for p in reg.SEMANTIC_PINS if p["source"] == "fixture"):
             with self.subTest(pin=pin["id"]):
@@ -573,9 +682,10 @@ class TestInstalledExtension(unittest.TestCase):
         self._assert_sets("Forge 옵션 키 (shared.opts.add_option)", reg.OPTIONS, self.options)
 
     def test_p10_option_specs_match_installed_source(self):
-        """P10 — 요청마다 덮어쓰는 옵션의 기본값·infotext·컴포넌트(bool 체크박스)가 설치된 소스와 같고, onchange 콜백이
-        있는 것은 SAM3 RAM 보관 하나다. override 는 적용 때 콜백을 돌리지 않으므로(processing.py:813) 다른 옵션에 콜백이
-        생기면 '요청마다 덮어써도 된다'는 가정과 카드 경고를 다시 봐야 한다."""
+        """P10 — 요청마다 덮어쓰는 옵션의 기본값·infotext·컴포넌트(체크박스 = bool, 라디오 = 선택지 문자열)·라디오 선택지
+        값(순서까지)이 설치된 소스와 같고, onchange 콜백이 있는 것은 SAM3 RAM 보관 하나다. override 는 적용 때 콜백을
+        돌리지 않으므로(processing.py:813) 다른 옵션에 콜백이 생기면 '요청마다 덮어써도 된다'는 가정과 카드 경고를 다시
+        봐야 한다. 라디오 값이 바뀌면 앱이 보낸 값을 확장이 모르는 값으로 읽는다(조용히 다르게 돈다)."""
         from core.forge_override_settings import SPECS
         infos = self.src.option_infos()
         self.assertEqual(set(infos), set(self.options), "option_infos 가 add_option 을 모두 읽지 못했다")
@@ -585,9 +695,14 @@ class TestInstalledExtension(unittest.TestCase):
             if info is None:
                 problems.append(f"  {spec.key}: 설치된 확장에 없다")
                 continue
-            for field, want in (("default", spec.default), ("infotext", spec.infotext), ("component", "Checkbox")):
+            checks = [("default", spec.default), ("infotext", spec.infotext), ("component", spec.component)]
+            if spec.choices:
+                checks.append(("choices", spec.values))
+            for field, want in checks:
                 if info[field] != want or type(info[field]) is not type(want):
                     problems.append(f"  {spec.key}.{field}: 앱 {want!r} / 확장 {info[field]!r} ({info['file']})")
+            if not spec.choices and info["choices"] != ():
+                problems.append(f"  {spec.key}.choices: 앱 체크박스 / 확장 선택지 {info['choices']!r} ({info['file']})")
             if info["onchange"] != spec.onchange:
                 problems.append(f"  {spec.key}.onchange: 앱 {spec.onchange!r} / 확장 {info['onchange']!r}")
         self.assertEqual(problems, [], "\ncore/forge_override_settings.SPECS 가 설치된 확장 옵션과 다르다:\n"

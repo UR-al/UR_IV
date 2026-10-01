@@ -186,7 +186,8 @@ def _explain_rejection(body, payload: Dict) -> str:
 
 
 def _extension_notices(api_url: str, info: Dict, payload: Dict, *, propagated_titles=()) -> list:
-    """Forge info + 보낸 요청 → sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락). 실패하면 [].
+    """Forge info + 보낸 요청 → sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락·DoRA·Anima DeGrid error).
+    실패하면 [].
 
     ``propagated_titles``: 보조 패스가 메인 생성 설정에서 전달한 제목 — 그 기능 알림에 '(전달됨)' 을 붙인다(P7)."""
     try:
@@ -1059,7 +1060,8 @@ class WebUIBackend(AbstractBackend):
             else:
                 generation_info = {"raw_info": raw_info}
             generation_info['artifact_count'] = len(artifacts)
-            # sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락) + 요청 전·재시도 알림(P10) — UI 가 토스트로 띄운다(P4)
+            # sam-extra 결과 알림(SAM3 Error·Anima38 off·PAG 누락·DoRA·Anima DeGrid error) + 요청 전·재시도 알림(P10)
+            # — UI 가 토스트로 띄운다(P4)
             result_notices = [*_extension_notices(self.api_url, generation_info, payload), *(notices or ())]
             if result_notices:
                 from core.sam_extra_notices import INFO_KEY, notices_to_dicts
