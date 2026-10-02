@@ -128,8 +128,11 @@ class SpecTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn("core/forge_override_settings.py:SPECS", reg.OPTIONS[key]["app"])
         deferred = {key: entry["package"] for key, entry in reg.OPTIONS.items() if entry["status"] == reg.DEFERRED}
-        # VAE DeGrid 옵션 셋은 P10 이 맡는다(라디오 둘은 선택지 문자열) — 남은 보류는 레퍼런스 IP-Adapter 둘(P20)뿐
-        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20"})
+        # VAE DeGrid 옵션 셋은 P10 이 맡는다(라디오 둘은 선택지 문자열) — 남은 보류는 레퍼런스 IP-Adapter 둘(P20)과
+        # 2026-10-02 검토 제안 옵션 둘(PAG 강도 곡선·내장 NegPiP 스위치 — HOLD, 앱은 Forge 설정을 따른다)
+        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20",
+                                    "sam3_guidance_pag_cosine_envelope": "HOLD",
+                                    "sam3_builtin_negpip_enabled": "HOLD"})
         for key, const in ((DEVICE, "OPT_DEGRID_DEVICE"), (PRECISION, "OPT_DEGRID_GPU_PRECISION"),
                            (KEEP_LOADED, "OPT_DEGRID_KEEP_LOADED")):
             with self.subTest(key=key):

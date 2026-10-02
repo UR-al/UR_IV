@@ -15,6 +15,8 @@ import unittest
 
 from core.anima_guidance import (
     DETAIL_DAEMON_SPEC,
+    FIXED,
+    PAG_DETAIL_SUITE_FROM,
     PERTURBATION_SPEC,
     SCRIPT_DETAIL_DAEMON,
     SCRIPT_PERTURBATION,
@@ -56,6 +58,14 @@ EXPECTED_PERTURBATION = [
     'mod_adapter_mode', 'mod_adapter_path',
     'smc_preset', 'smc_master_enabled',
     'rdc_enabled', 'rdc_tau', 'rdc_alpha_ll', 'rdc_alpha_hh',
+    # 62-90 : v0.30 디테일 묶음 — 앱은 고정 칸(늘 확장 기본값)
+    'slg_mode', 's2_scale', 's2_ratio', 's2_blocks', 's2_start', 's2_end',
+    'smc_mode', 'smc_adaptive_alpha', 'smc_adaptive_lambda',
+    'tsr_enabled', 'tsr_k', 'tsr_sigma',
+    'mg_enabled', 'mg_alpha', 'mg_beta', 'mg_normalize', 'mg_min', 'mg_max',
+    'higs_enabled', 'higs_weight', 'higs_eta', 'higs_alpha', 'higs_cutoff',
+    'higs_t_min', 'higs_t_max',
+    'hiflow_enabled', 'hiflow_alpha', 'hiflow_beta', 'hiflow_cutoff',
 ]
 EXPECTED_SKIMMED = [
     'enabled', 'skimming_cfg', 'full_skim_negative',
@@ -324,7 +334,7 @@ class TestSpecOrder(unittest.TestCase):
                 self.assertEqual(got, expected)
 
     def test_arg_counts(self):
-        self.assertEqual(len(PERTURBATION_SPEC), 62)
+        self.assertEqual(len(PERTURBATION_SPEC), 91)
         self.assertEqual(len(SKIMMED_SPEC), 7)
         self.assertEqual(len(DETAIL_DAEMON_SPEC), 14)
 
@@ -332,6 +342,32 @@ class TestSpecOrder(unittest.TestCase):
         keys = [k for spec in (PERTURBATION_SPEC, SKIMMED_SPEC, DETAIL_DAEMON_SPEC)
                 for k, _kind, _d, _e in spec]
         self.assertEqual(len(keys), len(set(keys)))
+
+
+class TestDetailSuiteFixedSlots(unittest.TestCase):
+    """확장 v0.30 디테일 묶음(62-90)은 앱이 노출하지 않는 고정 칸 — 저장값과 무관하게 확장 기본값(전부 끔)을 보내고,
+    설정 키가 아니며, 그 칸이 없는 62개 빌드에서도 'Forge에서 가져오기'가 된다."""
+
+    def test_slots_always_send_extension_defaults(self):
+        args = build_args(SCRIPT_PERTURBATION, {
+            'guid_tsr_enabled': 'true', 'guid_mg_enabled': 'true', 'guid_higs_enabled': 'true',
+            'guid_hiflow_enabled': 'true', 'guid_slg_mode': 'Stochastic (S²)', 'guid_smc_mode': 'Adaptive sign'})
+        self.assertEqual(args[62:], [default for _k, _kind, default, _e in PERTURBATION_SPEC[62:]])
+        self.assertEqual((args[62], args[68]), ('Fixed', 'Unit-L2'))
+        for index in (71, 74, 80, 87):   # TSR · Momentum · HiGS · HiFlow 켜기
+            self.assertIs(args[index], False)
+
+    def test_slots_are_not_user_settings(self):
+        slots = {key for key, *_rest in PERTURBATION_SPEC[62:]}
+        self.assertEqual(slots & set(default_settings()), set())
+
+    def test_forge_import_accepts_a_build_without_the_detail_suite(self):
+        args = [{'value': default} for _k, _kind, default, _e in PERTURBATION_SPEC[:62]]
+        settings, meta = parse_forge_script_info(
+            [{'name': SCRIPT_PERTURBATION, 'is_img2img': False, 'args': args}])
+        self.assertEqual(meta['imported_scripts'], [SCRIPT_PERTURBATION])
+        self.assertEqual(meta['missing_trailing_args'], [])
+        self.assertTrue(set(settings) <= set(default_settings()))
 
 
 class TestBuildArgs(unittest.TestCase):
@@ -538,12 +574,14 @@ class TestForgeScriptInfoImport(unittest.TestCase):
             SCRIPT_PERTURBATION, PERTURBATION_SPEC, trailing=2,
         )]
         settings, meta = parse_forge_script_info(payload)
-        self.assertEqual(len(settings), len(PERTURBATION_SPEC))
+        # 고정 칸(62-90 디테일 묶음)은 설정이 아니라 가져오지 않는다
+        self.assertEqual(len(settings), sum(1 for _k, kind, *_r in PERTURBATION_SPEC if kind != FIXED))
         self.assertEqual(meta['ignored_trailing_args'], 2)
 
     def test_short_positional_payload_is_rejected(self):
+        # 디테일 묶음(62-90) 앞 칸까지 빠진 배열은 위치가 어긋날 수 있어 거부한다(62칸 빌드는 받는다)
         payload = [self._entry(SCRIPT_PERTURBATION, PERTURBATION_SPEC)]
-        payload[0]['args'].pop()
+        del payload[0]['args'][PAG_DETAIL_SUITE_FROM - 1:]
         with self.assertRaisesRegex(ValueError, '인자 수'):
             parse_forge_script_info(payload)
 

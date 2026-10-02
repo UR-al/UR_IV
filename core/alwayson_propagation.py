@@ -195,6 +195,7 @@ NEVER: Mapping[str, str] = MappingProxyType({
     "ADetailer": "이미지 패스 — 복사하면 부모 패스 뒤에 T2I 얼굴 보정이 한 번 더 돈다(_ad_disabled 는 SAM3 p2 에만)",
     "Anima VAE 2x (spacepxl decoder)": "HOLD(M9) — 앱이 만들지 않는다. 2x 디코더가 인페인트 패스 출력 크기를 바꿀 수 있다",
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
+    "Anima Optimal Scale": "HOLD — 실험 기능(기본 끔, 2026-10-02 검토 제안) — 앱이 만들지 않는다",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
 })

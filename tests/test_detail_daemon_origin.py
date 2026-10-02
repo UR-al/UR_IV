@@ -401,7 +401,7 @@ class ForgeImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "인자 수 12개가 앱 계약 13개"):
             parse_forge_script_info([entry])
         pag = self._other(anima_guidance.SCRIPT_PERTURBATION, anima_guidance.PERTURBATION_SPEC, {})
-        pag["args"].pop()
+        del pag["args"][anima_guidance.PAG_DETAIL_SUITE_FROM - 1:]   # 디테일 묶음(62-90) 앞 칸까지 빠짐
         with self.assertRaisesRegex(ValueError, "Perturbation Guidance: Forge 인자 수 61개"):
             parse_forge_script_info([pag])
 

@@ -1,15 +1,15 @@
 {
  "schema": 1,
  "source": "GET /sdapi/v1/script-info (tools/refresh_sam_extra_fixture.py)",
- "captured_at": "2026-09-30T13:07:01+00:00",
- "api_url": "http://127.0.0.1:7861",
+ "captured_at": "2026-10-02T05:04:10+00:00",
+ "api_url": "http://127.0.0.1:7860",
  "ext_version": "0.30.0",
  "extension": {
   "name": "forge_sam3_extension",
   "branch": "feat/anima-character-reference",
-  "commit_hash": "3e35f1e3e7fe07b75c3cf4c0403084f022c0441b",
-  "commit_date": 1790768986,
-  "version": "3e35f1e3"
+  "commit_hash": "3d5d26dd6b3d7306b63a93002db07609e695a867",
+  "commit_date": 1790898537,
+  "version": "3d5d26dd"
  },
  "scripts": [
   {
@@ -365,6 +365,84 @@
    ]
   },
   {
+   "name": "anima optimal scale",
+   "is_alwayson": true,
+   "is_img2img": false,
+   "args": [
+    {
+     "label": "Enable Anima Optimal Scale",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Optimal-scale blend",
+     "value": 0.25,
+     "minimum": 0,
+     "maximum": 1,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Optimal-scale start (%)",
+     "value": 0.0,
+     "minimum": 0,
+     "maximum": 1,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Optimal-scale end (%)",
+     "value": 1.0,
+     "minimum": 0,
+     "maximum": 1,
+     "step": 0.01,
+     "choices": null
+    }
+   ]
+  },
+  {
+   "name": "anima optimal scale",
+   "is_alwayson": true,
+   "is_img2img": true,
+   "args": [
+    {
+     "label": "Enable Anima Optimal Scale",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "Optimal-scale blend",
+     "value": 0.25,
+     "minimum": 0,
+     "maximum": 1,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Optimal-scale start (%)",
+     "value": 0.0,
+     "minimum": 0,
+     "maximum": 1,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Optimal-scale end (%)",
+     "value": 1.0,
+     "minimum": 0,
+     "maximum": 1,
+     "step": 0.01,
+     "choices": null
+    }
+   ]
+  },
+  {
    "name": "anima perturbation guidance",
    "is_alwayson": true,
    "is_img2img": false,
@@ -894,6 +972,244 @@
      "minimum": 0.0,
      "maximum": 0.1,
      "step": 0.001,
+     "choices": null
+    },
+    {
+     "label": "SLG mode",
+     "value": "Fixed",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Fixed",
+      "Stochastic (S²)"
+     ]
+    },
+    {
+     "label": "S² scale ω",
+     "value": 0.25,
+     "minimum": 0.0,
+     "maximum": 5.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "S² drop ratio (호출마다 건너뛸 블록 비율 · 최소 1블록)",
+     "value": 0.05,
+     "minimum": 0.01,
+     "maximum": 0.5,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "S² eligible blocks (빈칸=1~마지막 · 블록 0 제외)",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "S² start (스텝 비율)",
+     "value": 0.1,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "S² end (스텝 비율)",
+     "value": 0.9,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "SMC controller",
+     "value": "Unit-L2",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Unit-L2",
+      "Adaptive sign"
+     ]
+    },
+    {
+     "label": "Adaptive SMC α (이득 = α·mean|e|)",
+     "value": 0.2,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Adaptive SMC λ",
+     "value": 5.0,
+     "minimum": 0.5,
+     "maximum": 30.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Enable TSR",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "TSR k (1=끔 · 낮을수록 디테일)",
+     "value": 0.95,
+     "minimum": 0.5,
+     "maximum": 1.5,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "TSR sigma (클수록 일찍 적용)",
+     "value": 1.0,
+     "minimum": 0.1,
+     "maximum": 10.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Enable Momentum Guidance",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "MG α (밀어내는 세기)",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 3.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "MG β (지수평균 기억)",
+     "value": 0.6,
+     "minimum": 0.0,
+     "maximum": 0.95,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Normalize momentum (‖m‖을 ‖v‖에 맞춤 · 논문 §8.2)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "MG window min (노이즈 수준)",
+     "value": 0.3,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "MG window max (노이즈 수준)",
+     "value": 0.95,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Enable HiGS",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "HiGS weight w",
+     "value": 1.75,
+     "minimum": 0.0,
+     "maximum": 3.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiGS η (예측 방향 성분 비중)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiGS history α (지수평균 갱신)",
+     "value": 0.75,
+     "minimum": 0.05,
+     "maximum": 0.95,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiGS high-pass cutoff R_c",
+     "value": 0.05,
+     "minimum": 0.0,
+     "maximum": 0.5,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "HiGS t min (노이즈 수준 · 이하에서 끔)",
+     "value": 0.4,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "HiGS t max (노이즈 수준)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Enable HiFlow (hires fix)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "HiFlow direction α",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiFlow acceleration β",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiFlow low-pass cutoff D (Butterworth)",
+     "value": 0.2,
+     "minimum": 0.05,
+     "maximum": 1.0,
+     "step": 0.01,
      "choices": null
     }
    ]
@@ -1428,6 +1744,244 @@
      "minimum": 0.0,
      "maximum": 0.1,
      "step": 0.001,
+     "choices": null
+    },
+    {
+     "label": "SLG mode",
+     "value": "Fixed",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Fixed",
+      "Stochastic (S²)"
+     ]
+    },
+    {
+     "label": "S² scale ω",
+     "value": 0.25,
+     "minimum": 0.0,
+     "maximum": 5.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "S² drop ratio (호출마다 건너뛸 블록 비율 · 최소 1블록)",
+     "value": 0.05,
+     "minimum": 0.01,
+     "maximum": 0.5,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "S² eligible blocks (빈칸=1~마지막 · 블록 0 제외)",
+     "value": "",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "S² start (스텝 비율)",
+     "value": 0.1,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "S² end (스텝 비율)",
+     "value": 0.9,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "SMC controller",
+     "value": "Unit-L2",
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": [
+      "Unit-L2",
+      "Adaptive sign"
+     ]
+    },
+    {
+     "label": "Adaptive SMC α (이득 = α·mean|e|)",
+     "value": 0.2,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Adaptive SMC λ",
+     "value": 5.0,
+     "minimum": 0.5,
+     "maximum": 30.0,
+     "step": 0.1,
+     "choices": null
+    },
+    {
+     "label": "Enable TSR",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "TSR k (1=끔 · 낮을수록 디테일)",
+     "value": 0.95,
+     "minimum": 0.5,
+     "maximum": 1.5,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "TSR sigma (클수록 일찍 적용)",
+     "value": 1.0,
+     "minimum": 0.1,
+     "maximum": 10.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Enable Momentum Guidance",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "MG α (밀어내는 세기)",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 3.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "MG β (지수평균 기억)",
+     "value": 0.6,
+     "minimum": 0.0,
+     "maximum": 0.95,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "Normalize momentum (‖m‖을 ‖v‖에 맞춤 · 논문 §8.2)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "MG window min (노이즈 수준)",
+     "value": 0.3,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "MG window max (노이즈 수준)",
+     "value": 0.95,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Enable HiGS",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "HiGS weight w",
+     "value": 1.75,
+     "minimum": 0.0,
+     "maximum": 3.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiGS η (예측 방향 성분 비중)",
+     "value": 0.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiGS history α (지수평균 갱신)",
+     "value": 0.75,
+     "minimum": 0.05,
+     "maximum": 0.95,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiGS high-pass cutoff R_c",
+     "value": 0.05,
+     "minimum": 0.0,
+     "maximum": 0.5,
+     "step": 0.005,
+     "choices": null
+    },
+    {
+     "label": "HiGS t min (노이즈 수준 · 이하에서 끔)",
+     "value": 0.4,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "HiGS t max (노이즈 수준)",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.01,
+     "choices": null
+    },
+    {
+     "label": "Enable HiFlow (hires fix)",
+     "value": false,
+     "minimum": null,
+     "maximum": null,
+     "step": null,
+     "choices": null
+    },
+    {
+     "label": "HiFlow direction α",
+     "value": 1.0,
+     "minimum": 0.0,
+     "maximum": 2.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiFlow acceleration β",
+     "value": 0.5,
+     "minimum": 0.0,
+     "maximum": 1.0,
+     "step": 0.05,
+     "choices": null
+    },
+    {
+     "label": "HiFlow low-pass cutoff D (Butterworth)",
+     "value": 0.2,
+     "minimum": 0.05,
+     "maximum": 1.0,
+     "step": 0.01,
      "choices": null
     }
    ]
@@ -1641,6 +2195,8 @@
      "step": null,
      "choices": [
       "None",
+      "Qwen2D-Anime-dense-440k_ema_epoch_1.safetensors",
+      "Qwen2D-Anime-dense_epoch_1.safetensors",
       "minimax_h3_audio_vae_fp32.safetensors",
       "minimax_h3_video_vae_fp16.safetensors",
       "qwen_image_vae.safetensors"
@@ -1696,6 +2252,8 @@
      "step": null,
      "choices": [
       "None",
+      "Qwen2D-Anime-dense-440k_ema_epoch_1.safetensors",
+      "Qwen2D-Anime-dense_epoch_1.safetensors",
       "minimax_h3_audio_vae_fp32.safetensors",
       "minimax_h3_video_vae_fp16.safetensors",
       "qwen_image_vae.safetensors"

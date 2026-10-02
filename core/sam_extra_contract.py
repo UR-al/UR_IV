@@ -41,7 +41,13 @@ EXT_VERSION_AUDITED = "0.30.0"
 # NegPiP 내부 수정(395854b — 제목·인자 0개·always-on·파일 이름 그대로, 앱 계약 변화 없음)까지.
 # 2026-10-01 VAE DeGrid 앱 노출(확장은 그대로 395854b): SCRIPTS·MODULES 를 HOLD → mapped(Extras 판은 ignored — API 없음),
 # 옵션 셋은 P10 라디오 덮어쓰기(OPTIONS mapped), 상수 계약은 SEMANTIC_PINS degrid_*(앱·Comfy 팩 거울).
-EXT_COMMIT_AUDITED = "395854b"
+# 2026-10-02 3d5d26d(Forge 2.29.2 Anima 엔진 속성 이름 대응 — 인자·infotext 계약 그대로) 위의 fe2a4e7:
+# v0.30 디테일 묶음(PAG 인자 62→91 — S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow, 앱은 고정 칸으로 확장 기본값만 보냄)과
+# 2026-10-02 검토 제안 편입(새 스크립트 'Anima Optimal Scale', 옵션 sam3_guidance_pag_cosine_envelope 기본 끔·
+# sam3_builtin_negpip_enabled 기본 켬 — 셋 다 HOLD). 픽스처는 같은 날 Forge 2.29.2(46365871)를 이 트리로 다시 띄워
+# 라이브로 받았다 — 학습 중에 소스 AST 로 먼저 맞춘 새 칸(PAG 62-90·Optimal Scale)과 값이 모두 같았다.
+# 같은 날 v0.30.0 으로 릴리스했다 — master 089333b 는 fe2a4e7 을 합친 머지 커밋이고 트리가 같다.
+EXT_COMMIT_AUDITED = "089333b"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -127,13 +133,16 @@ SCRIPTS = MappingProxyType({
             gaps=("P14: BatchView SAM3 필드·inpaint W/H 폴백 1024",))),
     "Anima Perturbation Guidance": _script(
         # shape: Attn Scale 최대 15→100(원본 scale 0~100 — wave B PAG-F), DCW·CWM·RDC·CNS 기본값·범위와 숨은
-        # RDC 스위치 True(원본 입력 — wave C DCW-F·CNS-F). 픽스처는 둘 다 Forge 정지 중 소스 AST 로 맞췄다
-        file="scripts/anima_safe_pag.py", form="positional", live_argc=62, shape="4e714c4bdfa5",
-        ui_return="app_spec", api_reads="0-10,12-61", runtime_choices=(45,),
+        # RDC 스위치 True(원본 입력 — wave C DCW-F·CNS-F). 픽스처는 둘 다 Forge 정지 중 소스 AST 로 맞췄다.
+        # 2026-10-02 v0.30 디테일 묶음 62-90 append — 앱은 고정 칸(PERTURBATION_SPEC). 픽스처는 라이브(Forge 2.29.2)
+        file="scripts/anima_safe_pag.py", form="positional", live_argc=91, shape="6fcc5c61ac90",
+        ui_return="app_spec", api_reads="0-10,12-90", runtime_choices=(45,),
         app_title="core.anima_guidance:SCRIPT_PERTURBATION",
         app_spec=("core.anima_guidance:PERTURBATION_SPEC", "guid_"),
         api_note="idx11(auto_decay)은 visible=False 자리 유지용이라 API 가 읽지 않는다. idx45(CLIP-L)는 실행 "
-                 "시점 목록. live_argc 57 은 v0.21.2 빌드 — 뒤 5개가 잘리고 idx56 'Auto' 가 SMC 를 켠다(나-5, P5).",
+                 "시점 목록. live_argc 57 은 v0.21.2 빌드 — 뒤 5개가 잘리고 idx56 'Auto' 가 SMC 를 켠다(나-5, P5). "
+                 "62-90 은 v0.30 디테일 묶음(SLG mode·S² 5칸·SMC controller·Adaptive α/λ·TSR 3칸·Momentum 6칸·HiGS 7칸·"
+                 "HiFlow 4칸) — 62개 빌드에 보내면 Forge 가 넘친 인자를 버리고, 확장은 빠진 칸을 기본값(전부 끔)으로 읽는다.",
         classification=mapped(
             "core/anima_guidance.py:PERTURBATION_SPEC", "core/anima_guidance.py:build_alwayson",
             "ui/generator_generation.py:_apply_postprocess_chain",
@@ -161,7 +170,10 @@ SCRIPTS = MappingProxyType({
                  "SMC/CWM 이 원본 DCW(+a) 처럼 돌고 APG 만 건너뛴다. CNS 는 guidance_cns.apply_cns 래퍼 "
                  "(tests/test_comfy_guidance_suite.py). 확장은 DCW-F 전 빌드에서 CFG≈1 의 SMC/CWM 도 건너뛰고 ADG "
                  "스텝의 DCW 를 생략한다",
-            gaps=("P15: guid_cfg_mode 활성 키, SLG 배지, CLIP-L 없음 경고",
+            gaps=("HOLD: v0.30 디테일 묶음(62-90 — S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow)은 고정 칸으로 확장 기본값"
+                  "(전부 끔)만 보낸다. Anima 실측 A/B 전이라 카드·Comfy 팩 노출은 보류(사용자 결정) — 붙여 넣은 "
+                  "infotext 의 'Anima TSR' 등도 앱이 되살리지 않는다",
+                  "P15: guid_cfg_mode 활성 키, SLG 배지, CLIP-L 없음 경고",
                   "P17(호스트 차이): PAG 와 SEG/SLG 를 함께 켜고 rescale > 0 이면 확장은 두 항을 더해 한 번 rescale "
                   "하고(_apply_perturbation), 팩은 원본 PAG post-CFG 가 자기 항을, 이어서 SEG/SLG post-CFG 가 받은 "
                   "결과를 기준으로 자기 항을 rescale 한다 — 원본 PAG 노드를 고치지 않으므로 남는다(rescale 0 이면 "
@@ -354,6 +366,15 @@ SCRIPTS = MappingProxyType({
                   "Forge models/DeGrid 의 파일은 ComfyUI/models/degrid(팩이 등록하는 폴더)에 따로 두거나 경로를 더해야 "
                   "보인다(관리형 ComfyUI 는 앱이 degrid 카테고리를 적는다 — core/backend_runtime.MODEL_PATH_CATEGORIES)",
                   "HOLD: 모델 내려받기 카탈로그 항목이 없다 — NAFNet 파일은 사용자가 직접 넣는다"))),
+    # 2026-10-02 검토 제안 편입(확장 미커밋) — CFG-Zero* 의 optimized-scale 만(zero-init 제외)인 Anima·CFG > 1 전용 실험
+    # post-CFG. 끄면 자기 콜백만 뗀다. Skimmed CFG·다른 CFG 함수·앞선 post-CFG 보정이 있으면 건너뛰고 status 에 남긴다.
+    "Anima Optimal Scale": _script(
+        file="scripts/anima_cfg_optimal_scale.py", form="positional", live_argc=4, shape="b38ff7c09159",
+        ui_return=("enabled", "blend", "start", "end"), api_reads="0-3",
+        api_note="위치 인자 [enabled, blend(0-1, 기본 0.25), start, end(%, percent_to_sigma 창)]. infotext "
+                 "'Anima Optimal Scale'(blend·start·end·zero_init=omitted)·'Anima Optimal Scale status'(적용·건너뜀 수).",
+        classification=deferred(HOLD, "실험 기능(기본 끔) — Anima 화질·GPU 동작 미검증. 앱이 만들지 않는다"
+                                      "(core/alwayson_propagation NEVER)")),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -395,7 +416,7 @@ SAM3_REQUEST_ONLY_KEYS = ("sam3_source_image",)
 SAM3_ENABLE_LABEL = "Enable SAM3"      # script-info args[0].label
 SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam3Args 49 + sam3_enable
 
-# ── Forge 옵션 (shared.opts.add_option, 라이브 18개) ───────────────────────────────
+# ── Forge 옵션 (shared.opts.add_option, 라이브 20개) ───────────────────────────────
 # 주의(나-7): override_settings 에 모르는 키가 있으면 Forge classic 은 KeyError 로 요청 전체를 실패시킨다.
 # P10: 요청마다 덮어쓰는 11개(core/forge_override_settings.SPECS — 체크박스는 bool, 라디오는 선택지 문자열) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
 # 기능 스냅샷의 has_option 이 True 일 때만 보내고, 거절(500 KeyError·설정 잠금)되면 앱 키를 빼고 한 번 더 보낸다.
@@ -433,6 +454,13 @@ OPTIONS = MappingProxyType({
         "OPT_DAVE_PRE_DD", "DAVE+Detail Daemon 우회(기본 켬, 결과가 달라짐 — infotext 'Anima DAVE pre-DD sigma'). 끄면 원본 "
                            "노드 조합처럼 DAVE 가 모든 스텝에 걸려 무너진다. 앱 Comfy 팩은 같은 기본값(guid_dave_pre_dd, 팩 "
                            "1.4.1)"),
+    # 2026-10-02 검토 제안 편입(확장 미커밋) — 둘 다 앱은 Forge 설정을 따른다(P10 덮어쓰기에 넣지 않는다)
+    "sam3_guidance_pag_cosine_envelope": deferred(
+        HOLD, "PAG 강도 곡선(자체 실험, 기본 끔 — PAG σ 창 양끝 0·가운데 1 인 sin² 곡선을 PAG 항에만 곱함, infotext "
+              "'Anima PAG cosine envelope'·'Anima PAG envelope status'). 논문 기법이 아니고 화질 미검증"),
+    "sam3_builtin_negpip_enabled": deferred(
+        HOLD, "내장 NegPiP 스위치(기본 켬 = 예전 자동 적용, 끄면 infotext 'SAM Extra NegPiP enabled: False'). 끄면 음수 "
+              "가중치를 순정 Forge 가 처리한다 — 앱의 NegPiP 안내(OTHER_EXTENSIONS 'negpip')는 이 설정을 모른다"),
     # VAE DeGrid 옵션 셋 — Forge 전용(ComfyUI 노드는 확장 기본값 auto·fp32·끔, core/vae_degrid.COMFY_OPTIONS). 라디오
     # 둘은 P10 이 선택지 값 문자열로 보낸다(ForgeOptionSpec.choices — 계약 테스트가 설치된 소스의 선택지와 대조)
     "sam3_degrid_device": _p10(
@@ -495,7 +523,7 @@ ROUTES = MappingProxyType({
              "stop_if_job(sam3_route_tile_repair)). 큐를 쥔 txt2img·패널 Tile-Repair 는 건드리지 않는다"),
 })
 
-# ── XYZ 축 (접두어별, 라이브 104개: [SAM3] 37, [Anima …] 51, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4) ──
+# ── XYZ 축 (접두어별, 라이브 133개: [SAM3] 37, [Anima …] 80, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4) ──
 _XYZ_GUIDANCE = deferred("P18", "G17 — 앱 XYZ 가 가이던스 spec 키·인덱스를 바꿔 가며 돌릴 수 없다")
 XYZ_AXES = MappingProxyType({
     "[SAM3]": {**deferred("P18", "S9 — 앱 XYZ 가 SAM3 state 키를 바꿔 가며 돌릴 수 없다"), "labels": (
@@ -509,7 +537,8 @@ XYZ_AXES = MappingProxyType({
     "[Anima Pert]": {**_XYZ_GUIDANCE, "labels": (
         "Attn Block Indices", "Attn Head Indices", "Attn Method", "Attn Scale", "Enable", "End Percent",
         "Legacy Perturbation Strength", "Legacy Soft/Approx", "Perturbation Strength", "Rescale",
-        "Rescale Mode", "SEG Blur Sigma", "SLG Block Indices", "SLG Enable", "SLG Scale", "Start Percent")},
+        "Rescale Mode", "SEG Blur Sigma", "SLG Block Indices", "SLG Enable", "SLG Mode", "SLG Scale",
+        "Start Percent")},
     "[Anima APG]": {**_XYZ_GUIDANCE, "labels": ("Enable", "Eta", "Momentum", "Norm Threshold")},
     "[Anima AdaptiveG]": {**_XYZ_GUIDANCE, "labels": ("Enable", "Keep Every", "Skip After")},
     "[Anima CFG]": {**_XYZ_GUIDANCE, "labels": ("Base Mode", "Experimental Stack")},
@@ -519,7 +548,15 @@ XYZ_AXES = MappingProxyType({
     "[Anima DCW]": {**_XYZ_GUIDANCE, "labels": ("Enable", "Lambda High", "Lambda Low")},
     "[Anima Mod]": {**_XYZ_GUIDANCE, "labels": ("Direction Weight", "Enable", "End Block", "Start Block")},
     "[Anima RDC]": {**_XYZ_GUIDANCE, "labels": ("Alpha HH", "Alpha LL", "Enable", "Tau")},
-    "[Anima SMC]": {**_XYZ_GUIDANCE, "labels": ("Enable", "K", "Lambda", "Preset")},
+    "[Anima SMC]": {**_XYZ_GUIDANCE, "labels": (
+        "Adaptive Alpha", "Adaptive Lambda", "Controller", "Enable", "K", "Lambda", "Preset")},
+    # v0.30 디테일 묶음(2026-10-02, 확장 미커밋) — 앱은 이 칸들을 고정 칸으로만 보낸다(PERTURBATION_SPEC 62-90)
+    "[Anima S2]": {**_XYZ_GUIDANCE, "labels": ("Drop Ratio", "Eligible Blocks", "End", "Scale", "Start")},
+    "[Anima TSR]": {**_XYZ_GUIDANCE, "labels": ("Enable", "K", "Sigma")},
+    "[Anima MG]": {**_XYZ_GUIDANCE, "labels": ("Alpha", "Beta", "Enable", "Normalize", "Window Max", "Window Min")},
+    "[Anima HiGS]": {**_XYZ_GUIDANCE, "labels": (
+        "Cutoff", "Enable", "Eta", "History Alpha", "T Max", "T Min", "Weight")},
+    "[Anima HiFlow]": {**_XYZ_GUIDANCE, "labels": ("Alpha", "Beta", "Cutoff", "Enable")},
     "[Anima Skim]": {**_XYZ_GUIDANCE, "labels": (
         "Disable Flipping Filter", "Enable", "End", "Flip At", "Full Skim Negative", "Skimming CFG", "Start")},
     "[Detail Daemon]": {**deferred("P18", "G17 — 앱 XYZ 가 가이던스 spec 키를 바꿔 가며 돌릴 수 없다. 'Amount' "
@@ -576,6 +613,7 @@ MODULES = MappingProxyType({
                                          note="SCRIPTS['DoRA Inference Mode'] — 라벨·infotext 'DoRA inserted' 는 "
                                               "SEMANTIC_PINS dora_*_labels·dora_infotext_insert_key"),
     "scripts/anima_vae_2x.py": deferred(HOLD, "SCRIPTS['Anima VAE 2x (spacepxl decoder)'] — M9 보류"),
+    "scripts/anima_cfg_optimal_scale.py": deferred(HOLD, "SCRIPTS['Anima Optimal Scale'] — 실험 기능 보류"),
     "scripts/anima_vae_degrid.py": mapped(
         "core/vae_degrid.py:SCRIPT_NAME", "core/forge_override_settings.py:OPT_DEGRID_DEVICE",
         note="SCRIPTS['Anima VAE DeGrid (NAFNet)'] — 옵션 sam3_degrid_* 셋도 여기서 등록한다(OPTIONS, P10 Forge 전용). "
@@ -594,7 +632,9 @@ MODULES = MappingProxyType({
     "scripts/anima_ref_poc.py": ignored("N9 — 디버그"),
     "scripts/lora_manager.py": ignored("N8 — 숨은 Gradio 브리지와 옵션 두 개(N2)"),
     "scripts/appearance_theme.py": ignored("N3 — Forge 화면 테마 옵션"),
-    "scripts/negpip.py": mapped("core/alwayson_propagation.py:TITLE_NEGPIP", note="SCRIPTS['NegPiP'] (sd-forge-negpip 편입)"),
+    "scripts/negpip.py": mapped("core/alwayson_propagation.py:TITLE_NEGPIP",
+                                note="SCRIPTS['NegPiP'] (sd-forge-negpip 편입). 내장 스위치 옵션 sam3_builtin_negpip_enabled 도 "
+                                     "여기서 등록한다(OPTIONS, HOLD)"),
     # sam3ext/
     "sam3ext/__init__.py": ignored("패키지 지연 import — 공개 이름(SAM3_NAME, Sam3Args)은 SCRIPTS 가 본다"),
     "sam3ext/__version__.py": mapped("core/sam_extra_contract.py:EXT_VERSION_AUDITED",

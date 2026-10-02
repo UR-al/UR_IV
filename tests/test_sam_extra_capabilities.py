@@ -165,12 +165,12 @@ class LiveFixtureTests(unittest.TestCase):
         # 녹화 시점엔 아직 없는 라우트 (메모·TIPO·레퍼런스·계약)
         for flag in ("memo_routes", "tipo_route", "reference_route", "contract_route"):
             self.assertFalse(getattr(c, flag), flag)
-        self.assertEqual(c.anima_guidance_argc, 62)
+        self.assertEqual(c.anima_guidance_argc, 91)
         self.assertIs(c.detail_daemon_hires, True)       # 인자 13(Hires Pass)이 있다
 
     def test_script_details_match_app_specs(self):
         pag = self.caps.script(anima_guidance.SCRIPT_PERTURBATION)
-        self.assertEqual((pag["live_argc"], pag["spec_argc"]), (62, len(anima_guidance.PERTURBATION_SPEC)))
+        self.assertEqual((pag["live_argc"], pag["spec_argc"]), (91, len(anima_guidance.PERTURBATION_SPEC)))
         self.assertEqual(pag["trailing_unmapped"], ())
         self.assertTrue(pag["img2img"])
         self.assertEqual(self.caps.script("Anima Detail Daemon")["live_argc"], 14)
@@ -294,12 +294,26 @@ class VariantTests(unittest.TestCase):
         self.assertEqual(caps.anima_guidance_argc, 57)
         self.assertIn("pag_smc_auto_old_build", _codes(caps))
         detail = caps.script("anima perturbation guidance")
+        # 고정 칸(62-90 디테일 묶음)은 앱 설정이 아니라 '무시될 기능'에 들지 않는다
         self.assertEqual(list(detail["trailing_unmapped"]),
-                         [key for key, *_ in anima_guidance.PERTURBATION_SPEC[57:]])
+                         [key for key, kind, *_ in anima_guidance.PERTURBATION_SPEC[57:]
+                          if kind != anima_guidance.FIXED])
         fewer = next(w for w in caps.warnings if w["code"] == "args_fewer")
         self.assertIn("RDC", fewer["message"])
         self.assertIn("SMC", fewer["message"])
         self.assertIs(caps.detail_daemon_hires, True)
+
+    def test_pag_build_without_the_detail_suite_has_nothing_to_drop(self):
+        # v0.30 디테일 묶음(62-90) 전 빌드(62개): 앱은 그 칸을 고정 칸(확장 기본값)으로만 보내므로 경고가 없다
+        bodies = live_bodies()
+        for img2img in (False, True):
+            pag = _script(bodies, "anima perturbation guidance", img2img=img2img)
+            pag["args"] = pag["args"][:62]
+        caps, _ = build(bodies)
+        self.assertEqual(caps.anima_guidance_argc, 62)
+        self.assertEqual(list(caps.script("anima perturbation guidance")["trailing_unmapped"]), [])
+        self.assertNotIn("args_fewer", _codes(caps))
+        self.assertNotIn("pag_smc_auto_old_build", _codes(caps))
 
     def test_detail_daemon_without_hires(self):
         # Hires Pass(인자 13) 추가 전 빌드: 잘려서 무시될 칸을 알리고, 앱은 dd_hires 생성에 경고한다

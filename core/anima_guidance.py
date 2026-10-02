@@ -79,7 +79,7 @@ _B, _F, _I, _C, _T = 'bool', 'float', 'int', 'choice', 'text'
 # 보낸다. 위젯 프록시·default_settings()·Forge 가져오기에서 빠진다.
 FIXED = _X = 'fixed'
 
-# scripts/anima_safe_pag.py — ui() return 순서 (v0.21.2+ 기준 62개)
+# scripts/anima_safe_pag.py — ui() return 순서 (v0.30 디테일 묶음 기준 91개 — 62-90 은 고정 칸)
 PERTURBATION_SPEC = (
     # 0-4 : PAG/SEG 본체
     ('guid_enabled',            _B, False,  None),
@@ -175,7 +175,41 @@ PERTURBATION_SPEC = (
     ('guid_rdc_tau',            _F, 0.0,    (0.0, 0.5)),
     ('guid_rdc_alpha_ll',       _F, 0.03,   (0.0, 0.3)),
     ('guid_rdc_alpha_hh',       _F, 0.0,    (0.0, 0.1)),
+    # 62-90 : 확장 v0.30 디테일 묶음 append(2026-10-02 — S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow, 확장 기본 전부 끔).
+    #   앱은 아직 이 기능들을 노출하지 않는다(HOLD — core/sam_extra_contract.py) — 고정 칸으로 자리만 지키고 늘 확장
+    #   기본값을 보낸다(= 그 기능이 없는 옛 빌드와 같은 결과). 62칸 옛 빌드는 Forge 가 넘친 인자를 버린다.
+    ('guid_slg_mode',            _X, 'Fixed',   None),
+    ('guid_s2_scale',            _X, 0.25,      None),
+    ('guid_s2_ratio',            _X, 0.05,      None),
+    ('guid_s2_blocks',           _X, '',        None),
+    ('guid_s2_start',            _X, 0.10,      None),
+    ('guid_s2_end',              _X, 0.90,      None),
+    ('guid_smc_mode',            _X, 'Unit-L2', None),
+    ('guid_smc_adaptive_alpha',  _X, 0.2,       None),
+    ('guid_smc_adaptive_lambda', _X, 5.0,       None),
+    ('guid_tsr_enabled',         _X, False,     None),
+    ('guid_tsr_k',               _X, 0.95,      None),
+    ('guid_tsr_sigma',           _X, 1.0,       None),
+    ('guid_mg_enabled',          _X, False,     None),
+    ('guid_mg_alpha',            _X, 0.5,       None),
+    ('guid_mg_beta',             _X, 0.6,       None),
+    ('guid_mg_normalize',        _X, False,     None),
+    ('guid_mg_min',              _X, 0.30,      None),
+    ('guid_mg_max',              _X, 0.95,      None),
+    ('guid_higs_enabled',        _X, False,     None),
+    ('guid_higs_weight',         _X, 1.75,      None),
+    ('guid_higs_eta',            _X, 0.0,       None),
+    ('guid_higs_alpha',          _X, 0.75,      None),
+    ('guid_higs_cutoff',         _X, 0.05,      None),
+    ('guid_higs_t_min',          _X, 0.40,      None),
+    ('guid_higs_t_max',          _X, 1.00,      None),
+    ('guid_hiflow_enabled',      _X, False,     None),
+    ('guid_hiflow_alpha',        _X, 1.0,       None),
+    ('guid_hiflow_beta',         _X, 0.5,       None),
+    ('guid_hiflow_cutoff',       _X, 0.2,       None),
 )
+# 처음 append 된 디테일 묶음 칸(62) — 그 앞 62칸은 옛 빌드와 같은 뜻이다(_APPEND_ONLY_FROM).
+PAG_DETAIL_SUITE_FROM = [key for key, *_rest in PERTURBATION_SPEC].index('guid_slg_mode')   # 62
 
 # 빈 문자열이면 스펙 기본값을 보내는 텍스트 칸 — DAVE 블록 칸은 원본 기본 마스크(블록 8~18)를 대신한다.
 # 팩(guidance_dave.py: ``str(blocks or '').strip() or '8-18'``)과 같은 규칙.
@@ -231,7 +265,9 @@ DD_HIRES_INDEX = [key for key, *_rest in DETAIL_DAEMON_SPEC].index('dd_hires')  
 # 뒤에 append 된 칸이라 없는 빌드도 앞 칸의 위치 계약은 같은 스크립트 → 처음 append 된 인덱스.
 # Forge 가져오기는 이보다 짧으면 거부하고, 이 인덱스부터 빠진 칸은 기본값으로 둔다(meta 에 알린다).
 # Hires Pass 는 13개 인자 빌드(sam-extra v0.30, 4045adb)에 없다 — 그 빌드의 앞 13칸은 지금과 같은 뜻이다.
+# PAG 디테일 묶음(62-90)은 62개 인자 빌드에 없다 — 모두 고정 칸이라 가져올 값도 없다.
 _APPEND_ONLY_FROM = {
+    SCRIPT_PERTURBATION: PAG_DETAIL_SUITE_FROM,
     SCRIPT_DETAIL_DAEMON: DD_HIRES_INDEX,
 }
 

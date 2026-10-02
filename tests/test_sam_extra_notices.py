@@ -377,8 +377,8 @@ class PreGenerationNoticeTests(_QuietAssumption):
         test_forge_cfg_exactly_one_has_no_uncond_so_smc_cwm_step_aside). 원본 ComfyUI 노드(origin:
         namemechan/ComfyUI-DCW@66aaf9dd:dcw_node.py:877-878 — 뜻만)는 CFG 1 에도 네거티브가 있어 SMC/CWM 이 돈다 —
         호스트 차이. 두 빌드는 버전·인자 수(0.30.0·62개)로 가를 수 없지만 답이 같다."""
-        pre_dcwf = _capabilities(*_live_bodies())      # 픽스처 = DCW-F 전 소스(62개, arg30 max 0.5)
-        self.assertEqual(pre_dcwf.anima_guidance_argc, 62)
+        pre_dcwf = _capabilities(*_live_bodies())      # 픽스처 스냅샷(지금 91개 — v0.30 디테일 묶음 포함)
+        self.assertEqual(pre_dcwf.anima_guidance_argc, 91)
         dcwf = SimpleNamespace(known=True, anima_guidance_argc=62, installed=True,
                                script=lambda _t: {"present": True, "img2img": True})
         for label, caps in (("unknown", None), ("pre-DCW-F", pre_dcwf), ("DCW-F", dcwf)):

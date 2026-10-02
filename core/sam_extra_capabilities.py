@@ -94,6 +94,10 @@ POSITIONAL_SPECS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     TITLE_ANIMA38: tuple(anima38.ARG_NAMES),
 })
 
+# 고정 칸(anima_guidance.FIXED)은 사용자 설정이 아니라 늘 확장 기본값이다 — 그 칸이 없는 옛 빌드여도 앱 기능이
+# 빠지지 않으므로 '무시될 기능'에 넣지 않는다(PAG 디테일 묶음 62-90, Detail Daemon 자리 칸).
+_FIXED_KEYS = frozenset(key for spec in anima_guidance.SPECS.values()
+                        for key, kind, *_rest in spec if kind == anima_guidance.FIXED)
 # v0.21.2 계열 PAG 빌드의 인자 수. 이 빌드는 SMC 프리셋이 'Off' 가 아니면 SMC 를 켠다(나-5).
 PAG_OLD_BUILD_ARGC = 57
 # Detail Daemon Hires Pass 인자 위치(맨 뒤 append) — 앱 스펙의 dd_hires 자리.
@@ -336,12 +340,13 @@ def _script_detail(title: str, present: bool, img2img: bool, item: Any, warnings
         return detail
     feature = next((name for name, t in _SCRIPT_FEATURES if t == title), title)
     if live_argc < len(spec):
-        dropped = list(spec[live_argc:])
+        dropped = [key for key in spec[live_argc:] if key not in _FIXED_KEYS]
         detail["trailing_unmapped"] = dropped
-        warnings.append(_warning(
-            "args_fewer", feature,
-            f"{_FEATURE_LABELS.get(feature, title)}: 확장 인자가 {live_argc}개로 앱({len(spec)}개)보다 적습니다 "
-            f"— 확장 업데이트 필요. 무시될 기능: {', '.join(_feature_groups(dropped))}"))
+        if dropped:
+            warnings.append(_warning(
+                "args_fewer", feature,
+                f"{_FEATURE_LABELS.get(feature, title)}: 확장 인자가 {live_argc}개로 앱({len(spec)}개)보다 적습니다 "
+                f"— 확장 업데이트 필요. 무시될 기능: {', '.join(_feature_groups(dropped))}"))
     elif live_argc > len(spec):
         detail["extra_live_args"] = live_argc - len(spec)
         warnings.append(_warning(
