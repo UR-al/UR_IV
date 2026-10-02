@@ -29,6 +29,7 @@ class TestForgeParityContracts(unittest.TestCase):
             "ForgeNeoNegPip", "ForgeNeoAnimaDAVE", "ForgeNeoAnimaModGuidance",
             "ForgeNeoSkimmedCFG", "ForgeNeoAnimaSafePAG", "ForgeNeoDCWCWMSMC",
             "ForgeNeoAnimaGuidanceSuite", "ForgeNeoAnimaDetailDaemon",
+            "ForgeNeoAnimaOptimalScale",
         }
         expected_generation = {
             "ForgeNeoKSamplerCNS", "ForgeNeoCNSSamplerPatch", "ForgeNeoModelSamplingShift",

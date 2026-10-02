@@ -68,6 +68,7 @@ TITLE_SAM3 = sam3_args.SCRIPT_SAM3.lower()
 TITLE_PAG = anima_guidance.SCRIPT_PERTURBATION.lower()
 TITLE_SKIMMED = anima_guidance.SCRIPT_SKIMMED_CFG.lower()
 TITLE_DETAIL_DAEMON = anima_guidance.SCRIPT_DETAIL_DAEMON.lower()
+TITLE_OPTIMAL_SCALE = anima_guidance.SCRIPT_OPTIMAL_SCALE.lower()   # scripts/anima_cfg_optimal_scale.py (v0.30.0)
 TITLE_ANIMA38 = anima38.SCRIPT_NAME.lower()
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME.lower()    # scripts/dora_infer_mode.py (DORA_INFER_NAME)
 TITLE_VAE2X = "anima vae 2x (spacepxl decoder)"     # scripts/anima_vae_2x.py
@@ -77,7 +78,7 @@ TITLE_SPARSE_LORA = "sam extra anima sparse lora"   # scripts/anima_lora_blocks.
 TITLE_REFERENCE_POC = "anima reference poc (shape logger)"  # 디버그
 
 SAM_EXTRA_TITLES = (
-    TITLE_SAM3, TITLE_PAG, TITLE_SKIMMED, TITLE_DETAIL_DAEMON, TITLE_ANIMA38, TITLE_DORA,
+    TITLE_SAM3, TITLE_PAG, TITLE_SKIMMED, TITLE_DETAIL_DAEMON, TITLE_OPTIMAL_SCALE, TITLE_ANIMA38, TITLE_DORA,
     TITLE_VAE2X, TITLE_DEGRID, TITLE_LORA_BRIDGE, TITLE_SPARSE_LORA, TITLE_REFERENCE_POC,
 )
 # 확장 폴더 이름 — 앱 설치기는 sam-extra, 수동 클론은 forge_sam3_extension (core/sam3_assets.py 와 같다)
@@ -91,31 +92,35 @@ POSITIONAL_SPECS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     TITLE_PAG: tuple(key for key, *_ in anima_guidance.PERTURBATION_SPEC),
     TITLE_SKIMMED: tuple(key for key, *_ in anima_guidance.SKIMMED_SPEC),
     TITLE_DETAIL_DAEMON: tuple(key for key, *_ in anima_guidance.DETAIL_DAEMON_SPEC),
+    TITLE_OPTIMAL_SCALE: tuple(key for key, *_ in anima_guidance.OPTIMAL_SCALE_SPEC),
     TITLE_ANIMA38: tuple(anima38.ARG_NAMES),
 })
 
 # 고정 칸(anima_guidance.FIXED)은 사용자 설정이 아니라 늘 확장 기본값이다 — 그 칸이 없는 옛 빌드여도 앱 기능이
-# 빠지지 않으므로 '무시될 기능'에 넣지 않는다(PAG 디테일 묶음 62-90, Detail Daemon 자리 칸).
+# 빠지지 않으므로 '무시될 기능'에 넣지 않는다(Detail Daemon 자리 칸).
 _FIXED_KEYS = frozenset(key for spec in anima_guidance.SPECS.values()
                         for key, kind, *_rest in spec if kind == anima_guidance.FIXED)
+# '무시될 기능' 묶음 이름 — 키 둘째 마디의 대문자가 읽기 어려운 것만(디테일 묶음: guid_mg_* → Momentum 등).
+_GROUP_LABELS = {"MG": "Momentum", "HIGS": "HiGS", "HIFLOW": "HiFlow"}
 # v0.21.2 계열 PAG 빌드의 인자 수. 이 빌드는 SMC 프리셋이 'Off' 가 아니면 SMC 를 켠다(나-5).
 PAG_OLD_BUILD_ARGC = 57
 # Detail Daemon Hires Pass 인자 위치(맨 뒤 append) — 앱 스펙의 dd_hires 자리.
 DD_HIRES_INDEX = POSITIONAL_SPECS[TITLE_DETAIL_DAEMON].index("dd_hires")
 # 앱 기능 이름 → 스냅샷 플래그. Vue 도 같은 이름을 쓴다(frontend/src/utils/samExtraCapabilities.ts).
 FEATURE_FLAGS = (
-    "sam3", "anima_guidance", "skimmed_cfg", "detail_daemon", "anima38", "dora", "vae2x", "degrid",
+    "sam3", "anima_guidance", "skimmed_cfg", "detail_daemon", "optimal_scale", "anima38", "dora", "vae2x", "degrid",
     "lora_manager", "memo_routes", "tipo_route", "reference_route", "contract_route",
     "tile_repair_route",
 )
 _SCRIPT_FEATURES = (
     ("sam3", TITLE_SAM3), ("anima_guidance", TITLE_PAG), ("skimmed_cfg", TITLE_SKIMMED),
-    ("detail_daemon", TITLE_DETAIL_DAEMON), ("anima38", TITLE_ANIMA38), ("dora", TITLE_DORA),
-    ("vae2x", TITLE_VAE2X), ("degrid", TITLE_DEGRID),
+    ("detail_daemon", TITLE_DETAIL_DAEMON), ("optimal_scale", TITLE_OPTIMAL_SCALE), ("anima38", TITLE_ANIMA38),
+    ("dora", TITLE_DORA), ("vae2x", TITLE_VAE2X), ("degrid", TITLE_DEGRID),
 )
 _FEATURE_LABELS = {
     "sam3": "SAM3 Mask", "anima_guidance": "Anima 가이던스(PAG)", "skimmed_cfg": "Skimmed CFG",
-    "detail_daemon": "Detail Daemon", "anima38": "Anima 3.8B", "dora": "DoRA 추론 방식",
+    "detail_daemon": "Detail Daemon", "optimal_scale": "Anima Optimal Scale",
+    "anima38": "Anima 3.8B", "dora": "DoRA 추론 방식",
     "vae2x": "VAE 2x", "degrid": "VAE DeGrid", "lora_manager": "LoRA Manager", "memo_routes": "메모 동기화",
     "tipo_route": "TIPO", "reference_route": "레퍼런스", "tile_repair_route": "Tile & Repair",
 }
@@ -190,6 +195,7 @@ class SamExtraCapabilities:
     skimmed_cfg: bool = False
     detail_daemon: bool = False
     detail_daemon_hires: Optional[bool] = None  # Detail Daemon 인자 13(Hires Pass)이 있나. None = 모름·스크립트 없음
+    optimal_scale: bool = False                 # 'Anima Optimal Scale' 스크립트(v0.30.0, 2026-10-02 검토 제안)
     anima38: bool = False
     dora: bool = False
     vae2x: bool = False
@@ -325,6 +331,12 @@ def _feature_groups(keys: Iterable[str]) -> list[str]:
         label = parts[1].upper() if parts[0] in ("guid", "skim", "dd") and len(parts) > 1 else key
         if key == "guid_smc_master_enabled":
             label = "SMC 마스터"
+        elif key == "guid_slg_mode" or key.startswith("guid_s2_"):
+            label = "S²"   # SLG mode 는 S² 를 고르는 칸이다
+        elif key == "guid_smc_mode" or key.startswith("guid_smc_adaptive_"):
+            label = "Adaptive SMC"
+        else:
+            label = _GROUP_LABELS.get(label, label)
         if label not in groups:
             groups.append(label)
     return groups

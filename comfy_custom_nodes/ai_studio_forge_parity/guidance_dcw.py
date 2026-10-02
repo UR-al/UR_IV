@@ -36,7 +36,22 @@ import math
 from typing import Any, Callable
 
 from .compat import clone_model, require_torch
-from .guidance_common import CATEGORY, _haar_dwt, _haar_idwt, _scalar_sigma
+from .guidance_common import CATEGORY, PRE_DD_SIGMAS_KEY, _haar_dwt, _haar_idwt, _scalar_sigma
+
+
+def _sampler_sigma(args: dict[str, Any]) -> float | None:
+    """The sampler's own sigma for this call: Detail Daemon's note (``PRE_DD_SIGMAS_KEY``), else the model's."""
+    options = args.get("model_options") or {}
+    transformer = options.get("transformer_options") if isinstance(options, dict) else None
+    noted = transformer.get(PRE_DD_SIGMAS_KEY) if isinstance(transformer, dict) else None
+    for value in (noted, args.get("sigma")):
+        if value is None:
+            continue
+        try:
+            return float(value.flatten()[0].item()) if hasattr(value, "flatten") else float(value)
+        except (TypeError, ValueError, RuntimeError):
+            continue
+    return None
 
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -237,6 +252,54 @@ def _smc_error(error: Any, previous: Any, strength: float, k: float):
     return corrected, corrected.detach().clone()
 
 
+SMC_MODE_UNIT = "Unit-L2"
+SMC_MODE_ADAPTIVE = "Adaptive sign"
+SMC_ADAPTIVE_ALPHA = 0.2
+SMC_ADAPTIVE_LAMBDA = 5.0
+_ADAPTIVE_FLOOR = 1e-12
+
+
+def normalize_smc_mode(value: Any) -> str:
+    """sam-extra's reading of the SMC controller: 'adaptive…' is the adaptive one, anything else unit-L2."""
+    return SMC_MODE_ADAPTIVE if str(value or "").strip().casefold().startswith("adaptive") else SMC_MODE_UNIT
+
+
+def _smc_adaptive_error(error: Any, sigma: float | None, previous: Any, alpha: float, lambda_value: float):
+    """Adaptive-gain sliding-mode CFG, ``(corrected_error, new_state)`` -- sam-extra v0.30.0's controller.
+
+    sorryhyun's Anima form of CFG-Ctrl (arXiv 2603.03281; sorryhyun/anima_lora ``smc_cfg.py``, MIT --
+    THIRD_PARTY_NOTICES.md): ``s = (e - e_prev') + lambda*e_prev'`` with the stored error rescaled by
+    ``sigma_t/sigma_prev``, gain ``alpha*mean|e|`` (one gain for the batch), ``e + d`` with
+    ``d = -gain*sign(s)``; the state keeps the *uncorrected* error. The first call, a shape change or an
+    unknown sigma start from ``e_prev = e``; ``alpha == 0`` returns ``error`` and still records the state.
+    Here ``error`` is Comfy's noise-space ``cond - uncond`` (= -(x0_c - x0_u)); the controller is odd in
+    ``e``, so the guided result equals the extension's x0-space one.
+    """
+    torch = require_torch()
+    working = _finite(error.to(dtype=torch.float32))
+    state = previous if isinstance(previous, dict) else None
+    sigma_now = None if sigma is None else float(sigma)
+    if (
+        state is None
+        or not torch.is_tensor(state.get("e"))
+        or tuple(state["e"].shape) != tuple(working.shape)
+        or sigma_now is None
+        or not state.get("sigma")
+        or sigma_now <= 0.0
+    ):
+        e_prev = working
+    else:
+        e_prev = _finite(state["e"].to(device=working.device, dtype=working.dtype)) * (
+            sigma_now / float(state["sigma"]))
+    new_state = {"e": working.detach(), "sigma": sigma_now}
+    if float(alpha) == 0.0:
+        return error, new_state
+    surface = (working - e_prev) + float(lambda_value) * e_prev
+    gain = float(alpha) * working.abs().mean().clamp_min(_ADAPTIVE_FLOOR)
+    corrected = _finite(working - gain * torch.sign(surface))
+    return corrected.to(dtype=error.dtype), new_state
+
+
 def _cwm_error(error: Any, sigma: Any, scale: float, low: float, high: float):
     """Scale the guidance error per Haar band (CFG wavelet mixing).
 
@@ -316,14 +379,21 @@ def _guided_noise(
     smc_k: float,
     smc_state: dict[str, Any],
     apg: Callable[[Any], Any] | None = None,
+    smc_mode: str = SMC_MODE_UNIT,
+    smc_alpha: float = SMC_ADAPTIVE_ALPHA,
+    smc_sigma: float | None = None,
 ) -> Any:
     """Combine noise-space ``cond``/``uncond`` the way the DCW(+a) hook does.
 
     Order: guidance error, SMC, (APG), then CWM or plain scaling. With SMC,
-    CWM and APG all inactive this is exactly plain CFG.
+    CWM and APG all inactive this is exactly plain CFG. ``smc_mode`` Adaptive
+    sign runs sam-extra's adaptive controller (``_smc_adaptive_error``, lambda =
+    ``smc_lambda``, gain ``smc_alpha``, the sampler sigma ``smc_sigma``) instead
+    of the original unit-L2 step.
     """
 
-    smc_on = smc_lambda != 0.0 and smc_k != 0.0
+    adaptive = smc_mode == SMC_MODE_ADAPTIVE
+    smc_on = smc_lambda != 0.0 and (adaptive or smc_k != 0.0)
     cwm_on = alpha_low != 0.0 or alpha_high != 0.0
     if not (smc_on or cwm_on or apg is not None):
         return _plain_cfg(cond, uncond, scale)
@@ -333,7 +403,12 @@ def _guided_noise(
     if dtype != source_dtype:
         cond, uncond = cond.to(dtype=dtype), uncond.to(dtype=dtype)
     error = _finite(cond - uncond)
-    if smc_on:
+    if smc_on and adaptive:
+        corrected, smc_state["adaptive"] = _smc_adaptive_error(
+            error, smc_sigma, smc_state.get("adaptive"), smc_alpha, smc_lambda
+        )
+        error = corrected.to(dtype=dtype)
+    elif smc_on:
         corrected, smc_state["e_prev"] = _smc_error(
             error, smc_state.get("e_prev"), smc_lambda, smc_k
         )
@@ -446,6 +521,8 @@ def _cfg_hook(
     smc_lambda: float,
     smc_k: float,
     apg_settings: dict[str, float] | None,
+    smc_mode: str = SMC_MODE_UNIT,
+    smc_alpha: float = SMC_ADAPTIVE_ALPHA,
 ):
     def dcw_cfg_hook(args: dict[str, Any]):
         cond, uncond = args.get("cond"), args.get("uncond")
@@ -455,6 +532,8 @@ def _cfg_hook(
         options = args.get("model_options", fallback_options)
         smc_state = options.setdefault(SMC_STATE_KEY, {})
         sigma = args.get("sigma")
+        # Adaptive SMC reads the sampler's own sigma (Detail Daemon's note), like sam-extra's sampler_sigma
+        smc_sigma = _sampler_sigma(args) if smc_mode == SMC_MODE_ADAPTIVE else None
         apg = None
         if apg_settings is not None:
             apg_state = options.setdefault(APG_STATE_KEY, {})
@@ -472,6 +551,7 @@ def _cfg_hook(
                 cond, uncond, sigma, scale,
                 alpha_low=alpha_low, alpha_high=alpha_high,
                 smc_lambda=smc_lambda, smc_k=smc_k, smc_state=smc_state, apg=apg,
+                smc_mode=smc_mode, smc_alpha=smc_alpha, smc_sigma=smc_sigma,
             )
         except Exception as exc:
             LOGGER.warning("DCW(+a) CWM/SMC skipped for this step: %s", exc)
@@ -528,6 +608,9 @@ def patch_dcw(
     rdc_alpha_ll: float,
     rdc_alpha_hh: float,
     apg_settings: dict[str, float] | None = None,
+    smc_mode: str = SMC_MODE_UNIT,
+    smc_adaptive_alpha: float = SMC_ADAPTIVE_ALPHA,
+    smc_adaptive_lambda: float = SMC_ADAPTIVE_LAMBDA,
 ):
     """Apply DCW(+a) with the original node's switches and gating.
 
@@ -538,13 +621,19 @@ def patch_dcw(
     - CWM needs ``cwm_enabled`` and a non-zero alpha.
 
     ``apg_settings`` (``eta``, ``norm_threshold``, ``momentum``) adds the pack's
-    APG to the CFG hook. Returns ``model`` itself when nothing is active.
+    APG to the CFG hook. ``smc_mode`` Adaptive sign swaps the SMC step for
+    sam-extra's adaptive controller with ``smc_adaptive_alpha``/``_lambda`` (the
+    preset's values are not used then). Returns ``model`` itself when nothing is
+    active.
     """
 
     lambda_l, lambda_h = float(lambda_l), float(lambda_h)
     alpha_l, alpha_h = float(alpha_l), float(alpha_h)
     rdc_tau = float(rdc_tau)
+    smc_mode = normalize_smc_mode(smc_mode)
     smc = resolve_smc(model, smc_preset, smc_lambda, smc_k)
+    if smc is not None and smc_mode == SMC_MODE_ADAPTIVE:
+        smc = (float(smc_adaptive_lambda), 0.0)
     rdc_on = rdc_tau > 0.0
     dcw_on = bool(dcw_enabled) and (lambda_l != 0.0 or lambda_h != 0.0 or rdc_on)
     cwm_on = bool(cwm_enabled) and (alpha_l != 0.0 or alpha_h != 0.0)
@@ -573,6 +662,8 @@ def patch_dcw(
                 smc_lambda=smc_lambda_value,
                 smc_k=smc_k_value,
                 apg_settings=apg_settings,
+                smc_mode=smc_mode if smc is not None else SMC_MODE_UNIT,
+                smc_alpha=float(smc_adaptive_alpha),
             )
             options["disable_cfg1_optimization"] = True
 

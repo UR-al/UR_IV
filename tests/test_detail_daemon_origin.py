@@ -380,7 +380,9 @@ class ForgeImportTests(unittest.TestCase):
             dd,
         ]
         settings, meta = parse_forge_script_info(payload)
-        self.assertEqual(meta["imported_scripts"], list(anima_guidance.SPECS))
+        self.assertEqual(meta["imported_scripts"], [anima_guidance.SCRIPT_PERTURBATION, anima_guidance.SCRIPT_SKIMMED_CFG,
+                                                    anima_guidance.SCRIPT_DETAIL_DAEMON])
+        self.assertEqual(meta["missing_scripts"], [anima_guidance.SCRIPT_OPTIMAL_SCALE])   # 이 응답에는 없다
         self.assertEqual((settings["guid_enabled"], settings["guid_scale"]), (True, 5.5))
         self.assertEqual((settings["skim_enabled"], settings["skim_skimming_cfg"]), (True, 3.0))
         self.assertEqual((settings["dd_enabled"], settings["dd_amount"], settings["dd_end_offset"]),

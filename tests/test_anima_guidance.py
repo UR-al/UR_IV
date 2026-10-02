@@ -16,16 +16,22 @@ import unittest
 from core.anima_guidance import (
     DETAIL_DAEMON_SPEC,
     FIXED,
+    OPTIMAL_SCALE_SPEC,
     PAG_DETAIL_SUITE_FROM,
     PERTURBATION_SPEC,
     SCRIPT_DETAIL_DAEMON,
+    SCRIPT_OPTIMAL_SCALE,
     SCRIPT_PERTURBATION,
     SCRIPT_SKIMMED_CFG,
     SKIMMED_SPEC,
+    SLG_MODE_S2,
+    SMC_MODE_ADAPTIVE,
     build_alwayson,
     build_args,
     default_settings,
     describe_active,
+    detail_suite_features,
+    detail_suite_note,
     is_script_active,
     parse_forge_script_info,
 )
@@ -58,7 +64,7 @@ EXPECTED_PERTURBATION = [
     'mod_adapter_mode', 'mod_adapter_path',
     'smc_preset', 'smc_master_enabled',
     'rdc_enabled', 'rdc_tau', 'rdc_alpha_ll', 'rdc_alpha_hh',
-    # 62-90 : v0.30 디테일 묶음 — 앱은 고정 칸(늘 확장 기본값)
+    # 62-90 : v0.30 디테일 묶음(S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow)
     'slg_mode', 's2_scale', 's2_ratio', 's2_blocks', 's2_start', 's2_end',
     'smc_mode', 'smc_adaptive_alpha', 'smc_adaptive_lambda',
     'tsr_enabled', 'tsr_k', 'tsr_sigma',
@@ -76,6 +82,7 @@ EXPECTED_DETAIL_DAEMON = [
     'start_offset', 'end_offset', 'fade', 'multiplier', 'smooth', 'cfg_couple',
     'hires',
 ]
+EXPECTED_OPTIMAL_SCALE = ['enabled', 'blend', 'start', 'end']
 
 _PREFIXES = {
     SCRIPT_PERTURBATION: ('guid_', PERTURBATION_SPEC, EXPECTED_PERTURBATION,
@@ -84,6 +91,8 @@ _PREFIXES = {
                          'anima_skimmed_cfg.py'),
     SCRIPT_DETAIL_DAEMON: ('dd_', DETAIL_DAEMON_SPEC, EXPECTED_DETAIL_DAEMON,
                            'anima_detail_daemon.py'),
+    SCRIPT_OPTIMAL_SCALE: ('ocfg_', OPTIMAL_SCALE_SPEC, EXPECTED_OPTIMAL_SCALE,
+                           'anima_cfg_optimal_scale.py'),
 }
 
 
@@ -344,30 +353,116 @@ class TestSpecOrder(unittest.TestCase):
         self.assertEqual(len(keys), len(set(keys)))
 
 
-class TestDetailSuiteFixedSlots(unittest.TestCase):
-    """확장 v0.30 디테일 묶음(62-90)은 앱이 노출하지 않는 고정 칸 — 저장값과 무관하게 확장 기본값(전부 끔)을 보내고,
-    설정 키가 아니며, 그 칸이 없는 62개 빌드에서도 'Forge에서 가져오기'가 된다."""
+class TestDetailSuiteSettings(unittest.TestCase):
+    """확장 v0.30 디테일 묶음(62-90 — S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow)은 사용자 설정이다: 저장값을 제
+    자리에 보내고, 기본값은 확장 기본값(전부 끔)이며, 그 칸이 없는 62개 빌드에서 가져오면 빠진 칸을 알린다."""
 
-    def test_slots_always_send_extension_defaults(self):
+    def test_saved_values_are_sent_in_their_slots(self):
         args = build_args(SCRIPT_PERTURBATION, {
-            'guid_tsr_enabled': 'true', 'guid_mg_enabled': 'true', 'guid_higs_enabled': 'true',
-            'guid_hiflow_enabled': 'true', 'guid_slg_mode': 'Stochastic (S²)', 'guid_smc_mode': 'Adaptive sign'})
+            'guid_slg_mode': ' stochastic (s²) ', 'guid_s2_scale': '0.5', 'guid_s2_blocks': '2-20',
+            'guid_smc_mode': 'Adaptive sign', 'guid_smc_adaptive_alpha': '0.3',
+            'guid_tsr_enabled': 'true', 'guid_tsr_k': '0.9',
+            'guid_mg_enabled': 'true', 'guid_mg_normalize': 'true',
+            'guid_higs_enabled': 'true', 'guid_higs_weight': '0.5',
+            'guid_hiflow_enabled': 'true', 'guid_hiflow_cutoff': '0.4'})
+        self.assertEqual((args[62], args[63], args[65]), (SLG_MODE_S2, 0.5, '2-20'))
+        self.assertEqual((args[68], args[69]), (SMC_MODE_ADAPTIVE, 0.3))
+        self.assertEqual((args[71], args[72]), (True, 0.9))
+        self.assertEqual((args[74], args[77]), (True, True))
+        self.assertEqual((args[80], args[81]), (True, 0.5))
+        self.assertEqual((args[87], args[90]), (True, 0.4))
+
+    def test_defaults_are_the_extension_defaults_all_off(self):
+        args = build_args(SCRIPT_PERTURBATION, {})
         self.assertEqual(args[62:], [default for _k, _kind, default, _e in PERTURBATION_SPEC[62:]])
         self.assertEqual((args[62], args[68]), ('Fixed', 'Unit-L2'))
         for index in (71, 74, 80, 87):   # TSR · Momentum · HiGS · HiFlow 켜기
             self.assertIs(args[index], False)
 
-    def test_slots_are_not_user_settings(self):
-        slots = {key for key, *_rest in PERTURBATION_SPEC[62:]}
-        self.assertEqual(slots & set(default_settings()), set())
+    def test_values_are_clamped_to_the_extension_sliders(self):
+        args = build_args(SCRIPT_PERTURBATION, {
+            'guid_s2_ratio': '0', 'guid_tsr_k': '3', 'guid_hiflow_cutoff': '0', 'guid_smc_mode': 'bogus'})
+        self.assertEqual((args[64], args[72], args[90]), (0.01, 1.5, 0.05))
+        self.assertEqual(args[68], 'Unit-L2')
 
-    def test_forge_import_accepts_a_build_without_the_detail_suite(self):
+    def test_slots_are_user_settings(self):
+        slots = {key for key, *_rest in PERTURBATION_SPEC[62:]}
+        self.assertEqual(slots - set(default_settings()), set())
+        self.assertNotIn(FIXED, {kind for _key, kind, *_rest in PERTURBATION_SPEC})
+
+    def test_detail_stage_switches_attach_the_script_on_their_own(self):
+        for key in ('guid_tsr_enabled', 'guid_mg_enabled', 'guid_higs_enabled', 'guid_hiflow_enabled'):
+            with self.subTest(key=key):
+                self.assertTrue(is_script_active(SCRIPT_PERTURBATION, {key: 'true'}))
+                self.assertIn(SCRIPT_PERTURBATION, build_alwayson({key: 'true'}))
+        # S² · Adaptive SMC 는 SLG · SMC 의 방식이다 — 둘이 꺼져 있으면 스크립트를 붙이지 않는다
+        self.assertFalse(is_script_active(SCRIPT_PERTURBATION, {
+            'guid_slg_mode': SLG_MODE_S2, 'guid_smc_mode': SMC_MODE_ADAPTIVE}))
+
+    def test_forge_import_of_a_build_without_the_detail_suite_reports_the_missing_slots(self):
         args = [{'value': default} for _k, _kind, default, _e in PERTURBATION_SPEC[:62]]
         settings, meta = parse_forge_script_info(
             [{'name': SCRIPT_PERTURBATION, 'is_img2img': False, 'args': args}])
         self.assertEqual(meta['imported_scripts'], [SCRIPT_PERTURBATION])
+        missing = [key for key, *_rest in PERTURBATION_SPEC[62:]]
+        self.assertEqual(meta['missing_trailing_args'], missing)
+        self.assertEqual({key: settings[key] for key in missing},
+                         {key: default for key, _kind, default, _e in PERTURBATION_SPEC[62:]})
+
+    def test_forge_import_reads_the_detail_suite(self):
+        values = {key: default for key, _kind, default, _e in PERTURBATION_SPEC}
+        values.update({'guid_slg_mode': SLG_MODE_S2, 'guid_higs_weight': 0.5, 'guid_hiflow_enabled': True})
+        args = [{'value': values[key]} for key, *_rest in PERTURBATION_SPEC]
+        settings, meta = parse_forge_script_info([{'name': SCRIPT_PERTURBATION, 'args': args}])
         self.assertEqual(meta['missing_trailing_args'], [])
-        self.assertTrue(set(settings) <= set(default_settings()))
+        self.assertEqual(
+            (settings['guid_slg_mode'], settings['guid_higs_weight'], settings['guid_hiflow_enabled']),
+            (SLG_MODE_S2, 0.5, True))
+
+    def test_describe_active_names_the_detail_features(self):
+        text = describe_active({
+            'guid_enabled': 'true', 'guid_attn_method': 'None', 'guid_slg_on': 'true',
+            'guid_slg_mode': SLG_MODE_S2, 'guid_smc_master_enabled': 'true',
+            'guid_smc_mode': SMC_MODE_ADAPTIVE, 'guid_tsr_enabled': 'true', 'guid_mg_enabled': 'true',
+            'guid_higs_enabled': 'true', 'guid_hiflow_enabled': 'true'})
+        self.assertEqual(text, 'S² + SMC(adaptive) + TSR + MG + HiGS + HiFlow')
+
+    def test_detail_suite_features_need_their_base_switch(self):
+        self.assertEqual(detail_suite_features({}), [])
+        # 방식만 바꾸고 SLG · SMC 를 끈 설정에서는 아무것도 돌지 않는다
+        self.assertEqual(detail_suite_features({
+            'guid_enabled': 'true', 'guid_slg_mode': SLG_MODE_S2, 'guid_smc_mode': SMC_MODE_ADAPTIVE}), [])
+        # SLG 는 Perturbation 스위치 아래에서만 돈다
+        self.assertEqual(detail_suite_features({'guid_slg_on': 'true', 'guid_slg_mode': SLG_MODE_S2}), [])
+        self.assertEqual(detail_suite_features({
+            'guid_enabled': 'true', 'guid_slg_on': 'true', 'guid_slg_mode': SLG_MODE_S2,
+            'guid_cfg_mode': 'SMC + CWM', 'guid_smc_mode': SMC_MODE_ADAPTIVE,
+            'guid_hiflow_enabled': 'true'}), ['S²', 'Adaptive SMC', 'HiFlow'])
+
+    def test_detail_suite_features_skip_what_the_extension_leaves_off(self):
+        """TSR k 1 · HiGS w 0 은 확장도 끈 것으로 본다(_TSR on = k != 1, higs_on = w > 0) — 경고·옛 팩 거부 대상이 아니다."""
+        on = {'guid_tsr_enabled': 'true', 'guid_mg_enabled': 'true', 'guid_higs_enabled': 'true'}
+        self.assertEqual(detail_suite_features(on), ['TSR', 'Momentum Guidance', 'HiGS'])
+        self.assertEqual(detail_suite_features({**on, 'guid_tsr_k': 1.0, 'guid_higs_weight': 0.0}),
+                         ['Momentum Guidance'])
+        self.assertEqual(detail_suite_features({**on, 'guid_tsr_k': '1.05', 'guid_higs_weight': '0.05'}),
+                         ['TSR', 'Momentum Guidance', 'HiGS'])
+
+    def test_old_extension_note(self):
+        class Caps:   # SamExtraCapabilities 에서 쓰는 두 칸
+            def __init__(self, known, argc):
+                self.known, self.anima_guidance_argc = known, argc
+
+        on = {'guid_tsr_enabled': 'true', 'guid_higs_enabled': 'true'}
+        note = detail_suite_note(on, Caps(True, 62))
+        self.assertIn('TSR·HiGS', note)
+        self.assertIn('62개', note)
+        self.assertIn('v0.30.0', note)
+        self.assertIsNone(detail_suite_note(on, Caps(True, 91)))
+        self.assertIsNone(detail_suite_note(on, Caps(False, 62)))   # 모르면 경고하지 않는다
+        self.assertIsNone(detail_suite_note(on, None))
+        self.assertIsNone(detail_suite_note({}, Caps(True, 62)))
+        self.assertIsNone(detail_suite_note(on, Caps(True, 62), comfyui=True))
 
 
 class TestBuildArgs(unittest.TestCase):
@@ -548,6 +643,8 @@ class TestForgeScriptInfoImport(unittest.TestCase):
                         overrides={'skim_enabled': True}),
             self._entry(SCRIPT_DETAIL_DAEMON, DETAIL_DAEMON_SPEC,
                         overrides={'dd_amount': 2.5, 'dd_hires': True}),
+            self._entry(SCRIPT_OPTIMAL_SCALE, OPTIMAL_SCALE_SPEC,
+                        overrides={'ocfg_enabled': True, 'ocfg_blend': 0.5}),
         ]
         settings, meta = parse_forge_script_info(payload)
         self.assertIs(settings['guid_enabled'], True)
@@ -557,7 +654,16 @@ class TestForgeScriptInfoImport(unittest.TestCase):
         self.assertEqual(settings['dd_amount'], 2.5)
         self.assertIs(settings['dd_hires'], True)
         self.assertNotIn('dd_preset', settings)
+        self.assertEqual((settings['ocfg_enabled'], settings['ocfg_blend']), (True, 0.5))
         self.assertEqual(meta['missing_scripts'], [])
+
+    def test_a_build_without_optimal_scale_still_imports_the_rest(self):
+        # Optimal Scale 은 v0.30.0 릴리스(2026-10-02)에 생긴 스크립트 — 없는 빌드는 그 스크립트만 빠진다
+        payload = [self._entry(SCRIPT_PERTURBATION, PERTURBATION_SPEC, overrides={'guid_scale': 6.5})]
+        settings, meta = parse_forge_script_info(payload)
+        self.assertEqual(settings['guid_scale'], 6.5)
+        self.assertNotIn('ocfg_enabled', settings)
+        self.assertIn(SCRIPT_OPTIMAL_SCALE, meta['missing_scripts'])
 
     def test_prefers_txt2img_when_forge_returns_both_modes(self):
         payload = [
@@ -574,7 +680,7 @@ class TestForgeScriptInfoImport(unittest.TestCase):
             SCRIPT_PERTURBATION, PERTURBATION_SPEC, trailing=2,
         )]
         settings, meta = parse_forge_script_info(payload)
-        # 고정 칸(62-90 디테일 묶음)은 설정이 아니라 가져오지 않는다
+        # 고정 칸은 설정이 아니라 가져오지 않는다(지금 PAG 에는 없다 — 디테일 묶음 62-90 도 설정이다)
         self.assertEqual(len(settings), sum(1 for _k, kind, *_r in PERTURBATION_SPEC if kind != FIXED))
         self.assertEqual(meta['ignored_trailing_args'], 2)
 

@@ -54,13 +54,14 @@ def _with_current_dd_shape(script_info):
 
 
 def _with_degrid_scripts(scripts):
-    """/sdapi/v1/scripts 녹화(2026-09-25)는 VAE DeGrid(확장 3a74dd8..1dd1a98) 전이다 — script-info 픽스처(2026-09-30
-    다시 녹화)에는 이미 있다. 다시 녹화하기 전까지 지금 확장처럼 txt2img·img2img 목록에 제목을 더한다(있으면 그대로).
-    refresh 도구는 script-info 만 기록한다(tools/refresh_sam_extra_fixture.py)."""
+    """/sdapi/v1/scripts 녹화(2026-09-25)는 VAE DeGrid(확장 3a74dd8..1dd1a98)와 Anima Optimal Scale(fe2a4e7) 전이다 —
+    script-info 픽스처(2026-10-02 다시 녹화)에는 둘 다 있다. 다시 녹화하기 전까지 지금 확장처럼 txt2img·img2img 목록에
+    제목을 더한다(있으면 그대로). refresh 도구는 script-info 만 기록한다(tools/refresh_sam_extra_fixture.py)."""
     for tab in ("txt2img", "img2img"):
         titles = scripts.get(tab)
-        if isinstance(titles, list) and caps_mod.TITLE_DEGRID not in titles:
-            titles.append(caps_mod.TITLE_DEGRID)
+        for title in (caps_mod.TITLE_DEGRID, caps_mod.TITLE_OPTIMAL_SCALE):
+            if isinstance(titles, list) and title not in titles:
+                titles.append(title)
     return scripts
 
 
@@ -294,7 +295,7 @@ class VariantTests(unittest.TestCase):
         self.assertEqual(caps.anima_guidance_argc, 57)
         self.assertIn("pag_smc_auto_old_build", _codes(caps))
         detail = caps.script("anima perturbation guidance")
-        # 고정 칸(62-90 디테일 묶음)은 앱 설정이 아니라 '무시될 기능'에 들지 않는다
+        # 고정 칸이 있으면 앱 설정이 아니라 '무시될 기능'에 들지 않는다(지금 PAG 에는 없다)
         self.assertEqual(list(detail["trailing_unmapped"]),
                          [key for key, kind, *_ in anima_guidance.PERTURBATION_SPEC[57:]
                           if kind != anima_guidance.FIXED])
@@ -303,16 +304,18 @@ class VariantTests(unittest.TestCase):
         self.assertIn("SMC", fewer["message"])
         self.assertIs(caps.detail_daemon_hires, True)
 
-    def test_pag_build_without_the_detail_suite_has_nothing_to_drop(self):
-        # v0.30 디테일 묶음(62-90) 전 빌드(62개): 앱은 그 칸을 고정 칸(확장 기본값)으로만 보내므로 경고가 없다
+    def test_pag_build_without_the_detail_suite_drops_it(self):
+        # v0.30 디테일 묶음(62-90) 전 빌드(62개): 앞 62칸은 같은 뜻이고, 디테일 묶음 칸만 잘려 무시된다
         bodies = live_bodies()
         for img2img in (False, True):
             pag = _script(bodies, "anima perturbation guidance", img2img=img2img)
             pag["args"] = pag["args"][:62]
         caps, _ = build(bodies)
         self.assertEqual(caps.anima_guidance_argc, 62)
-        self.assertEqual(list(caps.script("anima perturbation guidance")["trailing_unmapped"]), [])
-        self.assertNotIn("args_fewer", _codes(caps))
+        self.assertEqual(list(caps.script("anima perturbation guidance")["trailing_unmapped"]),
+                         [key for key, *_ in anima_guidance.PERTURBATION_SPEC[62:]])
+        fewer = next(w for w in caps.warnings if w["code"] == "args_fewer")
+        self.assertIn("무시될 기능: S², Adaptive SMC, TSR, Momentum, HiGS, HiFlow", fewer["message"])
         self.assertNotIn("pag_smc_auto_old_build", _codes(caps))
 
     def test_detail_daemon_without_hires(self):
@@ -830,7 +833,8 @@ class FrontendMirrorTests(unittest.TestCase):
         py_keys = set(anima_guidance._ACTIVATION_KEYS[anima_guidance.SCRIPT_PERTURBATION])
         self.assertEqual(ts_keys, py_keys)
         for title, feature in ((anima_guidance.SCRIPT_SKIMMED_CFG, "skimmed_cfg"),
-                               (anima_guidance.SCRIPT_DETAIL_DAEMON, "detail_daemon")):
+                               (anima_guidance.SCRIPT_DETAIL_DAEMON, "detail_daemon"),
+                               (anima_guidance.SCRIPT_OPTIMAL_SCALE, "optimal_scale")):
             keys = re.search(rf"{feature}:\s*\[(.*?)\]", text, re.S).group(1)
             self.assertEqual(set(re.findall(r"'_(\w+)'", keys)), set(anima_guidance._ACTIVATION_KEYS[title]))
 

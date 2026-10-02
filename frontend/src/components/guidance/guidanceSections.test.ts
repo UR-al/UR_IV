@@ -70,16 +70,22 @@ describe('AnimaGuidancePanel sections', () => {
     const toggles = [
       'guid_enabled', 'guid_slg_on', 'guid_legacy_attn', 'guid_apg_enabled', 'guid_cwm_enabled',
       'guid_smc_master_enabled', 'skim_enabled', 'guid_dcw_enabled', 'guid_rdc_enabled', 'guid_dave_enabled',
-      'guid_cns_enabled', 'dd_enabled', 'guid_adg_enabled', 'guid_mod_enabled',
+      'guid_cns_enabled', 'guid_tsr_enabled', 'guid_mg_enabled', 'guid_higs_enabled', 'guid_hiflow_enabled',
+      'ocfg_enabled', 'dd_enabled', 'guid_adg_enabled', 'guid_mod_enabled',
     ]
     const widgets = reactive<Record<string, any>>(Object.fromEntries(toggles.map(key => [`_${key}`, 'true'])))
     const html = await renderToString(createSSRApp(AnimaGuidancePanel, { widgets }))
     const order = [
-      'PAG / SEG / SLG — Attention perturbation</summary>', 'Enable Perturbation Guidance', 'Enable SLG',
+      'PAG / SEG / SLG — Attention perturbation</summary>', 'Enable Perturbation Guidance', 'Enable SLG', 'SLG mode',
       'Legacy Soft/Approx 호환',
-      'APG / CWM / SMC — CFG base</summary>', 'Enable APG', 'Enable CWM', 'Enable SMC', 'Legacy CFG base 라디오',
+      'APG / CWM / SMC — CFG base</summary>', 'Enable APG', 'Enable CWM', 'Enable SMC', 'SMC controller',
+      'Legacy CFG base 라디오',
       'Skimmed CFG — anti-burn</summary>', 'Enable Skimmed CFG',
+      'Optimal Scale — CFG-Zero* (실험)</summary>', 'Enable Anima Optimal Scale',
       'DCW / RDC / DAVE / CNS</summary>', 'Enable DCW', 'Enable RDC', 'Enable DAVE', 'Enable CNS',
+      // 확장 Guidance 아코디언과 같은 자리 — CNS 아래 디테일 단계(확장 적용 순서는 HiFlow → MG → HiGS → TSR)
+      'TSR / Momentum / HiGS / HiFlow — 디테일 단계</summary>', 'Enable TSR', 'Enable Momentum Guidance', 'Enable HiGS',
+      'Enable HiFlow',
       'Detail Daemon</summary>', 'Enable Detail Daemon',
       'Adaptive Guidance / CLIP Modulation</summary>', 'Enable Adaptive Guidance', 'Enable Anima Modulation Guidance',
       'Forge에서 가져오기',
@@ -87,7 +93,7 @@ describe('AnimaGuidancePanel sections', () => {
     const positions = order.map(text => html.indexOf(text))
     order.forEach((text, i) => expect(positions[i], text).toBeGreaterThanOrEqual(0))
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
-    expect(html.split('<details class="ag-group"')).toHaveLength(7)
+    expect(html.split('<details class="ag-group"')).toHaveLength(9)
   })
 })
 
@@ -111,5 +117,17 @@ describe('AnimaGuidancePanel summary badge', () => {
     // 다른 칸의 순서는 그대로: CWM · DCW · RDC · DAVE
     expect(await badge({ ...on, _guid_cwm_enabled: 'true', _guid_dave_enabled: 'true' }))
       .toEqual(['CWM', 'DCW', 'RDC', 'DAVE'])
+  })
+
+  it('names S² and adaptive SMC by their mode and lists the detail stages after CNS (describe_active)', async () => {
+    expect(await badge({ _guid_slg_on: 'true', _guid_smc_master_enabled: 'true' })).toEqual(['SLG', 'SMC'])
+    expect(await badge({
+      _guid_slg_on: 'true', _guid_slg_mode: 'Stochastic (S²)',
+      _guid_smc_master_enabled: 'true', _guid_smc_mode: 'Adaptive sign',
+      _guid_cns_enabled: 'true', _guid_tsr_enabled: 'true', _guid_mg_enabled: 'true',
+      _guid_higs_enabled: 'true', _guid_hiflow_enabled: 'true', _ocfg_enabled: 'true', _dd_enabled: 'true',
+    })).toEqual(['S²', 'SMC(adaptive)', 'CNS', 'TSR', 'MG', 'HiGS', 'HiFlow', 'OptScale', 'DD'])
+    // 방식만 고르고 SLG · SMC 를 끄면 아무것도 돌지 않는다
+    expect(await badge({ _guid_slg_mode: 'Stochastic (S²)', _guid_smc_mode: 'Adaptive sign' })).toEqual([])
   })
 })

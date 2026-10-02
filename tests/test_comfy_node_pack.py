@@ -37,6 +37,7 @@ COMPILER_BUILT_NODES = frozenset({
     "ForgeNeoSkimmedCFG",
     "ForgeNeoAnimaGuidanceSuite",
     "ForgeNeoAnimaDetailDaemon",
+    "ForgeNeoAnimaOptimalScale",
     "ForgeNeoKSamplerCNS",
     "ForgeNeoLatentInput",
     "ForgeNeoHiresFix",
@@ -152,7 +153,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 37)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 38)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):

@@ -80,7 +80,7 @@
             <Anima38Card />
 
             <!-- Anima Guidance Suite — SAM3와 완전히 분리된 독립 기능.
-                 인자 계약(위치 기반 62/7/13개)은 core/anima_guidance.py 참조. -->
+                 인자 계약(위치 기반, 스크립트별)은 core/anima_guidance.py SPECS 참조. -->
             <AnimaGuidancePanel :widgets="storeWidgets" />
 
             <!-- NegPiP 상시 적용 / 조건부 프롬프트는 STUDIO TOOLS '조건부' 모달로 이동 -->

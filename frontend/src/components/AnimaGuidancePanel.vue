@@ -29,6 +29,12 @@
       <SkimSection :widgets="widgets" />
     </details>
 
+    <!-- ── Optimal Scale (CFG-Zero* optimized-scale, 실험) ──────────── -->
+    <details class="ag-group">
+      <summary>Optimal Scale — CFG-Zero* (실험)</summary>
+      <OptimalScaleSection :widgets="widgets" />
+    </details>
+
     <!-- ── DCW / RDC / DAVE / CNS ───────────────────────────────────── -->
     <details class="ag-group">
       <summary>DCW / RDC / DAVE / CNS</summary>
@@ -36,6 +42,12 @@
       <RdcSection :widgets="widgets" />
       <DaveSection :widgets="widgets" />
       <CnsSection :widgets="widgets" />
+    </details>
+
+    <!-- ── 디테일 단계: TSR / Momentum / HiGS / HiFlow ──────────────── -->
+    <details class="ag-group">
+      <summary>TSR / Momentum / HiGS / HiFlow — 디테일 단계</summary>
+      <DetailStagesSection :widgets="widgets" />
     </details>
 
     <!-- ── Detail Daemon ────────────────────────────────────────────── -->
@@ -68,10 +80,12 @@ import PagSection from './guidance/PagSection.vue'
 import ApgSection from './guidance/ApgSection.vue'
 import CwmSmcSection from './guidance/CwmSmcSection.vue'
 import SkimSection from './guidance/SkimSection.vue'
+import OptimalScaleSection from './guidance/OptimalScaleSection.vue'
 import DcwSection from './guidance/DcwSection.vue'
 import RdcSection from './guidance/RdcSection.vue'
 import DaveSection from './guidance/DaveSection.vue'
 import CnsSection from './guidance/CnsSection.vue'
+import DetailStagesSection from './guidance/DetailStagesSection.vue'
 import DetailDaemonSection from './guidance/DetailDaemonSection.vue'
 import AdgSection from './guidance/AdgSection.vue'
 import ModulationSection from './guidance/ModulationSection.vue'
@@ -103,18 +117,25 @@ function importFromForge() {
 const activeSummary = computed(() => {
   const parts: string[] = []
   if (b('guid_enabled') && w._guid_attn_method !== 'None') parts.push(String(w._guid_attn_method || 'PAG'))
+  // S² 는 SLG 의 방식, Adaptive 는 SMC 의 컨트롤러 — describe_active 와 같은 이름(S² · SMC(adaptive))
+  const slgLabel = w._guid_slg_mode === 'Stochastic (S²)' ? 'S²' : 'SLG'
   const beforeSmc: Array<[string, string]> = [
-    ['guid_slg_on', 'SLG'], ['guid_apg_enabled', 'APG'], ['guid_adg_enabled', 'ADG'],
+    ['guid_slg_on', slgLabel], ['guid_apg_enabled', 'APG'], ['guid_adg_enabled', 'ADG'],
   ]
   for (const [key, label] of beforeSmc) if (b(key)) parts.push(label)
-  if (b('guid_smc_master_enabled') || b('guid_smc_enabled')) parts.push('SMC')
+  if (b('guid_smc_master_enabled') || b('guid_smc_enabled')) {
+    parts.push(w._guid_smc_mode === 'Adaptive sign' ? 'SMC(adaptive)' : 'SMC')
+  }
   // RDC 는 보내는 값과 같은 원본 켜짐 규칙으로만 표시한다 — 스위치 · DCW · tau > 0 셋 다
   // (core/anima_guidance.py _rdc_on / describe_active). 스위치만 켜고 tau 0(원본 기본)이면 RDC 는 꺼져 있다.
   const rdcOn = b('guid_rdc_enabled') && b('guid_dcw_enabled') && Number(w._guid_rdc_tau) > 0
   const afterSmc: Array<[boolean, string]> = [
     [b('guid_cwm_enabled'), 'CWM'], [b('guid_dcw_enabled'), 'DCW'], [rdcOn, 'RDC'],
     [b('guid_dave_enabled'), 'DAVE'], [b('guid_cns_enabled'), 'CNS'],
-    [b('guid_mod_enabled'), 'MOD'], [b('skim_enabled'), 'Skim'], [b('dd_enabled'), 'DD'],
+    [b('guid_tsr_enabled'), 'TSR'], [b('guid_mg_enabled'), 'MG'],
+    [b('guid_higs_enabled'), 'HiGS'], [b('guid_hiflow_enabled'), 'HiFlow'],
+    [b('guid_mod_enabled'), 'MOD'], [b('skim_enabled'), 'Skim'], [b('ocfg_enabled'), 'OptScale'],
+    [b('dd_enabled'), 'DD'],
   ]
   for (const [on, label] of afterSmc) if (on) parts.push(label)
   return parts.join(' · ')

@@ -20,6 +20,7 @@ Detail Daemon 은 원본 노드(Jonseed/ComfyUI-Detail-Daemon) 단위 그대로 
 SCRIPT_PERTURBATION = "Anima Perturbation Guidance"   # scripts/anima_safe_pag.py
 SCRIPT_SKIMMED_CFG = "Anima Skimmed CFG"              # scripts/anima_skimmed_cfg.py
 SCRIPT_DETAIL_DAEMON = "Anima Detail Daemon"          # scripts/anima_detail_daemon.py
+SCRIPT_OPTIMAL_SCALE = "Anima Optimal Scale"          # scripts/anima_cfg_optimal_scale.py
 
 
 # ── 값 강제 변환 ────────────────────────────────────────────────────────────
@@ -78,6 +79,13 @@ _B, _F, _I, _C, _T = 'bool', 'float', 'int', 'choice', 'text'
 # 고정 칸: 위치 계약 때문에 자리는 지키지만 사용자 설정이 아니다 — 저장값을 읽지 않고 항상 default 를
 # 보낸다. 위젯 프록시·default_settings()·Forge 가져오기에서 빠진다.
 FIXED = _X = 'fixed'
+
+# 디테일 묶음의 선택지 — 확장 라디오 표기 그대로(scripts/anima_safe_pag.py 'SLG mode'·'SMC controller',
+# sam3ext/guidance/cwm_smc.py SMC_MODE_*). Vue 섹션·Comfy 팩이 같은 글자를 쓴다.
+SLG_MODE_FIXED = 'Fixed'
+SLG_MODE_S2 = 'Stochastic (S²)'
+SMC_MODE_UNIT = 'Unit-L2'
+SMC_MODE_ADAPTIVE = 'Adaptive sign'
 
 # scripts/anima_safe_pag.py — ui() return 순서 (v0.30 디테일 묶음 기준 91개 — 62-90 은 고정 칸)
 PERTURBATION_SPEC = (
@@ -176,37 +184,38 @@ PERTURBATION_SPEC = (
     ('guid_rdc_alpha_ll',       _F, 0.03,   (0.0, 0.3)),
     ('guid_rdc_alpha_hh',       _F, 0.0,    (0.0, 0.1)),
     # 62-90 : 확장 v0.30 디테일 묶음 append(2026-10-02 — S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow, 확장 기본 전부 끔).
-    #   앱은 아직 이 기능들을 노출하지 않는다(HOLD — core/sam_extra_contract.py) — 고정 칸으로 자리만 지키고 늘 확장
-    #   기본값을 보낸다(= 그 기능이 없는 옛 빌드와 같은 결과). 62칸 옛 빌드는 Forge 가 넘친 인자를 버린다.
-    ('guid_slg_mode',            _X, 'Fixed',   None),
-    ('guid_s2_scale',            _X, 0.25,      None),
-    ('guid_s2_ratio',            _X, 0.05,      None),
-    ('guid_s2_blocks',           _X, '',        None),
-    ('guid_s2_start',            _X, 0.10,      None),
-    ('guid_s2_end',              _X, 0.90,      None),
-    ('guid_smc_mode',            _X, 'Unit-L2', None),
-    ('guid_smc_adaptive_alpha',  _X, 0.2,       None),
-    ('guid_smc_adaptive_lambda', _X, 5.0,       None),
-    ('guid_tsr_enabled',         _X, False,     None),
-    ('guid_tsr_k',               _X, 0.95,      None),
-    ('guid_tsr_sigma',           _X, 1.0,       None),
-    ('guid_mg_enabled',          _X, False,     None),
-    ('guid_mg_alpha',            _X, 0.5,       None),
-    ('guid_mg_beta',             _X, 0.6,       None),
-    ('guid_mg_normalize',        _X, False,     None),
-    ('guid_mg_min',              _X, 0.30,      None),
-    ('guid_mg_max',              _X, 0.95,      None),
-    ('guid_higs_enabled',        _X, False,     None),
-    ('guid_higs_weight',         _X, 1.75,      None),
-    ('guid_higs_eta',            _X, 0.0,       None),
-    ('guid_higs_alpha',          _X, 0.75,      None),
-    ('guid_higs_cutoff',         _X, 0.05,      None),
-    ('guid_higs_t_min',          _X, 0.40,      None),
-    ('guid_higs_t_max',          _X, 1.00,      None),
-    ('guid_hiflow_enabled',      _X, False,     None),
-    ('guid_hiflow_alpha',        _X, 1.0,       None),
-    ('guid_hiflow_beta',         _X, 0.5,       None),
-    ('guid_hiflow_cutoff',       _X, 0.2,       None),
+    #   범위·선택지는 확장 ui() 의 슬라이더·라디오 그대로다(scripts/anima_safe_pag.py — 계약 테스트가 픽스처와 대조).
+    #   S² 는 SLG 가, Adaptive SMC 는 SMC 가 켜져 있을 때만 돈다. 62칸 옛 빌드는 Forge 가 넘친 인자를 버린다 —
+    #   그 빌드에서 켠 디테일 설정은 적용되지 않는다(detail_suite_note 가 알린다).
+    ('guid_slg_mode',            _C, SLG_MODE_FIXED, (SLG_MODE_FIXED, SLG_MODE_S2)),
+    ('guid_s2_scale',            _F, 0.25,      (0.0, 5.0)),
+    ('guid_s2_ratio',            _F, 0.05,      (0.01, 0.5)),
+    ('guid_s2_blocks',           _T, '',        None),     # 빈칸 = 1~마지막 블록(블록 0 제외) — 확장이 정한다
+    ('guid_s2_start',            _F, 0.10,      (0.0, 1.0)),
+    ('guid_s2_end',              _F, 0.90,      (0.0, 1.0)),
+    ('guid_smc_mode',            _C, SMC_MODE_UNIT, (SMC_MODE_UNIT, SMC_MODE_ADAPTIVE)),
+    ('guid_smc_adaptive_alpha',  _F, 0.2,       (0.0, 1.0)),
+    ('guid_smc_adaptive_lambda', _F, 5.0,       (0.5, 30.0)),
+    ('guid_tsr_enabled',         _B, False,     None),
+    ('guid_tsr_k',               _F, 0.95,      (0.5, 1.5)),
+    ('guid_tsr_sigma',           _F, 1.0,       (0.1, 10.0)),
+    ('guid_mg_enabled',          _B, False,     None),
+    ('guid_mg_alpha',            _F, 0.5,       (0.0, 3.0)),
+    ('guid_mg_beta',             _F, 0.6,       (0.0, 0.95)),
+    ('guid_mg_normalize',        _B, False,     None),
+    ('guid_mg_min',              _F, 0.30,      (0.0, 1.0)),
+    ('guid_mg_max',              _F, 0.95,      (0.0, 1.0)),
+    ('guid_higs_enabled',        _B, False,     None),
+    ('guid_higs_weight',         _F, 1.75,      (0.0, 3.0)),
+    ('guid_higs_eta',            _F, 0.0,       (0.0, 1.0)),
+    ('guid_higs_alpha',          _F, 0.75,      (0.05, 0.95)),
+    ('guid_higs_cutoff',         _F, 0.05,      (0.0, 0.5)),
+    ('guid_higs_t_min',          _F, 0.40,      (0.0, 1.0)),
+    ('guid_higs_t_max',          _F, 1.00,      (0.0, 1.0)),
+    ('guid_hiflow_enabled',      _B, False,     None),
+    ('guid_hiflow_alpha',        _F, 1.0,       (0.0, 2.0)),
+    ('guid_hiflow_beta',         _F, 0.5,       (0.0, 1.0)),
+    ('guid_hiflow_cutoff',       _F, 0.2,       (0.05, 1.0)),
 )
 # 처음 append 된 디테일 묶음 칸(62) — 그 앞 62칸은 옛 빌드와 같은 뜻이다(_APPEND_ONLY_FROM).
 PAG_DETAIL_SUITE_FROM = [key for key, *_rest in PERTURBATION_SPEC].index('guid_slg_mode')   # 62
@@ -262,10 +271,20 @@ DETAIL_DAEMON_SPEC = (
 )
 DD_HIRES_INDEX = [key for key, *_rest in DETAIL_DAEMON_SPEC].index('dd_hires')   # 13
 
+# scripts/anima_cfg_optimal_scale.py — ui() return 순서 (4개, 2026-10-02 검토 제안 편입). CFG-Zero*(arXiv 2503.18886)의
+# optimized-scale 식만 — zero-init 은 없다. 범위는 확장 슬라이더 그대로: blend 0.25 (0~1 step .05), start 0 / end 1
+# (0~1 step .01, σ 기준 % — 확장이 predictor.percent_to_sigma 로 바꾼다). start ≥ end 면 확장이 붙지 않는다.
+OPTIMAL_SCALE_SPEC = (
+    ('ocfg_enabled', _B, False, None),
+    ('ocfg_blend',   _F, 0.25,  (0.0, 1.0)),
+    ('ocfg_start',   _F, 0.0,   (0.0, 1.0)),
+    ('ocfg_end',     _F, 1.0,   (0.0, 1.0)),
+)
+
 # 뒤에 append 된 칸이라 없는 빌드도 앞 칸의 위치 계약은 같은 스크립트 → 처음 append 된 인덱스.
 # Forge 가져오기는 이보다 짧으면 거부하고, 이 인덱스부터 빠진 칸은 기본값으로 둔다(meta 에 알린다).
 # Hires Pass 는 13개 인자 빌드(sam-extra v0.30, 4045adb)에 없다 — 그 빌드의 앞 13칸은 지금과 같은 뜻이다.
-# PAG 디테일 묶음(62-90)은 62개 인자 빌드에 없다 — 모두 고정 칸이라 가져올 값도 없다.
+# PAG 디테일 묶음(62-90)은 62개 인자 빌드(v0.30.0 릴리스 전 개발 빌드)에 없다 — 앞 62칸은 같은 뜻이다.
 _APPEND_ONLY_FROM = {
     SCRIPT_PERTURBATION: PAG_DETAIL_SUITE_FROM,
     SCRIPT_DETAIL_DAEMON: DD_HIRES_INDEX,
@@ -275,6 +294,7 @@ SPECS = {
     SCRIPT_PERTURBATION: PERTURBATION_SPEC,
     SCRIPT_SKIMMED_CFG: SKIMMED_SPEC,
     SCRIPT_DETAIL_DAEMON: DETAIL_DAEMON_SPEC,
+    SCRIPT_OPTIMAL_SCALE: OPTIMAL_SCALE_SPEC,
 }
 
 # 스크립트를 페이로드에 넣을지 결정하는 마스터 토글.
@@ -286,15 +306,18 @@ _ACTIVATION_KEYS = {
     # 'Forge에서 가져오기' 뒤 늘 True 이므로, 키로 두면 모든 생성(Anima 가 아닌 체크포인트 포함)에 중립 인자뿐인
     # 스크립트가 붙고 sam-extra 가 없는 Forge 에서는 켜지 않은 기능 때문에 422 가 난다.
     # 이 표는 Vue 거울(frontend/src/utils/samExtraCapabilities.ts)과 같아야 한다.
+    # 디테일 단계 넷(TSR·MG·HiGS·HiFlow)은 혼자서도 켜진다. S²·Adaptive SMC 는 SLG·SMC 의 방식이라 그 스위치가 키다.
     SCRIPT_PERTURBATION: (
         'guid_enabled', 'guid_slg_on', 'guid_apg_enabled', 'guid_adg_enabled',
         'guid_smc_enabled', 'guid_smc_master_enabled', 'guid_cwm_enabled',
         'guid_dcw_enabled',
         'guid_dave_enabled', 'guid_cns_enabled', 'guid_mod_enabled',
         'guid_experimental_stack',
+        'guid_tsr_enabled', 'guid_mg_enabled', 'guid_higs_enabled', 'guid_hiflow_enabled',
     ),
     SCRIPT_SKIMMED_CFG: ('skim_enabled',),
     SCRIPT_DETAIL_DAEMON: ('dd_enabled',),
+    SCRIPT_OPTIMAL_SCALE: ('ocfg_enabled',),
 }
 
 
@@ -474,6 +497,26 @@ def apply_to_payload(payload: dict, settings=None) -> dict:
     return payload
 
 
+def _slg_stochastic(settings: dict) -> bool:
+    return _as_choice(settings.get('guid_slg_mode'), SLG_MODE_FIXED,
+                      (SLG_MODE_FIXED, SLG_MODE_S2)) == SLG_MODE_S2
+
+
+def _smc_adaptive(settings: dict) -> bool:
+    return _as_choice(settings.get('guid_smc_mode'), SMC_MODE_UNIT,
+                      (SMC_MODE_UNIT, SMC_MODE_ADAPTIVE)) == SMC_MODE_ADAPTIVE
+
+
+def _smc_on(settings: dict) -> bool:
+    """SMC 가 도는가 — 스위치 둘·실험 스택·예전 CFG base 라디오(SMC, SMC + CWM) 중 하나(확장 _cfg_base_flags 와 같은 뜻)."""
+    if any(_as_bool(settings.get(key), False) for key in (
+            'guid_smc_master_enabled', 'guid_smc_enabled', 'guid_experimental_stack')):
+        return True
+    mode = _as_choice(settings.get('guid_cfg_mode'), 'Preserve incoming',
+                      ('Preserve incoming', 'APG', 'CWM', 'SMC', 'SMC + CWM'))
+    return mode in ('SMC', 'SMC + CWM')
+
+
 def describe_active(settings=None) -> str:
     """로그/토스트용 짧은 요약. 예: 'PAG(4.0) + Skimmed CFG + Detail Daemon(0.1)'"""
     settings = settings if isinstance(settings, dict) else {}
@@ -487,11 +530,12 @@ def describe_active(settings=None) -> str:
         ('guid_adg_enabled', 'Adaptive'),
     ):
         if _as_bool(settings.get(key), False):
-            parts.append(label)
+            # S² 는 SLG 의 방식이다(확장: SLG 가 켜져 있을 때만 — 그 weak 행을 쓴다)
+            parts.append('S²' if key == 'guid_slg_on' and _slg_stochastic(settings) else label)
     if any(_as_bool(settings.get(key), False) for key in (
         'guid_smc_master_enabled', 'guid_smc_enabled',
     )):
-        parts.append('SMC')
+        parts.append('SMC(adaptive)' if _smc_adaptive(settings) else 'SMC')
     # CWM·DCW·RDC·DAVE 는 원본이 실제로 거는 조건으로 적는다(보내는 값 = build_args 로 판정):
     #   CWM = 켜짐 · alpha 하나라도 ≠ 0, DCW = 켜짐 · (lambda ≠ 0 또는 RDC), RDC = _derive_rdc
     #   (origin: namemechan/ComfyUI-DCW@66aaf9dd:dcw_node.py:855-858 — 뜻만),
@@ -513,15 +557,72 @@ def describe_active(settings=None) -> str:
         parts.append('DAVE')
     for key, label in (
         ('guid_cns_enabled', 'CNS'),
+        # 디테일 단계 — 확장 순서(HiFlow → MG → HiGS → TSR)가 아니라 화면 순서로 적는다
+        ('guid_tsr_enabled', 'TSR'), ('guid_mg_enabled', 'MG'),
+        ('guid_higs_enabled', 'HiGS'), ('guid_hiflow_enabled', 'HiFlow'),
         ('guid_mod_enabled', 'Modulation'), ('skim_enabled', 'Skimmed CFG'),
     ):
         if _as_bool(settings.get(key), False):
             parts.append(label)
+    if _as_bool(settings.get('ocfg_enabled'), False):
+        blend = _as_float(settings.get('ocfg_blend'), 0.25, 0.0, 1.0)
+        parts.append(f"Optimal Scale({blend:g})")
     if _as_bool(settings.get('dd_enabled'), False):
         amount = _as_float(settings.get('dd_amount'), 0.10, -DD_AMOUNT_MAX, DD_AMOUNT_MAX)
         hires = ', Hires' if _as_bool(settings.get('dd_hires'), False) else ''
         parts.append(f"Detail Daemon({amount:g}{hires})")
     return ' + '.join(parts)
+
+
+def detail_suite_features(settings=None) -> list[str]:
+    """켜 둔 디테일 묶음 기능(PAG 인자 62-90 이 있어야 도는 것)의 이름 — 화면 순서.
+
+    S² 와 Adaptive SMC 는 그 방식만으로는 아무것도 켜지 않는다: SLG·SMC 가 켜져 있어야 확장이 쓴다
+    (scripts/anima_safe_pag.py — S² 는 SLG weak 행, Adaptive SMC 는 SMC 의 컨트롤러). TSR k 1·HiGS w 0 은
+    스위치를 켜도 확장이 끈 것으로 본다(_TSR on = k != 1, higs_on = w > 0) — 옛 빌드·옛 팩이 무시해도 같은 그림이다.
+    """
+    settings = settings if isinstance(settings, dict) else {}
+    out = []
+    # SLG 는 Perturbation 스위치(인자 0) 아래에서만 돈다(확장 pert_enabled)
+    if _as_bool(settings.get('guid_enabled'), False) and _as_bool(settings.get('guid_slg_on'), False) \
+            and _slg_stochastic(settings):
+        out.append('S²')
+    if _smc_on(settings) and _smc_adaptive(settings):
+        out.append('Adaptive SMC')
+    if _as_bool(settings.get('guid_tsr_enabled'), False) \
+            and _as_float(settings.get('guid_tsr_k'), 0.95, 0.5, 1.5) != 1.0:
+        out.append('TSR')
+    if _as_bool(settings.get('guid_mg_enabled'), False):
+        out.append('Momentum Guidance')
+    if _as_bool(settings.get('guid_higs_enabled'), False) \
+            and _as_float(settings.get('guid_higs_weight'), 1.75, 0.0, 3.0) > 0.0:
+        out.append('HiGS')
+    if _as_bool(settings.get('guid_hiflow_enabled'), False):
+        out.append('HiFlow')
+    return out
+
+
+DETAIL_SUITE_NOTE_OLD_EXTENSION = (
+    '디테일 가이던스({features}): 연결된 sam-extra 가 이 설정을 모릅니다(Perturbation 인자 {argc}개 빌드) — '
+    '켜도 적용되지 않습니다. sam-extra 를 v0.30.0 이상으로 업데이트하세요.')
+
+
+def detail_suite_note(settings=None, capabilities=None, *, comfyui=False):
+    """디테일 묶음 기능을 켰는데 연결된 Forge 확장이 그 인자(62-90)를 모르면 경고 문구, 아니면 None.
+
+    Forge 는 넘친 위치 인자를 버리므로 생성은 되지만 그 기능만 빠진다. ``capabilities`` 는
+    SamExtraCapabilities 또는 None(모르면 경고하지 않는다). ComfyUI 는 번들 팩이 처리하고, 옛 팩이면
+    컴파일러가 큐에 넣기 전에 멈춘다 — 여기서는 경고하지 않는다.
+    """
+    if comfyui or not getattr(capabilities, 'known', False):
+        return None
+    argc = getattr(capabilities, 'anima_guidance_argc', None)
+    if not isinstance(argc, int) or argc > PAG_DETAIL_SUITE_FROM:
+        return None
+    features = detail_suite_features(settings)
+    if not features:
+        return None
+    return DETAIL_SUITE_NOTE_OLD_EXTENSION.format(features='·'.join(features), argc=argc)
 
 
 DD_HIRES_NOTE_OLD_EXTENSION = (

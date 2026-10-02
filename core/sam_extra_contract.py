@@ -134,7 +134,8 @@ SCRIPTS = MappingProxyType({
     "Anima Perturbation Guidance": _script(
         # shape: Attn Scale 최대 15→100(원본 scale 0~100 — wave B PAG-F), DCW·CWM·RDC·CNS 기본값·범위와 숨은
         # RDC 스위치 True(원본 입력 — wave C DCW-F·CNS-F). 픽스처는 둘 다 Forge 정지 중 소스 AST 로 맞췄다.
-        # 2026-10-02 v0.30 디테일 묶음 62-90 append — 앱은 고정 칸(PERTURBATION_SPEC). 픽스처는 라이브(Forge 2.29.2)
+        # 2026-10-02 v0.30 디테일 묶음 62-90 append — 앱 설정(PERTURBATION_SPEC, 범위는 확장 슬라이더). 픽스처는 라이브
+        # (Forge 2.29.2)
         file="scripts/anima_safe_pag.py", form="positional", live_argc=91, shape="6fcc5c61ac90",
         ui_return="app_spec", api_reads="0-10,12-90", runtime_choices=(45,),
         app_title="core.anima_guidance:SCRIPT_PERTURBATION",
@@ -142,7 +143,8 @@ SCRIPTS = MappingProxyType({
         api_note="idx11(auto_decay)은 visible=False 자리 유지용이라 API 가 읽지 않는다. idx45(CLIP-L)는 실행 "
                  "시점 목록. live_argc 57 은 v0.21.2 빌드 — 뒤 5개가 잘리고 idx56 'Auto' 가 SMC 를 켠다(나-5, P5). "
                  "62-90 은 v0.30 디테일 묶음(SLG mode·S² 5칸·SMC controller·Adaptive α/λ·TSR 3칸·Momentum 6칸·HiGS 7칸·"
-                 "HiFlow 4칸) — 62개 빌드에 보내면 Forge 가 넘친 인자를 버리고, 확장은 빠진 칸을 기본값(전부 끔)으로 읽는다.",
+                 "HiFlow 4칸) — 62개 빌드에 보내면 Forge 가 넘친 인자를 버려 켠 디테일 기능만 빠진다(앱이 경고 — "
+                 "anima_guidance.detail_suite_note).",
         classification=mapped(
             "core/anima_guidance.py:PERTURBATION_SPEC", "core/anima_guidance.py:build_alwayson",
             "ui/generator_generation.py:_apply_postprocess_chain",
@@ -159,6 +161,14 @@ SCRIPTS = MappingProxyType({
             "frontend/src/components/guidance/CnsSection.vue:guid_cns_enabled",
             "frontend/src/components/guidance/AdgSection.vue:guid_adg_enabled",
             "frontend/src/components/guidance/ModulationSection.vue:guid_mod_enabled",
+            # v0.30 디테일 묶음(62-90) — 칸 범위는 tests/test_guidance_detail_inputs.py 가 픽스처와 대조한다
+            "frontend/src/components/guidance/PagSection.vue:slgModes",
+            "frontend/src/components/guidance/CwmSmcSection.vue:smcModes",
+            "frontend/src/components/guidance/DetailStagesSection.vue:guid_tsr_enabled",
+            "frontend/src/components/guidance/DetailStagesSection.vue:guid_mg_enabled",
+            "frontend/src/components/guidance/DetailStagesSection.vue:guid_higs_enabled",
+            "frontend/src/components/guidance/DetailStagesSection.vue:guid_hiflow_enabled",
+            "core/anima_guidance.py:detail_suite_note",
             # 'Anima Perturbation Guidance' 누락(v0.30 OOM 폴백)·CFG≈1 의 APG 알림(P4, 다-2 — SMC/CWM 은 원본처럼 CFG 1 에서도 돈다)
             "core/sam_extra_notices.py:KEY_PAG", "core/sam_extra_notices.py:requested_features",
             comfy=("core/comfy_workflow_compiler.py:_add_anima_guidance",
@@ -169,10 +179,11 @@ SCRIPTS = MappingProxyType({
                  "SMC e_prev 유지)에 DCW 만 적용한다(sam-extra has_pert = not adg_skipped). CFG≈1 에서는 "
                  "SMC/CWM 이 원본 DCW(+a) 처럼 돌고 APG 만 건너뛴다. CNS 는 guidance_cns.apply_cns 래퍼 "
                  "(tests/test_comfy_guidance_suite.py). 확장은 DCW-F 전 빌드에서 CFG≈1 의 SMC/CWM 도 건너뛰고 ADG "
-                 "스텝의 DCW 를 생략한다",
-            gaps=("HOLD: v0.30 디테일 묶음(62-90 — S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow)은 고정 칸으로 확장 기본값"
-                  "(전부 끔)만 보낸다. Anima 실측 A/B 전이라 카드·Comfy 팩 노출은 보류(사용자 결정) — 붙여 넣은 "
-                  "infotext 의 'Anima TSR' 등도 앱이 되살리지 않는다",
+                 "스텝의 DCW 를 생략한다. v0.30 디테일 묶음(팩 1.6.0): Adaptive SMC 는 CFG 단계의 SMC 를, S² 는 SLG "
+                 "약한 패스의 블록을 바꾸고, PAG/SEG/SLG 와 DCW 사이에 HiFlow→MG→HiGS→TSR, DCW 뒤에 HiFlow 기록 — 확장 "
+                 "식과 같은 텐서로 대조한다(tests/test_comfy_detail_parity.py). HiFlow 는 txt2img Hires.fix 에서만 켠다",
+            gaps=("P16: 붙여 넣은 infotext 의 디테일 묶음('Anima TSR'·'Anima Momentum Guidance'·'Anima HiGS'·"
+                  "'Anima HiFlow'·S2·smc=Adaptive)을 앱이 되살리지 않는다(가이던스 공통 — infotext 가져오기 없음)",
                   "P15: guid_cfg_mode 활성 키, SLG 배지, CLIP-L 없음 경고",
                   "P17(호스트 차이): PAG 와 SEG/SLG 를 함께 켜고 rescale > 0 이면 확장은 두 항을 더해 한 번 rescale "
                   "하고(_apply_perturbation), 팩은 원본 PAG post-CFG 가 자기 항을, 이어서 SEG/SLG post-CFG 가 받은 "
@@ -370,11 +381,23 @@ SCRIPTS = MappingProxyType({
     # post-CFG. 끄면 자기 콜백만 뗀다. Skimmed CFG·다른 CFG 함수·앞선 post-CFG 보정이 있으면 건너뛰고 status 에 남긴다.
     "Anima Optimal Scale": _script(
         file="scripts/anima_cfg_optimal_scale.py", form="positional", live_argc=4, shape="b38ff7c09159",
-        ui_return=("enabled", "blend", "start", "end"), api_reads="0-3",
+        ui_return="app_spec", api_reads="0-3",
+        app_title="core.anima_guidance:SCRIPT_OPTIMAL_SCALE",
+        app_spec=("core.anima_guidance:OPTIMAL_SCALE_SPEC", "ocfg_"),
         api_note="위치 인자 [enabled, blend(0-1, 기본 0.25), start, end(%, percent_to_sigma 창)]. infotext "
                  "'Anima Optimal Scale'(blend·start·end·zero_init=omitted)·'Anima Optimal Scale status'(적용·건너뜀 수).",
-        classification=deferred(HOLD, "실험 기능(기본 끔) — Anima 화질·GPU 동작 미검증. 앱이 만들지 않는다"
-                                      "(core/alwayson_propagation NEVER)")),
+        classification=mapped(
+            "core/anima_guidance.py:OPTIMAL_SCALE_SPEC", "ui/generator_generation.py:_apply_postprocess_chain",
+            "ui/sampling_blocks.py:build_sampling_blocks", "core/alwayson_propagation.py:PROPAGATION",
+            "frontend/src/components/guidance/OptimalScaleSection.vue:ocfg_enabled",
+            comfy=("core/comfy_workflow_compiler.py:_add_anima_guidance",
+                   "comfy_custom_nodes/ai_studio_forge_parity/guidance_optimal_scale.py:ForgeNeoAnimaOptimalScale"),
+            note="실험 기능(기본 끔, 2026-10-02 검토 제안) — Anima 화질 효과는 확인 전. Skimmed CFG 와 함께면 건너뛰고, "
+                 "SMC·APG·CWM 이 CFG 기반을 다시 만들면 보정이 남지 않는다(확장 _apply_cfg_base 가 cond/uncond 에서 다시 "
+                 "계산). 보조 패스에는 Skimmed CFG 와 같은 규칙으로 간다. Comfy 는 팩 1.6.0 노드를 스위트 앞에 걸어 "
+                 "post-CFG 순서가 같고, SMC·APG·CWM(sampler_cfg_function)이면 노드가 건너뛴다 — 결과는 Forge 와 같다 "
+                 "(tests/test_comfy_detail_parity.py·test_comfy_detail_compiler.py)",
+            gaps=("P16: 붙여 넣은 infotext 'Anima Optimal Scale' 을 앱이 되살리지 않는다(가이던스 공통)",))),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -454,13 +477,15 @@ OPTIONS = MappingProxyType({
         "OPT_DAVE_PRE_DD", "DAVE+Detail Daemon 우회(기본 켬, 결과가 달라짐 — infotext 'Anima DAVE pre-DD sigma'). 끄면 원본 "
                            "노드 조합처럼 DAVE 가 모든 스텝에 걸려 무너진다. 앱 Comfy 팩은 같은 기본값(guid_dave_pre_dd, 팩 "
                            "1.4.1)"),
-    # 2026-10-02 검토 제안 편입(확장 미커밋) — 둘 다 앱은 Forge 설정을 따른다(P10 덮어쓰기에 넣지 않는다)
-    "sam3_guidance_pag_cosine_envelope": deferred(
-        HOLD, "PAG 강도 곡선(자체 실험, 기본 끔 — PAG σ 창 양끝 0·가운데 1 인 sin² 곡선을 PAG 항에만 곱함, infotext "
-              "'Anima PAG cosine envelope'·'Anima PAG envelope status'). 논문 기법이 아니고 화질 미검증"),
-    "sam3_builtin_negpip_enabled": deferred(
-        HOLD, "내장 NegPiP 스위치(기본 켬 = 예전 자동 적용, 끄면 infotext 'SAM Extra NegPiP enabled: False'). 끄면 음수 "
-              "가중치를 순정 Forge 가 처리한다 — 앱의 NegPiP 안내(OTHER_EXTENSIONS 'negpip')는 이 설정을 모른다"),
+    # 2026-10-02 검토 제안 편입(v0.30.0) — 둘 다 P10 덮어쓰기(기본 = Forge 설정 따름)
+    "sam3_guidance_pag_cosine_envelope": _p10(
+        "OPT_PAG_COSINE", "PAG 강도 곡선(자체 실험, 기본 끔, 결과가 달라짐 — PAG σ 창 양끝 0·가운데 1 인 sin² 곡선을 PAG "
+                          "항에만 곱함, infotext 'Anima PAG cosine envelope'·'Anima PAG envelope status'). 논문 기법이 "
+                          "아니고 화질 미검증. Forge 전용: 팩의 PAG 는 원본 노드라 곡선이 없다"),
+    "sam3_builtin_negpip_enabled": _p10(
+        "OPT_BUILTIN_NEGPIP", "내장 NegPiP 스위치(기본 켬 = 예전 자동 적용, 끄면 infotext 'SAM Extra NegPiP enabled: "
+                              "False'). 끄면 음수 가중치를 순정 Forge 가 처리한다. Forge 전용: ComfyUI 는 앱 NegPiP 칸이 "
+                              "ForgeNeoNegPip 노드를 정한다"),
     # VAE DeGrid 옵션 셋 — Forge 전용(ComfyUI 노드는 확장 기본값 auto·fp32·끔, core/vae_degrid.COMFY_OPTIONS). 라디오
     # 둘은 P10 이 선택지 값 문자열로 보낸다(ForgeOptionSpec.choices — 계약 테스트가 설치된 소스의 선택지와 대조)
     "sam3_degrid_device": _p10(
@@ -613,7 +638,8 @@ MODULES = MappingProxyType({
                                          note="SCRIPTS['DoRA Inference Mode'] — 라벨·infotext 'DoRA inserted' 는 "
                                               "SEMANTIC_PINS dora_*_labels·dora_infotext_insert_key"),
     "scripts/anima_vae_2x.py": deferred(HOLD, "SCRIPTS['Anima VAE 2x (spacepxl decoder)'] — M9 보류"),
-    "scripts/anima_cfg_optimal_scale.py": deferred(HOLD, "SCRIPTS['Anima Optimal Scale'] — 실험 기능 보류"),
+    "scripts/anima_cfg_optimal_scale.py": mapped("core/anima_guidance.py:OPTIMAL_SCALE_SPEC",
+                                                 note="SCRIPTS['Anima Optimal Scale'] — 가이던스 패널의 Optimal Scale 그룹"),
     "scripts/anima_vae_degrid.py": mapped(
         "core/vae_degrid.py:SCRIPT_NAME", "core/forge_override_settings.py:OPT_DEGRID_DEVICE",
         note="SCRIPTS['Anima VAE DeGrid (NAFNet)'] — 옵션 sam3_degrid_* 셋도 여기서 등록한다(OPTIONS, P10 Forge 전용). "
@@ -634,7 +660,7 @@ MODULES = MappingProxyType({
     "scripts/appearance_theme.py": ignored("N3 — Forge 화면 테마 옵션"),
     "scripts/negpip.py": mapped("core/alwayson_propagation.py:TITLE_NEGPIP",
                                 note="SCRIPTS['NegPiP'] (sd-forge-negpip 편입). 내장 스위치 옵션 sam3_builtin_negpip_enabled 도 "
-                                     "여기서 등록한다(OPTIONS, HOLD)"),
+                                     "여기서 등록한다(OPTIONS — P10 덮어쓰기, Forge 전용)"),
     # sam3ext/
     "sam3ext/__init__.py": ignored("패키지 지연 import — 공개 이름(SAM3_NAME, Sam3Args)은 SCRIPTS 가 본다"),
     "sam3ext/__version__.py": mapped("core/sam_extra_contract.py:EXT_VERSION_AUDITED",
@@ -1095,6 +1121,20 @@ SEMANTIC_PINS = (
      "name": "INFOTEXT_SPARSE_GUESS_KEY", "expected": "Anima sparse LoRA",
      "app": "core.forge_override_settings:INFOTEXT_SPARSE_GUESS",
      "meaning": "추측 변환한 생성에만 남는 infotext 이름(붙여 넣으면 이 옵션을 켜는 덮어쓰기가 된다)"},
+    {"id": "opt_guidance_pag_cosine", "source": "ast", "file": "scripts/anima_safe_pag.py", "name": "OPT_PAG_COSINE",
+     "expected": "sam3_guidance_pag_cosine_envelope", "app": "core.forge_override_settings:OPT_PAG_COSINE",
+     "meaning": "가이던스 패스마다 읽는 PAG 강도 곡선 옵션(2026-10-02 검토 제안)"},
+    {"id": "opt_infotext_pag_cosine", "source": "ast", "file": "scripts/anima_safe_pag.py",
+     "name": "INFOTEXT_PAG_COSINE", "expected": "Anima PAG cosine envelope",
+     "app": "core.forge_override_settings:INFOTEXT_PAG_COSINE",
+     "meaning": "곡선을 켠 PAG 생성에 남는 infotext 이름"},
+    {"id": "opt_builtin_negpip", "source": "ast", "file": "scripts/negpip.py", "name": "OPT_BUILTIN_NEGPIP",
+     "expected": "sam3_builtin_negpip_enabled", "app": "core.forge_override_settings:OPT_BUILTIN_NEGPIP",
+     "meaning": "process_batch 마다 읽는 내장 NegPiP 스위치(끄면 음수 가중치를 순정 Forge 가 처리)"},
+    {"id": "opt_infotext_builtin_negpip", "source": "ast", "file": "scripts/negpip.py",
+     "name": "INFOTEXT_BUILTIN_NEGPIP", "expected": "SAM Extra NegPiP enabled",
+     "app": "core.forge_override_settings:INFOTEXT_BUILTIN_NEGPIP",
+     "meaning": "스위치를 끈 생성에 남는 infotext 이름"},
     # VAE DeGrid — 위 _DEGRID_PINS(앱·Comfy 팩 거울)
     *_DEGRID_PINS,
 )

@@ -19,6 +19,9 @@ CATEGORY = "AI Studio/Forge Neo parity/Guidance"
 # on every step). Detail Daemon notes the sampler's own sigma under this transformer_options key
 # for every model call it wraps; DAVE's pre-DD option (default on) looks that one up instead.
 PRE_DD_SIGMAS_KEY = "ai_studio_pre_dd_sigmas"
+# S²-Guidance (guidance_s2): the blocks one SLG weak evaluation skips, from the suite's draw to the block
+# wrappers (guidance_dave._patch_anima_blocks). Absent = fixed SLG (every wrapped SLG block is skipped).
+S2_DROP_KEY = "forge_neo_slg_drop"
 
 
 def parse_indices(spec: str, count: int, *, default: str = "") -> set[int]:

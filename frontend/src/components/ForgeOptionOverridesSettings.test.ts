@@ -61,7 +61,7 @@ const DEVICE = 'sam3_degrid_device', PRECISION = 'sam3_degrid_gpu_precision'
 
 it('mount reads prefs and never saves (default = Forge 설정 따름, nothing sent)', async () => {
   const root = await mount()
-  expect(all(root, 'csel')).toHaveLength(11)
+  expect(all(root, 'csel')).toHaveLength(13)
   expect(all(root, 'csel').every(sel => sel.props.value === 'Forge 설정 따름')).toBe(true)
   expect(action).not.toHaveBeenCalled()
   expect(prefsEvent).toBeTypeOf('function')

@@ -24,7 +24,8 @@ read back the same way. Creator workflows keep their own `SaveImage` nodes.
   `ForgeNeoAnimaLoraLoader`
 - Model patches/guidance: `ForgeNeoModelSamplingShift`, `ForgeNeoNegPip`,
   `ForgeNeoSkimmedCFG`, `ForgeNeoAnimaGuidanceSuite`,
-  `ForgeNeoAnimaDetailDaemon`
+  `ForgeNeoAnimaDetailDaemon`, `ForgeNeoAnimaOptimalScale` (pack 1.6.0+; before
+  the suite so its post-CFG function runs first)
 - Sampling: `ForgeNeoLatentInput`, `ForgeNeoKSamplerCNS`, `ForgeNeoHiresFix`
 - Detailers: `ForgeNeoADetailer`, `ForgeNeoSAM3Mask`, `ForgeNeoSAM3Detailer`,
   `ForgeNeoSAM3Refine`
@@ -57,6 +58,35 @@ When the app generates from an ANIMA custom workflow it keeps
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.6.0 changes
+
+The detail guidance of the sam-extra Forge extension v0.30.0, with its equations, defaults, clamps
+and order (`tests/test_comfy_detail_parity.py` runs the pack and the installed extension on the same
+tensors on CPU):
+
+- `ForgeNeoAnimaGuidanceSuite` reads the new suite keys:
+  - **S²-Guidance** (`guid_slg_mode` "Stochastic (S²)", `guid_s2_*`, `guid_s2_seed`): SLG's weak row
+    skips a fresh random draw of blocks at every evaluation, `random.Random("s2:<seed>:<pass>:<draw>")`
+    as in the extension, with omega as SLG's scale and the S² window as a step fraction
+    (`guidance_s2.py`).
+  - **Adaptive SMC** (`guid_smc_mode` "Adaptive sign", `guid_smc_adaptive_alpha`/`_lambda`): the SMC
+    step of the CFG stage becomes the adaptive sign controller (`guidance_dcw._smc_adaptive_error`).
+  - **TSR, Momentum Guidance, HiGS, HiFlow** (`guid_tsr_*`, `guid_mg_*`, `guid_higs_*`,
+    `guid_hiflow_*`): one post-CFG function after PAG/SEG/SLG and before DCW, HiFlow -> MG -> HiGS
+    -> TSR (`guidance_detail.py`). HiFlow records the base pass's final x0 (a function after DCW) and
+    aligns the Hires.fix pass with it.
+- `ForgeNeoKSamplerCNS`/`ForgeNeoHiresFix` tag their runs `base`/`hires` (transformer_options
+  `forge_neo_pass`) on a MODEL the suite marked for S² or HiFlow; any other MODEL is sampled as is.
+  An untagged run is a base run (a custom workflow's own sampler before the app's `ForgeNeoHiresFix`),
+  so HiFlow also works there; the app turns HiFlow on for txt2img Hires.fix generations only.
+- New `ForgeNeoAnimaOptimalScale`: the extension's experimental "Anima Optimal Scale" (CFG-Zero*'s
+  optimized scale without zero-init) with its skip rules.
+- The suite's `settings_json` hides the new keys from the input-contract check, so the app refuses a
+  graph that turns one of them on when ComfyUI's `/object_info` has no `ForgeNeoAnimaOptimalScale`
+  (a 1.5.0 pack would ignore them silently).
+- Host differences: HiFlow cannot align a Hires.fix pass that loads another checkpoint (that MODEL has
+  no suite); a second-order sampler's corrector evaluation is placed in the S² window by its sigma.
 
 ## 1.5.0 changes
 
@@ -152,8 +182,9 @@ after the updated pack is installed.
   than being approximated by Comfy's stock 0.6/0.6 `beta` schedule. Flow-shift
   patching preserves the loaded model's timestep multiplier (1.0 for Anima)
   instead of resetting it to SD3's 1000-unit scale.
-- Guidance: NegPiP, DAVE, modulation guidance, Skim CFG, PAG/SEG/SLG,
-  APG/CWM/SMC/DCW/RDC, adaptive guidance, and Detail Daemon compatibility.
+- Guidance: NegPiP, DAVE, modulation guidance, Skim CFG, PAG/SEG/SLG (and S²),
+  APG/CWM/SMC (unit-L2 or adaptive)/DCW/RDC, adaptive guidance, the detail stages
+  (TSR, Momentum Guidance, HiGS, HiFlow), Optimal Scale and Detail Daemon compatibility.
   `ForgeNeoAnimaDetailDaemon` (pack 1.4.0+) behaves exactly like the
   original "Detail Daemon Sampler" node of
   [`Jonseed/ComfyUI-Detail-Daemon`](https://github.com/Jonseed/ComfyUI-Detail-Daemon)

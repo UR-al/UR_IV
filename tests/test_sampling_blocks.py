@@ -180,6 +180,22 @@ class BuilderTests(unittest.TestCase):
         self.assertIn(anima_guidance.DD_HIRES_NOTE_OLD_EXTENSION, [r.getMessage() for r in logs.records])
         self.assertTrue(any(r.getMessage().startswith("Anima Guidance 적용됨: ") for r in logs.records))
 
+    def test_detail_suite_note_for_a_forge_extension_without_arguments_62_90(self):
+        """디테일 묶음을 켰는데 연결된 sam-extra 가 그 칸을 모르면(62개 빌드) 경고 — 블록은 그대로 보낸다
+        (Forge 가 넘친 인자를 버린다). 인자가 있는 빌드·모르는 스냅샷에서는 조용하다."""
+        settings = {"guid_tsr_enabled": "true"}
+        old = SimpleNamespace(known=True, anima_guidance_argc=62, detail_daemon_hires=True)
+        with self.assertLogs("generation", "INFO") as logs:
+            result = sb.build_sampling_blocks(ChainHost(settings, capabilities=old), ap.TARGET_T2I)
+        warnings = [r.getMessage() for r in logs.records if r.levelname == "WARNING"]
+        self.assertEqual(warnings, [anima_guidance.detail_suite_note(settings, old)])
+        self.assertIn("TSR", warnings[0])
+        self.assertIs(result.blocks[PAG]["args"][71], True)
+        for capabilities in (SimpleNamespace(known=True, anima_guidance_argc=91, detail_daemon_hires=True), None):
+            with self.subTest(capabilities=capabilities), self.assertLogs("generation", "INFO") as logs:
+                sb.build_sampling_blocks(ChainHost(settings, capabilities=capabilities), ap.TARGET_T2I)
+            self.assertEqual([r for r in logs.records if r.levelname == "WARNING"], [])
+
 
 class EnvelopeParityTests(unittest.TestCase):
     def setUp(self):

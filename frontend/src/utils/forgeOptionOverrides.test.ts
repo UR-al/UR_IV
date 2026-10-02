@@ -16,10 +16,10 @@ const known = (options: Record<string, unknown>, optionsKnown = true) =>
   ({ status: 'ok', known: true, options_known: optionsKnown, options }) as const
 
 describe('forgeOptionOverrides table', () => {
-  it('has eleven options (checkbox or radio) in three groups with a description each', () => {
+  it('has thirteen options (checkbox or radio) in three groups with a description each', () => {
     expect(PREF_KEY).toBe('forgeOptionOverrides')
-    expect(SPECS).toHaveLength(11)
-    expect(new Set(SPECS.map(s => s.key)).size).toBe(11)
+    expect(SPECS).toHaveLength(13)
+    expect(new Set(SPECS.map(s => s.key)).size).toBe(13)
     for (const item of SPECS) expect(accepts(item, item.default)).toBe(true)
     expect(SPECS.filter(isEnumSpec).map(s => s.key)).toEqual([DEVICE, PRECISION])
     expect(specsOf('result_minor').map(s => s.key)).toContain(PRECISION)

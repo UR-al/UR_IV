@@ -27,12 +27,35 @@
       <ToggleSwitch :model-value="b('guid_slg_on')" @update:model-value="setB('guid_slg_on', $event)" size="sm" />
       <span>Enable SLG (skip layers · PAG/SEG와 병용 가능)</span>
     </label>
-    <div class="ext-row" v-if="b('guid_slg_on')">
-      <div class="ext-field"><label>SLG scale</label>
-        <input type="number" v-model="w._guid_slg_scale" step="0.1" min="0" max="15" /></div>
-      <div class="ext-field"><label>SLG skip blocks</label>
-        <input type="text" v-model="w._guid_slg_blocks" placeholder="18" /></div>
-    </div>
+    <template v-if="b('guid_slg_on')">
+      <div class="ext-field"><label>SLG mode</label>
+        <CustomSelect v-model="w._guid_slg_mode" :options="slgModes" placeholder="Fixed" /></div>
+      <div class="ext-row" v-if="!s2Mode">
+        <div class="ext-field"><label>SLG scale</label>
+          <input type="number" v-model="w._guid_slg_scale" step="0.1" min="0" max="15" /></div>
+        <div class="ext-field"><label>SLG skip blocks</label>
+          <input type="text" v-model="w._guid_slg_blocks" placeholder="18" /></div>
+      </div>
+      <template v-else>
+        <p class="ext-note" :title="s2Title">S²-Guidance — 모델 호출마다 건너뛸 블록을 무작위로 새로 고릅니다(위 SLG scale·블록
+          대신 아래 값). 시드·패스·호출 순번으로 정해져 같은 설정이면 같은 그림이 나옵니다.</p>
+        <p v-if="detailNote" class="ext-note">{{ detailNote }}</p>
+        <div class="ext-row">
+          <div class="ext-field"><label>S² scale ω (논문 0.25)</label>
+            <input type="number" v-model="w._guid_s2_scale" step="0.01" min="0" max="5" /></div>
+          <div class="ext-field"><label>S² drop ratio (호출마다 · 최소 1블록)</label>
+            <input type="number" v-model="w._guid_s2_ratio" step="0.01" min="0.01" max="0.5" /></div>
+        </div>
+        <div class="ext-field"><label>S² eligible blocks (빈칸 = 1~마지막 · 블록 0 제외)</label>
+          <input type="text" v-model="w._guid_s2_blocks" placeholder="비우면 1~마지막 블록" /></div>
+        <div class="ext-row">
+          <div class="ext-field"><label>S² start (스텝 비율)</label>
+            <input type="number" v-model="w._guid_s2_start" step="0.01" min="0" max="1" /></div>
+          <div class="ext-field"><label>S² end (스텝 비율)</label>
+            <input type="number" v-model="w._guid_s2_end" step="0.01" min="0" max="1" /></div>
+        </div>
+      </template>
+    </template>
 
     <div class="ext-row">
       <div class="ext-field"><label>Start percent</label>
@@ -60,8 +83,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
 import CustomSelect from '../CustomSelect.vue'
+import { useSamExtraCapabilities } from '../../composables/useSamExtraCapabilities'
+import { detailSuiteNote } from '../../utils/guidanceDetailSuite'
 import { useGuidanceWidgets } from './guidanceWidgets'
 
 /**
@@ -71,10 +97,23 @@ import { useGuidanceWidgets } from './guidanceWidgets'
  * __init__.py:201-207): scale 0~100 step 0.1, perturbation_strength 0~1 step 0.01, start/end 0~1 step 0.001,
  * rescale 0~1 step 0.01. guidanceOriginInputs.test.ts 가 지킨다(scale 은 PagSection.test.ts 도).
  * SEG sigma · SLG · Legacy strength 는 원본 노드에 없는 확장 기능이라 확장 범위를 그대로 둔다.
+ * SLG mode 와 S² 칸(인자 62-67, 확장 v0.30 디테일 묶음)도 확장 슬라이더 범위 그대로다 — 원본 S²-Guidance 코드는
+ * 없다(논문 arXiv 2508.12880). S² 는 SLG 의 방식이라 SLG 가 켜져 있을 때만 보인다.
  *
  * 조각(fragment) 컴포넌트다 — 감싸는 요소 없이 AnimaGuidancePanel 의 그룹 <details> 안에 그대로 놓인다.
  * 그래서 패널의 scoped 속성을 받지 않는다: .ag-sub · .ext-note 모양은 패널이 :deep 으로 입힌다.
  */
 const props = defineProps<{ widgets: Record<string, any> }>()
 const { w, b, setB } = useGuidanceWidgets(props)
+
+// 선택지 표기 = 확장 라디오 그대로(core/anima_guidance.py SLG_MODE_*)
+const slgModes = ['Fixed', 'Stochastic (S²)']
+const s2Mode = computed(() => w._guid_slg_mode === 'Stochastic (S²)')
+const s2Title =
+  '논문 본문 식 CFG + ω·(cond − drop). 논문 권장 ω 0.25, 블록 0 제외, 전체 과정의 가운데 80%(0.10–0.90). '
+  + '비율 0.05 는 28·40·52 블록 모델에서 1·2·3 블록입니다. Anima 실측 A/B 는 아직 없습니다.'
+
+// 연결된 Forge 의 sam-extra 가 S²(인자 62-67)를 모르면 안내 — ComfyUI 는 번들 팩이 처리한다
+const { capabilities } = useSamExtraCapabilities()
+const detailNote = computed(() => detailSuiteNote(capabilities.value))
 </script>

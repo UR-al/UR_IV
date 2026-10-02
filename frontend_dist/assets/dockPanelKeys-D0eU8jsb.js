@@ -1,1 +1,0 @@
-import{j as e}from"./index-DeNbj5gW.js";function t(t){return t.key===`Escape`?t.defaultPrevented||e(t)?null:`close`:t.key===`ArrowUp`||t.key===`ArrowDown`?`contain`:null}function n(e,n){let r=t(e);r&&(e.stopPropagation(),r===`close`&&(e.preventDefault(),n()))}export{n as t};

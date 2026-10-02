@@ -27,6 +27,7 @@ from .guidance_cns import (
     cns_float_input,
     model_cns_settings,
 )
+from .guidance_detail import PASS_BASE, PASS_HIRES, with_pass_tag
 from .anima_lora_nodes import (
     AnimaLoraStateCache,
     load_lora_block_weight,
@@ -358,6 +359,8 @@ class ForgeNeoKSamplerCNS:
 
     def sample(self, model, positive, negative, latent_image, seed, steps, cfg, sampler_name, scheduler, denoise=1.0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, spectrum_enabled=False, spectrum_window_size=2.0, spectrum_flex_window=0.25, spectrum_warmup_steps=6, spectrum_tail_actual_steps=3, spectrum_blend_w=0.3, spectrum_cheby_degree=3, spectrum_ridge_lambda=0.1, spectrum_history_size=100, spectrum_one_sampler_only=False, spectrum_verbose=False, speed_enabled=False, speed_split_mode="single", speed_spd_scale=0.5, speed_spd_sigma=0.7, speed_adaptive_smc_alpha=0.0):
         model = _with_cns(model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
+        # The base pass of the generation: HiFlow records here, S² draws with the 'base' tag (guidance_detail).
+        model = with_pass_tag(model, PASS_BASE)
         if speed_enabled:
             # CNS rides on the MODEL's sampler wrapper, so it also colours the
             # SPEED sampler's steps (Path B when SPEED wraps sample_*).
@@ -554,6 +557,8 @@ class ForgeNeoHiresFix:
         actual_seed = secrets.randbits(64) if int(seed) < 0 else (int(seed) + int(seed_delta)) & 0xFFFFFFFFFFFFFFFF
         actual_steps = int(steps) if int(steps) > 0 else int(base_steps)
         active_model = _with_cns(active_model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
+        # The hires pass: HiFlow aligns here with the base pass's trajectory, S² draws with the 'hires' tag.
+        active_model = with_pass_tag(active_model, PASS_HIRES)
         output = _common_sample(active_model, actual_seed, actual_steps, cfg, sampler_name or base_sampler_name, scheduler or base_scheduler, positive, negative, resized, denoise)[0]
         return output, active_vae
 

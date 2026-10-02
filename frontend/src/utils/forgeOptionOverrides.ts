@@ -48,6 +48,8 @@ export const SPECS: readonly ForgeOptionSpec[] = [
   { key: 'sam3_degrid_gpu_precision', label: 'VAE DeGrid GPU 정밀도', group: 'result_minor', default: 'fp32', infotext: '', choices: [['fp32', 'fp32 (ComfyUI 노드와 같음)'], ['fp16', 'fp16 autocast']] },
   { key: 'sam3_anima_sparse_lora_forge_guess', label: '부분 LoRA 순정 추측 변환', group: 'result', default: false, infotext: 'Anima sparse LoRA', choices: [] },
   { key: 'sam3_guidance_dave_pre_dd_sigma', label: 'DAVE 판정을 Detail Daemon 전 σ 로 (우회)', group: 'result', default: true, infotext: 'Anima DAVE pre-DD sigma', choices: [] },
+  { key: 'sam3_guidance_pag_cosine_envelope', label: 'PAG 강도를 σ 구간 양끝에서 줄이기 (자체 실험)', group: 'result', default: false, infotext: 'Anima PAG cosine envelope', choices: [] },
+  { key: 'sam3_builtin_negpip_enabled', label: '내장 NegPiP 사용', group: 'result', default: true, infotext: 'SAM Extra NegPiP enabled', choices: [] },
 ]
 
 /** 줄마다 한두 문장 — 확장 설명을 요약한 것(복사하지 않는다). */
@@ -63,6 +65,8 @@ export const DESCRIPTIONS: Readonly<Record<string, string>> = {
   sam3_degrid_gpu_precision: "fp32 가 ComfyUI 노드와 같은 계산입니다(기본). fp16 autocast 는 값이 넘친 타일만 fp32 로 다시 합니다. 쓴 값은 결과 infotext 'Anima DeGrid precision' 에 남습니다. 예전 키 sam3_degrid_precision 은 확장이 더 읽지 않습니다.",
   sam3_anima_sparse_lora_forge_guess: '일부 블록만 담은 Anima LoRA 를 순정 판정 레이아웃에서 지금 모델로 추측 변환해 로드합니다(끔이면 건너뜀). 블록 대응이 틀릴 수 있습니다.',
   sam3_guidance_dave_pre_dd_sigma: 'DAVE 와 Detail Daemon 을 함께 켰을 때 DAVE 적용 스텝을 Detail Daemon 이 σ 를 바꾸기 전 값으로 판정합니다. Detail Daemon 을 끈 생성은 켜고 끔이 같습니다.',
+  sam3_guidance_pag_cosine_envelope: 'PAG 항에만 PAG σ 창 안의 sin² 곡선(양끝 0 · 가운데 최대)을 곱합니다. 논문 기법이 아닌 확장의 자체 실험이고 화질 효과는 확인 전입니다. SEG·SLG 에는 적용하지 않습니다. ComfyUI 에는 없습니다.',
+  sam3_builtin_negpip_enabled: '끄면 sam-extra 에 들어 있는 NegPiP 만 건너뛰고 음수 가중치는 순정 Forge 가 처리합니다(기본 켬 = 예전 자동 적용). 따로 설치한 sd-forge-negpip 에는 적용되지 않습니다. ComfyUI 는 NegPiP 칸이 정합니다.',
 }
 
 export const FOLLOW = 'follow'

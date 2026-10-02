@@ -35,7 +35,7 @@ import math
 from typing import Any
 
 from .compat import clone_model, require_torch
-from .guidance_common import CATEGORY, parse_indices
+from .guidance_common import CATEGORY, S2_DROP_KEY, parse_indices
 
 
 def _original_pag_node():
@@ -163,6 +163,7 @@ def _patch_seg_slg_guidance(
     end_percent: float,
     rescale: float,
     rescale_mode: str,
+    s2_run: Any = None,
 ):
     """SEG and SLG through a second, weak ``calc_cond_batch`` in post-CFG.
 
@@ -172,6 +173,11 @@ def _patch_seg_slg_guidance(
     iljung1106/comfyui-anima-safe-pag@905b0107:__init__.py:15-34, :229-233,
     :337). sam-extra gates PAG, SEG and SLG with this one window
     (``_pert_in_range``), so SEG/SLG here run at exactly the PAG steps.
+
+    ``s2_run`` (``guidance_s2.S2Run``) turns SLG into S²-Guidance like sam-extra v0.30.0: every call
+    draws this evaluation's skipped blocks (the draw index advances inside and outside the window),
+    the S² window is the step fraction (``S2Run.in_window``, not the PAG window) and ``slg_scale`` is
+    omega. The draw is also advanced on a step Adaptive Guidance ran cond-only (``on_adg_skipped``).
     """
 
     if not seg_enabled and not slg_enabled:
@@ -194,7 +200,7 @@ def _patch_seg_slg_guidance(
         strength = min(1.0, max(0.0, float(seg_strength)))
         return {"q": q + (weak_q - q) * strength, "k": k, "v": v}
 
-    def weak_prediction(args: dict[str, Any], *, attention: bool):
+    def weak_prediction(args: dict[str, Any], *, attention: bool, drop: Any = None):
         import comfy.samplers  # lazy: only reachable inside ComfyUI
 
         options = dict(args["model_options"])
@@ -205,6 +211,8 @@ def _patch_seg_slg_guidance(
             transformer["patches"] = patches
         else:
             transformer["forge_neo_slg_active"] = True
+            if drop is not None:
+                transformer[S2_DROP_KEY] = drop
         options["transformer_options"] = transformer
         (weak,) = comfy.samplers.calc_cond_batch(
             args["model"], [args["cond"]], args["input"], args["sigma"], options
@@ -213,18 +221,23 @@ def _patch_seg_slg_guidance(
 
     def post_cfg(args):
         original = args["denoised"]
-        if not _sigma_active(args["sigma"], sigma_start, sigma_end):
+        # S²: one draw per evaluation, before any gate (sam-extra draws when the evaluation opens)
+        drop = s2_run.draw(args) if (s2_run is not None and slg_enabled) else None
+        in_pag_window = _sigma_active(args["sigma"], sigma_start, sigma_end)
+        seg_on = seg_enabled and in_pag_window
+        slg_on = slg_enabled and (s2_run.in_window(args) if s2_run is not None else in_pag_window)
+        if not (seg_on or slg_on):
             return original
         cond = args.get("cond_denoised")
         if cond is None:
             raise RuntimeError("PAG/SEG/SLG requires a conditional prediction.")
         cond_work = cond.float()
         guidance = None
-        if seg_enabled:
+        if seg_on:
             weak = weak_prediction(args, attention=True)
             guidance = (cond_work - weak.float()) * float(seg_scale)
-        if slg_enabled:
-            weak = weak_prediction(args, attention=False)
+        if slg_on:
+            weak = weak_prediction(args, attention=False, drop=drop)
             term = (cond_work - weak.float()) * float(slg_scale)
             guidance = term if guidance is None else guidance + term
         if guidance is None:
@@ -243,6 +256,10 @@ def _patch_seg_slg_guidance(
             guidance = guidance * (amount * ratio + (1.0 - amount))
         return (original.float() + guidance).to(original.dtype)
 
+    if s2_run is not None and slg_enabled:
+        # Adaptive Guidance's cond-only steps skip this function (guidance._skip_perturbation_on_adg_steps);
+        # sam-extra still draws on them, so the gate advances the draw through this hook.
+        post_cfg.on_adg_skipped = s2_run.draw
     patched.set_model_sampler_post_cfg_function(
         post_cfg, disable_cfg1_optimization=True
     )
@@ -266,8 +283,9 @@ def _patch_perturbation_guidance(
     head_indices: str = "",
     legacy_attn: bool = False,
     legacy_strength: float | None = None,
+    s2_run: Any = None,
 ):
-    """Apply PAG (original node), SEG and/or SLG in that order.
+    """Apply PAG (original node), SEG and/or SLG in that order (SLG as S² with ``s2_run``).
 
     ``legacy_attn`` with PAG reads ``legacy_strength`` instead of
     ``attention_strength``, as sam-extra does (``anima_safe_pag.py:3624``);
@@ -315,6 +333,7 @@ def _patch_perturbation_guidance(
         end_percent=end_percent,
         rescale=rescale,
         rescale_mode=rescale_mode,
+        s2_run=s2_run,
     )
 
 

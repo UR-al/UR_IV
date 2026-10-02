@@ -55,6 +55,8 @@ from .guidance_pag import (  # noqa: F401
 )
 from .guidance_dcw import (  # noqa: F401
     APG_STATE_KEY,
+    SMC_MODE_ADAPTIVE,
+    SMC_MODE_UNIT,
     SMC_PRESET_CHOICES,
     apply_dcw,
     ForgeNeoDCWCWMSMC,
@@ -87,6 +89,22 @@ from .guidance_cns import (  # noqa: F401
     CNS_DEFAULTS,
     apply_cns,
     color_noise_wavelet,
+)
+from .guidance_detail import (  # noqa: F401
+    DetailRun,
+    detail_settings,
+    mark_pass_aware,
+    patch_detail_stages,
+    patch_hiflow_recorder,
+)
+from .guidance_s2 import (  # noqa: F401
+    S2Run,
+    eligible_blocks as s2_eligible_blocks,
+    s2_active,
+    s2_settings,
+)
+from .guidance_optimal_scale import (  # noqa: F401
+    ForgeNeoAnimaOptimalScale,
 )
 
 
@@ -254,6 +272,10 @@ def _skip_perturbation_on_adg_steps(before: Any, patched: Any):
         @functools.wraps(function)
         def perturbation_unless_adg_skipped(args):
             if _adg_step_skipped(args):
+                # S²'s draw index still advances on such a step (sam-extra draws when the evaluation opens)
+                hook = getattr(function, "on_adg_skipped", None)
+                if callable(hook):
+                    hook(args)
                 return args["denoised"]
             return function(args)
 
@@ -296,8 +318,14 @@ def _patch_cfg_stage(
     smc_lambda: float,
     smc_k: float,
     apg_settings: dict[str, float] | None,
+    smc_mode: str = SMC_MODE_UNIT,
+    smc_adaptive_alpha: float = 0.2,
+    smc_adaptive_lambda: float = 5.0,
 ):
     """The CFG stage, SMC -> APG -> CWM, as DCW(+a)'s ``sampler_cfg_function``.
+
+    ``smc_mode`` Adaptive sign (sam-extra v0.30.0) swaps SMC's step for the adaptive controller
+    (``guidance_dcw._smc_adaptive_error``) with its own alpha/lambda.
 
     ``guidance_dcw.patch_dcw`` installs the hook (SMC/CWM as the original,
     APG between them). Two sam-extra rules sit on top of it:
@@ -321,6 +349,8 @@ def _patch_cfg_stage(
         cwm_enabled=cwm_enabled, alpha_l=alpha_low, alpha_h=alpha_high,
         smc_preset=smc_preset, smc_lambda=smc_lambda, smc_k=smc_k,
         rdc_tau=0.0, rdc_alpha_ll=0.0, rdc_alpha_hh=0.0,
+        smc_mode=smc_mode, smc_adaptive_alpha=smc_adaptive_alpha,
+        smc_adaptive_lambda=smc_adaptive_lambda,
     )
     incoming = dict(getattr(model, "model_options", {}) or {})
     patched = patch_dcw(model, apg_settings=apg_settings, **common)
@@ -356,7 +386,7 @@ def _patch_cfg_stage(
 
 
 class ForgeNeoAnimaGuidanceSuite:
-    """Compose the extension's 62-field Anima guidance payload on one MODEL."""
+    """Compose the extension's Anima Perturbation Guidance settings (``settings_json``) on one MODEL."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -393,6 +423,19 @@ class ForgeNeoAnimaGuidanceSuite:
 
         slg_enabled = _as_bool(_setting(settings, "guid_slg_on", False))
         dave_enabled = _as_bool(_setting(settings, "guid_dave_enabled", False))
+        # S² (SLG mode Stochastic): SLG's weak row skips a fresh draw of blocks from the eligible pool at
+        # every evaluation, with omega as its scale (sam-extra v0.30.0 — guidance_s2). Without omega or
+        # a block to drop the extension turns SLG off, and so does the suite.
+        s2_run = None
+        slg_scale = float(_setting(settings, "guid_slg_scale", 3.0))
+        s2 = s2_settings(settings) if slg_enabled else None
+        if s2 is not None:
+            eligible = s2_eligible_blocks(s2, len(_model_blocks(model)))
+            if s2_active(s2, eligible):
+                s2_run = S2Run(s2, eligible)
+                slg_scale = s2.scale
+            else:
+                slg_enabled = False
         current = _patch_anima_blocks(
             model,
             dave_enabled=dave_enabled,
@@ -402,6 +445,7 @@ class ForgeNeoAnimaGuidanceSuite:
             dave_pre_dd=_as_bool(_setting(settings, "guid_dave_pre_dd", True)),
             slg_enabled=slg_enabled,
             slg_blocks=str(_setting(settings, "guid_slg_blocks", "18")),
+            slg_targets_override=set(s2_run.eligible) if s2_run is not None else None,
         )
 
         mode_text = str(_setting(settings, "guid_cfg_mode", "Preserve incoming")).strip().casefold()
@@ -457,6 +501,10 @@ class ForgeNeoAnimaGuidanceSuite:
                     "norm_threshold": float(_setting(settings, "guid_apg_norm", 15.0)),
                     "momentum": float(_setting(settings, "guid_apg_momentum", 0.0)),
                 } if apg_enabled else None,
+                # SMC controller (sam-extra v0.30.0): Adaptive sign uses its own alpha/lambda, not the preset
+                smc_mode=str(_setting(settings, "guid_smc_mode", SMC_MODE_UNIT)),
+                smc_adaptive_alpha=min(1.0, max(0.0, float(_setting(settings, "guid_smc_adaptive_alpha", 0.2)))),
+                smc_adaptive_lambda=min(30.0, max(0.5, float(_setting(settings, "guid_smc_adaptive_lambda", 5.0)))),
             )
 
         # ADG before PAG: the original PAG node chains an existing
@@ -488,7 +536,7 @@ class ForgeNeoAnimaGuidanceSuite:
                 ),
                 seg_sigma=float(_setting(settings, "guid_seg_sigma", 100.0)),
                 slg_enabled=slg_enabled,
-                slg_scale=float(_setting(settings, "guid_slg_scale", 3.0)),
+                slg_scale=slg_scale,
                 start_percent=float(_setting(settings, "guid_start_percent", 0.0)),
                 end_percent=float(_setting(settings, "guid_end_percent", 0.7)),
                 rescale=rescale,
@@ -496,9 +544,16 @@ class ForgeNeoAnimaGuidanceSuite:
                 head_indices=head_indices,
                 legacy_attn=legacy_attn,
                 legacy_strength=float(_setting(settings, "guid_legacy_strength", 0.75)),
+                s2_run=s2_run,
             )
             if adg_enabled:
                 current = _skip_perturbation_on_adg_steps(before_perturbation, current)
+
+        # Detail stages (sam-extra v0.30.0): after the PAG/SEG/SLG term, before DCW — HiFlow (hires run)
+        # -> Momentum Guidance -> HiGS -> TSR in one post-CFG function (guidance_detail). It is not behind
+        # the ADG gate: on a cond-only step TSR/HiFlow still apply and MG/HiGS restart, like the extension.
+        detail_run = DetailRun(detail_settings(settings))
+        current = patch_detail_stages(current, detail_run, adg_skipped_of=_adg_step_skipped)
 
         # DCW/RDC last: appended after the PAG/SEG/SLG post-CFG functions. As in
         # the original, RDC only runs inside DCW; the suite's RDC switch only vetoes it.
@@ -515,6 +570,13 @@ class ForgeNeoAnimaGuidanceSuite:
                 rdc_alpha_ll=float(_setting(settings, "guid_rdc_alpha_ll", 0.03)),
                 rdc_alpha_hh=float(_setting(settings, "guid_rdc_alpha_hh", 0.0)),
             )
+
+        # HiFlow records the base run's final x0 (after DCW) — the last post-CFG function of the suite.
+        current = patch_hiflow_recorder(current, detail_run)
+        if s2_run is not None or detail_run.settings.hiflow:
+            # S² draws per pass and HiFlow records/aligns per pass: the sampler nodes tag their runs
+            # (ForgeNeoKSamplerCNS 'base', ForgeNeoHiresFix 'hires') only on a MODEL marked like this.
+            current = mark_pass_aware(current)
 
         if _as_bool(_setting(settings, "guid_mod_enabled", False)):
             mod_clip = clip
@@ -578,4 +640,5 @@ NODE_CLASS_MAPPINGS = {
     "ForgeNeoDCWCWMSMC": ForgeNeoDCWCWMSMC,
     "ForgeNeoAnimaGuidanceSuite": ForgeNeoAnimaGuidanceSuite,
     "ForgeNeoAnimaDetailDaemon": ForgeNeoAnimaDetailDaemon,
+    "ForgeNeoAnimaOptimalScale": ForgeNeoAnimaOptimalScale,
 }

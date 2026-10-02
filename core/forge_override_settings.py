@@ -56,6 +56,8 @@ OPT_PREFIX_DEDUP = "sam3_guidance_pag_prefix_dedup"         # scripts/anima_safe
 OPT_SEG_SEPARABLE = "sam3_guidance_seg_separable_blur"      # scripts/anima_safe_pag.py
 OPT_SPARSE_FORGE_GUESS = "sam3_anima_sparse_lora_forge_guess"  # sam3ext/anima_lora_blocks.py
 OPT_DAVE_PRE_DD = "sam3_guidance_dave_pre_dd_sigma"         # scripts/anima_safe_pag.py (8878b9e)
+OPT_PAG_COSINE = "sam3_guidance_pag_cosine_envelope"        # scripts/anima_safe_pag.py (v0.30.0, 자체 실험)
+OPT_BUILTIN_NEGPIP = "sam3_builtin_negpip_enabled"          # scripts/negpip.py (v0.30.0)
 # VAE DeGrid(sam3ext/vae_degrid_runtime.py) — 이름은 core/vae_degrid 한 곳에서(ComfyUI 노드 기본값과 같은 표)
 OPT_DEGRID_DEVICE = _vdg.OPT_DEVICE                          # Radio auto/cpu
 OPT_DEGRID_GPU_PRECISION = _vdg.OPT_GPU_PRECISION            # Radio fp32/fp16
@@ -66,6 +68,8 @@ INFOTEXT_PREFIX_DEDUP = "Anima PAG prefix dedup"
 INFOTEXT_SEG_SEPARABLE = "Anima SEG separable blur"
 INFOTEXT_SPARSE_GUESS = "Anima sparse LoRA"
 INFOTEXT_DAVE_PRE_DD = "Anima DAVE pre-DD sigma"
+INFOTEXT_PAG_COSINE = "Anima PAG cosine envelope"
+INFOTEXT_BUILTIN_NEGPIP = "SAM Extra NegPiP enabled"
 
 
 OptionValue = Union[bool, str]
@@ -144,6 +148,13 @@ SPECS: tuple[ForgeOptionSpec, ...] = (
     # 무너진다). Detail Daemon 을 끈 생성은 켜고 끔이 같다. 앱 Comfy 팩(guid_dave_pre_dd, 1.4.1)도 같은 기본값이다.
     ForgeOptionSpec(OPT_DAVE_PRE_DD, "DAVE 판정을 Detail Daemon 전 σ 로 (우회)", True, RESULT,
                     infotext=INFOTEXT_DAVE_PRE_DD, feature="anima_guidance"),
+    # 2026-10-02 검토 제안(v0.30.0). 강도 곡선은 PAG 항에만 sin²(πu) 를 곱하는 확장의 자체 실험이고(꺼 두면 결과 같음),
+    # NegPiP 스위치는 끄면 내장 NegPiP 만 건너뛰어 음수 가중치를 순정 Forge 가 처리한다. 둘 다 Forge 전용 — ComfyUI 는
+    # 팩의 PAG(원본 노드)에 곡선이 없고, NegPiP 는 앱 NegPiP 칸(ForgeNeoNegPip 노드)이 정한다.
+    ForgeOptionSpec(OPT_PAG_COSINE, "PAG 강도를 σ 구간 양끝에서 줄이기 (자체 실험)", False, RESULT,
+                    infotext=INFOTEXT_PAG_COSINE, feature="anima_guidance"),
+    ForgeOptionSpec(OPT_BUILTIN_NEGPIP, "내장 NegPiP 사용", True, RESULT,
+                    infotext=INFOTEXT_BUILTIN_NEGPIP, feature="negpip"),
 )
 SPEC_BY_KEY: Mapping[str, ForgeOptionSpec] = MappingProxyType({spec.key: spec for spec in SPECS})
 OPTION_KEYS: tuple[str, ...] = tuple(spec.key for spec in SPECS)

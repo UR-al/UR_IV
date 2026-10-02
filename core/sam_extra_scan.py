@@ -701,10 +701,16 @@ class ExtensionSource:
             component_args = info.args[3] if len(info.args) > 3 else keywords.get("component_args")
             onchange = keywords.get("onchange")
             infotext = value_of(keywords.get("infotext"))
+            default = value_of(info.args[0] if info.args else keywords.get("default"))
+            component_name = _call_name(component) if component is not None else None
+            if component_name is None and isinstance(default, bool):
+                # 컴포넌트를 주지 않으면 Forge 가 기본값 타입으로 고른다 — bool 은 Checkbox
+                # (modules/ui_settings.py create_setting_component). 내장 NegPiP 스위치가 그렇다(scripts/negpip.py).
+                component_name = "Checkbox"
             attrs = {
                 "file": self.rel(path),
-                "default": value_of(info.args[0] if info.args else keywords.get("default")),
-                "component": _call_name(component) if component is not None else None,
+                "default": default,
+                "component": component_name,
                 "infotext": infotext if isinstance(infotext, str) else "",
                 "onchange": onchange is not None and not (isinstance(onchange, ast.Constant) and onchange.value is None),
                 "choices": _option_choices(component_args, value_of),

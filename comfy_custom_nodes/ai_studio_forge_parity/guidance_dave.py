@@ -75,6 +75,7 @@ from .compat import clone_model
 from .guidance_common import (
     CATEGORY,
     PRE_DD_SIGMAS_KEY,
+    S2_DROP_KEY as _S2_DROP_KEY,
     _model_blocks,
     _transformer_options,
     parse_indices,
@@ -216,7 +217,14 @@ def _patch_anima_blocks(
     slg_enabled: bool,
     slg_blocks: str,
     dave_pre_dd: bool = True,
+    slg_targets_override: set[int] | None = None,
 ):
+    """DAVE and the SLG block skip on the MODEL's Anima blocks.
+
+    ``slg_targets_override`` is S²'s eligible pool (``guidance_s2``): every block in it is wrapped,
+    and each weak evaluation skips only the blocks its draw put under ``guidance_s2.DROP_KEY`` in
+    transformer_options. Without a drop set (fixed SLG) the wrapped blocks are the skipped ones.
+    """
     attenuation = dave_attenuation(dave_strength) if dave_enabled else 0.0
     dave_on = attenuation > DAVE_MIN_ATTENUATION
     if not dave_on and not slg_enabled:
@@ -242,10 +250,12 @@ def _patch_anima_blocks(
         raise RuntimeError(
             "SLG requires an Anima/Cosmos MODEL exposing diffusion_model.blocks."
         )
-    slg_targets = (
-        parse_indices(slg_blocks, len(blocks), default="18")
-        if slg_enabled else set()
-    )
+    if not slg_enabled:
+        slg_targets = set()
+    elif slg_targets_override is not None:
+        slg_targets = {index for index in slg_targets_override if 0 <= index < len(blocks)}
+    else:
+        slg_targets = parse_indices(slg_blocks, len(blocks), default="18")
     if slg_enabled and not slg_targets:
         raise RuntimeError("SLG has no valid target blocks for this model.")
     tau = float(dave_tau) if dave_on else 0.0
@@ -254,7 +264,9 @@ def _patch_anima_blocks(
 
         def combined_forward(*args, _index=index, _original=original, **kwargs):
             options = _transformer_options(args, kwargs)
-            if _index in slg_targets and options.get("forge_neo_slg_active"):
+            drop = options.get(_S2_DROP_KEY)
+            skipped = slg_targets if drop is None else drop
+            if _index in skipped and _index in slg_targets and options.get("forge_neo_slg_active"):
                 if args:
                     return args[0]
                 value = kwargs.get("x_B_T_H_W_D", kwargs.get("x"))

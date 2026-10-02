@@ -478,7 +478,7 @@ class SettingsMixin:
         return read_settings(widgets)
 
     def _get_anima_guidance_settings(self, widgets):
-        """62/7/13 위치 계약의 원본 문자열 값을 key 기반 dict로 저장한다."""
+        """위치 계약(core/anima_guidance.SPECS)의 원본 문자열 값을 key 기반 dict로 저장한다."""
         return {
             key: proxy.text()
             for key, proxy in widgets.items()
@@ -504,7 +504,7 @@ class SettingsMixin:
             proxy.setText(value)
 
     def _reset_anima_guidance(self) -> int:
-        """ANIMA 가이던스 82칸을 확장 기본값으로 — Vue '전체 초기화'(reset_anima_guidance 액션).
+        """ANIMA 가이던스 칸 전부(SPECS)를 확장 기본값으로 — Vue '전체 초기화'(reset_anima_guidance 액션).
 
         기본값의 단일 출처는 core/anima_guidance.SPECS(default_settings)다. 예전엔 Vue 패널이
         82개 리터럴 사본(DEFAULTS)을 들고 있어, 스펙 기본값이 바뀌거나 키가 늘면 초기화만

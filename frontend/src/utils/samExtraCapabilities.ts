@@ -21,9 +21,11 @@ export const FEATURE_ENABLE_WIDGETS: Readonly<Partial<Record<SamExtraFeature, re
     '_guid_dcw_enabled',
     '_guid_dave_enabled', '_guid_cns_enabled', '_guid_mod_enabled',
     '_guid_experimental_stack',
+    '_guid_tsr_enabled', '_guid_mg_enabled', '_guid_higs_enabled', '_guid_hiflow_enabled',
   ],
   skimmed_cfg: ['_skim_enabled'],
   detail_daemon: ['_dd_enabled'],
+  optimal_scale: ['_ocfg_enabled'],
 }
 
 export const FEATURE_LABELS: Readonly<Partial<Record<SamExtraFeature, string>>> = {
@@ -31,6 +33,7 @@ export const FEATURE_LABELS: Readonly<Partial<Record<SamExtraFeature, string>>> 
   anima_guidance: 'Anima 가이던스',
   skimmed_cfg: 'Skimmed CFG',
   detail_daemon: 'Detail Daemon',
+  optimal_scale: 'Anima Optimal Scale',
   // FEATURE_ENABLE_WIDGETS 에는 넣지 않는다 — 없을 때는 게이트가 빼고 경고한다(DoRA·Anima38 과 같다)
   degrid: 'VAE DeGrid',
 }

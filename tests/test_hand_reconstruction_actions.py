@@ -798,7 +798,7 @@ class HandSamplingTableTests(unittest.TestCase):
             _model, result, _backend = host._hand_snapshot({"prompt": "open hand"})
         self.assertEqual(set(result["alwayson_scripts"]),
                          {anima38.SCRIPT_NAME, anima_guidance.SCRIPT_PERTURBATION,
-                          anima_guidance.SCRIPT_DETAIL_DAEMON, "NegPiP"})
+                          anima_guidance.SCRIPT_DETAIL_DAEMON, anima_guidance.SCRIPT_OPTIMAL_SCALE, "NegPiP"})
 
     def test_snapshot_uses_the_backend_cache_when_the_host_has_no_snapshot(self):
         backend = FakeBackend()

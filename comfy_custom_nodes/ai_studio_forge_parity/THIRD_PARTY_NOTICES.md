@@ -155,3 +155,21 @@ weights as ComfyUI's `tiled_scale` and is written here independently.
 No model weight is included. The DraconicDragon NAFNet-VAE-DeGrid weights
 (Apache-2.0) and any other NAFNet file must be supplied by the user and remain
 subject to their own licenses.
+
+## Detail guidance (pack 1.6.0)
+
+`guidance_detail.py`, `guidance_s2.py`, `guidance_optimal_scale.py` and the adaptive SMC step in
+`guidance_dcw.py` are local code that follows the sam-extra Forge extension v0.30.0 (by the author
+of AI Studio Pro). Their sources:
+
+| Stage | Reference | License | Notes |
+| --- | --- | --- | --- |
+| HiFlow | [Bujiazi/HiFlow](https://github.com/Bujiazi/HiFlow) `flux_pipeline_hiflow.py` and `utils.py` at commit `31cc2b1c515195d8bfee002d3da58ac7c7773fef`; defaults from `run_hiflow.py` at commit `da351a8ef036384a42485744ba47bc9c1d882b94` | Apache-2.0 | The direction/acceleration alignment and the order-4 Butterworth mask follow the official code, rewritten as a per-evaluation x0 replacement for ComfyUI's post-CFG hook; the changes are listed in `guidance_detail.py`'s module docstring (Apache-2.0 section 4(b)). The upstream repository ships no NOTICE file. Full license text: `LICENSES/HiFlow-Apache-2.0.txt`. |
+| Adaptive SMC | [sorryhyun/anima_lora](https://github.com/sorryhyun/anima_lora) `library/inference/corrections/smc_cfg.py`; CFG-Ctrl, [arXiv:2603.03281](https://arxiv.org/abs/2603.03281) | MIT (Copyright (c) 2026 Seunghyun Ji) | Formula and defaults (alpha 0.2, lambda 5) only; no code is copied. |
+| TSR | Temporal Score Rescaling, [arXiv:2510.01184](https://arxiv.org/abs/2510.01184); ComfyUI's `TemporalScoreRescaling` node as the behavioural reference | — | Written from the paper's equation; no ComfyUI code is included. |
+| S²-Guidance | [arXiv:2508.12880](https://arxiv.org/abs/2508.12880) Eq. 4, Algorithm 1 | no official code | Paper reimplementation. |
+| Momentum Guidance | [arXiv:2602.20360](https://arxiv.org/abs/2602.20360) Eq. 12–13 | no official code | Paper reimplementation. |
+| HiGS | [arXiv:2509.22300](https://arxiv.org/abs/2509.22300) Eq. 6, 8, Algorithms 2–3 | paper code not used | Paper reimplementation. |
+| Optimal Scale | CFG-Zero*, [arXiv:2503.18886](https://arxiv.org/abs/2503.18886) | — | The optimized-scale equation only (no zero-init). |
+
+This notice does not replace or modify the upstream licenses.

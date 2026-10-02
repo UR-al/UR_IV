@@ -152,6 +152,13 @@ def _anima_guidance(host, ctx: SamplingContext) -> Contribution:
             comfyui=ctx.host_backend == ap.BACKEND_COMFY)
         if hires_note:
             _logger.warning(hires_note)
+        # 디테일 묶음(S²·Adaptive SMC·TSR·MG·HiGS·HiFlow — 인자 62-90)을 켰는데 연결된 확장이 그 칸을 모르면
+        # Forge 가 넘친 인자를 버려 그 기능만 빠진다 — 같은 스냅샷으로 경고만 남긴다.
+        suite_note = anima_guidance.detail_suite_note(
+            anima_settings, getattr(host, 'sam_extra_capabilities', None),
+            comfyui=ctx.host_backend == ap.BACKEND_COMFY)
+        if suite_note:
+            _logger.warning(suite_note)
         blocks = anima_guidance.build_alwayson(anima_settings)
         summary = anima_guidance.describe_active(anima_settings)
         if summary:

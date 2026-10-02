@@ -37,7 +37,12 @@ PACK_ID = "ai_studio_forge_parity"
 # implementation checked against the extension's own numbers) and a ``degrid`` model folder.
 # Older packs lack the class: the compiler leaves DeGrid out of the graph and the backend
 # tells the user (core/comfy_workflow_compiler._add_degrid) — the generation itself runs.
-PACK_VERSION = "1.5.0"
+# 1.6.0: sam-extra v0.30.0's detail guidance in the suite — S² (SLG mode Stochastic), Adaptive SMC
+# (SMC controller), TSR, Momentum Guidance, HiGS and HiFlow (Hires.fix) — plus the new
+# ForgeNeoAnimaOptimalScale node. The suite's settings_json hides the new keys from the input
+# contract check, so the compiler refuses a graph that turns one on when /object_info lacks
+# ForgeNeoAnimaOptimalScale (``_DETAIL_SUITE_MARKER``) instead of letting a 1.5.0 pack ignore it.
+PACK_VERSION = "1.6.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

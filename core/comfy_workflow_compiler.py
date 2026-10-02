@@ -207,6 +207,10 @@ _CNS_SAMPLER_CARRIERS = frozenset({"ForgeNeoKSamplerCNS", "ForgeNeoHiresFix"})
 # the contract check passes a stale pack and the queued run fails.  1.4.0 adds no
 # PAG-only class; the per-step CNS node ships from that same 1.4.0 on.
 _PAG_ORIGIN_MARKER = _PER_STEP_CNS_MARKER
+# sam-extra v0.30.0's detail guidance (S², Adaptive SMC, TSR, Momentum, HiGS, HiFlow) rides in the
+# suite's settings_json from pack 1.6.0 on.  A 1.5.0 suite has the same inputs and silently ignores
+# the new keys, so the contract check cannot see it — this class ships from the same 1.6.0 on.
+_DETAIL_SUITE_MARKER = "ForgeNeoAnimaOptimalScale"
 
 
 def _suite_settings(inputs: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -238,6 +242,21 @@ def _graph_enables_cns(workflow: Mapping[str, Any]) -> bool:
             value = inputs.get("cns_enabled")
             if not _is_link(value) and _bool(value):
                 return True
+    return False
+
+
+def _graph_uses_detail_suite(workflow: Mapping[str, Any]) -> bool:
+    """Whether a graph's guidance suite turns on a pack-1.6.0 detail feature (S², Adaptive SMC, TSR, MG, HiGS,
+    HiFlow) — read like core/anima_guidance.detail_suite_features, which the app's spec uses for Forge."""
+    from core import anima_guidance
+
+    for node in workflow.values():
+        if not isinstance(node, Mapping) or node.get("class_type") != "ForgeNeoAnimaGuidanceSuite":
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, Mapping) and _bool(inputs.get("enabled"), True) and \
+                anima_guidance.detail_suite_features(dict(_suite_settings(inputs))):
+            return True
     return False
 
 
@@ -914,6 +933,14 @@ class ComfyWorkflowCompiler:
                 f"(1.4.0 이상)이 필요한데 ComfyUI에 {_PAG_ORIGIN_MARKER}가 없습니다(옛 팩은 둘 다 "
                 "실행 중에 거부합니다). 번들 노드 팩을 갱신하고 ComfyUI를 재시작하세요."
             )
+        if _DETAIL_SUITE_MARKER not in self.object_info and _graph_uses_detail_suite(workflow):
+            # 옛 팩(1.5.0)의 스위트는 입력이 같아 아래 검사를 통과하지만 새 키를 모르고 조용히 건너뛴다 —
+            # 켠 기능 없이 다른 그림을 내지 않게 큐 전에 막는다.
+            raise WorkflowCompileError(
+                "디테일 가이던스(S²·Adaptive SMC·TSR·Momentum·HiGS·HiFlow)에는 AI Studio Forge Parity 노드 팩"
+                f"(1.6.0 이상)이 필요한데 ComfyUI에 {_DETAIL_SUITE_MARKER}가 없습니다(옛 팩은 이 설정을 "
+                "모르고 건너뜁니다). 번들 노드 팩을 갱신하고 ComfyUI를 재시작하세요."
+            )
 
         # A stale copy of the bundled pack can expose the class name while
         # still having an older input contract.  Catch that before /prompt so
@@ -989,6 +1016,8 @@ class ComfyWorkflowCompiler:
          sampler_options, pass_lora_base) = self._add_default_model_stack(
             graph, model_name, payload, loras, anima_plan, prompt_loras=prompt_loras,
             main_prompt=main_prompt,
+            # HiFlow 는 txt2img Hires.fix 의 hires 패스에서만 돈다(sam-extra _hiflow_attach)
+            hiflow_pass=mode == "txt2img" and _bool(payload.get("enable_hr")),
         )
         latent = self._add_latent(
             graph, mode, vae, payload,
@@ -1036,6 +1065,7 @@ class ComfyWorkflowCompiler:
         *,
         prompt_loras: Sequence[LoraSpec] = (),
         main_prompt: str = "",
+        hiflow_pass: bool = False,
     ) -> tuple[list, list, list, list, list, dict[str, Any], _PassLoraBase]:
         """Loaders → model patches → conditioning → guidance (app graphs).
 
@@ -1060,7 +1090,7 @@ class ComfyWorkflowCompiler:
             anima_plan=anima_plan, payload=payload, prompt=main_prompt,
         )
         model, sampler_options = self._add_anima_guidance(
-            graph, model, clip, positive, negative, payload,
+            graph, model, clip, positive, negative, payload, hiflow_pass=hiflow_pass,
         )
         return model, clip, vae, positive, negative, sampler_options, pass_lora_base
 
@@ -1643,11 +1673,31 @@ class ComfyWorkflowCompiler:
 
     def _add_anima_guidance(
         self, graph: _Graph, model: list, clip: list, positive: list, negative: list,
-        payload: Mapping[str, Any],
+        payload: Mapping[str, Any], *, hiflow_pass: bool = False,
     ) -> tuple[list, dict[str, Any]]:
+        """Optimal Scale → 가이던스 스위트 → Skimmed CFG 를 모델에 건다.
+
+        ``hiflow_pass``: 이 그래프가 txt2img + Hires.fix 메인 생성인가. HiFlow 는 sam-extra 처럼 그때만 켠다
+        (확장 _hiflow_attach — enable_hr·txt2img 가 아니면 기록도 정렬도 없다). 사용자 워크플로도 같다 — 워크플로
+        자신의 샘플러(패스 태그 없음 = base)가 기록하고 앱이 붙인 ForgeNeoHiresFix 가 정렬한다. 보조 패스(LoRA 분기)·
+        후처리는 HiFlow 를 끈 채 보낸다(확장도 ADetailer 의 p2 에는 붙이지 않는다).
+        """
         from core import anima_guidance
 
         sampler_options: dict[str, Any] = {}
+        # Optimal Scale(sam-extra 2026-10-02 검토 제안, 실험) — 스위트보다 먼저 걸어야 그 post-CFG 함수가 PAG/SEG/SLG·DCW
+        # 앞에서 돈다(확장도 Safe PAG 보다 먼저 붙는다). 선형 CFG 가 아니면(앞선 보정·CFG 함수) 노드가 스스로 건너뛴다.
+        optimal = self._script(payload, anima_guidance.SCRIPT_OPTIMAL_SCALE)
+        if optimal is not None:
+            settings = self._script_settings(optimal, anima_guidance.OPTIMAL_SCALE_SPEC)
+            if _bool(settings.get("ocfg_enabled")):
+                node = graph.add("ForgeNeoAnimaOptimalScale", {
+                    "model": model, "enabled": True,
+                    "blend": _float(settings.get("ocfg_blend"), 0.25),
+                    "start_percent": _float(settings.get("ocfg_start"), 0.0),
+                    "end_percent": _float(settings.get("ocfg_end"), 1.0),
+                }, "Anima optimal scale")
+                model = [node, 0]
         perturb = self._script(payload, anima_guidance.SCRIPT_PERTURBATION)
         if perturb is not None:
             settings = self._script_settings(perturb, anima_guidance.PERTURBATION_SPEC)
@@ -1656,11 +1706,18 @@ class ComfyWorkflowCompiler:
                 "guid_smc_enabled", "guid_smc_master_enabled", "guid_cwm_enabled",
                 "guid_dcw_enabled", "guid_rdc_enabled", "guid_dave_enabled",
                 "guid_cns_enabled", "guid_mod_enabled", "guid_experimental_stack",
+                "guid_tsr_enabled", "guid_mg_enabled", "guid_higs_enabled", "guid_hiflow_enabled",
             )
             if any(_bool(settings.get(key)) for key in active_keys):
                 self._validate_anima_guidance_settings(settings)
                 suite_settings = dict(settings)
                 suite_settings["cfg_scale"] = _float(payload.get("cfg_scale"), 7.0)
+                if not hiflow_pass:
+                    suite_settings["guid_hiflow_enabled"] = False
+                if "S²" in anima_guidance.detail_suite_features(settings):
+                    # S² 는 생성 시드로 블록을 뽑는다(확장 _s2_seed = p.seeds[0]) — 샘플러와 같은 시드. S² 를 켰을 때만
+                    # 넣어 다른 설정에서는 settings_json 이 시드마다 바뀌지 않게 한다(Comfy 캐시).
+                    suite_settings["guid_s2_seed"] = concrete_seed(payload.get("seed"))
                 node = graph.add("ForgeNeoAnimaGuidanceSuite", {
                     "model": model, "clip": clip, "positive": positive, "negative": negative,
                     "enabled": True,
@@ -2571,6 +2628,7 @@ class ComfyWorkflowCompiler:
         )
         model, sampler_options = self._add_anima_guidance(
             graph, model, clip, positive, negative, payload,
+            hiflow_pass=mode == "txt2img" and _bool(payload.get("enable_hr")),
         )
         # Detail Daemon 은 이 sampler(base) 또는 hires 한 곳에만 — model 자체에는 없다. 디테일러가 받는 모델은
         # _add_image_extensions(last_pass_model=) 이 정한다.

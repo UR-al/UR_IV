@@ -50,10 +50,10 @@ def isolate_pushed_setting(case: unittest.TestCase) -> None:
 
 class SpecTests(unittest.TestCase):
     def test_options_in_card_order(self):
-        """체크박스(bool)와 라디오(선택지 문자열) 11개. 기본값은 스펙이 받는 값이고, 컴포넌트는 선택지 유무로 정해진다."""
-        self.assertEqual(len(fos.SPECS), 11)
+        """체크박스(bool)와 라디오(선택지 문자열) 13개. 기본값은 스펙이 받는 값이고, 컴포넌트는 선택지 유무로 정해진다."""
+        self.assertEqual(len(fos.SPECS), 13)
         self.assertEqual(fos.OPTION_KEYS, tuple(spec.key for spec in fos.SPECS))
-        self.assertEqual(len(set(fos.OPTION_KEYS)), 11)
+        self.assertEqual(len(set(fos.OPTION_KEYS)), 13)
         for spec in fos.SPECS:
             with self.subTest(key=spec.key):
                 self.assertTrue(spec.accepts(spec.default), spec.default)
@@ -82,7 +82,20 @@ class SpecTests(unittest.TestCase):
         self.assertEqual((spec.effect, spec.default, spec.infotext), (fos.RESULT, True, "Anima DAVE pre-DD sigma"))
         self.assertEqual(fos.SPEC_BY_KEY[SPARSE].effect, fos.RESULT)
         self.assertEqual({s.key for s in fos.SPECS if s.effect == fos.RESULT_MINOR}, {DEDUP, SEP, PRECISION})
-        self.assertEqual([s.key for s in fos.SPECS if s.effect == fos.RESULT], [SPARSE, DAVE])
+        self.assertEqual([s.key for s in fos.SPECS if s.effect == fos.RESULT],
+                         [SPARSE, DAVE, fos.OPT_PAG_COSINE, fos.OPT_BUILTIN_NEGPIP])
+
+    def test_review_proposal_options(self):
+        """2026-10-02 검토 제안 옵션 둘 — 강도 곡선(기본 끔)·내장 NegPiP 스위치(기본 켬). 둘 다 결과가 달라지는 묶음이고
+        infotext 는 확장 OptionInfo 의 이름이다(계약 테스트가 설치된 소스와 대조). 콜백이 없다."""
+        cosine, negpip = fos.SPEC_BY_KEY[fos.OPT_PAG_COSINE], fos.SPEC_BY_KEY[fos.OPT_BUILTIN_NEGPIP]
+        self.assertEqual((cosine.key, cosine.default, cosine.effect, cosine.infotext, cosine.feature),
+                         ("sam3_guidance_pag_cosine_envelope", False, fos.RESULT, "Anima PAG cosine envelope",
+                          "anima_guidance"))
+        self.assertEqual((negpip.key, negpip.default, negpip.effect, negpip.infotext, negpip.feature),
+                         ("sam3_builtin_negpip_enabled", True, fos.RESULT, "SAM Extra NegPiP enabled", "negpip"))
+        self.assertFalse(cosine.onchange or negpip.onchange)
+        self.assertEqual((cosine.component, negpip.component), ("Checkbox", "Checkbox"))
 
     def test_degrid_options_mirror_core_vae_degrid(self):
         """VAE DeGrid 옵션 셋 — 키·기본값·선택지 값은 core/vae_degrid 한 곳에서 온다. GPU 정밀도는 결과가 아주 미세하게
@@ -128,13 +141,12 @@ class SpecTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn("core/forge_override_settings.py:SPECS", reg.OPTIONS[key]["app"])
         deferred = {key: entry["package"] for key, entry in reg.OPTIONS.items() if entry["status"] == reg.DEFERRED}
-        # VAE DeGrid 옵션 셋은 P10 이 맡는다(라디오 둘은 선택지 문자열) — 남은 보류는 레퍼런스 IP-Adapter 둘(P20)과
-        # 2026-10-02 검토 제안 옵션 둘(PAG 강도 곡선·내장 NegPiP 스위치 — HOLD, 앱은 Forge 설정을 따른다)
-        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20",
-                                    "sam3_guidance_pag_cosine_envelope": "HOLD",
-                                    "sam3_builtin_negpip_enabled": "HOLD"})
+        # VAE DeGrid 옵션 셋과 2026-10-02 검토 제안 옵션 둘(PAG 강도 곡선·내장 NegPiP 스위치)도 P10 이 맡는다 — 남은
+        # 보류는 레퍼런스 IP-Adapter 둘(P20)
+        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20"})
         for key, const in ((DEVICE, "OPT_DEGRID_DEVICE"), (PRECISION, "OPT_DEGRID_GPU_PRECISION"),
-                           (KEEP_LOADED, "OPT_DEGRID_KEEP_LOADED")):
+                           (KEEP_LOADED, "OPT_DEGRID_KEEP_LOADED"), (fos.OPT_PAG_COSINE, "OPT_PAG_COSINE"),
+                           (fos.OPT_BUILTIN_NEGPIP, "OPT_BUILTIN_NEGPIP")):
             with self.subTest(key=key):
                 self.assertEqual(getattr(fos, const), key)
                 self.assertIn(f"core/forge_override_settings.py:{const}", reg.OPTIONS[key]["app"])

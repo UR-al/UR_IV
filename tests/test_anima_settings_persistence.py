@@ -28,8 +28,9 @@ class TestAnimaSettingsPersistence(unittest.TestCase):
             for index, key in enumerate(default_settings())
         }
         saved = self.mixin._get_anima_guidance_settings(widgets)
-        # 62 + 7 + Detail Daemon 11 (14칸 중 자리만 남은 preset·multiplier·cfg_couple 은 설정이 아니다)
-        self.assertEqual(len(saved), 80)
+        # 91(PAG — 디테일 묶음 62-90 포함) + 7 + Detail Daemon 11 (14칸 중 자리만 남은 preset·multiplier·cfg_couple 은
+        # 설정이 아니다) + Optimal Scale 4
+        self.assertEqual(len(saved), 113)
         self.assertEqual(saved['guid_smc_preset'], widgets['guid_smc_preset'].text())
         self.assertEqual(saved['guid_rdc_tau'], widgets['guid_rdc_tau'].text())
 
@@ -84,11 +85,11 @@ class TestAnimaSettingsPersistence(unittest.TestCase):
         self.mixin.anima_guidance_widgets = widgets
         self.mixin.vue_bridge = _Bridge()
 
-        self.assertEqual(self.mixin._reset_anima_guidance(), 80)
+        self.assertEqual(self.mixin._reset_anima_guidance(), 113)
         for key, value in defaults.items():
             expected = ('true' if value else 'false') if isinstance(value, bool) else str(value)
             self.assertEqual(widgets[key].text(), expected, key)
-        # 80개 값이 배치 안에서 한 번에 Vue 로 간다
+        # 113개 값이 배치 안에서 한 번에 Vue 로 간다
         kinds = [c[0] for c in calls]
         self.assertEqual(kinds[0], 'begin')
         self.assertEqual(kinds.index('end'), 1 + kinds.count('set'))

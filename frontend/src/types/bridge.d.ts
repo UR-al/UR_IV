@@ -120,7 +120,8 @@ export type SamExtraStatus = 'ok' | 'unknown' | 'unreachable' | 'error' | 'not_a
 
 /** 기능 플래그 이름 — 파이썬 FEATURE_FLAGS 와 같은 순서·철자. */
 export type SamExtraFeature =
-  | 'sam3' | 'anima_guidance' | 'skimmed_cfg' | 'detail_daemon' | 'anima38' | 'dora' | 'vae2x' | 'degrid'
+  | 'sam3' | 'anima_guidance' | 'skimmed_cfg' | 'detail_daemon' | 'optimal_scale' | 'anima38' | 'dora' | 'vae2x'
+  | 'degrid'
   | 'lora_manager' | 'memo_routes' | 'tipo_route' | 'reference_route' | 'contract_route'
   | 'tile_repair_route'
 

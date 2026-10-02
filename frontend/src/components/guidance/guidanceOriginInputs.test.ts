@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { createSSRApp, reactive, type Component } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
+import { createSSRApp, reactive, ref, type Component } from 'vue'
 import { renderToString } from '@vue/server-renderer'
+
+// PAG · CWM/SMC 섹션은 디테일 묶음 안내에 기능 스냅샷을 읽는다(브리지 없이 렌더)
+vi.mock('../../composables/useSamExtraCapabilities', () => ({
+  useSamExtraCapabilities: () => ({ capabilities: ref(null), refresh: () => {}, mayUse: () => true }),
+}))
+
 import DcwSection from './DcwSection.vue'
 import CwmSmcSection from './CwmSmcSection.vue'
 import RdcSection from './RdcSection.vue'
@@ -48,8 +54,10 @@ const SECTIONS: OriginSection[] = [
       _guid_end_percent: [0, 1, 0.001],
       _guid_rescale: [0, 1, 0.01],
     },
-    // SEG query blur sigma · SLG scale · Legacy strength — 원본 PAG 노드에 없는 확장 기능
-    hostOnly: ['_guid_seg_sigma', '_guid_slg_scale', '_guid_legacy_strength'],
+    // SEG query blur sigma · SLG scale · Legacy strength · S² 칸 — 원본 PAG 노드에 없는 확장 기능
+    // (S² 범위는 tests/test_guidance_detail_inputs.py 가 확장 슬라이더와 대조한다)
+    hostOnly: ['_guid_seg_sigma', '_guid_slg_scale', '_guid_legacy_strength',
+      '_guid_s2_scale', '_guid_s2_ratio', '_guid_s2_start', '_guid_s2_end'],
   },
   {
     // origin: namemechan/ComfyUI-DCW@66aaf9dd:dcw_node.py:637-667 (lambda_l ±0.5 / .005, lambda_h ±0.3 / .001)
@@ -70,6 +78,8 @@ const SECTIONS: OriginSection[] = [
       _guid_smc_lambda: [0.5, 30, 0.1],
       _guid_smc_k: [0, 5, 0.01],
     },
+    // Adaptive SMC — sorryhyun 의 Anima 판(원본 DCW 노드에 없음, 범위는 확장 슬라이더 — test_guidance_detail_inputs.py)
+    hostOnly: ['_guid_smc_adaptive_alpha', '_guid_smc_adaptive_lambda'],
   },
   {
     // origin: namemechan/ComfyUI-DCW@66aaf9dd:dcw_node.py:757-815 (rdc_tau — 0 = 끔, 따로 스위치 없음 — rdc_alpha_ll/hh)
