@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.30.0"
+EXT_VERSION_AUDITED = "0.30.1"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -47,7 +47,10 @@ EXT_VERSION_AUDITED = "0.30.0"
 # sam3_builtin_negpip_enabled 기본 켬 — 셋 다 HOLD). 픽스처는 같은 날 Forge 2.29.2(46365871)를 이 트리로 다시 띄워
 # 라이브로 받았다 — 학습 중에 소스 AST 로 먼저 맞춘 새 칸(PAG 62-90·Optimal Scale)과 값이 모두 같았다.
 # 같은 날 v0.30.0 으로 릴리스했다 — master 089333b 는 fe2a4e7 을 합친 머지 커밋이고 트리가 같다.
-EXT_COMMIT_AUDITED = "089333b"
+# 2026-10-03 v0.30.1(991c45b, master 머지 1c49f89 — 트리 같음): [VERIFY] MG·HiGS 적용 횟수를 패스마다 새로 센다
+# (sam3ext/guidance/runtime.py reset_pass 가 새 HistoryState). 인자·infotext·옵션·제목 그대로 — 픽스처는 고친 코드로 띄운
+# Forge 2.29.2 에서 커밋 전에 다시 받았다(기록된 커밋은 그때 HEAD fe2a4e7, 버전은 로컬 0.30.1). scripts 부분은 0.30.0 때와 같았다.
+EXT_COMMIT_AUDITED = "1c49f89"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
