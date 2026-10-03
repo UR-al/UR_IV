@@ -79,6 +79,8 @@ EXT_VERSION_AUDITED = "0.32.1"
 # 검사(sam3ext/speed/schedule.py build_plan 이 A ≤ 0·NaN 을 PlanError invalid 로 — 그 패스는 순정, status 에 이유). 인자·infotext·
 # 옵션·제목 그대로(둘 다 앱은 HOLD). 픽스처는 릴리스 직후 7860 에서 읽기 전용 GET 으로 다시 받았다(captured_at
 # 2026-10-03T15:07:21+00:00) — scripts 부분은 0.32.0 픽스처와 바이트 단위로 같다.
+# 2026-10-04 Extra Schedulers 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 셋을 HOLD → mapped, XYZ 축은 P18(앱 XYZ 의
+# Scheduler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS xsched_*(앱 쪽 — ComfyUI 팩 거울 '_comfy' 는 팩 1.7.0 단계 C0).
 EXT_COMMIT_AUDITED = "6101f05"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
@@ -463,21 +465,56 @@ SCRIPTS = MappingProxyType({
         classification=deferred(HOLD, "실험 기능(SPEED — 초반 스텝을 DCT 저해상도로, 기본 끔, 이미지가 달라진다). 확장도 Anima "
                                       "화질·속도를 GPU 로 확인하지 않았다(CHANGELOG). 앱 노출 요청 없음 — 앱이 만들지 않는다"
                                       "(core/alwayson_propagation NEVER)")),
+    # 2026-10-04 앱 노출(보류 → mapped): 파라미터 카드의 값 칸·샘플링 블록 기여자·보조 패스 전달 규칙·결과 알림·붙여 넣기
+    # 규칙. 상수 계약은 SEMANTIC_PINS xsched_*. ComfyUI(팩 1.7.0 의 스케줄러 6개 등록·값 운반 노드)는 계획 C 단계.
     "Extra Schedulers (sam-extra)": _script(
         file="scripts/anima_extra_schedulers.py", form="positional_or_dict", live_argc=5, shape="c3552551b4b0",
+        app_title="core.extra_schedulers:SCRIPT_NAME",
         api_note="위치 인자 [custom_mode, custom_expression, custom_sigmas, laplace_mu, laplace_beta] 또는 그 키의 dict 한 개"
-                 "(sam3ext/ui_extra_schedulers.py ARG_NAMES·coerce_args — 스크립트 모듈 밖). ui() 가 build_controls 의 튜플을 "
-                 "list() 로 돌려줘 반환 순서·컴포넌트를 정적으로 못 읽는다. 값은 생성의 Schedule type(·Hires schedule type)이 "
-                 "이 확장의 custom·Laplace 일 때만 쓰인다. 스케줄러 6개(name cosine·cosine_exponential·phi·laplace·"
-                 "karras_dynamic·custom, label Cosine·CosineExponential blend·Phi·Laplace·Karras Dynamic·custom)는 불러올 때 "
-                 "Forge 목록에 등록돼 /sdapi/v1/schedulers 로 나온다 — 앱 Forge 스케줄러 콤보는 라이브 name 목록(backends/"
-                 "webui_backend.py get_info)이라 그대로 고를 수 있고, 이 블록 없이 확장 기본값(식 'M * (m / M) ** x', μ 0·β "
-                 "0.5)으로 돈다. ComfyUI 는 KSampler scheduler 선택지에 없는 이름이라 컴파일 오류('지원하지 않는 값', "
-                 "core/comfy_workflow_compiler._runtime_sampler_values) — 별칭을 두지 않는다(Comfy LaplaceScheduler 는 "
-                 "KSampler 가 아닌 SIGMAS 노드). infotext 'Custom scheduler expression'·'Custom scheduler sigmas'·"
-                 "'Laplace mu'·'Laplace beta'.",
-        classification=deferred(HOLD, "custom 식·시그마 목록·Laplace μ/β 칸 — 앱 노출 요청 없음. 앱이 만들지 않는다"
-                                      "(core/alwayson_propagation NEVER)")),
+                 "(sam3ext/ui_extra_schedulers.py ARG_NAMES·coerce_args — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 읽힌다, "
+                 "핀 xsched_arg_names). ui() 가 build_controls 의 튜플을 list() 로 돌려줘 반환 순서·컴포넌트를 정적으로 못 "
+                 "읽는다. 뒤 인자는 빼도 기본값, 숫자가 아닌 μ/β 는 기본값, 범위 밖은 자른다(settings.coerce). process() 는 "
+                 "요청마다(블록이 없어도 ui() 기본값으로) 전역 상태를 덮고(settings.set_active) 스케줄러가 그것을 읽는다 — "
+                 "값은 생성의 Schedule type(·Hires schedule type)이 이 확장의 custom·Laplace 일 때만 쓰인다. 스케줄러 6개"
+                 "(name cosine·cosine_exponential·phi·laplace·karras_dynamic·custom, label Cosine·CosineExponential blend·Phi·"
+                 "Laplace·Karras Dynamic·custom)는 불러올 때 Forge 목록에 등록돼 /sdapi/v1/schedulers 로 나온다 — 앱 Forge "
+                 "스케줄러 콤보는 라이브 name 목록(backends/webui_backend.py get_info). 같은 이름·라벨이 이미 있으면(aoleg/"
+                 "Neo_ExtraSchedulers) 건너뛰고 그 스케줄러가 돈다. 잘못된 식·목록·평평한 스케줄은 생성을 멈춘다(HTTP 500, "
+                 "'Extra Schedulers: …'). infotext 'Custom scheduler expression'·'Custom scheduler sigmas'(공백 한 칸)·"
+                 "'Laplace mu'·'Laplace beta'(repr) — 이 확장의 custom·Laplace 를 쓴 생성에만.",
+        classification=mapped(
+            "core/extra_schedulers.py:SCRIPT_NAME", "core/extra_schedulers.py:ARG_NAMES",
+            "core/extra_schedulers.py:parse_settings", "core/extra_schedulers.py:as_block",
+            "core/extra_schedulers.py:parse_script_block", "core/extra_schedulers.py:plan",
+            "core/extra_schedulers.py:from_infotext", "core/extra_schedulers.py:resolve_scheduler",
+            "core/extra_schedulers.py:value_scheduler_passes", "core/extra_schedulers.py:passes_from_widgets",
+            # 보조 패스 전달(모든 보조 img2img — 확장 전역 상태가 요청마다 덮인다)·기능 스냅샷
+            "core/alwayson_propagation.py:TITLE_EXTRA_SCHEDULERS", "core/alwayson_propagation.py:PROPAGATION",
+            "core/sam_extra_capabilities.py:TITLE_EXTRA_SCHEDULERS",
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용)·저장·붙여 넣기(계획 A-R1 이 '이 설정으로 생성'에 잇는다)
+            "ui/extra_schedulers_ui.py:contribute", "ui/extra_schedulers_ui.py:apply_saved_settings",
+            "ui/extra_schedulers_ui.py:apply_infotext", "ui/sampling_blocks.py:CONTRIBUTORS",
+            # 결과 'Schedule type' 이 Laplace·custom 인데 값 기록 없음(다른 확장의 같은 이름 스케줄러) → 알림(P4 규칙)
+            "core/sam_extra_notices.py:CODE_XSCHED_NOT_APPLIED", "core/sam_extra_notices.py:explain_scheduler_error",
+            # 결과 infotext 4키를 확장 그룹으로(PNG Info·갤러리·히스토리)
+            "core/image_metadata.py:_EXTENSION_MARKERS",
+            # 파라미터 카드 Sampler/Scheduler 줄 아래 값 칸 — laplace·custom 을 쓰는 패스가 있을 때만 보인다
+            "frontend/src/components/params/ExtraSchedulerFields.vue",
+            "frontend/src/utils/extraSchedulers.ts:passesUsing",
+            note="dict 한 개(5키)로 보낸다 — Forge 가 캐시한 위치 기본값·사용자 ui-config 기본값과 무관하다. 기능 스냅샷이 "
+                 "스크립트를 확인하면 값이 기본값이어도 늘 보낸다(XYZ Scheduler 축이 Laplace 로 바꾸는 칸도 같은 값 — 계획 "
+                 "X5), 확인 못 했으면 어느 패스가 laplace·custom 을 쓸 때만(모르면 사용자 값만, 없다고 하면 빼고 알림). "
+                 "앱 기본값 = 확장 기본값. 메인 요청과 모든 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같은 블록 — "
+                 "확장 전역 상태가 요청마다 덮이므로. 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). "
+                 "Krea2 는 보내지 않는다. 결과에 이 확장의 값 키가 없으면 다른 확장의 같은 이름 스케줄러가 돈 것 — 알림",
+            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/extra_schedulers.plan 'comfy_pending', 계획 R16). "
+                  "ComfyUI 는 아직 KSampler 에 없는 이름이라 컴파일 오류('지원하지 않는 값')",
+                  "P18: XYZ μ/β/식 축은 앱 XYZ 에 없다(Scheduler 축은 있다)",
+                  "Forge 설정 rho·sigma min/max(Settings → Sampler Parameters)는 Forge 전용 — 앱은 보내지 않는다",
+                  "C7: custom 식·목록을 앱이 미리 검사하지 않는다(계산기는 ComfyUI 팩 extra_schedulers_math — 팩 1.7.0 단계 "
+                  "뒤 core/extra_schedulers.check_text). 잘못된 식은 Forge 가 'Extra Schedulers: …' 로 멈춘다",
+                  "Forge HTTP 500 본문은 앱 옵션 재시도 때만 읽는다 — 스케줄러 오류 원문(explain_scheduler_error)은 아직 "
+                  "생성 오류 문구에 붙지 않는다"))),
     "Extra Samplers": _script(
         file="scripts/anima_extra_samplers.py", form="positional", live_argc=2, shape="9429dfbd04a7",
         ui_return=("max_stage", "eta"),
@@ -733,7 +770,9 @@ XYZ_AXES = MappingProxyType({
         "Chroma Contrast", "Clarity", "Contrast", "Enable", "End", "Exposure", "Saturation", "Sharpness", "Start",
         "Strength", "Temperature", "Tint", "Tone Compression", "Vibrance")},
     "[Anima SPEED]": {**_XYZ_HOLD, "labels": ("Delta", "Enable", "Manual sigma", "Mode", "Scale", "Sigma divisor")},
-    "[Extra Schedulers (sam-extra)]": {**_XYZ_HOLD, "labels": (
+    "[Extra Schedulers (sam-extra)]": {**deferred("P18", "앱 XYZ 에 μ/β/식 축이 없다 — Scheduler 축은 이미 있고(앱 XYZ "
+                                                         "'Scheduler'), 블록은 그 칸에도 카드 값으로 같이 간다(core/"
+                                                         "extra_schedulers.plan)"), "labels": (
         "Custom expression", "Custom sigma list", "Laplace beta", "Laplace mu")},
     "[Extra Samplers]": {**_XYZ_HOLD, "labels": ("ER SDE eta", "ER SDE max stage")},
 })
@@ -812,9 +851,10 @@ MODULES = MappingProxyType({
     "scripts/colorcraft.py": deferred(HOLD, "SCRIPTS['Colorcraft (sam-extra)'] — 옵션 sam3_colorcraft_* 둘·XYZ [Colorcraft] 도 "
                                             "여기서 등록한다"),
     "scripts/anima_speed.py": deferred(HOLD, "SCRIPTS['Anima SPEED'] — 옵션 sam3_speed_* 둘·XYZ [Anima SPEED] 도 여기서 등록한다"),
-    "scripts/anima_extra_schedulers.py": deferred(
-        HOLD, "SCRIPTS['Extra Schedulers (sam-extra)'] — 불러올 때 스케줄러 6개를 Forge 목록에 등록한다(앱 Forge 스케줄러 콤보에 "
-              "라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Schedulers (sam-extra)] 도 여기서"),
+    "scripts/anima_extra_schedulers.py": mapped(
+        "core/extra_schedulers.py:SCRIPT_NAME", "core/extra_schedulers.py:SCHEDULER_NAMES",
+        note="SCRIPTS['Extra Schedulers (sam-extra)'] — 불러올 때 스케줄러 6개를 Forge 목록에 등록한다(앱 Forge 스케줄러 "
+             "콤보에 라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Schedulers (sam-extra)] 도 여기서(P18)"),
     "scripts/anima_extra_samplers.py": deferred(
         HOLD, "SCRIPTS['Extra Samplers'] — 불러올 때 샘플러 5개를 Forge 목록에 등록한다(앱 Forge 샘플러 콤보에 라이브로 "
               "보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Samplers] 도 여기서"),
@@ -941,12 +981,21 @@ MODULES = MappingProxyType({
                                           "넣기·colorcraft_schema.js 생성)"),
     "sam3ext/speed/": deferred(HOLD, "SPEED 런타임 — ARG_NAMES·coerce_settings·infotext(forge_host), 전환 계획(schedule)·"
                                      "스펙트럼 변환(spectral)·샘플러 래퍼(runner)"),
-    "sam3ext/extra_schedulers/": deferred(HOLD, "스케줄러 6개·안전 식 계산기(AST 화이트리스트)·시그마 목록 보간·Forge 등록 — "
-                                                "앱은 custom 식·Laplace 값을 보낼 수 없다(스케줄러 이름은 Forge 목록으로 고른다)"),
+    "sam3ext/extra_schedulers/": mapped(
+        "core/extra_schedulers.py:coerce", "core/extra_schedulers.py:SCHEDULER_LABELS",
+        "core/extra_schedulers.py:README_LABELS", "core/extra_schedulers.py:ERROR_PREFIX",
+        note="스케줄러 6개·안전 식 계산기(AST 화이트리스트)·시그마 목록 보간·값 정규화(settings)·Forge 등록(registry). 앱은 "
+             "정규화 규칙·이름 표·오류 머리만 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현, 계획 "
+             "C 단계). tests/test_extra_schedulers_core.py 가 설치된 settings·registry 와 비교한다",
+        gaps=("C7: 식·목록 검사(expression·sigma_list)를 앱이 미리 하지 않는다",)),
     "sam3ext/extra_samplers/": deferred(HOLD, "샘플러 5개(ER SDE 둘·DPM++ 4M SDE·Euler Dy CFG++ 둘)·ER SDE 값·Forge 등록 — 앱은 "
                                               "ER SDE 값을 보낼 수 없다(샘플러 이름은 Forge 목록으로 고른다)"),
-    "sam3ext/ui_extra_schedulers.py": deferred(HOLD, "Extra Schedulers 인자(ARG_NAMES·coerce_args)·infotext 키·붙여 넣기·"
-                                                     "Gradio 컨트롤 — SCRIPTS['Extra Schedulers (sam-extra)']"),
+    "sam3ext/ui_extra_schedulers.py": mapped(
+        "core/extra_schedulers.py:ARG_NAMES", "core/extra_schedulers.py:coerce_args",
+        "core/extra_schedulers.py:from_infotext", "core/extra_schedulers.py:infotext_items",
+        "core/extra_schedulers.py:infotext_labels",
+        note="인자(ARG_NAMES·coerce_args)·infotext 키·붙여 넣기(paste_*)·infotext_items — SCRIPTS['Extra Schedulers "
+             "(sam-extra)']. Gradio 컨트롤(build_controls)은 앱 카드가 대신한다(범위·step 은 픽스처 핀 xsched_ui_*)"),
     "sam3ext/progress_api.py": deferred(HOLD, "ROUTES['GET /sam-extra/progress'] — 진행률·작업 전체 ETA 계산과 라우트 등록"),
     # javascript/
     "javascript/appearance_theme.js": ignored(_N6),
@@ -1124,6 +1173,88 @@ _DEGRID_PINS = (
     {"id": "degrid_ui_tile_min", "source": "fixture", "script": _DEGRID_TITLE, "index": 4,
      "field": "minimum", "expected": 0,
      "meaning": "타일 슬라이더 최소 0 = 나누지 않음 — 카드 TILE_RANGE.min 도 0(그 위는 128 단위)"},
+)
+
+# Extra Schedulers 상수 계약 — 앱(core/extra_schedulers)이 같은 값을 하드코딩한다. μ/β 범위·기본값은 확장 settings.py 의
+# 튜플 대입(LAPLACE_MU_MIN, … = …)이라 AST 로 풀리지 않아 script-info 슬라이더(픽스처 — 소스↔픽스처 비교가 소스 변경을
+# 잡는다)로 핀한다. 스케줄러 name·label 은 생성자 호출(SchedulerSpec)이라 tests/test_extra_schedulers_core.py 가 설치된
+# registry 를 import 해 비교한다.
+_XSCHED_UI = "sam3ext/ui_extra_schedulers.py"
+_XSCHED_SETTINGS = "sam3ext/extra_schedulers/settings.py"
+_XSCHED_REGISTRY = "sam3ext/extra_schedulers/registry.py"
+_XSCHED_TITLE = "Extra Schedulers (sam-extra)"
+_APP_XSCHED = "core.extra_schedulers"
+
+
+def _xsched_pins(pin_id: str, file: str, name: str, expected, meaning: str, *, app: str = "") -> tuple:
+    """확장 ``file:name`` 핀 — ``app`` 은 앱 상수 이름(core.extra_schedulers). 팩 거울(``<id>_comfy``)은 계획 C0 이 더한다."""
+    base = {"id": pin_id, "source": "ast", "file": file, "name": name, "expected": expected, "meaning": meaning}
+    return ({**base, **({"app": f"{_APP_XSCHED}:{app}"} if app else {})},)
+
+
+def _xsched_slider_pin(pin_id: str, index: int, field: str, expected, app: str, meaning: str) -> dict:
+    return {"id": pin_id, "source": "fixture", "script": _XSCHED_TITLE, "index": index, "field": field,
+            "expected": expected, "app": f"{_APP_XSCHED}:{app}", "meaning": meaning}
+
+
+_XSCHED_PINS = (
+    *_xsched_pins("xsched_title", _XSCHED_UI, "TITLE", _XSCHED_TITLE,
+                  "alwayson_scripts 키(aoleg/Neo_ExtraSchedulers 의 'Extra Schedulers' 아코디언과 다른 이름) — 앱 블록·기능 "
+                  "스냅샷·전달 규칙·알림 표의 제목이 모두 이 상수 하나에서 나온다", app="SCRIPT_NAME"),
+    *_xsched_pins("xsched_arg_names", _XSCHED_UI, "ARG_NAMES",
+                  ("custom_mode", "custom_expression", "custom_sigmas", "laplace_mu", "laplace_beta"),
+                  "API dict 키(뒤에만 덧붙인다) — 앱은 dict 한 개로 보내므로 이름이 바뀌면 값이 조용히 기본값이 된다",
+                  app="ARG_NAMES"),
+    *_xsched_pins("xsched_mode_labels", _XSCHED_UI, "MODE_LABELS", {"expression": "Expression", "sigmas": "Sigma list"},
+                  "모드 라디오 라벨 — coerce_mode 가 'Sigma list' 를 sigmas 로 읽는다(script-info 기본값도 라벨)",
+                  app="MODE_LABELS"),
+    *_xsched_pins("xsched_modes", _XSCHED_SETTINGS, "MODES", ("expression", "sigmas"),
+                  "custom_mode 값 — 그 밖의 값은 expression 으로 읽힌다", app="MODES"),
+    *_xsched_pins("xsched_mode_expression", _XSCHED_SETTINGS, "MODE_EXPRESSION", "expression", "식 모드 값",
+                  app="MODE_EXPRESSION"),
+    *_xsched_pins("xsched_mode_sigmas", _XSCHED_SETTINGS, "MODE_SIGMAS", "sigmas", "시그마 목록 모드 값",
+                  app="MODE_SIGMAS"),
+    *_xsched_pins("xsched_default_expression", _XSCHED_SETTINGS, "DEFAULT_EXPRESSION", "M * (m / M) ** x",
+                  "custom 식 기본값(Exponential 과 같은 곡선) — 블록이 없을 때의 값, 앱 기본값과 같아야 한다",
+                  app="DEFAULT_EXPRESSION"),
+    *_xsched_pins("xsched_default_sigmas", _XSCHED_SETTINGS, "DEFAULT_SIGMAS", "[1.0, 0.6, 0.25, 0.1, 0.0]",
+                  "custom 시그마 목록 기본값(1.0…0.0 이면 σmax~σmin 로 늘린다)", app="DEFAULT_SIGMAS"),
+    *(pin for short, const, value, meaning in (
+        ("custom_expression", "KEY_CUSTOM_EXPRESSION", "Custom scheduler expression", "custom 식(공백 한 칸) — 식 모드로 돈 때"),
+        ("custom_sigmas", "KEY_CUSTOM_SIGMAS", "Custom scheduler sigmas", "custom 시그마 목록(공백 한 칸) — 목록 모드로 돈 때"),
+        ("laplace_mu", "KEY_LAPLACE_MU", "Laplace mu", "Laplace μ(repr) — Laplace 로 돈 때 β 와 늘 함께"),
+        ("laplace_beta", "KEY_LAPLACE_BETA", "Laplace beta", "Laplace β(repr)"))
+      for pin in _xsched_pins(f"xsched_key_{short}", _XSCHED_UI, const, value,
+                              "infotext 키: " + meaning + ". 붙여 넣기(from_infotext)·결과 알림(CODE_XSCHED_NOT_APPLIED)이 "
+                              "읽는다", app=const)),
+    *_xsched_pins("xsched_infotext_keys", _XSCHED_UI, "INFOTEXT_KEYS",
+                  ("Custom scheduler expression", "Custom scheduler sigmas", "Laplace mu", "Laplace beta"),
+                  "확장이 쓰는(그리고 생성마다 지우는) infotext 키 전부", app="INFOTEXT_KEYS"),
+    *_xsched_pins("xsched_use_same_scheduler", _XSCHED_UI, "USE_SAME_SCHEDULER", "Use same scheduler",
+                  "Hires schedule type 의 '같은 스케줄러' — 메인 스케줄러를 쓴다(붙여 넣기·패스 판정)",
+                  app="USE_SAME_SCHEDULER"),
+    *_xsched_pins("xsched_label_laplace", _XSCHED_REGISTRY, "LABEL_LAPLACE", "Laplace",
+                  "infotext 'Schedule type' 라벨 — 이 라벨이면 붙여 넣기가 μ/β 기본값을 채운다", app="LABEL_LAPLACE"),
+    *_xsched_pins("xsched_label_custom", _XSCHED_REGISTRY, "LABEL_CUSTOM", "custom", "custom 스케줄러 라벨",
+                  app="LABEL_CUSTOM"),
+    *_xsched_pins("xsched_readme_labels", _XSCHED_REGISTRY, "README_LABELS", {
+        "cosine": "cosine", "cosine_exponential": "cosine-exponential blend", "phi": "phi", "laplace": "laplace",
+        "karras_dynamic": "karras dynamic", "custom": "custom"},
+        "Forge schedulers_map 에도 들어가는 별칭(aoleg README 표기) — 그 확장 이미지의 'Schedule type' 을 이 확장 "
+        "스케줄러로 읽는다(resolve_scheduler·infotext_labels)", app="README_LABELS"),
+    # script-info(픽스처) — 카드 입력 범위·step·기본값이 Forge UI 와 같다(= settings.coerce 의 자르기 범위)
+    _xsched_slider_pin("xsched_ui_mu_min", 3, "minimum", -10.0, "LAPLACE_MU_MIN", "Laplace μ 하한(자르기)"),
+    _xsched_slider_pin("xsched_ui_mu_max", 3, "maximum", 10.0, "LAPLACE_MU_MAX", "Laplace μ 상한(자르기)"),
+    _xsched_slider_pin("xsched_ui_mu_step", 3, "step", 0.1, "LAPLACE_MU_STEP",
+                       "μ 슬라이더 step — 카드(frontend/src/utils/extraSchedulers.ts MU_RANGE)도 같다"),
+    _xsched_slider_pin("xsched_ui_mu_default", 3, "value", 0.0, "LAPLACE_MU_DEFAULT",
+                       "μ 기본값(ComfyUI LaplaceScheduler 와 같다)"),
+    _xsched_slider_pin("xsched_ui_beta_min", 4, "minimum", 0.0, "LAPLACE_BETA_MIN", "Laplace β 하한(자르기)"),
+    _xsched_slider_pin("xsched_ui_beta_max", 4, "maximum", 10.0, "LAPLACE_BETA_MAX", "Laplace β 상한(자르기)"),
+    _xsched_slider_pin("xsched_ui_beta_step", 4, "step", 0.1, "LAPLACE_BETA_STEP",
+                       "β 슬라이더 step — 카드 BETA_RANGE 도 같다"),
+    _xsched_slider_pin("xsched_ui_beta_default", 4, "value", 0.5, "LAPLACE_BETA_DEFAULT",
+                       "β 기본값(ComfyUI LaplaceScheduler 와 같다)"),
 )
 
 SEMANTIC_PINS = (
@@ -1342,6 +1473,8 @@ SEMANTIC_PINS = (
      "meaning": "SPEED 의 img2img rescale 값이 남는 infotext 이름"},
     # VAE DeGrid — 위 _DEGRID_PINS(앱·Comfy 팩 거울)
     *_DEGRID_PINS,
+    # Extra Schedulers — 위 _XSCHED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    *_XSCHED_PINS,
 )
 
 # ── ui() 컴포넌트에서 AST 로 못 읽는 칸 (script, index) → 필드와 사유 ─────────────────────

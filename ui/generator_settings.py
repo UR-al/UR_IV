@@ -27,6 +27,12 @@ def _degrid_settings(host) -> dict:
     return get_settings(host)
 
 
+def _extra_schedulers_settings(host) -> dict:
+    """Extra Schedulers 값 칸(ui/extra_schedulers_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
+    from ui.extra_schedulers_ui import get_settings
+    return get_settings(host)
+
+
 def migrate_legacy_gallery_folder(
     settings: dict,
     *,
@@ -181,6 +187,8 @@ class SettingsMixin:
             "anima38_settings": _anima38_settings(self),
             # VAE DeGrid 카드(core/vae_degrid.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
             "vae_degrid_settings": _degrid_settings(self),
+            # Extra Schedulers 값 칸(core/extra_schedulers.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
+            "extra_schedulers_settings": _extra_schedulers_settings(self),
             
             
             "remove_artist": self.chk_remove_artist.isChecked(),

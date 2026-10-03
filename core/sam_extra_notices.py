@@ -24,6 +24,10 @@
 - ``dora_*_notice``                         DoRA 추론 방식 — Comfy 순정 안내·라이브 선택지 불일치·첫 로드 앱 기본값(P8)
 - ``degrid_result_notices``/``degrid_comfy_unavailable_notice``  VAE DeGrid — Comfy 백엔드가 노드 리포트를 Forge 와 같은
                                             infotext 키로 바꿔 같은 규칙으로 알린다(core/vae_degrid.report_params)
+- Extra Schedulers                          결과: Laplace·custom 으로 돌았는데 값 기록('Laplace mu'·'Custom scheduler …')이
+                                            없음(다른 확장의 같은 이름 스케줄러). ``xsched_invalid_text_notice`` 는 쓸 수 없는
+                                            custom 식·목록(생성 전 — 계산기는 계획 C7 이 잇는다), ``explain_scheduler_error``
+                                            는 확장 스케줄러 오류('Extra Schedulers: …') 원문에 한국어 머리를 붙인다
 - ``anima38_*_notice``                      Anima 3.8B — 첫 로드 앱 기본값(부정 커넥터 켬)·Comfy v1 자동 켜짐 폐지 안내(P9).
                                             'off: install failed (RuntimeError)' 힌트는 결과 모델 종류(비 Anima)를 먼저 본다
 - ``app_block_retried_notice``/``block_retried_notice``  메인 생성 재시도(DoRA·Anima38 422 — 앱 기본값이면 정보, 사용자
@@ -55,7 +59,7 @@ from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 from urllib.parse import urlsplit
 
-from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, sam3_args, vae_degrid
+from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, extra_schedulers, sam3_args, vae_degrid
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,9 @@ CODE_ANIMA38_COMFY_V1 = "anima38_comfy_v1"            # 생성 전(Comfy): Qwen3
 CODE_DEGRID_ERROR = "degrid_error"                    # 결과: 'Anima DeGrid error' — 그 이미지는 DeGrid 없이 저장(경고)
 CODE_DEGRID_NOT_APPLIED = "degrid_not_applied"        # 결과: 보냈는데 'Anima DeGrid model'·'error' 가 모두 없음(옛 sam-extra)
 CODE_DEGRID_COMFY_UNAVAILABLE = "degrid_comfy_unavailable"   # ComfyUI: 노드(팩 1.5.0)·출력 연결이 없어 빼고 생성(경고)
+# Extra Schedulers(core/extra_schedulers)
+CODE_XSCHED_NOT_APPLIED = "xsched_not_applied"        # 결과: Laplace·custom 으로 돌았는데 값 기록이 없음(다른 확장의 스케줄러)
+CODE_XSCHED_INVALID_TEXT = "xsched_invalid_text"      # 생성 전: custom 식·시그마 목록을 쓸 수 없다(보내기는 한다 — 경고)
 # 메인 생성 재시도·Forge 옵션 덮어쓰기(P10, core/forge_override_settings·core/forge_optional_parts)
 CODE_APP_BLOCK_RETRIED = "app_block_retried"          # 메인 생성: 앱이 넣은 블록(DoRA·Anima38)을 Forge 가 422 로 거절 → 빼고 다시
 CODE_BLOCK_RETRIED = "block_retried"                  # 메인 생성: 사용자 값(또는 출처 모름) 블록을 422 로 거절 → 빼고 다시(경고)
@@ -170,6 +177,9 @@ NOTICE_MIN_TTL_S = {
     CODE_DEGRID_ERROR: PRE_GENERATION_NOTICE_TTL_S,
     CODE_DEGRID_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_DEGRID_COMFY_UNAVAILABLE: PRE_GENERATION_NOTICE_TTL_S,
+    # Extra Schedulers 도 설정·설치가 그대로면 요청마다 같다
+    CODE_XSCHED_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_XSCHED_INVALID_TEXT: PRE_GENERATION_NOTICE_TTL_S,
 }
 # 띄울 때 GUI 가 기능 스냅샷을 다시 받아야 하는 알림(연결 때 받은 스냅샷이 틀렸다는 뜻) —
 # ui/sam_extra_notices_ui.show_notices 가 _refresh_sam_extra_capabilities(force=True) 를 부른다.
@@ -179,6 +189,7 @@ REFRESH_CAPABILITIES_CODES = frozenset({CODE_PROPAGATION_RETRIED, CODE_APP_BLOCK
 # ── alwayson 제목 → 사람이 읽는 이름 ─────────────────────────────────────────
 _TITLE_DORA = dora_infer_mode.SCRIPT_NAME
 _TITLE_DEGRID = vae_degrid.SCRIPT_NAME
+_TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME
 _TITLE_VAE2X = "Anima VAE 2x (spacepxl decoder)"
 SAM_EXTRA_FEATURES = {
     sam3_args.SCRIPT_SAM3.lower(): ("sam3", "SAM3 Mask"),
@@ -189,6 +200,7 @@ SAM_EXTRA_FEATURES = {
     _TITLE_DORA.lower(): ("dora", "DoRA 추론 방식"),
     _TITLE_VAE2X.lower(): ("vae2x", "VAE 2x"),
     _TITLE_DEGRID.lower(): ("degrid", "VAE DeGrid"),
+    _TITLE_EXTRA_SCHEDULERS.lower(): ("extra_schedulers", "Extra Schedulers 값(custom 식·Laplace μ/β)"),
 }
 # 기능 스냅샷(SAM_EXTRA_FEATURES) 밖 제목: 소문자 제목 → (기능, 제공 확장 이름). NegPiP 는 2026-09-30 부터 sam-extra 에
 # 내장(sd-forge-negpip 편입)됐지만 스냅샷 기능이 아니므로 여기 둔다.
@@ -398,6 +410,7 @@ class RequestedFeatures:
     anima38: Optional[anima38.Anima38Settings] = None   # 블록을 보냈을 때만
     dora: Optional[dora_infer_mode.DoraSettings] = None   # 블록을 보냈을 때만(확장이 읽는 규칙 — parse_script_block)
     degrid: Optional[vae_degrid.DegridSettings] = None     # 블록을 보냈을 때만(확장 coerce_args 규칙)
+    extra_schedulers: Optional[extra_schedulers.ExtraSchedulerSettings] = None   # 블록을 보냈을 때만(coerce_args 규칙)
     cfg_scale: Optional[float] = None
     hires: bool = False
     hires_cfg: Optional[float] = None         # 요청에 hr_cfg 가 있을 때만
@@ -507,6 +520,7 @@ def requested_features(payload: Any, *, live_pag_argc: Optional[int] = None) -> 
         anima38=anima38.parse_script_block(block38) if block38 is not None else None,
         dora=dora_infer_mode.parse_script_block(_script_block(payload, dora_infer_mode.SCRIPT_NAME)),
         degrid=vae_degrid.parse_script_block(_script_block(payload, vae_degrid.SCRIPT_NAME)),
+        extra_schedulers=extra_schedulers.parse_script_block(_script_block(payload, extra_schedulers.SCRIPT_NAME)),
         cfg_scale=_number(payload.get("cfg_scale")),
         hires=hires, hires_cfg=_number(payload.get("hr_cfg")) if hires and "hr_cfg" in payload else None,
         # 키가 있으면 img2img 요청이다 — 재인코딩하는 I2I 는 워커가 채울 때까지 init_images=[] 로 둔다
@@ -905,6 +919,67 @@ def degrid_result_notices(payload: Any, params_list: Iterable[Any], *, comfy: bo
     return _degrid_result_notices(requested_features(payload), images, comfy=comfy)
 
 
+# ── Extra Schedulers ────────────────────────────────────────────────────────────
+XSCHED_ERROR_LEAD = "Extra Schedulers 스케줄을 만들 수 없습니다"
+
+
+def _xsched_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
+    """보낸 Extra Schedulers 블록의 결과(P4 '보냈는데 흔적 없음' 규칙). 확장은 자기 Laplace·custom 이 돈 장에만 값 키를
+    남긴다(ui_extra_schedulers.write_infotext — 다른 확장이 같은 라벨을 먼저 등록했으면 그 확장의 스케줄러가 돌고 키가
+    없다). 'Schedule type'·'Hires schedule type' 이 Laplace·custom 인데 그 키가 없는 장이 있으면 앱이 보낸 값이 쓰이지
+    않았다(경고 한 번). 블록을 보내지 않았거나(게이트가 뺐거나 Comfy) 읽을 결과가 없으면 말하지 않는다."""
+    if request.extra_schedulers is None or not images:
+        return []
+    xs = extra_schedulers
+    missing: dict = {}
+    for params in images:
+        labels = xs.infotext_labels(params)
+        if xs.LABEL_LAPLACE in labels and xs.KEY_LAPLACE_MU not in params:
+            missing.setdefault(xs.LABEL_LAPLACE, (xs.KEY_LAPLACE_MU, xs.KEY_LAPLACE_BETA))
+        if xs.LABEL_CUSTOM in labels and xs.KEY_CUSTOM_EXPRESSION not in params and xs.KEY_CUSTOM_SIGMAS not in params:
+            missing.setdefault(xs.LABEL_CUSTOM, (xs.KEY_CUSTOM_EXPRESSION, xs.KEY_CUSTOM_SIGMAS))
+    if not missing:
+        return []
+    names = " · ".join(missing)
+    keys = "'·'".join(key for group in missing.values() for key in group)
+    return [Notice(
+        CODE_XSCHED_NOT_APPLIED, LEVEL_WARNING,
+        f"스케줄러 {names} 로 생성했지만 결과에 Extra Schedulers 값 기록('{keys}')이 없습니다 — 다른 확장"
+        "(aoleg/Neo_ExtraSchedulers 등)이 같은 이름의 스케줄러를 먼저 등록해 그 스케줄러가 돌았고 앱이 보낸 μ/β·식은 "
+        "쓰이지 않았습니다. 그 확장을 끄거나 Forge 콘솔의 '[Extra Schedulers (sam-extra)]' 줄을 확인하세요.",
+        feature="extra_schedulers", detail=names)]
+
+
+def xsched_result_notices(payload: Any, params_list: Iterable[Any]) -> list[Notice]:
+    """보낸 페이로드 + 이미지마다 infotext 식 파라미터 → Extra Schedulers 결과 알림(``result_notices`` 와 같은 규칙)."""
+    images = [dict(p) for p in (params_list or ()) if isinstance(p, Mapping)]
+    return _xsched_result_notices(requested_features(payload), images)
+
+
+def xsched_invalid_text_notice(detail: Any, *, sigmas: bool = False) -> Notice:
+    """생성 전: custom 스케줄러를 쓰는 패스가 있는데 식(또는 시그마 목록)을 쓸 수 없다 — 계산기 오류 원문(영어, Forge·
+    ComfyUI 와 같은 문구). 요청은 그대로 보낸다(σ 에 따라 달라지는 검사는 미리 판정하지 않는다) — 경고."""
+    text = " ".join(str(detail or "").split())
+    what = "시그마 목록" if sigmas else "식"
+    return Notice(
+        CODE_XSCHED_INVALID_TEXT, LEVEL_WARNING,
+        f"Extra Schedulers custom {what}을 쓸 수 없습니다: {_short(text, 160)} — 이대로면 생성이 이 오류로 멈춥니다. "
+        f"파라미터 카드의 custom {what}을 고치세요.",
+        feature="extra_schedulers", detail=text)
+
+
+def explain_scheduler_error(text: Any) -> Optional[str]:
+    """Forge HTTP 500 본문·ComfyUI 노드 오류 문구에 확장 스케줄러 오류(``core/extra_schedulers.ERROR_PREFIX`` —
+    'Extra Schedulers: …')가 있으면 한국어 머리를 붙인 한 줄, 없으면 None. 원문(영어)은 줄이지 않고 공백만 한 칸으로 —
+    Forge 와 ComfyUI 팩이 같은 문구를 낸다."""
+    raw = " ".join(str(text or "").split())
+    index = raw.find(extra_schedulers.ERROR_PREFIX)
+    if index < 0:
+        return None
+    detail = raw[index + len(extra_schedulers.ERROR_PREFIX):].strip()
+    return f"{XSCHED_ERROR_LEAD}: {_short(detail, 300)}" if detail else XSCHED_ERROR_LEAD
+
+
 def degrid_comfy_unavailable_notice(reason: str) -> Notice:
     """ComfyUI: DeGrid 노드를 넣을 수 없어(팩 1.5.0 이 아님·노드 입력이 다름·출력 연결 없음) 빼고 생성했다(경고)."""
     text = " ".join(str(reason or "").split())
@@ -1006,6 +1081,7 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
 
     out.extend(_dora_result_notices(request, images))
     out.extend(_degrid_result_notices(request, images))
+    out.extend(_xsched_result_notices(request, images))
 
     # 부분 Anima LoRA 추측 변환 — Forge 설정을 켠 사용자에게 블록 대응이 틀릴 수 있음을 알린다(확장의 gr.Info 대응).
     guesses = list(dict.fromkeys(str(p[KEY_SPARSE_LORA_GUESS]).strip() for p in images
@@ -1477,7 +1553,7 @@ __all__ = [
     "CODE_LORA_SPARSE_GUESS", "CODE_PAG_DROPPED", "CODE_PROPAGATION_DROPPED", "CODE_PROPAGATION_RETRIED",
     "CODE_REQUEST_REJECTED", "CODE_SAM3_ERROR", "CODE_SAM3_HF_DOWNLOAD", "CODE_SAM3_NOT_APPLIED",
     "CODE_SAM3_SOURCE_FALLBACK", "CODE_SAM3_SOURCE_UNSUPPORTED",
-    "CODE_SCRIPT_MISSING", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
+    "CODE_SCRIPT_MISSING", "CODE_XSCHED_INVALID_TEXT", "CODE_XSCHED_NOT_APPLIED", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
     "KEY_DEGRID_ERROR", "KEY_DEGRID_MODEL", "KEY_SAM3_SOURCE", "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",
     "Notice", "NoticeThrottle", "NoticedImage", "PRE_GENERATION_NOTICE_TTL_S", "PROPAGATED_SUFFIX",
     "REFRESH_CAPABILITIES_CODES", "RESULT_NOTICE_TTL_S", "RequestedFeatures", "anima38_app_default_notice",
@@ -1490,4 +1566,5 @@ __all__ = [
     "notices_from_info", "notices_of", "notices_to_dicts", "pre_generation_notices", "propagation_dropped_notice",
     "propagation_retried_notice", "requested_features", "result_notices", "sam3_checkpoint_notice",
     "sam3_error_hint", "sam3_failure_repeats", "standalone_failure_text", "standalone_sam3_failure",
+    "XSCHED_ERROR_LEAD", "explain_scheduler_error", "xsched_invalid_text_notice", "xsched_result_notices",
 ]

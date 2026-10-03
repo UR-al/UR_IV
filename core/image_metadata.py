@@ -444,7 +444,10 @@ _GROUP_GENERATION = ("Steps", "Sampler", "Schedule type")
 _GROUP_CORE = ("CFG scale", "Seed", "Size")
 _GROUP_MODEL = ("Model", "Model hash", "VAE", "Clip skip")
 # 'degrid': sam-extra VAE DeGrid 의 'Anima DeGrid model/mode/strength/tile/precision/error'(core/vae_degrid KEY_*)
-_EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled", "degrid")
+# 'laplace'·'custom scheduler': sam-extra Extra Schedulers 의 'Laplace mu/beta'·'Custom scheduler expression/sigmas'
+# (core/extra_schedulers KEY_* — 'Schedule type' 은 위 생성 줄이 먼저 가져간다)
+_EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled", "degrid", "laplace",
+                      "custom scheduler")
 
 
 def group_parameters(params: dict) -> dict[str, str]:

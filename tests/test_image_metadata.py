@@ -944,5 +944,21 @@ class MetadataTransplantTests(unittest.TestCase):
                     self.assertEqual(bool(img.info.get("icc_profile")), keeps)
 
 
+class ExtraSchedulersMetadataGroupTests(unittest.TestCase):
+    """sam-extra Extra Schedulers 의 값 키 4개는 확장 그룹, 'Schedule type' 은 생성 줄(계획 A-XS3 마커)."""
+
+    def test_keys_group_as_extensions(self):
+        from core.image_metadata import group_parameters, parse_infotext
+        text = ("a cat\nSteps: 20, Sampler: Euler, Schedule type: Laplace, Hires schedule type: custom, "
+                "Laplace mu: 0.5, Laplace beta: 1.25, Custom scheduler expression: \"m + (M - m) * (1 - x) ** 3\", "
+                "Custom scheduler sigmas: \"[1.0, 0.6, 0.0]\", Seed: 7")
+        groups = group_parameters(parse_infotext(text).parameters)
+        for key in ("Laplace mu: 0.5", "Laplace beta: 1.25", "Custom scheduler expression: m + (M - m) * (1 - x) ** 3",
+                    "Custom scheduler sigmas: [1.0, 0.6, 0.0]"):
+            with self.subTest(key=key):
+                self.assertIn(key, groups["extensions"])
+        self.assertIn("Schedule type: Laplace", groups["generation"])
+        self.assertNotIn("Laplace mu", groups.get("other", ""))
+
 if __name__ == "__main__":
     unittest.main()

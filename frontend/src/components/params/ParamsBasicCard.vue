@@ -61,6 +61,8 @@
         <CustomSelect v-model="storeWidgets.scheduler_combo" :options="schedulerItems" placeholder="Scheduler..." />
       </div>
     </div>
+    <!-- sam-extra Extra Schedulers 값 — 어느 패스가 laplace·custom 일 때만(계획 R8: Extra Samplers 칸 다음 자리) -->
+    <ExtraSchedulerFields />
     <div class="ext-row">
       <div class="ext-field"><label>스텝</label><input type="number" v-model="storeWidgets.steps_input" min="1" max="150" /></div>
       <div class="ext-field"><label>CFG</label><input type="number" v-model="storeWidgets.cfg_input" step="0.5" /></div>
@@ -79,6 +81,7 @@
 import type { PropType } from 'vue'
 import CustomSelect from '../CustomSelect.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
+import ExtraSchedulerFields from './ExtraSchedulerFields.vue'
 import { requestAction, useWidgetStore } from '../../stores/widgetStore.js'
 import { useParamItems } from '../../composables/useParamItems'
 import { widgetFlag } from '../../composables/widgetFlag'

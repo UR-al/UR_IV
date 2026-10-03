@@ -902,5 +902,45 @@ class TestInstalledExtension(unittest.TestCase):
                          "UI_UNREAD 를 사유와 함께 고쳐라(이제 읽히면 지운다):\n" + "\n".join(problems))
 
 
+class ExtraSchedulersRegistryTests(unittest.TestCase):
+    """Extra Schedulers 앱 노출(계획 A-XS3, 보류 → mapped) — 확장 없이 도는 레지스트리 검사."""
+
+    def test_mapped_with_the_comfy_pending_gap(self):
+        from core import extra_schedulers as xs
+        entry = reg.SCRIPTS[xs.SCRIPT_NAME]
+        self.assertEqual(entry["status"], reg.MAPPED)
+        self.assertEqual(entry["app_title"], "core.extra_schedulers:SCRIPT_NAME")
+        self.assertEqual((entry["form"], entry["live_argc"], entry["shape"]), ("positional_or_dict", 5, "c3552551b4b0"))
+        self.assertIsNone(entry["arg_names"], "ARG_NAMES 는 스크립트 모듈 밖(sam3ext/ui_extra_schedulers.py) — 핀 xsched_arg_names")
+        for ref in ("core/extra_schedulers.py:plan", "core/extra_schedulers.py:from_infotext",
+                    "core/alwayson_propagation.py:TITLE_EXTRA_SCHEDULERS", "core/sam_extra_notices.py:CODE_XSCHED_NOT_APPLIED",
+                    "core/image_metadata.py:_EXTENSION_MARKERS"):
+            self.assertIn(ref, entry["app"])
+        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
+        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
+        self.assertTrue(any(gap.startswith("P18") for gap in entry["gaps"]))
+        rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
+                for key, row in table.items() if "extra_schedulers" in key.lower() or "extra schedulers" in key.lower()}
+        self.assertEqual(len(rows), 1 + 1 + 3, sorted(rows))   # SCRIPTS·XYZ·MODULES 셋
+        self.assertEqual(sorted(k for k, row in rows.items() if row.get("package") == reg.HOLD), [])
+        xyz = reg.XYZ_AXES["[Extra Schedulers (sam-extra)]"]
+        self.assertEqual((xyz["status"], xyz["package"]), (reg.DEFERRED, "P18"))
+
+    def test_pins_mirror_every_shared_app_constant(self):
+        """앱이 확장 값을 하드코딩한 곳마다 핀이 있다 — 빠지면 확장이 바뀌어도 앱만 조용히 어긋난다."""
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("xsched_")}
+        apps = {pin["app"] for pin in pins.values() if "app" in pin}
+        names = ("SCRIPT_NAME", "ARG_NAMES", "MODE_LABELS", "MODES", "MODE_EXPRESSION", "MODE_SIGMAS",
+                 "DEFAULT_EXPRESSION", "DEFAULT_SIGMAS", "KEY_CUSTOM_EXPRESSION", "KEY_CUSTOM_SIGMAS", "KEY_LAPLACE_MU",
+                 "KEY_LAPLACE_BETA", "INFOTEXT_KEYS", "USE_SAME_SCHEDULER", "LABEL_LAPLACE", "LABEL_CUSTOM",
+                 "README_LABELS", "LAPLACE_MU_MIN", "LAPLACE_MU_MAX", "LAPLACE_MU_STEP", "LAPLACE_MU_DEFAULT",
+                 "LAPLACE_BETA_MIN", "LAPLACE_BETA_MAX", "LAPLACE_BETA_STEP", "LAPLACE_BETA_DEFAULT")
+        self.assertEqual(sorted({f"core.extra_schedulers:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
+        self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
+                         {"sam3ext/ui_extra_schedulers.py", "sam3ext/extra_schedulers/settings.py",
+                          "sam3ext/extra_schedulers/registry.py"})
+        self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
+                         {(index, field) for index in (3, 4) for field in ("minimum", "maximum", "step", "value")})
+
 if __name__ == "__main__":
     unittest.main()

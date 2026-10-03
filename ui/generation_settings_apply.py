@@ -347,6 +347,10 @@ def apply_generation_settings(host, settings: Mapping[str, Any], *, only_present
     from ui.vae_degrid_ui import apply_saved_settings as _apply_degrid_settings
     _apply_degrid_settings(host, settings, only_present=only_present)
 
+    # Extra Schedulers — 같은 규칙(키가 없으면 프리셋은 그대로, 옛 설정은 앱 기본값 = 확장 기본값이라 안내 없음)
+    from ui.extra_schedulers_ui import apply_saved_settings as _apply_extra_schedulers_settings
+    _apply_extra_schedulers_settings(host, settings, only_present=only_present)
+
     if unavailable:
         warnings.append(unavailable_message(unavailable))
     return warnings

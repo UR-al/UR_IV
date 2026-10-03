@@ -1,5 +1,5 @@
 # core/alwayson_propagation.py
-"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
+"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid·Extra Schedulers)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
 
 메인 생성은 T2I 패널의 샘플링 블록을 ``alwayson_scripts`` 로 보낸다. 보조 패스(Refine·단독/배치 SAM3·단독 ADetailer·
 손 재구성)도 같은 블록을 받아야 Forge 생성 안의 SAM3 패스·🎯 퀵 버튼과 결과가 같다(P7). 이 모듈은
@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
 
-from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, sam3_args, vae_degrid
+from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, extra_schedulers, sam3_args, vae_degrid
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ ENVELOPE_VERSION = 1
 TITLE_NEGPIP = "NegPiP"
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME   # 확장 scripts/dora_infer_mode.py DORA_INFER_NAME
 TITLE_DEGRID = vae_degrid.SCRIPT_NAME      # 확장 sam3ext/ui_vae_degrid.py TITLE (앱 노출)
+TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME   # 확장 sam3ext/ui_extra_schedulers.py TITLE (앱 노출)
 
 _AUX_LABELS = {AUX_REFINE: "Refine", AUX_SAM3: "SAM3", AUX_ADETAILER: "ADetailer", AUX_HAND: "손 재구성"}
 
@@ -193,6 +194,14 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
                "(Refine·단독/배치 SAM3·ADetailer·손 재구성)는 각자 새 요청이라 넣으면 이미 DeGrid 된 이미지에 한 번 더 "
                "걸린다(확장도 _sam3_inner·_ad_inner 에서는 돌지 않는다). 사용자가 켠 값이라 모를 때는 보내고, 스크립트가 "
                "없으면 가이던스처럼 422 를 설명한다(main_retry 없음 — Rule 문서의 규칙)"),
+    TITLE_EXTRA_SCHEDULERS: Rule(
+        passes=frozenset(AUX_PASSES), backends=_ALL_BACKENDS, feature="extra_schedulers",
+        when_unknown=_unknown(user=SEND, app_default=SKIP), main_retry=True,
+        reason="process() 가 요청마다 전역 상태를 덮는다(sam3ext/extra_schedulers/settings.py set_active) — 블록 없는 보조 "
+               "img2img 는 기본값으로 돌아가 Laplace μ/β·custom 식이 메인과 달라진다. 값은 그 패스가 laplace·custom 일 때만 "
+               "쓰이므로 늘 보내도 결과가 같다. 스냅샷이 확인하면 값이 기본값이어도 앱이 스스로 싣는 블록이라(core/"
+               "extra_schedulers.plan, 계획 X5) 모르는 Forge 의 422 는 빼고 한 번 더(main_retry). 앱 기본값 블록은 확인 "
+               "전에는 보내지 않는다(Forge 도 블록 없이 같은 기본값으로 돈다)"),
 })
 
 NEVER: Mapping[str, str] = MappingProxyType({
@@ -204,7 +213,6 @@ NEVER: Mapping[str, str] = MappingProxyType({
     # 2026-10-03 sam-extra 미커밋 작업 트리(CHANGELOG v0.31.0) — 넷 다 HOLD(core/sam_extra_contract SCRIPTS)
     "Colorcraft (sam-extra)": "HOLD — latent 색 보정(기본 끔) — 앱이 만들지 않는다",
     "Anima SPEED": "HOLD — 실험 기능(저해상도 선행 샘플링, 기본 끔) — 앱이 만들지 않는다",
-    "Extra Schedulers (sam-extra)": "HOLD — custom·Laplace 값 칸 — 앱이 만들지 않는다(스케줄러 이름은 Forge 목록으로 고른다)",
     "Extra Samplers": "HOLD — ER SDE 값 칸 — 앱이 만들지 않는다(샘플러 이름은 Forge 목록으로 고른다)",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
@@ -494,7 +502,8 @@ __all__ = [
     "AUX_ADETAILER", "AUX_HAND", "AUX_PASSES", "AUX_REFINE", "AUX_SAM3", "BACKEND_COMFY", "BACKEND_KREA2",
     "BACKEND_WEBUI", "ENVELOPE_VERSION", "GateResult", "NEVER", "PROPAGATION", "PROVENANCES",
     "PROVENANCE_APP_DEFAULT", "PROVENANCE_KEY", "PROVENANCE_USER", "Rule", "SEND", "SETTINGS_KEY", "SKIP", "TARGETS",
-    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_DEGRID", "TITLE_DORA", "TITLE_NEGPIP", "apply", "aux_label",
+    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_DEGRID", "TITLE_DORA", "TITLE_EXTRA_SCHEDULERS", "TITLE_NEGPIP",
+    "apply", "aux_label",
     "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance",
     "final_image_titles", "gate",
     "gate_notices", "has_model_bound", "is_envelope", "main_only_titles", "main_retry_titles", "mark_provenance", "provenance_of", "script_available",

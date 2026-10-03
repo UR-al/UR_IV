@@ -60,8 +60,10 @@ class ContributorTests(unittest.TestCase):
         _webui(self)
 
     def test_registered_after_dora(self):
-        self.assertEqual(sb.CONTRIBUTORS[-1], vui.contribute)
-        self.assertEqual(sb.CONTRIBUTORS.index(vui.contribute), len(sb.CONTRIBUTORS) - 1)
+        """DoRA 바로 뒤(네 기능 계획 R7 의 순서 — 뒤에 Extra Schedulers·Extra Samplers 가 붙는다)."""
+        from ui.dora_infer_mode_ui import contribute as dora
+        self.assertEqual(sb.CONTRIBUTORS.index(vui.contribute), sb.CONTRIBUTORS.index(dora) + 1)
+        self.assertEqual(sb.CONTRIBUTORS.count(vui.contribute), 1)
 
     def test_t2i_known_present_sends_the_dict_block_last_as_a_user_value(self):
         result = sb.build_sampling_blocks(DegridHost(PRESENT), ap.TARGET_T2I)

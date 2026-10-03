@@ -1275,5 +1275,86 @@ class DegridExtensionSourceTests(unittest.TestCase):
                 self.assertIn(f'"{prefix}', joined.replace("f\"", "\""))
 
 
+# ── Extra Schedulers (계획 A-XS3) ──────────────────────────────────────────────
+def xsched_payload(**values):
+    from core import extra_schedulers
+    block = extra_schedulers.as_block(extra_schedulers.ExtraSchedulerSettings(**values))
+    return {"prompt": "1girl", "cfg_scale": 4.5, "alwayson_scripts": {extra_schedulers.SCRIPT_NAME: block}}
+
+
+def _xsched_head(schedule: str, hires: str = "") -> str:
+    head = _HEAD.replace("Schedule type: Automatic", f"Schedule type: {schedule}")
+    return head + (f"Hires schedule type: {hires}, " if hires else "")
+
+
+XSCHED_LAPLACE_OK = _xsched_head("Laplace") + "Laplace mu: 0.5, Laplace beta: 0.5, " + _TAIL
+XSCHED_LAPLACE_FOREIGN = _xsched_head("Laplace") + _TAIL                  # 다른 확장의 'Laplace' 가 돌았다
+XSCHED_CUSTOM_OK = _xsched_head("custom") + 'Custom scheduler sigmas: "[1.0, 0.6, 0.25, 0.1, 0.0]", ' + _TAIL
+XSCHED_HIRES_CUSTOM_FOREIGN = _xsched_head("Karras", hires="custom") + _TAIL
+XSCHED_KARRAS = _xsched_head("Karras") + _TAIL
+
+
+class ExtraSchedulersNoticeTests(_QuietAssumption):
+    def test_quiet_when_the_values_were_recorded_or_not_used_or_not_sent(self):
+        for info, payload in ((info_of(XSCHED_LAPLACE_OK), xsched_payload()),
+                              (info_of(XSCHED_CUSTOM_OK), xsched_payload(custom_mode="sigmas")),
+                              (info_of(XSCHED_KARRAS), xsched_payload()),
+                              (info_of(XSCHED_LAPLACE_FOREIGN), {"prompt": "x"})):     # 블록을 보내지 않았다
+            with self.subTest(info=info[150:230]):
+                self.assertEqual([n for n in sn.result_notices(info, payload) if n.feature == "extra_schedulers"], [])
+
+    def test_laplace_or_custom_without_their_keys_warn_once(self):
+        [notice] = sn.result_notices(info_of(XSCHED_LAPLACE_FOREIGN, XSCHED_LAPLACE_OK, XSCHED_LAPLACE_FOREIGN),
+                                     xsched_payload())
+        self.assertEqual((notice.code, notice.level, notice.feature, notice.detail),
+                         (sn.CODE_XSCHED_NOT_APPLIED, sn.LEVEL_WARNING, "extra_schedulers", "Laplace"))
+        self.assertIn("'Laplace mu'·'Laplace beta'", notice.message)
+        self.assertIn("aoleg/Neo_ExtraSchedulers", notice.message)
+        [hires] = sn.result_notices(info_of(XSCHED_HIRES_CUSTOM_FOREIGN), xsched_payload())
+        self.assertEqual(hires.detail, "custom")
+        self.assertIn("Custom scheduler expression", hires.message)
+        both = sn.xsched_result_notices(xsched_payload(), [
+            {"Schedule type": "Laplace", "Hires schedule type": "custom"}])
+        self.assertEqual([n.detail for n in both], ["Laplace · custom"])
+        self.assertEqual(sn.xsched_result_notices(xsched_payload(), []), [])
+
+    def test_requested_features_read_the_block_like_the_extension(self):
+        from core import extra_schedulers
+        request = sn.requested_features(xsched_payload(laplace_mu=12.0))
+        self.assertEqual(request.extra_schedulers, extra_schedulers.ExtraSchedulerSettings(laplace_mu=10.0))
+        positional = {"alwayson_scripts": {"extra schedulers (sam-extra)": {"args": ["Sigma list", " x "]}}}
+        self.assertEqual(sn.requested_features(positional).extra_schedulers,
+                         extra_schedulers.ExtraSchedulerSettings(custom_mode="sigmas", custom_expression="x"))
+        self.assertIsNone(sn.requested_features({"prompt": "x"}).extra_schedulers)
+
+    def test_invalid_text_notice_and_scheduler_error_text(self):
+        notice = sn.xsched_invalid_text_notice("name 'q' is not allowed in a scheduler expression")
+        self.assertEqual((notice.code, notice.level, notice.feature),
+                         (sn.CODE_XSCHED_INVALID_TEXT, sn.LEVEL_WARNING, "extra_schedulers"))
+        self.assertIn("custom 식을", notice.message)
+        self.assertIn("시그마 목록을", sn.xsched_invalid_text_notice("x", sigmas=True).message)
+        body = ('{"error": "CustomSchedulerError", "detail": "", "errors": "Extra Schedulers: the custom scheduler\'s '
+                'sigma list gives sigma 0.5 at steps 3 and 4 (no change)"}')
+        text = sn.explain_scheduler_error(body)
+        self.assertTrue(text.startswith(sn.XSCHED_ERROR_LEAD + ": the custom scheduler's sigma list"), text)
+        self.assertEqual(sn.explain_scheduler_error("Extra Schedulers:"), sn.XSCHED_ERROR_LEAD)
+        for other in ("", None, "RuntimeError: boom", {"detail": "Not Found"}):
+            self.assertIsNone(sn.explain_scheduler_error(other))
+
+    def test_throttling_exports_and_feature_name(self):
+        for name in ("CODE_XSCHED_NOT_APPLIED", "CODE_XSCHED_INVALID_TEXT"):
+            with self.subTest(code=name):
+                notice = sn.Notice(getattr(sn, name), sn.LEVEL_WARNING, "m")
+                self.assertEqual(sn.notice_ttl(notice, sn.RESULT_NOTICE_TTL_S), sn.PRE_GENERATION_NOTICE_TTL_S)
+                self.assertIn(name, sn.__all__)
+        text = sn.explain_rejected_request(
+            422, {"detail": "always on script Extra Schedulers (sam-extra) not found"}, xsched_payload())
+        self.assertIn("켠 기능: Extra Schedulers 값", text)
+        self.assertEqual(sn.block_not_sent_notice("Extra Schedulers (sam-extra)", img2img=False).feature,
+                         "extra_schedulers")
+        [propagated] = sn.result_notices(info_of(XSCHED_LAPLACE_FOREIGN), xsched_payload(),
+                                         propagated_titles=("extra schedulers (sam-extra)",))
+        self.assertTrue(propagated.message.endswith(sn.PROPAGATED_SUFFIX))
+
 if __name__ == "__main__":
     unittest.main()
