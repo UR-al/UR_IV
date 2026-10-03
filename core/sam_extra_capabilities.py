@@ -35,7 +35,8 @@ from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Optional
 from urllib.parse import urlsplit, urlunsplit
 
-from core import anima38, anima_guidance, dora_infer_mode, sam3_args, vae_degrid
+from core import (anima38, anima_guidance, anima_speed, colorcraft, dora_infer_mode, extra_samplers,
+                  extra_schedulers, sam3_args, vae_degrid)
 
 # ── GET 경로 ────────────────────────────────────────────────────────────────
 EP_SCRIPTS = "/sdapi/v1/scripts"
@@ -73,13 +74,19 @@ TITLE_ANIMA38 = anima38.SCRIPT_NAME.lower()
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME.lower()    # scripts/dora_infer_mode.py (DORA_INFER_NAME)
 TITLE_VAE2X = "anima vae 2x (spacepxl decoder)"     # scripts/anima_vae_2x.py
 TITLE_DEGRID = vae_degrid.SCRIPT_NAME.lower()       # scripts/anima_vae_degrid.py (앱 노출 — core/vae_degrid)
+# sam-extra 0.31.0+ 의 네 기능(2026-10 노출 계획 — 제목은 각 core 모듈의 SCRIPT_NAME 하나에서)
+TITLE_COLORCRAFT = colorcraft.SCRIPT_NAME.lower()           # scripts/colorcraft.py
+TITLE_SPEED = anima_speed.SCRIPT_NAME.lower()               # scripts/anima_speed.py
+TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME.lower()   # scripts/anima_extra_schedulers.py
+TITLE_EXTRA_SAMPLERS = extra_samplers.SCRIPT_NAME.lower()   # scripts/anima_extra_samplers.py
 TITLE_LORA_BRIDGE = "sam3 lora manager bridge"      # scripts/lora_manager.py (인자 0개)
 TITLE_SPARSE_LORA = "sam extra anima sparse lora"   # scripts/anima_lora_blocks.py (인자 0개)
 TITLE_REFERENCE_POC = "anima reference poc (shape logger)"  # 디버그
 
 SAM_EXTRA_TITLES = (
     TITLE_SAM3, TITLE_PAG, TITLE_SKIMMED, TITLE_DETAIL_DAEMON, TITLE_OPTIMAL_SCALE, TITLE_ANIMA38, TITLE_DORA,
-    TITLE_VAE2X, TITLE_DEGRID, TITLE_LORA_BRIDGE, TITLE_SPARSE_LORA, TITLE_REFERENCE_POC,
+    TITLE_VAE2X, TITLE_DEGRID, TITLE_COLORCRAFT, TITLE_SPEED, TITLE_EXTRA_SCHEDULERS, TITLE_EXTRA_SAMPLERS,
+    TITLE_LORA_BRIDGE, TITLE_SPARSE_LORA, TITLE_REFERENCE_POC,
 )
 # 확장 폴더 이름 — 앱 설치기는 sam-extra, 수동 클론은 forge_sam3_extension (core/sam3_assets.py 와 같다)
 EXTENSION_FOLDERS = ("forge_sam3_extension", "sam-extra")
@@ -109,6 +116,7 @@ DD_HIRES_INDEX = POSITIONAL_SPECS[TITLE_DETAIL_DAEMON].index("dd_hires")
 # 앱 기능 이름 → 스냅샷 플래그. Vue 도 같은 이름을 쓴다(frontend/src/utils/samExtraCapabilities.ts).
 FEATURE_FLAGS = (
     "sam3", "anima_guidance", "skimmed_cfg", "detail_daemon", "optimal_scale", "anima38", "dora", "vae2x", "degrid",
+    "colorcraft", "speed", "extra_schedulers", "extra_samplers",
     "lora_manager", "memo_routes", "tipo_route", "reference_route", "contract_route",
     "tile_repair_route",
 )
@@ -116,12 +124,16 @@ _SCRIPT_FEATURES = (
     ("sam3", TITLE_SAM3), ("anima_guidance", TITLE_PAG), ("skimmed_cfg", TITLE_SKIMMED),
     ("detail_daemon", TITLE_DETAIL_DAEMON), ("optimal_scale", TITLE_OPTIMAL_SCALE), ("anima38", TITLE_ANIMA38),
     ("dora", TITLE_DORA), ("vae2x", TITLE_VAE2X), ("degrid", TITLE_DEGRID),
+    ("colorcraft", TITLE_COLORCRAFT), ("speed", TITLE_SPEED), ("extra_schedulers", TITLE_EXTRA_SCHEDULERS),
+    ("extra_samplers", TITLE_EXTRA_SAMPLERS),
 )
 _FEATURE_LABELS = {
     "sam3": "SAM3 Mask", "anima_guidance": "Anima 가이던스(PAG)", "skimmed_cfg": "Skimmed CFG",
     "detail_daemon": "Detail Daemon", "optimal_scale": "Anima Optimal Scale",
     "anima38": "Anima 3.8B", "dora": "DoRA 추론 방식",
-    "vae2x": "VAE 2x", "degrid": "VAE DeGrid", "lora_manager": "LoRA Manager", "memo_routes": "메모 동기화",
+    "vae2x": "VAE 2x", "degrid": "VAE DeGrid", "colorcraft": "Colorcraft", "speed": "Anima SPEED",
+    "extra_schedulers": "Extra Schedulers 값", "extra_samplers": "Extra Samplers (ER SDE 값)",
+    "lora_manager": "LoRA Manager", "memo_routes": "메모 동기화",
     "tipo_route": "TIPO", "reference_route": "레퍼런스", "tile_repair_route": "Tile & Repair",
 }
 # 있고 없음만 보는 라우트: 기능 이름 → (경로, 있음으로 보는 상태). POST 전용 라우트는 GET 405 도 있음이다.
@@ -200,6 +212,10 @@ class SamExtraCapabilities:
     dora: bool = False
     vae2x: bool = False
     degrid: bool = False
+    colorcraft: bool = False                    # 'Colorcraft (sam-extra)' (v0.31.0+)
+    speed: bool = False                         # 'Anima SPEED' (v0.31.0+)
+    extra_schedulers: bool = False              # 'Extra Schedulers (sam-extra)' (v0.31.0+)
+    extra_samplers: bool = False                # 'Extra Samplers' (v0.31.0+)
     lora_manager: bool = False
     memo_routes: bool = False
     tipo_route: bool = False

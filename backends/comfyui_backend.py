@@ -1731,11 +1731,11 @@ class ComfyUIBackend(AbstractBackend):
         # bypass/semantic negative, NegPiP, guidance, Detail Daemon) come from the
         # envelope — the T2I panel at click time, same as the Forge path (P7) —
         # or, without one (API callers), from the saved generation context.
-        # 최종 이미지 블록(VAE DeGrid — Rule.passes 가 빈 행)은 메인 생성 결과에만 한 번: 봉투 없는 API 호출자의
-        # 저장 문맥에서도 뗀다(봉투가 있으면 _replace_sampling_blocks 가 PROPAGATION 제목을 모두 뗀다). 명시
-        # settings['alwayson_scripts'] 로 다시 넣어도 compile_postprocess 는 DeGrid 를 만들지 않는다(D1).
-        from core.alwayson_propagation import canonical_title, final_image_titles
-        final_only = set(final_image_titles())
+        # 메인 요청 전용 블록(Rule.passes 가 빈 행 — VAE DeGrid 같은 최종 이미지 블록)은 메인 생성 결과에만 한 번: 봉투
+        # 없는 API 호출자의 저장 문맥에서도 뗀다(봉투가 있으면 _replace_sampling_blocks 가 PROPAGATION 제목을 모두 뗀다).
+        # 명시 settings['alwayson_scripts'] 로 다시 넣어도 compile_postprocess 는 DeGrid 를 만들지 않는다(D1).
+        from core.alwayson_propagation import canonical_title, main_only_titles
+        final_only = set(main_only_titles())
         scripts = {name: block for name, block in payload['alwayson_scripts'].items()
                    if str(name).strip().casefold() not in {'adetailer', 'sam3 mask'}
                    and canonical_title(name) not in final_only}

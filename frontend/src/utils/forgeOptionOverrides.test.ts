@@ -16,10 +16,10 @@ const known = (options: Record<string, unknown>, optionsKnown = true) =>
   ({ status: 'ok', known: true, options_known: optionsKnown, options }) as const
 
 describe('forgeOptionOverrides table', () => {
-  it('has thirteen options (checkbox or radio) in three groups with a description each', () => {
+  it('has fifteen options (checkbox or radio) in three groups with a description each', () => {
     expect(PREF_KEY).toBe('forgeOptionOverrides')
-    expect(SPECS).toHaveLength(13)
-    expect(new Set(SPECS.map(s => s.key)).size).toBe(13)
+    expect(SPECS).toHaveLength(15)
+    expect(new Set(SPECS.map(s => s.key)).size).toBe(15)
     for (const item of SPECS) expect(accepts(item, item.default)).toBe(true)
     expect(SPECS.filter(isEnumSpec).map(s => s.key)).toEqual([DEVICE, PRECISION])
     expect(specsOf('result_minor').map(s => s.key)).toContain(PRECISION)
@@ -28,6 +28,9 @@ describe('forgeOptionOverrides table', () => {
     expect(GROUPS.flatMap(g => specsOf(g.id)).map(s => s.key)).toEqual(SPECS.map(s => s.key))
     for (const spec of SPECS) expect(DESCRIPTIONS[spec.key]?.length).toBeGreaterThan(10)
     expect(specsOf('result').map(s => s.key)).toContain(DAVE)
+    // sam-extra 0.31.0 의 두 기능 옵션 — 결과가 달라지는 묶음의 맨 뒤, 기본 켬 체크박스
+    expect(specsOf('result').map(s => s.key).slice(-2)).toEqual(['sam3_colorcraft_pre_dd_sigma', 'sam3_speed_img2img_rescale'])
+    expect([spec('sam3_colorcraft_pre_dd_sigma').default, spec('sam3_speed_img2img_rescale').default]).toEqual([true, true])
     expect(CHOICES.map(c => c.id)).toEqual(['follow', 'on', 'off'])
   })
 })

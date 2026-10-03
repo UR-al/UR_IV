@@ -26,11 +26,12 @@ Anima38 블록을 422 로 거절했을 때 알림 수준을 정한다: 앱 기�
 체크포인트를 지정하지 않아 Forge 에 지금 걸린 체크포인트로 돌고, Comfy 단독 후처리는 저장된 문맥의 모델로 돈다.
 실제 모델을 모르거나 다르면 뺀다(정보 로그).
 
-**최종 이미지 블록**(``Rule.passes`` 가 빈 행 → 메인 요청만 — VAE DeGrid): 확장이 이미지마다 저장 직전에 한 번 도는
-후처리(``postprocess_image_after_composite``)라 메인 요청에만 싣는다. 보조 패스는 각자 새 요청이라 넣으면 이미 처리된
-이미지에 한 번 더 걸린다 — ``blocks_for`` 는 어느 보조 패스에도 주지 않는다. 그래도 PROPAGATION 행이라 메인 게이트·동결
-재게이트·봉투(메인 체인과 같은 모양, T15)는 다른 샘플링 블록과 같은 규칙을 탄다. ``final_image_titles`` 가 이 제목들을
-돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때 — 봉투 없는 API 호출).
+**메인 요청 전용 블록**(``Rule.passes`` 가 빈 행 → 메인 요청만): 최종 이미지 블록(VAE DeGrid — 확장이 이미지마다 저장
+직전에 한 번 도는 후처리 ``postprocess_image_after_composite``)과, 메인 생성의 샘플링에만 거는 블록(Colorcraft·Anima
+SPEED — 기능 작업이 행을 더한다)이다. 보조 패스는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸리거나 메인
+생성과 다른 샘플링이 된다 — ``blocks_for`` 는 어느 보조 패스에도 주지 않는다. 그래도 PROPAGATION 행이라 메인 게이트·동결
+재게이트·봉투(메인 체인과 같은 모양, T15)는 다른 샘플링 블록과 같은 규칙을 탄다. ``main_only_titles`` 가 이 제목들을
+돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때 — 봉투 없는 API 호출). 옛 이름 ``final_image_titles`` 는 별칭이다.
 
 NegPiP 은 Forge 에 보조 전달하지 않는다: sam-extra 내장 NegPiP(2026-09-30 sd-forge-negpip 편입,
 extensions/forge_sam3_extension/scripts/negpip.py — 예전 extensions/sd-forge-negpip/scripts/negpip.py 와 파일 이름·제목·
@@ -418,10 +419,14 @@ def has_model_bound(blocks: Mapping) -> bool:
     return False
 
 
-def final_image_titles() -> tuple:
-    """최종 이미지 블록의 정식 제목(``Rule.passes`` 가 빈 행 — 메인 요청에만 싣는다). 보조 경로가 저장된 문맥·호출자
-    페이로드에서 뗄 때 쓴다(PROPAGATION 순서)."""
+def main_only_titles() -> tuple:
+    """메인 요청 전용 블록의 정식 제목(``Rule.passes`` 가 빈 행 — 최종 이미지 블록과 메인 생성 전용 샘플링 블록).
+    보조 경로가 저장된 문맥·호출자 페이로드에서 뗄 때 쓴다(PROPAGATION 순서)."""
     return tuple(title for title, rule in PROPAGATION.items() if not rule.passes)
+
+
+# 옛 이름(VAE DeGrid 때) — 같은 함수다. 새 코드는 main_only_titles 를 쓴다.
+final_image_titles = main_only_titles
 
 
 def main_retry_titles(payload: Any) -> tuple:
@@ -492,6 +497,6 @@ __all__ = [
     "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_DEGRID", "TITLE_DORA", "TITLE_NEGPIP", "apply", "aux_label",
     "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance",
     "final_image_titles", "gate",
-    "gate_notices", "has_model_bound", "is_envelope", "main_retry_titles", "mark_provenance", "provenance_of", "script_available",
+    "gate_notices", "has_model_bound", "is_envelope", "main_only_titles", "main_retry_titles", "mark_provenance", "provenance_of", "script_available",
     "take_envelope", "take_provenance",
 ]

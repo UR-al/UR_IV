@@ -123,6 +123,7 @@ export type SamExtraStatus = 'ok' | 'unknown' | 'unreachable' | 'error' | 'not_a
 export type SamExtraFeature =
   | 'sam3' | 'anima_guidance' | 'skimmed_cfg' | 'detail_daemon' | 'optimal_scale' | 'anima38' | 'dora' | 'vae2x'
   | 'degrid'
+  | 'colorcraft' | 'speed' | 'extra_schedulers' | 'extra_samplers'
   | 'lora_manager' | 'memo_routes' | 'tipo_route' | 'reference_route' | 'contract_route'
   | 'tile_repair_route'
 

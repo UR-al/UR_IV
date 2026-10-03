@@ -6,6 +6,7 @@ import {
 
 const FLAGS: SamExtraFeature[] = [
   'sam3', 'anima_guidance', 'skimmed_cfg', 'detail_daemon', 'anima38', 'dora', 'vae2x', 'degrid',
+  'colorcraft', 'speed', 'extra_schedulers', 'extra_samplers',
   'lora_manager', 'memo_routes', 'tipo_route', 'reference_route', 'contract_route',
   'tile_repair_route',
 ]
@@ -67,5 +68,10 @@ describe('missingFeaturesMessage', () => {
     expect(missingFeaturesMessage(snapshot({ installed: false }, []), ['sam3'])).toContain('확장이 없습니다')
     expect(missingFeaturesMessage(snapshot({}, ['sam3']), ['detail_daemon'])).toContain('Detail Daemon')
     expect(missingFeaturesMessage(snapshot(), [])).toBe('')
+  })
+  it('names the four sam-extra 0.31 features by their labels', () => {
+    const message = missingFeaturesMessage(snapshot({}, ['sam3']),
+      ['colorcraft', 'speed', 'extra_schedulers', 'extra_samplers'])
+    expect(message).toContain('Colorcraft, Anima SPEED, Extra Schedulers 값, Extra Samplers (ER SDE 값)')
   })
 })

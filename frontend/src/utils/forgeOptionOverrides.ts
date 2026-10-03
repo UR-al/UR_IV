@@ -50,6 +50,8 @@ export const SPECS: readonly ForgeOptionSpec[] = [
   { key: 'sam3_guidance_dave_pre_dd_sigma', label: 'DAVE 판정을 Detail Daemon 전 σ 로 (우회)', group: 'result', default: true, infotext: 'Anima DAVE pre-DD sigma', choices: [] },
   { key: 'sam3_guidance_pag_cosine_envelope', label: 'PAG 강도를 σ 구간 양끝에서 줄이기 (자체 실험)', group: 'result', default: false, infotext: 'Anima PAG cosine envelope', choices: [] },
   { key: 'sam3_builtin_negpip_enabled', label: '내장 NegPiP 사용', group: 'result', default: true, infotext: 'SAM Extra NegPiP enabled', choices: [] },
+  { key: 'sam3_colorcraft_pre_dd_sigma', label: 'Colorcraft 스케줄 위치를 Detail Daemon 전 σ 로', group: 'result', default: true, infotext: 'SAM Extra Colorcraft pre-DD sigma', choices: [] },
+  { key: 'sam3_speed_img2img_rescale', label: 'SPEED img2img·Hires 시작 latent 를 flow 형태로 맞추기', group: 'result', default: true, infotext: 'Anima SPEED img2img rescale', choices: [] },
 ]
 
 /** 줄마다 한두 문장 — 확장 설명을 요약한 것(복사하지 않는다). */
@@ -67,6 +69,8 @@ export const DESCRIPTIONS: Readonly<Record<string, string>> = {
   sam3_guidance_dave_pre_dd_sigma: 'DAVE 와 Detail Daemon 을 함께 켰을 때 DAVE 적용 스텝을 Detail Daemon 이 σ 를 바꾸기 전 값으로 판정합니다. Detail Daemon 을 끈 생성은 켜고 끔이 같습니다.',
   sam3_guidance_pag_cosine_envelope: 'PAG 항에만 PAG σ 창 안의 sin² 곡선(양끝 0 · 가운데 최대)을 곱합니다. 논문 기법이 아닌 확장의 자체 실험이고 화질 효과는 확인 전입니다. SEG·SLG 에는 적용하지 않습니다. ComfyUI 에는 없습니다.',
   sam3_builtin_negpip_enabled: '끄면 sam-extra 에 들어 있는 NegPiP 만 건너뛰고 음수 가중치는 순정 Forge 가 처리합니다(기본 켬 = 예전 자동 적용). 따로 설치한 sd-forge-negpip 에는 적용되지 않습니다. ComfyUI 는 NegPiP 칸이 정합니다.',
+  sam3_colorcraft_pre_dd_sigma: 'Colorcraft 와 Detail Daemon 을 함께 켰을 때 Start·End 스케줄 위치를 Detail Daemon 이 σ 를 줄이기 전 값으로 찾습니다(끄면 ComfyUI 에서 두 원본 노드를 이어 쓴 것과 같음). Detail Daemon 을 끈 생성은 켜고 끔이 같습니다. ComfyUI 노드는 늘 켬입니다.',
+  sam3_speed_img2img_rescale: 'SPEED 가 img2img·Hires(σ<1 에서 시작)의 저해상도 시작 latent 를 이미지·노이즈 비율이 맞는 flow 형태로 고칩니다(끄면 원본 노드 동작). txt2img 는 켜고 끔이 같습니다. ComfyUI 노드는 늘 켬입니다.',
 }
 
 export const FOLLOW = 'follow'

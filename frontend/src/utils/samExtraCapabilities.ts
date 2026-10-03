@@ -36,6 +36,12 @@ export const FEATURE_LABELS: Readonly<Partial<Record<SamExtraFeature, string>>> 
   optimal_scale: 'Anima Optimal Scale',
   // FEATURE_ENABLE_WIDGETS 에는 넣지 않는다 — 없을 때는 게이트가 빼고 경고한다(DoRA·Anima38 과 같다)
   degrid: 'VAE DeGrid',
+  // sam-extra 0.31.0+ 의 네 기능. DeGrid 처럼 켜짐 위젯 표에는 아직 넣지 않는다 — 없으면 게이트가 빼고 경고한다
+  // (SPEED 카드의 켜짐 스위치는 카드를 연결할 때 FEATURE_ENABLE_WIDGETS 에 더한다)
+  colorcraft: 'Colorcraft',
+  speed: 'Anima SPEED',
+  extra_schedulers: 'Extra Schedulers 값',
+  extra_samplers: 'Extra Samplers (ER SDE 값)',
 }
 
 /** 시그널 페이로드(JSON 문자열) → 이벤트. 깨졌거나 모양이 다르면 null. */

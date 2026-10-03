@@ -371,7 +371,7 @@ SCRIPTS = MappingProxyType({
             "core/vae_degrid.py:from_infotext",
             # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용 — 보조 패스에는 건너가지 않는다)와 최종 이미지 전달 규칙
             "ui/vae_degrid_ui.py:contribute", "ui/vae_degrid_ui.py:apply_saved_settings", "ui/sampling_blocks.py:CONTRIBUTORS",
-            "core/alwayson_propagation.py:TITLE_DEGRID", "core/alwayson_propagation.py:final_image_titles",
+            "core/alwayson_propagation.py:TITLE_DEGRID", "core/alwayson_propagation.py:main_only_titles",
             # 기능 스냅샷(스크립트·모델 목록 — 'None' 자리 표시는 빼고 degrid_no_model 진단)
             "core/sam_extra_capabilities.py:TITLE_DEGRID",
             # 결과 infotext 'Anima DeGrid error'(이미지마다 n/m 장)·보냈는데 흔적 없음 → 알림(P4 규칙)
@@ -534,7 +534,7 @@ SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam
 
 # ── Forge 옵션 (shared.opts.add_option, 38개 — 0.30.1 라이브 20 + 2026-10-03 미커밋 18) ─────────────────
 # 주의(나-7): override_settings 에 모르는 키가 있으면 Forge classic 은 KeyError 로 요청 전체를 실패시킨다.
-# P10: 요청마다 덮어쓰는 11개(core/forge_override_settings.SPECS — 체크박스는 bool, 라디오는 선택지 문자열) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
+# P10: 요청마다 덮어쓰는 15개(core/forge_override_settings.SPECS — 체크박스는 bool, 라디오는 선택지 문자열) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
 # 기능 스냅샷의 has_option 이 True 일 때만 보내고, 거절(500 KeyError·설정 잠금)되면 앱 키를 빼고 한 번 더 보낸다.
 _P10_APP = ("core/forge_override_settings.py:SPECS", "core/forge_override_settings.py:merge_into_payload",
             "backends/webui_backend.py:_forge_option_parts", "frontend/src/components/ForgeOptionOverridesSettings.vue")
@@ -600,15 +600,18 @@ OPTIONS = MappingProxyType({
     "sam3_degrid_keep_loaded": _p10(
         "OPT_DEGRID_KEEP_LOADED", "VAE DeGrid 모델 VRAM 상주(Checkbox, 약 117 MB, 결과 같음). Forge 전용: ComfyUI "
                                   "노드는 끔(이미지마다 올렸다가 내림)"),
-    # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0) — 결과를 바꾸는 둘은 스크립트와 함께 HOLD, 로그·화면·MCP 는 ignored
-    "sam3_colorcraft_pre_dd_sigma": deferred(
-        HOLD, "Colorcraft + Detail Daemon: 스케줄 위치를 DD 가 줄이기 전 σ 로 찾기(기본 켬, 결과가 달라짐 — infotext 'SAM "
-              "Extra Colorcraft pre-DD sigma', 실제로 바뀐 생성에만). Colorcraft 를 켠 생성에만 쓰인다 — "
-              "SCRIPTS['Colorcraft (sam-extra)'] 와 함께 보류"),
+    # sam-extra v0.31.0 의 결과를 바꾸는 옵션 둘 — P10 덮어쓰기(기본 = Forge 설정 따름), 로그·화면·MCP 는 ignored
+    "sam3_colorcraft_pre_dd_sigma": _p10(
+        "OPT_COLORCRAFT_PRE_DD", "Colorcraft + Detail Daemon: 스케줄 위치를 DD 가 줄이기 전 σ 로 찾기(기본 켬, 결과가 달라짐 — "
+                                 "infotext 'SAM Extra Colorcraft pre-DD sigma', 실제로 바뀐 생성에만). Colorcraft 를 켠 생성에만 "
+                                 "쓰이고 Detail Daemon 을 끈 생성은 켜고 끔이 같다(DAVE 우회와 같은 뜻). Forge 전용: ComfyUI 팩 "
+                                 "노드는 확장 기본값(켬)"),
     "sam3_colorcraft_log": ignored("콘솔 로그(패스마다 σ 목록·탭별 스케줄 값, 기본 끔, 결과 같음)"),
-    "sam3_speed_img2img_rescale": deferred(
-        HOLD, "SPEED 의 img2img·Hires 저해상도 시작 latent 를 flow 형태로 맞추기(기본 켬, 결과가 달라짐 — infotext 'Anima SPEED "
-              "img2img rescale', 끄면 원본 노드 동작). SPEED 를 켠 생성에만 쓰인다 — SCRIPTS['Anima SPEED'] 와 함께 보류"),
+    "sam3_speed_img2img_rescale": _p10(
+        "OPT_SPEED_IMG2IMG_RESCALE", "SPEED 의 img2img·Hires 저해상도 시작 latent 를 flow 형태로 맞추기(기본 켬, 결과가 "
+                                     "달라짐 — infotext 'Anima SPEED img2img rescale', 끄면 원본 노드 동작). SPEED 를 켠 "
+                                     "img2img·Hires(σ<1 시작)에만 쓰이고 txt2img 는 같다. Forge 전용: ComfyUI 팩 노드는 확장 "
+                                     "기본값(켬)"),
     "sam3_speed_log": ignored("콘솔 로그([AnimaSPEED] 전환 계획·결과, 기본 켬, 결과 같음)"),
     "sam3_progress_enabled": _PROGRESS_BAR,
     "sam3_progress_smoothness": _PROGRESS_BAR,
@@ -1321,6 +1324,22 @@ SEMANTIC_PINS = (
      "name": "INFOTEXT_BUILTIN_NEGPIP", "expected": "SAM Extra NegPiP enabled",
      "app": "core.forge_override_settings:INFOTEXT_BUILTIN_NEGPIP",
      "meaning": "스위치를 끈 생성에 남는 infotext 이름"},
+    # sam-extra v0.31.0 — Colorcraft·SPEED 의 P10 옵션(기본값·컴포넌트는 test_p10_option_specs_match_installed_source)
+    {"id": "opt_colorcraft_pre_dd", "source": "ast", "file": "sam3ext/colorcraft/hook.py", "name": "OPT_PRE_DD",
+     "expected": "sam3_colorcraft_pre_dd_sigma", "app": "core.forge_override_settings:OPT_COLORCRAFT_PRE_DD",
+     "meaning": "Colorcraft 가 σ 마다 읽는 Detail Daemon 우회 옵션(스케줄 위치를 DD 전 σ 로)"},
+    {"id": "opt_infotext_colorcraft_pre_dd", "source": "ast", "file": "sam3ext/colorcraft/hook.py",
+     "name": "INFOTEXT_PRE_DD", "expected": "SAM Extra Colorcraft pre-DD sigma",
+     "app": "core.forge_override_settings:INFOTEXT_COLORCRAFT_PRE_DD",
+     "meaning": "Colorcraft + DD 에서 실제로 바뀐 생성에만 남는 infotext 이름"},
+    {"id": "opt_speed_img2img_rescale", "source": "ast", "file": "sam3ext/speed/forge_host.py",
+     "name": "OPT_IMG2IMG_RESCALE", "expected": "sam3_speed_img2img_rescale",
+     "app": "core.forge_override_settings:OPT_SPEED_IMG2IMG_RESCALE",
+     "meaning": "SPEED 가 img2img·Hires 패스마다 읽는 저해상도 시작 latent 맞춤 옵션"},
+    {"id": "opt_infotext_speed_img2img_rescale", "source": "ast", "file": "sam3ext/speed/forge_host.py",
+     "name": "INFOTEXT_IMG2IMG_RESCALE", "expected": "Anima SPEED img2img rescale",
+     "app": "core.forge_override_settings:INFOTEXT_SPEED_IMG2IMG_RESCALE",
+     "meaning": "SPEED 의 img2img rescale 값이 남는 infotext 이름"},
     # VAE DeGrid — 위 _DEGRID_PINS(앱·Comfy 팩 거울)
     *_DEGRID_PINS,
 )

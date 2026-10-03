@@ -58,6 +58,9 @@ OPT_SPARSE_FORGE_GUESS = "sam3_anima_sparse_lora_forge_guess"  # sam3ext/anima_l
 OPT_DAVE_PRE_DD = "sam3_guidance_dave_pre_dd_sigma"         # scripts/anima_safe_pag.py (8878b9e)
 OPT_PAG_COSINE = "sam3_guidance_pag_cosine_envelope"        # scripts/anima_safe_pag.py (v0.30.0, 자체 실험)
 OPT_BUILTIN_NEGPIP = "sam3_builtin_negpip_enabled"          # scripts/negpip.py (v0.30.0)
+# sam-extra 0.31.0+ — 그 기능을 켠 생성에만 쓰인다(기능 자체는 core/colorcraft·core/anima_speed)
+OPT_COLORCRAFT_PRE_DD = "sam3_colorcraft_pre_dd_sigma"      # sam3ext/colorcraft/hook.py (OPT_PRE_DD)
+OPT_SPEED_IMG2IMG_RESCALE = "sam3_speed_img2img_rescale"    # sam3ext/speed/forge_host.py (OPT_IMG2IMG_RESCALE)
 # VAE DeGrid(sam3ext/vae_degrid_runtime.py) — 이름은 core/vae_degrid 한 곳에서(ComfyUI 노드 기본값과 같은 표)
 OPT_DEGRID_DEVICE = _vdg.OPT_DEVICE                          # Radio auto/cpu
 OPT_DEGRID_GPU_PRECISION = _vdg.OPT_GPU_PRECISION            # Radio fp32/fp16
@@ -70,6 +73,8 @@ INFOTEXT_SPARSE_GUESS = "Anima sparse LoRA"
 INFOTEXT_DAVE_PRE_DD = "Anima DAVE pre-DD sigma"
 INFOTEXT_PAG_COSINE = "Anima PAG cosine envelope"
 INFOTEXT_BUILTIN_NEGPIP = "SAM Extra NegPiP enabled"
+INFOTEXT_COLORCRAFT_PRE_DD = "SAM Extra Colorcraft pre-DD sigma"
+INFOTEXT_SPEED_IMG2IMG_RESCALE = "Anima SPEED img2img rescale"
 
 
 OptionValue = Union[bool, str]
@@ -83,7 +88,7 @@ class ForgeOptionSpec:
                체크박스는 bool, 라디오는 ``choices`` 값 중 하나(str)
     effect     MEMORY(결과 같음) / RESULT_MINOR(아주 미세하게 다름) / RESULT(결과가 달라짐)
     infotext   확장 OptionInfo 의 ``infotext=``(Forge 붙여넣기가 이 옵션으로 되돌리는 이름). 없으면 ''
-    feature    관련 기능(표시용): anima38 / sam3 / anima_guidance / lora / degrid
+    feature    관련 기능(표시용): anima38 / sam3 / anima_guidance / lora / negpip / degrid / colorcraft / speed
     onchange   확장이 onchange 콜백을 둔 옵션 — 요청 적용 때는 돌지 않고 복원 때 돈다(modules/processing.py:813, :846)
     choices    라디오 옵션의 ((값, 앱 라벨), …) — 값 순서 = 확장 선택지 순서. 비면 체크박스(bool)
     """
@@ -155,6 +160,13 @@ SPECS: tuple[ForgeOptionSpec, ...] = (
                     infotext=INFOTEXT_PAG_COSINE, feature="anima_guidance"),
     ForgeOptionSpec(OPT_BUILTIN_NEGPIP, "내장 NegPiP 사용", True, RESULT,
                     infotext=INFOTEXT_BUILTIN_NEGPIP, feature="negpip"),
+    # sam-extra 0.31.0+ 두 기능의 옵션 — 그 기능을 켠 생성에만 쓰인다. 둘 다 Forge 전용이고 ComfyUI 팩 노드는 확장
+    # 기본값(켬)으로 돈다. Colorcraft 는 DAVE 우회와 같은 뜻(Detail Daemon 을 끈 생성은 켜고 끔이 같다), SPEED 는
+    # img2img·Hires(σ<1 시작)에서만 결과가 달라진다(txt2img 는 같다).
+    ForgeOptionSpec(OPT_COLORCRAFT_PRE_DD, "Colorcraft 스케줄 위치를 Detail Daemon 전 σ 로", True, RESULT,
+                    infotext=INFOTEXT_COLORCRAFT_PRE_DD, feature="colorcraft"),
+    ForgeOptionSpec(OPT_SPEED_IMG2IMG_RESCALE, "SPEED img2img·Hires 시작 latent 를 flow 형태로 맞추기", True, RESULT,
+                    infotext=INFOTEXT_SPEED_IMG2IMG_RESCALE, feature="speed"),
 )
 SPEC_BY_KEY: Mapping[str, ForgeOptionSpec] = MappingProxyType({spec.key: spec for spec in SPECS})
 OPTION_KEYS: tuple[str, ...] = tuple(spec.key for spec in SPECS)

@@ -1,9 +1,11 @@
 """프리셋 값을 지금 백엔드 콤보 항목에 맞추기(core.preset_choice)와 TE 선택 맞추기(audit #154 후속)."""
+import ast
 import unittest
 
 from core.comfy_workflow_compiler import _FORGE_SAMPLER_ALIASES, _FORGE_SCHEDULER_ALIASES
 from core.main_module_choices import resolve_te_selection
 from core.preset_choice import (
+    FORGE_SCHEDULER_LABELS,
     fold_choice,
     match_choice,
     match_sampler,
@@ -11,6 +13,7 @@ from core.preset_choice import (
     sampler_key,
     scheduler_key,
 )
+from tests._sam_extra_ext import EXT_ROOT, REQUIRED, requires_extension
 
 COMFY_SAMPLERS = ['euler', 'euler_ancestral', 'dpmpp_2m', 'dpmpp_2m_sde', 'uni_pc', 'er_sde']
 FORGE_SAMPLERS = ['Euler', 'Euler a', 'DPM++ 2M', 'DPM++ 2M SDE', 'UniPC', 'ER SDE']
@@ -72,6 +75,97 @@ class SchedulerAliasTests(unittest.TestCase):
     def test_use_same_scheduler_is_not_an_alias_target(self):
         self.assertEqual(match_scheduler('Automatic', ['Use same scheduler', 'normal']), -1)
         self.assertEqual(match_scheduler('Use same scheduler', ['Use same scheduler', 'normal']), 0)
+
+
+# Forge 스케줄러 콤보는 이름(API name), infotext 'Schedule type' 은 표기(label) — sam-extra Extra Schedulers 포함
+FORGE_SCHEDULER_NAMES = ['automatic', 'karras', 'exponential', 'sgm_uniform', 'simple', 'beta', 'flow_match',
+                         'cosine', 'cosine_exponential', 'phi', 'laplace', 'karras_dynamic', 'custom']
+
+
+class ForgeScheduleTypeLabelTests(unittest.TestCase):
+    """'이 설정으로 생성'(X3a): Forge infotext 의 표기가 이름 목록에서 골라진다."""
+
+    def test_labels_pick_the_name_valued_items(self):
+        for label, name in (('Karras', 'karras'), ('SGM Uniform', 'sgm_uniform'), ('SGMUniform', 'sgm_uniform'),
+                            ('Laplace', 'laplace'), ('CosineExponential blend', 'cosine_exponential'),
+                            ('cosine-exponential blend', 'cosine_exponential'), ('Karras Dynamic', 'karras_dynamic'),
+                            ('FlowMatchEulerDiscrete', 'flow_match'), ('Phi', 'phi'), ('custom', 'custom')):
+            with self.subTest(label=label):
+                self.assertEqual(FORGE_SCHEDULER_NAMES[match_scheduler(label, FORGE_SCHEDULER_NAMES)], name)
+
+    def test_comfy_names_on_forge_lists(self):
+        self.assertEqual(FORGE_SAMPLERS[match_sampler('euler_ancestral', FORGE_SAMPLERS)], 'Euler a')
+        self.assertEqual(FORGE_SAMPLERS[match_sampler('uni_pc', FORGE_SAMPLERS)], 'UniPC')
+        for name in ('karras', 'sgm_uniform', 'laplace', 'cosine_exponential'):
+            self.assertEqual(FORGE_SCHEDULER_NAMES[match_scheduler(name, FORGE_SCHEDULER_NAMES)], name)
+
+    def test_unknown_values_miss(self):
+        self.assertEqual(match_scheduler('Align Your Steps 32', FORGE_SCHEDULER_NAMES), -1)
+        self.assertEqual(match_scheduler('CosineExponential', FORGE_SCHEDULER_NAMES), -1)
+        self.assertEqual(match_sampler('Restart', FORGE_SAMPLERS), -1)
+
+    def test_the_label_table_only_holds_labels_that_do_not_fold_to_their_name(self):
+        for label, name in FORGE_SCHEDULER_LABELS.items():
+            with self.subTest(label=label):
+                self.assertEqual(label, label.strip().casefold())
+                self.assertNotEqual(fold_choice(label), fold_choice(name))
+                self.assertEqual(scheduler_key(label), scheduler_key(name))
+
+
+def _call_rows(path, func_name):
+    """``func_name(name, label, …, aliases=…)`` 호출에서 (이름, 표기, 별칭들) — 상수 dict 첨자도 푼다."""
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    tables = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
+            target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+            if isinstance(target, ast.Name):
+                try:
+                    tables[target.id] = ast.literal_eval(node.value)
+                except ValueError:
+                    pass
+
+    def value(expr):
+        if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Name):
+            return tables[expr.value.id][ast.literal_eval(expr.slice)]
+        return ast.literal_eval(expr)
+
+    rows = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == func_name:
+            if len(node.args) < 2 or not all(isinstance(a, (ast.Constant,)) for a in node.args[:2]):
+                continue
+            aliases = []
+            for keyword in node.keywords:
+                if keyword.arg == 'aliases':
+                    aliases = [value(item) for item in keyword.value.elts]
+            rows.append((node.args[0].value, node.args[1].value, tuple(aliases)))
+    return rows
+
+
+@requires_extension
+class InstalledForgeScheduleLabelTests(unittest.TestCase):
+    """설치된 Forge(modules/sd_schedulers.py)와 sam-extra(Extra Schedulers registry)의 표기·별칭이 모두 그 이름으로
+    골라진다 — 새 표기가 접어도 이름과 다르면 FORGE_SCHEDULER_LABELS 에 더하라고 실패한다."""
+
+    def test_every_installed_label_and_alias_resolves_to_its_name(self):
+        forge = EXT_ROOT.parents[1] / 'modules' / 'sd_schedulers.py'
+        if not forge.is_file():
+            if REQUIRED:
+                self.fail(f'Forge 스케줄러 소스가 없다: {forge}')
+            self.skipTest(f'Forge 스케줄러 소스가 없다: {forge}')
+        registry = EXT_ROOT / 'sam3ext' / 'extra_schedulers' / 'registry.py'
+        rows = _call_rows(forge, 'Scheduler') + _call_rows(registry, 'SchedulerSpec')
+        names = [name for name, _label, _aliases in rows]
+        self.assertIn('karras', names)
+        self.assertIn('cosine_exponential', names)
+        problems = []
+        for name, label, aliases in rows:
+            for text in (label, *aliases):
+                index = match_scheduler(text, names)
+                if index < 0 or names[index] != name:
+                    problems.append(f"{text!r} → {names[index] if index >= 0 else None!r} (이름 {name!r})")
+        self.assertEqual(problems, [], '\nFORGE_SCHEDULER_LABELS 에 더할 표기:\n' + '\n'.join(problems))
 
 
 class ResolveTeSelectionTests(unittest.TestCase):

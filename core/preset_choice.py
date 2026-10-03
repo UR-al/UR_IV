@@ -10,12 +10,18 @@ Forge 이름('Euler a', 'Karras', Forge 전용 VAE)이 ComfyUI 목록에 없으�
 맞추는 순서: 정확히 같음 → 대소문자·공백/밑줄 무시 → 샘플러/스케줄러 별칭(Forge 표기 ↔ ComfyUI
 KSampler 이름). 별칭 표는 ComfyUI 생성이 Forge 표기를 바꿀 때 쓰는 core.comfy_workflow_compiler
 의 표를 그대로 쓴다 — 두 곳이 갈라지지 않게(tests/test_comfy_sampler_aliases.py 가 그 표를 고정).
+
+Forge 스케줄러는 이름(name — API·콤보 값)과 표기(label — infotext 'Schedule type' 값)가 따로다. 대부분은 접으면
+같지만('Karras' ↔ 'karras', 'SGM Uniform' ↔ 'sgm_uniform') 접어도 다른 표기는 ``FORGE_SCHEDULER_LABELS`` 로
+이름에 잇는다(``scheduler_key``). 이 표는 UI 콤보 맞추기에만 쓰고 ComfyUI 그래프는 바꾸지 않는다 — 컴파일러 별칭은
+따로다(tests/test_preset_choice.py 가 설치된 Forge·sam-extra 소스의 표기 전부로 대조한다).
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping
+from types import MappingProxyType
 from typing import Any
 
 #: 'Hires/ADetailer 는 메인 값 사용' 같은 자리표시 — 별칭 비교에서 실제 샘플러로 취급하지 않는다.
@@ -24,6 +30,16 @@ PLACEHOLDER_CHOICES = frozenset({
 })
 
 _SEPARATORS = re.compile(r'[\s_]+')
+
+#: Forge 스케줄러 표기·별칭 중 접어도(:func:`fold_choice`) 이름과 다른 것 → 이름. 키는 공백을 하나로 줄인 소문자.
+#: 출처: Forge ``modules/sd_schedulers.py`` 의 ``Scheduler(name, label, …, aliases=…)``, sam-extra
+#: ``sam3ext/extra_schedulers/registry.py`` 의 ``SchedulerSpec``(README 별칭 포함).
+FORGE_SCHEDULER_LABELS: Mapping[str, str] = MappingProxyType({
+    'flowmatcheulerdiscrete': 'flow_match',              # Forge 'FlowMatchEulerDiscrete'
+    'sgmuniform': 'sgm_uniform',                         # Forge 별칭 'SGMUniform'
+    'cosineexponential blend': 'cosine_exponential',     # sam-extra Extra Schedulers 표기
+    'cosine-exponential blend': 'cosine_exponential',    # sam-extra README 별칭(aoleg/Neo_ExtraSchedulers)
+})
 
 
 def fold_choice(value: Any) -> str:
@@ -57,8 +73,10 @@ def sampler_key(value: Any) -> str:
 
 
 def scheduler_key(value: Any) -> str:
-    """'Karras' ↔ 'karras', 'SGM Uniform' ↔ 'sgm_uniform'. 'Automatic' 은 따로 둔다(뜻이 다르다)."""
-    return _alias_key(value, _alias_tables()[1])
+    """'Karras' ↔ 'karras', 'SGM Uniform' ↔ 'sgm_uniform', 'CosineExponential blend' ↔ 'cosine_exponential'.
+    'Automatic' 은 따로 둔다(뜻이 다르다)."""
+    folded = re.sub(r'\s+', ' ', str(value or '').strip()).casefold()
+    return _alias_key(FORGE_SCHEDULER_LABELS.get(folded, value), _alias_tables()[1])
 
 
 def match_choice(value: Any, items: Iterable[Any], *,
@@ -99,6 +117,7 @@ def match_scheduler(value: Any, items: Iterable[Any]) -> int:
 
 
 __all__ = [
+    'FORGE_SCHEDULER_LABELS',
     'PLACEHOLDER_CHOICES',
     'fold_choice',
     'match_choice',

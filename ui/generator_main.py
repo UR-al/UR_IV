@@ -2129,16 +2129,17 @@ class GeneratorMainUI(
         """
         if not isinstance(item, dict):
             return
+        from ui.generation_settings_apply import apply_sampler_scheduler
+        combo_warnings: list = []
         self.is_programmatic_change = True
         try:
             if item.get('prompt') is not None:
                 self.total_prompt_display.setPlainText(str(item.get('prompt') or ''))
             if item.get('negative_prompt') is not None:
                 self.neg_prompt_text.setPlainText(str(item.get('negative_prompt') or ''))
-            if item.get('sampler_name'):
-                self.sampler_combo.setText(str(item['sampler_name']))
-            if item.get('scheduler'):
-                self.scheduler_combo.setText(str(item['scheduler']))
+            # Forge infotext 표기('Karras'·'CosineExponential blend')·다른 백엔드 이름도 콤보 항목으로 맞춘다 —
+            # 못 찾으면 현재 선택을 두고 알린다(예전 setText 는 Vue 에만 값을 보이고 이전 선택으로 생성했다)
+            combo_warnings = apply_sampler_scheduler(self, item.get('sampler_name'), item.get('scheduler'))
             if item.get('steps') is not None:
                 self.steps_input.setText(str(item.get('steps')))
             if item.get('cfg_scale') is not None:
@@ -2153,6 +2154,13 @@ class GeneratorMainUI(
             print(f"[Queue] _apply_payload_to_ui 실패: {e}")
         finally:
             self.is_programmatic_change = False
+        if combo_warnings:
+            message = ' · '.join(combo_warnings)
+            from utils.app_logger import get_logger
+            get_logger('generation').warning("생성 설정 적용: %s", message)   # print 는 cp949 콘솔에서 '—' 로 깨진다
+            bridge = getattr(self, 'vue_bridge', None)
+            if bridge is not None:
+                bridge.showNotification.emit('warning', message)
 
     def _on_generation_requested(self, item: dict):
         # 동결 항목(시드 탐색 · XYZ · ComfyUI 스냅숏/컨트롤)은 굳힌 payload 그대로 보낸다 —

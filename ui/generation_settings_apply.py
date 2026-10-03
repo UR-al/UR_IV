@@ -112,6 +112,21 @@ def apply_combo_value(combo, value: str, label: str, match: Callable[[str, Seque
         warnings.append(combo_miss_message(label, value, combo, chosen))
 
 
+def apply_sampler_scheduler(host, sampler: Any, scheduler: Any) -> list[str]:
+    """큐 항목·'이 설정으로 생성'의 샘플러·스케줄러를 프리셋 불러오기와 같은 매처로 고른다 → 경고 목록.
+
+    Forge infotext 의 'Schedule type' 은 표기(label — 'Karras', 'SGM Uniform', 'Laplace', 'CosineExponential
+    blend')이고 Forge 콤보 값은 이름(name)이다. 예전 ``ComboBoxProxy.setText`` 는 정확히 같은 항목만 골라, 표기·다른
+    백엔드 이름이 오면 Vue 에만 그 값을 보이고 Python 은 이전 선택으로 생성했다. 이제 정확 → 접기 → 별칭·Forge 표기
+    순서로 고르고(core.preset_choice), 목록이 비었으면(연결 전) setText 로 미루며, 찾지 못하면 현재 선택을 둔다.
+    """
+    warnings: list[str] = []
+    for attr, value, label, match in (('sampler_combo', sampler, '샘플러', match_sampler_index),
+                                      ('scheduler_combo', scheduler, '스케줄러', match_scheduler_index)):
+        apply_combo_value(getattr(host, attr, None), _text(value), label, match, warnings, defer_when_empty=True)
+    return warnings
+
+
 def unavailable_message(labels: Sequence[str]) -> str:
     return (f"백엔드 목록이 아직 없어 {', '.join(labels)}을(를) 적용하지 못했습니다"
             " — 백엔드에 연결한 뒤 다시 불러오세요")

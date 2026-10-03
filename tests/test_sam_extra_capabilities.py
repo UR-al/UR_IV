@@ -53,13 +53,22 @@ def _with_current_dd_shape(script_info):
     return script_info
 
 
+# /scripts 녹화 뒤에 생긴 스크립트 — script-info 픽스처(2026-10-03 다시 녹화, v0.32.1)에는 txt2img·img2img 둘 다 있다.
+_SCRIPTS_AFTER_RECORDING = (
+    caps_mod.TITLE_DEGRID, caps_mod.TITLE_OPTIMAL_SCALE,
+    # sam-extra 0.31.0+ 의 네 기능
+    caps_mod.TITLE_COLORCRAFT, caps_mod.TITLE_SPEED, caps_mod.TITLE_EXTRA_SCHEDULERS, caps_mod.TITLE_EXTRA_SAMPLERS,
+)
+
+
 def _with_degrid_scripts(scripts):
-    """/sdapi/v1/scripts 녹화(2026-09-25)는 VAE DeGrid(확장 3a74dd8..1dd1a98)와 Anima Optimal Scale(fe2a4e7) 전이다 —
-    script-info 픽스처(2026-10-02 다시 녹화)에는 둘 다 있다. 다시 녹화하기 전까지 지금 확장처럼 txt2img·img2img 목록에
-    제목을 더한다(있으면 그대로). refresh 도구는 script-info 만 기록한다(tools/refresh_sam_extra_fixture.py)."""
+    """/sdapi/v1/scripts 녹화(2026-09-25)는 VAE DeGrid(확장 3a74dd8..1dd1a98)·Anima Optimal Scale(fe2a4e7)과 v0.31.0 의
+    네 기능(Colorcraft·SPEED·Extra Schedulers·Extra Samplers) 전이다 — script-info 픽스처(2026-10-03 다시 녹화)에는 모두
+    있다. 다시 녹화하기 전까지 지금 확장처럼 txt2img·img2img 목록에 제목을 더한다(있으면 그대로). refresh 도구는
+    script-info 만 기록한다(tools/refresh_sam_extra_fixture.py)."""
     for tab in ("txt2img", "img2img"):
         titles = scripts.get(tab)
-        for title in (caps_mod.TITLE_DEGRID, caps_mod.TITLE_OPTIMAL_SCALE):
+        for title in _SCRIPTS_AFTER_RECORDING:
             if isinstance(titles, list) and title not in titles:
                 titles.append(title)
     return scripts
@@ -821,6 +830,44 @@ class DegridCapabilityTests(unittest.TestCase):
         self.assertEqual(data["choices"]["degrid_models"], ["qwenVAEDegridNafnet_v11", "NAFNet-QwenVAE-DeGrid"])
 
 
+class SamExtra031FeatureTests(unittest.TestCase):
+    """sam-extra 0.31.0+ 의 네 기능 — 제목은 core 모듈의 SCRIPT_NAME 하나, 플래그는 스크립트 목록에서."""
+
+    FEATURES = (("colorcraft", "core.colorcraft", "TITLE_COLORCRAFT"), ("speed", "core.anima_speed", "TITLE_SPEED"),
+                ("extra_schedulers", "core.extra_schedulers", "TITLE_EXTRA_SCHEDULERS"),
+                ("extra_samplers", "core.extra_samplers", "TITLE_EXTRA_SAMPLERS"))
+
+    def test_titles_come_from_the_core_modules_and_the_recording_has_them(self):
+        import importlib
+        info = _script_info_fixture()
+        for feature, module, constant in self.FEATURES:
+            with self.subTest(feature=feature):
+                title = getattr(caps_mod, constant)
+                self.assertEqual(title, importlib.import_module(module).SCRIPT_NAME.lower())
+                self.assertIn(title, caps_mod.SAM_EXTRA_TITLES)
+                self.assertIn((feature, title), caps_mod._SCRIPT_FEATURES)
+                self.assertEqual({s["is_img2img"] for s in info if s["name"] == title}, {False, True})
+        # 순서는 TS 유니언과 같아야 한다(test_feature_flags_match_typescript_union) — degrid 바로 뒤, 계획 R10 순서
+        start = caps_mod.FEATURE_FLAGS.index("degrid") + 1
+        self.assertEqual(caps_mod.FEATURE_FLAGS[start:start + 4], tuple(f for f, *_ in self.FEATURES))
+
+    def test_flags_follow_the_script_list_and_unknown_never_blocks(self):
+        caps, _ = build(live_bodies())
+        for feature, *_ in self.FEATURES:
+            self.assertTrue(getattr(caps, feature) and caps.may_use(feature), feature)
+            self.assertIs(caps.to_dict()["features"][feature], True)
+            self.assertTrue(unknown_capabilities().may_use(feature))
+        self.assertNotIn("script_missing", _codes(caps))
+        bodies = live_bodies()
+        for tab in ("txt2img", "img2img"):
+            bodies[EP_SCRIPTS][tab].remove(caps_mod.TITLE_SPEED)
+        bodies[EP_SCRIPT_INFO] = [s for s in bodies[EP_SCRIPT_INFO] if s["name"] != caps_mod.TITLE_SPEED]
+        caps, _ = build(bodies)
+        self.assertFalse(caps.speed or caps.may_use("speed"))
+        self.assertEqual([w["feature"] for w in caps.warnings if w["code"] == "script_missing"], ["speed"])
+        self.assertTrue(caps.colorcraft and caps.extra_schedulers and caps.extra_samplers)
+
+
 class FrontendMirrorTests(unittest.TestCase):
     """Vue 토스트의 '켜짐' 판단 표가 파이썬 활성화 키와 같아야 한다."""
 
@@ -852,9 +899,11 @@ class FrontendMirrorTests(unittest.TestCase):
             text = f.read()
         labels = re.search(r"export const FEATURE_LABELS[^{]*\{(.*?)\n\}", text, re.S).group(1)
         ts = dict(re.findall(r"^\s*(\w+):\s*'([^']*)'", labels, re.M))
-        self.assertEqual(ts["degrid"], caps_mod._FEATURE_LABELS["degrid"])
+        for feature in ("degrid", "colorcraft", "speed", "extra_schedulers", "extra_samplers"):
+            self.assertEqual(ts[feature], caps_mod._FEATURE_LABELS[feature], feature)
         gates = re.search(r"export const FEATURE_ENABLE_WIDGETS[^{]*\{(.*?)\n\}", text, re.S).group(1)
-        self.assertNotIn("degrid", gates)
+        for feature in ("degrid", "colorcraft", "extra_schedulers", "extra_samplers"):   # 값 기능 — 켜짐 스위치가 아니다
+            self.assertNotIn(feature, gates)
         for name in ts:
             self.assertIn(name, caps_mod.FEATURE_FLAGS)
 

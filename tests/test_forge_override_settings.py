@@ -50,10 +50,10 @@ def isolate_pushed_setting(case: unittest.TestCase) -> None:
 
 class SpecTests(unittest.TestCase):
     def test_options_in_card_order(self):
-        """체크박스(bool)와 라디오(선택지 문자열) 13개. 기본값은 스펙이 받는 값이고, 컴포넌트는 선택지 유무로 정해진다."""
-        self.assertEqual(len(fos.SPECS), 13)
+        """체크박스(bool)와 라디오(선택지 문자열) 15개. 기본값은 스펙이 받는 값이고, 컴포넌트는 선택지 유무로 정해진다."""
+        self.assertEqual(len(fos.SPECS), 15)
         self.assertEqual(fos.OPTION_KEYS, tuple(spec.key for spec in fos.SPECS))
-        self.assertEqual(len(set(fos.OPTION_KEYS)), 13)
+        self.assertEqual(len(set(fos.OPTION_KEYS)), 15)
         for spec in fos.SPECS:
             with self.subTest(key=spec.key):
                 self.assertTrue(spec.accepts(spec.default), spec.default)
@@ -83,7 +83,8 @@ class SpecTests(unittest.TestCase):
         self.assertEqual(fos.SPEC_BY_KEY[SPARSE].effect, fos.RESULT)
         self.assertEqual({s.key for s in fos.SPECS if s.effect == fos.RESULT_MINOR}, {DEDUP, SEP, PRECISION})
         self.assertEqual([s.key for s in fos.SPECS if s.effect == fos.RESULT],
-                         [SPARSE, DAVE, fos.OPT_PAG_COSINE, fos.OPT_BUILTIN_NEGPIP])
+                         [SPARSE, DAVE, fos.OPT_PAG_COSINE, fos.OPT_BUILTIN_NEGPIP, fos.OPT_COLORCRAFT_PRE_DD,
+                          fos.OPT_SPEED_IMG2IMG_RESCALE])
 
     def test_review_proposal_options(self):
         """2026-10-02 검토 제안 옵션 둘 — 강도 곡선(기본 끔)·내장 NegPiP 스위치(기본 켬). 둘 다 결과가 달라지는 묶음이고
@@ -96,6 +97,21 @@ class SpecTests(unittest.TestCase):
                          ("sam3_builtin_negpip_enabled", True, fos.RESULT, "SAM Extra NegPiP enabled", "negpip"))
         self.assertFalse(cosine.onchange or negpip.onchange)
         self.assertEqual((cosine.component, negpip.component), ("Checkbox", "Checkbox"))
+
+    def test_colorcraft_and_speed_options(self):
+        """sam-extra 0.31.0 의 결과를 바꾸는 옵션 둘 — 둘 다 기본 켬 체크박스, 결과가 달라지는 묶음의 맨 뒤(Colorcraft →
+        SPEED 순서), infotext 는 확장 OptionInfo 의 이름(계약 테스트가 설치된 소스와 대조), 콜백 없음. ComfyUI 는 확장
+        기본값으로 돈다(Forge 전용)."""
+        colorcraft = fos.SPEC_BY_KEY[fos.OPT_COLORCRAFT_PRE_DD]
+        speed = fos.SPEC_BY_KEY[fos.OPT_SPEED_IMG2IMG_RESCALE]
+        self.assertEqual((colorcraft.key, colorcraft.default, colorcraft.effect, colorcraft.infotext, colorcraft.feature),
+                         ("sam3_colorcraft_pre_dd_sigma", True, fos.RESULT, "SAM Extra Colorcraft pre-DD sigma",
+                          "colorcraft"))
+        self.assertEqual((speed.key, speed.default, speed.effect, speed.infotext, speed.feature),
+                         ("sam3_speed_img2img_rescale", True, fos.RESULT, "Anima SPEED img2img rescale", "speed"))
+        self.assertEqual((colorcraft.component, speed.component), ("Checkbox", "Checkbox"))
+        self.assertFalse(colorcraft.onchange or speed.onchange)
+        self.assertEqual(fos.OPTION_KEYS[-2:], (fos.OPT_COLORCRAFT_PRE_DD, fos.OPT_SPEED_IMG2IMG_RESCALE))
 
     def test_degrid_options_mirror_core_vae_degrid(self):
         """VAE DeGrid 옵션 셋 — 키·기본값·선택지 값은 core/vae_degrid 한 곳에서 온다. GPU 정밀도는 결과가 아주 미세하게
@@ -141,14 +157,15 @@ class SpecTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn("core/forge_override_settings.py:SPECS", reg.OPTIONS[key]["app"])
         deferred = {key: entry["package"] for key, entry in reg.OPTIONS.items() if entry["status"] == reg.DEFERRED}
-        # VAE DeGrid 옵션 셋과 2026-10-02 검토 제안 옵션 둘(PAG 강도 곡선·내장 NegPiP 스위치)도 P10 이 맡는다 — 남은
-        # 보류는 레퍼런스 IP-Adapter 둘(P20)과 2026-10-03 sam-extra 미커밋 기능(HOLD 스크립트)의 결과를 바꾸는 옵션 둘
-        # (Colorcraft pre-DD σ·SPEED img2img rescale — 앱은 Forge 설정을 따른다. 로그·진행 막대·MCP 옵션은 ignored)
-        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20",
-                                    "sam3_colorcraft_pre_dd_sigma": "HOLD", "sam3_speed_img2img_rescale": "HOLD"})
+        # VAE DeGrid 옵션 셋, 2026-10-02 검토 제안 옵션 둘(PAG 강도 곡선·내장 NegPiP 스위치)과 sam-extra v0.31.0 의 결과를
+        # 바꾸는 옵션 둘(Colorcraft pre-DD σ·SPEED img2img rescale)도 P10 이 맡는다 — 남은 보류는 레퍼런스 IP-Adapter
+        # 둘(P20)뿐이다(로그·진행 막대·MCP 옵션은 ignored)
+        self.assertEqual(deferred, {"sam3_ipa_duplicate_policy": "P20", "sam3_anima38_reference_ipa": "P20"})
         for key, const in ((DEVICE, "OPT_DEGRID_DEVICE"), (PRECISION, "OPT_DEGRID_GPU_PRECISION"),
                            (KEEP_LOADED, "OPT_DEGRID_KEEP_LOADED"), (fos.OPT_PAG_COSINE, "OPT_PAG_COSINE"),
-                           (fos.OPT_BUILTIN_NEGPIP, "OPT_BUILTIN_NEGPIP")):
+                           (fos.OPT_BUILTIN_NEGPIP, "OPT_BUILTIN_NEGPIP"),
+                           (fos.OPT_COLORCRAFT_PRE_DD, "OPT_COLORCRAFT_PRE_DD"),
+                           (fos.OPT_SPEED_IMG2IMG_RESCALE, "OPT_SPEED_IMG2IMG_RESCALE")):
             with self.subTest(key=key):
                 self.assertEqual(getattr(fos, const), key)
                 self.assertIn(f"core/forge_override_settings.py:{const}", reg.OPTIONS[key]["app"])
