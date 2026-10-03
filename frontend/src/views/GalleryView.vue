@@ -163,6 +163,10 @@
                 <div class="param-line" v-if="exifData.params.model"><span class="pl">모델</span><span>{{ exifData.params.model }}</span></div>
                 <div class="param-line" v-if="exifData.params.hires"><span class="pl">고해상도</span><span>{{ exifData.params.hires }}</span></div>
                 <div class="param-line" v-if="exifData.params.extensions"><span class="pl">확장</span><span>{{ exifData.params.extensions }}</span></div>
+                <div v-if="importable.length" class="param-line sx-import">
+                  <button type="button" class="sx-import-btn" :title="IMPORT_TITLE" @click="importFromImage">sam-extra 값 가져오기
+                    ({{ importLabel }})</button>
+                </div>
                 <div class="param-line" v-if="exifData.params.other"><span class="pl">기타</span><span>{{ exifData.params.other }}</span></div>
               </div>
             </div>
@@ -224,6 +228,7 @@ import { useContextMenu } from '../composables/useContextMenu'
 import { galleryShowMetadata } from '../composables/uiPrefs'
 import type { ActionName, ActionPayload } from '../types/bridge'
 import ComfyMetadataDetails from '../components/ComfyMetadataDetails.vue'
+import { IMPORT_LABELS, IMPORT_TITLE, importSamExtra, importText, importableFeatures } from '../utils/samExtraImport'
 
 interface ExifParams {
   generation?: string
@@ -302,6 +307,10 @@ const { visibleCount, fillViewport, onScroll: onGalleryScroll } = paging
 const displayImages = computed(() => displaySource.value.slice(0, visibleCount.value))
 
 const exifData = ref<ExifData | null>(null)
+// sam-extra 카드 기능(Colorcraft·Anima SPEED) 값이 이미지에 있으면 그 카드로 가져온다(액션 sam_extra_import — 계획 X3c)
+const importable = computed(() => importableFeatures(exifData.value?.parameters))
+const importLabel = computed(() => importable.value.map(feature => IMPORT_LABELS[feature]).join('·'))
+function importFromImage() { importSamExtra(importText(exifData.value?.parameters ?? {}, importable.value)) }
 const largeView = ref<ExifData | null>(null)
 /** 확대 뷰에서 프롬프트/네거티브를 고쳤는가 — 안 고쳤으면 저장하지 않는다 */
 const exifDirty = ref(false)
@@ -570,6 +579,11 @@ onUnmounted(() => {
 .params-grid { background: var(--bg-input); border-radius: 8px; padding: 8px 12px; }
 .param-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 11px; color: var(--text-secondary); border-bottom: 1px solid rgba(255,255,255,0.03); font-family: 'Consolas', monospace; }
 .param-line:last-child { border-bottom: none; }
+.sx-import-btn {
+  height: 22px; padding: 0 8px; font-size: var(--fs-meta); border-radius: 4px; cursor: pointer; font-family: inherit;
+  background: transparent; border: 1px dashed var(--border); color: var(--text-secondary);
+}
+.sx-import-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .pl { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--accent); letter-spacing: 0; min-width: 45px; flex-shrink: 0; }
 
 .mini-action { flex: 1; height: 36px; background: var(--bg-button); border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-secondary); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }

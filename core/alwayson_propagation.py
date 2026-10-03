@@ -1,5 +1,5 @@
 # core/alwayson_propagation.py
-"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid·Extra Schedulers·Anima SPEED)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
+"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid·Extra Schedulers·Anima SPEED·Colorcraft)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
 
 메인 생성은 T2I 패널의 샘플링 블록을 ``alwayson_scripts`` 로 보낸다. 보조 패스(Refine·단독/배치 SAM3·단독 ADetailer·
 손 재구성)도 같은 블록을 받아야 Forge 생성 안의 SAM3 패스·🎯 퀵 버튼과 결과가 같다(P7). 이 모듈은
@@ -28,7 +28,7 @@ Anima38 블록을 422 로 거절했을 때 알림 수준을 정한다: 앱 기�
 
 **메인 요청 전용 블록**(``Rule.passes`` 가 빈 행 → 메인 요청만): 최종 이미지 블록(VAE DeGrid — 확장이 이미지마다 저장
 직전에 한 번 도는 후처리 ``postprocess_image_after_composite``)과, 메인 생성의 샘플링에만 거는 블록(Anima SPEED 의
-샘플러 래퍼 — Colorcraft 는 기능 작업이 행을 더한다)이다. 보조 패스는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸리거나 메인
+샘플러 래퍼, 내부 패스를 건너뛰는 Colorcraft 의 샘플링 중 색 보정)이다. 보조 패스는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸리거나 메인
 생성과 다른 샘플링이 된다 — ``blocks_for`` 는 어느 보조 패스에도 주지 않는다. 그래도 PROPAGATION 행이라 메인 게이트·동결
 재게이트·봉투(메인 체인과 같은 모양, T15)는 다른 샘플링 블록과 같은 규칙을 탄다. ``main_only_titles`` 가 이 제목들을
 돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때 — 봉투 없는 API 호출). 옛 이름 ``final_image_titles`` 는 별칭이다.
@@ -47,8 +47,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
 
-from core import (anima38, anima_guidance, anima_model_kind, anima_speed, dora_infer_mode, extra_schedulers, sam3_args,
-                  vae_degrid)
+from core import (anima38, anima_guidance, anima_model_kind, anima_speed, colorcraft, dora_infer_mode, extra_schedulers,
+                  sam3_args, vae_degrid)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ TITLE_DORA = dora_infer_mode.SCRIPT_NAME   # 확장 scripts/dora_infer_mode.py D
 TITLE_DEGRID = vae_degrid.SCRIPT_NAME      # 확장 sam3ext/ui_vae_degrid.py TITLE (앱 노출)
 TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME   # 확장 sam3ext/ui_extra_schedulers.py TITLE (앱 노출)
 TITLE_SPEED = anima_speed.SCRIPT_NAME      # 확장 scripts/anima_speed.py TITLE (앱 노출)
+TITLE_COLORCRAFT = colorcraft.SCRIPT_NAME  # 확장 scripts/colorcraft.py TITLE (앱 노출)
 
 _AUX_LABELS = {AUX_REFINE: "Refine", AUX_SAM3: "SAM3", AUX_ADETAILER: "ADetailer", AUX_HAND: "손 재구성"}
 
@@ -114,7 +115,8 @@ _ALL_BACKENDS = frozenset({BACKEND_WEBUI, BACKEND_COMFY})
 class Rule:
     """한 제목의 전달 규칙.
 
-    passes         이 블록을 받는 보조 패스. 비면 최종 이미지 블록 — 메인 요청에만 싣는다(VAE DeGrid)
+    passes         이 블록을 받는 보조 패스. 비면 메인 요청 전용 블록 — 메인 요청에만 싣는다(최종 이미지 후처리 VAE DeGrid,
+                   메인 샘플링 전용 Anima SPEED·Colorcraft)
     backends       보조 패스에 보내는 백엔드(메인 체인은 이 표로 거르지 않는다)
     feature        기능 스냅샷 이름. None = 스냅샷 기능이 아님(NegPiP — sam-extra 내장이지만 스냅샷에 없다) — 게이트하지 않는다
     when_unknown   스냅샷을 모를 때 출처별 SEND/SKIP
@@ -212,6 +214,14 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
                "(runtime_guard) σ 시작이 전환 σ 보다 낮아 저해상도 스텝이 없다(build_plan) — 보내도 status 만 남거나 메인과 "
                "다른 샘플링이 된다. 앱 기본값이 꺼짐이라 켜진 블록은 사용자 값 — 모를 때는 보내고, 스크립트가 없으면 "
                "가이던스처럼 422 를 설명한다(main_retry 없음 — Rule 문서의 규칙)"),
+    TITLE_COLORCRAFT: Rule(
+        passes=frozenset(), backends=_ALL_BACKENDS, feature="colorcraft",
+        when_unknown=_unknown(user=SEND, app_default=SKIP),   # main_retry 기본 False — Rule 문서의 규칙(사용자가 켠 블록)
+        reason="샘플링 중 색 보정(post-CFG 맨 끝). 확장은 SAM3·Refine·ADetailer 내부 패스(_sam3_inner·_ad_inner)에서 붙지 "
+               "않는다(sam3ext/colorcraft/hook.py inner_pass) — 생성의 base·hires 패스와 img2img 메인 요청만 보정한다. 보조 "
+               "패스(Refine·단독/배치 SAM3·ADetailer·손 재구성)는 각자 새 요청이라 넣으면 이미 보정된 이미지를 한 번 더 "
+               "보정하므로 메인 요청에만 싣는다(passes=() — DeGrid 와 같은 '메인 요청 전용' 행). 앱 기본값이 꺼짐이라 켜진 "
+               "블록은 사용자 값 — 모를 때는 보내고, 스크립트가 없으면 가이던스처럼 422 를 설명한다(main_retry 없음)"),
 })
 
 NEVER: Mapping[str, str] = MappingProxyType({
@@ -220,8 +230,7 @@ NEVER: Mapping[str, str] = MappingProxyType({
     "ADetailer": "이미지 패스 — 복사하면 부모 패스 뒤에 T2I 얼굴 보정이 한 번 더 돈다(_ad_disabled 는 SAM3 p2 에만)",
     "Anima VAE 2x (spacepxl decoder)": "HOLD(M9) — 앱이 만들지 않는다. 2x 디코더가 인페인트 패스 출력 크기를 바꿀 수 있다",
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
-    # 2026-10-03 sam-extra 미커밋 작업 트리(CHANGELOG v0.31.0) — 넷 다 HOLD(core/sam_extra_contract SCRIPTS)
-    "Colorcraft (sam-extra)": "HOLD — latent 색 보정(기본 끔) — 앱이 만들지 않는다",
+    # 2026-10-03 sam-extra v0.31.0 의 네 기능 중 아직 HOLD 인 것(core/sam_extra_contract SCRIPTS)
     "Extra Samplers": "HOLD — ER SDE 값 칸 — 앱이 만들지 않는다(샘플러 이름은 Forge 목록으로 고른다)",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
@@ -511,8 +520,8 @@ __all__ = [
     "AUX_ADETAILER", "AUX_HAND", "AUX_PASSES", "AUX_REFINE", "AUX_SAM3", "BACKEND_COMFY", "BACKEND_KREA2",
     "BACKEND_WEBUI", "ENVELOPE_VERSION", "GateResult", "NEVER", "PROPAGATION", "PROVENANCES",
     "PROVENANCE_APP_DEFAULT", "PROVENANCE_KEY", "PROVENANCE_USER", "Rule", "SEND", "SETTINGS_KEY", "SKIP", "TARGETS",
-    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_DEGRID", "TITLE_DORA", "TITLE_EXTRA_SCHEDULERS", "TITLE_NEGPIP",
-    "TITLE_SPEED", "apply", "aux_label",
+    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_COLORCRAFT", "TITLE_DEGRID", "TITLE_DORA", "TITLE_EXTRA_SCHEDULERS",
+    "TITLE_NEGPIP", "TITLE_SPEED", "apply", "aux_label",
     "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance",
     "final_image_titles", "gate",
     "gate_notices", "has_model_bound", "is_envelope", "main_only_titles", "main_retry_titles", "mark_provenance", "provenance_of", "script_available",

@@ -87,6 +87,10 @@
                  인자 계약(위치 기반, 스크립트별)은 core/anima_guidance.py SPECS 참조. -->
             <AnimaGuidancePanel :widgets="storeWidgets" />
 
+            <!-- Colorcraft — 가이던스 다음(Forge 에서 Anima Optimal Scale 바로 아래, 네 기능 계획 R8). 카드가 위젯 스토어
+                 (_cc_*)를 직접 읽는다(destructure 없음) -->
+            <ColorcraftCard />
+
             <!-- NegPiP 상시 적용 / 조건부 프롬프트는 STUDIO TOOLS '조건부' 모달로 이동 -->
 
             <LoraStackCard :lora="lora" />
@@ -404,6 +408,7 @@ import LoraStackCard from './components/params/LoraStackCard.vue'
 import DoraModeCard from './components/params/DoraModeCard.vue'
 import Anima38Card from './components/params/Anima38Card.vue'
 import AnimaSpeedCard from './components/params/AnimaSpeedCard.vue'
+import ColorcraftCard from './components/params/ColorcraftCard.vue'
 import VaeDegridCard from './components/params/VaeDegridCard.vue'
 import PresetManagerModal from './components/managers/PresetManagerModal.vue'
 import WeightManagerModal from './components/managers/WeightManagerModal.vue'

@@ -83,6 +83,9 @@ EXT_VERSION_AUDITED = "0.32.1"
 # Scheduler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS xsched_*(앱 쪽 — ComfyUI 팩 거울 '_comfy' 는 팩 1.7.0 단계 C0).
 # 2026-10-04 Anima SPEED 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 둘을 HOLD → mapped(메인 요청 전용 — 전달 행
 # passes=()), XYZ [Anima SPEED] 6축은 P18, 상수 계약은 SEMANTIC_PINS speed_*(앱 쪽 — 팩 거울 '_comfy' 는 C0).
+# 2026-10-04 Colorcraft 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 둘을 HOLD → mapped(첫 인자 하나 = 확장 infotext
+# 문자열, 메인 요청 전용 — 전달 행 passes=()), XYZ [Colorcraft] 14축은 P18, 상수 계약은 SEMANTIC_PINS colorcraft_*(앱 쪽 —
+# 팩 거울 '_comfy' 는 C0). 화면 JS 셋은 그대로 N6.
 EXT_COMMIT_AUDITED = "6101f05"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
@@ -434,11 +437,12 @@ SCRIPTS = MappingProxyType({
                  "post-CFG 순서가 같고, SMC·APG·CWM(sampler_cfg_function)이면 노드가 건너뛴다 — 결과는 Forge 와 같다 "
                  "(tests/test_comfy_detail_parity.py·test_comfy_detail_compiler.py)",
             gaps=("P16: 붙여 넣은 infotext 'Anima Optimal Scale' 을 앱이 되살리지 않는다(가이던스 공통)",))),
-    # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0) — 넷 다 HOLD(앱 노출 요청 없음). 앱은 블록을 만들지 않고
-    # (core/alwayson_propagation NEVER), Forge 는 블록이 없으면 ui() 기본값(전부 끔·확장 기본값)으로 돌린다.
-    # v0.32.0 공유 편집기 — 인자 579 → 67. 계산·infotext·XYZ·옵션 그대로, HOLD 그대로.
+    # 2026-10-04 앱 노출(보류 → mapped): 첫 인자 하나 = 확장 infotext 문자열(core/colorcraft.to_infotext) — 상태·infotext·
+    # 붙여 넣기·체인 거울(core/colorcraft), 메인 전용 전달 행, 결과 status 알림. 상수 계약은 SEMANTIC_PINS colorcraft_*.
+    # ComfyUI(팩 1.7.0 ForgeNeoColorcraft — 업스트림 MIT 엔진 + 앱 호스트, CPU 비트 대조)는 계획 C 단계.
     "Colorcraft (sam-extra)": _script(
         file="scripts/colorcraft.py", form="positional_or_dict", live_argc=67, shape="456003a0acc3",
+        app_title="core.colorcraft:SCRIPT_NAME",
         api_note="위치 인자 67개(sam3ext/colorcraft/panel_state.ARG_NAMES — enabled·masking·state(숨은 Textbox: \"\" 또는 "
                  "JSON {\"v\":1,\"rev\":…, 경로: 값}, 기본값은 뺀다)·debug·debug_step·ref(숨은 Textbox '<수정자>|<마스크>|<rev>', "
                  "기본 'I|M1|0')·편집기 61칸(수정자 44·마스크 10·조합 7). 확장은 이 67개를 내부 형식이라 바뀔 수 있다고 적는다). "
@@ -453,9 +457,45 @@ SCRIPTS = MappingProxyType({
                  "에 전체 목록, 조합별 좁히기는 브라우저). 붙여 넣기 필드는 65개(인자 58 — debug·debug_step·조합 편집기 7칸 빼고 — "
                  "와 선택 줄·요약 같은 화면 7)이고 조합 편집기에는 놓이지 않는다. infotext 'SAM Extra Colorcraft'·'SAM Extra "
                  "Colorcraft status'(원본·포크의 'Colorcraft' 키도 붙여 넣기로 읽는다).",
-        classification=deferred(HOLD, "샘플링 중 latent 색 보정(muerrilla/ComfyUI-Colorcraft 이식, 기본 끔) — 확장도 화질·VRAM 을 "
-                                      "GPU 로 확인하지 않았다(CHANGELOG). 앱 노출 요청 없음 — 앱이 만들지 않는다(core/"
-                                      "alwayson_propagation NEVER). Comfy 쪽은 원본 노드 팩이 따로 있고 앱 컴파일러는 넣지 않는다")),
+        classification=mapped(
+            "core/colorcraft.py:SCRIPT_NAME", "core/colorcraft.py:to_infotext", "core/colorcraft.py:as_block",
+            "core/colorcraft.py:parse_compact", "core/colorcraft.py:parse_script_block", "core/colorcraft.py:build_chain",
+            "core/colorcraft.py:plan", "core/colorcraft.py:from_infotext", "core/colorcraft.py:from_value",
+            "core/colorcraft.py:dump_state", "core/colorcraft.py:parse_state", "core/colorcraft.py:schema_ts",
+            # 메인 요청 전용 전달 행(passes=() — 보조 패스에는 가지 않는다)·기능 스냅샷
+            "core/alwayson_propagation.py:TITLE_COLORCRAFT", "core/alwayson_propagation.py:PROPAGATION",
+            "core/alwayson_propagation.py:main_only_titles", "core/sam_extra_capabilities.py:TITLE_COLORCRAFT",
+            # 샘플링 블록 기여자(가이던스 뒤 — 메인 t2i·i2i·보조 패스 봉투 공용, 보조 패스에는 건너가지 않는다)·저장
+            "ui/colorcraft_ui.py:contribute", "ui/colorcraft_ui.py:apply_saved_settings",
+            "ui/colorcraft_ui.py:init_colorcraft_proxies", "ui/sampling_blocks.py:CONTRIBUTORS",
+            # 파라미터 열 카드(가이던스 다음) — 공유 편집기(●/○ 고르개 + 수정자·마스크 편집기), 상태 문자열·체인·상태 줄은
+            # 파이썬의 거울(utils/colorcraft.ts — 골든 utils/colorcraft.cases.json·tests/fixtures/colorcraft_state_golden.json)
+            "frontend/src/components/params/ColorcraftCard.vue", "frontend/src/utils/colorcraft.ts:cardStatus",
+            "frontend/src/utils/colorcraft.ts:dumpState", "frontend/src/utils/colorcraftSchema.generated.ts",
+            # 가져오기(계획 X3c — 액션 하나 sam_extra_import: 자기·업스트림·포크 형식, 맨 값도)
+            "ui/sam_extra_import.py:import_infotext", "ui/colorcraft_ui.py:apply_config",
+            "frontend/src/utils/samExtraImport.ts:importSamExtra", "frontend/src/views/PngInfoView.vue",
+            "frontend/src/views/GalleryView.vue",
+            # 결과 'SAM Extra Colorcraft status'(거절·오류 경고, 색 벡터 없음 정보)·보냈는데 흔적 없음 → 알림(P4 규칙)
+            "core/sam_extra_notices.py:CODE_COLORCRAFT_NOT_APPLIED", "core/sam_extra_notices.py:CODE_COLORCRAFT_ERROR",
+            "core/sam_extra_notices.py:CODE_COLORCRAFT_NO_BASIS", "core/sam_extra_notices.py:CODE_COLORCRAFT_MISSING",
+            "core/sam_extra_notices.py:colorcraft_result_notices",
+            # 결과 infotext 3키(+ 업스트림·포크 'Colorcraft')를 확장 그룹으로(PNG Info·갤러리·히스토리)
+            "core/image_metadata.py:_EXTENSION_MARKERS",
+            note="첫 인자 하나 — 확장 infotext 문자열(core/colorcraft.to_infotext, 'v1;mods=…'). 나머지 66칸은 Forge 가 ui() "
+                 "기본값으로 채우고 확장이 무시한다(spec.is_compact_arg) — 사용자 Forge 패널 기본값이 앱 요청에 섞이지 "
+                 "않는다. 문자열은 모든 탭 꺼짐에서 시작한다(dict 형식은 수정자 I 켜짐에서 — 앱은 쓰지 않는다). 앱 기본값 = "
+                 "확장 기본값(꺼짐). 메인 요청만: T2I 계열, I2I·인페인트는 카드 토글(기본 끔 — Forge img2img 패널도 따로 "
+                 "꺼짐). Refine·단독/배치 SAM3·ADetailer·손 재구성에는 보내지 않는다(PROPAGATION passes=() — 확장도 내부 "
+                 "패스에서 붙지 않는다). 돌 항목이 없으면(켠 수정자가 없거나 모두 0) 보내지 않는다. 사용자가 켠 블록이라 "
+                 "스냅샷이 없다고 하면 빼고 block_not_sent 알림, 모르면 보낸다(main_retry 없음). Krea2 는 보내지 않는다. "
+                 "계산은 Forge 에서 확장이 한다",
+            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/colorcraft.plan 'comfy_pending', 계획 R16)",
+                  "P18: XYZ [Colorcraft] 14축(수정자 I 13축·Enable)은 앱 XYZ 에 없다",
+                  "HOLD: Debug 패널(마스크·축 미리보기)은 Forge 화면 전용 — 앱은 debug 를 보내지 않는다",
+                  "HOLD: 앱 Krea2 생성 경로(core/krea2_generation)에는 걸리지 않는다",
+                  "Forge 옵션 sam3_colorcraft_pre_dd_sigma 는 OPTIONS P10(Forge 전용 — ComfyUI 는 확장 기본값 켬), "
+                  "sam3_colorcraft_log 는 쓰지 않는다"))),
     # 2026-10-04 앱 노출(보류 → mapped): 메인 요청 전용 샘플러 래퍼 — 정규화·블록·검사·붙여 넣기 거울(core/anima_speed),
     # 메인 전용 전달 행, 결과 status 알림. 상수 계약은 SEMANTIC_PINS speed_*. ComfyUI(팩 1.7.0 ForgeNeoAnimaSpeed — 같은 계산을
     # 다시 구현해 CPU 비트 대조)는 계획 C 단계.
@@ -485,6 +525,9 @@ SCRIPTS = MappingProxyType({
             # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용 — 보조 패스에는 건너가지 않는다)·저장·가져오기
             "ui/anima_speed_ui.py:contribute", "ui/anima_speed_ui.py:apply_saved_settings",
             "ui/anima_speed_ui.py:apply_infotext", "ui/sampling_blocks.py:CONTRIBUTORS",
+            # 가져오기(계획 X3c — 액션 sam_extra_import, PNG Info·갤러리 단추)
+            "ui/sam_extra_import.py:import_infotext", "frontend/src/utils/samExtraImport.ts:importSamExtra",
+            "frontend/src/views/PngInfoView.vue", "frontend/src/views/GalleryView.vue",
             # 파라미터 열 카드(Anima38 다음) — 값 칸·검사 줄(파이썬 validate 의 거울)·켜짐 스위치 기능 확인
             "frontend/src/components/params/AnimaSpeedCard.vue", "frontend/src/utils/animaSpeed.ts:validate",
             "frontend/src/utils/samExtraCapabilities.ts:FEATURE_ENABLE_WIDGETS",
@@ -501,7 +544,6 @@ SCRIPTS = MappingProxyType({
                  "없음). 잘못된 설정도 보낸다 — Forge 가 'invalid settings' 로 기록하고 평소처럼 샘플링한다(카드가 validate "
                  "로 미리 알린다). Krea2 는 보내지 않는다. 계산은 Forge 에서 확장이 한다",
             gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/anima_speed.plan 'comfy_pending', 계획 R16)",
-                  "P16: 붙여 넣기(from_infotext)는 있지만 아직 연결되지 않았다(계획 X3c — 가져오기 sam_extra_import)",
                   "P18: XYZ [Anima SPEED] 6축은 앱 XYZ 에 없다",
                   "Forge 옵션 sam3_speed_img2img_rescale 은 OPTIONS P10(Forge 전용 — ComfyUI 는 확장 기본값 켬, 계획 D7), "
                   "sam3_speed_log 는 쓰지 않는다"))),
@@ -806,7 +848,10 @@ XYZ_AXES = MappingProxyType({
     "[DoRA]": {**deferred("P18", "M8 — DoRA 축은 값이 바뀔 때마다 LoRA 를 다시 합친다(바깥 루프에 둔다)"),
                "labels": ("Inference mode", "Inserted blocks", "Weak copy scope", "Weak copy strength")},
     # 2026-10-03 미커밋 작업 트리 — 넷 다 p 속성으로 값을 덮어쓴다(Colorcraft 는 탭 I 와 전체 켜기만)
-    "[Colorcraft]": {**_XYZ_HOLD, "labels": (
+    "[Colorcraft]": {**deferred("P18", "앱 XYZ 가 Colorcraft 값을 축으로 바꿔 돌릴 수 없다(수정자 I 13축·Enable — 확장은 "
+                                       "p 속성 _sam3_colorcraft_xyz 로 덮어쓴다). 블록은 카드 값으로 메인 요청에만 간다"
+                                       "(core/colorcraft.plan)"),
+                     "labels": (
         "Chroma Contrast", "Clarity", "Contrast", "Enable", "End", "Exposure", "Saturation", "Sharpness", "Start",
         "Strength", "Temperature", "Tint", "Tone Compression", "Vibrance")},
     "[Anima SPEED]": {**deferred("P18", "앱 XYZ 에 SPEED 축이 없다(design_speed D13) — 블록은 카드 값으로 메인 요청에만 간다"
@@ -890,8 +935,12 @@ MODULES = MappingProxyType({
                                 note="SCRIPTS['NegPiP'] (sd-forge-negpip 편입). 내장 스위치 옵션 sam3_builtin_negpip_enabled 도 "
                                      "여기서 등록한다(OPTIONS — P10 덮어쓰기, Forge 전용)"),
     # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0)
-    "scripts/colorcraft.py": deferred(HOLD, "SCRIPTS['Colorcraft (sam-extra)'] — 옵션 sam3_colorcraft_* 둘·XYZ [Colorcraft] 도 "
-                                            "여기서 등록한다"),
+    "scripts/colorcraft.py": mapped(
+        "core/colorcraft.py:SCRIPT_NAME", "core/colorcraft.py:XYZ_PREFIX",
+        "core/forge_override_settings.py:OPT_COLORCRAFT_PRE_DD",
+        note="SCRIPTS['Colorcraft (sam-extra)'] — 옵션 sam3_colorcraft_* 둘(pre-DD σ = OPTIONS P10, log = ignored)·XYZ "
+             "[Colorcraft](P18)도 여기서 등록한다. 붙여 넣기 필드(panel_state 의 65개)는 앱이 쓰지 않는다 — 앱은 infotext "
+             "문자열 하나를 core/colorcraft.from_infotext 로 읽는다(spec.decode 와 같은 결과)"),
     "scripts/anima_speed.py": mapped(
         "core/anima_speed.py:SCRIPT_NAME", "core/anima_speed.py:paste_values", "core/anima_speed.py:XYZ_PREFIX",
         "core/forge_override_settings.py:OPT_SPEED_IMG2IMG_RESCALE",
@@ -1022,10 +1071,19 @@ MODULES = MappingProxyType({
     "sam3ext/panel_container.py": ignored("N5 — 선택 이미지 도크 컨테이너"),
     "sam3ext/ui_dock.py": ignored("N5 — 선택 이미지 도크(안의 기능은 각 항목에서 다룬다)"),
     # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0)
-    "sam3ext/colorcraft/": deferred(HOLD, "Colorcraft 런타임 — 인자 표(spec: arg_names·compact 인자·infotext)·엔진·마스크·"
-                                          "Debug·Gradio 패널, 색 벡터 data/*.safetensors 셋(krea2·zimage·flux2) 포함. v0.32.0 "
-                                          "패널 인자(panel_state: 67개 ARG_NAMES·숨은 state·편집기 겹치기·옛 579개 거절·붙여 "
-                                          "넣기·colorcraft_schema.js 생성)"),
+    "sam3ext/colorcraft/": mapped(
+        "core/colorcraft.py:MODIFIER_FIELDS", "core/colorcraft.py:LEAF_FIELDS", "core/colorcraft.py:COMBO_FIELDS",
+        "core/colorcraft.py:KIND_PARAMS", "core/colorcraft.py:to_infotext", "core/colorcraft.py:parse_own",
+        "core/colorcraft.py:parse_upstream", "core/colorcraft.py:parse_fork", "core/colorcraft.py:build_chain",
+        "core/colorcraft.py:overview", "core/colorcraft.py:dump_state",
+        note="Colorcraft 런타임 — 인자 표(spec: arg_names·compact 인자·infotext·업스트림/포크 붙여 넣기)·엔진·마스크·Debug·"
+             "Gradio 패널, 색 벡터 data/*.safetensors 셋(krea2·zimage·flux2). v0.32.0 패널 인자(panel_state: 67개 "
+             "ARG_NAMES·숨은 state·편집기 겹치기·옛 579개 거절·붙여 넣기·colorcraft_schema.js 생성). 앱은 표·형식·체인·한눈에 "
+             "보기 규칙을 다시 구현해 두고(GPL 코드는 옮기지 않는다) tests/test_colorcraft_spec_parity.py 가 설치된 spec·"
+             "panel_state 와 같은 입력으로 비교한다. 계산(engine·hook·basis)은 Forge 에서는 확장이 한다",
+        gaps=("Comfy: 팩 1.7.0 단계 전 — 계산(colorcraft_basis·colorcraft_engine·colorcraft_host·colorcraft_nodes, 업스트림 "
+              "MIT lib_colorcraft·벡터)은 C0 에서 들어온다",
+              "HOLD: Debug 패널(debug_panel·debug)은 Forge 화면 전용")),
     "sam3ext/speed/": mapped(
         "core/anima_speed.py:coerce", "core/anima_speed.py:ScriptSettings", "core/anima_speed.py:PRESETS",
         "core/anima_speed.py:parse_status", "core/anima_speed.py:UNSUPPORTED_SAMPLERS",
@@ -1396,6 +1454,78 @@ _SPEED_PINS = (
     _speed_slider_pin("speed_ui_divisor_step", 6, "step", 0.01, "DIVISOR_STEP", "σ 나눔값 슬라이더 step"),
 )
 
+# Colorcraft 상수 계약 — 앱(core/colorcraft)이 같은 값을 하드코딩한다. 제목·XYZ 머리는 scripts/colorcraft.py, infotext 키·
+# 개수·선택지·종류 표는 sam3ext/colorcraft/spec.py, 종류는 engine.py, 마스크 축은 masking.py, 묶음 순서는 panel_state.py
+# (모두 AST 로 풀린다). 필드 표·_KIND_PARAMS·패스 선택지(튜플 풀기 대입이라 AST 로 안 풀린다)처럼 리터럴이 아닌 표는
+# tests/test_colorcraft_spec_parity.py 가 설치된 모듈과 비교한다. status 문구(f-string)는 tests/test_sam_extra_notices.py 가 설치된 소스에서 찾는다. 팩 거울(<id>_comfy — 기저·VAE
+# 배율·종류·마스크 축)은 계획 C0 이 더한다.
+_CC_SCRIPT = "scripts/colorcraft.py"
+_CC_SPEC = "sam3ext/colorcraft/spec.py"
+_CC_ENGINE = "sam3ext/colorcraft/engine.py"
+_CC_MASKING = "sam3ext/colorcraft/masking.py"
+_CC_PANEL = "sam3ext/colorcraft/panel_state.py"
+_APP_CC = "core.colorcraft"
+
+
+def _cc_pin(pin_id: str, file: str, name: str, expected, app: str, meaning: str) -> dict:
+    """확장 ``file:name`` 핀 — ``app`` 은 앱 상수 이름(core.colorcraft)."""
+    return {"id": pin_id, "source": "ast", "file": file, "name": name, "expected": expected,
+            "app": f"{_APP_CC}:{app}", "meaning": meaning}
+
+
+_COLORCRAFT_PINS = (
+    _cc_pin("colorcraft_title", _CC_SCRIPT, "TITLE", "Colorcraft (sam-extra)", "SCRIPT_NAME",
+            "alwayson_scripts 키 — 앱 블록·기능 스냅샷·전달 규칙·알림 표의 제목이 모두 이 상수 하나에서 나온다"),
+    _cc_pin("colorcraft_xyz_prefix", _CC_SCRIPT, "XYZ_PREFIX", "[Colorcraft]", "XYZ_PREFIX",
+            "XYZ 축 머리(P18 — 앱은 축을 쓰지 않지만 XYZ_AXES 키와 같아야 한다)"),
+    _cc_pin("colorcraft_infotext_key", _CC_SPEC, "INFOTEXT_KEY", "SAM Extra Colorcraft", "INFOTEXT_KEY",
+            "infotext 설정 문자열 키 — 결과 알림(CODE_COLORCRAFT_MISSING)·붙여 넣기(from_infotext)가 읽는다"),
+    _cc_pin("colorcraft_status_key", _CC_SPEC, "STATUS_KEY", "SAM Extra Colorcraft status", "STATUS_KEY",
+            "패스마다 status('base: … | hires: …' 또는 'not applied: …') — 결과 알림이 읽는다"),
+    _cc_pin("colorcraft_foreign_key", _CC_SPEC, "FOREIGN_KEY", "Colorcraft", "FOREIGN_KEY",
+            "업스트림·aoleg 포크가 쓰는 키 — 붙여 넣기만 읽는다"),
+    _cc_pin("colorcraft_version", _CC_SPEC, "VERSION", "v1", "VERSION",
+            "infotext 문자열 형식 버전('v1;mods=…') — 앱이 보내는 첫 인자가 이 형식이다(is_compact_arg)"),
+    _cc_pin("colorcraft_modifier_count", _CC_SPEC, "MODIFIER_COUNT", 10, "MODIFIER_COUNT", "수정자 탭 수(I…X)"),
+    _cc_pin("colorcraft_mask_count", _CC_SPEC, "MASK_COUNT", 10, "MASK_COUNT", "마스크 잎 수(M1…M10)"),
+    _cc_pin("colorcraft_combo_count", _CC_SPEC, "COMBO_COUNT", 5, "COMBO_COUNT",
+            "마스크 조합 수(C1…C5 — Ck 는 잎과 앞선 조합만 고른다)"),
+    _cc_pin("colorcraft_modifier_tags", _CC_SPEC, "MODIFIER_TAGS",
+            ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"), "MODIFIER_TAGS",
+            "수정자 태그 = 상태·infotext 경로 머리('I.exposure')·mods 목록"),
+    _cc_pin("colorcraft_kinds", _CC_ENGINE, "KINDS",
+            ("advanced", "basic", "luma", "chroma", "chroma_plus", "punch", "shift"), "KINDS",
+            "체인 항목 kind(업스트림 노드 종류) — 상태·infotext 의 Type 값도 이 순서의 라벨"),
+    _cc_pin("colorcraft_advanced_kinds", _CC_ENGINE, "ADVANCED_KINDS",
+            frozenset({"advanced", "luma", "chroma", "chroma_plus", "punch"}), "ADVANCED_KINDS",
+            "기저 벡터가 필요한 종류(needs_basis) — 결과 알림 '색 벡터 없음' 판정의 바탕"),
+    _cc_pin("colorcraft_kind_labels", _CC_SPEC, "KIND_LABELS", {
+        "advanced": "Advanced", "basic": "Basic", "luma": "Luma", "chroma": "Chroma", "chroma_plus": "Chroma Plus",
+        "punch": "Punch", "shift": "Shift"}, "KIND_LABELS", "Type 드롭다운 값(카드가 보내는 선택지 리터럴)"),
+    _cc_pin("colorcraft_kind_groups", _CC_SPEC, "KIND_GROUPS", {
+        "advanced": ("luma", "contrast", "detail", "chroma", "chroma_plus", "color_shift", "dev"),
+        "basic": ("contrast", "color_shift"), "luma": ("luma",), "chroma": ("chroma",),
+        "chroma_plus": ("chroma_plus",), "punch": ("contrast", "detail"), "shift": ("color_shift",)}, "KIND_GROUPS",
+        "Type 마다 보이는 묶음 — 카드 편집기(colorcraftSchema.generated.ts)와 infotext 에 쓰는 칸"),
+    _cc_pin("colorcraft_kind_gates", _CC_SPEC, "KIND_GATES", {"advanced": ("more_colors", "color_shift")},
+            "KIND_GATES", "Advanced 만의 두 스위치(Chroma Plus·Color Shift 묶음을 켠다)"),
+    _cc_pin("colorcraft_mask_none", _CC_SPEC, "MASK_NONE", "none", "MASK_NONE", "마스크 없음 선택지"),
+    _cc_pin("colorcraft_mask_axes", _CC_MASKING, "MASK_AXIS_OPTIONS",
+            ("exposure", "hue", "saturation", "temperature", "tint", "temp+tint", "temp-tint", "lab-a", "lab-b",
+             "lab-a+b", "lab-a-b", "clarity", "sharpness"), "MASK_AXIS_OPTIONS", "마스크 기준 축 선택지"),
+    _cc_pin("colorcraft_mask_modes", _CC_SPEC, "MASK_MODE_OPTIONS", ("highs", "lows", "split", "range", "protect range"),
+            "MASK_MODE_OPTIONS", "마스크 방식 선택지"),
+    _cc_pin("colorcraft_combo_ops", _CC_SPEC, "COMBO_OP_OPTIONS", ("and", "or", "subtract", "xor"), "COMBO_OP_OPTIONS",
+            "마스크 조합 연산 선택지"),
+    _cc_pin("colorcraft_color_shift_modes", _CC_SPEC, "COLOR_SHIFT_MODE_OPTIONS", ("default", "legacy"),
+            "COLOR_SHIFT_MODE_OPTIONS", "색 이동 방식 선택지"),
+    _cc_pin("colorcraft_chroma_planes", _CC_SPEC, "CHROMA_PLANE_OPTIONS", ("temp_tint", "lab"), "CHROMA_PLANE_OPTIONS",
+            "개발자 묶음 색 평면 선택지"),
+    _cc_pin("colorcraft_group_order", _CC_PANEL, "GROUP_ORDER",
+            ("luma", "contrast", "detail", "chroma", "chroma_plus", "color_shift", "dev"), "GROUP_ORDER",
+            "편집기 묶음 순서(확장 공유 편집기와 같은 순서로 보인다)"),
+)
+
 SEMANTIC_PINS = (
     {"id": "dd_amount_max", "source": "fixture", "script": "Anima Detail Daemon", "index": 2,
      "field": "maximum", "expected": 5.0,
@@ -1616,6 +1746,8 @@ SEMANTIC_PINS = (
     *_XSCHED_PINS,
     # Anima SPEED — 위 _SPEED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
     *_SPEED_PINS,
+    # Colorcraft — 위 _COLORCRAFT_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    *_COLORCRAFT_PINS,
 )
 
 # ── ui() 컴포넌트에서 AST 로 못 읽는 칸 (script, index) → 필드와 사유 ─────────────────────

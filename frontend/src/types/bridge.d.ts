@@ -38,7 +38,7 @@ export type ActionName =
   | 'editor_open_file' | 'editor_save' | 'editor_save_as' | 'editor_add_yolo_model'
   | 'editor_clear_yolo_models' | 'editor_load_watermark_image'
   | 'open_png_info_file' | 'open_compare_image' | 'pnginfo_send_prompt' | 'pnginfo_generate'
-  | 'pnginfo_transplant_meta'
+  | 'pnginfo_transplant_meta' | 'sam_extra_import'
   | 'pull_prompt_from_image' | 'explore_seed' | 'copy_to_clipboard'
   | 'gallery_open_folder' | 'gallery_send_exif_to_t2i' | 'add_favorite' | 'remove_favorite' | 'delete_image'
   | 'restore_image'
@@ -498,6 +498,15 @@ export interface ActionPayloads {
   tile_repair_options: TileRepairRequestPayload
   tile_repair_run: TileRepairRunPayload
   tile_repair_cancel: TileRepairRequestPayload
+  sam_extra_import: SamExtraImportPayload
+}
+
+/** sam_extra_import — 붙여 넣은 infotext(전체·'Key: value' 줄·맨 값)의 카드 기능 값(Colorcraft·Anima SPEED)을 카드로
+ *  (ui/sam_extra_import.py). only 가 있으면 그 기능만. 결과는 토스트(showNotification) 하나. */
+export type SamExtraImportFeature = 'colorcraft' | 'speed'
+export interface SamExtraImportPayload {
+  text: string
+  only?: SamExtraImportFeature
 }
 
 // ── Anima Tile & Repair (I2I 카드 · Forge sam-extra POST /sam-extra/tile-repair) ──

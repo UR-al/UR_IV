@@ -31,6 +31,9 @@
 - Anima SPEED                               결과: 'Anima SPEED status' 의 패스마다 — 설정 오류·실패 뒤 순정 재샘플링(경고),
                                             건너뜀(정보, 이유 한 번), 보냈는데 'Anima SPEED' 기록 없음(옛 sam-extra·스크립트
                                             오류). ``speed_static_skip_notice`` 는 생성 전에 앱이 아는 건너뜀(정보)
+- Colorcraft                                결과: 'SAM Extra Colorcraft status' — 거절('not applied: …', 앱 문자열이면 계약
+                                            경보)·평가 오류/비유한 결과/붙이지 못함(경고), 색 벡터 없는 모델(정보), 보냈는데
+                                            'SAM Extra Colorcraft' 기록 없음(옛 sam-extra — 'n/m장')
 - ``anima38_*_notice``                      Anima 3.8B — 첫 로드 앱 기본값(부정 커넥터 켬)·Comfy v1 자동 켜짐 폐지 안내(P9).
                                             'off: install failed (RuntimeError)' 힌트는 결과 모델 종류(비 Anima)를 먼저 본다
 - ``app_block_retried_notice``/``block_retried_notice``  메인 생성 재시도(DoRA·Anima38 422 — 앱 기본값이면 정보, 사용자
@@ -62,8 +65,8 @@ from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 from urllib.parse import urlsplit
 
-from core import (anima38, anima_guidance, anima_model_kind, anima_speed, dora_infer_mode, extra_schedulers, sam3_args,
-                  vae_degrid)
+from core import (anima38, anima_guidance, anima_model_kind, anima_speed, colorcraft, dora_infer_mode, extra_schedulers,
+                  sam3_args, vae_degrid)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +133,11 @@ CODE_SPEED_INVALID = "speed_invalid"                  # 결과: 'invalid setting
 CODE_SPEED_FALLBACK = "speed_fallback"                # 결과: 'fell back to plain sampling after …' — 실패 뒤 순정 재샘플링(경고)
 CODE_SPEED_SKIPPED = "speed_skipped"                  # 결과·생성 전: 'skipped - <이유>'(정보 — 생성마다 이유 한 번)
 CODE_SPEED_NOT_APPLIED = "speed_not_applied"          # 결과: 보냈는데 'Anima SPEED' 가 없음(옛 sam-extra·스크립트 오류)
+# Colorcraft(core/colorcraft) — 결과 'SAM Extra Colorcraft status'
+CODE_COLORCRAFT_NOT_APPLIED = "colorcraft_not_applied"   # 결과: status 'not applied: …' — 확장이 인자를 거절(앱 문자열이면 계약 경보)
+CODE_COLORCRAFT_ERROR = "colorcraft_error"            # 결과: 평가 오류·비유한 결과(입력 통과)·붙이지 못함·앵커 실패(경고)
+CODE_COLORCRAFT_NO_BASIS = "colorcraft_no_basis"      # 결과: 색 벡터 없는 모델(SD1.5·SDXL — 대비·색 이동만, 정보)·벡터 파일 없음(경고)
+CODE_COLORCRAFT_MISSING = "colorcraft_missing"        # 결과: 돌 항목을 보냈는데 'SAM Extra Colorcraft' 기록이 없음(옛 sam-extra)
 # 메인 생성 재시도·Forge 옵션 덮어쓰기(P10, core/forge_override_settings·core/forge_optional_parts)
 CODE_APP_BLOCK_RETRIED = "app_block_retried"          # 메인 생성: 앱이 넣은 블록(DoRA·Anima38)을 Forge 가 422 로 거절 → 빼고 다시
 CODE_BLOCK_RETRIED = "block_retried"                  # 메인 생성: 사용자 값(또는 출처 모름) 블록을 422 로 거절 → 빼고 다시(경고)
@@ -194,6 +202,11 @@ NOTICE_MIN_TTL_S = {
     CODE_SPEED_FALLBACK: PRE_GENERATION_NOTICE_TTL_S,
     CODE_SPEED_SKIPPED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_SPEED_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
+    # Colorcraft 도 설정·모델이 그대로면 요청마다 같다
+    CODE_COLORCRAFT_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_COLORCRAFT_ERROR: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_COLORCRAFT_NO_BASIS: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_COLORCRAFT_MISSING: PRE_GENERATION_NOTICE_TTL_S,
 }
 # 띄울 때 GUI 가 기능 스냅샷을 다시 받아야 하는 알림(연결 때 받은 스냅샷이 틀렸다는 뜻) —
 # ui/sam_extra_notices_ui.show_notices 가 _refresh_sam_extra_capabilities(force=True) 를 부른다.
@@ -205,6 +218,7 @@ _TITLE_DORA = dora_infer_mode.SCRIPT_NAME
 _TITLE_DEGRID = vae_degrid.SCRIPT_NAME
 _TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME
 _TITLE_SPEED = anima_speed.SCRIPT_NAME
+_TITLE_COLORCRAFT = colorcraft.SCRIPT_NAME
 _TITLE_VAE2X = "Anima VAE 2x (spacepxl decoder)"
 SAM_EXTRA_FEATURES = {
     sam3_args.SCRIPT_SAM3.lower(): ("sam3", "SAM3 Mask"),
@@ -217,6 +231,7 @@ SAM_EXTRA_FEATURES = {
     _TITLE_DEGRID.lower(): ("degrid", "VAE DeGrid"),
     _TITLE_EXTRA_SCHEDULERS.lower(): ("extra_schedulers", "Extra Schedulers 값(custom 식·Laplace μ/β)"),
     _TITLE_SPEED.lower(): ("speed", _TITLE_SPEED),
+    _TITLE_COLORCRAFT.lower(): ("colorcraft", "Colorcraft"),
 }
 # 기능 스냅샷(SAM_EXTRA_FEATURES) 밖 제목: 소문자 제목 → (기능, 제공 확장 이름). NegPiP 는 2026-09-30 부터 sam-extra 에
 # 내장(sd-forge-negpip 편입)됐지만 스냅샷 기능이 아니므로 여기 둔다.
@@ -428,6 +443,7 @@ class RequestedFeatures:
     degrid: Optional[vae_degrid.DegridSettings] = None     # 블록을 보냈을 때만(확장 coerce_args 규칙)
     extra_schedulers: Optional[extra_schedulers.ExtraSchedulerSettings] = None   # 블록을 보냈을 때만(coerce_args 규칙)
     speed: Optional[anima_speed.ScriptSettings] = None     # 블록을 보냈을 때만(확장 coerce_settings 규칙 — a/0 은 error)
+    colorcraft: Optional[colorcraft.Config] = None         # 블록을 보냈고 첫 인자가 한 값 형식일 때만(확장 parse_own 규칙)
     cfg_scale: Optional[float] = None
     hires: bool = False
     hires_cfg: Optional[float] = None         # 요청에 hr_cfg 가 있을 때만
@@ -539,6 +555,7 @@ def requested_features(payload: Any, *, live_pag_argc: Optional[int] = None) -> 
         degrid=vae_degrid.parse_script_block(_script_block(payload, vae_degrid.SCRIPT_NAME)),
         extra_schedulers=extra_schedulers.parse_script_block(_script_block(payload, extra_schedulers.SCRIPT_NAME)),
         speed=anima_speed.parse_script_block(_script_block(payload, anima_speed.SCRIPT_NAME)),
+        colorcraft=_colorcraft_block(payload),
         cfg_scale=_number(payload.get("cfg_scale")),
         hires=hires, hires_cfg=_number(payload.get("hr_cfg")) if hires and "hr_cfg" in payload else None,
         # 키가 있으면 img2img 요청이다 — 재인코딩하는 I2I 는 워커가 채울 때까지 init_images=[] 로 둔다
@@ -1131,6 +1148,137 @@ def speed_static_skip_notice(reason: str) -> Notice:
                   f"Anima SPEED: {text} — 이번 생성은 평소처럼 샘플링합니다.", feature="speed", detail=code)
 
 
+# ── Colorcraft ──────────────────────────────────────────────────────────────────
+# 확장 status(sam3ext/colorcraft/hook.py PassStatus.render·_refuse·_family·process)의 한 패스 조각 → (코드, 억제 키).
+# 앞에서부터 처음 맞는 것. 'error <예외> xN (input passed through)' 는 예외 이름이 키에 붙는다.
+_COLORCRAFT_REFUSED = "not applied:"
+_COLORCRAFT_PART_RULES = (
+    (re.compile(r"^error (\w+) x\d+ \(input passed through\)$"), CODE_COLORCRAFT_ERROR, "error"),
+    (re.compile(r"^non-finite result passed through x\d+$"), CODE_COLORCRAFT_ERROR, "nonfinite"),
+    (re.compile(r"^not attached \((\w+)\)$"), CODE_COLORCRAFT_ERROR, "not_attached"),
+    (re.compile(r"^anchors failed \((\w+)\): Contrast/Color Shift off$"), CODE_COLORCRAFT_ERROR, "anchors"),
+    (re.compile(r"^colorcraft-[\w-]+\.safetensors missing: vector controls off$"), CODE_COLORCRAFT_NO_BASIS,
+     "vectors_missing"),
+    (re.compile(r"^vector controls off on this model: only Contrast and Color Shift apply$"), CODE_COLORCRAFT_NO_BASIS,
+     "no_basis"),
+)
+_COLORCRAFT_PASS_NAMES = {"base": "기본", "hires": "Hires"}
+
+
+def _colorcraft_block(payload: Any) -> Optional["colorcraft.Config"]:
+    """보낸 Colorcraft 블록 → 확장이 읽는 ``Config``. 첫 인자가 한 값 형식이 아니면(앱이 만들지 않는 모양) None."""
+    try:
+        return colorcraft.parse_script_block(_script_block(payload, colorcraft.SCRIPT_NAME))
+    except colorcraft.BlockError:
+        return None
+
+
+def colorcraft_status_parts(status: Any) -> list:
+    """'SAM Extra Colorcraft status' → ``[(패스 이름, 조각), …]``. 패스는 ' | ' 로, 조각은 '; ' 로 잇는다
+    (``base: krea2 (Wan21); mods I+III; 30 evals, 28 edited | hires: …``). 거절('not applied: …')은 패스가 없어
+    ``[("", 원문)]``."""
+    text = " ".join(str(status or "").split())
+    if not text:
+        return []
+    if text.startswith(_COLORCRAFT_REFUSED):
+        return [("", text)]
+    out = []
+    for chunk in text.split(" | "):
+        name, sep, rest = chunk.partition(": ")
+        if not sep:
+            continue
+        out.extend((name.strip(), part.strip()) for part in rest.split("; ") if part.strip())
+    return out
+
+
+def _colorcraft_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
+    """보낸 Colorcraft 블록의 결과(확장은 실패해도 생성을 멈추지 않고 'SAM Extra Colorcraft status' 에 남긴다).
+
+    거절('not applied: …' — 앱이 보내는 infotext 문자열은 늘 읽혀야 하므로 계약 경보)·평가 오류/비유한 결과(그 스텝은 입력
+    통과)·붙이지 못함·앵커 실패는 경고, 색 벡터 없는 모델(SD1.5·SDXL 등 — 대비·색 이동만)은 정보, 벡터 파일이 없는 설치는
+    경고. 돌 항목이 있는 블록을 보냈는데 어느 쪽 기록도 없는 장은 Colorcraft 를 모르는 옛 sam-extra(0.31.0 전)다(경고 —
+    DeGrid 처럼 'n/m장'). 블록을 보내지 않았거나(꺼짐·게이트·Comfy) 돌 항목이 없거나 읽을 결과가 없으면 말하지 않는다."""
+    sent = request.colorcraft
+    if sent is None or not sent.enabled or not images:
+        return []
+    cc = colorcraft
+    base = cc.build_chain(sent, False).entries
+    hires = cc.build_chain(sent, True).entries if request.hires else []
+    if not base and not hires:
+        return []
+    total = len(images)
+
+    def scope(count: int, suffix: str) -> str:
+        return f"{count}/{total}장{suffix}" if total > 1 and count < total else ""
+
+    out: list[Notice] = []
+    missing = [p for p in images if cc.INFOTEXT_KEY not in p and cc.STATUS_KEY not in p]
+    if missing:
+        out.append(Notice(
+            CODE_COLORCRAFT_MISSING, LEVEL_WARNING,
+            f"Colorcraft 를 켰지만 {scope(len(missing), '의 ')}결과에 '{cc.INFOTEXT_KEY}' 기록이 없습니다 — 연결된 "
+            "sam-extra 가 Colorcraft 를 모르는 옛 버전(0.31.0 전)이거나 스크립트가 오류로 멈췄습니다. sam-extra 를 "
+            "업데이트하고 Forge 콘솔의 '[Colorcraft]' 줄을 확인하세요.",
+            feature="colorcraft", detail=cc.INFOTEXT_KEY))
+    groups: dict = {}       # (code, 키) → {"passes": [...], "images": n, "text": 원문}
+    for params in images:
+        seen: set = set()
+        for name, part in colorcraft_status_parts(params.get(cc.STATUS_KEY)):
+            if not name and part.startswith(_COLORCRAFT_REFUSED):
+                code, key = CODE_COLORCRAFT_NOT_APPLIED, "refused"
+            else:
+                for pattern, rule_code, rule_key in _COLORCRAFT_PART_RULES:
+                    match = pattern.match(part)
+                    if match:
+                        code = rule_code
+                        key = f"{rule_key}:{match.group(1)}" if match.groups() else rule_key
+                        break
+                else:
+                    continue
+            group = groups.setdefault((code, key), {"passes": [], "images": 0, "text": part})
+            if name:
+                group["passes"].append(name)
+            if (code, key) not in seen:
+                seen.add((code, key))
+                group["images"] += 1
+    for (code, key), group in groups.items():
+        passes = "·".join(_COLORCRAFT_PASS_NAMES.get(n, n) for n in dict.fromkeys(group["passes"]))
+        where = f"({passes} 패스) " if passes else ""
+        text = _short(group["text"], 160)
+        if code == CODE_COLORCRAFT_NOT_APPLIED:
+            out.append(Notice(
+                code, LEVEL_WARNING,
+                f"Forge 의 Colorcraft 가 앱이 보낸 설정을 읽지 못해 {scope(group['images'], '이 ')}Colorcraft 없이 "
+                f"생성됐습니다 — 앱과 sam-extra 의 형식이 어긋났습니다(앱·확장을 같은 시기 버전으로 맞추세요). "
+                f"(확장: {text})",
+                feature="colorcraft", detail=key))
+        elif code == CODE_COLORCRAFT_ERROR:
+            out.append(Notice(
+                code, LEVEL_WARNING,
+                f"Colorcraft 가 {scope(group['images'], '에서 ')}{where}일부 스텝을 보정하지 못했습니다(그 스텝은 보정 없이 "
+                f"그대로) — 값이 너무 크면 줄이고, Forge 콘솔의 '[Colorcraft]' 줄을 확인하세요. (확장: {text})",
+                feature="colorcraft", detail=key))
+        elif key == "vectors_missing":
+            out.append(Notice(
+                code, LEVEL_WARNING,
+                f"sam-extra 설치에 Colorcraft 색 벡터 파일이 없어 {scope(group['images'], '에서 ')}노출·색·디테일·마스크가 "
+                f"꺼졌습니다(대비·색 이동만 적용) — sam-extra 를 다시 설치하세요. (확장: {text})",
+                feature="colorcraft", detail=key))
+        else:
+            out.append(Notice(
+                code, LEVEL_INFO,
+                f"이 모델은 Colorcraft 색 벡터가 없어 {scope(group['images'], '에서 ')}노출·색·디테일·마스크가 꺼졌습니다 — "
+                "대비·색 이동만 적용됩니다(벡터는 Anima·Krea 2·Qwen-Image·Flux·Z-Image·Flux 2 계열에만 있습니다).",
+                feature="colorcraft", detail=key))
+    return out
+
+
+def colorcraft_result_notices(payload: Any, params_list: Iterable[Any]) -> list[Notice]:
+    """보낸 페이로드 + 이미지마다 infotext 식 파라미터 → Colorcraft 결과 알림(``result_notices`` 와 같은 규칙)."""
+    images = [dict(p) for p in (params_list or ()) if isinstance(p, Mapping)]
+    return _colorcraft_result_notices(requested_features(payload), images)
+
+
 def degrid_comfy_unavailable_notice(reason: str) -> Notice:
     """ComfyUI: DeGrid 노드를 넣을 수 없어(팩 1.5.0 이 아님·노드 입력이 다름·출력 연결 없음) 빼고 생성했다(경고)."""
     text = " ".join(str(reason or "").split())
@@ -1234,6 +1382,7 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
     out.extend(_degrid_result_notices(request, images))
     out.extend(_xsched_result_notices(request, images))
     out.extend(_speed_result_notices(request, images))
+    out.extend(_colorcraft_result_notices(request, images))
 
     # 부분 Anima LoRA 추측 변환 — Forge 설정을 켠 사용자에게 블록 대응이 틀릴 수 있음을 알린다(확장의 gr.Info 대응).
     guesses = list(dict.fromkeys(str(p[KEY_SPARSE_LORA_GUESS]).strip() for p in images
@@ -1721,4 +1870,6 @@ __all__ = [
     "sam3_error_hint", "sam3_failure_repeats", "standalone_failure_text", "standalone_sam3_failure",
     "XSCHED_ERROR_LEAD", "explain_scheduler_error", "xsched_invalid_text_notice", "xsched_result_notices",
     "speed_result_notices", "speed_skip_hint", "speed_static_skip_notice",
+    "CODE_COLORCRAFT_ERROR", "CODE_COLORCRAFT_MISSING", "CODE_COLORCRAFT_NO_BASIS", "CODE_COLORCRAFT_NOT_APPLIED",
+    "colorcraft_result_notices", "colorcraft_status_parts",
 ]

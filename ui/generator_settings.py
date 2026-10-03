@@ -39,6 +39,12 @@ def _speed_settings(host) -> dict:
     return get_settings(host)
 
 
+def _colorcraft_settings(host) -> dict:
+    """Colorcraft 카드 값(ui/colorcraft_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
+    from ui.colorcraft_ui import get_settings
+    return get_settings(host)
+
+
 def migrate_legacy_gallery_folder(
     settings: dict,
     *,
@@ -197,6 +203,8 @@ class SettingsMixin:
             "extra_schedulers_settings": _extra_schedulers_settings(self),
             # Anima SPEED 카드(core/anima_speed.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
             "anima_speed_settings": _speed_settings(self),
+            # Colorcraft 카드(core/colorcraft.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
+            "colorcraft_settings": _colorcraft_settings(self),
             
             
             "remove_artist": self.chk_remove_artist.isChecked(),

@@ -49,6 +49,10 @@
               <div class="param-line" v-if="exif.params.extensions"><span class="pl">확장</span><span>{{ exif.params.extensions }}</span></div>
               <div class="param-line" v-if="exif.params.other"><span class="pl">기타</span><span>{{ exif.params.other }}</span></div>
             </div>
+            <div v-if="importable.length" class="sx-import">
+              <button type="button" class="sx-import-btn" :title="IMPORT_TITLE" @click="importFromImage">sam-extra 값 가져오기
+                ({{ importLabel }})</button>
+            </div>
           </div>
           <div v-else-if="exif.params_line" class="section">
             <div class="section-head">
@@ -197,6 +201,7 @@ import { copyTextToClipboard } from '../utils/clipboard'
 import { diffParameters } from '../utils/paramDiff'
 import type { ActionName, ActionPayload, CompareGifReadyPayload } from '../types/bridge'
 import { createLatestRequest, wasAbandoned } from '../utils/bridgeRequest'
+import { IMPORT_LABELS, IMPORT_TITLE, importSamExtra, importText, importableFeatures } from '../utils/samExtraImport'
 
 interface ExifParams {
   generation?: string
@@ -296,6 +301,10 @@ async function copySection(text: string, label: string) {
 }
 function sendPrompt() { if (exif.value.can_apply !== false) requestAction('pnginfo_send_prompt', { prompt: exif.value.prompt || '', negative: exif.value.negative || '', source: exif.value.source, can_apply: exif.value.can_apply, path: exif.value.path }) }
 function sendGenerate() { if (exif.value.can_apply !== false) requestAction('pnginfo_generate', exif.value) }
+// sam-extra 카드 기능(Colorcraft·Anima SPEED) 값이 이미지에 있으면 그 카드로 가져온다(액션 sam_extra_import — 계획 X3c)
+const importable = computed(() => importableFeatures(exif.value.parameters))
+const importLabel = computed(() => importable.value.map(feature => IMPORT_LABELS[feature]).join('·'))
+function importFromImage() { importSamExtra(importText(exif.value.parameters ?? {}, importable.value)) }
 function action<K extends ActionName>(name: K, payload?: ActionPayload<K>) { requestAction(name, payload) }
 
 // 메타 이식 — 대상 이미지·저장 위치는 호스트 대화상자(원격 웹 모드에선 v-host-dialog 가 버튼을 끈다)
@@ -474,6 +483,12 @@ onUnmounted(() => {
 .params-grid { background: var(--bg-secondary); border-radius: 4px; padding: 6px 8px; }
 .param-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 11px; color: var(--text-secondary); border-bottom: 1px solid var(--rule); }
 .param-line:last-child { border-bottom: none; }
+.sx-import { margin-top: 6px; }
+.sx-import-btn {
+  height: 26px; padding: 0 10px; font-size: var(--fs-meta); border-radius: 5px; cursor: pointer;
+  background: transparent; border: 1px dashed var(--border); color: var(--text-secondary);
+}
+.sx-import-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .pl { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--accent); letter-spacing: 0; min-width: 45px; flex-shrink: 0; }
 
 /* Compare Layout */

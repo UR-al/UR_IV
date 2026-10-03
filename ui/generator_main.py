@@ -992,6 +992,11 @@ class GeneratorMainUI(
                     return
                 _start_generation_from_metadata(self, info)
 
+            # ═══════ sam-extra 가져오기 — 붙여 넣은 infotext 의 Colorcraft·Anima SPEED 값을 카드로(계획 X3c) ═══════
+            elif action == 'sam_extra_import':
+                from ui.sam_extra_import import import_infotext as _sam_extra_import
+                _sam_extra_import(self, payload)
+
             elif action == 'pnginfo_transplant_meta':
                 # 보고 있는 이미지의 메타 → 다른 이미지에 박아 새 PNG (대화상자 2개, 원본은 안 건드림)
                 transplant_metadata_action(self, payload, _clean_path)

@@ -1,6 +1,6 @@
 # ui/sampling_blocks.py
-"""샘플링 블록(NegPiP·Anima 가이던스·Anima38·Anima SPEED·DoRA·VAE DeGrid·Extra Schedulers)을 만드는 유일한 곳 — 얇은 Qt
-접착층.
+"""샘플링 블록(NegPiP·Anima 가이던스·Colorcraft·Anima38·Anima SPEED·DoRA·VAE DeGrid·Extra Schedulers)을 만드는 유일한 곳 —
+얇은 Qt 접착층.
 
 - 메인 체인(``GenerationMixin._apply_postprocess_chain``, target t2i·i2i)과 보조 패스 봉투(``ui/aux_pass_snapshot``,
   target aux)가 같은 ``build_sampling_blocks`` 를 쓴다 — 둘이 갈라지지 않게(tests/test_sampling_blocks.py T15).
@@ -10,6 +10,8 @@
   더했다(호출부는 그대로). DeGrid 는 최종 이미지 블록이라(전달 행 ``passes=()``) 봉투에는 실려도 보조 패스에는 가지 않는다.
   Extra Schedulers(값 블록 — 스냅샷이 확인하면 늘, 아니면 laplace·custom 패스가 있을 때만)는 DeGrid 뒤에 한 줄(계획 R7).
   Anima SPEED(메인 요청 전용 샘플러 래퍼 — 전달 행 ``passes=()``)는 Anima38 뒤에 한 줄(계획 R7, Forge 레인 순서).
+  Colorcraft(메인 요청 전용 샘플링 중 색 보정 — 전달 행 ``passes=()``)는 가이던스 뒤·Anima38 앞에 한 줄(계획 R7 — Forge 에서
+  Anima Optimal Scale 바로 아래).
   기여자는 위젯만 읽는다(GUI 스레드). 하나가 실패해도 나머지와 생성은 진행한다.
 - 게이트: Forge(webui) **메인** 요청(t2i·i2i)만 여기서 한다(스냅샷이 '없다'고 한 블록은 422 대신 빼고 경고).
   보조 패스(aux)는 워커가 요청 직전에 새 스냅샷으로 한다(``WebUIBackend._propagate``, 손 재구성은 ``_hand_snapshot``)
@@ -33,6 +35,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional
 from core import alwayson_propagation as ap
 from ui.anima38_ui import contribute as _anima38
 from ui.anima_speed_ui import contribute as _anima_speed
+from ui.colorcraft_ui import contribute as _colorcraft
 from ui.dora_infer_mode_ui import contribute as _dora_infer_mode
 from ui.extra_schedulers_ui import contribute as _extra_schedulers
 from ui.vae_degrid_ui import contribute as _vae_degrid
@@ -75,7 +78,8 @@ class Contribution:
 
 @dataclass
 class SamplingBlocks:
-    blocks: dict                # 순서: NegPiP, PAG, Skimmed, DD, Anima38, Anima SPEED, DoRA, DeGrid, Extra Schedulers
+    blocks: dict                # 순서: NegPiP, PAG, Skimmed, DD, Colorcraft, Anima38, Anima SPEED, DoRA, DeGrid,
+                                # Extra Schedulers
     notices: list               # 보내는 곳에서 띄울 알림(게이트 제외 포함)
     dropped: tuple = ()
     provenance: dict = field(default_factory=dict)
@@ -178,12 +182,12 @@ def _anima_guidance(host, ctx: SamplingContext) -> Contribution:
         return Contribution()
 
 
-# 순서 = 블록 순서(NegPiP → 가이던스 → Anima38 → Anima SPEED → DoRA → DeGrid → Extra Schedulers). 네 기능 계획 R7 의
-# 최종 순서:
+# 순서 = 블록 순서(NegPiP → 가이던스 → Colorcraft → Anima38 → Anima SPEED → DoRA → DeGrid → Extra Schedulers). 네 기능
+# 계획 R7 의 최종 순서:
 # (_negpip, _anima_guidance, _colorcraft, _anima38, _anima_speed, _dora_infer_mode, _vae_degrid, _extra_schedulers,
 # _extra_samplers) — 있던 블록의 바이트 순서는 그대로다(새 블록이 사이에 끼어도 Forge 는 스크립트 순서를 스스로 정한다).
 CONTRIBUTORS: tuple[Callable[[Any, SamplingContext], Contribution], ...] = (
-    _negpip, _anima_guidance, _anima38, _anima_speed, _dora_infer_mode, _vae_degrid, _extra_schedulers)
+    _negpip, _anima_guidance, _colorcraft, _anima38, _anima_speed, _dora_infer_mode, _vae_degrid, _extra_schedulers)
 
 
 def build_sampling_blocks(host, target: str, *, krea2: Optional[bool] = None) -> SamplingBlocks:

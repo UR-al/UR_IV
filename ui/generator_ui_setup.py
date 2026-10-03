@@ -517,6 +517,11 @@ class UISetupMixin:
         from ui.anima_speed_ui import init_speed_proxies
         self.anima_speed_widgets = init_speed_proxies(b)
 
+        # ── Colorcraft(sam-extra 'Colorcraft (sam-extra)') — _cc_<key> 프록시 4개(켬·마스크·I2I·상태 문자열), 초기값은
+        #    앱 기본값(= 확장 기본값: 꺼짐·마스크 끔·수정자 I 켜짐 + 앱 전용 'I2I·인페인트에도 적용' 끔). 판정은 core/colorcraft.py.
+        from ui.colorcraft_ui import init_colorcraft_proxies
+        self.colorcraft_widgets = init_colorcraft_proxies(b)
+
         # 제거 옵션
         self.chk_remove_artist = CheckBoxProxy(b, 'chk_remove_artist')
         self.chk_remove_copyright = CheckBoxProxy(b, 'chk_remove_copyright')

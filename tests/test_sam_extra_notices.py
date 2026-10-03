@@ -1472,6 +1472,166 @@ class SpeedNoticeTests(_QuietAssumption):
         self.assertEqual(sn.block_not_sent_notice("Anima SPEED", img2img=False).feature, "speed")
 
 
+def colorcraft_payload(mapping=None, *, hires=False):
+    """앱 카드가 보내는 모양 — 첫 인자 하나(to_infotext). 기본은 수정자 I 노출 0.3(Base)."""
+    from core import colorcraft
+    config = colorcraft.config_from_mapping(mapping or {"enabled": True, "I.exposure": 0.3})
+    payload = {"prompt": "1girl", "cfg_scale": 4.5, "alwayson_scripts": {colorcraft.SCRIPT_NAME: colorcraft.as_block(config)}}
+    if hires:
+        payload["enable_hr"] = True
+    return payload
+
+
+def colorcraft_infotext(status: str = "", *, value: str = "v1;mods=I;I.exposure=0.3") -> str:
+    """확장이 쓰는 모양(쉼표·콜론·세미콜론이 든 값은 JSON 따옴표 — create_infotext)."""
+    text = _HEAD
+    if value:
+        text += f"SAM Extra Colorcraft: {json.dumps(value)}, "
+    if status:
+        text += f"SAM Extra Colorcraft status: {json.dumps(status)}, "
+    return text + _TAIL
+
+
+CC_APPLIED = colorcraft_infotext("base: krea2 (Wan21); mods I; 30 evals, 28 edited")
+CC_NO_BASIS = colorcraft_infotext("base: no basis (SDXL); mods I; 30 evals, 0 edited; vector controls off on this "
+                                  "model: only Contrast and Color Shift apply")
+CC_VECTORS_MISSING = colorcraft_infotext("base: no basis (Wan21); mods I; 30 evals, 0 edited; colorcraft-krea2.safetensors "
+                                         "missing: vector controls off; vector controls off on this model: only "
+                                         "Contrast and Color Shift apply")
+CC_ERROR = colorcraft_infotext("base: krea2 (Wan21); mods I; 30 evals, 27 edited; error KeyError x3 (input passed "
+                               "through) | hires: krea2 (Wan21); mods I; 12 evals, 12 edited; non-finite result passed "
+                               "through x1")
+CC_NOT_ATTACHED = colorcraft_infotext("base: krea2 (Wan21); mods I; not attached (AttributeError)")
+CC_REFUSED = colorcraft_infotext("not applied: unreadable panel state (expected a JSON object)", value="")
+
+
+class ColorcraftNoticeTests(_QuietAssumption):
+    def _cc(self, info, payload=None):
+        return [n for n in sn.result_notices(info, colorcraft_payload() if payload is None else payload)
+                if n.feature == "colorcraft"]
+
+    def test_quiet_when_applied_off_not_sent_or_nothing_to_run(self):
+        nothing = colorcraft_payload({"enabled": True, "I.strength": 0.0, "I.exposure": 0.3})   # 스케줄 0 → 항목 없음
+        hires_only = colorcraft_payload({"enabled": True, "I.pass": "Hires", "I.exposure": 0.3})  # Hires 끈 요청
+        for info, payload in ((info_of(CC_APPLIED), None), (info_of(CC_APPLIED, CC_APPLIED), None),
+                              # 문자열에는 켬이 없다(받으면 켠 것) — 끈 블록은 dict 형식으로만 쓸 수 있다
+                              (info_of(NO_EXTENSION_TRACE), {"alwayson_scripts": {"Colorcraft (sam-extra)": {
+                                  "args": [{"enabled": False, "I.exposure": 0.3}]}}}),
+                              (info_of(NO_EXTENSION_TRACE), {"alwayson_scripts": {"Colorcraft (sam-extra)": {
+                                  "args": ["v1;mods="]}}}),                              # 켠 수정자 없음
+                              (info_of(NO_EXTENSION_TRACE), {"prompt": "x"}),                    # 블록을 보내지 않았다
+                              (info_of(NO_EXTENSION_TRACE), nothing), (info_of(NO_EXTENSION_TRACE), hires_only),
+                              (info_of(CC_ERROR), {"alwayson_scripts": {"colorcraft (sam-extra)": {"args": [True]}}})):
+            with self.subTest(info=info[200:260], payload=str(payload)[:120]):
+                self.assertEqual(self._cc(info, payload), [])
+        self.assertEqual(sn.colorcraft_result_notices(colorcraft_payload(), []), [])
+
+    def test_sent_but_no_trace_means_an_old_sam_extra(self):
+        [old] = self._cc(info_of(NO_EXTENSION_TRACE, NO_EXTENSION_TRACE))
+        self.assertEqual((old.code, old.level, old.detail),
+                         (sn.CODE_COLORCRAFT_MISSING, sn.LEVEL_WARNING, "SAM Extra Colorcraft"))
+        self.assertIn("0.31.0", old.message)
+        self.assertNotIn("장의", old.message)                                   # 모든 장이면 개수 없음
+        [some] = self._cc(info_of(CC_APPLIED, NO_EXTENSION_TRACE))
+        self.assertIn("1/2장의 결과에", some.message)
+        hires_only = colorcraft_payload({"enabled": True, "I.pass": "Hires", "I.exposure": 0.3}, hires=True)
+        [hires] = self._cc(info_of(NO_EXTENSION_TRACE), hires_only)            # Hires 패스만 도는 수정자도 기록을 남긴다
+        self.assertEqual(hires.code, sn.CODE_COLORCRAFT_MISSING)
+
+    def test_refused_arguments_are_a_contract_alarm(self):
+        [refused] = self._cc(info_of(CC_REFUSED, CC_REFUSED))
+        self.assertEqual((refused.code, refused.level, refused.detail),
+                         (sn.CODE_COLORCRAFT_NOT_APPLIED, sn.LEVEL_WARNING, "refused"))
+        self.assertIn("unreadable panel state", refused.message)
+        self.assertNotIn(sn.CODE_COLORCRAFT_MISSING, codes(self._cc(info_of(CC_REFUSED))))   # status 가 있으면 흔적 있음
+
+    def test_evaluation_errors_warn_per_kind_with_their_passes(self):
+        notices = self._cc(info_of(CC_ERROR, CC_APPLIED), colorcraft_payload(hires=True))
+        self.assertEqual([(n.code, n.level, n.detail) for n in notices],
+                         [(sn.CODE_COLORCRAFT_ERROR, sn.LEVEL_WARNING, "error:KeyError"),
+                          (sn.CODE_COLORCRAFT_ERROR, sn.LEVEL_WARNING, "nonfinite")])
+        self.assertIn("1/2장에서 (기본 패스) 일부 스텝", notices[0].message)
+        self.assertIn("(Hires 패스)", notices[1].message)
+        [attach] = self._cc(info_of(CC_NOT_ATTACHED))
+        self.assertEqual((attach.code, attach.detail), (sn.CODE_COLORCRAFT_ERROR, "not_attached:AttributeError"))
+
+    def test_models_without_a_basis_inform_and_missing_vectors_warn(self):
+        [info] = self._cc(info_of(CC_NO_BASIS))
+        self.assertEqual((info.code, info.level, info.detail), (sn.CODE_COLORCRAFT_NO_BASIS, sn.LEVEL_INFO, "no_basis"))
+        self.assertIn("대비·색 이동만", info.message)
+        vectors = self._cc(info_of(CC_VECTORS_MISSING))
+        self.assertEqual([(n.code, n.level, n.detail) for n in vectors],
+                         [(sn.CODE_COLORCRAFT_NO_BASIS, sn.LEVEL_WARNING, "vectors_missing"),
+                          (sn.CODE_COLORCRAFT_NO_BASIS, sn.LEVEL_INFO, "no_basis")])
+
+    def test_status_parts(self):
+        self.assertEqual(sn.colorcraft_status_parts(""), [])
+        self.assertEqual(sn.colorcraft_status_parts("not applied: x; y | z"), [("", "not applied: x; y | z")])
+        self.assertEqual(sn.colorcraft_status_parts("base: a; b | hires: c"),
+                         [("base", "a"), ("base", "b"), ("hires", "c")])
+
+    def test_requested_features_read_the_block_like_the_extension(self):
+        from core import colorcraft
+        request = sn.requested_features(colorcraft_payload({"enabled": True, "III.kind": "Punch", "III.active": True,
+                                                            "III.clarity": 0.5}))
+        self.assertEqual(request.colorcraft, colorcraft.parse_own("v1;mods=I,III;III.kind=Punch;III.clarity=0.5"))
+        upper = {"alwayson_scripts": {"COLORCRAFT (SAM-EXTRA)": {"args": ["v1;mods=II;II.contrast=0.4"]}}}
+        self.assertEqual(sn.requested_features(upper).colorcraft.modifiers[1]["contrast"], 0.4)
+        self.assertIsNone(sn.requested_features({"alwayson_scripts": {colorcraft.SCRIPT_NAME: {"args": [True]}}})
+                          .colorcraft)                                       # 위치 인자 목록은 앱이 만들지 않는다
+        self.assertIsNone(sn.requested_features({"prompt": "x"}).colorcraft)
+
+    def test_throttling_exports_and_feature_name(self):
+        for name in ("CODE_COLORCRAFT_NOT_APPLIED", "CODE_COLORCRAFT_ERROR", "CODE_COLORCRAFT_NO_BASIS",
+                     "CODE_COLORCRAFT_MISSING"):
+            with self.subTest(code=name):
+                notice = sn.Notice(getattr(sn, name), sn.LEVEL_WARNING, "m")
+                self.assertEqual(sn.notice_ttl(notice, sn.RESULT_NOTICE_TTL_S), sn.PRE_GENERATION_NOTICE_TTL_S)
+                self.assertIn(name, sn.__all__)
+        for name in ("colorcraft_result_notices", "colorcraft_status_parts"):
+            self.assertIn(name, sn.__all__)
+        text = sn.explain_rejected_request(422, {"detail": "always on script Colorcraft (sam-extra) not found"},
+                                           colorcraft_payload())
+        self.assertIn("켠 기능: Colorcraft", text)
+        self.assertEqual(sn.block_not_sent_notice("Colorcraft (sam-extra)", img2img=False).feature, "colorcraft")
+
+
+@requires_extension
+class ColorcraftExtensionSourceTests(unittest.TestCase):
+    """Colorcraft 알림이 기대는 status 문구가 설치된 확장에 그대로 있는가(f-string 이라 핀 대신 원문 검색)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(EXT_ROOT, "sam3ext", "colorcraft", "hook.py"), encoding="utf-8") as fh:
+            cls.source = fh.read()
+
+    def test_status_shapes(self):
+        for needle in ('_params(p)[spec.STATUS_KEY] = f"not applied: {reason}"',
+                       'text = " | ".join(passes[name].render() for name in ("base", "hires") if name in passes)',
+                       'return f"{self.name}: " + "; ".join(parts)',
+                       'parts.append(f"error {self.last_error} x{self.errors} (input passed through)")',
+                       'parts.append(f"non-finite result passed through x{self.nonfinite}")',
+                       'status.notes.append(f"not attached ({type(exc).__name__})")',
+                       'status.notes.append(f"anchors failed ({type(exc).__name__}): Contrast/Color Shift off")',
+                       'status.notes.append(f"colorcraft-{family}.safetensors missing: vector controls off")',
+                       'status.notes.append("vector controls off on this model: only Contrast and Color Shift apply")',
+                       'params[spec.INFOTEXT_KEY] = spec.to_infotext(config)',
+                       'print(f"[Colorcraft] {message}", file=sys.stderr)'):
+            with self.subTest(needle=needle[:60]):
+                self.assertIn(needle, self.source)
+
+    def test_every_status_rule_matches_what_the_extension_writes(self):
+        samples = {"error": "error KeyError x3 (input passed through)", "nonfinite": "non-finite result passed through x2",
+                   "not_attached": "not attached (AttributeError)",
+                   "anchors": "anchors failed (RuntimeError): Contrast/Color Shift off",
+                   "vectors_missing": "colorcraft-flux2.safetensors missing: vector controls off",
+                   "no_basis": "vector controls off on this model: only Contrast and Color Shift apply"}
+        self.assertEqual(set(samples), {key for _pattern, _code, key in sn._COLORCRAFT_PART_RULES})
+        for _pattern, _code, key in sn._COLORCRAFT_PART_RULES:
+            with self.subTest(key=key):
+                self.assertTrue(_pattern.match(samples[key]))
+
+
 @requires_extension
 class SpeedExtensionSourceTests(unittest.TestCase):
     """SPEED 알림이 기대는 status 문구 머리·건너뜀 이유가 설치된 확장에 그대로 있는가(f-string 이라 핀 대신 원문 검색)."""

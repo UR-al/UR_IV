@@ -1,0 +1,268 @@
+{
+  "about": "Colorcraft state string golden (core/colorcraft.dump_state == utils/colorcraft.ts dumpState). For each case: canonical(input) == state and parse(state) == paths. Inputs are hand-picked; tests/test_colorcraft_core.py checks Python, vitest checks TS.",
+  "version": 1,
+  "cases": [
+    {
+      "name": "empty",
+      "note": "every default -> empty state",
+      "input": "",
+      "state": "",
+      "paths": {}
+    },
+    {
+      "name": "defaults_object",
+      "note": "only the version -> empty state",
+      "input": "{\"v\":1}",
+      "state": "",
+      "paths": {}
+    },
+    {
+      "name": "one_float",
+      "note": "one value",
+      "input": "{\"v\":1,\"I.exposure\":0.3}",
+      "state": "{\"v\":1,\"I.exposure\":0.3}",
+      "paths": {
+        "I.exposure": 0.3
+      }
+    },
+    {
+      "name": "integer_float",
+      "note": "1.0 is written 1 (JS JSON.stringify)",
+      "input": "{\"v\":1,\"I.exposure\":1.0,\"II.strength\":-1.0}",
+      "state": "{\"v\":1,\"I.exposure\":1,\"II.strength\":-1}",
+      "paths": {
+        "I.exposure": 1,
+        "II.strength": -1
+      }
+    },
+    {
+      "name": "path_order",
+      "note": "paths come back in arg_names() order, v first",
+      "input": "{\"III.kind\":\"Punch\",\"v\":1,\"I.tone_compression\":-0.2,\"I.exposure\":0.3}",
+      "state": "{\"v\":1,\"I.exposure\":0.3,\"I.tone_compression\":-0.2,\"III.kind\":\"Punch\"}",
+      "paths": {
+        "I.exposure": 0.3,
+        "I.tone_compression": -0.2,
+        "III.kind": "Punch"
+      }
+    },
+    {
+      "name": "negative_zero",
+      "note": "-0 equals 0 (default omitted; bias 0 written 0)",
+      "input": "{\"v\":1,\"I.exposure\":-0.0,\"I.bias\":-0.0,\"M1.mask_center\":-0}",
+      "state": "{\"v\":1,\"I.bias\":0}",
+      "paths": {
+        "I.bias": 0
+      }
+    },
+    {
+      "name": "small_large",
+      "note": "JS number spelling: 1e-7, 0.0000015, 1e+21, 123456789012",
+      "input": "{\"v\":1,\"I.exposure\":1e-7,\"I.contrast\":0.0000015,\"I.clarity\":1e21,\"I.sharpness\":123456789012}",
+      "state": "{\"v\":1,\"I.exposure\":1e-7,\"I.contrast\":0.0000015,\"I.clarity\":1e+21,\"I.sharpness\":123456789012}",
+      "paths": {
+        "I.exposure": 1e-07,
+        "I.contrast": 1.5e-06,
+        "I.clarity": 1e+21,
+        "I.sharpness": 123456789012
+      }
+    },
+    {
+      "name": "strings_for_numbers",
+      "note": "numbers given as text are read, unreadable/non-finite fall back to the default",
+      "input": "{\"v\":1,\"I.exposure\":\"0.25\",\"I.contrast\":\" 2 \",\"I.clarity\":\"abc\",\"I.sharpness\":\"NaN\"}",
+      "state": "{\"v\":1,\"I.exposure\":0.25,\"I.contrast\":2}",
+      "paths": {
+        "I.exposure": 0.25,
+        "I.contrast": 2
+      }
+    },
+    {
+      "name": "bool_words",
+      "note": "bool words; an unknown word keeps the default",
+      "input": "{\"v\":1,\"I.advanced\":\"yes\",\"I.smooth\":\"off\",\"I.more_colors\":0,\"I.color_shift\":\"maybe\"}",
+      "state": "{\"v\":1,\"I.advanced\":true,\"I.smooth\":false,\"I.more_colors\":false}",
+      "paths": {
+        "I.advanced": true,
+        "I.smooth": false,
+        "I.more_colors": false
+      }
+    },
+    {
+      "name": "choice_case",
+      "note": "choices ignore case; Type also by node id",
+      "input": "{\"v\":1,\"I.kind\":\"chroma plus\",\"II.kind\":\"CHROMA_PLUS\",\"III.kind\":\"punch\",\"IV.pass\":\"HIRES\",\"IV.active\":true,\"M2.mask_mode\":\"Protect Range\"}",
+      "state": "{\"v\":1,\"I.kind\":\"Chroma Plus\",\"II.kind\":\"Chroma Plus\",\"III.kind\":\"Punch\",\"IV.active\":true,\"IV.pass\":\"Hires\",\"M2.mask_mode\":\"protect range\"}",
+      "paths": {
+        "I.kind": "Chroma Plus",
+        "II.kind": "Chroma Plus",
+        "III.kind": "Punch",
+        "IV.active": true,
+        "IV.pass": "Hires",
+        "M2.mask_mode": "protect range"
+      }
+    },
+    {
+      "name": "bad_choices",
+      "note": "unknown choices fall back to the default",
+      "input": "{\"v\":1,\"I.kind\":\"Turbo\",\"I.pass\":\"Third\",\"I.mask\":\"M11\",\"M1.mask_axis\":\"luma\"}",
+      "state": "",
+      "paths": {}
+    },
+    {
+      "name": "combo_refs",
+      "note": "a combo may name leaves and earlier combos only",
+      "input": "{\"v\":1,\"C1.mask_a\":\"C1\",\"C1.mask_b\":\"M2\",\"C2.mask_a\":\"C1\",\"C2.mask_b\":\"m3\",\"C5.mask_a\":\"C4\"}",
+      "state": "{\"v\":1,\"C1.mask_b\":\"M2\",\"C2.mask_a\":\"C1\",\"C2.mask_b\":\"M3\",\"C5.mask_a\":\"C4\"}",
+      "paths": {
+        "C1.mask_b": "M2",
+        "C2.mask_a": "C1",
+        "C2.mask_b": "M3",
+        "C5.mask_a": "C4"
+      }
+    },
+    {
+      "name": "active_flags",
+      "note": "modifier I starts active: false is written, the others true",
+      "input": "{\"v\":1,\"I.active\":false,\"II.active\":true,\"X.active\":\"1\"}",
+      "state": "{\"v\":1,\"I.active\":false,\"II.active\":true,\"X.active\":true}",
+      "paths": {
+        "I.active": false,
+        "II.active": true,
+        "X.active": true
+      }
+    },
+    {
+      "name": "unknown_and_rev",
+      "note": "rev, unknown paths and head/debug values are dropped",
+      "input": "{\"v\":1,\"rev\":\"a1b2c3d4e5f6\",\"I.exposure\":0.5,\"XI.exposure\":1,\"I.nonsense\":2,\"enabled\":true,\"debug\":true}",
+      "state": "{\"v\":1,\"I.exposure\":0.5}",
+      "paths": {
+        "I.exposure": 0.5
+      }
+    },
+    {
+      "name": "nulls",
+      "note": "null keeps the default",
+      "input": "{\"v\":1,\"I.exposure\":null,\"II.kind\":null}",
+      "state": "",
+      "paths": {}
+    },
+    {
+      "name": "full_modifier",
+      "note": "every modifier field changed",
+      "input": "{\"v\":1,\"II.active\":true,\"II.kind\":\"Advanced\",\"II.pass\":\"Both\",\"II.mask\":\"C2\",\"II.strength\":-0.5,\"II.start\":0.1,\"II.end\":0.9,\"II.advanced\":true,\"II.exponent\":1.5,\"II.bias\":0.25,\"II.start_off\":-0.3,\"II.end_off\":0.2,\"II.smooth\":false,\"II.exposure\":3.99,\"II.tone_compression\":-1,\"II.contrast\":0.125,\"II.clarity\":-2,\"II.sharpness\":4,\"II.temperature\":0.01,\"II.tint\":-0.01,\"II.vibrance\":0.333,\"II.saturation\":-0.999,\"II.chroma_contrast\":1.1,\"II.chroma_center\":-0.75,\"II.more_colors\":false,\"II.temp_plus_tint\":0.1,\"II.temp_minus_tint\":0.2,\"II.lab_a\":0.3,\"II.lab_b\":0.4,\"II.lab_a_plus_b\":0.5,\"II.lab_a_minus_b\":0.6,\"II.color_shift\":false,\"II.color_shift_amount\":1.25,\"II.color_shift_mode\":\"legacy\",\"II.color_shift_red\":2,\"II.color_shift_green\":-2,\"II.color_shift_blue\":0.5,\"II.color_shift_brightness\":-0.5,\"II.recenter_override\":true,\"II.recenter\":0.75,\"II.max_chroma_override\":true,\"II.max_chroma\":10,\"II.chroma_plane_override\":true,\"II.chroma_plane\":\"lab\"}",
+      "state": "{\"v\":1,\"II.active\":true,\"II.pass\":\"Both\",\"II.mask\":\"C2\",\"II.strength\":-0.5,\"II.start\":0.1,\"II.end\":0.9,\"II.advanced\":true,\"II.exponent\":1.5,\"II.bias\":0.25,\"II.start_off\":-0.3,\"II.end_off\":0.2,\"II.smooth\":false,\"II.exposure\":3.99,\"II.tone_compression\":-1,\"II.contrast\":0.125,\"II.clarity\":-2,\"II.sharpness\":4,\"II.temperature\":0.01,\"II.tint\":-0.01,\"II.vibrance\":0.333,\"II.saturation\":-0.999,\"II.chroma_contrast\":1.1,\"II.chroma_center\":-0.75,\"II.more_colors\":false,\"II.temp_plus_tint\":0.1,\"II.temp_minus_tint\":0.2,\"II.lab_a\":0.3,\"II.lab_b\":0.4,\"II.lab_a_plus_b\":0.5,\"II.lab_a_minus_b\":0.6,\"II.color_shift\":false,\"II.color_shift_amount\":1.25,\"II.color_shift_mode\":\"legacy\",\"II.color_shift_red\":2,\"II.color_shift_green\":-2,\"II.color_shift_blue\":0.5,\"II.color_shift_brightness\":-0.5,\"II.recenter_override\":true,\"II.recenter\":0.75,\"II.max_chroma_override\":true,\"II.max_chroma\":10,\"II.chroma_plane_override\":true,\"II.chroma_plane\":\"lab\"}",
+      "paths": {
+        "II.active": true,
+        "II.pass": "Both",
+        "II.mask": "C2",
+        "II.strength": -0.5,
+        "II.start": 0.1,
+        "II.end": 0.9,
+        "II.advanced": true,
+        "II.exponent": 1.5,
+        "II.bias": 0.25,
+        "II.start_off": -0.3,
+        "II.end_off": 0.2,
+        "II.smooth": false,
+        "II.exposure": 3.99,
+        "II.tone_compression": -1,
+        "II.contrast": 0.125,
+        "II.clarity": -2,
+        "II.sharpness": 4,
+        "II.temperature": 0.01,
+        "II.tint": -0.01,
+        "II.vibrance": 0.333,
+        "II.saturation": -0.999,
+        "II.chroma_contrast": 1.1,
+        "II.chroma_center": -0.75,
+        "II.more_colors": false,
+        "II.temp_plus_tint": 0.1,
+        "II.temp_minus_tint": 0.2,
+        "II.lab_a": 0.3,
+        "II.lab_b": 0.4,
+        "II.lab_a_plus_b": 0.5,
+        "II.lab_a_minus_b": 0.6,
+        "II.color_shift": false,
+        "II.color_shift_amount": 1.25,
+        "II.color_shift_mode": "legacy",
+        "II.color_shift_red": 2,
+        "II.color_shift_green": -2,
+        "II.color_shift_blue": 0.5,
+        "II.color_shift_brightness": -0.5,
+        "II.recenter_override": true,
+        "II.recenter": 0.75,
+        "II.max_chroma_override": true,
+        "II.max_chroma": 10,
+        "II.chroma_plane_override": true,
+        "II.chroma_plane": "lab"
+      }
+    },
+    {
+      "name": "masks",
+      "note": "leaf and combo fields",
+      "input": "{\"v\":1,\"M1.mask_axis\":\"hue\",\"M1.mask_mode\":\"lows\",\"M1.mask_strength\":0.5,\"M1.mask_width\":1.5,\"M1.mask_center\":-0.25,\"M1.mask_hardness\":2,\"M1.blur\":8,\"M1.spread\":-1,\"M1.contrast\":9.5,\"M1.normalize\":true,\"M10.mask_axis\":\"sharpness\",\"C3.mask_a\":\"C2\",\"C3.mask_b\":\"M10\",\"C3.operation\":\"xor\",\"C3.blur\":64,\"C3.spread\":3,\"C3.contrast\":-10,\"C3.normalize\":true}",
+      "state": "{\"v\":1,\"M1.mask_axis\":\"hue\",\"M1.mask_mode\":\"lows\",\"M1.mask_strength\":0.5,\"M1.mask_width\":1.5,\"M1.mask_center\":-0.25,\"M1.mask_hardness\":2,\"M1.blur\":8,\"M1.spread\":-1,\"M1.contrast\":9.5,\"M1.normalize\":true,\"M10.mask_axis\":\"sharpness\",\"C3.mask_a\":\"C2\",\"C3.mask_b\":\"M10\",\"C3.operation\":\"xor\",\"C3.blur\":64,\"C3.spread\":3,\"C3.contrast\":-10,\"C3.normalize\":true}",
+      "paths": {
+        "M1.mask_axis": "hue",
+        "M1.mask_mode": "lows",
+        "M1.mask_strength": 0.5,
+        "M1.mask_width": 1.5,
+        "M1.mask_center": -0.25,
+        "M1.mask_hardness": 2,
+        "M1.blur": 8,
+        "M1.spread": -1,
+        "M1.contrast": 9.5,
+        "M1.normalize": true,
+        "M10.mask_axis": "sharpness",
+        "C3.mask_a": "C2",
+        "C3.mask_b": "M10",
+        "C3.operation": "xor",
+        "C3.blur": 64,
+        "C3.spread": 3,
+        "C3.contrast": -10,
+        "C3.normalize": true
+      }
+    },
+    {
+      "name": "out_of_range_kept",
+      "note": "values are never clamped",
+      "input": "{\"v\":1,\"I.exposure\":12.5,\"I.strength\":-3,\"M1.blur\":200}",
+      "state": "{\"v\":1,\"I.strength\":-3,\"I.exposure\":12.5,\"M1.blur\":200}",
+      "paths": {
+        "I.strength": -3,
+        "I.exposure": 12.5,
+        "M1.blur": 200
+      }
+    },
+    {
+      "name": "ten_digits",
+      "note": "full double precision is kept",
+      "input": "{\"v\":1,\"I.exposure\":0.1234567891234,\"I.contrast\":0.30000000000000004}",
+      "state": "{\"v\":1,\"I.exposure\":0.1234567891234,\"I.contrast\":0.30000000000000004}",
+      "paths": {
+        "I.exposure": 0.1234567891234,
+        "I.contrast": 0.30000000000000004
+      }
+    },
+    {
+      "name": "extension_dump",
+      "note": "the extension panel's dump_state (with rev) for the same set-up reads the same",
+      "input": "{\"v\":1,\"rev\":\"0f1e2d3c4b5a\",\"I.exposure\":0.3,\"I.tone_compression\":-0.2,\"III.active\":true,\"III.kind\":\"Punch\",\"III.pass\":\"Hires\",\"III.clarity\":0.5,\"III.sharpness\":0.25,\"M1.mask_mode\":\"lows\",\"M1.mask_hardness\":2.0,\"M1.blur\":8.0}",
+      "state": "{\"v\":1,\"I.exposure\":0.3,\"I.tone_compression\":-0.2,\"III.active\":true,\"III.kind\":\"Punch\",\"III.pass\":\"Hires\",\"III.clarity\":0.5,\"III.sharpness\":0.25,\"M1.mask_mode\":\"lows\",\"M1.mask_hardness\":2,\"M1.blur\":8}",
+      "paths": {
+        "I.exposure": 0.3,
+        "I.tone_compression": -0.2,
+        "III.active": true,
+        "III.kind": "Punch",
+        "III.pass": "Hires",
+        "III.clarity": 0.5,
+        "III.sharpness": 0.25,
+        "M1.mask_mode": "lows",
+        "M1.mask_hardness": 2,
+        "M1.blur": 8
+      }
+    }
+  ]
+}

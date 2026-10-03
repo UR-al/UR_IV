@@ -163,7 +163,8 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(rule.unknown_action(ap.PROVENANCE_APP_DEFAULT), ap.SKIP)
         self.assertFalse(rule.main_retry)
         self.assertFalse(rule.model_bound)
-        self.assertEqual(ap.main_only_titles(), (DEGRID, ap.TITLE_SPEED))   # + Anima SPEED(계획 A-SP3, 메인 전용)
+        # + Anima SPEED(계획 A-SP3)·Colorcraft(A-CC5) — 메인 전용 행은 PROPAGATION 순서
+        self.assertEqual(ap.main_only_titles(), (DEGRID, ap.TITLE_SPEED, ap.TITLE_COLORCRAFT))
         self.assertIs(ap.final_image_titles, ap.main_only_titles)            # 옛 이름은 별칭(레지스트리 참조·호출자)
         self.assertEqual(ap.canonical_title("  anima vae degrid (NAFNET) "), DEGRID)
         source = ap.envelope(all_blocks(), source="t2i_panel", backend=ap.BACKEND_WEBUI)
@@ -562,7 +563,7 @@ class AnimaSpeedRuleTests(unittest.TestCase):
         self.assertFalse(rule.main_retry)
         self.assertFalse(rule.model_bound)
         self.assertIsNone(rule.condition)
-        self.assertEqual(ap.main_only_titles(), (DEGRID, title))
+        self.assertEqual(ap.main_only_titles(), (DEGRID, title, ap.TITLE_COLORCRAFT))   # + Colorcraft(A-CC5)
         self.assertEqual(ap.canonical_title("  anima SPEED "), title)
         self.assertEqual(ap.main_retry_titles({"alwayson_scripts": {"anima speed": self.BLOCK}}), ())
 
@@ -623,6 +624,98 @@ class AnimaSpeedRuleTests(unittest.TestCase):
                 literals = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
                             and isinstance(node.value, str) and node.value.strip().lower() == "anima speed"]
                 self.assertEqual(literals, [])
+
+
+class ColorcraftRuleTests(unittest.TestCase):
+    """Colorcraft(계획 A-CC5, design_colorcraft §5.1): 메인 요청 전용 샘플링 중 색 보정 — passes=() 로 어느 보조 패스에도
+    주지 않는다(확장도 SAM3·ADetailer 내부 패스에서는 붙지 않는다). 앱 기본값이 꺼짐이라 켜진 블록은 사용자 값(모르면
+    보낸다), 메인 422 재시도는 없다."""
+
+    @staticmethod
+    def _block():
+        from core import colorcraft
+        config = colorcraft.config_from_state(True, False, colorcraft.dump_state(colorcraft.config_from_mapping(
+            {"enabled": True, "I.exposure": 0.3})))
+        return colorcraft.as_block(config)
+
+    def test_rule(self):
+        from core import colorcraft
+        title = colorcraft.SCRIPT_NAME
+        rule = ap.PROPAGATION[title]
+        self.assertNotIn(title, ap.NEVER)
+        self.assertEqual(rule.passes, frozenset())
+        self.assertEqual(rule.backends, frozenset({ap.BACKEND_WEBUI, ap.BACKEND_COMFY}))
+        self.assertEqual(rule.feature, "colorcraft")
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_USER), ap.SEND)
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_APP_DEFAULT), ap.SKIP)
+        self.assertFalse(rule.main_retry)
+        self.assertFalse(rule.model_bound)
+        self.assertIsNone(rule.condition)
+        self.assertIn(title, ap.main_only_titles())
+        self.assertIn(title, ap.final_image_titles())        # 옛 이름(Comfy 단독 후처리가 뗄 때)도 같은 표
+        self.assertEqual(ap.canonical_title("  COLORCRAFT (sam-extra) "), title)
+        self.assertEqual(ap.main_retry_titles({"alwayson_scripts": {"colorcraft (sam-extra)": self._block()}}), ())
+        self.assertEqual(self._block(), {"args": ["v1;mods=I;I.exposure=0.3"]})
+
+    def test_envelope_carries_it_but_no_aux_pass_gets_it(self):
+        from core import colorcraft
+        title = colorcraft.SCRIPT_NAME
+        block = self._block()
+        source = ap.envelope({**all_blocks(), "colorcraft (SAM-EXTRA)": block}, source="t2i_panel",
+                             backend=ap.BACKEND_WEBUI)
+        self.assertEqual(source["blocks"][title], block)                    # 봉투에는 실린다(T15 — 메인 체인과 같은 모양)
+        for aux in ap.AUX_PASSES:
+            for backend in (ap.BACKEND_WEBUI, ap.BACKEND_COMFY, ap.BACKEND_KREA2):
+                for src in (source, {**all_blocks(), title: block}, {"colorcraft (sam-extra)": block}):
+                    with self.subTest(aux=aux, backend=backend):
+                        got = ap.blocks_for(src, aux, backend=backend)
+                        self.assertNotIn(title, got)
+                        self.assertNotIn("colorcraft (sam-extra)", got)
+
+    def test_gate_by_provenance_when_the_snapshot_is_unknown_or_missing(self):
+        from core import colorcraft
+        title = colorcraft.SCRIPT_NAME
+        blocks = {title: self._block()}
+        unknown_user = ap.gate(blocks, None, img2img=False, provenance={title: ap.PROVENANCE_USER})
+        self.assertEqual(list(unknown_user.kept), [title])
+        unknown_default = ap.gate(blocks, None, img2img=False, provenance={title: ap.PROVENANCE_APP_DEFAULT})
+        self.assertEqual((unknown_default.kept, unknown_default.dropped_unknown), ({}, (title,)))
+        missing = ap.gate(blocks, _caps_with_absent(title), img2img=True, provenance={title: ap.PROVENANCE_USER})
+        self.assertEqual(missing.dropped_missing, (title,))
+        [notice] = ap.gate_notices(missing, {title: ap.PROVENANCE_USER}, img2img=True)
+        self.assertEqual(notice.feature, "colorcraft")
+
+    def test_title_is_the_single_app_constant(self):
+        from core import colorcraft, sam_extra_capabilities as caps_mod
+        self.assertIs(ap.TITLE_COLORCRAFT, colorcraft.SCRIPT_NAME)
+        self.assertEqual(caps_mod.TITLE_COLORCRAFT, colorcraft.SCRIPT_NAME.lower())
+        self.assertIs(sn._TITLE_COLORCRAFT, colorcraft.SCRIPT_NAME)
+        self.assertEqual(sn.SAM_EXTRA_FEATURES[colorcraft.SCRIPT_NAME.lower()], ("colorcraft", "Colorcraft"))
+        self.assertIn(colorcraft.SCRIPT_NAME, reg.SCRIPTS)
+
+    def test_title_copies_are_derived_from_script_name_in_the_source(self):
+        """값 비교로는 같은 문자열 사본을 못 잡는다 — 대입식이 SCRIPT_NAME 에서 나오고 제목 리터럴이 없는지 AST 로 본다."""
+        import ast
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        expected = {
+            "core/sam_extra_capabilities.py": ("TITLE_COLORCRAFT", "colorcraft.SCRIPT_NAME.lower()"),
+            "core/alwayson_propagation.py": ("TITLE_COLORCRAFT", "colorcraft.SCRIPT_NAME"),
+            "core/sam_extra_notices.py": ("_TITLE_COLORCRAFT", "colorcraft.SCRIPT_NAME"),
+        }
+        for rel, (name, source) in expected.items():
+            with self.subTest(module=rel):
+                tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+                values = [ast.unparse(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+                self.assertEqual(values, [source])
+        for rel in (*expected, "core/colorcraft.py"):
+            with self.subTest(literals=rel):
+                tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+                literals = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
+                            and isinstance(node.value, str) and node.value.strip().lower() == "colorcraft (sam-extra)"]
+                self.assertEqual(len(literals), 1 if rel == "core/colorcraft.py" else 0, literals)
 
 
 def _caps_with_absent(title):

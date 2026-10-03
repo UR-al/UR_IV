@@ -960,8 +960,12 @@ class AnimaSpeedRegistryTests(unittest.TestCase):
             self.assertIn(ref, entry["app"])
         self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
         self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
-        for package in ("P16", "P18"):
-            self.assertTrue(any(gap.startswith(package) for gap in entry["gaps"]), package)
+        self.assertTrue(any(gap.startswith("P18") for gap in entry["gaps"]))
+        # 붙여 넣기는 가져오기(액션 sam_extra_import — 계획 A-CC12a/b)로 연결됐다: P16 틈은 닫혔다
+        self.assertFalse(any(gap.startswith("P16") for gap in entry["gaps"]), entry["gaps"])
+        for ref in ("ui/sam_extra_import.py:import_infotext", "frontend/src/views/PngInfoView.vue",
+                    "frontend/src/views/GalleryView.vue"):
+            self.assertIn(ref, entry["app"])
         rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
                 for key, row in table.items() if "anima speed" in key.lower() or "anima_speed" in key.lower()
                 or key.startswith("sam3ext/speed/")}
@@ -986,6 +990,67 @@ class AnimaSpeedRegistryTests(unittest.TestCase):
                          {"scripts/anima_speed.py", "sam3ext/speed/forge_host.py", "sam3ext/speed/schedule.py"})
         self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
                          {(index, field) for index in (5, 6) for field in ("minimum", "maximum", "step")})
+
+
+class ColorcraftRegistryTests(unittest.TestCase):
+    """Colorcraft 앱 노출(계획 A-CC5, 보류 → mapped) — 확장 없이 도는 레지스트리 검사."""
+
+    def test_mapped_main_only_with_the_comfy_pending_gap(self):
+        from core import colorcraft as cc
+        entry = reg.SCRIPTS[cc.SCRIPT_NAME]
+        self.assertEqual(entry["status"], reg.MAPPED)
+        self.assertEqual(entry["app_title"], "core.colorcraft:SCRIPT_NAME")
+        self.assertEqual((entry["form"], entry["live_argc"], entry["shape"]), ("positional_or_dict", 67, "456003a0acc3"))
+        self.assertIsNone(entry["app_spec"], "위치 인자 spec 이 없다 — 첫 인자 하나(compact 문자열)만 보낸다")
+        for ref in ("core/colorcraft.py:to_infotext", "core/colorcraft.py:plan", "core/colorcraft.py:from_infotext",
+                    "core/colorcraft.py:build_chain", "core/alwayson_propagation.py:TITLE_COLORCRAFT",
+                    "core/alwayson_propagation.py:main_only_titles", "core/sam_extra_capabilities.py:TITLE_COLORCRAFT",
+                    "ui/colorcraft_ui.py:contribute", "ui/colorcraft_ui.py:apply_saved_settings",
+                    "ui/sampling_blocks.py:CONTRIBUTORS", "core/sam_extra_notices.py:CODE_COLORCRAFT_NOT_APPLIED",
+                    "core/sam_extra_notices.py:colorcraft_result_notices", "core/image_metadata.py:_EXTENSION_MARKERS"):
+            self.assertIn(ref, entry["app"])
+        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
+        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
+        for package in ("P18", "HOLD"):
+            self.assertTrue(any(gap.startswith(package) for gap in entry["gaps"]), package)
+        self.assertFalse(any(gap.startswith("P16") for gap in entry["gaps"]), entry["gaps"])     # 가져오기로 연결됐다
+        for ref in ("ui/sam_extra_import.py:import_infotext", "ui/colorcraft_ui.py:apply_config",
+                    "frontend/src/utils/samExtraImport.ts:importSamExtra", "frontend/src/views/PngInfoView.vue",
+                    "frontend/src/views/GalleryView.vue", "frontend/src/components/params/ColorcraftCard.vue"):
+            self.assertIn(ref, entry["app"])
+        rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
+                for key, row in table.items() if "colorcraft" in key.lower()}
+        self.assertEqual(sorted(rows), [
+            "MODULES[javascript/colorcraft_editor.js]", "MODULES[javascript/colorcraft_schema.js]",
+            "MODULES[javascript/colorcraft_sliders.js]", "MODULES[sam3ext/colorcraft/]", "MODULES[scripts/colorcraft.py]",
+            "OPTIONS[sam3_colorcraft_log]", "OPTIONS[sam3_colorcraft_pre_dd_sigma]", "SCRIPTS[Colorcraft (sam-extra)]",
+            "XYZ_AXES[[Colorcraft]]"])
+        self.assertEqual(sorted(k for k, row in rows.items() if row.get("package") == reg.HOLD), [])
+        self.assertEqual(sorted(k for k, row in rows.items() if row["status"] == reg.MAPPED), [
+            "MODULES[sam3ext/colorcraft/]", "MODULES[scripts/colorcraft.py]", "OPTIONS[sam3_colorcraft_pre_dd_sigma]",
+            "SCRIPTS[Colorcraft (sam-extra)]"])
+        xyz = reg.XYZ_AXES[cc.XYZ_PREFIX]
+        self.assertEqual((xyz["status"], xyz["package"]), (reg.DEFERRED, "P18"))
+        self.assertEqual(len(xyz["labels"]), 14)
+        self.assertEqual(reg.OPTIONS[cc.OPT_PRE_DD]["status"], reg.MAPPED)      # P10 행(F2)
+
+    def test_pins_mirror_every_shared_app_constant(self):
+        """앱이 확장 값을 하드코딩한 곳마다 핀이 있다 — 빠지면 확장이 바뀌어도 앱만 조용히 어긋난다."""
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("colorcraft_")}
+        apps = {pin["app"] for pin in pins.values() if "app" in pin}
+        names = ("SCRIPT_NAME", "XYZ_PREFIX", "INFOTEXT_KEY", "STATUS_KEY", "FOREIGN_KEY", "VERSION", "MODIFIER_COUNT",
+                 "MASK_COUNT", "COMBO_COUNT", "MODIFIER_TAGS", "KINDS", "ADVANCED_KINDS", "KIND_LABELS", "KIND_GROUPS",
+                 "KIND_GATES", "MASK_NONE", "MASK_AXIS_OPTIONS", "MASK_MODE_OPTIONS", "COMBO_OP_OPTIONS",
+                 "COLOR_SHIFT_MODE_OPTIONS", "CHROMA_PLANE_OPTIONS", "GROUP_ORDER")
+        self.assertEqual(sorted({f"core.colorcraft:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
+        self.assertEqual({pin["file"] for pin in pins.values()},
+                         {"scripts/colorcraft.py", "sam3ext/colorcraft/spec.py", "sam3ext/colorcraft/engine.py",
+                          "sam3ext/colorcraft/masking.py", "sam3ext/colorcraft/panel_state.py"})
+        self.assertEqual({pin["source"] for pin in pins.values()}, {"ast"})
+        options = {pin["id"]: pin["app"] for pin in reg.SEMANTIC_PINS if pin["id"].startswith("opt_")}
+        self.assertEqual(options["opt_colorcraft_pre_dd"], "core.forge_override_settings:OPT_COLORCRAFT_PRE_DD")
+        self.assertEqual(options["opt_infotext_colorcraft_pre_dd"],
+                         "core.forge_override_settings:INFOTEXT_COLORCRAFT_PRE_DD")
 
 if __name__ == "__main__":
     unittest.main()

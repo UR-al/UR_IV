@@ -976,5 +976,21 @@ class AnimaSpeedMetadataGroupTests(unittest.TestCase):
                 self.assertIn(key, groups["extensions"])
         self.assertNotIn("Anima SPEED", groups.get("other", ""))
 
+
+class ColorcraftMetadataGroupTests(unittest.TestCase):
+    """sam-extra Colorcraft 의 infotext 3키와 업스트림·포크의 'Colorcraft' 는 확장 그룹(계획 A-CC5 마커 'colorcraft')."""
+
+    def test_keys_group_as_extensions(self):
+        from core.image_metadata import group_parameters, parse_infotext
+        text = ('a cat\nSteps: 28, Sampler: Euler, Seed: 7, SAM Extra Colorcraft: "v1;mods=I;I.exposure=0.3", '
+                'SAM Extra Colorcraft status: "base: krea2 (Wan21); mods I; 30 evals, 28 edited", '
+                'SAM Extra Colorcraft pre-DD sigma: True, Colorcraft: "MOD(I:1,0.5,0.75)", Version: f2')
+        groups = group_parameters(parse_infotext(text).parameters)
+        for key in ("SAM Extra Colorcraft: ", "SAM Extra Colorcraft status: ", "SAM Extra Colorcraft pre-DD sigma: True",
+                    "Colorcraft: "):
+            with self.subTest(key=key):
+                self.assertIn(key, groups["extensions"])
+        self.assertNotIn("Colorcraft", groups.get("other", ""))
+
 if __name__ == "__main__":
     unittest.main()

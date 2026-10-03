@@ -448,8 +448,10 @@ _GROUP_MODEL = ("Model", "Model hash", "VAE", "Clip skip")
 # (core/extra_schedulers KEY_* — 'Schedule type' 은 위 생성 줄이 먼저 가져간다)
 # 'anima speed': sam-extra Anima SPEED 의 'Anima SPEED'·'Anima SPEED status'·'Anima SPEED img2img rescale'
 # (core/anima_speed INFOTEXT_KEYS)
+# 'colorcraft': sam-extra Colorcraft 의 'SAM Extra Colorcraft'·'… status'·'… pre-DD sigma'(core/colorcraft INFOTEXT_KEYS)와
+# 업스트림·aoleg 포크의 'Colorcraft'(붙여 넣기로 읽는 열쇠)
 _EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled", "degrid", "laplace",
-                      "custom scheduler", "anima speed")
+                      "custom scheduler", "anima speed", "colorcraft")
 
 
 def group_parameters(params: dict) -> dict[str, str]:
