@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.32.0"
+EXT_VERSION_AUDITED = "0.32.1"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -74,7 +74,12 @@ EXT_VERSION_AUDITED = "0.32.0"
 # ignored N6). 진행 막대(표시 버그 4)·MCP 서버(mcp_server/ — 스캐너 단위 밖)·CI 수정은 옵션·라우트·인자 계약이 그대로다("새 설정은
 # 없습니다"). 확장 tests/ 의 새 파일도 스캐너 단위 밖이다. 픽스처는 커밋 b816661(버전 0.32.0)을 불러온 Forge 2.29.2(7860)에서
 # 릴리스 직후 읽기 전용 GET 으로 다시 받았다(captured_at 2026-10-03T11:03:06+00:00). Colorcraft 두 항목(txt2img·img2img) 말고는 0.31.0 픽스처와 같다.
-EXT_COMMIT_AUDITED = "252e24d"
+# 2026-10-04 v0.32.1(9ccf8d0, master 머지 6101f05 — 트리 같음): Colorcraft 편집기의 Type 표시 지연·화면 낭독기 접근성
+# (javascript/colorcraft_editor.js·notebook.js·style.css — 화면 전용, ui.py 는 docstring 만)과 Anima SPEED custom 스펙트럼 A·β
+# 검사(sam3ext/speed/schedule.py build_plan 이 A ≤ 0·NaN 을 PlanError invalid 로 — 그 패스는 순정, status 에 이유). 인자·infotext·
+# 옵션·제목 그대로(둘 다 앱은 HOLD). 픽스처는 릴리스 직후 7860 에서 읽기 전용 GET 으로 다시 받았다(captured_at
+# 2026-10-03T15:07:21+00:00) — scripts 부분은 0.32.0 픽스처와 바이트 단위로 같다.
+EXT_COMMIT_AUDITED = "6101f05"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
