@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.31.0"
+EXT_VERSION_AUDITED = "0.32.0"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -51,7 +51,7 @@ EXT_VERSION_AUDITED = "0.31.0"
 # (sam3ext/guidance/runtime.py reset_pass 가 새 HistoryState). 인자·infotext·옵션·제목 그대로 — 픽스처는 고친 코드로 띄운
 # Forge 2.29.2 에서 커밋 전에 다시 받았다(기록된 커밋은 그때 HEAD fe2a4e7, 버전은 로컬 0.30.1). scripts 부분은 0.30.0 때와 같았다.
 # 2026-10-03 v0.31.0(6adeb83, master 머지 a65c4ae — 트리 같음): 새 기능 일곱 —
-# Colorcraft(always-on 'Colorcraft (sam-extra)' 579 인자·옵션 둘·XYZ 14), Anima SPEED(14 인자·옵션 둘·XYZ 6), Extra Schedulers
+# Colorcraft(always-on 'Colorcraft (sam-extra)' 579 인자(v0.32.0 에서 67 — 아래)·옵션 둘·XYZ 14), Anima SPEED(14 인자·옵션 둘·XYZ 6), Extra Schedulers
 # (스케줄러 6개 + 'Extra Schedulers (sam-extra)' 5 인자·XYZ 4), Extra Samplers(샘플러 5개 + 'Extra Samplers' 2 인자·XYZ 2),
 # 진행 막대(옵션 sam3_progress_* 10·GET /sam-extra/progress), MCP 권한 스위치(옵션 sam3_mcp_allow_* 4), 그리고 앱의 구도 ·
 # 카메라 칸을 Forge 로 옮긴 것(옵션 sam3_composition_panel·scripts/composition_camera.py·javascript/composition_*.js — 화면 전용,
@@ -66,7 +66,15 @@ EXT_VERSION_AUDITED = "0.31.0"
 # 두었고(같은 방법이 기존 11개 스크립트의 라이브 항목을 값 타입까지 재현), 미커밋 트리로 띄운 Forge 의 라이브 값과 모든 칸·
 # 타입이 같았다. 픽스처는 커밋 6adeb83(버전 0.31.0)으로 다시 띄운 Forge 2.29.2(7860)에서 릴리스 전에 다시 받았다
 # (captured_at 2026-10-03T04:57:50Z, 스크립트 16개). 기존 스크립트의 인자 모양은 그대로다.
-EXT_COMMIT_AUDITED = "a65c4ae"
+# 2026-10-03 v0.32.0(b816661, master 머지 252e24d — 트리 같음): Colorcraft 공유 편집기 — 'Colorcraft (sam-extra)' 인자
+# 579 → 67(panel_state.ARG_NAMES — enabled·masking·숨은 state·debug·debug_step·ref·편집기 61칸). 계산·infotext·XYZ·옵션은 그대로이고
+# (CHANGELOG '결과 같음' — CPU 비트 대조와 실제 Forge GPU 대조: v0.31.0 패널 기준 4개의 픽셀·PNG 파일 md5 가 같음), API 의 위치 인자
+# 579개 형식만 더 읽지 않는다(호환 깨짐 — 앱은 Colorcraft 를 보내지 않으므로 영향 없음, HOLD 그대로). 새 파일:
+# sam3ext/colorcraft/panel_state.py(기존 'sam3ext/colorcraft/' 단위)와 javascript/colorcraft_editor.js·colorcraft_schema.js(MODULES
+# ignored N6). 진행 막대(표시 버그 4)·MCP 서버(mcp_server/ — 스캐너 단위 밖)·CI 수정은 옵션·라우트·인자 계약이 그대로다("새 설정은
+# 없습니다"). 확장 tests/ 의 새 파일도 스캐너 단위 밖이다. 픽스처는 커밋 b816661(버전 0.32.0)을 불러온 Forge 2.29.2(7860)에서
+# 릴리스 직후 읽기 전용 GET 으로 다시 받았다(captured_at 2026-10-03T11:03:06+00:00). Colorcraft 두 항목(txt2img·img2img) 말고는 0.31.0 픽스처와 같다.
+EXT_COMMIT_AUDITED = "252e24d"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -419,14 +427,23 @@ SCRIPTS = MappingProxyType({
             gaps=("P16: 붙여 넣은 infotext 'Anima Optimal Scale' 을 앱이 되살리지 않는다(가이던스 공통)",))),
     # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0) — 넷 다 HOLD(앱 노출 요청 없음). 앱은 블록을 만들지 않고
     # (core/alwayson_propagation NEVER), Forge 는 블록이 없으면 ui() 기본값(전부 끔·확장 기본값)으로 돌린다.
+    # v0.32.0 공유 편집기 — 인자 579 → 67. 계산·infotext·XYZ·옵션 그대로, HOLD 그대로.
     "Colorcraft (sam-extra)": _script(
-        file="scripts/colorcraft.py", form="positional_or_dict", live_argc=579, shape="6678b715b857",
-        api_note="위치 인자 579개(sam3ext/colorcraft/spec.arg_names() 순서 — enabled·masking, 수정자 탭 I~X 44칸씩, 마스크 "
-                 "M1~M10 10칸씩, 조합 C1~C5 7칸씩, debug·debug_step) 또는 첫 인자 하나(compact — infotext 'SAM Extra "
-                 "Colorcraft' 문자열이나 인자 경로 dict {'enabled': …, 'I.exposure': …}, spec.is_compact_arg). ui() 가 spec 표로 "
-                 "컨트롤을 만들어(colorcraft/ui.build) 반환 순서·컴포넌트를 정적으로 못 읽는다 — 소스↔픽스처 비교 밖. 선택지는 "
-                 "모두 고정 목록. infotext 'SAM Extra Colorcraft'·'SAM Extra Colorcraft status'(원본·포크의 'Colorcraft' 키도 "
-                 "붙여 넣기로 읽는다).",
+        file="scripts/colorcraft.py", form="positional_or_dict", live_argc=67, shape="456003a0acc3",
+        api_note="위치 인자 67개(sam3ext/colorcraft/panel_state.ARG_NAMES — enabled·masking·state(숨은 Textbox: \"\" 또는 "
+                 "JSON {\"v\":1,\"rev\":…, 경로: 값}, 기본값은 뺀다)·debug·debug_step·ref(숨은 Textbox '<수정자>|<마스크>|<rev>', "
+                 "기본 'I|M1|0')·편집기 61칸(수정자 44·마스크 10·조합 7). 확장은 이 67개를 내부 형식이라 바뀔 수 있다고 적는다). "
+                 "생성은 state 를 읽고, ref 의 rev 가 state 의 rev 와 같을 때만 ref 가 가리키는 수정자·마스크에 편집기 값을 "
+                 "얹는다(panel_state.config_from_script_args). API 는 첫 인자 하나(compact — infotext 'SAM Extra Colorcraft' "
+                 "문자열이나 인자 경로 dict {'enabled': …, 'I.exposure': …}, spec.is_compact_arg)나 v0.31.0 의 579개 목록을 한 겹 "
+                 "감싼 [[…]] 로 보낸다. 감싸지 않은 579개는 Forge 가 67개로 잘라 넘기고 확장이 옛 형식으로 알아봐 거절한다(이미지는 "
+                 "Colorcraft 없이, status 'not applied: v0.31.0 positional arguments (579 values) are no longer read - …'; state "
+                 "칸이 state 가 아니면 'not applied: unreadable panel state (…)'). [enabled]·[enabled, masking] 은 예전과 같은 "
+                 "뜻(나머지는 Forge 가 ui() 기본값으로 채운다). ui() 가 spec 표로 컨트롤을 만들어(colorcraft/ui.build) 반환 순서·"
+                 "컴포넌트를 정적으로 못 읽는다 — 소스↔픽스처 비교 밖. 선택지는 모두 고정 목록(조합 편집기 Mask A/B 는 script-info "
+                 "에 전체 목록, 조합별 좁히기는 브라우저). 붙여 넣기 필드는 65개(인자 58 — debug·debug_step·조합 편집기 7칸 빼고 — "
+                 "와 선택 줄·요약 같은 화면 7)이고 조합 편집기에는 놓이지 않는다. infotext 'SAM Extra Colorcraft'·'SAM Extra "
+                 "Colorcraft status'(원본·포크의 'Colorcraft' 키도 붙여 넣기로 읽는다).",
         classification=deferred(HOLD, "샘플링 중 latent 색 보정(muerrilla/ComfyUI-Colorcraft 이식, 기본 끔) — 확장도 화질·VRAM 을 "
                                       "GPU 로 확인하지 않았다(CHANGELOG). 앱 노출 요청 없음 — 앱이 만들지 않는다(core/"
                                       "alwayson_propagation NEVER). Comfy 쪽은 원본 노드 팩이 따로 있고 앱 컴파일러는 넣지 않는다")),
@@ -911,7 +928,9 @@ MODULES = MappingProxyType({
     "sam3ext/ui_dock.py": ignored("N5 — 선택 이미지 도크(안의 기능은 각 항목에서 다룬다)"),
     # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0)
     "sam3ext/colorcraft/": deferred(HOLD, "Colorcraft 런타임 — 인자 표(spec: arg_names·compact 인자·infotext)·엔진·마스크·"
-                                          "Debug·Gradio 패널, 색 벡터 data/*.safetensors 셋(krea2·zimage·flux2) 포함"),
+                                          "Debug·Gradio 패널, 색 벡터 data/*.safetensors 셋(krea2·zimage·flux2) 포함. v0.32.0 "
+                                          "패널 인자(panel_state: 67개 ARG_NAMES·숨은 state·편집기 겹치기·옛 579개 거절·붙여 "
+                                          "넣기·colorcraft_schema.js 생성)"),
     "sam3ext/speed/": deferred(HOLD, "SPEED 런타임 — ARG_NAMES·coerce_settings·infotext(forge_host), 전환 계획(schedule)·"
                                      "스펙트럼 변환(spectral)·샘플러 래퍼(runner)"),
     "sam3ext/extra_schedulers/": deferred(HOLD, "스케줄러 6개·안전 식 계산기(AST 화이트리스트)·시그마 목록 보간·Forge 등록 — "
@@ -931,6 +950,11 @@ MODULES = MappingProxyType({
     "javascript/tipo_device.js": ignored(_N6 + " — TIPO 장치 표시(P19)", package="P19"),
     "javascript/progress_bar.js": ignored(_N6 + " — 진행 막대 화면(라우트 계약은 ROUTES 의 /sam-extra/progress)"),
     "javascript/colorcraft_sliders.js": ignored(_N6 + " — Colorcraft 패널 슬라이더 화면"),
+    # v0.32.0 Colorcraft 공유 편집기 — 브라우저 전용(js 전용 이벤트, 서버 요청 없음)
+    "javascript/colorcraft_editor.js": ignored(_N6 + " — Colorcraft 공유 편집기 화면(항목 고르기·Reset·●/○ 표시·요약 줄, "
+                                                "js 전용 이벤트로 state·ref·편집기를 함께 갱신, notebook.js 빠른 드롭다운 맞추기)"),
+    "javascript/colorcraft_schema.js": ignored(_N6 + " — 편집기 필드 표(window.samextraColorcraftSchema). sam3ext/colorcraft/"
+                                                "panel_state.py 가 spec.py 에서 생성한다"),
     "javascript/composition_prompt.js": ignored(_N6 + " — 앱 frontend/src/utils/compositionPrompt.ts 의 이식(태그 계산). 확장 "
                                                   "tests/_origin_composition_prompt/ 가 앱 원본을 SHA-256 으로 고정해 대조한다"),
     "javascript/composition_ui.js": ignored(_N6 + " — 구도 · 카메라 칸 화면(앱 CompositionControl.vue 이식)"),
