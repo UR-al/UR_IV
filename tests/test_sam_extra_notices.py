@@ -1356,5 +1356,159 @@ class ExtraSchedulersNoticeTests(_QuietAssumption):
                                          propagated_titles=("extra schedulers (sam-extra)",))
         self.assertTrue(propagated.message.endswith(sn.PROPAGATED_SUFFIX))
 
+
+# ── Anima SPEED (계획 A-SP3) ───────────────────────────────────────────────────
+def speed_payload(**values):
+    from core import anima_speed
+    block = anima_speed.as_block(anima_speed.SpeedSettings(**{"enabled": True, **values}))
+    return {"prompt": "1girl", "cfg_scale": 4.5, "alwayson_scripts": {anima_speed.SCRIPT_NAME: block}}
+
+
+_SPEED_SUMMARY = ("mode=transition; threshold=neo_shift; preset=anima; scales=0.5,1; delta=0.01; divisor=1.03; "
+                  "manual=0.7; adaptive=True; transform=dct; seed=-1; hires=False")
+
+
+def speed_infotext(status: str = "", *, summary: str = _SPEED_SUMMARY) -> str:
+    """확장이 쓰는 모양(쉼표·콜론이 든 값은 JSON 따옴표 — create_infotext)."""
+    text = _HEAD + f"Anima SPEED: {json.dumps(summary)}, "
+    if status:
+        text += f"Anima SPEED status: {json.dumps(status)}, "
+    return text + _TAIL
+
+
+SPEED_APPLIED = speed_infotext("base: applied (transition) - 5/28 steps coarse, 52x76 -> 104x152, step 5 sigma "
+                               "0.7208->0.7208 | hires: not applied - Apply to Hires pass is off")
+SPEED_NOT_FLOW = speed_infotext("base: skipped - not a flow-matching model (prediction_type=eps) - SDXL/SD1.x eps/v "
+                                "models are not supported (kappa and the sigma* presets assume flow sigmas in (0, 1])")
+SPEED_NO_COARSE = speed_infotext("img2img: skipped - no coarse steps: the pass starts at sigma 0.6000, at or below the "
+                                 "first transition sigma 0.7208")
+SPEED_INVALID = speed_infotext("base: invalid settings - spectrum A must be a positive number; got -1.0")
+SPEED_FALLBACK = speed_infotext("base: fell back to plain sampling after RuntimeError: shape mismatch [1, 16, 52, 76]")
+SPEED_PENDING = speed_infotext("base: pending - sampler wrapped, waiting for sampling")
+SPEED_INTERRUPTED = speed_infotext("base: interrupted")
+
+
+class SpeedNoticeTests(_QuietAssumption):
+    def _speed(self, info, payload=None):
+        return [n for n in sn.result_notices(info, speed_payload() if payload is None else payload)
+                if n.feature == "speed"]
+
+    def test_quiet_when_applied_hires_off_interrupted_off_or_not_sent(self):
+        for info, payload in ((info_of(SPEED_APPLIED), None), (info_of(SPEED_INTERRUPTED), None),
+                              (info_of(SPEED_APPLIED, SPEED_APPLIED), None),
+                              (info_of(NO_EXTENSION_TRACE), speed_payload(enabled=False)),
+                              (info_of(SPEED_INVALID), {"prompt": "x"})):              # 블록을 보내지 않았다
+            with self.subTest(info=info[200:260]):
+                self.assertEqual(self._speed(info, payload), [])
+        self.assertEqual(sn.speed_result_notices(speed_payload(), []), [])
+
+    def test_skips_are_one_info_notice_with_korean_reasons(self):
+        [notice] = self._speed(info_of(SPEED_NOT_FLOW))
+        self.assertEqual((notice.code, notice.level, notice.detail), (sn.CODE_SPEED_SKIPPED, sn.LEVEL_INFO, "not_flow"))
+        self.assertIn("기본: flow 모델이 아닙니다", notice.message)
+        self.assertNotIn("장에서", notice.message)                              # 한 장이면 개수 없음
+        [both] = self._speed(info_of(SPEED_NOT_FLOW, SPEED_NO_COARSE, SPEED_APPLIED))
+        self.assertEqual(both.detail, "not_flow · no_coarse_steps")
+        self.assertIn("1/3장에서", both.message)
+        self.assertIn("img2img: 이 패스는 전환 σ 아래에서 시작해", both.message)
+        [pending] = self._speed(info_of(SPEED_PENDING))
+        self.assertEqual((pending.code, pending.detail), (sn.CODE_SPEED_SKIPPED, "pending"))
+        self.assertEqual(sn.speed_skip_hint("Restart re-plans its own schedule")[0], "sampler")
+        self.assertEqual(sn.speed_skip_hint("CompVisSampler is not a k-diffusion sampler (DDIM/PLMS-style samplers are "
+                                            "not supported)")[0], "sampler")
+        self.assertEqual(sn.speed_skip_hint("brand new 12 reason 0.5"), ("brand new # reason #", ""))
+
+    def test_invalid_settings_and_fallback_warn(self):
+        [invalid] = self._speed(info_of(SPEED_INVALID, SPEED_INVALID))
+        self.assertEqual((invalid.code, invalid.level), (sn.CODE_SPEED_INVALID, sn.LEVEL_WARNING))
+        self.assertEqual(invalid.detail, "spectrum A must be a positive number; got -1.0")
+        self.assertIn("기본 패스", invalid.message)
+        self.assertNotIn("장이", invalid.message)                               # 모든 장이면 개수 없음
+        [fallback] = self._speed(info_of(SPEED_FALLBACK, SPEED_APPLIED))
+        self.assertEqual((fallback.code, fallback.level, fallback.detail),
+                         (sn.CODE_SPEED_FALLBACK, sn.LEVEL_WARNING, "RuntimeError"))
+        self.assertIn("1/2장에서 기본 패스에서 실패해", fallback.message)
+        self.assertIn("shape mismatch [1, 16, 52, 76]", fallback.message)
+
+    def test_sent_but_no_trace_means_an_old_sam_extra_or_a_script_error(self):
+        [old] = self._speed(info_of(NO_EXTENSION_TRACE, NO_EXTENSION_TRACE))
+        self.assertEqual((old.code, old.level, old.detail),
+                         (sn.CODE_SPEED_NOT_APPLIED, sn.LEVEL_WARNING, "Anima SPEED"))
+        self.assertIn("0.31.0", old.message)
+        [script] = self._speed(info_of(NO_EXTENSION_TRACE), speed_payload(scales="1/0,1"))
+        self.assertEqual((script.code, script.detail), (sn.CODE_SPEED_NOT_APPLIED, "script_error"))
+        self.assertIn("a/0", script.message)
+
+    def test_requested_features_read_the_block_like_the_extension(self):
+        from core import anima_speed
+        request = sn.requested_features(speed_payload(delta=0.02))
+        self.assertEqual(request.speed, anima_speed.ScriptSettings(enabled=True, delta=0.02))
+        alias = {"alwayson_scripts": {"anima speed": {"args": [{"enabled": True, "divisor": 1.5, "A": 7}]}}}
+        got = sn.requested_features(alias).speed
+        self.assertEqual((got.enabled, got.sigma_divisor, got.spectrum_A), (True, 1.5, 7.0))
+        self.assertTrue(sn.requested_features(speed_payload(manual_sigmas="0.7/0")).speed.error.startswith(
+            anima_speed.SCRIPT_ERROR_PREFIX))
+        self.assertIsNone(sn.requested_features({"prompt": "x"}).speed)
+
+    def test_static_skip_notice(self):
+        from core import anima_speed
+        for code in anima_speed.SKIP_MESSAGES:
+            with self.subTest(code=code):
+                notice = sn.speed_static_skip_notice(code)
+                self.assertEqual((notice.code, notice.level, notice.feature, notice.detail),
+                                 (sn.CODE_SPEED_SKIPPED, sn.LEVEL_INFO, "speed", code))
+                self.assertIn(anima_speed.SKIP_MESSAGES[code], notice.message)
+
+    def test_throttling_exports_and_feature_name(self):
+        for name in ("CODE_SPEED_INVALID", "CODE_SPEED_FALLBACK", "CODE_SPEED_SKIPPED", "CODE_SPEED_NOT_APPLIED"):
+            with self.subTest(code=name):
+                notice = sn.Notice(getattr(sn, name), sn.LEVEL_WARNING, "m")
+                self.assertEqual(sn.notice_ttl(notice, sn.RESULT_NOTICE_TTL_S), sn.PRE_GENERATION_NOTICE_TTL_S)
+                self.assertIn(name, sn.__all__)
+        for name in ("speed_result_notices", "speed_skip_hint", "speed_static_skip_notice"):
+            self.assertIn(name, sn.__all__)
+        text = sn.explain_rejected_request(422, {"detail": "always on script Anima SPEED not found"}, speed_payload())
+        self.assertIn("켠 기능: Anima SPEED", text)
+        self.assertEqual(sn.block_not_sent_notice("Anima SPEED", img2img=False).feature, "speed")
+
+
+@requires_extension
+class SpeedExtensionSourceTests(unittest.TestCase):
+    """SPEED 알림이 기대는 status 문구 머리·건너뜀 이유가 설치된 확장에 그대로 있는가(f-string 이라 핀 대신 원문 검색)."""
+
+    @classmethod
+    def setUpClass(cls):
+        texts = []
+        for rel in ("scripts/anima_speed.py", "sam3ext/speed/forge_host.py", "sam3ext/speed/schedule.py"):
+            with open(os.path.join(EXT_ROOT, *rel.split("/")), encoding="utf-8") as fh:
+                texts.append(fh.read())
+        cls.source = "\n".join(texts)
+
+    def test_status_heads(self):
+        from core import anima_speed as sp
+        heads = {
+            sp.STATUS_APPLIED: 'f"applied ({settings.mode}) - ',
+            sp.STATUS_INVALID: 'f"invalid settings - {settings.error}"',
+            sp.STATUS_SKIPPED: 'f"skipped - {reason}"',
+            sp.STATUS_NOT_APPLIED: '"not applied - Apply to Hires pass is off"',
+            sp.STATUS_PENDING: '"pending - sampler wrapped, waiting for sampling"',
+            sp.STATUS_FALLBACK: 'f"fell back to plain sampling after {type(exc).__name__}: {exc}"',
+            sp.STATUS_INTERRUPTED: 'record_status(p, label, "interrupted")',
+        }
+        self.assertEqual(set(heads), set(sp.STATUS_KINDS))
+        for kind, needle in heads.items():
+            with self.subTest(kind=kind):
+                self.assertIn(needle, self.source)
+        self.assertIn('prefix = "invalid settings" if exc.kind == "invalid" else "skipped"', self.source)
+        self.assertIn('" | ".join(f"{name}: {value}" for name, value in state.statuses.items())', self.source)
+        self.assertEqual(tuple(sp.PASS_LABELS), ("base", "img2img", "hires"))
+        for label in sp.PASS_LABELS:
+            self.assertIn(f'return "{label}"', self.source)
+
+    def test_every_skip_hint_matches_a_reason_the_extension_writes(self):
+        for needles, key, _hint in sn._SPEED_SKIP_HINTS:      # 문구마다 한 리터럴 안에 있다(줄 이음 밖)
+            with self.subTest(key=key):
+                self.assertTrue(any(needle in self.source for needle in needles), needles)
+
 if __name__ == "__main__":
     unittest.main()

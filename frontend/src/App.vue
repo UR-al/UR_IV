@@ -79,6 +79,10 @@
                  model_combo 의 animaKinds 속성을 직접 읽는다(destructure 없음) -->
             <Anima38Card />
 
+            <!-- Anima SPEED — Anima38 다음(Forge 의 Anima 레인 순서, 네 기능 계획 R8). 카드가 위젯 스토어(_aspeed_*)를 직접
+                 읽는다(destructure 없음) -->
+            <AnimaSpeedCard />
+
             <!-- Anima Guidance Suite — SAM3와 완전히 분리된 독립 기능.
                  인자 계약(위치 기반, 스크립트별)은 core/anima_guidance.py SPECS 참조. -->
             <AnimaGuidancePanel :widgets="storeWidgets" />
@@ -399,6 +403,7 @@ import Sam3MaskCard from './components/params/Sam3MaskCard.vue'
 import LoraStackCard from './components/params/LoraStackCard.vue'
 import DoraModeCard from './components/params/DoraModeCard.vue'
 import Anima38Card from './components/params/Anima38Card.vue'
+import AnimaSpeedCard from './components/params/AnimaSpeedCard.vue'
 import VaeDegridCard from './components/params/VaeDegridCard.vue'
 import PresetManagerModal from './components/managers/PresetManagerModal.vue'
 import WeightManagerModal from './components/managers/WeightManagerModal.vue'

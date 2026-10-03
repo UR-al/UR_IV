@@ -33,6 +33,12 @@ def _extra_schedulers_settings(host) -> dict:
     return get_settings(host)
 
 
+def _speed_settings(host) -> dict:
+    """Anima SPEED 카드 값(ui/anima_speed_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
+    from ui.anima_speed_ui import get_settings
+    return get_settings(host)
+
+
 def migrate_legacy_gallery_folder(
     settings: dict,
     *,
@@ -189,6 +195,8 @@ class SettingsMixin:
             "vae_degrid_settings": _degrid_settings(self),
             # Extra Schedulers 값 칸(core/extra_schedulers.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
             "extra_schedulers_settings": _extra_schedulers_settings(self),
+            # Anima SPEED 카드(core/anima_speed.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
+            "anima_speed_settings": _speed_settings(self),
             
             
             "remove_artist": self.chk_remove_artist.isChecked(),

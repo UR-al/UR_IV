@@ -81,6 +81,8 @@ EXT_VERSION_AUDITED = "0.32.1"
 # 2026-10-03T15:07:21+00:00) — scripts 부분은 0.32.0 픽스처와 바이트 단위로 같다.
 # 2026-10-04 Extra Schedulers 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 셋을 HOLD → mapped, XYZ 축은 P18(앱 XYZ 의
 # Scheduler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS xsched_*(앱 쪽 — ComfyUI 팩 거울 '_comfy' 는 팩 1.7.0 단계 C0).
+# 2026-10-04 Anima SPEED 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 둘을 HOLD → mapped(메인 요청 전용 — 전달 행
+# passes=()), XYZ [Anima SPEED] 6축은 P18, 상수 계약은 SEMANTIC_PINS speed_*(앱 쪽 — 팩 거울 '_comfy' 는 C0).
 EXT_COMMIT_AUDITED = "6101f05"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
@@ -454,17 +456,55 @@ SCRIPTS = MappingProxyType({
         classification=deferred(HOLD, "샘플링 중 latent 색 보정(muerrilla/ComfyUI-Colorcraft 이식, 기본 끔) — 확장도 화질·VRAM 을 "
                                       "GPU 로 확인하지 않았다(CHANGELOG). 앱 노출 요청 없음 — 앱이 만들지 않는다(core/"
                                       "alwayson_propagation NEVER). Comfy 쪽은 원본 노드 팩이 따로 있고 앱 컴파일러는 넣지 않는다")),
+    # 2026-10-04 앱 노출(보류 → mapped): 메인 요청 전용 샘플러 래퍼 — 정규화·블록·검사·붙여 넣기 거울(core/anima_speed),
+    # 메인 전용 전달 행, 결과 status 알림. 상수 계약은 SEMANTIC_PINS speed_*. ComfyUI(팩 1.7.0 ForgeNeoAnimaSpeed — 같은 계산을
+    # 다시 구현해 CPU 비트 대조)는 계획 C 단계.
     "Anima SPEED": _script(
         file="scripts/anima_speed.py", form="positional_or_dict", live_argc=14, shape="c6889a2ed8d6",
         ui_return=("enabled", "mode", "threshold", "preset", "scales", "delta", "divisor", "manual", "adaptive",
                    "transform", "spectrum_a", "spectrum_beta", "seed", "hires"),
+        app_title="core.anima_speed:SCRIPT_NAME",
         api_note="위치 인자 14개(sam3ext/speed/forge_host.py ARG_NAMES 순서 — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 "
-                 "읽힌다) 또는 dict 한 개(ARG_NAMES·infotext 'Anima SPEED' 키, coerce_settings). 뒤 인자는 빼도 기본값. "
-                 "idx10-12 는 gr.Number(script-info 의 step 1 은 Gradio 기본값 — UI_UNREAD). infotext 'Anima SPEED'·"
-                 "'Anima SPEED status'·'Anima SPEED img2img rescale'(옵션). XYZ 는 p 속성(_anima_speed_xyz)으로 덮어쓴다.",
-        classification=deferred(HOLD, "실험 기능(SPEED — 초반 스텝을 DCT 저해상도로, 기본 끔, 이미지가 달라진다). 확장도 Anima "
-                                      "화질·속도를 GPU 로 확인하지 않았다(CHANGELOG). 앱 노출 요청 없음 — 앱이 만들지 않는다"
-                                      "(core/alwayson_propagation NEVER)")),
+                 "읽힌다, 핀 speed_arg_names) 또는 dict 한 개(ARG_NAMES·infotext 'Anima SPEED' 키 divisor·manual·A·beta, "
+                 "coerce_settings). 뒤 인자는 빼도 기본값. idx10-12 는 gr.Number(script-info 의 step 1 은 Gradio 기본값 — "
+                 "UI_UNREAD). 잘못된 값은 오류 목록이 되어 그 패스는 순정(status 'invalid settings - …', 'Anima SPEED' 는 "
+                 "남는다). 해상도 비율·수동 σ 칸의 'a/0' 분수는 schedule._numbers 의 ZeroDivisionError 가 coerce_settings 밖으로 "
+                 "나가 스크립트 오류가 된다(Forge 는 SPEED 없이 생성, infotext 없음). 패스마다(process_before_every_sampling) "
+                 "p.sampler.func 를 감싸고 base·img2img·hires 별 status 를 'Anima SPEED status' 에 ' | ' 로 잇는다(applied·"
+                 "skipped·invalid settings·not applied·pending·fell back to plain sampling·interrupted). infotext 'Anima "
+                 "SPEED'(요약 — 붙여 넣기가 되읽는다)·'Anima SPEED status'·'Anima SPEED img2img rescale'(옵션, init latent "
+                 "패스만). XYZ 는 p 속성(_anima_speed_xyz)으로 덮어쓴다.",
+        classification=mapped(
+            "core/anima_speed.py:SCRIPT_NAME", "core/anima_speed.py:ARG_NAMES", "core/anima_speed.py:coerce",
+            "core/anima_speed.py:as_block", "core/anima_speed.py:parse_script_block", "core/anima_speed.py:plan",
+            "core/anima_speed.py:validate", "core/anima_speed.py:static_skip_reason",
+            "core/anima_speed.py:from_infotext", "core/anima_speed.py:summary", "core/anima_speed.py:parse_status",
+            # 메인 요청 전용 전달 행(passes=() — 보조 패스에는 가지 않는다)·기능 스냅샷
+            "core/alwayson_propagation.py:TITLE_SPEED", "core/alwayson_propagation.py:PROPAGATION",
+            "core/alwayson_propagation.py:main_only_titles", "core/sam_extra_capabilities.py:TITLE_SPEED",
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용 — 보조 패스에는 건너가지 않는다)·저장·가져오기
+            "ui/anima_speed_ui.py:contribute", "ui/anima_speed_ui.py:apply_saved_settings",
+            "ui/anima_speed_ui.py:apply_infotext", "ui/sampling_blocks.py:CONTRIBUTORS",
+            # 파라미터 열 카드(Anima38 다음) — 값 칸·검사 줄(파이썬 validate 의 거울)·켜짐 스위치 기능 확인
+            "frontend/src/components/params/AnimaSpeedCard.vue", "frontend/src/utils/animaSpeed.ts:validate",
+            "frontend/src/utils/samExtraCapabilities.ts:FEATURE_ENABLE_WIDGETS",
+            # 결과 'Anima SPEED status' 의 패스마다(설정 오류·폴백 경고, 건너뜀 정보)·보냈는데 흔적 없음 → 알림(P4 규칙)
+            "core/sam_extra_notices.py:CODE_SPEED_INVALID", "core/sam_extra_notices.py:CODE_SPEED_FALLBACK",
+            "core/sam_extra_notices.py:CODE_SPEED_SKIPPED", "core/sam_extra_notices.py:CODE_SPEED_NOT_APPLIED",
+            "core/sam_extra_notices.py:speed_result_notices",
+            # 결과 infotext 3키를 확장 그룹으로(PNG Info·갤러리·히스토리)
+            "core/image_metadata.py:_EXTENSION_MARKERS",
+            note="실험 기능, 앱 기본값 = 확장 기본값(꺼짐). dict 한 개(14키 ARG_NAMES)로 보낸다 — Forge 가 캐시한 위치 "
+                 "기본값·확장의 인자 순서와 무관하다. 메인 요청만(계획 D4): T2I 계열, I2I 는 카드 토글(기본 끔 — Forge "
+                 "img2img 아코디언도 꺼짐). Refine·단독/배치 SAM3·ADetailer·손 재구성에는 보내지 않는다(PROPAGATION "
+                 "passes=()). 사용자가 켠 블록이라 스냅샷이 없다고 하면 빼고 block_not_sent 알림, 모르면 보낸다(main_retry "
+                 "없음). 잘못된 설정도 보낸다 — Forge 가 'invalid settings' 로 기록하고 평소처럼 샘플링한다(카드가 validate "
+                 "로 미리 알린다). Krea2 는 보내지 않는다. 계산은 Forge 에서 확장이 한다",
+            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/anima_speed.plan 'comfy_pending', 계획 R16)",
+                  "P16: 붙여 넣기(from_infotext)는 있지만 아직 연결되지 않았다(계획 X3c — 가져오기 sam_extra_import)",
+                  "P18: XYZ [Anima SPEED] 6축은 앱 XYZ 에 없다",
+                  "Forge 옵션 sam3_speed_img2img_rescale 은 OPTIONS P10(Forge 전용 — ComfyUI 는 확장 기본값 켬, 계획 D7), "
+                  "sam3_speed_log 는 쓰지 않는다"))),
     # 2026-10-04 앱 노출(보류 → mapped): 파라미터 카드의 값 칸·샘플링 블록 기여자·보조 패스 전달 규칙·결과 알림·붙여 넣기
     # 규칙. 상수 계약은 SEMANTIC_PINS xsched_*. ComfyUI(팩 1.7.0 의 스케줄러 6개 등록·값 운반 노드)는 계획 C 단계.
     "Extra Schedulers (sam-extra)": _script(
@@ -769,7 +809,9 @@ XYZ_AXES = MappingProxyType({
     "[Colorcraft]": {**_XYZ_HOLD, "labels": (
         "Chroma Contrast", "Clarity", "Contrast", "Enable", "End", "Exposure", "Saturation", "Sharpness", "Start",
         "Strength", "Temperature", "Tint", "Tone Compression", "Vibrance")},
-    "[Anima SPEED]": {**_XYZ_HOLD, "labels": ("Delta", "Enable", "Manual sigma", "Mode", "Scale", "Sigma divisor")},
+    "[Anima SPEED]": {**deferred("P18", "앱 XYZ 에 SPEED 축이 없다(design_speed D13) — 블록은 카드 값으로 메인 요청에만 간다"
+                                        "(core/anima_speed.plan)"),
+                      "labels": ("Delta", "Enable", "Manual sigma", "Mode", "Scale", "Sigma divisor")},
     "[Extra Schedulers (sam-extra)]": {**deferred("P18", "앱 XYZ 에 μ/β/식 축이 없다 — Scheduler 축은 이미 있고(앱 XYZ "
                                                          "'Scheduler'), 블록은 그 칸에도 카드 값으로 같이 간다(core/"
                                                          "extra_schedulers.plan)"), "labels": (
@@ -850,7 +892,12 @@ MODULES = MappingProxyType({
     # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0)
     "scripts/colorcraft.py": deferred(HOLD, "SCRIPTS['Colorcraft (sam-extra)'] — 옵션 sam3_colorcraft_* 둘·XYZ [Colorcraft] 도 "
                                             "여기서 등록한다"),
-    "scripts/anima_speed.py": deferred(HOLD, "SCRIPTS['Anima SPEED'] — 옵션 sam3_speed_* 둘·XYZ [Anima SPEED] 도 여기서 등록한다"),
+    "scripts/anima_speed.py": mapped(
+        "core/anima_speed.py:SCRIPT_NAME", "core/anima_speed.py:paste_values", "core/anima_speed.py:XYZ_PREFIX",
+        "core/forge_override_settings.py:OPT_SPEED_IMG2IMG_RESCALE",
+        note="SCRIPTS['Anima SPEED'] — 옵션 sam3_speed_* 둘(img2img rescale = OPTIONS P10, log = ignored)·XYZ [Anima SPEED]"
+             "(P18)도 여기서 등록한다. infotext_fields 의 붙여 넣기 변환(_paste·_paste_bool·_paste_int)은 core/anima_speed."
+             "paste_values 가 거울(tests/test_anima_speed.py 가 AST 로 잘라 같은 표로 비교한다)"),
     "scripts/anima_extra_schedulers.py": mapped(
         "core/extra_schedulers.py:SCRIPT_NAME", "core/extra_schedulers.py:SCHEDULER_NAMES",
         note="SCRIPTS['Extra Schedulers (sam-extra)'] — 불러올 때 스케줄러 6개를 Forge 목록에 등록한다(앱 Forge 스케줄러 "
@@ -979,8 +1026,14 @@ MODULES = MappingProxyType({
                                           "Debug·Gradio 패널, 색 벡터 data/*.safetensors 셋(krea2·zimage·flux2) 포함. v0.32.0 "
                                           "패널 인자(panel_state: 67개 ARG_NAMES·숨은 state·편집기 겹치기·옛 579개 거절·붙여 "
                                           "넣기·colorcraft_schema.js 생성)"),
-    "sam3ext/speed/": deferred(HOLD, "SPEED 런타임 — ARG_NAMES·coerce_settings·infotext(forge_host), 전환 계획(schedule)·"
-                                     "스펙트럼 변환(spectral)·샘플러 래퍼(runner)"),
+    "sam3ext/speed/": mapped(
+        "core/anima_speed.py:coerce", "core/anima_speed.py:ScriptSettings", "core/anima_speed.py:PRESETS",
+        "core/anima_speed.py:parse_status", "core/anima_speed.py:UNSUPPORTED_SAMPLERS",
+        note="SPEED 런타임 — ARG_NAMES·coerce_settings·infotext·status(forge_host), 전환 계획(schedule)·스펙트럼 변환"
+             "(spectral)·샘플러 래퍼(runner). 앱은 정규화(coerce)·요약·status 문구·설정만 보고 아는 build_plan 거절"
+             "(validate)을 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현, 계획 C 단계). "
+             "tests/test_anima_speed.py 가 설치된 forge_host·schedule 과 같은 입력으로 비교한다",
+        gaps=("Comfy: 팩 1.7.0 단계 전 — 계산(speed_schedule·speed_spectral·speed_runner·speed_nodes)은 C0 에서 들어온다",)),
     "sam3ext/extra_schedulers/": mapped(
         "core/extra_schedulers.py:coerce", "core/extra_schedulers.py:SCHEDULER_LABELS",
         "core/extra_schedulers.py:README_LABELS", "core/extra_schedulers.py:ERROR_PREFIX",
@@ -1257,6 +1310,92 @@ _XSCHED_PINS = (
                        "β 기본값(ComfyUI LaplaceScheduler 와 같다)"),
 )
 
+# Anima SPEED 상수 계약 — 앱(core/anima_speed)이 같은 값을 하드코딩한다. 인자 이름·기본값·별칭·infotext 키는
+# sam3ext/speed/forge_host.py, 선택지·프리셋은 schedule.py(모두 AST 로 풀린다). δ·σ 나눔값 슬라이더는 script-info(픽스처).
+# status 문구(f-string)는 tests/test_sam_extra_notices.py 가 설치된 소스에서 찾는다. 팩 거울(<id>_comfy — 런너 시드
+# 오프셋·MAX_COARSE_FRACTION·RESPACE_PATCH 등)은 계획 C0 이 더한다.
+_SPEED_SCRIPT = "scripts/anima_speed.py"
+_SPEED_HOST = "sam3ext/speed/forge_host.py"
+_SPEED_SCHEDULE = "sam3ext/speed/schedule.py"
+_SPEED_TITLE = "Anima SPEED"
+_APP_SPEED = "core.anima_speed"
+
+
+def _speed_pin(pin_id: str, file: str, name: str, expected, app: str, meaning: str) -> dict:
+    """확장 ``file:name`` 핀 — ``app`` 은 앱 상수 이름(core.anima_speed)."""
+    return {"id": pin_id, "source": "ast", "file": file, "name": name, "expected": expected,
+            "app": f"{_APP_SPEED}:{app}", "meaning": meaning}
+
+
+def _speed_slider_pin(pin_id: str, index: int, field: str, expected, app: str, meaning: str) -> dict:
+    return {"id": pin_id, "source": "fixture", "script": _SPEED_TITLE, "index": index, "field": field,
+            "expected": expected, "app": f"{_APP_SPEED}:{app}", "meaning": meaning}
+
+
+_SPEED_PINS = (
+    _speed_pin("speed_title", _SPEED_SCRIPT, "TITLE", _SPEED_TITLE, "SCRIPT_NAME",
+               "alwayson_scripts 키 — 앱 블록·기능 스냅샷·전달 규칙·알림 표의 제목이 모두 이 상수 하나에서 나온다"),
+    _speed_pin("speed_xyz_prefix", _SPEED_SCRIPT, "XYZ_PREFIX", "[Anima SPEED]", "XYZ_PREFIX",
+               "XYZ 축 머리(P18 — 앱은 축을 쓰지 않지만 XYZ_AXES 키와 같아야 한다)"),
+    _speed_pin("speed_arg_names", _SPEED_HOST, "ARG_NAMES",
+               ("enabled", "mode", "threshold", "preset", "scales", "delta", "sigma_divisor", "manual_sigmas",
+                "adaptive", "transform", "spectrum_A", "spectrum_beta", "seed", "hires"), "ARG_NAMES",
+               "API dict 키·위치 인자 순서(뒤에만 덧붙인다) — 앱은 dict 한 개로 보내므로 이름이 바뀌면 값이 조용히 "
+               "기본값이 된다"),
+    _speed_pin("speed_defaults", _SPEED_HOST, "DEFAULTS", {
+        "enabled": False, "mode": "transition", "threshold": "neo_shift", "preset": "anima", "scales": "0.5,1.0",
+        "delta": 0.01, "sigma_divisor": 1.03, "manual_sigmas": "0.7", "adaptive": True, "transform": "dct",
+        "spectrum_A": 203.615097, "spectrum_beta": 1.915461, "seed": -1, "hires": False}, "DEFAULTS",
+        "인자 기본값(= ui() 기본값) — 앱 기본값(APP_DEFAULTS)과 빠진 dict 키가 이 값이 된다"),
+    _speed_pin("speed_aliases", _SPEED_HOST, "ARG_ALIASES",
+               {"divisor": "sigma_divisor", "manual": "manual_sigmas", "A": "spectrum_A", "beta": "spectrum_beta"},
+               "ARG_ALIASES", "dict 인자의 별칭 = infotext 요약 'Anima SPEED' 의 키 — 붙여 넣기·parse_script_block 이 읽는다"),
+    _speed_pin("speed_infotext_key", _SPEED_HOST, "KEY", "Anima SPEED", "INFOTEXT_KEY",
+               "infotext 요약 키 — 결과 알림(CODE_SPEED_NOT_APPLIED: 보냈는데 없음)·붙여 넣기가 읽는다"),
+    _speed_pin("speed_status_key", _SPEED_HOST, "STATUS_KEY", "Anima SPEED status", "STATUS_KEY",
+               "패스마다 status('base: … | hires: …') — 결과 알림(parse_status)이 읽는다"),
+    _speed_pin("speed_infotext_img2img_rescale", _SPEED_HOST, "INFOTEXT_IMG2IMG_RESCALE", "Anima SPEED img2img rescale",
+               "INFOTEXT_IMG2IMG_RESCALE", "init latent 패스의 rescale 기록 — PNG Info 확장 그룹(_EXTENSION_MARKERS)"),
+    _speed_pin("speed_opt_log", _SPEED_HOST, "OPT_LOG", "sam3_speed_log", "OPT_LOG",
+               "콘솔 로그 옵션(앱은 쓰지 않는다 — OPTIONS ignored)"),
+    _speed_pin("speed_unsupported_samplers", _SPEED_HOST, "UNSUPPORTED_SAMPLERS", {
+        "restart_sampler": "Restart re-plans its own schedule", "sample_unipc": "UniPC is not segment-safe",
+        "sample_dpm_fast": "DPM fast has no sigma schedule", "sample_dpm_adaptive": "DPM adaptive has no sigma schedule"},
+        "UNSUPPORTED_SAMPLERS", "붙이지 않는 샘플러 함수와 status 이유 — 결과 알림의 '건너뜀' 설명이 이 문구를 찾는다"),
+    _speed_pin("speed_modes", _SPEED_SCHEDULE, "MODES", ("transition", "respace"), "MODES",
+               "mode 선택지 — 그 밖의 값은 오류(transition 으로 읽고 invalid settings)"),
+    _speed_pin("speed_thresholds", _SPEED_SCHEDULE, "THRESHOLDS", ("neo_shift", "delta_optimal", "manual"),
+               "THRESHOLDS", "전환 σ 선택지"),
+    _speed_pin("speed_transforms", _SPEED_SCHEDULE, "TRANSFORMS", ("dct", "dwt", "fft"), "TRANSFORMS", "변환 선택지"),
+    _speed_pin("speed_preset_names", _SPEED_SCHEDULE, "PRESET_NAMES",
+               ("anima", "flux", "flux2", "krea-2", "krea-2-raw", "z-image", "wan21", "custom"), "PRESET_NAMES",
+               "스펙트럼 프리셋 드롭다운 순서"),
+    _speed_pin("speed_presets", _SPEED_SCHEDULE, "PRESETS", {
+        "flux": {"A": 1963.48906, "beta": 1.915461, "ref_latent": 128},
+        "wan21": {"A": 219.484718, "beta": 2.422687, "ref_latent": 128, "ref_shift": 8.0},
+        "krea-2": {"A": 2357.960557, "beta": 2.422687, "ref_latent": 128, "ref_shift": 3.158193},
+        "krea-2-raw": {"A": 887.402358, "beta": 2.422687, "ref_latent": 128, "ref_shift": 3.158193},
+        "z-image": {"A": 877.001476, "beta": 1.915461, "ref_latent": 128, "ref_shift": 3.0},
+        "flux2": {"A": 520.495848, "beta": 1.915461, "ref_latent": 64},
+        "anima": {"A": 8664.998524, "beta": 2.422687, "ref_latent": 128, "ref_shift": 3.0},
+        "custom": None}, "PRESETS",
+        "프리셋 A·β·기준 latent·shift — 앱 validate(custom A ≤ 0)·preset_params 가 쓴다(팩 거울은 C0)"),
+    _speed_pin("speed_reference_latent", _SPEED_SCHEDULE, "REFERENCE_LATENT", 128, "REFERENCE_LATENT",
+               "1024 px 기준 latent 짧은 변(적응형 δ)"),
+    _speed_pin("speed_custom_default_a", _SPEED_SCHEDULE, "CUSTOM_DEFAULT_A", 203.615097, "CUSTOM_DEFAULT_A",
+               "custom 프리셋 A 기본값(공식 Flux 맞춤값)"),
+    _speed_pin("speed_custom_default_beta", _SPEED_SCHEDULE, "CUSTOM_DEFAULT_BETA", 1.915461, "CUSTOM_DEFAULT_BETA",
+               "custom 프리셋 β 기본값"),
+    # script-info(픽스처) — 카드 입력 범위·step 이 Forge UI 와 같다(API 유효 범위는 더 넓다 — coerce 규칙)
+    _speed_slider_pin("speed_ui_delta_min", 5, "minimum", 0.0001, "DELTA_MIN", "δ 슬라이더 하한"),
+    _speed_slider_pin("speed_ui_delta_max", 5, "maximum", 0.5, "DELTA_MAX", "δ 슬라이더 상한"),
+    _speed_slider_pin("speed_ui_delta_step", 5, "step", 0.0001, "DELTA_STEP",
+                      "δ 슬라이더 step — 카드(frontend/src/utils/animaSpeed.ts RANGES)도 같다"),
+    _speed_slider_pin("speed_ui_divisor_min", 6, "minimum", 0.5, "DIVISOR_MIN", "σ 나눔값 슬라이더 하한"),
+    _speed_slider_pin("speed_ui_divisor_max", 6, "maximum", 2.0, "DIVISOR_MAX", "σ 나눔값 슬라이더 상한"),
+    _speed_slider_pin("speed_ui_divisor_step", 6, "step", 0.01, "DIVISOR_STEP", "σ 나눔값 슬라이더 step"),
+)
+
 SEMANTIC_PINS = (
     {"id": "dd_amount_max", "source": "fixture", "script": "Anima Detail Daemon", "index": 2,
      "field": "maximum", "expected": 5.0,
@@ -1475,6 +1614,8 @@ SEMANTIC_PINS = (
     *_DEGRID_PINS,
     # Extra Schedulers — 위 _XSCHED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
     *_XSCHED_PINS,
+    # Anima SPEED — 위 _SPEED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    *_SPEED_PINS,
 )
 
 # ── ui() 컴포넌트에서 AST 로 못 읽는 칸 (script, index) → 필드와 사유 ─────────────────────

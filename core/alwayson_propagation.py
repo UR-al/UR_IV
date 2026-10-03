@@ -1,5 +1,5 @@
 # core/alwayson_propagation.py
-"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid·Extra Schedulers)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
+"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid·Extra Schedulers·Anima SPEED)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
 
 메인 생성은 T2I 패널의 샘플링 블록을 ``alwayson_scripts`` 로 보낸다. 보조 패스(Refine·단독/배치 SAM3·단독 ADetailer·
 손 재구성)도 같은 블록을 받아야 Forge 생성 안의 SAM3 패스·🎯 퀵 버튼과 결과가 같다(P7). 이 모듈은
@@ -27,8 +27,8 @@ Anima38 블록을 422 로 거절했을 때 알림 수준을 정한다: 앱 기�
 실제 모델을 모르거나 다르면 뺀다(정보 로그).
 
 **메인 요청 전용 블록**(``Rule.passes`` 가 빈 행 → 메인 요청만): 최종 이미지 블록(VAE DeGrid — 확장이 이미지마다 저장
-직전에 한 번 도는 후처리 ``postprocess_image_after_composite``)과, 메인 생성의 샘플링에만 거는 블록(Colorcraft·Anima
-SPEED — 기능 작업이 행을 더한다)이다. 보조 패스는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸리거나 메인
+직전에 한 번 도는 후처리 ``postprocess_image_after_composite``)과, 메인 생성의 샘플링에만 거는 블록(Anima SPEED 의
+샘플러 래퍼 — Colorcraft 는 기능 작업이 행을 더한다)이다. 보조 패스는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸리거나 메인
 생성과 다른 샘플링이 된다 — ``blocks_for`` 는 어느 보조 패스에도 주지 않는다. 그래도 PROPAGATION 행이라 메인 게이트·동결
 재게이트·봉투(메인 체인과 같은 모양, T15)는 다른 샘플링 블록과 같은 규칙을 탄다. ``main_only_titles`` 가 이 제목들을
 돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때 — 봉투 없는 API 호출). 옛 이름 ``final_image_titles`` 는 별칭이다.
@@ -47,7 +47,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
 
-from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, extra_schedulers, sam3_args, vae_degrid
+from core import (anima38, anima_guidance, anima_model_kind, anima_speed, dora_infer_mode, extra_schedulers, sam3_args,
+                  vae_degrid)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ TITLE_NEGPIP = "NegPiP"
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME   # 확장 scripts/dora_infer_mode.py DORA_INFER_NAME
 TITLE_DEGRID = vae_degrid.SCRIPT_NAME      # 확장 sam3ext/ui_vae_degrid.py TITLE (앱 노출)
 TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME   # 확장 sam3ext/ui_extra_schedulers.py TITLE (앱 노출)
+TITLE_SPEED = anima_speed.SCRIPT_NAME      # 확장 scripts/anima_speed.py TITLE (앱 노출)
 
 _AUX_LABELS = {AUX_REFINE: "Refine", AUX_SAM3: "SAM3", AUX_ADETAILER: "ADetailer", AUX_HAND: "손 재구성"}
 
@@ -202,6 +204,14 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
                "쓰이므로 늘 보내도 결과가 같다. 스냅샷이 확인하면 값이 기본값이어도 앱이 스스로 싣는 블록이라(core/"
                "extra_schedulers.plan, 계획 X5) 모르는 Forge 의 422 는 빼고 한 번 더(main_retry). 앱 기본값 블록은 확인 "
                "전에는 보내지 않는다(Forge 도 블록 없이 같은 기본값으로 돈다)"),
+    TITLE_SPEED: Rule(
+        passes=frozenset(), backends=_ALL_BACKENDS, feature="speed",
+        when_unknown=_unknown(user=SEND, app_default=SKIP),   # main_retry 기본 False — Rule 문서의 규칙(사용자가 켠 블록)
+        reason="샘플러 래퍼(process_before_every_sampling 이 그 패스의 p.sampler.func 를 감싼다) — 메인 요청의 base·img2img·"
+               "(켠 경우) Hires 패스에만(계획 D4). 보조 패스(Refine·단독/배치 SAM3·ADetailer·손 재구성)는 마스크라 늘 건너뛰거나"
+               "(runtime_guard) σ 시작이 전환 σ 보다 낮아 저해상도 스텝이 없다(build_plan) — 보내도 status 만 남거나 메인과 "
+               "다른 샘플링이 된다. 앱 기본값이 꺼짐이라 켜진 블록은 사용자 값 — 모를 때는 보내고, 스크립트가 없으면 "
+               "가이던스처럼 422 를 설명한다(main_retry 없음 — Rule 문서의 규칙)"),
 })
 
 NEVER: Mapping[str, str] = MappingProxyType({
@@ -212,7 +222,6 @@ NEVER: Mapping[str, str] = MappingProxyType({
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
     # 2026-10-03 sam-extra 미커밋 작업 트리(CHANGELOG v0.31.0) — 넷 다 HOLD(core/sam_extra_contract SCRIPTS)
     "Colorcraft (sam-extra)": "HOLD — latent 색 보정(기본 끔) — 앱이 만들지 않는다",
-    "Anima SPEED": "HOLD — 실험 기능(저해상도 선행 샘플링, 기본 끔) — 앱이 만들지 않는다",
     "Extra Samplers": "HOLD — ER SDE 값 칸 — 앱이 만들지 않는다(샘플러 이름은 Forge 목록으로 고른다)",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
@@ -503,7 +512,7 @@ __all__ = [
     "BACKEND_WEBUI", "ENVELOPE_VERSION", "GateResult", "NEVER", "PROPAGATION", "PROVENANCES",
     "PROVENANCE_APP_DEFAULT", "PROVENANCE_KEY", "PROVENANCE_USER", "Rule", "SEND", "SETTINGS_KEY", "SKIP", "TARGETS",
     "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_DEGRID", "TITLE_DORA", "TITLE_EXTRA_SCHEDULERS", "TITLE_NEGPIP",
-    "apply", "aux_label",
+    "TITLE_SPEED", "apply", "aux_label",
     "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance",
     "final_image_titles", "gate",
     "gate_notices", "has_model_bound", "is_envelope", "main_only_titles", "main_retry_titles", "mark_provenance", "provenance_of", "script_available",

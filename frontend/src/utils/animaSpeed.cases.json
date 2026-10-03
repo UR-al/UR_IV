@@ -1,0 +1,1678 @@
+{
+  "//": "Anima SPEED 골든 사례 — core/anima_speed.py 가 만든 기대값(scratchpad impl/sp5/gen_cases.py). tests/test_anima_speed_card_mirror.py(파이썬)와 utils/animaSpeed.test.ts(TS)가 같은 파일을 읽는다: 카드 값 정규화(parse_settings ↔ parseSettings)와 설정 검사(validate — 오류 코드 순서까지). 두 구현이 갈라지면 둘 중 한쪽 테스트가 실패한다.",
+  "settings": [
+    {
+      "name": "app defaults",
+      "widgets": {},
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "enabled defaults",
+      "widgets": {
+        "enabled": "true"
+      },
+      "settings": {
+        "enabled": true,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "three-stage ladder",
+      "widgets": {
+        "scales": "0.25,0.5,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.25,0.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "fractions and semicolon",
+      "widgets": {
+        "scales": "1/4, 1/2; 1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1/4, 1/2; 1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "single 1.0 is a skip, not an error",
+      "widgets": {
+        "scales": "1.0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "does not end at 1",
+      "widgets": {
+        "scales": "0.5"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "not increasing",
+      "widgets": {
+        "scales": "0.5,0.5,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,0.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "zero scale",
+      "widgets": {
+        "scales": "0,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "scale above 1",
+      "widgets": {
+        "scales": "1.5,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "empty scales",
+      "widgets": {
+        "scales": ""
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "blank scales",
+      "widgets": {
+        "scales": " , ; "
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": ", ;",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "word in scales",
+      "widgets": {
+        "scales": "x,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "x,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "a/0 in scales is a script error",
+      "widgets": {
+        "scales": "1/0,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1/0,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "script_error"
+      ]
+    },
+    {
+      "name": "0/0 in scales is a script error",
+      "widgets": {
+        "scales": "0/0,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0/0,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "script_error"
+      ]
+    },
+    {
+      "name": "a/-0 in scales is a script error",
+      "widgets": {
+        "scales": "1/-0.0,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1/-0.0,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "script_error"
+      ]
+    },
+    {
+      "name": "a/0 in manual even when threshold is not manual",
+      "widgets": {
+        "manual_sigmas": "0.7/0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7/0",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "script_error"
+      ]
+    },
+    {
+      "name": "bad scales then a/0 in manual",
+      "widgets": {
+        "scales": "x,1",
+        "manual_sigmas": "1/0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "x,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "1/0",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "script_error"
+      ]
+    },
+    {
+      "name": "word before a/0 in the same field",
+      "widgets": {
+        "scales": "x,1/0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "x,1/0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "a/0 before a word in the same field",
+      "widgets": {
+        "scales": "1/0,x"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1/0,x",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "script_error"
+      ]
+    },
+    {
+      "name": "inf in scales",
+      "widgets": {
+        "scales": "0.5,inf"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,inf",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "nan in scales",
+      "widgets": {
+        "scales": "nan,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "nan,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "huge fraction overflows to inf",
+      "widgets": {
+        "scales": "1e308/1e-308,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1e308/1e-308,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "python float underscores",
+      "widgets": {
+        "scales": "1_0/20, 1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1_0/20, 1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "exponent with underscore",
+      "widgets": {
+        "scales": "5e-0_1,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "5e-0_1,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "hex is not a python float",
+      "widgets": {
+        "scales": "0x1,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0x1,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "leading dot and trailing dot",
+      "widgets": {
+        "scales": " .5 , 1. "
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": ".5 , 1.",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "double slash",
+      "widgets": {
+        "scales": "1/2/2,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1/2/2,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales"
+      ]
+    },
+    {
+      "name": "signs",
+      "widgets": {
+        "scales": "+0.5,+1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "+0.5,+1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "manual 0.7",
+      "widgets": {
+        "threshold": "manual",
+        "manual_sigmas": "0.7"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "manual increasing under transition",
+      "widgets": {
+        "threshold": "manual",
+        "manual_sigmas": "0.6,0.7"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.6,0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "manual"
+      ]
+    },
+    {
+      "name": "manual two for one transition (respace)",
+      "widgets": {
+        "threshold": "manual",
+        "mode": "respace",
+        "manual_sigmas": "0.6,0.7"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "respace",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.6,0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "manual_count"
+      ]
+    },
+    {
+      "name": "manual above 1",
+      "widgets": {
+        "threshold": "manual",
+        "manual_sigmas": "1.2"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "1.2",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "manual"
+      ]
+    },
+    {
+      "name": "manual empty",
+      "widgets": {
+        "threshold": "manual",
+        "manual_sigmas": ""
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "manual"
+      ]
+    },
+    {
+      "name": "manual one for two transitions (transition)",
+      "widgets": {
+        "threshold": "manual",
+        "scales": "0.25,0.5,1",
+        "manual_sigmas": "0.7"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.25,0.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "manual_count"
+      ]
+    },
+    {
+      "name": "manual one for two transitions (respace repeats)",
+      "widgets": {
+        "threshold": "manual",
+        "mode": "respace",
+        "scales": "0.25,0.5,1",
+        "manual_sigmas": "0.7"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "respace",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.25,0.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "manual two decreasing",
+      "widgets": {
+        "threshold": "manual",
+        "scales": "0.25,0.5,1",
+        "manual_sigmas": "0.8,0.6"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.25,0.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.8,0.6",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "manual increasing under respace",
+      "widgets": {
+        "threshold": "manual",
+        "mode": "RESPACE",
+        "scales": "0.25,0.5,1",
+        "manual_sigmas": "0.6,0.7"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "respace",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.25,0.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.6,0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "invalid manual ignored without manual threshold",
+      "widgets": {
+        "manual_sigmas": "abc"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "abc",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "delta 0",
+      "widgets": {
+        "delta": "0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.0,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "delta"
+      ]
+    },
+    {
+      "name": "delta 1",
+      "widgets": {
+        "delta": "1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 1.0,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "delta"
+      ]
+    },
+    {
+      "name": "delta negative",
+      "widgets": {
+        "delta": "-0.1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": -0.1,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "delta"
+      ]
+    },
+    {
+      "name": "delta unreadable keeps the default",
+      "widgets": {
+        "delta": "abc"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "delta ignored under manual",
+      "widgets": {
+        "threshold": "manual",
+        "delta": "0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.0,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "divisor 0 under neo_shift",
+      "widgets": {
+        "sigma_divisor": "0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 0.0,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "divisor"
+      ]
+    },
+    {
+      "name": "divisor 0 under delta_optimal (build_plan)",
+      "widgets": {
+        "threshold": "delta_optimal",
+        "sigma_divisor": "0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "delta_optimal",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 0.0,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "divisor"
+      ]
+    },
+    {
+      "name": "divisor 0 under manual",
+      "widgets": {
+        "threshold": "manual",
+        "sigma_divisor": "0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 0.0,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "delta and divisor both",
+      "widgets": {
+        "delta": "0",
+        "sigma_divisor": "-1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.0,
+        "sigma_divisor": -1.0,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "delta",
+        "divisor"
+      ]
+    },
+    {
+      "name": "custom A negative",
+      "widgets": {
+        "preset": "custom",
+        "spectrum_A": "-1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "custom",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": -1.0,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "spectrum_A"
+      ]
+    },
+    {
+      "name": "custom A zero",
+      "widgets": {
+        "preset": "custom",
+        "spectrum_A": "0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "custom",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 0.0,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "spectrum_A"
+      ]
+    },
+    {
+      "name": "preset A wins over the card A",
+      "widgets": {
+        "preset": "anima",
+        "spectrum_A": "-1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": -1.0,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "custom A negative under manual",
+      "widgets": {
+        "preset": "custom",
+        "spectrum_A": "-1",
+        "threshold": "manual"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "custom",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": -1.0,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "custom beta unreadable keeps the default",
+      "widgets": {
+        "preset": "custom",
+        "spectrum_beta": "inf"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "custom",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "dwt dyadic",
+      "widgets": {
+        "transform": "dwt",
+        "scales": "0.25,0.5,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.25,0.5,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dwt",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "dwt not dyadic",
+      "widgets": {
+        "transform": "dwt",
+        "scales": "0.3,1"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.3,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dwt",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "dwt_ratio"
+      ]
+    },
+    {
+      "name": "dwt single stage",
+      "widgets": {
+        "transform": "dwt",
+        "scales": "1.0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dwt",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "dwt after a plan error",
+      "widgets": {
+        "transform": "dwt",
+        "scales": "0.3,1",
+        "preset": "custom",
+        "spectrum_A": "-2"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "custom",
+        "scales": "0.3,1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dwt",
+        "spectrum_A": -2.0,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "spectrum_A"
+      ]
+    },
+    {
+      "name": "scales and delta order",
+      "widgets": {
+        "scales": "0.5",
+        "delta": "0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5",
+        "delta": 0.0,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": [
+        "scales",
+        "delta"
+      ]
+    },
+    {
+      "name": "unknown choices keep the defaults",
+      "widgets": {
+        "threshold": "bogus",
+        "mode": "fast",
+        "transform": "DCT",
+        "preset": "Krea-2"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "krea-2",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "booleans and blanks",
+      "widgets": {
+        "enabled": "1",
+        "adaptive": "",
+        "hires": "yes",
+        "apply_img2img": "0"
+      },
+      "settings": {
+        "enabled": true,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": true,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "whitespace boolean is false",
+      "widgets": {
+        "enabled": "  "
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "seed negative is -1",
+      "widgets": {
+        "seed": "-7"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "seed fraction truncates",
+      "widgets": {
+        "seed": "3.9"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": 3,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "seed unreadable keeps -1",
+      "widgets": {
+        "seed": "x"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "numbers with spaces and underscores",
+      "widgets": {
+        "delta": " 0.0_2 ",
+        "sigma_divisor": "1_0",
+        "spectrum_A": "1e3"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.02,
+        "sigma_divisor": 10.0,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 1000.0,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    },
+    {
+      "name": "text fields keep what was typed (trimmed)",
+      "widgets": {
+        "scales": "  0.5 , 1  ",
+        "manual_sigmas": " 0.7 "
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5 , 1",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "errors": []
+    }
+  ]
+}

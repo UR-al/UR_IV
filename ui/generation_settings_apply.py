@@ -351,6 +351,10 @@ def apply_generation_settings(host, settings: Mapping[str, Any], *, only_present
     from ui.extra_schedulers_ui import apply_saved_settings as _apply_extra_schedulers_settings
     _apply_extra_schedulers_settings(host, settings, only_present=only_present)
 
+    # Anima SPEED — 같은 규칙(키가 없으면 프리셋은 그대로, 옛 설정은 앱 기본값 꺼짐 — 동작이 같아 안내 없음)
+    from ui.anima_speed_ui import apply_saved_settings as _apply_speed_settings
+    _apply_speed_settings(host, settings, only_present=only_present)
+
     if unavailable:
         warnings.append(unavailable_message(unavailable))
     return warnings

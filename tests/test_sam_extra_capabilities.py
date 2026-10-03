@@ -907,6 +907,18 @@ class FrontendMirrorTests(unittest.TestCase):
         for name in ts:
             self.assertIn(name, caps_mod.FEATURE_FLAGS)
 
+    def test_speed_enable_widget_is_the_card_switch(self):
+        """SPEED 의 켜짐 위젯 = 카드 스위치(파이썬 core/anima_speed.widget_id('enabled'), 계획 A-SP6) — 켠 채 연결된 Forge 에
+        SPEED 가 없으면 경고 토스트(missingEnabledFeatures)."""
+        from core import anima_speed
+        path = os.path.join(ROOT, "frontend", "src", "utils", "samExtraCapabilities.ts")
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        gates = re.search(r"export const FEATURE_ENABLE_WIDGETS[^{]*\{(.*?)\n\}", text, re.S).group(1)
+        keys = re.search(r"^\s*speed:\s*\[(.*?)\]", gates, re.S | re.M).group(1)
+        self.assertEqual(re.findall(r"'(\w+)'", keys), [anima_speed.widget_id("enabled")])
+        self.assertIn("speed", caps_mod.FEATURE_FLAGS)
+
 
 class ActionsMixinTests(unittest.TestCase):
     """연결 훅·Vue 액션 → 워커 → samExtraCapabilities 이벤트."""

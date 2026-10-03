@@ -28,6 +28,9 @@
                                             없음(다른 확장의 같은 이름 스케줄러). ``xsched_invalid_text_notice`` 는 쓸 수 없는
                                             custom 식·목록(생성 전 — 계산기는 계획 C7 이 잇는다), ``explain_scheduler_error``
                                             는 확장 스케줄러 오류('Extra Schedulers: …') 원문에 한국어 머리를 붙인다
+- Anima SPEED                               결과: 'Anima SPEED status' 의 패스마다 — 설정 오류·실패 뒤 순정 재샘플링(경고),
+                                            건너뜀(정보, 이유 한 번), 보냈는데 'Anima SPEED' 기록 없음(옛 sam-extra·스크립트
+                                            오류). ``speed_static_skip_notice`` 는 생성 전에 앱이 아는 건너뜀(정보)
 - ``anima38_*_notice``                      Anima 3.8B — 첫 로드 앱 기본값(부정 커넥터 켬)·Comfy v1 자동 켜짐 폐지 안내(P9).
                                             'off: install failed (RuntimeError)' 힌트는 결과 모델 종류(비 Anima)를 먼저 본다
 - ``app_block_retried_notice``/``block_retried_notice``  메인 생성 재시도(DoRA·Anima38 422 — 앱 기본값이면 정보, 사용자
@@ -59,7 +62,8 @@ from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 from urllib.parse import urlsplit
 
-from core import anima38, anima_guidance, anima_model_kind, dora_infer_mode, extra_schedulers, sam3_args, vae_degrid
+from core import (anima38, anima_guidance, anima_model_kind, anima_speed, dora_infer_mode, extra_schedulers, sam3_args,
+                  vae_degrid)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +125,11 @@ CODE_DEGRID_COMFY_UNAVAILABLE = "degrid_comfy_unavailable"   # ComfyUI: 노드(�
 # Extra Schedulers(core/extra_schedulers)
 CODE_XSCHED_NOT_APPLIED = "xsched_not_applied"        # 결과: Laplace·custom 으로 돌았는데 값 기록이 없음(다른 확장의 스케줄러)
 CODE_XSCHED_INVALID_TEXT = "xsched_invalid_text"      # 생성 전: custom 식·시그마 목록을 쓸 수 없다(보내기는 한다 — 경고)
+# Anima SPEED(core/anima_speed) — 결과 'Anima SPEED status' 의 패스마다
+CODE_SPEED_INVALID = "speed_invalid"                  # 결과: 'invalid settings - …' — 그 패스는 SPEED 없이(경고)
+CODE_SPEED_FALLBACK = "speed_fallback"                # 결과: 'fell back to plain sampling after …' — 실패 뒤 순정 재샘플링(경고)
+CODE_SPEED_SKIPPED = "speed_skipped"                  # 결과·생성 전: 'skipped - <이유>'(정보 — 생성마다 이유 한 번)
+CODE_SPEED_NOT_APPLIED = "speed_not_applied"          # 결과: 보냈는데 'Anima SPEED' 가 없음(옛 sam-extra·스크립트 오류)
 # 메인 생성 재시도·Forge 옵션 덮어쓰기(P10, core/forge_override_settings·core/forge_optional_parts)
 CODE_APP_BLOCK_RETRIED = "app_block_retried"          # 메인 생성: 앱이 넣은 블록(DoRA·Anima38)을 Forge 가 422 로 거절 → 빼고 다시
 CODE_BLOCK_RETRIED = "block_retried"                  # 메인 생성: 사용자 값(또는 출처 모름) 블록을 422 로 거절 → 빼고 다시(경고)
@@ -180,6 +189,11 @@ NOTICE_MIN_TTL_S = {
     # Extra Schedulers 도 설정·설치가 그대로면 요청마다 같다
     CODE_XSCHED_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_XSCHED_INVALID_TEXT: PRE_GENERATION_NOTICE_TTL_S,
+    # Anima SPEED 도 설정·모델이 그대로면 요청마다 같다(배치 100장이 30초마다 다시 띄우지 않게)
+    CODE_SPEED_INVALID: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_SPEED_FALLBACK: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_SPEED_SKIPPED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_SPEED_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
 }
 # 띄울 때 GUI 가 기능 스냅샷을 다시 받아야 하는 알림(연결 때 받은 스냅샷이 틀렸다는 뜻) —
 # ui/sam_extra_notices_ui.show_notices 가 _refresh_sam_extra_capabilities(force=True) 를 부른다.
@@ -190,6 +204,7 @@ REFRESH_CAPABILITIES_CODES = frozenset({CODE_PROPAGATION_RETRIED, CODE_APP_BLOCK
 _TITLE_DORA = dora_infer_mode.SCRIPT_NAME
 _TITLE_DEGRID = vae_degrid.SCRIPT_NAME
 _TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME
+_TITLE_SPEED = anima_speed.SCRIPT_NAME
 _TITLE_VAE2X = "Anima VAE 2x (spacepxl decoder)"
 SAM_EXTRA_FEATURES = {
     sam3_args.SCRIPT_SAM3.lower(): ("sam3", "SAM3 Mask"),
@@ -201,6 +216,7 @@ SAM_EXTRA_FEATURES = {
     _TITLE_VAE2X.lower(): ("vae2x", "VAE 2x"),
     _TITLE_DEGRID.lower(): ("degrid", "VAE DeGrid"),
     _TITLE_EXTRA_SCHEDULERS.lower(): ("extra_schedulers", "Extra Schedulers 값(custom 식·Laplace μ/β)"),
+    _TITLE_SPEED.lower(): ("speed", _TITLE_SPEED),
 }
 # 기능 스냅샷(SAM_EXTRA_FEATURES) 밖 제목: 소문자 제목 → (기능, 제공 확장 이름). NegPiP 는 2026-09-30 부터 sam-extra 에
 # 내장(sd-forge-negpip 편입)됐지만 스냅샷 기능이 아니므로 여기 둔다.
@@ -411,6 +427,7 @@ class RequestedFeatures:
     dora: Optional[dora_infer_mode.DoraSettings] = None   # 블록을 보냈을 때만(확장이 읽는 규칙 — parse_script_block)
     degrid: Optional[vae_degrid.DegridSettings] = None     # 블록을 보냈을 때만(확장 coerce_args 규칙)
     extra_schedulers: Optional[extra_schedulers.ExtraSchedulerSettings] = None   # 블록을 보냈을 때만(coerce_args 규칙)
+    speed: Optional[anima_speed.ScriptSettings] = None     # 블록을 보냈을 때만(확장 coerce_settings 규칙 — a/0 은 error)
     cfg_scale: Optional[float] = None
     hires: bool = False
     hires_cfg: Optional[float] = None         # 요청에 hr_cfg 가 있을 때만
@@ -521,6 +538,7 @@ def requested_features(payload: Any, *, live_pag_argc: Optional[int] = None) -> 
         dora=dora_infer_mode.parse_script_block(_script_block(payload, dora_infer_mode.SCRIPT_NAME)),
         degrid=vae_degrid.parse_script_block(_script_block(payload, vae_degrid.SCRIPT_NAME)),
         extra_schedulers=extra_schedulers.parse_script_block(_script_block(payload, extra_schedulers.SCRIPT_NAME)),
+        speed=anima_speed.parse_script_block(_script_block(payload, anima_speed.SCRIPT_NAME)),
         cfg_scale=_number(payload.get("cfg_scale")),
         hires=hires, hires_cfg=_number(payload.get("hr_cfg")) if hires and "hr_cfg" in payload else None,
         # 키가 있으면 img2img 요청이다 — 재인코딩하는 I2I 는 워커가 채울 때까지 init_images=[] 로 둔다
@@ -980,6 +998,139 @@ def explain_scheduler_error(text: Any) -> Optional[str]:
     return f"{XSCHED_ERROR_LEAD}: {_short(detail, 300)}" if detail else XSCHED_ERROR_LEAD
 
 
+# ── Anima SPEED ─────────────────────────────────────────────────────────────────
+# 확장이 SPEED 를 건너뛴 이유(영어 원문 — sam3ext/speed/forge_host.py runtime_guard·attach·UNSUPPORTED_SAMPLERS,
+# schedule.build_plan 의 PlanError(skip)) → (억제 키, 한국어 설명). 앞에서부터 처음 맞는 것. 없으면 원문(숫자는 '#').
+_SPEED_SKIP_HINTS = (
+    (("not a flow-matching model",), "not_flow",
+     "flow 모델이 아닙니다(SDXL·SD1.x 같은 eps/v 모델에는 걸리지 않습니다)"),
+    (("is not a flow schedule",), "sigma_max", "σ 최댓값이 1 보다 커 flow 스케줄이 아닙니다"),
+    (("inpainting / mask",), "mask", "인페인트·마스크는 원래 크기 격자에 묶여 있습니다"),
+    (("reference latents are present",), "reference",
+     "레퍼런스 latent 가 원래 크기로 붙어 있습니다(Anima 레퍼런스·편집 모델)"),
+    (("concat_latent",), "concat", "Wan 2.2 I2V 조건(concat_latent)이 원래 크기로 붙어 있습니다"),
+    (("lq_latent",), "pid", "PiD 저화질 latent 조건이 원래 크기로 붙어 있습니다"),
+    (("ControlNet-LLLite is on",), "lllite", "ControlNet-LLLite 힌트가 원래 크기 격자에 묶여 있습니다"),
+    (("ControlNet is on",), "controlnet", "ControlNet 힌트가 원래 크기 격자에 묶여 있습니다"),
+    (("Spectrum Integrated is on",), "spectrum", "Forge Spectrum Integrated 가 켜져 있으면 SPEED 가 비킵니다"),
+    (("no coarse steps",), "no_coarse_steps",
+     "이 패스는 전환 σ 아래에서 시작해 저해상도 스텝이 없습니다(denoise 가 낮은 img2img·Hires)"),
+    (("is never reached in this schedule",), "never_reached",
+     "이 스케줄은 전환 σ 에 닿지 않습니다(스텝 수·스케줄러·전환 σ 를 바꿔 보세요)"),
+    (("scales has no coarse stage",), "no_coarse_stage", "해상도 비율이 1.0 하나라 저해상도 구간이 없습니다"),
+    ((*anima_speed.UNSUPPORTED_SAMPLERS.values(), "k-diffusion sampler", "no sigma schedule"), "sampler",
+     "이 샘플러에는 SPEED 를 걸 수 없습니다(Restart·UniPC·DPM fast·DPM adaptive·DDIM/PLMS 계열)"),
+    (("unsupported latent shape",), "latent_shape", "latent 모양이 4-D·5-D 가 아닙니다"),
+)
+_SPEED_PENDING_HINT = ("pending", "샘플러가 SPEED 래퍼를 부르지 않았습니다(Forge 콘솔의 '[AnimaSPEED]' 줄을 확인하세요)")
+_SPEED_PASS_NAMES = {anima_speed.PASS_BASE: "기본", anima_speed.PASS_IMG2IMG: "img2img", anima_speed.PASS_HIRES: "Hires"}
+
+
+def speed_skip_hint(reason: Any) -> tuple:
+    """SPEED 건너뜀 이유(영어 원문) → ``(억제 키, 한국어 설명)``. 모르는 이유는 ``(숫자를 '#' 로 줄인 원문, '')``."""
+    text = " ".join(str(reason or "").split())
+    for needles, key, hint in _SPEED_SKIP_HINTS:
+        if any(needle in text for needle in needles):
+            return key, hint
+    return re.sub(r"\d+(?:\.\d+)?", "#", _short(text, 120)), ""
+
+
+def _speed_passes(labels: Iterable[str]) -> str:
+    return "·".join(_SPEED_PASS_NAMES.get(label, label) for label in dict.fromkeys(labels))
+
+
+def _speed_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
+    """보낸 Anima SPEED 블록의 결과. 확장은 실패해도 생성을 멈추지 않고 'Anima SPEED status' 에 패스마다
+    (``core/anima_speed.parse_status``) 이유를 남긴다: 설정 오류(``invalid settings``)·실패 뒤 순정 재샘플링
+    (``fell back to plain sampling``)은 경고, 건너뜀(``skipped``·래퍼가 불리지 않은 ``pending``)은 생성마다 이유를 한 번
+    정보로. 적용(``applied``)·Hires 끔(``not applied``)·중단은 말하지 않는다. 'Anima SPEED' 기록이 한 장에도 없으면 스크립트가
+    돌지 않았다(옛 sam-extra — 0.31.0 전, 또는 해상도 비율·수동 σ 의 a/0 스크립트 오류). 블록을 보내지 않았거나(꺼짐·게이트·
+    Comfy) 읽을 결과가 없으면 말하지 않는다."""
+    sent = request.speed
+    if sent is None or not sent.enabled or not images:
+        return []
+    sp = anima_speed
+    if not any(sp.INFOTEXT_KEY in params for params in images):
+        if str(sent.error or "").startswith(sp.SCRIPT_ERROR_PREFIX):
+            return [Notice(
+                CODE_SPEED_NOT_APPLIED, LEVEL_WARNING,
+                "Anima SPEED 의 해상도 비율·수동 σ 칸에 0으로 나누는 분수(a/0)가 있어 Forge 의 SPEED 스크립트가 오류로 "
+                "멈췄습니다 — SPEED 없이 생성됐습니다. 파라미터 카드의 SPEED 칸을 고치세요.",
+                feature="speed", detail=sp.ERR_SCRIPT)]
+        return [Notice(
+            CODE_SPEED_NOT_APPLIED, LEVEL_WARNING,
+            f"Anima SPEED 를 켰지만 결과에 '{sp.INFOTEXT_KEY}' 기록이 없습니다 — 연결된 sam-extra 가 SPEED 를 모르는 옛 "
+            "버전(0.31.0 전)이거나 스크립트가 오류로 멈췄습니다. sam-extra 를 업데이트하고 Forge 콘솔의 '[AnimaSPEED]' "
+            "줄을 확인하세요.",
+            feature="speed", detail=sp.INFOTEXT_KEY)]
+    total = len(images)
+    groups: dict = {}      # (code, 억제 키) → {"labels": [...], "images": n, "text": 원문, "hint": 설명}
+    for params in images:
+        seen: set = set()
+        for status in sp.parse_status(params.get(sp.STATUS_KEY)):
+            if status.kind == sp.STATUS_INVALID:
+                code, key, hint = CODE_SPEED_INVALID, status.detail, ""
+            elif status.kind == sp.STATUS_FALLBACK:
+                code, key, hint = CODE_SPEED_FALLBACK, status.detail.split(":", 1)[0].strip(), ""
+            elif status.kind == sp.STATUS_SKIPPED:
+                key, hint = speed_skip_hint(status.detail)
+                code = CODE_SPEED_SKIPPED
+            elif status.kind == sp.STATUS_PENDING:
+                (key, hint), code = _SPEED_PENDING_HINT, CODE_SPEED_SKIPPED
+            else:
+                continue
+            group = groups.setdefault((code, key), {"labels": [], "images": 0, "text": status.detail, "hint": hint})
+            group["labels"].append(status.label)
+            if (code, key) not in seen:
+                seen.add((code, key))
+                group["images"] += 1
+
+    def scope(count: int, suffix: str) -> str:
+        return f"{count}/{total}장{suffix}" if total > 1 and count < total else ""
+
+    out: list[Notice] = []
+    for (code, key), group in groups.items():
+        passes = _speed_passes(group["labels"])
+        if code == CODE_SPEED_INVALID:
+            out.append(Notice(
+                code, LEVEL_WARNING,
+                f"Anima SPEED 설정 오류로 {scope(group['images'], '이 ')}SPEED 없이 생성됐습니다({passes} 패스) — 파라미터 "
+                f"카드의 SPEED 칸을 고치세요. (확장: {_short(group['text'], 160)})",
+                feature="speed", detail=key))
+        elif code == CODE_SPEED_FALLBACK:
+            out.append(Notice(
+                code, LEVEL_WARNING,
+                f"Anima SPEED 가 {scope(group['images'], '에서 ')}{passes} 패스에서 실패해 SPEED 없이 다시 샘플링했습니다 — "
+                f"Forge 콘솔의 '[AnimaSPEED]' 줄을 확인하세요. (원인: {_short(group['text'], 140)})",
+                feature="speed", detail=key))
+    skipped = [(key, group) for (code, key), group in groups.items() if code == CODE_SPEED_SKIPPED]
+    if skipped:
+        count = max(group["images"] for _key, group in skipped)
+        reasons = "; ".join(f"{_speed_passes(group['labels'])}: {group['hint'] or _short(group['text'], 120)}"
+                            for _key, group in skipped)
+        out.append(Notice(
+            CODE_SPEED_SKIPPED, LEVEL_INFO,
+            f"Anima SPEED 를 {scope(count, '에서 ')}건너뛰어 그 패스는 평소처럼 샘플링했습니다 — {reasons}. "
+            f"(결과 정보 '{sp.STATUS_KEY}')",
+            feature="speed", detail=" · ".join(key for key, _group in skipped)))
+    return out
+
+
+def speed_result_notices(payload: Any, params_list: Iterable[Any]) -> list[Notice]:
+    """보낸 페이로드 + 이미지마다 infotext 식 파라미터 → Anima SPEED 결과 알림(``result_notices`` 와 같은 규칙)."""
+    images = [dict(p) for p in (params_list or ()) if isinstance(p, Mapping)]
+    return _speed_result_notices(requested_features(payload), images)
+
+
+def speed_static_skip_notice(reason: str) -> Notice:
+    """생성 전: 앱이 아는 SPEED 건너뜀(``core/anima_speed.static_skip_reason`` 코드 — 인페인트·ControlNet·ComfyUI
+    Spectrum·해상도 비율 1.0 하나). 블록은 그대로 보낸다(Forge 가 같은 이유를 status 에 남긴다) — 정보."""
+    code = str(reason or "")
+    text = anima_speed.SKIP_MESSAGES.get(code, code)
+    return Notice(CODE_SPEED_SKIPPED, LEVEL_INFO,
+                  f"Anima SPEED: {text} — 이번 생성은 평소처럼 샘플링합니다.", feature="speed", detail=code)
+
+
 def degrid_comfy_unavailable_notice(reason: str) -> Notice:
     """ComfyUI: DeGrid 노드를 넣을 수 없어(팩 1.5.0 이 아님·노드 입력이 다름·출력 연결 없음) 빼고 생성했다(경고)."""
     text = " ".join(str(reason or "").split())
@@ -1082,6 +1233,7 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
     out.extend(_dora_result_notices(request, images))
     out.extend(_degrid_result_notices(request, images))
     out.extend(_xsched_result_notices(request, images))
+    out.extend(_speed_result_notices(request, images))
 
     # 부분 Anima LoRA 추측 변환 — Forge 설정을 켠 사용자에게 블록 대응이 틀릴 수 있음을 알린다(확장의 gr.Info 대응).
     guesses = list(dict.fromkeys(str(p[KEY_SPARSE_LORA_GUESS]).strip() for p in images
@@ -1553,7 +1705,8 @@ __all__ = [
     "CODE_LORA_SPARSE_GUESS", "CODE_PAG_DROPPED", "CODE_PROPAGATION_DROPPED", "CODE_PROPAGATION_RETRIED",
     "CODE_REQUEST_REJECTED", "CODE_SAM3_ERROR", "CODE_SAM3_HF_DOWNLOAD", "CODE_SAM3_NOT_APPLIED",
     "CODE_SAM3_SOURCE_FALLBACK", "CODE_SAM3_SOURCE_UNSUPPORTED",
-    "CODE_SCRIPT_MISSING", "CODE_XSCHED_INVALID_TEXT", "CODE_XSCHED_NOT_APPLIED", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
+    "CODE_SCRIPT_MISSING", "CODE_SPEED_FALLBACK", "CODE_SPEED_INVALID", "CODE_SPEED_NOT_APPLIED",
+    "CODE_SPEED_SKIPPED", "CODE_XSCHED_INVALID_TEXT", "CODE_XSCHED_NOT_APPLIED", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
     "KEY_DEGRID_ERROR", "KEY_DEGRID_MODEL", "KEY_SAM3_SOURCE", "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",
     "Notice", "NoticeThrottle", "NoticedImage", "PRE_GENERATION_NOTICE_TTL_S", "PROPAGATED_SUFFIX",
     "REFRESH_CAPABILITIES_CODES", "RESULT_NOTICE_TTL_S", "RequestedFeatures", "anima38_app_default_notice",
@@ -1567,4 +1720,5 @@ __all__ = [
     "propagation_retried_notice", "requested_features", "result_notices", "sam3_checkpoint_notice",
     "sam3_error_hint", "sam3_failure_repeats", "standalone_failure_text", "standalone_sam3_failure",
     "XSCHED_ERROR_LEAD", "explain_scheduler_error", "xsched_invalid_text_notice", "xsched_result_notices",
+    "speed_result_notices", "speed_skip_hint", "speed_static_skip_notice",
 ]

@@ -960,5 +960,21 @@ class ExtraSchedulersMetadataGroupTests(unittest.TestCase):
         self.assertIn("Schedule type: Laplace", groups["generation"])
         self.assertNotIn("Laplace mu", groups.get("other", ""))
 
+
+class AnimaSpeedMetadataGroupTests(unittest.TestCase):
+    """sam-extra Anima SPEED 의 infotext 3키는 확장 그룹(계획 A-SP3 마커 'anima speed')."""
+
+    def test_keys_group_as_extensions(self):
+        from core.image_metadata import group_parameters, parse_infotext
+        text = ('a cat\nSteps: 28, Sampler: Euler, Seed: 7, Anima SPEED: "mode=transition; threshold=neo_shift; '
+                'preset=anima; scales=0.5,1; delta=0.01; divisor=1.03; manual=0.7; adaptive=True; transform=dct; '
+                'seed=-1; hires=False", Anima SPEED status: "base: applied (transition) - 5/28 steps coarse, '
+                '52x76 -> 104x152", Anima SPEED img2img rescale: True, Version: f2')
+        groups = group_parameters(parse_infotext(text).parameters)
+        for key in ("Anima SPEED: ", "Anima SPEED status: ", "Anima SPEED img2img rescale: True"):
+            with self.subTest(key=key):
+                self.assertIn(key, groups["extensions"])
+        self.assertNotIn("Anima SPEED", groups.get("other", ""))
+
 if __name__ == "__main__":
     unittest.main()

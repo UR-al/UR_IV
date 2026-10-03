@@ -163,7 +163,7 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(rule.unknown_action(ap.PROVENANCE_APP_DEFAULT), ap.SKIP)
         self.assertFalse(rule.main_retry)
         self.assertFalse(rule.model_bound)
-        self.assertEqual(ap.main_only_titles(), (DEGRID,))
+        self.assertEqual(ap.main_only_titles(), (DEGRID, ap.TITLE_SPEED))   # + Anima SPEED(계획 A-SP3, 메인 전용)
         self.assertIs(ap.final_image_titles, ap.main_only_titles)            # 옛 이름은 별칭(레지스트리 참조·호출자)
         self.assertEqual(ap.canonical_title("  anima vae degrid (NAFNET) "), DEGRID)
         source = ap.envelope(all_blocks(), source="t2i_panel", backend=ap.BACKEND_WEBUI)
@@ -538,6 +538,91 @@ class ExtraSchedulersRuleTests(unittest.TestCase):
                             and isinstance(node.value, str)
                             and node.value.strip().lower() == "extra schedulers (sam-extra)"]
                 self.assertEqual(len(literals), 1 if rel == "core/extra_schedulers.py" else 0, literals)
+
+
+class AnimaSpeedRuleTests(unittest.TestCase):
+    """Anima SPEED(계획 A-SP3, design_speed D4): 메인 요청 전용 샘플러 래퍼 — passes=() 로 어느 보조 패스에도 주지 않는다.
+    앱 기본값이 꺼짐이라 켜진 블록은 사용자 값(모르면 보낸다), 메인 422 재시도는 없다(Rule 문서의 규칙)."""
+
+    BLOCK = {"args": [{"enabled": True, "mode": "transition", "threshold": "neo_shift", "preset": "anima",
+                       "scales": "0.5,1.0", "delta": 0.01, "sigma_divisor": 1.03, "manual_sigmas": "0.7",
+                       "adaptive": True, "transform": "dct", "spectrum_A": 203.615097, "spectrum_beta": 1.915461,
+                       "seed": -1, "hires": False}]}
+
+    def test_rule(self):
+        from core import anima_speed
+        title = anima_speed.SCRIPT_NAME
+        rule = ap.PROPAGATION[title]
+        self.assertNotIn(title, ap.NEVER)
+        self.assertEqual(rule.passes, frozenset())
+        self.assertEqual(rule.backends, frozenset({ap.BACKEND_WEBUI, ap.BACKEND_COMFY}))
+        self.assertEqual(rule.feature, "speed")
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_USER), ap.SEND)
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_APP_DEFAULT), ap.SKIP)
+        self.assertFalse(rule.main_retry)
+        self.assertFalse(rule.model_bound)
+        self.assertIsNone(rule.condition)
+        self.assertEqual(ap.main_only_titles(), (DEGRID, title))
+        self.assertEqual(ap.canonical_title("  anima SPEED "), title)
+        self.assertEqual(ap.main_retry_titles({"alwayson_scripts": {"anima speed": self.BLOCK}}), ())
+
+    def test_envelope_carries_it_but_no_aux_pass_gets_it(self):
+        from core import anima_speed
+        title = anima_speed.SCRIPT_NAME
+        source = ap.envelope({**all_blocks(), "anima speed": self.BLOCK}, source="t2i_panel", backend=ap.BACKEND_WEBUI)
+        self.assertEqual(source["blocks"][title], self.BLOCK)                   # 봉투에는 실린다(T15 — 메인 체인과 같은 모양)
+        for aux in ap.AUX_PASSES:
+            for backend in (ap.BACKEND_WEBUI, ap.BACKEND_COMFY, ap.BACKEND_KREA2):
+                for src in (source, {**all_blocks(), title: self.BLOCK}, {"anima speed": self.BLOCK}):
+                    with self.subTest(aux=aux, backend=backend):
+                        got = ap.blocks_for(src, aux, backend=backend)
+                        self.assertNotIn(title, got)
+                        self.assertNotIn("anima speed", got)
+
+    def test_gate_by_provenance_when_the_snapshot_is_unknown_or_missing(self):
+        from core import anima_speed
+        title = anima_speed.SCRIPT_NAME
+        blocks = {title: self.BLOCK}
+        unknown_user = ap.gate(blocks, None, img2img=False, provenance={title: ap.PROVENANCE_USER})
+        self.assertEqual(list(unknown_user.kept), [title])
+        unknown_default = ap.gate(blocks, None, img2img=False, provenance={title: ap.PROVENANCE_APP_DEFAULT})
+        self.assertEqual((unknown_default.kept, unknown_default.dropped_unknown), ({}, (title,)))
+        missing = ap.gate(blocks, _caps_with_absent(title), img2img=True, provenance={title: ap.PROVENANCE_USER})
+        self.assertEqual(missing.dropped_missing, (title,))
+        [notice] = ap.gate_notices(missing, {title: ap.PROVENANCE_USER}, img2img=True)
+        self.assertEqual(notice.feature, "speed")
+
+    def test_title_is_the_single_app_constant(self):
+        from core import anima_speed, sam_extra_capabilities as caps_mod
+        self.assertIs(ap.TITLE_SPEED, anima_speed.SCRIPT_NAME)
+        self.assertEqual(caps_mod.TITLE_SPEED, anima_speed.SCRIPT_NAME.lower())
+        self.assertIs(sn._TITLE_SPEED, anima_speed.SCRIPT_NAME)
+        self.assertEqual(sn.SAM_EXTRA_FEATURES[anima_speed.SCRIPT_NAME.lower()], ("speed", anima_speed.SCRIPT_NAME))
+        self.assertIn(anima_speed.SCRIPT_NAME, reg.SCRIPTS)
+
+    def test_title_copies_are_derived_from_script_name_in_the_source(self):
+        """값 비교로는 같은 문자열 사본을 못 잡는다 — 대입식이 SCRIPT_NAME 에서 나오고 제목 리터럴이 없는지 AST 로 본다."""
+        import ast
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        expected = {
+            "core/sam_extra_capabilities.py": ("TITLE_SPEED", "anima_speed.SCRIPT_NAME.lower()"),
+            "core/alwayson_propagation.py": ("TITLE_SPEED", "anima_speed.SCRIPT_NAME"),
+            "core/sam_extra_notices.py": ("_TITLE_SPEED", "anima_speed.SCRIPT_NAME"),
+        }
+        for rel, (name, source) in expected.items():
+            with self.subTest(module=rel):
+                tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+                values = [ast.unparse(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+                self.assertEqual(values, [source])
+        for rel in ("core/alwayson_propagation.py", "core/sam_extra_notices.py"):
+            with self.subTest(literals=rel):
+                tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+                literals = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
+                            and isinstance(node.value, str) and node.value.strip().lower() == "anima speed"]
+                self.assertEqual(literals, [])
 
 
 def _caps_with_absent(title):

@@ -512,6 +512,11 @@ class UISetupMixin:
         from ui.extra_schedulers_ui import init_extra_schedulers_proxies
         self.extra_schedulers_widgets = init_extra_schedulers_proxies(b)
 
+        # ── Anima SPEED(sam-extra 'Anima SPEED') — _aspeed_<key> 프록시, 초기값은 앱 기본값(= 확장 기본값: 꺼짐·transition·
+        #    neo_shift·anima·0.5,1.0 … + 앱 전용 'I2I에도 적용' 끔). 판정·정규화는 core/anima_speed.py.
+        from ui.anima_speed_ui import init_speed_proxies
+        self.anima_speed_widgets = init_speed_proxies(b)
+
         # 제거 옵션
         self.chk_remove_artist = CheckBoxProxy(b, 'chk_remove_artist')
         self.chk_remove_copyright = CheckBoxProxy(b, 'chk_remove_copyright')

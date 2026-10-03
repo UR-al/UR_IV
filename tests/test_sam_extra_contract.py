@@ -942,5 +942,50 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
         self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
                          {(index, field) for index in (3, 4) for field in ("minimum", "maximum", "step", "value")})
 
+
+class AnimaSpeedRegistryTests(unittest.TestCase):
+    """Anima SPEED 앱 노출(계획 A-SP3, 보류 → mapped) — 확장 없이 도는 레지스트리 검사."""
+
+    def test_mapped_main_only_with_the_comfy_pending_gap(self):
+        from core import anima_speed as sp
+        entry = reg.SCRIPTS[sp.SCRIPT_NAME]
+        self.assertEqual(entry["status"], reg.MAPPED)
+        self.assertEqual(entry["app_title"], "core.anima_speed:SCRIPT_NAME")
+        self.assertEqual((entry["form"], entry["live_argc"], entry["shape"]), ("positional_or_dict", 14, "c6889a2ed8d6"))
+        self.assertIsNone(entry["arg_names"], "ARG_NAMES 는 스크립트 모듈 밖(sam3ext/speed/forge_host.py) — 핀 speed_arg_names")
+        for ref in ("core/anima_speed.py:plan", "core/anima_speed.py:as_block", "core/anima_speed.py:from_infotext",
+                    "core/alwayson_propagation.py:TITLE_SPEED", "core/alwayson_propagation.py:main_only_titles",
+                    "core/sam_extra_notices.py:CODE_SPEED_NOT_APPLIED", "core/sam_extra_notices.py:speed_result_notices",
+                    "core/image_metadata.py:_EXTENSION_MARKERS"):
+            self.assertIn(ref, entry["app"])
+        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
+        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
+        for package in ("P16", "P18"):
+            self.assertTrue(any(gap.startswith(package) for gap in entry["gaps"]), package)
+        rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
+                for key, row in table.items() if "anima speed" in key.lower() or "anima_speed" in key.lower()
+                or key.startswith("sam3ext/speed/")}
+        self.assertEqual(sorted(rows), ["MODULES[sam3ext/speed/]", "MODULES[scripts/anima_speed.py]",
+                                        "SCRIPTS[Anima SPEED]", "XYZ_AXES[[Anima SPEED]]"])
+        self.assertEqual(sorted(k for k, row in rows.items() if row.get("package") == reg.HOLD), [])
+        xyz = reg.XYZ_AXES[sp.XYZ_PREFIX]
+        self.assertEqual((xyz["status"], xyz["package"]), (reg.DEFERRED, "P18"))
+        self.assertEqual(reg.OPTIONS[sp.OPT_IMG2IMG_RESCALE]["status"], reg.MAPPED)     # P10 행(F2)
+        self.assertEqual(reg.OPTIONS[sp.OPT_LOG]["status"], reg.IGNORED)
+
+    def test_pins_mirror_every_shared_app_constant(self):
+        """앱이 확장 값을 하드코딩한 곳마다 핀이 있다 — 빠지면 확장이 바뀌어도 앱만 조용히 어긋난다."""
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("speed_")}
+        apps = {pin["app"] for pin in pins.values() if "app" in pin}
+        names = ("SCRIPT_NAME", "XYZ_PREFIX", "ARG_NAMES", "DEFAULTS", "ARG_ALIASES", "INFOTEXT_KEY", "STATUS_KEY",
+                 "INFOTEXT_IMG2IMG_RESCALE", "OPT_LOG", "UNSUPPORTED_SAMPLERS", "MODES", "THRESHOLDS", "TRANSFORMS",
+                 "PRESET_NAMES", "PRESETS", "REFERENCE_LATENT", "CUSTOM_DEFAULT_A", "CUSTOM_DEFAULT_BETA",
+                 "DELTA_MIN", "DELTA_MAX", "DELTA_STEP", "DIVISOR_MIN", "DIVISOR_MAX", "DIVISOR_STEP")
+        self.assertEqual(sorted({f"core.anima_speed:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
+        self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
+                         {"scripts/anima_speed.py", "sam3ext/speed/forge_host.py", "sam3ext/speed/schedule.py"})
+        self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
+                         {(index, field) for index in (5, 6) for field in ("minimum", "maximum", "step")})
+
 if __name__ == "__main__":
     unittest.main()

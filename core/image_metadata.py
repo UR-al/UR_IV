@@ -446,8 +446,10 @@ _GROUP_MODEL = ("Model", "Model hash", "VAE", "Clip skip")
 # 'degrid': sam-extra VAE DeGrid 의 'Anima DeGrid model/mode/strength/tile/precision/error'(core/vae_degrid KEY_*)
 # 'laplace'·'custom scheduler': sam-extra Extra Schedulers 의 'Laplace mu/beta'·'Custom scheduler expression/sigmas'
 # (core/extra_schedulers KEY_* — 'Schedule type' 은 위 생성 줄이 먼저 가져간다)
+# 'anima speed': sam-extra Anima SPEED 의 'Anima SPEED'·'Anima SPEED status'·'Anima SPEED img2img rescale'
+# (core/anima_speed INFOTEXT_KEYS)
 _EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled", "degrid", "laplace",
-                      "custom scheduler")
+                      "custom scheduler", "anima speed")
 
 
 def group_parameters(params: dict) -> dict[str, str]:

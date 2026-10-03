@@ -26,6 +26,8 @@ export const FEATURE_ENABLE_WIDGETS: Readonly<Partial<Record<SamExtraFeature, re
   skimmed_cfg: ['_skim_enabled'],
   detail_daemon: ['_dd_enabled'],
   optimal_scale: ['_ocfg_enabled'],
+  // Anima SPEED 카드의 켜짐 스위치(파이썬 core/anima_speed.widget_id('enabled')) — 켠 채 연결된 Forge 에 없으면 경고 토스트
+  speed: ['_aspeed_enabled'],
 }
 
 export const FEATURE_LABELS: Readonly<Partial<Record<SamExtraFeature, string>>> = {
@@ -36,8 +38,8 @@ export const FEATURE_LABELS: Readonly<Partial<Record<SamExtraFeature, string>>> 
   optimal_scale: 'Anima Optimal Scale',
   // FEATURE_ENABLE_WIDGETS 에는 넣지 않는다 — 없을 때는 게이트가 빼고 경고한다(DoRA·Anima38 과 같다)
   degrid: 'VAE DeGrid',
-  // sam-extra 0.31.0+ 의 네 기능. DeGrid 처럼 켜짐 위젯 표에는 아직 넣지 않는다 — 없으면 게이트가 빼고 경고한다
-  // (SPEED 카드의 켜짐 스위치는 카드를 연결할 때 FEATURE_ENABLE_WIDGETS 에 더한다)
+  // sam-extra 0.31.0+ 의 네 기능. 값 기능(Colorcraft 는 카드 연결 때 정한다·Extra Schedulers·Extra Samplers)은 DeGrid 처럼
+  // 켜짐 위젯 표에 넣지 않는다 — 없으면 게이트가 빼고 경고한다. SPEED 는 켜짐 스위치가 있어 FEATURE_ENABLE_WIDGETS 에 있다
   colorcraft: 'Colorcraft',
   speed: 'Anima SPEED',
   extra_schedulers: 'Extra Schedulers 값',
