@@ -294,6 +294,40 @@ class TestOptionInfoChoices(unittest.TestCase):
                 shared.opts.add_option("fake_dynamic", shared.OptionInfo(
                     "a", "dyn", gr.Dropdown, lambda: {"choices": list_things()}))
         ''',
+        # 도우미 함수 + 루프(sam-extra scripts/mcp_settings.py 모양): 반복마다 호출 인자로 OptionInfo 를 읽는다
+        "scripts/helper_opts.py": '''
+            import gradio as gr
+            from modules import shared
+
+            SECTION = ("x", "X")
+            default = "module constant with a parameter's name"
+            OPTIONS = (
+                ("fake_allow_a", True, "allow a", "help " + describe()),
+                ("fake_allow_b", False, "allow b", "help b"),
+            )
+
+            def _option(default, label, info):
+                try:
+                    option = shared.OptionInfo(default, label, gr.Checkbox, section=SECTION, restrict_api=True)
+                except TypeError:
+                    option = shared.OptionInfo(default, label, gr.Checkbox, section=SECTION)
+                return option.info(info)
+
+            def _split(default, label, keyed=False):
+                if keyed:
+                    return shared.OptionInfo(default, label, gr.Checkbox, infotext="On key")
+                return shared.OptionInfo(default, label, gr.Checkbox)
+
+            def _opaque(default):
+                return make_option(default)
+
+            def on_ui_settings():
+                for key, default, label, info in OPTIONS:
+                    shared.opts.add_option(key, _option(default, label, info))
+                shared.opts.add_option("fake_split", _split(True, "split"))
+                shared.opts.add_option("fake_unbound", _option(read_default(), "unbound", "i"))
+                shared.opts.add_option("fake_opaque", _opaque(True))
+        ''',
     }
 
     @classmethod
@@ -305,10 +339,30 @@ class TestOptionInfoChoices(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
         cls.infos = ExtensionSource(cls.root).option_infos()
+        cls.keys = ExtensionSource(cls.root).option_keys()
 
     @classmethod
     def tearDownClass(cls):
         cls._tmp.cleanup()
+
+    def test_helper_function_options_are_read_per_loop_iteration(self):
+        for key, default in (("fake_allow_a", True), ("fake_allow_b", False)):
+            with self.subTest(key=key):
+                info = self.infos[key]
+                self.assertEqual((info["default"], info["component"], info["infotext"], info["onchange"], info["choices"]),
+                                 (default, "Checkbox", "", False, ()))
+                self.assertEqual(info["file"], "scripts/helper_opts.py")
+
+    def test_helper_branches_that_disagree_and_unreadable_helpers(self):
+        split = self.infos["fake_split"]
+        self.assertIs(split["default"], True)
+        self.assertIsNone(split["infotext"], "갈래마다 다른 칸은 None — 한쪽 값으로 정하지 않는다")
+        # 못 푼 인자는 같은 이름의 모듈 상수로 읽지 않는다
+        self.assertIsNone(self.infos["fake_unbound"]["default"])
+        # OptionInfo 를 돌려주지 않는 도우미는 따라가지 않는다(키는 option_keys 가 본다)
+        self.assertNotIn("fake_opaque", self.infos)
+        self.assertIn("fake_opaque", self.keys)
+        self.assertEqual(set(self.keys) - set(self.infos), {"fake_opaque"})
 
     def test_radio_choice_values_follow_constants(self):
         info = self.infos["fake_device"]

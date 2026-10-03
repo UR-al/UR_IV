@@ -678,7 +678,11 @@ class ExtensionSource:
         (키워드가 없으면 ''), ``onchange``(콜백을 넘겼나), ``choices``(``component_args``(4번째 위치 인자 또는 키워드)
         dict 의 ``"choices"`` — ``(라벨, 값)`` 쌍이면 값, 그냥 값이면 그 값의 튜플. 선택지가 없으면 (), 정적으로 못 풀면
         None — 함수로 넘긴 component_args 등). ``.info()``·``.needs_reload_ui()`` 같은 체인 호출은 벗긴다.
-        못 푸는 칸은 None 으로 두고 ``unresolved`` 에 적지 않는다(키 존재는 ``option_keys`` 가 본다)."""
+        못 푸는 칸은 None 으로 두고 ``unresolved`` 에 적지 않는다(키 존재는 ``option_keys`` 가 본다).
+
+        도우미 함수: ``add_option(KEY, _option(default, label, …))`` 처럼 같은 모듈의 ``def`` 가 ``OptionInfo(…)`` 를
+        (지역 변수·try/except 갈래를 거쳐, ``.info()`` 체인째) 돌려주면 그 OptionInfo 를 호출 인자 값으로 읽는다 — 루프로
+        등록하면 반복마다(sam-extra scripts/mcp_settings.py). 갈래마다 값이 다른 칸은 None 이다."""
         found: dict[str, dict] = {}
         for path, call in self._calls(lambda name: name == "add_option"):
             info = call.args[1] if len(call.args) > 1 else next(
@@ -686,38 +690,100 @@ class ExtensionSource:
             while (isinstance(info, ast.Call) and isinstance(info.func, ast.Attribute)
                    and info.func.attr != "OptionInfo" and isinstance(info.func.value, ast.Call)):
                 info = info.func.value   # .info("…") / .needs_reload_ui() / .link(…) 체인
-            if not isinstance(info, ast.Call) or _call_name(info.func) != "OptionInfo":
-                continue
             scope = self.enclosing_function(path, call)
-
-            def value_of(node):
-                if node is None:
-                    return None
-                found_values = self.values(path, node, scope=scope)
-                return found_values[0] if len(found_values) == 1 else None
-
-            keywords = {kw.arg: kw.value for kw in info.keywords if kw.arg}
-            component = info.args[2] if len(info.args) > 2 else keywords.get("component")
-            component_args = info.args[3] if len(info.args) > 3 else keywords.get("component_args")
-            onchange = keywords.get("onchange")
-            infotext = value_of(keywords.get("infotext"))
-            default = value_of(info.args[0] if info.args else keywords.get("default"))
-            component_name = _call_name(component) if component is not None else None
-            if component_name is None and isinstance(default, bool):
-                # 컴포넌트를 주지 않으면 Forge 가 기본값 타입으로 고른다 — bool 은 Checkbox
-                # (modules/ui_settings.py create_setting_component). 내장 NegPiP 스위치가 그렇다(scripts/negpip.py).
-                component_name = "Checkbox"
-            attrs = {
-                "file": self.rel(path),
-                "default": default,
-                "component": component_name,
-                "infotext": infotext if isinstance(infotext, str) else "",
-                "onchange": onchange is not None and not (isinstance(onchange, ast.Constant) and onchange.value is None),
-                "choices": _option_choices(component_args, value_of),
-            }
-            for key, _env in self._resolve_arg(path, call, 0, "key", "옵션 키", report=False):
-                found[key] = dict(attrs)
+            if isinstance(info, ast.Call) and _call_name(info.func) == "OptionInfo":
+                attrs = self._option_info_attrs(path, info, scope, {})
+                for key, _env in self._resolve_arg(path, call, 0, "key", "옵션 키", report=False):
+                    found[key] = dict(attrs)
+                continue
+            helper = self._option_helper(path, info)
+            if helper is None:
+                continue
+            fn, candidates = helper
+            for key, env in self._resolve_arg(path, call, 0, "key", "옵션 키", report=False):
+                bound = self._bind_helper_args(path, fn, info, scope, env)
+                merged: dict | None = None
+                for candidate in candidates:
+                    attrs = self._option_info_attrs(path, candidate, fn, bound)
+                    merged = attrs if merged is None else {
+                        field: value if merged[field] == value and type(merged[field]) is type(value) else None
+                        for field, value in attrs.items()}
+                found[key] = merged
         return found
+
+    def _option_info_attrs(self, path: Path, info: ast.Call, scope, env: Mapping[str, ast.AST]) -> dict:
+        """``OptionInfo(…)`` 호출 하나의 속성(``option_infos`` 참고). ``env`` 는 도우미 매개변수 → 호출 인자 값."""
+
+        def value_of(node):
+            if node is None:
+                return None
+            found_values = self.values(path, node, scope=scope, env=env)
+            return found_values[0] if len(found_values) == 1 else None
+
+        keywords = {kw.arg: kw.value for kw in info.keywords if kw.arg}
+        component = info.args[2] if len(info.args) > 2 else keywords.get("component")
+        component_args = info.args[3] if len(info.args) > 3 else keywords.get("component_args")
+        onchange = keywords.get("onchange")
+        infotext = value_of(keywords.get("infotext"))
+        default = value_of(info.args[0] if info.args else keywords.get("default"))
+        component_name = _call_name(component) if component is not None else None
+        if component_name is None and isinstance(default, bool):
+            # 컴포넌트를 주지 않으면 Forge 가 기본값 타입으로 고른다 — bool 은 Checkbox
+            # (modules/ui_settings.py create_setting_component). 내장 NegPiP 스위치가 그렇다(scripts/negpip.py).
+            component_name = "Checkbox"
+        return {
+            "file": self.rel(path),
+            "default": default,
+            "component": component_name,
+            "infotext": infotext if isinstance(infotext, str) else "",
+            "onchange": onchange is not None and not (isinstance(onchange, ast.Constant) and onchange.value is None),
+            "choices": _option_choices(component_args, value_of),
+        }
+
+    def _option_helper(self, path: Path, node) -> tuple | None:
+        """``helper(…)`` 가 같은 모듈의 ``def helper`` 이고 모든 return 이 ``OptionInfo(…)`` 면 (함수, OptionInfo 호출들).
+
+        return 값의 체인 호출(``option.info(…)``)을 벗기고, 지역 이름이면 그 이름에 대입한 값(try/except 갈래 모두)을 본다.
+        OptionInfo 가 아닌 return·대입이 하나라도 있으면 따라가지 않는다(None — 키는 ``option_keys`` 가 본다)."""
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            return None
+        tree = self.tree(path)
+        fn = next((n for n in (tree.body if tree is not None else ())
+                   if isinstance(n, ast.FunctionDef) and n.name == node.func.id), None)
+        if fn is None:
+            return None
+        candidates: list[ast.Call] = []
+        for ret in (n for n in _walk_scope(fn) if isinstance(n, ast.Return)):
+            value = _strip_option_chain(ret.value)
+            nodes = [value]
+            if isinstance(value, ast.Name):
+                nodes = [_strip_option_chain(n.value) for n in _walk_scope(fn) if isinstance(n, ast.Assign)
+                         and any(isinstance(t, ast.Name) and t.id == value.id for t in n.targets)]
+            if not nodes or not all(isinstance(n, ast.Call) and _call_name(n.func) == "OptionInfo" for n in nodes):
+                return None
+            candidates.extend(nodes)
+        return (fn, candidates) if candidates else None
+
+    def _bind_helper_args(self, path: Path, fn: ast.FunctionDef, call: ast.Call, scope,
+                          env: Mapping[str, ast.AST]) -> dict[str, ast.AST]:
+        """도우미 매개변수 → 호출 인자 값(호출한 곳의 지역·루프 변수로 풀어 상수 노드로). 넘기지 않은 매개변수는 기본값,
+        못 푸는 값은 풀 수 없는 이름 — 모듈 상수가 같은 이름이어도 그 값으로 잘못 읽지 않는다."""
+        positional = [*fn.args.posonlyargs, *fn.args.args]
+        defaults = dict(zip((a.arg for a in positional[len(positional) - len(fn.args.defaults):]), fn.args.defaults))
+        defaults.update((a.arg, d) for a, d in zip(fn.args.kwonlyargs, fn.args.kw_defaults) if d is not None)
+        given = dict(zip((a.arg for a in positional), call.args))
+        given.update((kw.arg, kw.value) for kw in call.keywords if kw.arg)
+        bound: dict[str, ast.AST] = {}
+        for name in (a.arg for a in (*positional, *fn.args.kwonlyargs)):
+            if name in given:
+                values = self.values(path, given[name], scope=scope, env=env)
+            elif name in defaults:
+                values = self.values(path, defaults[name])
+            else:
+                values = []
+            bound[name] = (ast.Constant(value=values[0]) if len(values) == 1
+                           else ast.Name(id="\0unresolved", ctx=ast.Load()))
+        return bound
 
     def routes(self) -> dict[str, str]:
         """FastAPI 라우트 ``"METHOD /path"`` → 파일 (add_api_route / add_route / app.get 등)."""
@@ -937,6 +1003,14 @@ def _call_name(node: ast.AST | None) -> str | None:
     if isinstance(node, ast.Name):
         return node.id
     return None
+
+
+def _strip_option_chain(node):
+    """``OptionInfo(…).info(…)``·``option.info(…)`` 의 체인 호출을 벗긴 안쪽 노드(도우미 함수의 return 값용)."""
+    while (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+           and node.func.attr != "OptionInfo" and isinstance(node.func.value, (ast.Call, ast.Name))):
+        node = node.func.value
+    return node
 
 
 def _option_choices(component_args: ast.AST | None, value_of) -> tuple | None:

@@ -200,6 +200,11 @@ NEVER: Mapping[str, str] = MappingProxyType({
     "ADetailer": "이미지 패스 — 복사하면 부모 패스 뒤에 T2I 얼굴 보정이 한 번 더 돈다(_ad_disabled 는 SAM3 p2 에만)",
     "Anima VAE 2x (spacepxl decoder)": "HOLD(M9) — 앱이 만들지 않는다. 2x 디코더가 인페인트 패스 출력 크기를 바꿀 수 있다",
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
+    # 2026-10-03 sam-extra 미커밋 작업 트리(CHANGELOG v0.31.0) — 넷 다 HOLD(core/sam_extra_contract SCRIPTS)
+    "Colorcraft (sam-extra)": "HOLD — latent 색 보정(기본 끔) — 앱이 만들지 않는다",
+    "Anima SPEED": "HOLD — 실험 기능(저해상도 선행 샘플링, 기본 끔) — 앱이 만들지 않는다",
+    "Extra Schedulers (sam-extra)": "HOLD — custom·Laplace 값 칸 — 앱이 만들지 않는다(스케줄러 이름은 Forge 목록으로 고른다)",
+    "Extra Samplers": "HOLD — ER SDE 값 칸 — 앱이 만들지 않는다(샘플러 이름은 Forge 목록으로 고른다)",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
 })

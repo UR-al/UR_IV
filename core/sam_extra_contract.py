@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.30.1"
+EXT_VERSION_AUDITED = "0.31.0"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -50,7 +50,23 @@ EXT_VERSION_AUDITED = "0.30.1"
 # 2026-10-03 v0.30.1(991c45b, master 머지 1c49f89 — 트리 같음): [VERIFY] MG·HiGS 적용 횟수를 패스마다 새로 센다
 # (sam3ext/guidance/runtime.py reset_pass 가 새 HistoryState). 인자·infotext·옵션·제목 그대로 — 픽스처는 고친 코드로 띄운
 # Forge 2.29.2 에서 커밋 전에 다시 받았다(기록된 커밋은 그때 HEAD fe2a4e7, 버전은 로컬 0.30.1). scripts 부분은 0.30.0 때와 같았다.
-EXT_COMMIT_AUDITED = "1c49f89"
+# 2026-10-03 v0.31.0(6adeb83, master 머지 a65c4ae — 트리 같음): 새 기능 일곱 —
+# Colorcraft(always-on 'Colorcraft (sam-extra)' 579 인자·옵션 둘·XYZ 14), Anima SPEED(14 인자·옵션 둘·XYZ 6), Extra Schedulers
+# (스케줄러 6개 + 'Extra Schedulers (sam-extra)' 5 인자·XYZ 4), Extra Samplers(샘플러 5개 + 'Extra Samplers' 2 인자·XYZ 2),
+# 진행 막대(옵션 sam3_progress_* 10·GET /sam-extra/progress), MCP 권한 스위치(옵션 sam3_mcp_allow_* 4), 그리고 앱의 구도 ·
+# 카메라 칸을 Forge 로 옮긴 것(옵션 sam3_composition_panel·scripts/composition_camera.py·javascript/composition_*.js — 화면 전용,
+# 앱은 자기 원본을 쓴다). 앱 노출 요청이 없어 모두
+# deferred(HOLD) 또는 ignored(사유)이고 앱 UI·페이로드는 그대로다(새 always-on 넷은 core/alwayson_propagation NEVER). 새 샘플러·
+# 스케줄러는 Forge 목록(/sdapi/v1/samplers·schedulers)으로 들어와 앱 Forge 콤보에 라이브로 보이며(블록 없이 확장 기본값으로 돈다),
+# ComfyUI 에서는 KSampler 에 없는 이름이라 컴파일 오류('지원하지 않는 값')다 — SCRIPTS 두 항목의 api_note. mcp_server/ 는 Forge 가
+# 불러오지 않는 별도 uv 프로젝트라 스캐너의 모듈 단위 밖이다(Forge 쪽은 옵션 넷을 등록하는 scripts/mcp_settings.py 뿐). 옵션 넷은
+# 도우미 함수·루프로 등록돼 스캐너 option_infos 가 도우미를 따라가게 보강했다. 기존 스크립트 변경(Detail Daemon·Safe PAG 의 σ
+# 오프셋 도우미를 sam3ext/guidance/sigmas.py 로 옮김, layout_lanes 자리)은 인자·infotext·옵션·제목 그대로다. 새 스크립트 8항목·
+# shape 는 처음에 Forge 정지 중 설치된 소스의 ui() 를 가짜 gradio 4.40 + Forge create_script_ui_inner 규칙으로 돌려 계산해
+# 두었고(같은 방법이 기존 11개 스크립트의 라이브 항목을 값 타입까지 재현), 미커밋 트리로 띄운 Forge 의 라이브 값과 모든 칸·
+# 타입이 같았다. 픽스처는 커밋 6adeb83(버전 0.31.0)으로 다시 띄운 Forge 2.29.2(7860)에서 릴리스 전에 다시 받았다
+# (captured_at 2026-10-03T04:57:50Z, 스크립트 16개). 기존 스크립트의 인자 모양은 그대로다.
+EXT_COMMIT_AUDITED = "a65c4ae"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -93,7 +109,7 @@ def _script(*, file: str, form: str, live_argc: int, shape: str, classification:
             "api_note": api_note, "script_info": script_info, **classification}
 
 
-# ── always-on 스크립트 (제목 = alwayson_scripts 키, script-info 에 11개 + ui() None 인 NegPiP) ──────
+# ── always-on 스크립트 (제목 = alwayson_scripts 키, script-info 에 15개(0.30.1 라이브 11 + 미커밋 4) + ui() None 인 NegPiP) ──
 SCRIPTS = MappingProxyType({
     "SAM3 Mask": _script(
         file="scripts/!sam3.py", form="dict", live_argc=2, shape="9702cc627a8c",
@@ -401,6 +417,58 @@ SCRIPTS = MappingProxyType({
                  "post-CFG 순서가 같고, SMC·APG·CWM(sampler_cfg_function)이면 노드가 건너뛴다 — 결과는 Forge 와 같다 "
                  "(tests/test_comfy_detail_parity.py·test_comfy_detail_compiler.py)",
             gaps=("P16: 붙여 넣은 infotext 'Anima Optimal Scale' 을 앱이 되살리지 않는다(가이던스 공통)",))),
+    # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0) — 넷 다 HOLD(앱 노출 요청 없음). 앱은 블록을 만들지 않고
+    # (core/alwayson_propagation NEVER), Forge 는 블록이 없으면 ui() 기본값(전부 끔·확장 기본값)으로 돌린다.
+    "Colorcraft (sam-extra)": _script(
+        file="scripts/colorcraft.py", form="positional_or_dict", live_argc=579, shape="6678b715b857",
+        api_note="위치 인자 579개(sam3ext/colorcraft/spec.arg_names() 순서 — enabled·masking, 수정자 탭 I~X 44칸씩, 마스크 "
+                 "M1~M10 10칸씩, 조합 C1~C5 7칸씩, debug·debug_step) 또는 첫 인자 하나(compact — infotext 'SAM Extra "
+                 "Colorcraft' 문자열이나 인자 경로 dict {'enabled': …, 'I.exposure': …}, spec.is_compact_arg). ui() 가 spec 표로 "
+                 "컨트롤을 만들어(colorcraft/ui.build) 반환 순서·컴포넌트를 정적으로 못 읽는다 — 소스↔픽스처 비교 밖. 선택지는 "
+                 "모두 고정 목록. infotext 'SAM Extra Colorcraft'·'SAM Extra Colorcraft status'(원본·포크의 'Colorcraft' 키도 "
+                 "붙여 넣기로 읽는다).",
+        classification=deferred(HOLD, "샘플링 중 latent 색 보정(muerrilla/ComfyUI-Colorcraft 이식, 기본 끔) — 확장도 화질·VRAM 을 "
+                                      "GPU 로 확인하지 않았다(CHANGELOG). 앱 노출 요청 없음 — 앱이 만들지 않는다(core/"
+                                      "alwayson_propagation NEVER). Comfy 쪽은 원본 노드 팩이 따로 있고 앱 컴파일러는 넣지 않는다")),
+    "Anima SPEED": _script(
+        file="scripts/anima_speed.py", form="positional_or_dict", live_argc=14, shape="c6889a2ed8d6",
+        ui_return=("enabled", "mode", "threshold", "preset", "scales", "delta", "divisor", "manual", "adaptive",
+                   "transform", "spectrum_a", "spectrum_beta", "seed", "hires"),
+        api_note="위치 인자 14개(sam3ext/speed/forge_host.py ARG_NAMES 순서 — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 "
+                 "읽힌다) 또는 dict 한 개(ARG_NAMES·infotext 'Anima SPEED' 키, coerce_settings). 뒤 인자는 빼도 기본값. "
+                 "idx10-12 는 gr.Number(script-info 의 step 1 은 Gradio 기본값 — UI_UNREAD). infotext 'Anima SPEED'·"
+                 "'Anima SPEED status'·'Anima SPEED img2img rescale'(옵션). XYZ 는 p 속성(_anima_speed_xyz)으로 덮어쓴다.",
+        classification=deferred(HOLD, "실험 기능(SPEED — 초반 스텝을 DCT 저해상도로, 기본 끔, 이미지가 달라진다). 확장도 Anima "
+                                      "화질·속도를 GPU 로 확인하지 않았다(CHANGELOG). 앱 노출 요청 없음 — 앱이 만들지 않는다"
+                                      "(core/alwayson_propagation NEVER)")),
+    "Extra Schedulers (sam-extra)": _script(
+        file="scripts/anima_extra_schedulers.py", form="positional_or_dict", live_argc=5, shape="c3552551b4b0",
+        api_note="위치 인자 [custom_mode, custom_expression, custom_sigmas, laplace_mu, laplace_beta] 또는 그 키의 dict 한 개"
+                 "(sam3ext/ui_extra_schedulers.py ARG_NAMES·coerce_args — 스크립트 모듈 밖). ui() 가 build_controls 의 튜플을 "
+                 "list() 로 돌려줘 반환 순서·컴포넌트를 정적으로 못 읽는다. 값은 생성의 Schedule type(·Hires schedule type)이 "
+                 "이 확장의 custom·Laplace 일 때만 쓰인다. 스케줄러 6개(name cosine·cosine_exponential·phi·laplace·"
+                 "karras_dynamic·custom, label Cosine·CosineExponential blend·Phi·Laplace·Karras Dynamic·custom)는 불러올 때 "
+                 "Forge 목록에 등록돼 /sdapi/v1/schedulers 로 나온다 — 앱 Forge 스케줄러 콤보는 라이브 name 목록(backends/"
+                 "webui_backend.py get_info)이라 그대로 고를 수 있고, 이 블록 없이 확장 기본값(식 'M * (m / M) ** x', μ 0·β "
+                 "0.5)으로 돈다. ComfyUI 는 KSampler scheduler 선택지에 없는 이름이라 컴파일 오류('지원하지 않는 값', "
+                 "core/comfy_workflow_compiler._runtime_sampler_values) — 별칭을 두지 않는다(Comfy LaplaceScheduler 는 "
+                 "KSampler 가 아닌 SIGMAS 노드). infotext 'Custom scheduler expression'·'Custom scheduler sigmas'·"
+                 "'Laplace mu'·'Laplace beta'.",
+        classification=deferred(HOLD, "custom 식·시그마 목록·Laplace μ/β 칸 — 앱 노출 요청 없음. 앱이 만들지 않는다"
+                                      "(core/alwayson_propagation NEVER)")),
+    "Extra Samplers": _script(
+        file="scripts/anima_extra_samplers.py", form="positional", live_argc=2, shape="9429dfbd04a7",
+        ui_return=("max_stage", "eta"),
+        api_note="위치 인자 [max_stage(1-3, 기본 3), eta(0-10, 기본 1.0)] — 둘 다 생략 가능(sam3ext/extra_samplers/params.py "
+                 "settings_from_args — 스크립트 클래스 밖이라 api_reads 는 비어 있다). ER SDE (Reverse-time)·(ODE) 만 읽는다. "
+                 "샘플러 5개(ER SDE (Reverse-time)·ER SDE (ODE)·DPM++ 4M SDE·Euler Dy CFG++·Euler SMEA Dy CFG++)는 불러올 때 "
+                 "Forge 목록에 등록돼 /sdapi/v1/samplers 로 나온다 — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고를 수 "
+                 "있고, 이 블록 없이 확장 기본값(3·1.0)으로 돈다. ComfyUI 는 KSampler sampler_name 에 없는 이름이라 컴파일 "
+                 "오류('지원하지 않는 값') — 'ER SDE (Reverse-time)'·'(ODE)' 는 Comfy SamplerER_SDE 노드의 다른 잡음 척도라 "
+                 "KSampler er_sde(Forge 'ER SDE')로 잇지 않는다. infotext 'ER SDE max stage'·'ER SDE eta'(기본값과 다를 때)·"
+                 "'Extra Samplers status'.",
+        classification=deferred(HOLD, "ER SDE max stage·eta 칸 — 앱 노출 요청 없음. 앱이 만들지 않는다"
+                                      "(core/alwayson_propagation NEVER)")),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -442,7 +510,7 @@ SAM3_REQUEST_ONLY_KEYS = ("sam3_source_image",)
 SAM3_ENABLE_LABEL = "Enable SAM3"      # script-info args[0].label
 SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam3Args 49 + sam3_enable
 
-# ── Forge 옵션 (shared.opts.add_option, 라이브 20개) ───────────────────────────────
+# ── Forge 옵션 (shared.opts.add_option, 38개 — 0.30.1 라이브 20 + 2026-10-03 미커밋 18) ─────────────────
 # 주의(나-7): override_settings 에 모르는 키가 있으면 Forge classic 은 KeyError 로 요청 전체를 실패시킨다.
 # P10: 요청마다 덮어쓰는 11개(core/forge_override_settings.SPECS — 체크박스는 bool, 라디오는 선택지 문자열) — 기본은 'Forge 설정 따름'(키를 보내지 않음, D3), 키마다
 # 기능 스냅샷의 has_option 이 True 일 때만 보내고, 거절(500 KeyError·설정 잠금)되면 앱 키를 빼고 한 번 더 보낸다.
@@ -455,6 +523,14 @@ def _p10(key_const: str, note: str) -> dict:
                   gaps=("P16: 결과 infotext 붙여 넣기로 이 옵션을 한 번만 덮어쓰기(Forge 'Override settings' 드롭다운, "
                         "P10 연구의 P10b)는 아직 없다",))
 
+
+# 2026-10-03 미커밋 작업 트리 — 진행 막대(sd-webui-smooth-progress 편입)·MCP 서버(forgeneo-mcp 편입)의 설정. 둘 다 생성과 무관하다.
+_PROGRESS_BAR = ignored("진행 막대 설정(sd-webui-smooth-progress 편입, 기본 끔) — Forge 웹 화면(javascript/progress_bar.js)만 "
+                        "onOptionsChanged 로 읽는다. 생성·결과와 무관하고 앱은 자체 진행 표시를 쓴다(라우트는 ROUTES "
+                        "'GET /sam-extra/progress')")
+_MCP_PERMISSION = ignored("MCP 서버 권한 스위치(기본: 생성만 켬) — Forge 밖 uv 프로젝트 mcp_server/ 가 도구 호출마다 Forge "
+                          "config.json 에서 다시 읽는다(scripts/mcp_settings.py 는 등록만). Forge 생성·결과와 무관하고 앱은 MCP "
+                          "서버를 쓰지 않는다")
 
 OPTIONS = MappingProxyType({
     "sam3_unload_keep_in_ram": _p10(
@@ -502,7 +578,33 @@ OPTIONS = MappingProxyType({
     "sam3_degrid_keep_loaded": _p10(
         "OPT_DEGRID_KEEP_LOADED", "VAE DeGrid 모델 VRAM 상주(Checkbox, 약 117 MB, 결과 같음). Forge 전용: ComfyUI "
                                   "노드는 끔(이미지마다 올렸다가 내림)"),
+    # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0) — 결과를 바꾸는 둘은 스크립트와 함께 HOLD, 로그·화면·MCP 는 ignored
+    "sam3_colorcraft_pre_dd_sigma": deferred(
+        HOLD, "Colorcraft + Detail Daemon: 스케줄 위치를 DD 가 줄이기 전 σ 로 찾기(기본 켬, 결과가 달라짐 — infotext 'SAM "
+              "Extra Colorcraft pre-DD sigma', 실제로 바뀐 생성에만). Colorcraft 를 켠 생성에만 쓰인다 — "
+              "SCRIPTS['Colorcraft (sam-extra)'] 와 함께 보류"),
+    "sam3_colorcraft_log": ignored("콘솔 로그(패스마다 σ 목록·탭별 스케줄 값, 기본 끔, 결과 같음)"),
+    "sam3_speed_img2img_rescale": deferred(
+        HOLD, "SPEED 의 img2img·Hires 저해상도 시작 latent 를 flow 형태로 맞추기(기본 켬, 결과가 달라짐 — infotext 'Anima SPEED "
+              "img2img rescale', 끄면 원본 노드 동작). SPEED 를 켠 생성에만 쓰인다 — SCRIPTS['Anima SPEED'] 와 함께 보류"),
+    "sam3_speed_log": ignored("콘솔 로그([AnimaSPEED] 전환 계획·결과, 기본 켬, 결과 같음)"),
+    "sam3_progress_enabled": _PROGRESS_BAR,
+    "sam3_progress_smoothness": _PROGRESS_BAR,
+    "sam3_progress_text_format": _PROGRESS_BAR,
+    "sam3_progress_text_align": _PROGRESS_BAR,
+    "sam3_progress_after_finish": _PROGRESS_BAR,
+    "sam3_progress_fade_seconds": _PROGRESS_BAR,
+    "sam3_progress_interrupt_style": _PROGRESS_BAR,
+    "sam3_progress_height": _PROGRESS_BAR,
+    "sam3_progress_color": _PROGRESS_BAR,
+    "sam3_progress_custom_color": _PROGRESS_BAR,
+    "sam3_mcp_allow_generate": _MCP_PERMISSION,
+    "sam3_mcp_allow_model_switch": _MCP_PERMISSION,
+    "sam3_mcp_allow_interrupt": _MCP_PERMISSION,
+    "sam3_mcp_allow_download": _MCP_PERMISSION,
     "sam3_appearance_theme": ignored("N3 — Forge 화면 테마. 앱은 자체 디자인 토큰을 쓴다"),
+    "sam3_composition_panel": ignored("Forge 화면의 구도 · 카메라 칸 표시(UI 를 만들 때만 읽음) — 앱 CompositionControl 을 Forge 로 "
+                                      "옮긴 것이라 앱은 자기 원본을 쓴다. 생성·인자와 무관"),
     "sam3_layout_sections": ignored("N4 — txt2img 섹션 CSS 재배치, 인자 순서와 무관"),
     "sam3_fast_dropdown_visible_choices": ignored("N3 — Forge 빠른 드롭다운 표시 개수"),
     "sam3_lora_manager_tab_mode": ignored("N2 — Forge extra-networks 탭 배치"),
@@ -549,10 +651,19 @@ ROUTES = MappingProxyType({
         "core/forge_tile_repair_client.py:TILE_REPAIR_STOP_PATH", "core/forge_tile_repair_client.py:stop",
         note="라우트 요청만 멈춘다 — 도착 순간부터(큐 대기 중이면 큐를 받자마자 interrupted, 실행 중이면 "
              "stop_if_job(sam3_route_tile_repair)). 큐를 쥔 txt2img·패널 Tile-Repair 는 건드리지 않는다"),
+    # 진행 막대(2026-10-03 미커밋) — sam3ext/progress_api.py. 다른 sam-extra 라우트와 같은 헤더(X-SAM3-Notebook: 1)·로그인
+    # 의존성, Cache-Control no-store, OpenAPI 밖. ?id_task= 가 없으면 busy·queue_size·server_time 만 준다.
+    "GET /sam-extra/progress": deferred(
+        HOLD, "작업 하나(?id_task=)의 Forge 진행률(progressapi 식)·작업 전체 ETA(Hires·배치 패스, 패스 종류별 스텝 평균)·대기열 "
+              "위치 — Forge 진행 막대(javascript/progress_bar.js)용이다. 앱은 /sdapi/v1/progress 를 폴링하고 요청마다 "
+              "force_task_id 를 붙이므로(core/webui_cancel) 같은 id 로 물으면 작업 전체 ETA 를 받을 수 있다 — 앱 진행 "
+              "표시 개선 후보, 요청 전 보류"),
 })
 
-# ── XYZ 축 (접두어별, 라이브 133개: [SAM3] 37, [Anima …] 80, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4) ──
+# ── XYZ 축 (접두어별 159개 — 0.30.1 라이브 133: [SAM3] 37, [Anima …] 80, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4;
+#    2026-10-03 미커밋 26: [Colorcraft] 14, [Anima SPEED] 6, [Extra Schedulers (sam-extra)] 4, [Extra Samplers] 2) ──
 _XYZ_GUIDANCE = deferred("P18", "G17 — 앱 XYZ 가 가이던스 spec 키·인덱스를 바꿔 가며 돌릴 수 없다")
+_XYZ_HOLD = deferred(HOLD, "스크립트가 보류(HOLD) — 앱이 그 블록을 만들지 않으므로 축으로 바꿀 값도 없다. 노출하면 P18(앱 XYZ) 대상")
 XYZ_AXES = MappingProxyType({
     "[SAM3]": {**deferred("P18", "S9 — 앱 XYZ 가 SAM3 state 키를 바꿔 가며 돌릴 수 없다"), "labels": (
         "CFG Scale", "CN Enable", "CN Guidance End", "CN Guidance Start", "CN Model", "CN Module",
@@ -592,6 +703,14 @@ XYZ_AXES = MappingProxyType({
                         "labels": ("Amount", "Bias", "Enable", "End", "Start")},
     "[DoRA]": {**deferred("P18", "M8 — DoRA 축은 값이 바뀔 때마다 LoRA 를 다시 합친다(바깥 루프에 둔다)"),
                "labels": ("Inference mode", "Inserted blocks", "Weak copy scope", "Weak copy strength")},
+    # 2026-10-03 미커밋 작업 트리 — 넷 다 p 속성으로 값을 덮어쓴다(Colorcraft 는 탭 I 와 전체 켜기만)
+    "[Colorcraft]": {**_XYZ_HOLD, "labels": (
+        "Chroma Contrast", "Clarity", "Contrast", "Enable", "End", "Exposure", "Saturation", "Sharpness", "Start",
+        "Strength", "Temperature", "Tint", "Tone Compression", "Vibrance")},
+    "[Anima SPEED]": {**_XYZ_HOLD, "labels": ("Delta", "Enable", "Manual sigma", "Mode", "Scale", "Sigma divisor")},
+    "[Extra Schedulers (sam-extra)]": {**_XYZ_HOLD, "labels": (
+        "Custom expression", "Custom sigma list", "Laplace beta", "Laplace mu")},
+    "[Extra Samplers]": {**_XYZ_HOLD, "labels": ("ER SDE eta", "ER SDE max stage")},
 })
 
 # ── Gradio 전용 기능 (이름 엔드포인트 = 함수 이름) — 앱이 기대면 안 되는 것 ──────────────
@@ -664,6 +783,24 @@ MODULES = MappingProxyType({
     "scripts/negpip.py": mapped("core/alwayson_propagation.py:TITLE_NEGPIP",
                                 note="SCRIPTS['NegPiP'] (sd-forge-negpip 편입). 내장 스위치 옵션 sam3_builtin_negpip_enabled 도 "
                                      "여기서 등록한다(OPTIONS — P10 덮어쓰기, Forge 전용)"),
+    # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0)
+    "scripts/colorcraft.py": deferred(HOLD, "SCRIPTS['Colorcraft (sam-extra)'] — 옵션 sam3_colorcraft_* 둘·XYZ [Colorcraft] 도 "
+                                            "여기서 등록한다"),
+    "scripts/anima_speed.py": deferred(HOLD, "SCRIPTS['Anima SPEED'] — 옵션 sam3_speed_* 둘·XYZ [Anima SPEED] 도 여기서 등록한다"),
+    "scripts/anima_extra_schedulers.py": deferred(
+        HOLD, "SCRIPTS['Extra Schedulers (sam-extra)'] — 불러올 때 스케줄러 6개를 Forge 목록에 등록한다(앱 Forge 스케줄러 콤보에 "
+              "라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Schedulers (sam-extra)] 도 여기서"),
+    "scripts/anima_extra_samplers.py": deferred(
+        HOLD, "SCRIPTS['Extra Samplers'] — 불러올 때 샘플러 5개를 Forge 목록에 등록한다(앱 Forge 샘플러 콤보에 라이브로 "
+              "보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Samplers] 도 여기서"),
+    "scripts/appearance_progress_bar.py": ignored(
+        "진행 막대 — 설정 sam3_progress_* 와 GET /sam-extra/progress 등록만(스크립트 클래스·생성 훅 없음)"),
+    "scripts/mcp_settings.py": ignored(
+        "MCP 권한 스위치 sam3_mcp_allow_* 넷만 등록(라우트·UI·생성 훅 없음, mcp_server 패키지를 불러오지 않는다). "
+        "mcp_server/ 자체는 Forge 밖 uv 프로젝트라 모듈 단위 밖"),
+    "scripts/composition_camera.py": ignored(
+        "구도 · 카메라 — 스타일 줄 아래 빈 gr.HTML 자리와 옵션 sam3_composition_panel 등록만(스크립트 클래스·생성 훅 없음). "
+        "앱 frontend/src/components/CompositionControl.vue 를 Forge 로 옮긴 것"),
     # sam3ext/
     "sam3ext/__init__.py": ignored("패키지 지연 import — 공개 이름(SAM3_NAME, Sam3Args)은 SCRIPTS 가 본다"),
     "sam3ext/__version__.py": mapped("core/sam_extra_contract.py:EXT_VERSION_AUDITED",
@@ -772,6 +909,18 @@ MODULES = MappingProxyType({
     "sam3ext/layout_lanes.py": ignored("N4 — txt2img 섹션 레이아웃"),
     "sam3ext/panel_container.py": ignored("N5 — 선택 이미지 도크 컨테이너"),
     "sam3ext/ui_dock.py": ignored("N5 — 선택 이미지 도크(안의 기능은 각 항목에서 다룬다)"),
+    # 2026-10-03 미커밋 작업 트리(CHANGELOG v0.31.0)
+    "sam3ext/colorcraft/": deferred(HOLD, "Colorcraft 런타임 — 인자 표(spec: arg_names·compact 인자·infotext)·엔진·마스크·"
+                                          "Debug·Gradio 패널, 색 벡터 data/*.safetensors 셋(krea2·zimage·flux2) 포함"),
+    "sam3ext/speed/": deferred(HOLD, "SPEED 런타임 — ARG_NAMES·coerce_settings·infotext(forge_host), 전환 계획(schedule)·"
+                                     "스펙트럼 변환(spectral)·샘플러 래퍼(runner)"),
+    "sam3ext/extra_schedulers/": deferred(HOLD, "스케줄러 6개·안전 식 계산기(AST 화이트리스트)·시그마 목록 보간·Forge 등록 — "
+                                                "앱은 custom 식·Laplace 값을 보낼 수 없다(스케줄러 이름은 Forge 목록으로 고른다)"),
+    "sam3ext/extra_samplers/": deferred(HOLD, "샘플러 5개(ER SDE 둘·DPM++ 4M SDE·Euler Dy CFG++ 둘)·ER SDE 값·Forge 등록 — 앱은 "
+                                              "ER SDE 값을 보낼 수 없다(샘플러 이름은 Forge 목록으로 고른다)"),
+    "sam3ext/ui_extra_schedulers.py": deferred(HOLD, "Extra Schedulers 인자(ARG_NAMES·coerce_args)·infotext 키·붙여 넣기·"
+                                                     "Gradio 컨트롤 — SCRIPTS['Extra Schedulers (sam-extra)']"),
+    "sam3ext/progress_api.py": deferred(HOLD, "ROUTES['GET /sam-extra/progress'] — 진행률·작업 전체 ETA 계산과 라우트 등록"),
     # javascript/
     "javascript/appearance_theme.js": ignored(_N6),
     "javascript/lora_manager.js": ignored(_N6 + " — 폴링·브리지 로직은 P6 참고", package="P6"),
@@ -780,6 +929,11 @@ MODULES = MappingProxyType({
                                            "/sam3-notebook/memos 가 본다"),
     "javascript/notebook_lanes.js": ignored(_N6 + " — N4 섹션 레이아웃"),
     "javascript/tipo_device.js": ignored(_N6 + " — TIPO 장치 표시(P19)", package="P19"),
+    "javascript/progress_bar.js": ignored(_N6 + " — 진행 막대 화면(라우트 계약은 ROUTES 의 /sam-extra/progress)"),
+    "javascript/colorcraft_sliders.js": ignored(_N6 + " — Colorcraft 패널 슬라이더 화면"),
+    "javascript/composition_prompt.js": ignored(_N6 + " — 앱 frontend/src/utils/compositionPrompt.ts 의 이식(태그 계산). 확장 "
+                                                  "tests/_origin_composition_prompt/ 가 앱 원본을 SHA-256 으로 고정해 대조한다"),
+    "javascript/composition_ui.js": ignored(_N6 + " — 구도 · 카메라 칸 화면(앱 CompositionControl.vue 이식)"),
 })
 
 # ── preload.py 명령줄 플래그 ─────────────────────────────────────────────────
@@ -1156,6 +1310,11 @@ UI_UNREAD = MappingProxyType({
     ("DoRA Inference Mode", 0): {
         "fields": ("label",),
         "reason": "InputAccordion 과 구버전 폴백 gr.Checkbox('Enable') 의 라벨이 달라 한쪽을 고를 수 없다"},
+    # Anima SPEED 의 gr.Number 셋(Spectrum A·beta, 노이즈 시드) — step 키워드가 없어 script-info 의 step 1 은 Gradio 4 기본값
+    # (gradio/components/number.py step=1)이다. 스캐너는 Gradio 기본값을 흉내 내지 않는다(sam_extra_scan.ui_component).
+    ("Anima SPEED", 10): {"fields": ("step",), "reason": "gr.Number(Spectrum A) — step 은 Gradio 기본값 1"},
+    ("Anima SPEED", 11): {"fields": ("step",), "reason": "gr.Number(Spectrum beta) — step 은 Gradio 기본값 1"},
+    ("Anima SPEED", 12): {"fields": ("step",), "reason": "gr.Number(precision=0, 노이즈 시드) — step 은 Gradio 기본값 1"},
 })
 
 # ── 앱 spec 과 라이브 값의 알려진 차이 (script, key, field) ────────────────────────────
