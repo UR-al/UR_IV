@@ -182,24 +182,28 @@
       </section>
 
       <!-- Right: History -->
-      <aside class="side-panel right" v-show="showLeftPanel">
+      <aside ref="historyPanel" class="side-panel right" v-show="showLeftPanel"
+        tabindex="-1" aria-label="히스토리 — Delete로 휴지통 이동, Ctrl+Z로 복구" @keydown="onHistoryTrashKeydown">
         <div class="hist-header">
           <h3>히스토리</h3>
           <span class="count-badge">{{ historyImages.length }}</span>
         </div>
         <button class="hist-nav-btn" @click="histPage = Math.max(0, histPage - 1)" :disabled="histPage <= 0"><Icon name="chevron-up" /></button>
         <div class="hist-scroll" v-scroll-memory="'history'">
-          <div v-for="img in visibleHistory" :key="img" class="hist-card"
-            @click="selectHistoryImage(img)"
+          <div v-for="(img, index) in visibleHistory" :key="img" class="hist-card"
+            tabindex="0" role="button" :aria-label="`히스토리 이미지 ${histPage * histPerPage + index + 1}`" :aria-pressed="currentImage === img"
+            @click="pickHistoryImage(img)"
+            @keydown.enter.prevent="pickHistoryImage(img)" @keydown.space.prevent="pickHistoryImage(img)"
             @contextmenu.prevent="showHistoryMenu($event, img)"
             :class="{ selected: currentImage === img, blink: historyBlink && currentImage === img }"
             draggable="true" @dragstart="onDragStart($event, img)"
           >
-            <img :key="historyImageSrc(img)" :src="historyImageSrc(img)" decoding="async" />
+            <img :key="historyImageSrc(img)" :src="historyImageSrc(img)" alt="" decoding="async" />
           </div>
         </div>
         <button class="hist-nav-btn" @click="histPage++" :disabled="(histPage + 1) * histPerPage >= historyImages.length"><Icon name="chevron-down" /></button>
 
+        <Teleport to="body">
         <transition name="pop">
           <div v-if="ctxMenu.show" class="modern-ctx-menu" :style="ctxMenuStyle">
             <div class="ctx-item" @click="ctxAddFavorite"><Icon name="star" /> 즐겨찾기 추가</div>
@@ -217,6 +221,7 @@
             <div class="ctx-item delete" @click="ctxDelete"><Icon name="trash" /> 휴지통으로 이동</div>
           </div>
         </transition>
+        </Teleport>
       </aside>
     </main>
 
@@ -286,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { initBridge, onBackendEvent, getBackend } from './bridge.js'
 import { requestAction, useWidgetStore } from './stores/widgetStore.js'
 import { initialiseAppUpdates } from './stores/appUpdateStore'
@@ -326,7 +331,8 @@ import { mirrorPrefsToStorage } from './utils/uiPrefMirror'
 import { persistUiPrefs, restoreUiFlagsFromPrefs } from './composables/uiPrefs'
 import { useSessionRestore } from './composables/useSessionRestore'
 import { createPendingRequest } from './utils/pendingRequest'
-import { applyDeleteToHistory, parseImageDeleteResult } from './utils/imageDeleteResult'
+import { useHistoryTrash } from './composables/useHistoryTrash'
+import { createHistoryTrashKeydownHandler } from './utils/historyTrashShortcuts'
 import type { ActionName, ActionPayload, AutomationSettings, AutomationStatusEvent } from './types/bridge'
 
 const wStore = useWidgetStore()
@@ -435,6 +441,7 @@ const showExtendPanel = computed({
 const historyImages = ref<string[]>([])
 const histPage = ref(0)
 const histPerPage = 5
+const historyPanel = ref<HTMLElement | null>(null)
 // 히스토리 카드 썸네일 — 목록 전체를 백엔드 캐시로 미리 만들어 위아래 페이지 넘김에 로딩이 없게 (useHistoryThumbs)
 const {
   srcFor: historyThumbSrc, ensure: ensureHistoryThumbs, setWidth: setPreviewThumbWidth,
@@ -709,7 +716,10 @@ function cancelGeneration() {
   genEta.value = ''
 }
 
-function showHistoryMenu(e: MouseEvent, path: string) { ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, path } }
+function showHistoryMenu(e: MouseEvent, path: string) {
+  historyPanel.value?.focus({ preventScroll: true })
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, path }
+}
 function hideCtxMenu() { ctxMenu.value.show = false }
 const ctxAddFavorite = () => { action('add_favorite', { path: ctxMenu.value.path }); hideCtxMenu() }
 const ctxSendI2I = () => { action('send_to_i2i', { path: ctxMenu.value.path }); hideCtxMenu() }
@@ -723,15 +733,46 @@ const ctxAddToQueue = () => { action('add_image_to_queue', { path: ctxMenu.value
 const ctxDelete = () => {
   // 히스토리에서 바로 지우지 않는다 — 휴지통 이동이 실패하면 파일은 남는데 목록에서만
   // 사라진다. 백엔드의 imageDeleteResult(removed) 를 받은 뒤 applyImageDeleteToHistory 가 뺀다.
-  action('delete_image', { path: ctxMenu.value.path })
+  historyPanel.value?.focus({ preventScroll: true })
+  historyTrash.deleteImage(ctxMenu.value.path)
   hideCtxMenu()
 }
-/** 삭제 결과 반영 — 파일이 실제로 없어졌을 때만 히스토리에서 빼고, 보던 그림이면 첫 장으로. */
-function applyImageDeleteToHistory(raw: unknown) {
-  const next = applyDeleteToHistory(historyImages.value, currentImage.value, parseImageDeleteResult(raw))
-  if (!next) return
-  historyImages.value = next.history
-  if (next.current !== currentImage.value) currentImage.value = next.current
+// 단축키는 히스토리 영역 안에서만 처리한다 — 프롬프트/대화/에디터의 Delete·Undo를 가로채지 않는다.
+const historyTrash = useHistoryTrash({
+  history: historyImages, current: currentImage, page: histPage, perPage: histPerPage,
+  sendDelete: (payload) => action('delete_image', payload),
+  sendRestore: (payload) => action('restore_image', payload),
+  onSelection: (path) => {
+    currentExif.value = { prompt: '', negative: '', raw: '' }
+    resolution.value = ''
+    if (path) { invalidateHistoryThumb(path); void selectHistoryImage(path) }
+  },
+  onChanged: keepHistoryFocus,
+  onTimeout: () => addToast('warning', '휴지통 작업의 응답이 없습니다. 연결을 확인하고 F5로 히스토리를 새로고침해 주세요.'),
+})
+onUnmounted(() => historyTrash.dispose())
+const onHistoryTrashKeydown = createHistoryTrashKeydownHandler({
+  isEnabled: () => showLeftPanel.value && !gateOpen.value && !ctxMenu.value.show,
+  hasModal: () => appModalStack.isAnyOpen(),
+  activeElement: () => document.activeElement as HTMLElement | null,
+  deleteSelected: () => historyTrash.deleteImage(currentImage.value),
+  undo: () => historyTrash.undo(),
+})
+const applyImageDeleteToHistory = historyTrash.onDeleteResult
+
+function keepHistoryFocus() {
+  const panel = historyPanel.value
+  if (!panel?.contains(document.activeElement)) return
+  // 삭제로 카드가 사라져도 Ctrl+Z를 받는다. 다른 입력으로 이동했다면 포커스를 빼앗지 않는다.
+  void nextTick(() => {
+    if (document.activeElement === document.body || panel.contains(document.activeElement)) {
+      panel.focus({ preventScroll: true })
+    }
+  })
+}
+function pickHistoryImage(path: string) {
+  historyPanel.value?.focus({ preventScroll: true })
+  void selectHistoryImage(path)
 }
 
 async function selectHistoryImage(path: string) {
@@ -1056,6 +1097,7 @@ onMounted(async () => {
   onBackendEvent('showNotification', (type: string, msg: string) => { addToast(type, msg) })
   // 삭제 결과(경로별) — 실제로 파일이 없어졌을 때만 히스토리에서 뺀다(갤러리 삭제도 여기 반영).
   onBackendEvent('imageDeleteResult', applyImageDeleteToHistory)
+  onBackendEvent('imageRestoreResult', historyTrash.onRestoreResult)
   // 업데이트 알림도 같은 전역 토스트를 사용하므로 listener 등록 뒤 시작한다.
   void initialiseAppUpdates(true)
 
@@ -1237,6 +1279,8 @@ onMounted(async () => {
    간격이 불균일해 보였음. */
 .hist-card { position: relative; flex: 1 1 0; min-height: 0; border-radius: var(--radius-card); overflow: hidden; border: 2px solid transparent; cursor: pointer; transition: border-color 0.15s; }
 .hist-card:hover { border-color: var(--border); }
+.hist-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+.side-panel.right:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .hist-card.selected { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-dim); }
 .hist-card.selected.blink { animation: histBlink 1s ease-in-out infinite; }
 @keyframes histBlink {
@@ -1246,7 +1290,7 @@ onMounted(async () => {
 .hist-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* Context Menu */
-.modern-ctx-menu { position: fixed; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; padding: 6px; z-index: 1000; min-width: 200px; box-shadow: 0 12px 32px rgba(0,0,0,0.8); max-height: calc(100vh - 16px); overflow-y: auto; }
+.modern-ctx-menu { position: fixed; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; padding: 6px; z-index: 2500; min-width: 200px; box-shadow: 0 12px 32px rgba(0,0,0,0.8); max-height: calc(100vh - 16px); overflow-y: auto; }
 .ctx-item { padding: 10px 14px; font-size: 11px; font-weight: var(--fw-bold); color: var(--text-muted); cursor: pointer; border-radius: 6px; transition: var(--transition); }
 .ctx-item:hover { background: var(--bg-button-hover); color: var(--text-primary); }
 .ctx-item.delete { color: var(--state-alert-fg); }

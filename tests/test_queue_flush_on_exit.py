@@ -47,6 +47,11 @@ class FlushQueueStateTests(_QueueHostCase):
 
 
 class WebQuitHookTests(_QueueHostCase):
+    def test_quit_cleans_history_undo_snapshots(self):
+        undo = mock.Mock()
+        web_main_ui._flush_window_state_on_quit(SimpleNamespace(_history_trash_undo=undo))
+        undo.close.assert_called_once_with()
+
     def test_quit_hook_flushes_the_queue(self):
         self.panel.add_single_item({'prompt': 'last'})
         host = SimpleNamespace(queue_panel=self.panel)
@@ -104,6 +109,21 @@ class DesktopQuitTests(_QueueHostCase):
         host = self._host(mock.Mock(side_effect=OSError('disk full')))
         self.assertEqual(self._quit(host), [False])
         host._flush_queue_state.assert_called_once_with()
+
+    def test_undo_snapshots_are_cleaned_before_hard_exit(self):
+        host = self._host(mock.Mock())
+        undo = host._history_trash_undo = mock.Mock()
+        with mock.patch('core.app_instance.unregister_app_instance'), \
+                mock.patch('ui.generator_main.os._exit', side_effect=_Exited) as exit_:
+            with self.assertRaises(_Exited):
+                GeneratorMainUI._quit_app(host)
+        undo.close.assert_called_once_with()
+        exit_.assert_called_once_with(0)
+
+    def test_undo_cleanup_failure_does_not_prevent_exit(self):
+        host = self._host(mock.Mock())
+        host._history_trash_undo.close.side_effect = OSError('locked snapshot')
+        self.assertEqual(self._quit(host), [False])
 
 
 if __name__ == '__main__':

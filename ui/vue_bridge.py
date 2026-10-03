@@ -96,6 +96,8 @@ class VueBridge(QObject):
     # delete_image 결과 1건 — JSON {path(요청 원문), ok, removed, level, message}.
     # 프론트는 removed 가 참일 때만 갤러리·폴더 캐시·히스토리에서 뺀다(core/image_delete.py).
     imageDeleteResult = pyqtSignal(str)
+    # 히스토리 휴지통 이동 되돌리기: {undo_token, request_id, path, ok, restored, retryable, level, message}.
+    imageRestoreResult = pyqtSignal(str)
     inpaintImageLoaded = pyqtSignal(str)   # file path — InpaintView 전용 (send_to_inpaint)
     # PNG Info '열기'로 고른 파일 — PngInfoView 전용. 예전엔 inpaintImageLoaded 를 같이 써서
     # keep-alive 로 살아 있는 InpaintView 의 원본·마스크·undo 가 PNG Info 열기마다 날아갔다.
@@ -3890,4 +3892,3 @@ class VueBridge(QObject):
                 pass
 
         threading.Thread(target=_work, daemon=True, name='vue-image-search-texts').start()
-

@@ -596,13 +596,48 @@ class GeneratorMainUI(
                     # 이미지만 허용해서 영상 '삭제' 가 목록에서만 사라지고 파일은 남았다.
                     from core.image_delete import image_delete_result
                     from ui.vue_bridge import _GALLERY_MEDIA_EXTS
-                    result = image_delete_result(
-                        str(path), _clean_path(path), allowed_exts=_GALLERY_MEDIA_EXTS)
+                    try:
+                        undo_manager = None
+                        if payload.get('undoable') is True:
+                            from core.image_trash_undo import ImageTrashUndoManager
+                            undo_manager = getattr(self, '_history_trash_undo', None)
+                            if undo_manager is None:
+                                undo_manager = self._history_trash_undo = ImageTrashUndoManager(max_entries=30)
+                        result = image_delete_result(
+                            str(path), _clean_path(path), allowed_exts=_GALLERY_MEDIA_EXTS,
+                            undo_manager=undo_manager)
+                    except Exception as exc:
+                        from core.error_handler import sanitize_for_ui
+                        print(f"[History Trash] move failed: {exc}")
+                        result = {'path': str(path), 'ok': False, 'removed': False, 'level': 'error',
+                                  'message': sanitize_for_ui(f'휴지통으로 옮기지 못했습니다: {exc}')}
+                    if isinstance(payload.get('request_id'), str):
+                        result['request_id'] = payload['request_id']
                     if result['ok']:
                         self.show_status("Moved to trash.")
                     if hasattr(self, 'vue_bridge'):
                         self.vue_bridge.showNotification.emit(result['level'], result['message'])
                         self.vue_bridge.imageDeleteResult.emit(json.dumps(result, ensure_ascii=False))
+
+            elif action == 'restore_image':
+                from core.image_trash_undo import ImageTrashUndoManager
+                try:
+                    undo_manager = getattr(self, '_history_trash_undo', None)
+                    # A frontend may reconnect after the old session expired. The token
+                    # selects only an in-memory entry; no client path is ever restored.
+                    if undo_manager is None:
+                        undo_manager = self._history_trash_undo = ImageTrashUndoManager(max_entries=30)
+                    result = undo_manager.restore(payload.get('undo_token', ''))
+                except Exception as exc:
+                    from core.error_handler import sanitize_for_ui
+                    print(f"[History Trash] restore failed: {exc}")
+                    result = {'undo_token': payload.get('undo_token', ''), 'path': '',
+                              'ok': False, 'restored': False, 'retryable': True, 'level': 'error',
+                              'message': sanitize_for_ui(f'이미지를 복원하지 못했습니다: {exc}')}
+                if isinstance(payload.get('request_id'), str):
+                    result['request_id'] = payload['request_id']
+                self.vue_bridge.showNotification.emit(result['level'], result['message'])
+                self.vue_bridge.imageRestoreResult.emit(json.dumps(result, ensure_ascii=False))
 
             # 10. 프리셋 — 저장·미리보기·불러오기·공유가 같은 PRESET_KEYS(core.generation_presets)
             elif action == 'save_preset_by_name':
@@ -2866,6 +2901,12 @@ class GeneratorMainUI(
         # 최종 종료는 os._exit 유지 — QApplication.quit()은 QWebEngineProfile/Page 해체 순서
         # 크래시·행이 재발함(커밋 24d7856d6, e6f964c6f 이력). 위에서 설정 저장 + QThread
         # 정지·대기를 마쳤고, 에디터/캡션/영속 쓰기는 Python 데몬 스레드라 안전.
+        try:
+            undo_manager = getattr(self, '_history_trash_undo', None)
+            if undo_manager is not None:
+                undo_manager.close()
+        except Exception as exc:
+            print(f"[Shutdown] 히스토리 복구 사본 정리 실패(계속 종료): {exc}")
         os._exit(0)
 
     def _stop_owned_backend_runtimes(self) -> None:

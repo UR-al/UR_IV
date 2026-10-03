@@ -41,6 +41,7 @@ export type ActionName =
   | 'pnginfo_transplant_meta'
   | 'pull_prompt_from_image' | 'explore_seed' | 'copy_to_clipboard'
   | 'gallery_open_folder' | 'gallery_send_exif_to_t2i' | 'add_favorite' | 'remove_favorite' | 'delete_image'
+  | 'restore_image'
   | 'toggle_automation' | 'stop_automation' | 'set_automation_settings'
   | 'automation_override_next' | 'pause_automation' | 'resume_automation'
   | 'workflow_profile_list' | 'workflow_profile_save' | 'workflow_profile_load'
@@ -79,7 +80,7 @@ export type BackendEvent =
   | 'pngInfoImageLoaded'
   | 'compareImageLoaded' | 'galleryFolderLoaded' | 'galleryImagesReady' | 'thumbnailReady'
   | 'imageSearchTextsReady'
-  | 'imageDeleteResult'
+  | 'imageDeleteResult' | 'imageRestoreResult'
   | 'upscalersReady' | 'ollamaModelsReady' | 'adetailerModelsReady'
   | 'chatToken' | 'chatDone' | 'chatThreads'
   | 'chatGenerationEvent' | 'modelDownloadEvent' | 'creatorCacheEvent' | 'chatModelInfo'
@@ -476,6 +477,8 @@ export interface ComfyWorkflowPicked {
 
 /** 액션 이름 → 페이로드 타입. 여기 없는 액션은 ActionPayload 가 `object` 로 푼다. */
 export interface ActionPayloads {
+  delete_image: { path: string; undoable?: boolean; request_id?: string }
+  restore_image: { undo_token: string; request_id: string }
   show_toast: ShowToastPayload
   set_rating_filter: SetRatingFilterPayload
   set_high_res_factor: SetHighResPayload

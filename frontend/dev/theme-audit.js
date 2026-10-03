@@ -93,6 +93,8 @@ const readmeScenes = [
 const readmeImages = readmeScenes.map(scene => svgUrl(scene.body, `readme-${scene.tag}`))
 const sampleImage = README_MODE ? readmeImages[0] : 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="768"><rect width="640" height="768" fill="#d7e3e9"/><circle cx="440" cy="130" r="70" fill="#eed996"/><path d="M0 520L160 350 320 500 500 300 640 470V768H0Z" fill="#81998c"/><circle cx="310" cy="280" r="55" fill="#ddb9a1"/><path d="M250 350H370L410 590H210Z" fill="#4c698e"/><text x="26" y="724" font-family="sans-serif" font-size="22" fill="#1b1b19">Offline theme sample · no personal files</text></svg>') + '#offline-preview'
 const libraryImages = README_MODE ? readmeImages : [sampleImage]
+// 히스토리 Delete/Undo 검증도 메모리의 합성 이미지로만 한다. OS 휴지통/실제 파일 접근 없음.
+const offlineTrash = new Map()
 const sampleRows = README_MODE ? [
   { id: 1, copyright: 'original', character: '', artist: 'fixture_artist', general: '1girl solo smile standing blue_dress blue_eyes long_hair outdoors meadow sunlight', rating: 'g', image_width: 832, image_height: 1216 },
   { id: 2, copyright: 'original', character: '', artist: 'sample_painter', general: '1girl beach sunset white_dress ocean looking_at_viewer', rating: 'g', image_width: 1024, image_height: 1024 },
@@ -195,6 +197,31 @@ function savePrefs(patch) {
 }
 methods.onAction = (name, raw) => {
   const payload = JSON.parse(raw || '{}')
+  if (name === 'delete_image') {
+    const index = libraryImages.indexOf(payload.path)
+    const token = `offline-trash-${crypto.randomUUID()}`
+    if (index >= 0) {
+      offlineTrash.set(token, { path: payload.path, index })
+      libraryImages.splice(index, 1)
+    }
+    record(`휴지통 이동 모의 요청: ${index >= 0 ? '성공' : '이미 없음'} (실제 파일 변경 없음)`)
+    queueMicrotask(() => emit('imageDeleteResult', json({ path: payload.path,
+      request_id: payload.request_id, undo_token: index >= 0 && payload.undoable ? token : undefined,
+      ok: index >= 0, removed: true, level: 'info', message: '오프라인 샘플만 이동' })))
+    return
+  }
+  if (name === 'restore_image') {
+    const saved = offlineTrash.get(payload.undo_token)
+    if (saved) {
+      libraryImages.splice(saved.index, 0, saved.path)
+      offlineTrash.delete(payload.undo_token)
+    }
+    record(`복구 모의 요청: ${saved ? '성공' : '보관 사본 없음'} (실제 파일 변경 없음)`)
+    queueMicrotask(() => emit('imageRestoreResult', json({ path: saved?.path || '',
+      undo_token: payload.undo_token, request_id: payload.request_id,
+      ok: !!saved, restored: !!saved, retryable: false, level: 'info', message: '오프라인 샘플만 복구' })))
+    return
+  }
   if (name.startsWith('hand_reconstruction_')) {
     record(`${name}: 화면 검증용 모의 응답 (생성·저장 없음)`)
     if (name === 'hand_reconstruction_generate') {

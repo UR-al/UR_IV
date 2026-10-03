@@ -214,7 +214,7 @@ _WEB_SIGNALS = frozenset({
     # I2I 진행 — 빠지면 웹 모드에서 I2I 취소 버튼이 뜨지 않아 멈춘 생성을 멈출 길이 없다.
     "i2iJobState",
     # 삭제 결과 — 빠지면 웹 모드에서 휴지통으로 옮겨도 목록에서 영영 안 빠진다.
-    "imageDeleteResult",
+    "imageDeleteResult", "imageRestoreResult",
     "inpaintImageLoaded", "searchStatus", "searchResultLineage", "loraStackLoaded",
     # PNG Info '열기' 전용 — inpaintImageLoaded 와 분리(인페인트 캔버스를 날리지 않게).
     "pngInfoImageLoaded",
@@ -708,6 +708,12 @@ def _flush_window_state_on_quit(window) -> None:
             flush()
         except Exception as exc:
             print(f"[web] {label} 저장 실패(계속 종료): {exc}")
+    try:
+        undo_manager = getattr(window, '_history_trash_undo', None)
+        if undo_manager is not None:
+            undo_manager.close()
+    except Exception as exc:
+        print(f"[web] 히스토리 복구 사본 정리 실패(계속 종료): {exc}")
 
 
 def _web_startup(window, app, web_server):

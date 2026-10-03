@@ -22,7 +22,7 @@
     <button type="button" class="queue-pin"
       :class="{ running: queueRunning, paused: queuePaused, open: expanded || !!activePanel, bump: queueBump }"
       :aria-expanded="expanded" aria-haspopup="menu" aria-controls="quick-dock-menu"
-      :title="queueRunning ? '대기열 실행 중 — 눌러서 대기열 · 대화 · 메모장' : '대기열 · 대화 · 메모장'"
+      :aria-label="queueRunning ? '대기열 실행 중 — 눌러서 대기열 · 대화 · 메모장' : '대기열 · 대화 · 메모장'"
       @click="toggleExpanded">
       <Icon name="list" class="qp-ico" />
       <span class="qp-label">대기열</span>

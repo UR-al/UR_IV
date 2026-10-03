@@ -9,8 +9,13 @@ delete_image 분기가 ``imageDeleteResult`` 로 그대로 돌려주고, 프론�
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from core.image_utils import TRASH_ALREADY_GONE_MESSAGE, move_to_trash_result
 from core.path_safety import missing_input_path, safe_input_path
+
+if TYPE_CHECKING:
+    from core.image_trash_undo import ImageTrashUndoManager
 
 REFUSED_PATH_MESSAGE = '허용되지 않은 이미지 경로입니다'
 
@@ -20,6 +25,7 @@ def image_delete_result(
     local_path: str,
     *,
     allowed_exts: frozenset[str] | None = None,
+    undo_manager: ImageTrashUndoManager | None = None,
 ) -> dict:
     """삭제 요청 한 건을 처리하고 프론트로 보낼 결과를 만든다.
 
@@ -27,13 +33,23 @@ def image_delete_result(
                    그대로 돌려준다(정규화한 값을 돌려주면 '/' vs '\\' 로 어긋난다).
     local_path   — file:// 제거·구분자 정리를 마친 로컬 경로.
     allowed_exts — 지울 수 있는 확장자. None 이면 path_safety 기본(정지 이미지).
+    undo_manager — 히스토리에서만 사용하는 세션 내 복원 사본 관리자.
 
     반환: ``{path, ok, removed, level, message}`` — 뜻은 move_to_trash_result 와 같다.
     """
     exts_kwargs = {} if allowed_exts is None else {'allowed_exts': allowed_exts}
     clean = safe_input_path(local_path, **exts_kwargs)
     if clean:
-        result = move_to_trash_result(clean)
+        if undo_manager is None:
+            result = move_to_trash_result(clean)
+        else:
+            # Already validated above; retain the effective whitelist for restore.
+            from core.path_safety import _DEFAULT_IMAGE_EXTS
+            result = undo_manager.move_to_trash(
+                clean, request_path=request_path,
+                allowed_exts=_DEFAULT_IMAGE_EXTS if allowed_exts is None else allowed_exts,
+                trash=move_to_trash_result,
+            )
     elif missing_input_path(local_path, **exts_kwargs):
         # 허용된 경로인데 파일이 이미 없다(다른 프로그램이 지움·드라이브 분리) —
         # 목록에 남겨 두면 다시 지울 방법이 없으니 빼도 된다고 알린다.
