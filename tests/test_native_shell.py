@@ -29,9 +29,73 @@ app = QApplication([])
 theme = ThemeManager()
 '''
         result = subprocess.run([sys.executable, '-X', 'faulthandler', '-c', textwrap.dedent(prelude) + textwrap.dedent(body)],
-                                cwd=ROOT, capture_output=True, text=True, timeout=15,
-                                env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen', 'QT_OPENGL': 'software'})
+                                cwd=ROOT, capture_output=True, text=True, encoding='utf-8', timeout=15,
+                                env={**os.environ, 'PYTHONIOENCODING': 'utf-8',
+                                     'QT_QPA_PLATFORM': 'offscreen', 'QT_OPENGL': 'software'})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_exit_confirmation_matches_current_theme_each_time_it_opens(self):
+        self.qt_probe('''
+import ast
+from PyQt6.QtGui import QCloseEvent
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
+from ui.native_dialogs import apply_native_shell_theme
+tree = ast.parse(Path('ui/generator_main.py').read_text(encoding='utf-8'))
+method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == 'closeEvent')
+scope = {}
+exec(compile(ast.Module(body=[method], type_ignores=[]), 'exit-confirmation', 'exec'), scope)
+window = QMainWindow()
+quit_calls, errors, observed = [], [], []
+window._quit_app = lambda: quit_calls.append(True)
+cases = [
+    {'theme': 'light'}, {'theme': 'dark'}, {'theme': 'default'}, {'theme': 'light'},
+    {'theme': 'light', 'themeOverrides': {'accent': '#123456'}},
+]
+responses = ('no', 'escape', 'close', 'yes')
+def inspect_and_respond():
+    box = next(w for w in app.topLevelWidgets() if isinstance(w, QMessageBox) and w.isVisible())
+    try:
+        colors = theme.get_colors()
+        background = box.palette().color(QPalette.ColorRole.Window).name()
+        observed.append(background)
+        assert background == colors['bg_primary'].lower(), (prefs, background, colors['bg_primary'])
+        assert box.parentWidget() is window
+        assert box.defaultButton() is box.button(QMessageBox.StandardButton.No)
+        for label in box.findChildren(QLabel):
+            if label.text():
+                foreground = label.palette().color(QPalette.ColorRole.WindowText).name()
+                assert contrast_ratio(foreground, background) >= 4.5, (foreground, background)
+        for standard in (QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No):
+            button = box.button(standard)
+            foreground = button.palette().color(QPalette.ColorRole.ButtonText).name()
+            fill = button.palette().color(QPalette.ColorRole.Button).name()
+            assert contrast_ratio(foreground, fill) >= 4.5, (standard, foreground, fill)
+    except Exception as exc:
+        errors.append(repr(exc))
+    finally:
+        if response == 'escape':
+            QTest.keyClick(box, Qt.Key.Key_Escape)
+        elif response == 'close':
+            box.close()
+        else:
+            standard = QMessageBox.StandardButton.Yes if response == 'yes' else QMessageBox.StandardButton.No
+            box.button(standard).click()
+with patch('utils.theme_manager.get_theme_manager', return_value=theme):
+    for prefs in cases:
+        theme.apply_prefs(prefs)
+        apply_native_shell_theme(window, theme)
+        for response in responses:
+            previous_quit_count = len(quit_calls)
+            QTimer.singleShot(0, inspect_and_respond)
+            event = QCloseEvent()
+            scope['closeEvent'](window, event)
+            assert event.isAccepted() == (response == 'yes'), response
+            assert len(quit_calls) - previous_quit_count == int(response == 'yes'), response
+assert len(observed) == len(cases) * len(responses), observed
+assert len(quit_calls) == len(cases), quit_calls
+assert not errors, errors
+''')
 
     def test_live_theme_change_fixes_existing_stack_child_contrast(self):
         self.qt_probe('''

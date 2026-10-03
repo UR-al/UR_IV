@@ -2383,14 +2383,7 @@ class GeneratorMainUI(
         msg.setInformativeText("설정이 자동 저장됩니다.")
         msg.setStandardButtons(_QMB.StandardButton.Yes | _QMB.StandardButton.No)
         msg.setDefaultButton(_QMB.StandardButton.No)
-        msg.setStyleSheet("""
-            QMessageBox { background: #0D0D0D; color: #E8E8E8; }
-            QLabel { color: #E8E8E8; font-size: 13px; }
-            QPushButton { background: #1E1E1E; color: #E8E8E8; border: 1px solid #333;
-                          border-radius: 6px; padding: 6px 20px; font-weight: 600; }
-            QPushButton:hover { background: #333; }
-            QPushButton:default { background: #FACC15; color: #000; border: none; }
-        """)
+        # Inherit the main window's live theme instead of overriding it with dark colors.
         if msg.exec() == _QMB.StandardButton.Yes:
             self._quit_app()
         else:
