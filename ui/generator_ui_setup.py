@@ -507,8 +507,9 @@ class UISetupMixin:
         from ui.vae_degrid_ui import init_degrid_proxies
         self.degrid_widgets = init_degrid_proxies(b)
 
-        # ── Extra Schedulers(sam-extra 'Extra Schedulers (sam-extra)') — _xsched_<인자> 프록시, 초기값은 앱 기본값
-        #    (= 확장 기본값: 식 모드·M * (m / M) ** x·[1.0, 0.6, 0.25, 0.1, 0.0]·μ 0·β 0.5). 판정은 core/extra_schedulers.py.
+        # ── Extra Schedulers(sam-extra 'Extra Schedulers (sam-extra)') — _xsched_<인자> 프록시 8개, 초기값은 앱 기본값
+        #    (= 확장 기본값: 식 모드·M * (m / M) ** x·[1.0, 0.6, 0.25, 0.1, 0.0]·μ 0·β 0.5·Flow Cosmos ρ 7·σ̃ 80/0.002 — 뒤 셋은
+        #    v0.33.0, Flow Cosmos rho7·Dynamic 이 같이 쓴다). 판정은 core/extra_schedulers.py.
         from ui.extra_schedulers_ui import init_extra_schedulers_proxies
         self.extra_schedulers_widgets = init_extra_schedulers_proxies(b)
 

@@ -960,6 +960,18 @@ class ExtraSchedulersMetadataGroupTests(unittest.TestCase):
         self.assertIn("Schedule type: Laplace", groups["generation"])
         self.assertNotIn("Laplace mu", groups.get("other", ""))
 
+    def test_flow_cosmos_keys_group_as_extensions(self):
+        """v0.33.0 D19: 'Flow Cosmos rho'·'sigma max'·'sigma min'(Flow Cosmos rho7·Dynamic) — 마커 'flow cosmos'."""
+        from core.image_metadata import group_parameters, parse_infotext
+        text = ("a cat\nSteps: 28, Sampler: Euler, Schedule type: Flow Cosmos Dynamic, Flow Cosmos rho: 5.5, "
+                "Flow Cosmos sigma max: 240.0, Flow Cosmos sigma min: 0.006, Seed: 7")
+        groups = group_parameters(parse_infotext(text).parameters)
+        for key in ("Flow Cosmos rho: 5.5", "Flow Cosmos sigma max: 240.0", "Flow Cosmos sigma min: 0.006"):
+            with self.subTest(key=key):
+                self.assertIn(key, groups["extensions"])
+        self.assertIn("Schedule type: Flow Cosmos Dynamic", groups["generation"])
+        self.assertNotIn("Flow Cosmos", groups.get("other", ""))
+
 
 class AnimaSpeedMetadataGroupTests(unittest.TestCase):
     """sam-extra Anima SPEED 의 infotext 3키는 확장 그룹(계획 A-SP3 마커 'anima speed')."""

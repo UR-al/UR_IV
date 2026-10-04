@@ -910,7 +910,7 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
         entry = reg.SCRIPTS[xs.SCRIPT_NAME]
         self.assertEqual(entry["status"], reg.MAPPED)
         self.assertEqual(entry["app_title"], "core.extra_schedulers:SCRIPT_NAME")
-        self.assertEqual((entry["form"], entry["live_argc"], entry["shape"]), ("positional_or_dict", 5, "c3552551b4b0"))
+        self.assertEqual((entry["form"], entry["live_argc"], entry["shape"]), ("positional_or_dict", 8, "7c291b1a040a"))
         self.assertIsNone(entry["arg_names"], "ARG_NAMES 는 스크립트 모듈 밖(sam3ext/ui_extra_schedulers.py) — 핀 xsched_arg_names")
         for ref in ("core/extra_schedulers.py:plan", "core/extra_schedulers.py:from_infotext",
                     "core/alwayson_propagation.py:TITLE_EXTRA_SCHEDULERS", "core/sam_extra_notices.py:CODE_XSCHED_NOT_APPLIED",
@@ -934,13 +934,69 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
                  "DEFAULT_EXPRESSION", "DEFAULT_SIGMAS", "KEY_CUSTOM_EXPRESSION", "KEY_CUSTOM_SIGMAS", "KEY_LAPLACE_MU",
                  "KEY_LAPLACE_BETA", "INFOTEXT_KEYS", "USE_SAME_SCHEDULER", "LABEL_LAPLACE", "LABEL_CUSTOM",
                  "README_LABELS", "LAPLACE_MU_MIN", "LAPLACE_MU_MAX", "LAPLACE_MU_STEP", "LAPLACE_MU_DEFAULT",
-                 "LAPLACE_BETA_MIN", "LAPLACE_BETA_MAX", "LAPLACE_BETA_STEP", "LAPLACE_BETA_DEFAULT")
+                 "LAPLACE_BETA_MIN", "LAPLACE_BETA_MAX", "LAPLACE_BETA_STEP", "LAPLACE_BETA_DEFAULT",
+                 # v0.33.0 — Flow Cosmos 세 값(D19)·새 스케줄러 셋의 라벨·리터럴
+                 "KEY_FLOW_COSMOS_RHO", "KEY_FLOW_COSMOS_SIGMA_MAX", "KEY_FLOW_COSMOS_SIGMA_MIN",
+                 *(f"FLOW_COSMOS_{what}_{bound}" for what in ("RHO", "SIGMA_MAX", "SIGMA_MIN")
+                   for bound in ("MIN", "MAX", "STEP", "DEFAULT")),
+                 "LABEL_REACT_DYNSF", "REACT_DYNSF_FACTOR", "LABEL_FLOW_COSMOS_RHO7", "LABEL_FLOW_COSMOS_DYNAMIC",
+                 "FLOW_COSMOS_SIGMA_MAX", "FLOW_COSMOS_SIGMA_MIN", "FLOW_COSMOS_RHO")
         self.assertEqual(sorted({f"core.extra_schedulers:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
         self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
                          {"sam3ext/ui_extra_schedulers.py", "sam3ext/extra_schedulers/settings.py",
-                          "sam3ext/extra_schedulers/registry.py"})
+                          "sam3ext/extra_schedulers/registry.py", "sam3ext/extra_schedulers/schedulers.py"})
         self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
-                         {(index, field) for index in (3, 4) for field in ("minimum", "maximum", "step", "value")})
+                         {(index, field) for index in (3, 4, 5, 6, 7) for field in ("minimum", "maximum", "step", "value")})
+        logs = {pin["name"] for pin in pins.values() if pin["source"] == "ast" and pin["name"].endswith("_NOT_FLOW_LOG")}
+        self.assertEqual(logs, {"FLOW_COSMOS_NOT_FLOW_LOG", "FLOW_COSMOS_DYNAMIC_NOT_FLOW_LOG"})
+
+
+class ExtraSamplersV033RegistryTests(unittest.TestCase):
+    """sam-extra v0.33.0 Extra Samplers(계획 S3 — 앱 노출 A-XSa2..5 전) — 확장 없이 도는 레지스트리 검사: 행은 HOLD 그대로 인자
+    5개, 앱 core/extra_samplers(A-XSa1)가 하드코딩한 확장 값마다 핀(PLAN_amend_v033 §4)."""
+
+    def test_row_is_held_with_five_arguments(self):
+        from core import extra_samplers as xsamp
+        entry = reg.SCRIPTS[xsamp.SCRIPT_NAME]
+        self.assertEqual((entry["status"], entry["package"]), (reg.DEFERRED, reg.HOLD))
+        self.assertEqual((entry["form"], entry["live_argc"], entry["shape"]), ("positional", 5, "3ee8b4de008d"))
+        self.assertEqual(tuple(entry["ui_return"]), xsamp.ARG_NAMES)
+        xyz = reg.XYZ_AXES[xsamp.XYZ_PREFIX]
+        self.assertEqual(xyz["labels"], tuple(sorted(axis[len(xsamp.XYZ_PREFIX) + 1:] for axis in xsamp.XYZ_AXES)))
+        self.assertEqual(xyz["package"], reg.HOLD)
+
+    def test_pins_mirror_every_shared_app_constant(self):
+        from core import extra_samplers as xsamp
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("extra_samplers_")}
+        apps = {pin["app"] for pin in pins.values() if "app" in pin}
+        labels = tuple(name for name in dir(xsamp) if name.startswith("LABEL_") and isinstance(getattr(xsamp, name), str)
+                       and getattr(xsamp, name) in xsamp.LABELS)
+        self.assertEqual(len(labels), 18)
+        names = (*labels, "SCRIPT_NAME", "XYZ_PREFIX", "ARG_NAMES", "DEFAULT_MAX_STAGE", "MAX_STAGE_MIN", "MAX_STAGE_MAX",
+                 "DEFAULT_ETA", "ETA_MIN", "ETA_MAX", "ETA_STEP", "DEFAULT_NOISE_WINDOW", "DEFAULT_NOISE_START",
+                 "DEFAULT_NOISE_END", "NOISE_PERCENT_MIN", "NOISE_PERCENT_MAX", "NOISE_PERCENT_STEP", "KEY_MAX_STAGE",
+                 "KEY_ETA", "KEY_NOISE_WINDOW", "NOISE_WINDOW_OFF", "WINDOW_SKIPPED_STATUS", "STATUS_KEY", "RESTART_S_MIN",
+                 "RESTART_S_MAX", "RESTART_MIN_STEPS", "RESTART_TIMES", "RESTART_TIMES_LONG", "RESTART_LONG_FROM",
+                 "UD10_HISTORY_WEIGHT", "UD10_ZERO_WEIGHT", "UD10_UNCOND_HISTORY_WEIGHT", "IPNDM_MAX_ORDER", "DEIS_MAX_ORDER",
+                 "DEIS_MODE")
+        self.assertEqual(sorted({f"core.extra_samplers:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
+        self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
+                         {"scripts/anima_extra_samplers.py", "sam3ext/extra_samplers/params.py",
+                          "sam3ext/extra_samplers/registry.py", "sam3ext/extra_samplers/substep_guard.py",
+                          "sam3ext/extra_samplers/restart_flow.py", "sam3ext/extra_samplers/cfgpp_ud10_ab.py",
+                          "sam3ext/extra_samplers/ipndm_deis.py"})
+        self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
+                         {(2, "value")} | {(index, field) for index in (3, 4) for field in ("minimum", "maximum", "step", "value")})
+
+    def test_new_screen_only_files_are_ignored_with_a_reason(self):
+        """v0.33.0 의 화면 전용 파일(목록 계열 순서·'기본값 저장' 버튼)은 앱이 따라 할 것이 없다 — ignored + 사유."""
+        for key in ("scripts/list_order.py", "sam3ext/list_order.py", "scripts/layout_save_defaults.py",
+                    "sam3ext/save_defaults.py", "sam3ext/ui_save_defaults.py", "javascript/notebook_save_defaults.js"):
+            with self.subTest(module=key):
+                row = reg.MODULES[key]
+                self.assertEqual(row["status"], reg.IGNORED)
+                self.assertTrue(row["reason"].strip())
+                self.assertFalse(row.get("optional"))
 
 
 class AnimaSpeedRegistryTests(unittest.TestCase):

@@ -1,5 +1,5 @@
 {
-  "//": "Anima SPEED 골든 사례 — core/anima_speed.py 가 만든 기대값(scratchpad impl/sp5/gen_cases.py). tests/test_anima_speed_card_mirror.py(파이썬)와 utils/animaSpeed.test.ts(TS)가 같은 파일을 읽는다: 카드 값 정규화(parse_settings ↔ parseSettings)와 설정 검사(validate — 오류 코드 순서까지). 두 구현이 갈라지면 둘 중 한쪽 테스트가 실패한다.",
+  "//": "Anima SPEED 골든 사례 — core/anima_speed.py 가 만든 기대값(scratchpad impl/sp5/gen_cases.py — sam-extra 0.33.0 판 impl/aspv033/gen_cases_v033.py). tests/test_anima_speed_card_mirror.py(파이썬)와 utils/animaSpeed.test.ts(TS)가 같은 파일을 읽는다: 카드 값 정규화(parse_settings ↔ parseSettings)와 설정 검사(validate — 오류 코드 순서까지). 두 구현이 갈라지면 둘 중 한쪽 테스트가 실패한다.",
   "settings": [
     {
       "name": "app defaults",
@@ -302,7 +302,7 @@
       ]
     },
     {
-      "name": "a/0 in scales is a script error",
+      "name": "a/0 in scales is a scales error (sam-extra 0.33.0)",
       "widgets": {
         "scales": "1/0,1"
       },
@@ -324,11 +324,11 @@
         "apply_img2img": false
       },
       "errors": [
-        "script_error"
+        "scales"
       ]
     },
     {
-      "name": "0/0 in scales is a script error",
+      "name": "0/0 in scales is a scales error",
       "widgets": {
         "scales": "0/0,1"
       },
@@ -350,11 +350,11 @@
         "apply_img2img": false
       },
       "errors": [
-        "script_error"
+        "scales"
       ]
     },
     {
-      "name": "a/-0 in scales is a script error",
+      "name": "a/-0 in scales is a scales error",
       "widgets": {
         "scales": "1/-0.0,1"
       },
@@ -376,11 +376,11 @@
         "apply_img2img": false
       },
       "errors": [
-        "script_error"
+        "scales"
       ]
     },
     {
-      "name": "a/0 in manual even when threshold is not manual",
+      "name": "a/0 in manual is ignored when threshold is not manual",
       "widgets": {
         "manual_sigmas": "0.7/0"
       },
@@ -401,8 +401,33 @@
         "hires": false,
         "apply_img2img": false
       },
+      "errors": []
+    },
+    {
+      "name": "a/0 in manual under the manual threshold",
+      "widgets": {
+        "threshold": "manual",
+        "manual_sigmas": "0.7/0"
+      },
+      "settings": {
+        "enabled": false,
+        "mode": "transition",
+        "threshold": "manual",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7/0",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
       "errors": [
-        "script_error"
+        "manual"
       ]
     },
     {
@@ -429,7 +454,7 @@
         "apply_img2img": false
       },
       "errors": [
-        "script_error"
+        "scales"
       ]
     },
     {
@@ -481,7 +506,7 @@
         "apply_img2img": false
       },
       "errors": [
-        "script_error"
+        "scales"
       ]
     },
     {

@@ -8,13 +8,15 @@ part 1 (torch 없음):
 * ``CardSettingsTests`` · ``BlockTests`` · ``CoerceTests`` · ``PasteTests`` · ``ValidateTests`` · ``StaticSkipTests`` ·
   ``PlanTests`` · ``DescribeTests`` · ``ComfyConstantTests`` · ``ModuleTests`` — 앱 규칙.
 
-part 2 — 설치된 확장(sam-extra 0.32.1)을 시험 대조 기준으로 같은 입력을 넣는다(확장 코드는 앱에 옮기지 않는다):
-* ``CoerceParityTests`` (torch — sam3ext.speed 가 import 한다): 131행 표(위치·dict·별칭·텍스트·숫자·불리언·선택지·시드,
-  ``a/0`` 예외 행 포함) — ``coerce`` == ``forge_host.coerce_settings``: 모든 필드(타입·float 비트)·``error`` 문구·
-  ``summary()``, 예외면 같은 타입·문구. ``parse_summary`` 도.
+part 2 — 설치된 확장을 시험 대조 기준으로 같은 입력을 넣는다(확장 코드는 앱에 옮기지 않는다). **sam-extra 0.33.0 에
+고정**(``a/0`` → 'division by zero' 설정 오류, 아주 큰 정수 → 기본값, UniPC bh2 거절 — 0.32.1 에서는 그 행들이 일부러
+실패한다). 0.33.0 이 설치되기 전에는 AISTUDIO_FORGE_EXTENSION_DIR 로 그 작업 트리를 가리킨다:
+* ``CoerceParityTests`` (torch — sam3ext.speed 가 import 한다): 139행 표(위치·dict·별칭·텍스트·숫자·불리언·선택지·시드,
+  ``a/0``·아주 큰 정수 행 포함 — 어느 행도 예외로 죽지 않는다) — ``coerce`` == ``forge_host.coerce_settings``: 모든
+  필드(타입·float 비트)·``error`` 문구·``summary()``. ``parse_summary`` 도.
 * ``BlockParityTests`` (torch): 앱이 보내는 JSON 블록을 확장이 읽은 값 == 카드에서 계산한 값.
 * ``ValidateParityTests`` (torch): ``validate`` 오류 유무 == 확장의 T2I 판정(coerce 오류·``build_plan`` 의
-  ``PlanError(kind="invalid")``·스크립트 예외) — latent 크기 셋 × 스케줄 셋에서. 실행 중에만 아는 것은 따로 적어 둔다.
+  ``PlanError(kind="invalid")``) — latent 크기 셋 × 스케줄 셋에서. 실행 중에만 아는 것은 따로 적어 둔다.
 * ``PasteParityTests`` (torch 없음): 확장 ``_paste``·``_paste_bool``·``_paste_int``·``parse_summary`` 를 AST 로 떼어 Forge
   붙여 넣기 루프로 돌린 값 == ``paste_values``.
 확장이 없으면 skip, AISTUDIO_REQUIRE_FORGE_EXT=1 이면 실패(tests/_sam_extra_ext).
@@ -288,17 +290,26 @@ class BlockTests(unittest.TestCase):
         self.assertEqual(sp.parse_script_block({}), sp.ScriptSettings())
         self.assertEqual(sp.parse_script_block({"args": "x"}), sp.ScriptSettings())
 
-    def test_parse_script_block_turns_the_extension_crash_into_an_error(self):
-        for block, enabled in (({"args": [{"enabled": True, "scales": "1/0,1"}]}, True),
-                               ({"args": [{"manual": "0/0"}]}, False),
-                               ({"args": [True, "transition", "neo_shift", "anima", "0.5,1", 0.01, 1.03, "1/0"]}, True)):
+    def test_parse_script_block_reads_a_zero_denominator_like_any_bad_value(self):
+        """sam-extra 0.33.0: ``a/0`` 은 그 칸의 설정 오류(해상도 비율은 늘, 수동 σ 는 threshold 가 manual 일 때만) — 0.32.1 은
+        ZeroDivisionError 로 스크립트가 죽었다. 어느 블록도 예외를 올리지 않는다."""
+        cases = (
+            ({"args": [{"enabled": True, "scales": "1/0,1"}]}, True, "scales: division by zero: '1/0'", {}),
+            ({"args": [{"manual": "0/0"}]}, False, None, {}),
+            ({"args": [{"threshold": "manual", "manual": "0.9, 0.7/0"}]}, False,
+             "manual sigmas: division by zero: '0.7/0'", {"threshold": "manual"}),
+            ({"args": [True, "transition", "neo_shift", "anima", "0.5,1", 0.01, 1.03, "1/0"]}, True, None, {}),
+            ({"args": [True, "respace", "neo_shift", "anima", "0.5,1/-0"]}, True, "scales: division by zero: '1/-0'",
+             {"mode": "respace"}),
+        )
+        for block, enabled, error, fields in cases:
             with self.subTest(block=block):
-                with self.assertRaises(ZeroDivisionError):
-                    sp.coerce(block["args"])
                 got = sp.parse_script_block(block)
+                self.assertEqual(got, sp.coerce(block["args"]))
                 self.assertIs(got.enabled, enabled)
-                self.assertTrue(got.error.startswith(sp.SCRIPT_ERROR_PREFIX + "ZeroDivisionError"), got.error)
-                self.assertEqual(dataclasses.replace(got, enabled=False, error=None), sp.ScriptSettings())
+                self.assertEqual(got.error, error)
+                self.assertEqual(dataclasses.replace(got, enabled=False, error=None),
+                                 dataclasses.replace(sp.ScriptSettings(), **fields))
 
 
 class CoerceTests(unittest.TestCase):
@@ -309,6 +320,15 @@ class CoerceTests(unittest.TestCase):
         self.assertEqual(sp.coerce(None), sp.ScriptSettings())
         self.assertEqual(sp.coerce([{}]), sp.ScriptSettings())
         self.assertIsNone(sp.coerce([]).error)
+
+    def test_integers_too_large_for_a_float_read_as_the_defaults(self):
+        """sam-extra 0.33.0 (_as_float 가 OverflowError 도 잡는다) — 0.32.1 은 예외가 그대로 나갔다."""
+        huge = 10 ** 400
+        got = sp.coerce([{"delta": huge, "sigma_divisor": -huge, "seed": huge, "spectrum_A": huge,
+                          "spectrum_beta": -huge, "preset": "custom"}])
+        self.assertEqual(got, sp.ScriptSettings(preset="custom"))
+        self.assertEqual(sp.coerce([True, "transition", "neo_shift", "anima", "0.5,1.0", huge, huge]),
+                         sp.ScriptSettings(enabled=True))
 
     def test_script_settings_of_a_card_is_the_card(self):
         settings = card(enabled=True, mode="respace", threshold="delta_optimal", preset="custom", scales="1/4;0.5;1",
@@ -338,7 +358,8 @@ class CoerceTests(unittest.TestCase):
 
     def test_summary_of_a_card(self):
         self.assertIsNone(sp.summary(sp.APP_DEFAULTS))
-        self.assertIsNone(sp.summary(card(enabled=True, scales="1/0")))
+        # a/0 도 다른 설정 오류처럼 요약은 남는다(해상도 비율은 기본값 — sam-extra 0.33.0, 0.32.1 은 스크립트 오류로 없음)
+        self.assertEqual(sp.summary(card(enabled=True, scales="1/0")), sp.ScriptSettings().summary())
         self.assertEqual(sp.summary(card(enabled=True)), sp.ScriptSettings().summary())
 
     def test_parse_summary_round_trip(self):
@@ -411,8 +432,10 @@ class ValidateTests(unittest.TestCase):
         (card(scales="1,0.5"), (sp.ERR_SCALES,)),
         (card(scales=""), (sp.ERR_SCALES,)),
         (card(scales="nan,1"), (sp.ERR_SCALES,)),
-        (card(scales="1/0,1"), (sp.ERR_SCRIPT,)),
-        (card(manual_sigmas="0/0"), (sp.ERR_SCRIPT,)),           # threshold ≠ manual 이어도 확장이 읽는다
+        (card(scales="1/0,1"), (sp.ERR_SCALES,)),                # 0.33.0: 0으로 나눔도 그 칸의 오류
+        (card(scales="x,1", manual_sigmas="1/0"), (sp.ERR_SCALES,)),
+        (card(manual_sigmas="0/0"), ()),                         # threshold ≠ manual 이면 수동 σ 칸은 무시(0.33.0)
+        (card(threshold="manual", manual_sigmas="0.7/0"), (sp.ERR_MANUAL,)),
         (card(manual_sigmas="x"), ()),                           # threshold ≠ manual 이면 오류 아님
         (card(threshold="manual", manual_sigmas="x"), (sp.ERR_MANUAL,)),
         (card(threshold="manual", manual_sigmas="0.5,0.7"), (sp.ERR_MANUAL,)),
@@ -458,8 +481,6 @@ class ValidateTests(unittest.TestCase):
     def test_coerce_codes_follow_the_error_text(self):
         """coerce 의 오류 코드는 ``error`` 문구와 같은 자리에서 나온다 — 코드가 있으면 문구도 있고, 없으면 없다."""
         for settings, codes in self.CASES:
-            if sp.ERR_SCRIPT in codes:
-                continue
             with self.subTest(settings=settings):
                 script, coerce_codes = sp._coerce(sp.as_block(settings)["args"])
                 self.assertEqual(bool(coerce_codes), script.error is not None)
@@ -629,6 +650,7 @@ COERCE_ROWS = (
     [{"scales": "1,0.5"}], [{"scales": "x,1"}], [{"scales": "nan,1"}], [{"scales": "inf,1"}],
     [{"scales": "1e400,1"}], [{"scales": "1/2/3,1"}], [{"scales": " 0.25, 0.5 ,1 "}], [{"scales": [0.5, 1.0]}],
     [{"scales": (0.5, "1")}], [{"scales": [True, 1]}], [{"scales": "1/0,1"}], [{"scales": "0/0,1"}],
+    [{"scales": "0.5,1/0"}], [{"scales": "1/0,x"}], [{"scales": ["1/-0", "1"]}],
     [{"scales": "1e-308/1e308,1"}], [{"scales": 0.5}],
     [{"threshold": "manual", "manual": "0.7,0.5", "scales": "0.25,0.5,1"}],
     [{"threshold": "manual", "manual": "0.5,0.7"}],
@@ -639,6 +661,11 @@ COERCE_ROWS = (
     [{"threshold": "manual", "manual": [0.7]}], [{"threshold": "manual", "manual": None}],
     [{"threshold": "manual", "manual": "0.7,0.7", "mode": "respace"}],
     [{"manual": "x"}], [{"manual": "0.5,0.7"}], [{"manual": "1/0"}], [{"threshold": "manual", "manual": "2/0"}],
+    [{"threshold": "manual", "manual": "0.9,nan/0", "mode": "respace"}], [{"threshold": "delta_optimal", "manual": "0/0"}],
+    [{"delta": 10 ** 400}], [{"sigma_divisor": -10 ** 400, "seed": 10 ** 400, "A": 10 ** 400, "beta": -10 ** 400,
+                              "preset": "custom"}],
+    [True, "transition", "neo_shift", "anima", "0.5,1.0", 10 ** 400, 10 ** 400, "0.7", True, "dct", 1.0, 1.0,
+     -10 ** 400],
     [{"delta": 0}], [{"delta": 1}], [{"delta": -0.1}], [{"delta": 0.5}], [{"delta": "x"}], [{"delta": "nan"}],
     [{"delta": None}], [{"delta": True}], [{"delta": "1e-9"}], [{"delta": 1, "threshold": "manual"}],
     [{"delta": 1, "threshold": "delta_optimal"}],
@@ -674,14 +701,17 @@ class CoerceParityTests(unittest.TestCase):
 
     def test_table(self):
         self.assertGreaterEqual(len(COERCE_ROWS), 60)
-        raised = 0
+        raised = zero = 0
         for row in COERCE_ROWS:
             with self.subTest(row=row):
                 want = _outcome(self.fh.coerce_settings, copy.deepcopy(row))
                 got = _outcome(sp.coerce, copy.deepcopy(row))
                 self.assertEqual(got, want)
                 raised += want[0] == "raise"
-        self.assertGreaterEqual(raised, 4)   # a/0 행이 확장에서 정말 죽는다(거울도 같이)
+                if want[0] == "ok":
+                    zero += "division by zero" in (self.fh.coerce_settings(copy.deepcopy(row)).error or "")
+        self.assertEqual(raised, 0)          # sam-extra 0.33.0: a/0·아주 큰 정수도 예외 없이(오류 목록·기본값)
+        self.assertGreaterEqual(zero, 5)     # a/0 행이 정말 'division by zero' 설정 오류가 된다
 
     def test_extension_settings_carry_no_xyz_here(self):
         self.assertEqual(self.fh.coerce_settings([True]).xyz, ())
@@ -744,8 +774,8 @@ class BlockParityTests(unittest.TestCase):
 @requires_torch
 @requires_extension
 class ValidateParityTests(unittest.TestCase):
-    """``validate`` == 확장이 T2I(σ 1 시작)에서 내리는 판정: coerce_settings 의 오류 → ``invalid settings``,
-    build_plan 의 ``PlanError(kind="invalid")`` → ``invalid settings``, ``a/0`` → 스크립트 예외. 건너뜀
+    """``validate`` == 확장이 T2I(σ 1 시작)에서 내리는 판정: coerce_settings 의 오류(``a/0`` 포함 — 0.33.0) →
+    ``invalid settings``, build_plan 의 ``PlanError(kind="invalid")`` → ``invalid settings``. 건너뜀
     (``kind="skip"``)과 정상 계획은 오류 없음. 여러 latent 크기·스텝·shift 에서 같아야 한다(설정만 보는 검사)."""
 
     EXTRA = (
@@ -773,10 +803,7 @@ class ValidateParityTests(unittest.TestCase):
         return self.torch.tensor(values + [0.0], dtype=self.torch.float32)
 
     def _forge_verdicts(self, settings) -> set:
-        try:
-            script = self.fh.coerce_settings(sp.as_block(settings)["args"])
-        except ZeroDivisionError:
-            return {"script_error"}
+        script = self.fh.coerce_settings(sp.as_block(settings)["args"])     # 0.33.0: 예외 없음
         if script.error:
             return {"invalid"}
         verdicts = set()
@@ -801,13 +828,11 @@ class ValidateParityTests(unittest.TestCase):
                 codes = sp.validate(settings)
                 want = verdicts.pop()
                 seen.add(want)
-                if want == "script_error":
-                    self.assertEqual(codes, (sp.ERR_SCRIPT,))
-                elif want == "invalid":
-                    self.assertTrue(codes and sp.ERR_SCRIPT not in codes, codes)
+                if want == "invalid":
+                    self.assertTrue(codes, codes)
                 else:
                     self.assertEqual(codes, ())
-        self.assertEqual(seen, {"script_error", "invalid", "ok"})
+        self.assertEqual(seen, {"invalid", "ok"})
 
     def test_runtime_only_invalid_settings_are_documented(self):
         for settings in self.RUNTIME_ONLY:

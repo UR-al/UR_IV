@@ -24,8 +24,8 @@
 - ``dora_*_notice``                         DoRA 추론 방식 — Comfy 순정 안내·라이브 선택지 불일치·첫 로드 앱 기본값(P8)
 - ``degrid_result_notices``/``degrid_comfy_unavailable_notice``  VAE DeGrid — Comfy 백엔드가 노드 리포트를 Forge 와 같은
                                             infotext 키로 바꿔 같은 규칙으로 알린다(core/vae_degrid.report_params)
-- Extra Schedulers                          결과: Laplace·custom 으로 돌았는데 값 기록('Laplace mu'·'Custom scheduler …')이
-                                            없음(다른 확장의 같은 이름 스케줄러). ``xsched_invalid_text_notice`` 는 쓸 수 없는
+- Extra Schedulers                          결과: Laplace·custom·Flow Cosmos(rho7·Dynamic)로 돌았는데 값 기록('Laplace mu'·
+                                            'Custom scheduler …'·'Flow Cosmos rho')이 없음(다른 확장의 같은 이름 스케줄러). ``xsched_invalid_text_notice`` 는 쓸 수 없는
                                             custom 식·목록(생성 전 — 계산기는 계획 C7 이 잇는다), ``explain_scheduler_error``
                                             는 확장 스케줄러 오류('Extra Schedulers: …') 원문에 한국어 머리를 붙인다
 - Anima SPEED                               결과: 'Anima SPEED status' 의 패스마다 — 설정 오류·실패 뒤 순정 재샘플링(경고),
@@ -126,7 +126,7 @@ CODE_DEGRID_ERROR = "degrid_error"                    # 결과: 'Anima DeGrid er
 CODE_DEGRID_NOT_APPLIED = "degrid_not_applied"        # 결과: 보냈는데 'Anima DeGrid model'·'error' 가 모두 없음(옛 sam-extra)
 CODE_DEGRID_COMFY_UNAVAILABLE = "degrid_comfy_unavailable"   # ComfyUI: 노드(팩 1.5.0)·출력 연결이 없어 빼고 생성(경고)
 # Extra Schedulers(core/extra_schedulers)
-CODE_XSCHED_NOT_APPLIED = "xsched_not_applied"        # 결과: Laplace·custom 으로 돌았는데 값 기록이 없음(다른 확장의 스케줄러)
+CODE_XSCHED_NOT_APPLIED = "xsched_not_applied"        # 결과: 값 스케줄러로 돌았는데 값 기록이 없음(다른 확장의 스케줄러)
 CODE_XSCHED_INVALID_TEXT = "xsched_invalid_text"      # 생성 전: custom 식·시그마 목록을 쓸 수 없다(보내기는 한다 — 경고)
 # Anima SPEED(core/anima_speed) — 결과 'Anima SPEED status' 의 패스마다
 CODE_SPEED_INVALID = "speed_invalid"                  # 결과: 'invalid settings - …' — 그 패스는 SPEED 없이(경고)
@@ -229,7 +229,7 @@ SAM_EXTRA_FEATURES = {
     _TITLE_DORA.lower(): ("dora", "DoRA 추론 방식"),
     _TITLE_VAE2X.lower(): ("vae2x", "VAE 2x"),
     _TITLE_DEGRID.lower(): ("degrid", "VAE DeGrid"),
-    _TITLE_EXTRA_SCHEDULERS.lower(): ("extra_schedulers", "Extra Schedulers 값(custom 식·Laplace μ/β)"),
+    _TITLE_EXTRA_SCHEDULERS.lower(): ("extra_schedulers", "Extra Schedulers 값(custom 식·Laplace μ/β·Flow Cosmos ρ/σ̃)"),
     _TITLE_SPEED.lower(): ("speed", _TITLE_SPEED),
     _TITLE_COLORCRAFT.lower(): ("colorcraft", "Colorcraft"),
 }
@@ -959,10 +959,11 @@ XSCHED_ERROR_LEAD = "Extra Schedulers 스케줄을 만들 수 없습니다"
 
 
 def _xsched_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
-    """보낸 Extra Schedulers 블록의 결과(P4 '보냈는데 흔적 없음' 규칙). 확장은 자기 Laplace·custom 이 돈 장에만 값 키를
-    남긴다(ui_extra_schedulers.write_infotext — 다른 확장이 같은 라벨을 먼저 등록했으면 그 확장의 스케줄러가 돌고 키가
-    없다). 'Schedule type'·'Hires schedule type' 이 Laplace·custom 인데 그 키가 없는 장이 있으면 앱이 보낸 값이 쓰이지
-    않았다(경고 한 번). 블록을 보내지 않았거나(게이트가 뺐거나 Comfy) 읽을 결과가 없으면 말하지 않는다."""
+    """보낸 Extra Schedulers 블록의 결과(P4 '보냈는데 흔적 없음' 규칙). 확장은 자기 Laplace·custom·Flow Cosmos(rho7·
+    Dynamic — v0.33.0, 셋 다 늘 함께)가 돈 장에만 값 키를 남긴다(ui_extra_schedulers.write_infotext — 다른 확장이 같은 라벨을
+    먼저 등록했으면 그 확장의 스케줄러가 돌고 키가 없다). 'Schedule type'·'Hires schedule type' 이 그 스케줄러인데 그 키가
+    없는 장이 있으면 앱이 보낸 값이 쓰이지 않았다(경고 한 번). 블록을 보내지 않았거나(게이트가 뺐거나 Comfy) 읽을 결과가
+    없으면 말하지 않는다."""
     if request.extra_schedulers is None or not images:
         return []
     xs = extra_schedulers
@@ -973,6 +974,11 @@ def _xsched_result_notices(request: RequestedFeatures, images: Sequence[Mapping]
             missing.setdefault(xs.LABEL_LAPLACE, (xs.KEY_LAPLACE_MU, xs.KEY_LAPLACE_BETA))
         if xs.LABEL_CUSTOM in labels and xs.KEY_CUSTOM_EXPRESSION not in params and xs.KEY_CUSTOM_SIGMAS not in params:
             missing.setdefault(xs.LABEL_CUSTOM, (xs.KEY_CUSTOM_EXPRESSION, xs.KEY_CUSTOM_SIGMAS))
+        if xs.KEY_FLOW_COSMOS_RHO not in params:
+            for label in xs.FLOW_COSMOS_LABELS:
+                if label in labels:
+                    missing.setdefault(label, (xs.KEY_FLOW_COSMOS_RHO, xs.KEY_FLOW_COSMOS_SIGMA_MAX,
+                                               xs.KEY_FLOW_COSMOS_SIGMA_MIN))
     if not missing:
         return []
     names = " · ".join(missing)
@@ -980,7 +986,7 @@ def _xsched_result_notices(request: RequestedFeatures, images: Sequence[Mapping]
     return [Notice(
         CODE_XSCHED_NOT_APPLIED, LEVEL_WARNING,
         f"스케줄러 {names} 로 생성했지만 결과에 Extra Schedulers 값 기록('{keys}')이 없습니다 — 다른 확장"
-        "(aoleg/Neo_ExtraSchedulers 등)이 같은 이름의 스케줄러를 먼저 등록해 그 스케줄러가 돌았고 앱이 보낸 μ/β·식은 "
+        "(aoleg/Neo_ExtraSchedulers 등)이 같은 이름의 스케줄러를 먼저 등록해 그 스케줄러가 돌았고 앱이 보낸 μ/β·식·ρ/σ̃ 는 "
         "쓰이지 않았습니다. 그 확장을 끄거나 Forge 콘솔의 '[Extra Schedulers (sam-extra)]' 줄을 확인하세요.",
         feature="extra_schedulers", detail=names)]
 
@@ -1061,19 +1067,14 @@ def _speed_result_notices(request: RequestedFeatures, images: Sequence[Mapping])
     (``core/anima_speed.parse_status``) 이유를 남긴다: 설정 오류(``invalid settings``)·실패 뒤 순정 재샘플링
     (``fell back to plain sampling``)은 경고, 건너뜀(``skipped``·래퍼가 불리지 않은 ``pending``)은 생성마다 이유를 한 번
     정보로. 적용(``applied``)·Hires 끔(``not applied``)·중단은 말하지 않는다. 'Anima SPEED' 기록이 한 장에도 없으면 스크립트가
-    돌지 않았다(옛 sam-extra — 0.31.0 전, 또는 해상도 비율·수동 σ 의 a/0 스크립트 오류). 블록을 보내지 않았거나(꺼짐·게이트·
+    돌지 않았다(옛 sam-extra — 0.31.0 전, 또는 0.33.0 전 확장의 a/0 스크립트 오류. 0.33.0 은 a/0 을 다른 잘못된 값처럼
+    ``invalid settings`` 로 남긴다). 블록을 보내지 않았거나(꺼짐·게이트·
     Comfy) 읽을 결과가 없으면 말하지 않는다."""
     sent = request.speed
     if sent is None or not sent.enabled or not images:
         return []
     sp = anima_speed
     if not any(sp.INFOTEXT_KEY in params for params in images):
-        if str(sent.error or "").startswith(sp.SCRIPT_ERROR_PREFIX):
-            return [Notice(
-                CODE_SPEED_NOT_APPLIED, LEVEL_WARNING,
-                "Anima SPEED 의 해상도 비율·수동 σ 칸에 0으로 나누는 분수(a/0)가 있어 Forge 의 SPEED 스크립트가 오류로 "
-                "멈췄습니다 — SPEED 없이 생성됐습니다. 파라미터 카드의 SPEED 칸을 고치세요.",
-                feature="speed", detail=sp.ERR_SCRIPT)]
         return [Notice(
             CODE_SPEED_NOT_APPLIED, LEVEL_WARNING,
             f"Anima SPEED 를 켰지만 결과에 '{sp.INFOTEXT_KEY}' 기록이 없습니다 — 연결된 sam-extra 가 SPEED 를 모르는 옛 "

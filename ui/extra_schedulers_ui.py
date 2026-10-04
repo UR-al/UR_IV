@@ -3,16 +3,18 @@
 
 판정·정규화는 core/extra_schedulers 가 한다. 여기서는
 
-- ``init_extra_schedulers_proxies(bridge)``  ``_xsched_<인자>`` LineEditProxy 5개(값은 모두 문자열 — DeGrid·DoRA 프록시와
-  같은 패턴), 초기값은 앱 기본값(``APP_DEFAULTS`` = 확장 기본값: 식 모드·'M * (m / M) ** x'·'[1.0, 0.6, 0.25, 0.1, 0.0]'·
-  μ 0·β 0.5)
+- ``init_extra_schedulers_proxies(bridge)``  ``_xsched_<인자>`` LineEditProxy 8개(``core/extra_schedulers.WIDGET_KEYS`` =
+  확장 ARG_NAMES — 값은 모두 문자열, DeGrid·DoRA 프록시와 같은 패턴), 초기값은 앱 기본값(``APP_DEFAULTS`` = 확장 기본값:
+  식 모드·'M * (m / M) ** x'·'[1.0, 0.6, 0.25, 0.1, 0.0]'·μ 0·β 0.5·Flow Cosmos ρ 7·σ̃ max 80·σ̃ min 0.002)
 - ``contribute(host, ctx)``      ui/sampling_blocks.CONTRIBUTORS 의 한 줄(DeGrid 뒤 — 계획 R7). 지금 화면에서 laplace·
-  custom 을 쓰는 패스(``pass_values`` → ``core/extra_schedulers.passes_from_widgets``)를 ``plan`` 에 넘긴다 — 스냅샷이
+  custom·flow_cosmos_rho7·flow_cosmos_dynamic 을 쓰는 패스(``pass_values`` → ``core/extra_schedulers.passes_from_widgets``)를
+  ``plan`` 에 넘긴다 — 스냅샷이
   스크립트를 확인했으면 늘, 확인 못 했으면 그런 패스가 있을 때만 싣는다(계획 X5). 출처는 ``plan`` 이 값으로 정한다
   (기본값이면 앱 기본값). 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다. aux(보조 패스 봉투)는 t2i 와 같은
   블록이고 모든 보조 img2img 로 간다(확장 전역 상태가 요청마다 덮인다).
 - ``get_settings``/``set_settings``/``apply_saved_settings``  prompt_settings.json·생성 프리셋(``extra_schedulers_settings``).
-  옛 설정 파일에 키가 없으면 앱 기본값 — 확장 기본값과 같아 동작이 바뀌지 않으므로 안내하지 않는다.
+  옛 설정 파일에 키가 없으면 앱 기본값 — 확장 기본값과 같아 동작이 바뀌지 않으므로 안내하지 않는다. v0.33.0 전에 저장한
+  값(키 다섯)의 Flow Cosmos 셋도 앱 기본값이다(확장이 키 없는 옛 요청을 읽는 것과 같다).
 - ``apply_infotext(host, params)``  붙여 넣은 infotext(PNG Info·'이 설정으로 생성' — 계획 A-R1 이 연결)의 값을 칸에
   되살린다(``core/extra_schedulers.from_infotext`` — 이미지가 쓰지 않은 스케줄러의 칸은 그대로).
 
@@ -50,7 +52,7 @@ _PASS_SOURCES = {
 
 
 def init_extra_schedulers_proxies(bridge) -> dict:
-    """``_xsched_<인자>`` 프록시 5개 — 앱 기본값을 문자열로 심어 둔다(Vue 가 값을 보내기 전에도 같은 블록이 나가게)."""
+    """``_xsched_<인자>`` 프록시 8개 — 앱 기본값을 문자열로 심어 둔다(Vue 가 값을 보내기 전에도 같은 블록이 나가게)."""
     from ui.widget_proxies import LineEditProxy
 
     values = xs.widget_values(xs.APP_DEFAULTS)
@@ -82,7 +84,7 @@ def _raw(host) -> Optional[dict]:
 
 
 def get_settings(host) -> dict:
-    """저장용 위젯 문자열(키 5개). 위젯이 없는 호스트는 빈 dict."""
+    """저장용 위젯 문자열(키 8개). 위젯이 없는 호스트는 빈 dict."""
     raw = _raw(host)
     return {} if raw is None else xs.widget_values(xs.parse_settings(raw))
 
@@ -152,7 +154,7 @@ def pass_values(host) -> dict:
 
 
 def passes_in_use(host, *, img2img: bool = False) -> tuple:
-    """지금 화면에서 laplace·custom 을 쓰는 패스(``PassUse`` 튜플)."""
+    """지금 화면에서 값 스케줄러(``core/extra_schedulers.VALUE_SCHEDULERS``)를 쓰는 패스(``PassUse`` 튜플)."""
     return xs.passes_from_widgets(pass_values(host), img2img=img2img)
 
 

@@ -202,7 +202,8 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
         passes=frozenset(AUX_PASSES), backends=_ALL_BACKENDS, feature="extra_schedulers",
         when_unknown=_unknown(user=SEND, app_default=SKIP), main_retry=True,
         reason="process() 가 요청마다 전역 상태를 덮는다(sam3ext/extra_schedulers/settings.py set_active) — 블록 없는 보조 "
-               "img2img 는 기본값으로 돌아가 Laplace μ/β·custom 식이 메인과 달라진다. 값은 그 패스가 laplace·custom 일 때만 "
+               "img2img 는 기본값으로 돌아가 Laplace μ/β·custom 식·Flow Cosmos ρ/σ̃ 가 메인과 달라진다. 값은 그 패스가 "
+               "custom·Laplace·Flow Cosmos rho7·Dynamic 일 때만 "
                "쓰이므로 늘 보내도 결과가 같다. 스냅샷이 확인하면 값이 기본값이어도 앱이 스스로 싣는 블록이라(core/"
                "extra_schedulers.plan, 계획 X5) 모르는 Forge 의 422 는 빼고 한 번 더(main_retry). 앱 기본값 블록은 확인 "
                "전에는 보내지 않는다(Forge 도 블록 없이 같은 기본값으로 돈다)"),

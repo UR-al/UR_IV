@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.32.1"
+EXT_VERSION_AUDITED = "0.33.0"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -86,7 +86,20 @@ EXT_VERSION_AUDITED = "0.32.1"
 # 2026-10-04 Colorcraft 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 둘을 HOLD → mapped(첫 인자 하나 = 확장 infotext
 # 문자열, 메인 요청 전용 — 전달 행 passes=()), XYZ [Colorcraft] 14축은 P18, 상수 계약은 SEMANTIC_PINS colorcraft_*(앱 쪽 —
 # 팩 거울 '_comfy' 는 C0). 화면 JS 셋은 그대로 N6.
-EXT_COMMIT_AUDITED = "6101f05"
+# 2026-10-04 v0.33.0(b33708c, master 머지 d05afd9 — 트리 같음, 태그 v0.33.0): 샘플러 13종(18종 — 새 파일 dpmpp_flow·unipc·
+# cfgpp_ud10_ab·er_sde_window·ipndm_deis·restart_flow 는 기존 'sam3ext/extra_samplers/' 단위 안)과 스케줄러 3종(9종 — React
+# Cosinusoidal DynSF·Flow Cosmos rho7·Flow Cosmos Dynamic, DESIGN D18·D20). 'Extra Samplers' 인자 2 → 5(noise_window·
+# noise_start·noise_end, infotext 'ER SDE noise window', XYZ +1 — 앱 노출은 Lane A A-XSa2..5 라 HOLD 그대로, 상수 계약은
+# SEMANTIC_PINS extra_samplers_*), 'Extra Schedulers (sam-extra)' 인자 5 → 8(Flow Cosmos ρ·σ̃ max·σ̃ min — D19, infotext 키 셋·
+# XYZ +3; Flow Cosmos rho7·Dynamic 이 같은 세 값을 쓴다 — 앱 core/extra_schedulers·카드가 거울, 블록은 늘 키 8개).
+# Anima SPEED 고침(a/0 → invalid settings, float 로 못 바꾸는 큰 정수 → 기본값, UniPC bh2 건너뜀 — 인자·shape 그대로).
+# 새 화면 전용 파일 두 묶음은 ignored: 목록 계열 순서(scripts/list_order.py·sam3ext/list_order.py — D21, 이름·라벨·맵 그대로
+# 순서만)와 notebook '기본값 저장' 버튼(scripts/layout_save_defaults.py·sam3ext/save_defaults.py·ui_save_defaults.py·
+# javascript/notebook_save_defaults.js). 한 열 드롭다운은 기존 javascript/notebook.js·style.css 의 화면 변경. 기존 항목의
+# 결과는 그대로(CHANGELOG — 기존 대조 테스트 그대로). 픽스처는 설치된 0.33.0 을 불러온 테스트 Forge(7862)에서 읽기 전용
+# GET 으로 다시 받았다(captured_at 2026-10-04T11:35:16+00:00) — 'Extra Samplers'·'Extra Schedulers (sam-extra)' 두 항목
+# (각 txt2img·img2img)에 칸 셋씩 붙은 것 말고는 0.32.1 픽스처와 같다.
+EXT_COMMIT_AUDITED = "d05afd9"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -508,8 +521,11 @@ SCRIPTS = MappingProxyType({
                  "읽힌다, 핀 speed_arg_names) 또는 dict 한 개(ARG_NAMES·infotext 'Anima SPEED' 키 divisor·manual·A·beta, "
                  "coerce_settings). 뒤 인자는 빼도 기본값. idx10-12 는 gr.Number(script-info 의 step 1 은 Gradio 기본값 — "
                  "UI_UNREAD). 잘못된 값은 오류 목록이 되어 그 패스는 순정(status 'invalid settings - …', 'Anima SPEED' 는 "
-                 "남는다). 해상도 비율·수동 σ 칸의 'a/0' 분수는 schedule._numbers 의 ZeroDivisionError 가 coerce_settings 밖으로 "
-                 "나가 스크립트 오류가 된다(Forge 는 SPEED 없이 생성, infotext 없음). 패스마다(process_before_every_sampling) "
+                 "남는다). 해상도 비율·수동 σ 칸의 'a/0' 분수는 0.33.0 부터 schedule._numbers 가 ValueError('division by zero: "
+                 "…')로 바꿔 다른 잘못된 값처럼 invalid settings 다(수동 σ 글자는 threshold manual 일 때만 읽는다 — 0.32 까지는 "
+                 "ZeroDivisionError 가 coerce_settings 밖으로 나가 스크립트 오류였다). float 로 못 바꾸는 큰 API 정수는 기본값"
+                 "(_as_float), UniPC bh2(sample_unipc_bh2)는 UniPC 처럼 건너뛴다(UNSUPPORTED_SAMPLERS). "
+                 "패스마다(process_before_every_sampling) "
                  "p.sampler.func 를 감싸고 base·img2img·hires 별 status 를 'Anima SPEED status' 에 ' | ' 로 잇는다(applied·"
                  "skipped·invalid settings·not applied·pending·fell back to plain sampling·interrupted). infotext 'Anima "
                  "SPEED'(요약 — 붙여 넣기가 되읽는다)·'Anima SPEED status'·'Anima SPEED img2img rescale'(옵션, init latent "
@@ -548,22 +564,30 @@ SCRIPTS = MappingProxyType({
                   "Forge 옵션 sam3_speed_img2img_rescale 은 OPTIONS P10(Forge 전용 — ComfyUI 는 확장 기본값 켬, 계획 D7), "
                   "sam3_speed_log 는 쓰지 않는다"))),
     # 2026-10-04 앱 노출(보류 → mapped): 파라미터 카드의 값 칸·샘플링 블록 기여자·보조 패스 전달 규칙·결과 알림·붙여 넣기
-    # 규칙. 상수 계약은 SEMANTIC_PINS xsched_*. ComfyUI(팩 1.7.0 의 스케줄러 6개 등록·값 운반 노드)는 계획 C 단계.
+    # 규칙. 상수 계약은 SEMANTIC_PINS xsched_*. 같은 날 v0.33.0(인자 8개·스케줄러 9개 — 계획 S3)으로 맞췄다. ComfyUI(팩
+    # 1.7.0 의 스케줄러 등록·값 운반 노드)는 계획 C 단계.
     "Extra Schedulers (sam-extra)": _script(
-        file="scripts/anima_extra_schedulers.py", form="positional_or_dict", live_argc=5, shape="c3552551b4b0",
+        file="scripts/anima_extra_schedulers.py", form="positional_or_dict", live_argc=8, shape="7c291b1a040a",
         app_title="core.extra_schedulers:SCRIPT_NAME",
-        api_note="위치 인자 [custom_mode, custom_expression, custom_sigmas, laplace_mu, laplace_beta] 또는 그 키의 dict 한 개"
-                 "(sam3ext/ui_extra_schedulers.py ARG_NAMES·coerce_args — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 읽힌다, "
-                 "핀 xsched_arg_names). ui() 가 build_controls 의 튜플을 list() 로 돌려줘 반환 순서·컴포넌트를 정적으로 못 "
-                 "읽는다. 뒤 인자는 빼도 기본값, 숫자가 아닌 μ/β 는 기본값, 범위 밖은 자른다(settings.coerce). process() 는 "
-                 "요청마다(블록이 없어도 ui() 기본값으로) 전역 상태를 덮고(settings.set_active) 스케줄러가 그것을 읽는다 — "
-                 "값은 생성의 Schedule type(·Hires schedule type)이 이 확장의 custom·Laplace 일 때만 쓰인다. 스케줄러 6개"
-                 "(name cosine·cosine_exponential·phi·laplace·karras_dynamic·custom, label Cosine·CosineExponential blend·Phi·"
-                 "Laplace·Karras Dynamic·custom)는 불러올 때 Forge 목록에 등록돼 /sdapi/v1/schedulers 로 나온다 — 앱 Forge "
-                 "스케줄러 콤보는 라이브 name 목록(backends/webui_backend.py get_info). 같은 이름·라벨이 이미 있으면(aoleg/"
-                 "Neo_ExtraSchedulers) 건너뛰고 그 스케줄러가 돈다. 잘못된 식·목록·평평한 스케줄은 생성을 멈춘다(HTTP 500, "
+        api_note="위치 인자 [custom_mode, custom_expression, custom_sigmas, laplace_mu, laplace_beta, flow_cosmos_rho, "
+                 "flow_cosmos_sigma_max, flow_cosmos_sigma_min] 또는 그 키의 dict 한 개(sam3ext/ui_extra_schedulers.py "
+                 "ARG_NAMES·coerce_args — 스크립트 모듈 밖이라 arg_names 는 AST 로 안 읽힌다, 핀 xsched_arg_names). v0.33.0 이 뒤 "
+                 "셋(Flow Cosmos ρ·σ̃ max·σ̃ min — D19)을 덧붙였다: 인자 다섯 이하·키 다섯의 요청은 Flow Cosmos 기본값(ρ 7 · σ̃ "
+                 "0.002~80)으로 돈다. ui() 가 build_controls 의 튜플을 list() 로 돌려줘 반환 순서·컴포넌트를 정적으로 못 읽는다"
+                 "(슬라이더는 픽스처 핀 xsched_ui_*). 뒤 인자는 빼도 기본값, 숫자가 아닌 값(float 로 못 바꾸는 큰 정수 포함)은 "
+                 "기본값, 범위 밖은 자른다(settings.coerce). process() 는 요청마다(블록이 없어도 ui() 기본값으로) 전역 상태를 "
+                 "덮고(settings.set_active) 스케줄러가 그것을 읽는다 — 값은 생성의 Schedule type(·Hires schedule type)이 이 "
+                 "확장의 custom·Laplace·Flow Cosmos rho7·Flow Cosmos Dynamic 일 때만 쓰인다(Flow Cosmos 둘이 같은 세 값 — ρ 는 "
+                 "모든 모델에서, σ̃ 는 flow 모델에서만). 스케줄러 9개(name cosine·cosine_exponential·phi·laplace·karras_dynamic·"
+                 "custom·react_cosinusoidal_dynsf·flow_cosmos_rho7·flow_cosmos_dynamic, label Cosine·CosineExponential blend·"
+                 "Phi·Laplace·Karras Dynamic·custom·React Cosinusoidal DynSF·Flow Cosmos rho7·Flow Cosmos Dynamic)는 불러올 때 "
+                 "Forge 목록에 등록돼 /sdapi/v1/schedulers 로 나온다(v0.33.0 부터 계열 순서 — scripts/list_order.py) — 앱 "
+                 "Forge 스케줄러 콤보는 라이브 name 목록(backends/webui_backend.py get_info). 같은 이름·라벨이 이미 있으면"
+                 "(aoleg/Neo_ExtraSchedulers) 건너뛰고 그 스케줄러가 돈다. 잘못된 식·목록·평평한 스케줄, flow 모델에서 σ̃ min ≥ "
+                 "σ̃ max, Flow Cosmos Dynamic 의 ρ ≤ 2(또는 도중에 다시 올라가는 스케줄)는 생성을 멈춘다(HTTP 500, "
                  "'Extra Schedulers: …'). infotext 'Custom scheduler expression'·'Custom scheduler sigmas'(공백 한 칸)·"
-                 "'Laplace mu'·'Laplace beta'(repr) — 이 확장의 custom·Laplace 를 쓴 생성에만.",
+                 "'Laplace mu'·'Laplace beta'·'Flow Cosmos rho'·'Flow Cosmos sigma max'·'Flow Cosmos sigma min'(repr — Flow "
+                 "Cosmos 셋은 그 둘 중 하나가 돈 때 늘 함께, eps/v 에서도) — 이 확장의 그 스케줄러를 쓴 생성에만.",
         classification=mapped(
             "core/extra_schedulers.py:SCRIPT_NAME", "core/extra_schedulers.py:ARG_NAMES",
             "core/extra_schedulers.py:parse_settings", "core/extra_schedulers.py:as_block",
@@ -576,40 +600,52 @@ SCRIPTS = MappingProxyType({
             # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용)·저장·붙여 넣기(계획 A-R1 이 '이 설정으로 생성'에 잇는다)
             "ui/extra_schedulers_ui.py:contribute", "ui/extra_schedulers_ui.py:apply_saved_settings",
             "ui/extra_schedulers_ui.py:apply_infotext", "ui/sampling_blocks.py:CONTRIBUTORS",
-            # 결과 'Schedule type' 이 Laplace·custom 인데 값 기록 없음(다른 확장의 같은 이름 스케줄러) → 알림(P4 규칙)
+            # 결과 'Schedule type' 이 Laplace·custom·Flow Cosmos 인데 값 기록 없음(다른 확장의 같은 이름 스케줄러) → 알림(P4 규칙)
             "core/sam_extra_notices.py:CODE_XSCHED_NOT_APPLIED", "core/sam_extra_notices.py:explain_scheduler_error",
-            # 결과 infotext 4키를 확장 그룹으로(PNG Info·갤러리·히스토리)
+            # 결과 infotext 7키를 확장 그룹으로(PNG Info·갤러리·히스토리 — 'laplace'·'custom scheduler'·'flow cosmos')
             "core/image_metadata.py:_EXTENSION_MARKERS",
-            # 파라미터 카드 Sampler/Scheduler 줄 아래 값 칸 — laplace·custom 을 쓰는 패스가 있을 때만 보인다
+            # 파라미터 카드 Sampler/Scheduler 줄 아래 값 칸 — 값 스케줄러(laplace·custom·Flow Cosmos 둘)를 쓰는 패스가 있을 때만
+            # 보인다. Flow Cosmos 칸의 경고 줄(σ̃ min ≥ σ̃ max, Dynamic ρ ≤ 2)은 확장 검사의 거울
             "frontend/src/components/params/ExtraSchedulerFields.vue",
-            "frontend/src/utils/extraSchedulers.ts:passesUsing",
-            note="dict 한 개(5키)로 보낸다 — Forge 가 캐시한 위치 기본값·사용자 ui-config 기본값과 무관하다. 기능 스냅샷이 "
+            "frontend/src/utils/extraSchedulers.ts:passesUsing", "frontend/src/utils/extraSchedulers.ts:flowCosmosRangeOk",
+            "core/extra_schedulers.py:flow_cosmos_range_ok", "core/extra_schedulers.py:flow_cosmos_dynamic_rho_ok",
+            note="dict 한 개(8키 — v0.33.0, 늘 여덟; 0.31–0.32 는 뒤 셋을 버리고 그 판에는 그 값을 읽는 스케줄러도 없다)로 "
+                 "보낸다 — Forge 가 캐시한 위치 기본값·사용자 ui-config 기본값과 무관하다. 기능 스냅샷이 "
                  "스크립트를 확인하면 값이 기본값이어도 늘 보낸다(XYZ Scheduler 축이 Laplace 로 바꾸는 칸도 같은 값 — 계획 "
-                 "X5), 확인 못 했으면 어느 패스가 laplace·custom 을 쓸 때만(모르면 사용자 값만, 없다고 하면 빼고 알림). "
+                 "X5), 확인 못 했으면 어느 패스가 값 스케줄러(laplace·custom·Flow Cosmos rho7·Dynamic)를 쓸 때만(모르면 사용자 "
+                 "값만, 없다고 하면 빼고 알림). "
                  "앱 기본값 = 확장 기본값. 메인 요청과 모든 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같은 블록 — "
                  "확장 전역 상태가 요청마다 덮이므로. 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). "
                  "Krea2 는 보내지 않는다. 결과에 이 확장의 값 키가 없으면 다른 확장의 같은 이름 스케줄러가 돈 것 — 알림",
             gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/extra_schedulers.plan 'comfy_pending', 계획 R16). "
-                  "ComfyUI 는 아직 KSampler 에 없는 이름이라 컴파일 오류('지원하지 않는 값')",
-                  "P18: XYZ μ/β/식 축은 앱 XYZ 에 없다(Scheduler 축은 있다)",
+                  "ComfyUI 는 아직 KSampler 에 없는 이름이라 컴파일 오류('지원하지 않는 값'). 작업 중인 팩 1.7.0(pack-int)은 "
+                  "스케줄러 8개까지 — Flow Cosmos Dynamic(D20)은 아직 없다",
+                  "P18: XYZ μ/β/식·Flow Cosmos ρ/σ̃ 축은 앱 XYZ 에 없다(Scheduler 축은 있다)",
                   "Forge 설정 rho·sigma min/max(Settings → Sampler Parameters)는 Forge 전용 — 앱은 보내지 않는다",
                   "C7: custom 식·목록을 앱이 미리 검사하지 않는다(계산기는 ComfyUI 팩 extra_schedulers_math — 팩 1.7.0 단계 "
                   "뒤 core/extra_schedulers.check_text). 잘못된 식은 Forge 가 'Extra Schedulers: …' 로 멈춘다",
                   "Forge HTTP 500 본문은 앱 옵션 재시도 때만 읽는다 — 스케줄러 오류 원문(explain_scheduler_error)은 아직 "
                   "생성 오류 문구에 붙지 않는다"))),
     "Extra Samplers": _script(
-        file="scripts/anima_extra_samplers.py", form="positional", live_argc=2, shape="9429dfbd04a7",
-        ui_return=("max_stage", "eta"),
-        api_note="위치 인자 [max_stage(1-3, 기본 3), eta(0-10, 기본 1.0)] — 둘 다 생략 가능(sam3ext/extra_samplers/params.py "
-                 "settings_from_args — 스크립트 클래스 밖이라 api_reads 는 비어 있다). ER SDE (Reverse-time)·(ODE) 만 읽는다. "
-                 "샘플러 5개(ER SDE (Reverse-time)·ER SDE (ODE)·DPM++ 4M SDE·Euler Dy CFG++·Euler SMEA Dy CFG++)는 불러올 때 "
-                 "Forge 목록에 등록돼 /sdapi/v1/samplers 로 나온다 — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고를 수 "
-                 "있고, 이 블록 없이 확장 기본값(3·1.0)으로 돈다. ComfyUI 는 KSampler sampler_name 에 없는 이름이라 컴파일 "
-                 "오류('지원하지 않는 값') — 'ER SDE (Reverse-time)'·'(ODE)' 는 Comfy SamplerER_SDE 노드의 다른 잡음 척도라 "
+        file="scripts/anima_extra_samplers.py", form="positional", live_argc=5, shape="3ee8b4de008d",
+        ui_return=("max_stage", "eta", "noise_window", "noise_start", "noise_end"),
+        api_note="위치 인자 [max_stage(1-3, 기본 3), eta(0-10, 기본 1.0), noise_window(기본 False), noise_start(0-1, 기본 "
+                 "0.2), noise_end(0-1, 기본 0.8)] — 뒤에서부터 생략 가능(sam3ext/extra_samplers/params.py settings_from_args — "
+                 "스크립트 클래스 밖이라 api_reads 는 비어 있다). v0.33.0 이 뒤 셋을 덧붙였다 — 0.32 까지의 []·[max_stage]·"
+                 "[max_stage, eta] 요청은 구간 끔으로 전과 같다. max stage 는 ER SDE (Reverse-time)·(ODE)·(Tunable), η·잡음 "
+                 "구간은 Reverse-time·Tunable 만 읽는다(시작 ≥ 끝은 빈 구간). 샘플러 18개(ER SDE 셋·DPM++ 4M SDE·Euler Dy "
+                 "CFG++·Euler SMEA Dy CFG++·Euler Dy·Euler SMEA Dy·DPM++ 2M SDE Heun·flow ODE 셋·UniPC bh2·CFG++ UD10 AB·IPNDM·"
+                 "IPNDM_V·DEIS·Restart (flow))는 불러올 때 Forge 목록에 등록돼 /sdapi/v1/samplers 로 나온다(계열 순서 — "
+                 "scripts/list_order.py) — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고를 수 있고, 이 블록 없이 확장 "
+                 "기본값(3·1.0·구간 끔)으로 돈다. ComfyUI 는 KSampler sampler_name 에 없는 이름이라 컴파일 오류('지원하지 않는 "
+                 "값') — 계획 C1·C3(코어 이름 dpmpp_2m_sde_heun·uni_pc_bh2·cfgpp_ud10_ab·ipndm·ipndm_v·deis 는 별칭만, 나머지 "
+                 "12개는 팩 1.7.0). 'ER SDE (Reverse-time)'·'(ODE)'·'(Tunable)' 은 Comfy SamplerER_SDE 노드의 잡음 척도라 "
                  "KSampler er_sde(Forge 'ER SDE')로 잇지 않는다. infotext 'ER SDE max stage'·'ER SDE eta'(기본값과 다를 때)·"
-                 "'Extra Samplers status'.",
-        classification=deferred(HOLD, "ER SDE max stage·eta 칸 — 앱 노출 요청 없음. 앱이 만들지 않는다"
-                                      "(core/alwayson_propagation NEVER)")),
+                 "'ER SDE noise window'(구간을 켜고 Reverse-time·Tunable 이 돈 때 — '0.2-0.8')·'Extra Samplers status'(부분을 "
+                 "'; ' 로 잇는다 — Dy 보조 스텝·잡음 구간 건너뜀).",
+        classification=deferred(HOLD, "ER SDE max stage·η·잡음 구간 칸 — 앱 노출은 계획 Lane A A-XSa2..5(core/extra_samplers "
+                                      "는 표·정규화·infotext 까지 있다, 상수 계약은 SEMANTIC_PINS extra_samplers_*). 앱이 아직 "
+                                      "블록을 만들지 않는다(core/alwayson_propagation NEVER)")),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -804,8 +840,9 @@ ROUTES = MappingProxyType({
               "표시 개선 후보, 요청 전 보류"),
 })
 
-# ── XYZ 축 (접두어별 159개 — 0.30.1 라이브 133: [SAM3] 37, [Anima …] 80, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4;
-#    2026-10-03 미커밋 26: [Colorcraft] 14, [Anima SPEED] 6, [Extra Schedulers (sam-extra)] 4, [Extra Samplers] 2) ──
+# ── XYZ 축 (접두어별 163개 — 0.30.1 라이브 133: [SAM3] 37, [Anima …] 80, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4;
+#    2026-10-03 미커밋 26: [Colorcraft] 14, [Anima SPEED] 6, [Extra Schedulers (sam-extra)] 4, [Extra Samplers] 2;
+#    v0.33.0 +4: [Extra Schedulers (sam-extra)] Flow Cosmos 셋, [Extra Samplers] ER SDE noise window) ──
 _XYZ_GUIDANCE = deferred("P18", "G17 — 앱 XYZ 가 가이던스 spec 키·인덱스를 바꿔 가며 돌릴 수 없다")
 _XYZ_HOLD = deferred(HOLD, "스크립트가 보류(HOLD) — 앱이 그 블록을 만들지 않으므로 축으로 바꿀 값도 없다. 노출하면 P18(앱 XYZ) 대상")
 XYZ_AXES = MappingProxyType({
@@ -857,11 +894,13 @@ XYZ_AXES = MappingProxyType({
     "[Anima SPEED]": {**deferred("P18", "앱 XYZ 에 SPEED 축이 없다(design_speed D13) — 블록은 카드 값으로 메인 요청에만 간다"
                                         "(core/anima_speed.plan)"),
                       "labels": ("Delta", "Enable", "Manual sigma", "Mode", "Scale", "Sigma divisor")},
-    "[Extra Schedulers (sam-extra)]": {**deferred("P18", "앱 XYZ 에 μ/β/식 축이 없다 — Scheduler 축은 이미 있고(앱 XYZ "
-                                                         "'Scheduler'), 블록은 그 칸에도 카드 값으로 같이 간다(core/"
-                                                         "extra_schedulers.plan)"), "labels": (
-        "Custom expression", "Custom sigma list", "Laplace beta", "Laplace mu")},
-    "[Extra Samplers]": {**_XYZ_HOLD, "labels": ("ER SDE eta", "ER SDE max stage")},
+    "[Extra Schedulers (sam-extra)]": {**deferred("P18", "앱 XYZ 에 μ/β/식·Flow Cosmos ρ/σ̃ 축이 없다 — Scheduler 축은 "
+                                                         "이미 있고(앱 XYZ 'Scheduler'), 블록은 그 칸에도 카드 값으로 같이 "
+                                                         "간다(core/extra_schedulers.plan). Flow Cosmos 셋(v0.33.0)은 rho7·"
+                                                         "Dynamic 둘 다에 닿는다"), "labels": (
+        "Custom expression", "Custom sigma list", "Flow Cosmos rho", "Flow Cosmos sigma max", "Flow Cosmos sigma min",
+        "Laplace beta", "Laplace mu")},
+    "[Extra Samplers]": {**_XYZ_HOLD, "labels": ("ER SDE eta", "ER SDE max stage", "ER SDE noise window")},
 })
 
 # ── Gradio 전용 기능 (이름 엔드포인트 = 함수 이름) — 앱이 기대면 안 되는 것 ──────────────
@@ -891,6 +930,15 @@ UI_ONLY_FEATURES = MappingProxyType({
 # ── 모듈 파일 단위 (scripts/*.py, sam3ext/*.py, sam3ext/<하위 패키지>/, javascript/*.js, 루트 *.py) ──
 _N1 = "N1 — Forge 내부 직렬화·콜백 보호. 앱은 HTTP 로 요청하고 Forge API 큐가 직렬화한다"
 _N6 = "N6 — DOM 전용 JavaScript"
+# v0.33.0 새 화면 전용 기능 둘(스크립트 인자·옵션·라우트·infotext 없음)
+_SAVE_DEFAULTS = ("notebook 레이아웃 탭 줄의 '기본값 저장' 버튼(v0.33.0) — Forge 의 Settings → Defaults 'Apply'(ui-config)와 "
+                  "활성 UI Preset 설정 22개(forge_checkpoint_{p} … {p}_i2i_batch_size)를 한 번에 쓴다. 숨은 Gradio 버튼 하나뿐이고 "
+                  "JSON 라우트·옵션·스크립트 인자·infotext 가 없다 — Forge 웹 화면 전용. 앱은 자기 기본값(config/tab_defaults.json·"
+                  "생성 프리셋)을 따로 저장하고 Forge 설정 파일을 쓰지 않는다")
+_LIST_ORDER = ("D21 목록 계열 순서(v0.33.0) — on_before_ui 콜백 하나가 Forge 의 Sampling method·Schedule type 목록을 계열별로 "
+               "다시 늘어놓는다(이름·라벨·별칭·맵·옵션 그대로, 설정·스크립트 인자·라우트 없음). /sdapi/v1/samplers·schedulers 도 "
+               "그 순서라 앱 Forge 콤보에도 같은 순서로 보이지만(Forge 첫 항목 DPM++ 2M·Automatic 은 그대로 처음) 앱은 이름으로만 "
+               "찾고(core/preset_choice·resolve_scheduler) 순서·인덱스에 기대지 않아 따라 할 것이 없다")
 MODULES = MappingProxyType({
     # 루트
     "install.py": deferred("P21", "T9 — 앱의 pip install -r 이 install.py 의 버전 고정 정책을 거치지 않는다"),
@@ -949,11 +997,12 @@ MODULES = MappingProxyType({
              "paste_values 가 거울(tests/test_anima_speed.py 가 AST 로 잘라 같은 표로 비교한다)"),
     "scripts/anima_extra_schedulers.py": mapped(
         "core/extra_schedulers.py:SCRIPT_NAME", "core/extra_schedulers.py:SCHEDULER_NAMES",
-        note="SCRIPTS['Extra Schedulers (sam-extra)'] — 불러올 때 스케줄러 6개를 Forge 목록에 등록한다(앱 Forge 스케줄러 "
+        note="SCRIPTS['Extra Schedulers (sam-extra)'] — 불러올 때 스케줄러 9개(v0.33.0 +3)를 Forge 목록에 등록한다(앱 Forge 스케줄러 "
              "콤보에 라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Schedulers (sam-extra)] 도 여기서(P18)"),
     "scripts/anima_extra_samplers.py": deferred(
-        HOLD, "SCRIPTS['Extra Samplers'] — 불러올 때 샘플러 5개를 Forge 목록에 등록한다(앱 Forge 샘플러 콤보에 라이브로 "
-              "보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Samplers] 도 여기서"),
+        HOLD, "SCRIPTS['Extra Samplers'] — 불러올 때 샘플러 18개(v0.33.0 +13)를 Forge 목록에 등록한다(앱 Forge 샘플러 콤보에 "
+              "라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). 인자 5개(v0.33.0 잡음 구간 셋)·XYZ [Extra Samplers] 셋도 "
+              "여기서. 앱 노출은 Lane A A-XSa2..5"),
     "scripts/appearance_progress_bar.py": ignored(
         "진행 막대 — 설정 sam3_progress_* 와 GET /sam-extra/progress 등록만(스크립트 클래스·생성 훅 없음)"),
     "scripts/mcp_settings.py": ignored(
@@ -962,6 +1011,10 @@ MODULES = MappingProxyType({
     "scripts/composition_camera.py": ignored(
         "구도 · 카메라 — 스타일 줄 아래 빈 gr.HTML 자리와 옵션 sam3_composition_panel 등록만(스크립트 클래스·생성 훅 없음). "
         "앱 frontend/src/components/CompositionControl.vue 를 Forge 로 옮긴 것"),
+    # v0.33.0 — 둘 다 스크립트 클래스 없이 콜백 하나만 등록한다(파일 이름이 negpip.py 앞에 정렬된다)
+    "scripts/list_order.py": ignored(_LIST_ORDER),
+    "scripts/layout_save_defaults.py": ignored(_SAVE_DEFAULTS + " — 이 파일은 footer 의 on_after_component 연결 시점만 "
+                                                                   "등록한다"),
     # sam3ext/
     "sam3ext/__init__.py": ignored("패키지 지연 import — 공개 이름(SAM3_NAME, Sam3Args)은 SCRIPTS 가 본다"),
     "sam3ext/__version__.py": mapped("core/sam_extra_contract.py:EXT_VERSION_AUDITED",
@@ -1095,18 +1148,28 @@ MODULES = MappingProxyType({
     "sam3ext/extra_schedulers/": mapped(
         "core/extra_schedulers.py:coerce", "core/extra_schedulers.py:SCHEDULER_LABELS",
         "core/extra_schedulers.py:README_LABELS", "core/extra_schedulers.py:ERROR_PREFIX",
-        note="스케줄러 6개·안전 식 계산기(AST 화이트리스트)·시그마 목록 보간·값 정규화(settings)·Forge 등록(registry). 앱은 "
-             "정규화 규칙·이름 표·오류 머리만 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현, 계획 "
+        note="스케줄러 9개(v0.33.0: React DynSF·Flow Cosmos rho7·Flow Cosmos Dynamic — 뒤 둘은 같은 Flow Cosmos 세 값)·안전 식 "
+             "계산기(AST 화이트리스트)·시그마 목록 보간·값 정규화(settings — v0.33.0 Flow Cosmos 범위)·Forge 등록(registry). 앱은 "
+             "정규화 규칙·이름 표·오류 머리·Flow Cosmos 검사(flow_cosmos_range_ok·flow_cosmos_dynamic_rho_ok)만 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현, 계획 "
              "C 단계). tests/test_extra_schedulers_core.py 가 설치된 settings·registry 와 비교한다",
         gaps=("C7: 식·목록 검사(expression·sigma_list)를 앱이 미리 하지 않는다",)),
-    "sam3ext/extra_samplers/": deferred(HOLD, "샘플러 5개(ER SDE 둘·DPM++ 4M SDE·Euler Dy CFG++ 둘)·ER SDE 값·Forge 등록 — 앱은 "
-                                              "ER SDE 값을 보낼 수 없다(샘플러 이름은 Forge 목록으로 고른다)"),
+    "sam3ext/extra_samplers/": deferred(HOLD, "샘플러 18개(v0.33.0 +13 — 새 파일 dpmpp_flow.py(flow ODE 셋)·unipc.py(UniPC "
+                                              "bh2)·cfgpp_ud10_ab.py·er_sde_window.py(ER SDE 잡음 구간)·ipndm_deis.py(IPNDM·IPNDM_V·"
+                                              "DEIS)·restart_flow.py(Restart (flow)), 기존 er_sde·euler_dy·params·registry·"
+                                              "substep_guard 확장)·ER SDE 값(params — 인자 5개·infotext·붙여 넣기)·Forge 등록. 앱 "
+                                              "core/extra_samplers 는 표·정규화·infotext 를 거울로 두었고(A-XSa1, 상수 계약 "
+                                              "SEMANTIC_PINS extra_samplers_*) 아직 블록을 보내지 않는다(Lane A A-XSa2..5). "
+                                              "샘플러 이름은 Forge 목록으로 고른다"),
     "sam3ext/ui_extra_schedulers.py": mapped(
         "core/extra_schedulers.py:ARG_NAMES", "core/extra_schedulers.py:coerce_args",
         "core/extra_schedulers.py:from_infotext", "core/extra_schedulers.py:infotext_items",
         "core/extra_schedulers.py:infotext_labels",
-        note="인자(ARG_NAMES·coerce_args)·infotext 키·붙여 넣기(paste_*)·infotext_items — SCRIPTS['Extra Schedulers "
-             "(sam-extra)']. Gradio 컨트롤(build_controls)은 앱 카드가 대신한다(범위·step 은 픽스처 핀 xsched_ui_*)"),
+        note="인자(ARG_NAMES 8개·coerce_args)·infotext 키 7개·붙여 넣기(paste_* — Flow Cosmos 셋은 registry.FLOW_COSMOS_LABELS "
+             "의 둘 중 하나를 쓴 이미지)·infotext_items — SCRIPTS['Extra Schedulers (sam-extra)']. Gradio 컨트롤(build_controls)은 "
+             "앱 카드가 대신한다(범위·step 은 픽스처 핀 xsched_ui_*)"),
+    "sam3ext/list_order.py": ignored(_LIST_ORDER + " — 순서 표·규칙·Reload UI 때 등록 순서 되돌리기(이 파일)"),
+    "sam3ext/save_defaults.py": ignored(_SAVE_DEFAULTS + " — 프리셋 설정 22개 검사·쓰기(순수 로직, 이 파일)"),
+    "sam3ext/ui_save_defaults.py": ignored(_SAVE_DEFAULTS + " — 숨은 Gradio 버튼을 main_entry 컴포넌트에 잇는 다리"),
     "sam3ext/progress_api.py": deferred(HOLD, "ROUTES['GET /sam-extra/progress'] — 진행률·작업 전체 ETA 계산과 라우트 등록"),
     # javascript/
     "javascript/appearance_theme.js": ignored(_N6),
@@ -1118,6 +1181,7 @@ MODULES = MappingProxyType({
     "javascript/tipo_device.js": ignored(_N6 + " — TIPO 장치 표시(P19)", package="P19"),
     "javascript/progress_bar.js": ignored(_N6 + " — 진행 막대 화면(라우트 계약은 ROUTES 의 /sam-extra/progress)"),
     "javascript/colorcraft_sliders.js": ignored(_N6 + " — Colorcraft 패널 슬라이더 화면"),
+    "javascript/notebook_save_defaults.js": ignored(_N6 + " — " + _SAVE_DEFAULTS + "(보이는 버튼·Apply 누르기·결과 글)"),
     # v0.32.0 Colorcraft 공유 편집기 — 브라우저 전용(js 전용 이벤트, 서버 요청 없음)
     "javascript/colorcraft_editor.js": ignored(_N6 + " — Colorcraft 공유 편집기 화면(항목 고르기·Reset·●/○ 표시·요약 줄, "
                                                 "js 전용 이벤트로 state·ref·편집기를 함께 갱신, notebook.js 빠른 드롭다운 맞추기)"),
@@ -1293,6 +1357,7 @@ _DEGRID_PINS = (
 _XSCHED_UI = "sam3ext/ui_extra_schedulers.py"
 _XSCHED_SETTINGS = "sam3ext/extra_schedulers/settings.py"
 _XSCHED_REGISTRY = "sam3ext/extra_schedulers/registry.py"
+_XSCHED_SCHEDULERS = "sam3ext/extra_schedulers/schedulers.py"
 _XSCHED_TITLE = "Extra Schedulers (sam-extra)"
 _APP_XSCHED = "core.extra_schedulers"
 
@@ -1313,8 +1378,10 @@ _XSCHED_PINS = (
                   "alwayson_scripts 키(aoleg/Neo_ExtraSchedulers 의 'Extra Schedulers' 아코디언과 다른 이름) — 앱 블록·기능 "
                   "스냅샷·전달 규칙·알림 표의 제목이 모두 이 상수 하나에서 나온다", app="SCRIPT_NAME"),
     *_xsched_pins("xsched_arg_names", _XSCHED_UI, "ARG_NAMES",
-                  ("custom_mode", "custom_expression", "custom_sigmas", "laplace_mu", "laplace_beta"),
-                  "API dict 키(뒤에만 덧붙인다) — 앱은 dict 한 개로 보내므로 이름이 바뀌면 값이 조용히 기본값이 된다",
+                  ("custom_mode", "custom_expression", "custom_sigmas", "laplace_mu", "laplace_beta", "flow_cosmos_rho",
+                   "flow_cosmos_sigma_max", "flow_cosmos_sigma_min"),
+                  "API dict 키(뒤에만 덧붙인다 — v0.33.0 이 Flow Cosmos 셋을 붙였다) — 앱은 dict 한 개(늘 키 8개)로 보내므로 이름이 "
+                  "바뀌면 값이 조용히 기본값이 된다",
                   app="ARG_NAMES"),
     *_xsched_pins("xsched_mode_labels", _XSCHED_UI, "MODE_LABELS", {"expression": "Expression", "sigmas": "Sigma list"},
                   "모드 라디오 라벨 — coerce_mode 가 'Sigma list' 를 sigmas 로 읽는다(script-info 기본값도 라벨)",
@@ -1334,13 +1401,18 @@ _XSCHED_PINS = (
         ("custom_expression", "KEY_CUSTOM_EXPRESSION", "Custom scheduler expression", "custom 식(공백 한 칸) — 식 모드로 돈 때"),
         ("custom_sigmas", "KEY_CUSTOM_SIGMAS", "Custom scheduler sigmas", "custom 시그마 목록(공백 한 칸) — 목록 모드로 돈 때"),
         ("laplace_mu", "KEY_LAPLACE_MU", "Laplace mu", "Laplace μ(repr) — Laplace 로 돈 때 β 와 늘 함께"),
-        ("laplace_beta", "KEY_LAPLACE_BETA", "Laplace beta", "Laplace β(repr)"))
+        ("laplace_beta", "KEY_LAPLACE_BETA", "Laplace beta", "Laplace β(repr)"),
+        ("flow_cosmos_rho", "KEY_FLOW_COSMOS_RHO", "Flow Cosmos rho",
+         "Flow Cosmos ρ(repr) — v0.33.0, Flow Cosmos rho7·Dynamic 이 돈 때 σ̃ 둘과 늘 함께(eps/v 에서도)"),
+        ("flow_cosmos_sigma_max", "KEY_FLOW_COSMOS_SIGMA_MAX", "Flow Cosmos sigma max", "Flow Cosmos σ̃ max(repr)"),
+        ("flow_cosmos_sigma_min", "KEY_FLOW_COSMOS_SIGMA_MIN", "Flow Cosmos sigma min", "Flow Cosmos σ̃ min(repr)"))
       for pin in _xsched_pins(f"xsched_key_{short}", _XSCHED_UI, const, value,
                               "infotext 키: " + meaning + ". 붙여 넣기(from_infotext)·결과 알림(CODE_XSCHED_NOT_APPLIED)이 "
                               "읽는다", app=const)),
     *_xsched_pins("xsched_infotext_keys", _XSCHED_UI, "INFOTEXT_KEYS",
-                  ("Custom scheduler expression", "Custom scheduler sigmas", "Laplace mu", "Laplace beta"),
-                  "확장이 쓰는(그리고 생성마다 지우는) infotext 키 전부", app="INFOTEXT_KEYS"),
+                  ("Custom scheduler expression", "Custom scheduler sigmas", "Laplace mu", "Laplace beta", "Flow Cosmos rho",
+                   "Flow Cosmos sigma max", "Flow Cosmos sigma min"),
+                  "확장이 쓰는(그리고 생성마다 지우는) infotext 키 전부(v0.33.0: 7개)", app="INFOTEXT_KEYS"),
     *_xsched_pins("xsched_use_same_scheduler", _XSCHED_UI, "USE_SAME_SCHEDULER", "Use same scheduler",
                   "Hires schedule type 의 '같은 스케줄러' — 메인 스케줄러를 쓴다(붙여 넣기·패스 판정)",
                   app="USE_SAME_SCHEDULER"),
@@ -1366,6 +1438,138 @@ _XSCHED_PINS = (
                        "β 슬라이더 step — 카드 BETA_RANGE 도 같다"),
     _xsched_slider_pin("xsched_ui_beta_default", 4, "value", 0.5, "LAPLACE_BETA_DEFAULT",
                        "β 기본값(ComfyUI LaplaceScheduler 와 같다)"),
+    # v0.33.0 D19 — Flow Cosmos ρ·σ̃ max·σ̃ min 슬라이더(settings.py 의 튜플 대입이라 AST 대신 픽스처, Laplace 처럼). 카드 입력
+    # 범위·step(frontend/src/utils/extraSchedulers.ts RHO_RANGE·SIGMA_MAX_RANGE·SIGMA_MIN_RANGE)과 자르기 범위. 팩 거울은 C0.
+    *(_xsched_slider_pin(f"xsched_ui_cosmos_{short}_{suffix}", index, field, expected, f"{prefix}_{const}",
+                         f"Flow Cosmos {what} 슬라이더 {suffix} — 칸·자르기(coerce_flow_cosmos_*)가 같은 값을 쓴다")
+      for index, short, prefix, what, values in (
+          (5, "rho", "FLOW_COSMOS_RHO", "ρ", (1.0, 15.0, 0.1, 7.0)),
+          (6, "sigma_max", "FLOW_COSMOS_SIGMA_MAX", "σ̃ max", (1.0, 1000.0, 0.1, 80.0)),
+          (7, "sigma_min", "FLOW_COSMOS_SIGMA_MIN", "σ̃ min", (0.0001, 1.0, 0.0001, 0.002)))
+      for (suffix, field, const), expected in zip((("min", "minimum", "MIN"), ("max", "maximum", "MAX"),
+                                                 ("step", "step", "STEP"), ("default", "value", "DEFAULT")), values)),
+    # v0.33.0 — 새 스케줄러 셋의 라벨(붙여 넣기·알림이 찾는다)과 Flow Cosmos rho7 의 리터럴(D18 의 고정 목록 = D19 칸의 기본값)
+    *_xsched_pins("xsched_label_react", _XSCHED_REGISTRY, "LABEL_REACT_DYNSF", "React Cosinusoidal DynSF",
+                  "reForge 의 표기 = infotext 'Schedule type' — 값이 없는 스케줄러(카드 힌트만)", app="LABEL_REACT_DYNSF"),
+    *_xsched_pins("xsched_react_factor", _XSCHED_SCHEDULERS, "REACT_DYNSF_FACTOR", 2.15,
+                  "React DynSF 지수 계수(reForge 기본값, 고정) — 다른 계수는 custom 식(카드 힌트가 그 식을 안내)",
+                  app="REACT_DYNSF_FACTOR"),
+    *_xsched_pins("xsched_label_cosmos", _XSCHED_REGISTRY, "LABEL_FLOW_COSMOS_RHO7", "Flow Cosmos rho7",
+                  "infotext 'Schedule type' — 붙여 넣기가 키 없는 이미지에 Flow Cosmos 기본값을 채우고 알림이 값 키를 찾는다",
+                  app="LABEL_FLOW_COSMOS_RHO7"),
+    *_xsched_pins("xsched_label_cosmos_dynamic", _XSCHED_REGISTRY, "LABEL_FLOW_COSMOS_DYNAMIC", "Flow Cosmos Dynamic",
+                  "D20 — Flow Cosmos rho7 의 세 값을 같이 읽는다(registry.FLOW_COSMOS_LABELS — 붙여 넣기·infotext·알림 규칙이 "
+                  "같다)", app="LABEL_FLOW_COSMOS_DYNAMIC"),
+    *_xsched_pins("xsched_cosmos_sigma_max", _XSCHED_SCHEDULERS, "FLOW_COSMOS_SIGMA_MAX", 80.0,
+                  "Cosmos-Predict2 의 EDM σ 위 끝 — D19 부터 σ̃ max 칸의 기본값(같은 수, 테스트가 묶는다)",
+                  app="FLOW_COSMOS_SIGMA_MAX"),
+    *_xsched_pins("xsched_cosmos_sigma_min", _XSCHED_SCHEDULERS, "FLOW_COSMOS_SIGMA_MIN", 0.002,
+                  "Cosmos-Predict2 의 EDM σ 아래 끝 — σ̃ min 칸의 기본값", app="FLOW_COSMOS_SIGMA_MIN"),
+    *_xsched_pins("xsched_cosmos_rho", _XSCHED_SCHEDULERS, "FLOW_COSMOS_RHO", 7.0,
+                  "Karras 의 ρ — ρ 칸의 기본값(이름의 rho7)", app="FLOW_COSMOS_RHO"),
+    *_xsched_pins("xsched_cosmos_not_flow_log", _XSCHED_SCHEDULERS, "FLOW_COSMOS_NOT_FLOW_LOG",
+                  "[Extra Schedulers] Flow Cosmos rho7: not a flow model - using Karras rho {rho:g} on the model's own sigma "
+                  "range",
+                  "eps/v 모델에서 한 번 남기는 콘솔 줄(D19 부터 ρ 틀) — 앱 상수는 없다(팩 거울 '_comfy' 는 C0: 팩이 같은 줄을 "
+                  "ComfyUI 로그에 남긴다)"),
+    *_xsched_pins("xsched_cosmos_dynamic_not_flow_log", _XSCHED_SCHEDULERS, "FLOW_COSMOS_DYNAMIC_NOT_FLOW_LOG",
+                  "[Extra Schedulers] Flow Cosmos Dynamic: not a flow model - using Karras Dynamic rho {rho:g} on the model's "
+                  "own sigma range",
+                  "D20 — eps/v 에서 Karras Dynamic 으로 돈다는 콘솔 줄(앱 상수 없음 — 팩이 Flow Cosmos Dynamic 을 다시 구현하면 "
+                  "그 거울 '_comfy')"),
+)
+
+# Extra Samplers 상수 계약(sam-extra v0.33.0 — 계획 PLAN_amend_v033 §4, S3 에서 만든다) — 앱(core/extra_samplers, A-XSa1)이 같은
+# 값을 하드코딩한다. 앱 노출(SCRIPTS 행 mapped)은 Lane A A-XSa2..5 — 그때까지 행은 HOLD 지만 표·정규화·infotext 상수는 이미
+# core 에 있어 여기서 지킨다. 라벨은 params.py(ER SDE 셋)·registry.py(나머지 15 — registry 의 ER SDE 라벨은 params 를 가리키는
+# 이름이라 AST 로 안 풀린다). 팩 거울('_comfy' — 노드 입력 기본값·범위, Restart 상수)은 계획 C0.
+_XSAMP_PARAMS = "sam3ext/extra_samplers/params.py"
+_XSAMP_REGISTRY = "sam3ext/extra_samplers/registry.py"
+_XSAMP_TITLE = "Extra Samplers"
+_APP_XSAMP = "core.extra_samplers"
+
+
+def _xsamp_pin(pin_id: str, file: str, name: str, expected, meaning: str, *, app: str = "") -> dict:
+    """확장 ``file:name`` 핀 — ``app`` 은 앱 상수 이름(core.extra_samplers, 없으면 ``name``)."""
+    return {"id": pin_id, "source": "ast", "file": file, "name": name, "expected": expected,
+            "app": f"{_APP_XSAMP}:{app or name}", "meaning": meaning}
+
+
+def _xsamp_slider_pin(pin_id: str, index: int, field: str, expected, app: str, meaning: str) -> dict:
+    return {"id": pin_id, "source": "fixture", "script": _XSAMP_TITLE, "index": index, "field": field,
+            "expected": expected, "app": f"{_APP_XSAMP}:{app}", "meaning": meaning}
+
+
+_XSAMP_LABELS = (
+    (_XSAMP_PARAMS, "LABEL_ER_SDE_REVERSE_TIME", "ER SDE (Reverse-time)"),
+    (_XSAMP_PARAMS, "LABEL_ER_SDE_ODE", "ER SDE (ODE)"),
+    (_XSAMP_PARAMS, "LABEL_ER_SDE_TUNABLE", "ER SDE (Tunable)"),
+    (_XSAMP_REGISTRY, "LABEL_DPMPP_4M_SDE", "DPM++ 4M SDE"),
+    (_XSAMP_REGISTRY, "LABEL_EULER_DY_CFG_PP", "Euler Dy CFG++"),
+    (_XSAMP_REGISTRY, "LABEL_EULER_SMEA_DY_CFG_PP", "Euler SMEA Dy CFG++"),
+    (_XSAMP_REGISTRY, "LABEL_EULER_DY", "Euler Dy"),
+    (_XSAMP_REGISTRY, "LABEL_EULER_SMEA_DY", "Euler SMEA Dy"),
+    (_XSAMP_REGISTRY, "LABEL_DPMPP_2M_SDE_HEUN", "DPM++ 2M SDE Heun"),
+    (_XSAMP_REGISTRY, "LABEL_DPMPP_2M_FLOW_ODE", "DPM++ 2M (flow ODE)"),
+    (_XSAMP_REGISTRY, "LABEL_DPMPP_2M_HEUN_FLOW_ODE", "DPM++ 2M Heun (flow ODE)"),
+    (_XSAMP_REGISTRY, "LABEL_DPMPP_3M_FLOW_ODE", "DPM++ 3M (flow ODE)"),
+    (_XSAMP_REGISTRY, "LABEL_UNIPC_BH2", "UniPC bh2"),
+    (_XSAMP_REGISTRY, "LABEL_CFGPP_UD10_AB", "CFG++ UD10 AB"),
+    (_XSAMP_REGISTRY, "LABEL_IPNDM", "IPNDM"),
+    (_XSAMP_REGISTRY, "LABEL_IPNDM_V", "IPNDM_V"),
+    (_XSAMP_REGISTRY, "LABEL_DEIS", "DEIS"),
+    (_XSAMP_REGISTRY, "LABEL_RESTART_FLOW", "Restart (flow)"),
+)
+
+_XSAMP_PINS = (
+    _xsamp_pin("extra_samplers_title", "scripts/anima_extra_samplers.py", "TITLE", _XSAMP_TITLE,
+               "alwayson_scripts 키 — 기능 스냅샷(core/sam_extra_capabilities TITLE_EXTRA_SAMPLERS)이 이 상수에서 제목을 읽는다",
+               app="SCRIPT_NAME"),
+    _xsamp_pin("extra_samplers_xyz_prefix", "scripts/anima_extra_samplers.py", "XYZ_PREFIX", "[Extra Samplers]",
+               "XYZ 축 머리(앱 XYZ 에는 축이 없다 — XYZ_AXES 키와 같아야 한다)"),
+    *(_xsamp_pin(f"extra_samplers_label_{name[len('LABEL_'):].lower()}", file, name, label,
+                 "Forge 샘플러 라벨 = infotext 'Sampler' — 앱이 패널 종류·Comfy 이름(COMFY_NAMES)을 이 글자로 고른다")
+      for file, name, label in _XSAMP_LABELS),
+    _xsamp_pin("extra_samplers_arg_names", _XSAMP_PARAMS, "ARG_NAMES",
+               ("max_stage", "eta", "noise_window", "noise_start", "noise_end"),
+               "위치 인자 순서(뒤에만 덧붙인다 — v0.33.0 이 잡음 구간 셋을 붙였다). 앱 블록은 이 순서의 위치 인자 다섯(X10)"),
+    *(_xsamp_pin(f"extra_samplers_{name.lower()}", _XSAMP_PARAMS, name, value,
+                 "ER SDE 값의 기본값·범위(params.py — 정규화 coerce_*·ui() 슬라이더가 같은 상수)")
+      for name, value in (("DEFAULT_MAX_STAGE", 3), ("MAX_STAGE_MIN", 1), ("MAX_STAGE_MAX", 3), ("DEFAULT_ETA", 1.0),
+                          ("ETA_MIN", 0.0), ("ETA_MAX", 10.0), ("ETA_STEP", 0.01), ("DEFAULT_NOISE_WINDOW", False),
+                          ("DEFAULT_NOISE_START", 0.2), ("DEFAULT_NOISE_END", 0.8), ("NOISE_PERCENT_MIN", 0.0),
+                          ("NOISE_PERCENT_MAX", 1.0), ("NOISE_PERCENT_STEP", 0.01))),
+    *(_xsamp_pin(f"extra_samplers_{name.lower()}", file, name, value, meaning)
+      for file, name, value, meaning in (
+          (_XSAMP_PARAMS, "KEY_MAX_STAGE", "ER SDE max stage", "infotext 키(≠ 3 일 때) — 붙여 넣기가 읽는다"),
+          (_XSAMP_PARAMS, "KEY_ETA", "ER SDE eta", "infotext 키(Reverse-time·Tunable 의 η)"),
+          (_XSAMP_PARAMS, "KEY_NOISE_WINDOW", "ER SDE noise window",
+           "v0.33.0 infotext 키 — 구간을 켜고 Reverse-time·Tunable 이 돈 때 '0.2-0.8'"),
+          (_XSAMP_PARAMS, "NOISE_WINDOW_OFF", "off", "XYZ 칸 값 — 구간 끔"),
+          (_XSAMP_PARAMS, "WINDOW_SKIPPED_STATUS", "noise window skipped (no percent_to_sigma)",
+           "'Extra Samplers status' 의 잡음 구간 건너뜀 부분(예측기에 percent_to_sigma 가 없다) — 결과 알림이 찾는다"),
+          ("sam3ext/extra_samplers/substep_guard.py", "STATUS_KEY", "Extra Samplers status",
+           "infotext status 키 — 부분을 '; ' 로 잇는다(Dy 보조 스텝 건너뜀·잡음 구간 건너뜀)"))),
+    *(_xsamp_pin(f"extra_samplers_{name.lower()}", "sam3ext/extra_samplers/restart_flow.py", name, value,
+                 "Restart (flow) 계획 상수(arXiv 2306.14878 + A1111 규칙) — 앱은 NFE 안내, 팩은 같은 상수로 다시 구현(거울 C0)")
+      for name, value in (("RESTART_S_MIN", 0.1), ("RESTART_S_MAX", 2.0), ("RESTART_MIN_STEPS", 20), ("RESTART_TIMES", 1),
+                          ("RESTART_TIMES_LONG", 2), ("RESTART_LONG_FROM", 36))),
+    *(_xsamp_pin(f"extra_samplers_{name.lower()}", "sam3ext/extra_samplers/cfgpp_ud10_ab.py", name, value,
+                 "CFG++ UD10 AB 의 가중치 — ComfyUI sample_cfgpp_ud10_ab 이 넘기는 값과 같다(계획 X11: Comfy 는 코어 이름)")
+      for name, value in (("UD10_HISTORY_WEIGHT", 0.25), ("UD10_ZERO_WEIGHT", 1.0), ("UD10_UNCOND_HISTORY_WEIGHT", 0.1))),
+    *(_xsamp_pin(f"extra_samplers_{name.lower()}", "sam3ext/extra_samplers/ipndm_deis.py", name, value,
+                 "IPNDM·DEIS 차수·DEIS 방식 — ComfyUI KSampler 기본과 같다(계획 X11: Comfy 는 코어 이름)")
+      for name, value in (("IPNDM_MAX_ORDER", 4), ("DEIS_MAX_ORDER", 3), ("DEIS_MODE", "tab"))),
+    # script-info(픽스처) — 잡음 구간 체크·시작·끝 슬라이더(v0.33.0). 앞 둘(max stage·η)은 ui() 를 AST 로 읽어 픽스처와 비교한다.
+    _xsamp_slider_pin("extra_samplers_ui_noise_window_default", 2, "value", False, "DEFAULT_NOISE_WINDOW",
+                      "잡음 구간 체크 기본값(끔) — 끄면 v0.32 와 같다"),
+    *(_xsamp_slider_pin(f"extra_samplers_ui_noise_{end}_{suffix}", index, field, expected, const,
+                        f"잡음 구간 {end} 슬라이더 {suffix}(샘플링 진행률 0–1)")
+      for index, end, default_const, default in ((3, "start", "DEFAULT_NOISE_START", 0.2), (4, "end", "DEFAULT_NOISE_END", 0.8))
+      for suffix, field, const, expected in (("min", "minimum", "NOISE_PERCENT_MIN", 0.0),
+                                             ("max", "maximum", "NOISE_PERCENT_MAX", 1.0),
+                                             ("step", "step", "NOISE_PERCENT_STEP", 0.01),
+                                             ("default", "value", default_const, default))),
 )
 
 # Anima SPEED 상수 계약 — 앱(core/anima_speed)이 같은 값을 하드코딩한다. 인자 이름·기본값·별칭·infotext 키는
@@ -1418,8 +1622,10 @@ _SPEED_PINS = (
                "콘솔 로그 옵션(앱은 쓰지 않는다 — OPTIONS ignored)"),
     _speed_pin("speed_unsupported_samplers", _SPEED_HOST, "UNSUPPORTED_SAMPLERS", {
         "restart_sampler": "Restart re-plans its own schedule", "sample_unipc": "UniPC is not segment-safe",
-        "sample_dpm_fast": "DPM fast has no sigma schedule", "sample_dpm_adaptive": "DPM adaptive has no sigma schedule"},
-        "UNSUPPORTED_SAMPLERS", "붙이지 않는 샘플러 함수와 status 이유 — 결과 알림의 '건너뜀' 설명이 이 문구를 찾는다"),
+        "sample_unipc_bh2": "UniPC is not segment-safe", "sample_dpm_fast": "DPM fast has no sigma schedule",
+        "sample_dpm_adaptive": "DPM adaptive has no sigma schedule"},
+        "UNSUPPORTED_SAMPLERS", "붙이지 않는 샘플러 함수와 status 이유 — 결과 알림의 '건너뜀' 설명이 이 문구를 찾는다 "
+        "(v0.33.0: sam-extra 의 UniPC bh2 = 다른 이름의 sample_unipc 라 같이)"),
     _speed_pin("speed_modes", _SPEED_SCHEDULE, "MODES", ("transition", "respace"), "MODES",
                "mode 선택지 — 그 밖의 값은 오류(transition 으로 읽고 invalid settings)"),
     _speed_pin("speed_thresholds", _SPEED_SCHEDULE, "THRESHOLDS", ("neo_shift", "delta_optimal", "manual"),
@@ -1744,6 +1950,8 @@ SEMANTIC_PINS = (
     *_DEGRID_PINS,
     # Extra Schedulers — 위 _XSCHED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
     *_XSCHED_PINS,
+    # Extra Samplers — 위 _XSAMP_PINS(v0.33.0, 앱 core/extra_samplers 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    *_XSAMP_PINS,
     # Anima SPEED — 위 _SPEED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
     *_SPEED_PINS,
     # Colorcraft — 위 _COLORCRAFT_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)

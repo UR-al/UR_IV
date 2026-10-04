@@ -1292,6 +1292,9 @@ XSCHED_LAPLACE_FOREIGN = _xsched_head("Laplace") + _TAIL                  # 다�
 XSCHED_CUSTOM_OK = _xsched_head("custom") + 'Custom scheduler sigmas: "[1.0, 0.6, 0.25, 0.1, 0.0]", ' + _TAIL
 XSCHED_HIRES_CUSTOM_FOREIGN = _xsched_head("Karras", hires="custom") + _TAIL
 XSCHED_KARRAS = _xsched_head("Karras") + _TAIL
+XSCHED_COSMOS_OK = (_xsched_head("Flow Cosmos rho7", hires="Flow Cosmos Dynamic")
+                    + "Flow Cosmos rho: 7.0, Flow Cosmos sigma max: 80.0, Flow Cosmos sigma min: 0.002, " + _TAIL)
+XSCHED_COSMOS_DYNAMIC_FOREIGN = _xsched_head("Flow Cosmos Dynamic") + _TAIL   # 같은 라벨의 다른 스케줄러가 돌았다
 
 
 class ExtraSchedulersNoticeTests(_QuietAssumption):
@@ -1299,6 +1302,7 @@ class ExtraSchedulersNoticeTests(_QuietAssumption):
         for info, payload in ((info_of(XSCHED_LAPLACE_OK), xsched_payload()),
                               (info_of(XSCHED_CUSTOM_OK), xsched_payload(custom_mode="sigmas")),
                               (info_of(XSCHED_KARRAS), xsched_payload()),
+                              (info_of(XSCHED_COSMOS_OK), xsched_payload(flow_cosmos_rho=7.0)),
                               (info_of(XSCHED_LAPLACE_FOREIGN), {"prompt": "x"})):     # 블록을 보내지 않았다
             with self.subTest(info=info[150:230]):
                 self.assertEqual([n for n in sn.result_notices(info, payload) if n.feature == "extra_schedulers"], [])
@@ -1317,6 +1321,21 @@ class ExtraSchedulersNoticeTests(_QuietAssumption):
             {"Schedule type": "Laplace", "Hires schedule type": "custom"}])
         self.assertEqual([n.detail for n in both], ["Laplace · custom"])
         self.assertEqual(sn.xsched_result_notices(xsched_payload(), []), [])
+
+    def test_flow_cosmos_without_its_keys_warns_like_laplace(self):
+        """v0.33.0 D19/D20: Flow Cosmos rho7·Dynamic 은 돈 장에 'Flow Cosmos rho'·'sigma max'·'sigma min' 을 늘 남긴다."""
+        [notice] = sn.result_notices(info_of(XSCHED_COSMOS_DYNAMIC_FOREIGN), xsched_payload())
+        self.assertEqual((notice.code, notice.level, notice.feature, notice.detail),
+                         (sn.CODE_XSCHED_NOT_APPLIED, sn.LEVEL_WARNING, "extra_schedulers", "Flow Cosmos Dynamic"))
+        self.assertIn("'Flow Cosmos rho'·'Flow Cosmos sigma max'·'Flow Cosmos sigma min'", notice.message)
+        self.assertIn("ρ/σ̃", notice.message)
+        both = sn.xsched_result_notices(xsched_payload(), [
+            {"Schedule type": "flow_cosmos_rho7", "Hires schedule type": "Laplace"}])
+        self.assertEqual([n.detail for n in both], ["Laplace · Flow Cosmos rho7"])
+        self.assertEqual(sn.xsched_result_notices(xsched_payload(), [
+            {"Schedule type": "Flow Cosmos Dynamic", "Flow Cosmos rho": "7.0", "Flow Cosmos sigma max": "80.0",
+             "Flow Cosmos sigma min": "0.002"}]), [])
+        self.assertEqual(sn.xsched_result_notices({"prompt": "x"}, [{"Schedule type": "Flow Cosmos rho7"}]), [])
 
     def test_requested_features_read_the_block_like_the_extension(self):
         from core import extra_schedulers
@@ -1435,9 +1454,13 @@ class SpeedNoticeTests(_QuietAssumption):
         self.assertEqual((old.code, old.level, old.detail),
                          (sn.CODE_SPEED_NOT_APPLIED, sn.LEVEL_WARNING, "Anima SPEED"))
         self.assertIn("0.31.0", old.message)
+        # sam-extra 0.33.0: a/0 is an ordinary invalid setting (no notice of its own) — an older sam-extra's script crash
+        # leaves no trace, so it reads as the same 'no trace' notice
         [script] = self._speed(info_of(NO_EXTENSION_TRACE), speed_payload(scales="1/0,1"))
-        self.assertEqual((script.code, script.detail), (sn.CODE_SPEED_NOT_APPLIED, "script_error"))
-        self.assertIn("a/0", script.message)
+        self.assertEqual((script.code, script.detail), (sn.CODE_SPEED_NOT_APPLIED, "Anima SPEED"))
+        [invalid] = self._speed(info_of(speed_infotext("base: invalid settings - scales: division by zero: '1/0'")),
+                                speed_payload(scales="1/0,1"))
+        self.assertEqual((invalid.code, invalid.detail), (sn.CODE_SPEED_INVALID, "scales: division by zero: '1/0'"))
 
     def test_requested_features_read_the_block_like_the_extension(self):
         from core import anima_speed
@@ -1446,8 +1469,11 @@ class SpeedNoticeTests(_QuietAssumption):
         alias = {"alwayson_scripts": {"anima speed": {"args": [{"enabled": True, "divisor": 1.5, "A": 7}]}}}
         got = sn.requested_features(alias).speed
         self.assertEqual((got.enabled, got.sigma_divisor, got.spectrum_A), (True, 1.5, 7.0))
-        self.assertTrue(sn.requested_features(speed_payload(manual_sigmas="0.7/0")).speed.error.startswith(
-            anima_speed.SCRIPT_ERROR_PREFIX))
+        # a/0: the field's settings error like any bad value (sam-extra 0.33.0); the manual text only under 'manual'
+        self.assertEqual(sn.requested_features(speed_payload(scales="0.5,1/0")).speed.error,
+                         "scales: division by zero: '1/0'")
+        quiet = sn.requested_features(speed_payload(manual_sigmas="0.7/0")).speed
+        self.assertEqual((quiet.error, quiet.manual_sigmas), (None, (0.7,)))
         self.assertIsNone(sn.requested_features({"prompt": "x"}).speed)
 
     def test_static_skip_notice(self):

@@ -86,6 +86,47 @@ it('Laplace shows only the μ/β row with the extension ranges; the subtitle nam
   expect(text(root)).not.toContain('custom 식')
 })
 
+it('Flow Cosmos rho7 shows the three Flow Cosmos inputs with the extension ranges and their help', async () => {
+  widgets.scheduler_combo = 'Flow Cosmos rho7'
+  const root = await mount()
+  expect(text(root)).toContain('사용: 메인')
+  expect(labels(root)).toEqual(['Flow Cosmos ρ', 'σ̃ max', 'σ̃ min'])
+  const [rho, top, bottom] = inputs(root)
+  expect([rho!.props.min, rho!.props.max, rho!.props.step]).toEqual([1, 15, 0.1])
+  expect([top!.props.min, top!.props.max, top!.props.step]).toEqual([1, 1000, 0.1])
+  expect([bottom!.props.min, bottom!.props.max, bottom!.props.step]).toEqual([0.0001, 1, 0.0001])
+  expect(rho!.props.title).toBe(xs.FLOW_COSMOS_FIELDS[0]!.title)
+  expect(text(root)).toContain(xs.FLOW_COSMOS_NOTE)
+  expect(text(root)).toContain(xs.FLOW_COSMOS_HINT)
+  expect(text(root)).not.toContain(xs.FLOW_COSMOS_RANGE_WARNING)
+  expect(text(root)).not.toContain('Laplace μ')
+})
+
+it('Flow Cosmos Dynamic shares the row; warn lines for σ̃ min ≥ σ̃ max and for a Dynamic ρ of 2 or less', async () => {
+  widgets.scheduler_combo = 'karras'
+  widgets.hires_options_group = 'true'
+  widgets.hires_scheduler_combo = 'flow_cosmos_dynamic'
+  const root = await mount()
+  expect(text(root)).toContain('사용: Hires')
+  expect(labels(root)).toEqual(['Flow Cosmos ρ', 'σ̃ max', 'σ̃ min'])
+  expect(text(root)).toContain(xs.FLOW_COSMOS_DYNAMIC_HINT)
+  expect(text(root)).not.toContain(xs.FLOW_COSMOS_DYNAMIC_RHO_WARNING)
+  widgets[xs.WIDGET_IDS.flow_cosmos_sigma_max] = 1
+  widgets[xs.WIDGET_IDS.flow_cosmos_sigma_min] = '1'
+  await Vue.nextTick()
+  expect(text(root)).toContain(xs.FLOW_COSMOS_RANGE_WARNING)
+  widgets[xs.WIDGET_IDS.flow_cosmos_rho] = '2'
+  await Vue.nextTick()
+  expect(text(root)).toContain(xs.FLOW_COSMOS_DYNAMIC_RHO_WARNING)
+  widgets.hires_scheduler_combo = 'Flow Cosmos rho7'   // ρ 2 is fine for rho7
+  await Vue.nextTick()
+  expect(text(root)).not.toContain(xs.FLOW_COSMOS_DYNAMIC_RHO_WARNING)
+  expect(text(root)).toContain(xs.FLOW_COSMOS_RANGE_WARNING)
+  widgets[xs.WIDGET_IDS.flow_cosmos_sigma_min] = '0.5'
+  await Vue.nextTick()
+  expect(text(root)).not.toContain(xs.FLOW_COSMOS_RANGE_WARNING)
+})
+
 it('custom shows the mode switch; the mode swaps the expression and sigma list inputs', async () => {
   widgets.scheduler_combo = 'karras'
   widgets.sam3_group = 'true'
@@ -122,6 +163,7 @@ it('reset writes the extension defaults and is disabled at defaults', async () =
   widgets.scheduler_combo = 'laplace'
   widgets[xs.WIDGET_IDS.laplace_mu] = '2.5'
   widgets[xs.WIDGET_IDS.custom_mode] = 'sigmas'
+  widgets[xs.WIDGET_IDS.flow_cosmos_sigma_min] = '0.006'
   const root = await mount()
   const reset = () => all(root, 'button').find(b => b.props.class === 'xs-reset')!
   expect(reset().props.disabled).toBe(false)

@@ -1,8 +1,9 @@
 """Extra Schedulers 값 칸 ↔ 위젯 프록시 ↔ 샘플링 블록(ui/extra_schedulers_ui) — 실제 페이로드 빌더를 거친 요청 모양.
 
 GPU·Forge 없이: 기능 스냅샷은 가짜(``tests.test_alwayson_propagation.caps``), Forge 요청은 가짜 requests.post.
-규칙(계획 X5·R7·R16): 스냅샷이 스크립트를 확인하면 늘(기본값이면 앱 기본값 출처), 확인 못 하면 laplace·custom 을 쓰는
-패스가 있을 때만 싣는다. 메인 요청과 모든 보조 img2img 에 같은 블록. ComfyUI 는 팩 1.7.0 단계 전이라 싣지 않는다.
+규칙(계획 X5·R7·R16): 스냅샷이 스크립트를 확인하면 늘(기본값이면 앱 기본값 출처), 확인 못 하면 laplace·custom·
+flow_cosmos_rho7·flow_cosmos_dynamic 을 쓰는 패스가 있을 때만 싣는다. 메인 요청과 모든 보조 img2img 에 같은 블록(늘 키 8개 — v0.33.0 D19 의
+Flow Cosmos 셋 포함). ComfyUI 는 팩 1.7.0 단계 전이라 싣지 않는다.
 """
 import copy
 import json
@@ -37,7 +38,8 @@ def _known(present, absent):
 
 WITHOUT_XS = _known((PAG, SKIM, DD, A38, DORA, DEGRID), (XS,))
 DEFAULT_BLOCK = {"args": [{"custom_mode": "expression", "custom_expression": "M * (m / M) ** x",
-                           "custom_sigmas": "[1.0, 0.6, 0.25, 0.1, 0.0]", "laplace_mu": 0.0, "laplace_beta": 0.5}]}
+                           "custom_sigmas": "[1.0, 0.6, 0.25, 0.1, 0.0]", "laplace_mu": 0.0, "laplace_beta": 0.5,
+                           "flow_cosmos_rho": 7.0, "flow_cosmos_sigma_max": 80.0, "flow_cosmos_sigma_min": 0.002}]}
 
 
 class _Proxy:
@@ -103,6 +105,31 @@ class ContributorTests(unittest.TestCase):
         self.assertEqual(quiet.dropped, (XS,))
         self.assertEqual(quiet.notices, [])                                       # 앱 기본값 블록은 알리지 않는다
 
+    def test_flow_cosmos_rho7_reads_the_values_too(self):
+        """v0.33.0 D19: Flow Cosmos rho7 도 값 스케줄러 — 확인 못 한 스냅샷에서도 그 패스가 있으면 사용자 값을 싣는다."""
+        used = sb.build_sampling_blocks(XschedHost(None, scheduler="flow_cosmos_rho7", flow_cosmos_rho="5.5",
+                                                   flow_cosmos_sigma_max="240", flow_cosmos_sigma_min="0.006"),
+                                        ap.TARGET_T2I)
+        self.assertEqual(used.blocks[XS], user_block(flow_cosmos_rho=5.5, flow_cosmos_sigma_max=240,
+                                                     flow_cosmos_sigma_min=0.006))
+        self.assertEqual(used.provenance[XS], ap.PROVENANCE_USER)
+        self.assertEqual(used.notices, [])
+        quiet = sb.build_sampling_blocks(XschedHost(None, scheduler="Flow Cosmos rho7"), ap.TARGET_T2I)
+        self.assertNotIn(XS, quiet.blocks)                                        # 기본값 — 앱 기본값, 알리지 않는다
+        self.assertEqual((quiet.dropped, quiet.notices), ((XS,), []))
+        idle = sb.build_sampling_blocks(XschedHost(None, flow_cosmos_rho="3"), ap.TARGET_T2I)   # 메인 'Beta'
+        self.assertNotIn(XS, idle.blocks)
+
+    def test_flow_cosmos_dynamic_reads_the_same_values(self):
+        """v0.33.0 D20: Flow Cosmos Dynamic 도 같은 세 값을 읽는 값 스케줄러 — 그 패스가 있으면 사용자 값을 싣는다."""
+        used = sb.build_sampling_blocks(XschedHost(None, scheduler="Flow Cosmos Dynamic", flow_cosmos_rho="5.5",
+                                                   flow_cosmos_sigma_min="0.01"), ap.TARGET_T2I)
+        self.assertEqual(used.blocks[XS], user_block(flow_cosmos_rho=5.5, flow_cosmos_sigma_min=0.01))
+        self.assertEqual(len(used.blocks[XS]["args"][0]), 8)
+        self.assertEqual((used.provenance[XS], used.notices), (ap.PROVENANCE_USER, []))
+        quiet = sb.build_sampling_blocks(XschedHost(None, scheduler="flow_cosmos_dynamic"), ap.TARGET_T2I)
+        self.assertEqual((XS in quiet.blocks, quiet.dropped, quiet.notices), (False, (XS,), []))
+
     def test_missing_script_drops_user_values_with_a_warning(self):
         result = sb.build_sampling_blocks(XschedHost(WITHOUT_XS, scheduler="custom", custom_expression="M"),
                                           ap.TARGET_T2I)
@@ -166,14 +193,17 @@ class MainRequestTests(unittest.TestCase):
         payload, error = XschedHost(PRESENT)._build_generation_payload(snapshot=True)
         self.assertIsNone(error)
         expected = ('{"args": [{"custom_mode": "expression", "custom_expression": "M * (m / M) ** x", '
-                    '"custom_sigmas": "[1.0, 0.6, 0.25, 0.1, 0.0]", "laplace_mu": 0.0, "laplace_beta": 0.5}]}')
+                    '"custom_sigmas": "[1.0, 0.6, 0.25, 0.1, 0.0]", "laplace_mu": 0.0, "laplace_beta": 0.5, '
+                    '"flow_cosmos_rho": 7.0, "flow_cosmos_sigma_max": 80.0, "flow_cosmos_sigma_min": 0.002}]}')
         self.assertEqual(json.dumps(payload["alwayson_scripts"][XS]), expected)
         self.assertEqual(payload[ap.PROVENANCE_KEY], {XS: ap.PROVENANCE_APP_DEFAULT})   # 422 면 정보 알림으로 재시도
         user, _ = XschedHost(PRESENT, custom_mode="sigmas", custom_sigmas="[1, 0.3, 0]",
                              laplace_beta="1.5")._build_generation_payload(snapshot=True)
         self.assertEqual(user["alwayson_scripts"][XS],
                          {"args": [{"custom_mode": "sigmas", "custom_expression": "M * (m / M) ** x",
-                                    "custom_sigmas": "[1, 0.3, 0]", "laplace_mu": 0.0, "laplace_beta": 1.5}]})
+                                    "custom_sigmas": "[1, 0.3, 0]", "laplace_mu": 0.0, "laplace_beta": 1.5,
+                                    "flow_cosmos_rho": 7.0, "flow_cosmos_sigma_max": 80.0,
+                                    "flow_cosmos_sigma_min": 0.002}]})
         self.assertNotIn(ap.PROVENANCE_KEY, user)
         self.assertEqual(ap.main_retry_titles(user), (XS,))
 
@@ -295,16 +325,30 @@ class PersistenceTests(unittest.TestCase):
 
         host = _host([])
         host.extra_schedulers_widgets = xsched_widgets(custom_mode="sigmas", custom_sigmas="[1, 0]", laplace_mu="-2.5",
-                                                       laplace_beta="3")
+                                                       laplace_beta="3", flow_cosmos_rho="5.5",
+                                                       flow_cosmos_sigma_min="0.006")
         saved = _extra_schedulers_settings(host)
         self.assertEqual(saved, {"custom_mode": "sigmas", "custom_expression": "M * (m / M) ** x",
-                                 "custom_sigmas": "[1, 0]", "laplace_mu": "-2.5", "laplace_beta": "3"})
+                                 "custom_sigmas": "[1, 0]", "laplace_mu": "-2.5", "laplace_beta": "3",
+                                 "flow_cosmos_rho": "5.5", "flow_cosmos_sigma_max": "80",
+                                 "flow_cosmos_sigma_min": "0.006"})
         other = _host([])
         other.extra_schedulers_widgets = xsched_widgets()
         apply_generation_settings(other, {xs.SETTINGS_KEY: saved}, only_present=True)
         self.assertEqual(xui.get_settings(other), saved)
         apply_generation_settings(other, {"steps": "30"}, only_present=True)    # 프리셋에 키가 없으면 그대로
         self.assertEqual(xui.get_settings(other), saved)
+
+    def test_values_saved_before_flow_cosmos_restore_its_defaults(self):
+        """v0.33.0 전에 저장한 값(키 다섯): Flow Cosmos 셋은 앱 기본값(ρ 7 · σ̃ 0.002~80) — 확장이 키 없는 옛 요청을 읽는
+        것과 같다. 다른 칸은 저장값."""
+        host = SimpleNamespace(extra_schedulers_widgets=xsched_widgets(flow_cosmos_rho="3", flow_cosmos_sigma_max="9"))
+        old = {"custom_mode": "sigmas", "custom_expression": "x", "custom_sigmas": "[1, 0]", "laplace_mu": "1",
+               "laplace_beta": "2"}
+        xui.apply_saved_settings(host, {xs.SETTINGS_KEY: old}, only_present=True)
+        self.assertEqual(xui.current_settings(host),
+                         xs.ExtraSchedulerSettings("sigmas", "x", "[1, 0]", 1.0, 2.0, 7.0, 80.0, 0.002))
+        self.assertEqual(boot_notices.pending_boot_notices(host), [])
 
     def test_old_settings_file_starts_with_app_defaults_quietly(self):
         host = SimpleNamespace(extra_schedulers_widgets=xsched_widgets(laplace_mu="4", custom_mode="sigmas"))
@@ -345,6 +389,23 @@ class ApplyInfotextTests(unittest.TestCase):
         self.assertEqual(xui.apply_infotext(host, {"Schedule type": "Karras"}), xui.current_settings(host))
         self.assertEqual(xui.get_settings(host), before)
         self.assertIsNone(xui.apply_infotext(SimpleNamespace(), {"Laplace mu": 1}))
+
+    def test_flow_cosmos_values_come_back(self):
+        host = SimpleNamespace(extra_schedulers_widgets=xsched_widgets(laplace_mu="3", flow_cosmos_rho="9"))
+        restored = xui.apply_infotext(host, {"Schedule type": "Flow Cosmos rho7", "Flow Cosmos rho": "5.5",
+                                             "Flow Cosmos sigma max": "240.0", "Flow Cosmos sigma min": "0.006"})
+        self.assertEqual(restored, xs.ExtraSchedulerSettings(laplace_mu=3.0, flow_cosmos_rho=5.5,
+                                                             flow_cosmos_sigma_max=240.0, flow_cosmos_sigma_min=0.006))
+        self.assertEqual(xui.get_settings(host)["flow_cosmos_sigma_max"], "240")
+        xui.apply_infotext(host, {"Schedule type": "Karras", "Hires schedule type": "Flow Cosmos rho7"})   # 키 없음
+        self.assertEqual(xui.current_settings(host), xs.ExtraSchedulerSettings(laplace_mu=3.0))
+        # v0.33.0 D20: Flow Cosmos Dynamic 이미지도 같은 세 키로 되살린다(키 없으면 기본값)
+        restored = xui.apply_infotext(host, {"Schedule type": "Flow Cosmos Dynamic", "Flow Cosmos rho": "4.5",
+                                             "Flow Cosmos sigma max": "80.0", "Flow Cosmos sigma min": "0.002"})
+        self.assertEqual(restored, xs.ExtraSchedulerSettings(laplace_mu=3.0, flow_cosmos_rho=4.5))
+        self.assertEqual(xui.get_settings(host)["flow_cosmos_rho"], "4.5")
+        xui.apply_infotext(host, {"Schedule type": "flow_cosmos_dynamic"})
+        self.assertEqual(xui.current_settings(host), xs.ExtraSchedulerSettings(laplace_mu=3.0))
 
 
 if __name__ == "__main__":

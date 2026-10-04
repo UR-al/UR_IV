@@ -9,9 +9,10 @@ import type { SamExtraCapabilitiesEvent } from '../types/bridge'
  * 문자열('true'/'false', 선택지 키, 친 그대로의 해상도 비율·수동 σ, 숫자 '0.01')이다. 보낼지(대상·백엔드·게이트)는
  * 파이썬이 정한다 — 여기서는 카드 표시(보일 칸·요약·검사 줄·안내)만 계산한다.
  *
- * 검사는 확장 sam-extra 0.32.1 의 규칙이다: coerce_settings 의 오류(해상도 비율·수동 σ·δ·σ 나눔값) → build_plan 이 설정만
- * 보고 거절하는 것(수동 σ 개수, σ 나눔값, custom A ≤ 0, dwt 비율). 해상도 비율·수동 σ 칸의 'a/0' 분수는 확장이 예외로
- * 죽는다(스크립트 오류) — 숫자는 파이썬 float() 문법으로 읽는다('1_0' = 10, '0x1'·'' 은 오류, 'inf'·'nan' 은 유한하지 않다).
+ * 검사는 확장 sam-extra 0.33.0 의 규칙이다: coerce_settings 의 오류(해상도 비율·수동 σ·δ·σ 나눔값) → build_plan 이 설정만
+ * 보고 거절하는 것(수동 σ 개수, σ 나눔값, custom A ≤ 0, dwt 비율). 해상도 비율·수동 σ 칸의 'a/0' 분수는 그 칸의 오류다
+ * (수동 σ 는 threshold 가 manual 일 때만 — 0.32.1 은 스크립트가 예외로 죽었다) — 숫자는 파이썬 float() 문법으로 읽는다
+ * ('1_0' = 10, '0x1'·'' 은 오류, 'inf'·'nan' 은 유한하지 않다).
  */
 
 export type SpeedKey =
@@ -22,8 +23,8 @@ export type Mode = 'transition' | 'respace'
 export type Threshold = 'neo_shift' | 'delta_optimal' | 'manual'
 export type Transform = 'dct' | 'dwt' | 'fft'
 export type ErrorCode =
-  | 'script_error' | 'choice' | 'scales' | 'manual' | 'delta' | 'divisor' | 'manual_count' | 'spectrum_A'
-  | 'spectrum_beta' | 'dwt_ratio'
+  | 'choice' | 'scales' | 'manual' | 'delta' | 'divisor' | 'manual_count' | 'spectrum_A' | 'spectrum_beta'
+  | 'dwt_ratio'
 
 /** 카드 값(파이썬 SpeedSettings) — 텍스트 칸은 친 그대로, 숫자는 유한, 선택지는 확장 선택지. */
 export interface SpeedSettings {
@@ -157,7 +158,6 @@ export const RESET_TITLE = '확장 기본값으로 — 꺼짐 · transition · n
 
 /** 검사 줄(파이썬 VALIDATION_MESSAGES — 코드는 core/anima_speed ERR_*). */
 export const VALIDATION_MESSAGES: Readonly<Record<ErrorCode, string>> = {
-  script_error: '해상도 비율·수동 σ 에 0으로 나누는 분수(a/0)가 있습니다 — Forge 에서 SPEED 스크립트 오류가 납니다',
   choice: '방식·전환 σ·스펙트럼 프리셋·변환 중 확장에 없는 값이 있습니다',
   scales: '해상도 비율은 (0, 1] 사이 오름차순이고 1.0으로 끝나야 합니다',
   manual: '수동 σ는 0과 1 사이, transition 방식은 내림차순이어야 합니다',
@@ -186,8 +186,8 @@ export function pyFloat(text: unknown): number | null {
 
 type Parsed = { values: number[] } | { error: 'value' | 'zero' }
 
-/** 확장 schedule._numbers — ',' 와 ';', 'a/b' 분수, 유한한 수만. 첫 실패에서 멈춘다: 'value'(ValueError — 확장은 오류
- *  목록으로) 또는 'zero'(0으로 나눔 — 확장은 예외로 죽는다). */
+/** 확장 schedule._numbers — ',' 와 ';', 'a/b' 분수, 유한한 수만. 첫 실패에서 멈춘다: 'value'(ValueError) 또는 'zero'(0으로
+ *  나눔 — sam-extra 0.33.0 부터 이것도 ValueError 'division by zero' 라 검사에서는 'value' 와 같은 그 칸의 오류). */
 export function numbers(text: unknown): Parsed {
   const out: number[] = []
   for (const item of String(text ?? '').replace(/;/g, ',').split(',')) {
@@ -294,9 +294,7 @@ export function readSettings(widgets: Record<string, unknown> | null | undefined
 /** 카드 설정의 오류 코드(없으면 빈 배열). 확장 coerce_settings 의 오류 → build_plan 이 설정만 보고 거절하는 것 순. */
 export function validate(settings: SpeedSettings): ErrorCode[] {
   const scales = numbers(settings.scales)
-  if ('error' in scales && scales.error === 'zero') return ['script_error']
-  const manual = numbers(settings.manual_sigmas)          // threshold 와 상관없이 늘 읽힌다(확장 그대로)
-  if ('error' in manual && manual.error === 'zero') return ['script_error']
+  const manual = numbers(settings.manual_sigmas)          // 오류는 threshold 가 manual 일 때만('a/0' 도 — 0.33.0)
   const codes: ErrorCode[] = []
   const scaleValues = 'values' in scales && !scalesError(scales.values) ? scales.values : null
   if (scaleValues === null) codes.push('scales')

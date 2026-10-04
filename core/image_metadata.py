@@ -451,7 +451,7 @@ _GROUP_MODEL = ("Model", "Model hash", "VAE", "Clip skip")
 # 'colorcraft': sam-extra Colorcraft 의 'SAM Extra Colorcraft'·'… status'·'… pre-DD sigma'(core/colorcraft INFOTEXT_KEYS)와
 # 업스트림·aoleg 포크의 'Colorcraft'(붙여 넣기로 읽는 열쇠)
 _EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled", "degrid", "laplace",
-                      "custom scheduler", "anima speed", "colorcraft")
+                      "custom scheduler", "flow cosmos", "anima speed", "colorcraft")
 
 
 def group_parameters(params: dict) -> dict[str, str]:

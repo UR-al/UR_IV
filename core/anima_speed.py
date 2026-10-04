@@ -25,11 +25,11 @@ dict 하나로 보낸다 — Forge 가 캐시한 위치 인자 기본값이나 �
   않은 것과 같은 그림, 기록은 남는다). 카드는 ``validate`` 결과를 미리 보여 준다. 확장 ``build_plan`` 이 설정만 보고
   거절하는 것(custom A ≤ 0 — sam-extra 0.32.1 의 ``PlanError(kind="invalid")``, delta_optimal 의 σ 나눔값 ≤ 0, 수동 σ 개수,
   dwt 비율)도 ``validate`` 가 같은 조건으로 미리 잡는다(R18).
-- 확장이 **예외로 죽는** 입력이 하나 있다: 해상도 비율·수동 σ 칸의 ``a/0`` 분수(``schedule._numbers`` 의
-  ``ZeroDivisionError`` 는 ``ValueError`` 가 아니라 ``coerce_settings`` 밖으로 나간다 — 수동 σ 칸은 threshold 가 manual 이
-  아니어도 늘 읽힌다). Forge 는 스크립트 오류를 콘솔에 남기고 SPEED 없이 샘플링한다(infotext ``Anima SPEED`` 없음).
-  ``coerce`` 는 같은 예외를 그대로 올리고(거울), ``validate`` 는 ``script_error`` 로, ``parse_script_block`` 은
-  ``SCRIPT_ERROR_PREFIX`` 가 붙은 ``error`` 로 바꾼다.
+- 해상도 비율·수동 σ 칸의 ``a/0`` 분수는 sam-extra 0.33.0 부터 ``ValueError("division by zero: 'a/0'")`` — 다른 잘못된
+  값처럼 그 칸의 설정 오류다(해상도 비율은 늘, 수동 σ 는 threshold 가 manual 일 때만 — 아니면 예전처럼 무시). API 의 아주 큰
+  정수(float 로 못 바꾸는 int)는 기본값으로 읽는다. ``coerce`` 는 어떤 입력에도 예외를 올리지 않는다(0.32.1 까지는 ``a/0`` 의
+  ``ZeroDivisionError`` 가 ``coerce_settings`` 밖으로 나가 Forge 스크립트 오류였다 — 그런 옛 확장의 결과는 결과 알림
+  'Anima SPEED 기록 없음'(CODE_SPEED_NOT_APPLIED)이 말한다).
 - ComfyUI 는 앱 노드 팩 1.7.0 의 ``ForgeNeoAnimaSpeed`` 가 같은 계산을 한다 — 그 연결(phase C)이 끝날 때까지 ``plan`` 은
   ComfyUI 에 ``comfy_pending`` 을 돌려준다(R16). img2img·Hires 시작 latent 맞춤(P10 옵션)은 ComfyUI 에서 확장 기본값(켬)이다
   (D7, ``COMFY_IMG2IMG_RESCALE``).
@@ -119,10 +119,12 @@ DEFAULTS = MappingProxyType({
 DELTA_MIN, DELTA_MAX, DELTA_STEP = 0.0001, 0.5, 0.0001
 DIVISOR_MIN, DIVISOR_MAX, DIVISOR_STEP = 0.5, 2.0, 0.01
 
-# 확장이 붙이지 않는 샘플러(forge_host.UNSUPPORTED_SAMPLERS — 함수 이름 → status 이유)
+# 확장이 붙이지 않는 샘플러(forge_host.UNSUPPORTED_SAMPLERS — 함수 이름 → status 이유). 0.33.0 이 sam-extra 의 UniPC bh2
+# (extra_samplers/unipc.py — 이름만 다른 Forge sample_unipc)를 더했다.
 UNSUPPORTED_SAMPLERS = MappingProxyType({
     "restart_sampler": "Restart re-plans its own schedule",
     "sample_unipc": "UniPC is not segment-safe",
+    "sample_unipc_bh2": "UniPC is not segment-safe",
     "sample_dpm_fast": "DPM fast has no sigma schedule",
     "sample_dpm_adaptive": "DPM adaptive has no sigma schedule",
 })
@@ -177,10 +179,11 @@ def _as_bool(value: Any, default: bool) -> bool:
 
 
 def _as_float(value: Any, default: float) -> float:
-    """forge_host._as_float — 읽을 수 없거나 유한하지 않으면 ``default``."""
+    """forge_host._as_float — 읽을 수 없거나(float 로 못 바꾸는 큰 정수의 OverflowError 도 — sam-extra 0.33.0) 유한하지
+    않으면 ``default``."""
     try:
         out = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
     return out if math.isfinite(out) else default
 
@@ -200,7 +203,8 @@ def _choice(value: Any, choices: tuple, default: str, name: str, errors: list) -
 
 
 def _numbers(text: Any) -> list:
-    """schedule._numbers — 쉼표·세미콜론, ``a/b`` 분수, 유한한 수만. ``a/0`` 은 ZeroDivisionError(확장 그대로)."""
+    """schedule._numbers — 쉼표·세미콜론, ``a/b`` 분수, 유한한 수만. ``a/0`` 은 ``ValueError`` 'division by zero: 'a/0''
+    (sam-extra 0.33.0 — 0.32.1 은 ZeroDivisionError 가 그대로 나갔다)."""
     if isinstance(text, (list, tuple)):
         items: Iterable = text
     else:
@@ -212,7 +216,10 @@ def _numbers(text: Any) -> list:
             continue
         if "/" in token:
             num, den = token.split("/", 1)
-            value = float(num) / float(den)
+            try:
+                value = float(num) / float(den)
+            except ZeroDivisionError:   # ValueError — 부르는 쪽이 설정 오류로 적는다(0.33.0)
+                raise ValueError(f"division by zero: {token!r}") from None
         else:
             value = float(token)
         if not math.isfinite(value):
@@ -309,7 +316,6 @@ class ScriptSettings:
 
 
 # ``validate`` 오류 코드 — 카드 문구는 VALIDATION_MESSAGES(frontend/src/utils/animaSpeed.ts 가 같은 코드를 쓴다)
-ERR_SCRIPT = "script_error"        # a/0 분수 — 확장이 예외로 죽는다(Forge 스크립트 오류, SPEED 없음)
 ERR_CHOICE = "choice"              # mode·threshold·preset·transform 이 확장 선택지 밖
 ERR_SCALES = "scales"
 ERR_MANUAL = "manual"
@@ -320,7 +326,6 @@ ERR_SPECTRUM_A = "spectrum_A"      # build_plan(0.32.1): custom A ≤ 0 또는 �
 ERR_SPECTRUM_BETA = "spectrum_beta"  # build_plan(0.32.1): β 가 유한하지 않음
 ERR_DWT_RATIO = "dwt_ratio"        # build_plan: dwt 는 단계마다 정확히 2배
 VALIDATION_MESSAGES = MappingProxyType({
-    ERR_SCRIPT: "해상도 비율·수동 σ 에 0으로 나누는 분수(a/0)가 있습니다 — Forge 에서 SPEED 스크립트 오류가 납니다",
     ERR_CHOICE: "방식·전환 σ·스펙트럼 프리셋·변환 중 확장에 없는 값이 있습니다",
     ERR_SCALES: "해상도 비율은 (0, 1] 사이 오름차순이고 1.0으로 끝나야 합니다",
     ERR_MANUAL: "수동 σ는 0과 1 사이, transition 방식은 내림차순이어야 합니다",
@@ -332,8 +337,6 @@ VALIDATION_MESSAGES = MappingProxyType({
     ERR_DWT_RATIO: "dwt 변환은 해상도 비율이 단계마다 정확히 2배여야 합니다 (dct·fft 는 아무 비율)",
 })
 INVALID_NOTE = "이대로 생성하면 SPEED 는 적용되지 않습니다(설정 오류)"
-# parse_script_block: 확장이 예외로 죽는 블록의 error 머리
-SCRIPT_ERROR_PREFIX = "script error - "
 
 
 def _coerce(args) -> tuple:
@@ -409,7 +412,7 @@ def _coerce(args) -> tuple:
 
 def coerce(args) -> ScriptSettings:
     """스크립트 인자(위치 목록 또는 첫 칸의 dict 하나) → 확장이 읽는 값. forge_host.coerce_settings(args) 와 같다
-    (필드·``error`` 문구). 해상도 비율·수동 σ 칸의 ``a/0`` 은 확장처럼 ZeroDivisionError 를 올린다."""
+    (필드·``error`` 문구). 예외를 올리지 않는다 — ``a/0`` 도 ``error`` 다(sam-extra 0.33.0)."""
     return _coerce(args)[0]
 
 
@@ -621,18 +624,15 @@ def as_block(settings: SpeedSettings) -> dict:
 
 
 def script_settings(settings: SpeedSettings) -> ScriptSettings:
-    """카드가 보낼 블록을 확장이 읽은 값(``coerce(as_block(settings)["args"])``). ``a/0`` 은 ZeroDivisionError."""
+    """카드가 보낼 블록을 확장이 읽은 값(``coerce(as_block(settings)["args"])``)."""
     return coerce(as_block(settings)["args"])
 
 
 def summary(settings: SpeedSettings) -> Optional[str]:
-    """이 카드로 생성하면 Forge 가 남길 ``Anima SPEED`` 값(꺼짐·스크립트 오류면 None)."""
+    """이 카드로 생성하면 Forge 가 남길 ``Anima SPEED`` 값(꺼짐이면 None — 설정 오류여도 요약은 남는다)."""
     if not settings.enabled:
         return None
-    try:
-        return script_settings(settings).summary()
-    except ArithmeticError:
-        return None
+    return script_settings(settings).summary()
 
 
 def _block_args(block: Any) -> Optional[list]:
@@ -644,23 +644,11 @@ def _block_args(block: Any) -> Optional[list]:
 
 def parse_script_block(block: Any) -> Optional[ScriptSettings]:
     """보낸 alwayson 블록 → 확장이 읽는 값(컴파일러용 — 위치 인자·dict·별칭 키 모두). 블록이 아니면 None.
-
-    확장이 예외로 죽는 블록(``a/0``)은 죽지 않고 ``error`` 가 ``SCRIPT_ERROR_PREFIX`` 로 시작하는 값이 된다(그 밖의 칸은
-    확장 기본값, ``enabled`` 는 블록 값). Forge 는 그때 스크립트 오류를 남기고 SPEED 없이 샘플링한다."""
+    ``a/0`` 이 든 블록도 다른 잘못된 값처럼 ``error`` 가 있는 값이다(sam-extra 0.33.0 — 예외 없음)."""
     args = _block_args(block)
     if args is None:
         return None
-    try:
-        return coerce(args)
-    except ArithmeticError as exc:
-        raw = args[0] if args and isinstance(args[0], dict) else None
-        if raw is not None:
-            named = {ARG_ALIASES.get(str(key), str(key)): value for key, value in raw.items()}
-            enabled_value = named.get("enabled", DEFAULTS["enabled"])
-        else:
-            enabled_value = args[0] if args else DEFAULTS["enabled"]
-        return ScriptSettings(enabled=_as_bool(enabled_value, False),
-                              error=f"{SCRIPT_ERROR_PREFIX}{type(exc).__name__}: {exc}")
+    return coerce(args)
 
 
 def from_infotext(params: Any, *, base: SpeedSettings = APP_DEFAULTS) -> SpeedSettings:
@@ -765,12 +753,9 @@ def _plan_codes(script: ScriptSettings) -> list:
 
 
 def validate(settings: SpeedSettings) -> tuple:
-    """카드 설정의 오류 코드(없으면 빈 튜플). 확장 coerce_settings 의 오류(같은 조건) → build_plan 이 설정만 보고
-    거절하는 것 순. 확장이 예외로 죽는 ``a/0`` 은 ``ERR_SCRIPT`` 하나."""
-    try:
-        script, codes = _coerce(as_block(settings)["args"])
-    except ArithmeticError:
-        return (ERR_SCRIPT,)
+    """카드 설정의 오류 코드(없으면 빈 튜플). 확장 coerce_settings 의 오류(같은 조건 — ``a/0`` 은 그 칸의 오류이고 수동 σ
+    칸은 threshold 가 manual 일 때만, sam-extra 0.33.0) → build_plan 이 설정만 보고 거절하는 것 순."""
+    script, codes = _coerce(as_block(settings)["args"])
     if codes:
         return tuple(dict.fromkeys(codes))
     return tuple(_plan_codes(script))
@@ -830,7 +815,7 @@ def static_skip_reason(settings: SpeedSettings, payload: Optional[Mapping] = Non
         return SKIP_COMFY_SPECTRUM
     try:
         scales = parse_scales(settings.scales)
-    except (ValueError, ArithmeticError):
+    except ValueError:      # a/0 도 ValueError(0.33.0)
         return None
     return SKIP_NO_COARSE_STAGE if len(scales) == 1 else None
 
@@ -902,11 +887,11 @@ __all__ = [
     "COMFY_IMG2IMG_RESCALE", "COMFY_INPUTS", "COMFY_MIN_PACK_VERSION", "COMFY_NODE_CLASS", "COMFY_PASS_LABELS",
     "CUSTOM_DEFAULT_A", "CUSTOM_DEFAULT_BETA", "DEFAULTS", "DELTA_MAX", "DELTA_MIN", "DELTA_STEP", "DIVISOR_MAX",
     "DIVISOR_MIN", "DIVISOR_STEP", "ERR_CHOICE", "ERR_DELTA", "ERR_DIVISOR", "ERR_DWT_RATIO", "ERR_MANUAL",
-    "ERR_MANUAL_COUNT", "ERR_SCALES", "ERR_SCRIPT", "ERR_SPECTRUM_A", "ERR_SPECTRUM_BETA", "EXTENSION_DEFAULTS",
+    "ERR_MANUAL_COUNT", "ERR_SCALES", "ERR_SPECTRUM_A", "ERR_SPECTRUM_BETA", "EXTENSION_DEFAULTS",
     "INFOTEXT_IMG2IMG_RESCALE", "INFOTEXT_KEY", "INFOTEXT_KEYS", "INVALID_NOTE", "MODES", "MODE_RESPACE",
     "MODE_TRANSITION", "OPT_IMG2IMG_RESCALE", "OPT_LOG", "PASS_BASE", "PASS_HIRES", "PASS_IMG2IMG", "PASS_LABELS",
     "PASTE_FIELDS", "PRESETS", "PRESET_CUSTOM", "PRESET_NAMES", "PROVENANCE_USER", "PassStatus", "REASON_COMFY_PENDING",
-    "REASON_I2I_OFF", "REASON_KREA2", "REASON_OFF", "REASON_SEND", "REFERENCE_LATENT", "SCRIPT_ERROR_PREFIX",
+    "REASON_I2I_OFF", "REASON_KREA2", "REASON_OFF", "REASON_SEND", "REFERENCE_LATENT",
     "SCRIPT_NAME", "SETTINGS_KEY", "SKIP_COMFY_SPECTRUM", "SKIP_CONTROLNET", "SKIP_INPAINT", "SKIP_MESSAGES",
     "SKIP_NO_COARSE_STAGE", "STATUS_APPLIED", "STATUS_FALLBACK", "STATUS_INTERRUPTED", "STATUS_INVALID", "STATUS_KEY",
     "STATUS_KINDS", "STATUS_NOT_APPLIED", "STATUS_PENDING", "STATUS_SKIPPED", "TARGET_AUX", "TARGET_I2I", "TARGET_T2I",

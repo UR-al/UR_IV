@@ -21,7 +21,7 @@ describe('tables', () => {
     expect(Object.keys(PRESET_A).sort()).toEqual([...PRESET_NAMES].sort())
     expect(DELTA_RANGE).toEqual({ min: 0.0001, max: 0.5, step: 0.0001 })
     expect(DIVISOR_RANGE).toEqual({ min: 0.5, max: 2, step: 0.01 })
-    expect(Object.keys(VALIDATION_MESSAGES)).toHaveLength(10)
+    expect(Object.keys(VALIDATION_MESSAGES)).toHaveLength(9)     // sam-extra 0.33.0: no script_error (a/0 is a field error)
     expect(INVALID_NOTE).toContain('적용되지 않습니다')
   })
 })

@@ -1,5 +1,5 @@
 {
-  "//": "Extra Schedulers 골든 사례 — core/extra_schedulers.py(tests/test_extra_schedulers_card_mirror.py)와 utils/extraSchedulers.ts(extraSchedulers.test.ts)가 같은 파일을 읽는다. 스케줄러 이름 풀이(resolve)와 값을 읽는 패스 판정(passes — 위젯 값 그대로: 체크는 'true'/'false' 문자열)이 두 구현에서 갈라지면 둘 중 한쪽 테스트가 실패한다.",
+  "//": "Extra Schedulers 골든 사례 — core/extra_schedulers.py(tests/test_extra_schedulers_card_mirror.py)와 utils/extraSchedulers.ts(extraSchedulers.test.ts)가 같은 파일을 읽는다. 스케줄러 이름 풀이(resolve)와 값을 읽는 패스 판정(passes — 위젯 값 그대로: 체크는 'true'/'false' 문자열), Flow Cosmos 칸 검사(flow_cosmos — 위젯 글자 → 파이썬 parse_settings 뒤 flow_cosmos_range_ok·flow_cosmos_dynamic_rho_ok)가 두 구현에서 갈라지면 둘 중 한쪽 테스트가 실패한다.",
   "resolve": [
     { "text": "laplace", "name": "laplace" },
     { "text": "Laplace", "name": "laplace" },
@@ -13,6 +13,16 @@
     { "text": "Cosine", "name": "cosine" },
     { "text": "custom", "name": "custom" },
     { "text": "Custom", "name": "custom" },
+    { "text": "React Cosinusoidal DynSF", "name": "react_cosinusoidal_dynsf" },
+    { "text": "react_cosinusoidal_dynsf", "name": "react_cosinusoidal_dynsf" },
+    { "text": "Flow Cosmos rho7", "name": "flow_cosmos_rho7" },
+    { "text": " FLOW  COSMOS RHO7 ", "name": "flow_cosmos_rho7" },
+    { "text": "flow_cosmos_rho7", "name": "flow_cosmos_rho7" },
+    { "text": "Flow Cosmos Dynamic", "name": "flow_cosmos_dynamic" },
+    { "text": "flow_cosmos_dynamic", "name": "flow_cosmos_dynamic" },
+    { "text": "Flow Cosmos", "name": null },
+    { "text": "Cosmos Dynamic", "name": null },
+    { "text": "React DynSF", "name": null },
     { "text": "Karras", "name": null },
     { "text": "Automatic", "name": null },
     { "text": "simple", "name": null },
@@ -71,6 +81,58 @@
       "passes": [["main", "laplace"], ["hires", "custom"], ["adetailer_1", "custom"], ["sam3", "laplace"]] },
     { "name": "flow-unsuitable schedulers read no values", "widgets": {
         "scheduler_combo": "Karras Dynamic", "hires_options_group": "true", "hires_scheduler_combo": "Phi" },
+      "passes": [] },
+    { "name": "main flow cosmos rho7 name", "widgets": { "scheduler_combo": "flow_cosmos_rho7" },
+      "passes": [["main", "flow_cosmos_rho7"]] },
+    { "name": "hires same follows the flow cosmos dynamic label", "widgets": {
+        "scheduler_combo": "Flow Cosmos Dynamic", "hires_options_group": "true",
+        "hires_scheduler_combo": "Use same scheduler" },
+      "passes": [["main", "flow_cosmos_dynamic"], ["hires", "flow_cosmos_dynamic"]] },
+    { "name": "adetailer and sam3 on the flow cosmos pair", "widgets": {
+        "scheduler_combo": "karras", "adetailer_group": "true", "ad_slot1_group": "true", "_ad_s1_use_sampler": "true",
+        "_ad_s1_scheduler": "Flow Cosmos rho7", "sam3_group": "true", "_sam3_mode": "Inpaint",
+        "_sam3_use_scheduler": "true", "_sam3_scheduler": "flow_cosmos_dynamic" },
+      "passes": [["adetailer_1", "flow_cosmos_rho7"], ["sam3", "flow_cosmos_dynamic"]] },
+    { "name": "laplace main with a flow cosmos hires pass", "widgets": {
+        "scheduler_combo": "Laplace", "hires_options_group": "true", "hires_scheduler_combo": "FLOW COSMOS RHO7" },
+      "passes": [["main", "laplace"], ["hires", "flow_cosmos_rho7"]] },
+    { "name": "react dynsf reads no values", "widgets": {
+        "scheduler_combo": "React Cosinusoidal DynSF", "hires_options_group": "true",
+        "hires_scheduler_combo": "react_cosinusoidal_dynsf" },
       "passes": [] }
+  ],
+  "flow_cosmos": [
+    { "name": "defaults", "values": {}, "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "the default strings", "values": {
+        "flow_cosmos_rho": "7", "flow_cosmos_sigma_max": "80", "flow_cosmos_sigma_min": "0.002" },
+      "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "shift 3 range", "values": {
+        "flow_cosmos_rho": "7", "flow_cosmos_sigma_max": "240", "flow_cosmos_sigma_min": "0.006" },
+      "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "the two sliders meet at 1", "values": { "flow_cosmos_sigma_max": "1", "flow_cosmos_sigma_min": "1" },
+      "range_ok": false, "dynamic_rho_ok": true },
+    { "name": "min above max clamps to the meeting point", "values": {
+        "flow_cosmos_sigma_max": "0.5", "flow_cosmos_sigma_min": "7" },
+      "range_ok": false, "dynamic_rho_ok": true },
+    { "name": "max 1 with min just below", "values": { "flow_cosmos_sigma_max": "1", "flow_cosmos_sigma_min": "0.9999" },
+      "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "rho 2 is refused by Dynamic", "values": { "flow_cosmos_rho": "2" },
+      "range_ok": true, "dynamic_rho_ok": false },
+    { "name": "rho just above 2", "values": { "flow_cosmos_rho": "2.1" }, "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "rho below the slider clamps to 1", "values": { "flow_cosmos_rho": "0" },
+      "range_ok": true, "dynamic_rho_ok": false },
+    { "name": "rho above the slider clamps to 15", "values": { "flow_cosmos_rho": "99" },
+      "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "unreadable values are the defaults", "values": {
+        "flow_cosmos_rho": "abc", "flow_cosmos_sigma_max": "", "flow_cosmos_sigma_min": "nan" },
+      "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "spaces and exponents", "values": {
+        "flow_cosmos_rho": " 1.5 ", "flow_cosmos_sigma_max": "1e3", "flow_cosmos_sigma_min": "1E-4" },
+      "range_ok": true, "dynamic_rho_ok": false },
+    { "name": "too large for a float is the default", "values": {
+        "flow_cosmos_rho": "1e400", "flow_cosmos_sigma_max": "inf", "flow_cosmos_sigma_min": "-inf" },
+      "range_ok": true, "dynamic_rho_ok": true },
+    { "name": "negative sigma min clamps up", "values": { "flow_cosmos_sigma_max": "1", "flow_cosmos_sigma_min": "-3" },
+      "range_ok": true, "dynamic_rho_ok": true }
   ]
 }
