@@ -112,6 +112,18 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(result.blocks, {PAG: {"args": ["first"]}, SKIM: {"args": [1]}})
         self.assertTrue(any("boom" in message and "widget gone" in message for message in logs.output))
 
+    def test_contributor_order_is_the_plan_r7_order(self):
+        """네 기능 계획 R7 의 최종 순서 — 있던 블록의 바이트 순서는 그대로, Extra Samplers 가 맨 끝(A-XSa3)."""
+        from ui.anima38_ui import contribute as anima38
+        from ui.anima_speed_ui import contribute as anima_speed
+        from ui.colorcraft_ui import contribute as colorcraft
+        from ui.dora_infer_mode_ui import contribute as dora
+        from ui.extra_samplers_ui import contribute as extra_samplers
+        from ui.extra_schedulers_ui import contribute as extra_schedulers
+        from ui.vae_degrid_ui import contribute as degrid
+        self.assertEqual(sb.CONTRIBUTORS, (sb._negpip, sb._anima_guidance, colorcraft, anima38, anima_speed, dora,
+                                           degrid, extra_schedulers, extra_samplers))
+
     def test_contributors_without_widgets_add_nothing_quietly(self):
         class _Bare(GenerationMixin):
             pass

@@ -436,12 +436,12 @@ class RequestProvenanceKeyTests(unittest.TestCase):
 
 class MainRetryTitleTests(unittest.TestCase):
     """P10(critic A2) — 메인 생성에서 422 면 빼고 다시 보낼 제목은 앱이 스스로 넣는 블록뿐이다(Forge 설정에 맞춘
-    DoRA·Anima38, 스냅샷이 확인하면 기본값이어도 싣는 Extra Schedulers — 계획 X5)."""
+    DoRA·Anima38, 스냅샷이 확인하면 기본값이어도 싣는 Extra Schedulers·Extra Samplers — 계획 X5)."""
 
     def test_only_app_supplied_blocks_are_retried_in_the_main_generation(self):
-        from core import extra_schedulers
+        from core import extra_samplers, extra_schedulers
         self.assertEqual({title for title, rule in ap.PROPAGATION.items() if rule.main_retry},
-                         {A38, DORA, extra_schedulers.SCRIPT_NAME})
+                         {A38, DORA, extra_schedulers.SCRIPT_NAME, extra_samplers.SCRIPT_NAME})
 
     def test_titles_are_read_from_the_payload_as_spelled(self):
         payload = {"alwayson_scripts": {PAG: {"args": [1]}, "dora inference mode": {"args": [{}]},
@@ -539,6 +539,97 @@ class ExtraSchedulersRuleTests(unittest.TestCase):
                             and isinstance(node.value, str)
                             and node.value.strip().lower() == "extra schedulers (sam-extra)"]
                 self.assertEqual(len(literals), 1 if rel == "core/extra_schedulers.py" else 0, literals)
+
+
+class ExtraSamplersRuleTests(unittest.TestCase):
+    """Extra Samplers(계획 A-XSa2, R5/X5): 값은 요청마다 process() 가 정하므로(블록 없는 요청은 ui() 기본값) 메인과 모든 보조
+    img2img 에 같은 블록. 앱이 스스로 싣는 블록(스냅샷이 확인하면 기본값이어도 — core/extra_samplers.plan)이라 메인 422 는 빼고
+    한 번 더. NEVER 에서 빠졌다."""
+
+    BLOCK = {"args": [2, 0.5, True, 0.25, 0.75]}
+
+    def test_rule(self):
+        from core import extra_samplers, sam_extra_capabilities as caps_mod
+        title = extra_samplers.SCRIPT_NAME
+        rule = ap.PROPAGATION[title]
+        self.assertNotIn(title, ap.NEVER)
+        self.assertEqual(rule.passes, frozenset(ap.AUX_PASSES))
+        self.assertEqual(rule.backends, frozenset({ap.BACKEND_WEBUI, ap.BACKEND_COMFY}))
+        self.assertEqual(rule.feature, "extra_samplers")
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_USER), ap.SEND)
+        self.assertEqual(rule.unknown_action(ap.PROVENANCE_APP_DEFAULT), ap.SKIP)
+        self.assertTrue(rule.main_retry)
+        self.assertFalse(rule.model_bound)
+        self.assertIsNone(rule.condition)
+        self.assertEqual(dict(rule.pass_backends), {})
+        self.assertNotIn(title, ap.main_only_titles())
+        self.assertEqual(ap.canonical_title("  extra SAMPLERS "), title)
+        self.assertIn((rule.feature, caps_mod.TITLE_EXTRA_SAMPLERS), caps_mod._SCRIPT_FEATURES)
+
+    def test_every_aux_pass_gets_a_deep_copy_on_both_backends(self):
+        from core import extra_samplers
+        title = extra_samplers.SCRIPT_NAME
+        source = ap.envelope({**all_blocks(), "extra samplers": self.BLOCK}, source="t2i_panel",
+                             backend=ap.BACKEND_WEBUI)
+        self.assertEqual(source["blocks"][title], self.BLOCK)
+        for aux in ap.AUX_PASSES:
+            for backend in (ap.BACKEND_WEBUI, ap.BACKEND_COMFY):
+                with self.subTest(aux=aux, backend=backend):
+                    got = ap.blocks_for(source, aux, backend=backend)
+                    self.assertEqual(got[title], self.BLOCK)
+                    self.assertIsNot(got[title], source["blocks"][title])
+                    self.assertIsNot(got[title]["args"], source["blocks"][title]["args"])
+            self.assertNotIn(title, ap.blocks_for(source, aux, backend=ap.BACKEND_KREA2))
+        self.assertEqual(ap.main_retry_titles({"alwayson_scripts": {"EXTRA samplers": self.BLOCK}}), ("EXTRA samplers",))
+
+    def test_gate_by_provenance_when_the_snapshot_is_unknown_or_missing(self):
+        from core import extra_samplers
+        title = extra_samplers.SCRIPT_NAME
+        blocks = {title: self.BLOCK}
+        unknown_user = ap.gate(blocks, None, img2img=False, provenance={title: ap.PROVENANCE_USER})
+        self.assertEqual(list(unknown_user.kept), [title])
+        unknown_default = ap.gate(blocks, None, img2img=False, provenance={title: ap.PROVENANCE_APP_DEFAULT})
+        self.assertEqual((unknown_default.kept, unknown_default.dropped_unknown), ({}, (title,)))
+        self.assertEqual(ap.gate_notices(unknown_default, {title: ap.PROVENANCE_APP_DEFAULT}, img2img=False), [])
+        missing = ap.gate(blocks, _caps_with_absent(title), img2img=True, provenance={title: ap.PROVENANCE_USER})
+        self.assertEqual(missing.dropped_missing, (title,))
+        [notice] = ap.gate_notices(missing, {title: ap.PROVENANCE_USER}, img2img=True)
+        self.assertEqual(notice.feature, "extra_samplers")
+        self.assertEqual(ap.gate_notices(missing, {title: ap.PROVENANCE_APP_DEFAULT}, img2img=True), [])
+        confirmed = ap.gate(blocks, caps(present=(title,)), img2img=False, provenance={title: ap.PROVENANCE_APP_DEFAULT})
+        self.assertEqual(list(confirmed.kept), [title])
+
+    def test_title_is_the_single_app_constant(self):
+        from core import extra_samplers, sam_extra_capabilities as caps_mod
+        self.assertIs(ap.TITLE_EXTRA_SAMPLERS, extra_samplers.SCRIPT_NAME)
+        self.assertEqual(caps_mod.TITLE_EXTRA_SAMPLERS, extra_samplers.SCRIPT_NAME.lower())
+        self.assertIs(sn._TITLE_EXTRA_SAMPLERS, extra_samplers.SCRIPT_NAME)
+        self.assertEqual(sn.SAM_EXTRA_FEATURES[extra_samplers.SCRIPT_NAME.lower()][0], "extra_samplers")
+        self.assertIn(extra_samplers.SCRIPT_NAME, reg.SCRIPTS)
+
+    def test_title_copies_are_derived_from_script_name_in_the_source(self):
+        """값 비교로는 같은 문자열 사본을 못 잡는다 — 대입식이 SCRIPT_NAME 에서 나오고 제목 리터럴이 없는지 AST 로 본다."""
+        import ast
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        expected = {
+            "core/sam_extra_capabilities.py": ("TITLE_EXTRA_SAMPLERS", "extra_samplers.SCRIPT_NAME.lower()"),
+            "core/alwayson_propagation.py": ("TITLE_EXTRA_SAMPLERS", "extra_samplers.SCRIPT_NAME"),
+            "core/sam_extra_notices.py": ("_TITLE_EXTRA_SAMPLERS", "extra_samplers.SCRIPT_NAME"),
+        }
+        for rel, (name, source) in expected.items():
+            with self.subTest(module=rel):
+                tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+                values = [ast.unparse(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+                self.assertEqual(values, [source])
+        for rel in (*expected, "core/extra_samplers.py"):
+            with self.subTest(literals=rel):
+                tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+                literals = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
+                            and isinstance(node.value, str) and node.value.strip().lower() == "extra samplers"]
+                self.assertEqual(len(literals), 1 if rel == "core/extra_samplers.py" else 0, literals)
 
 
 class AnimaSpeedRuleTests(unittest.TestCase):

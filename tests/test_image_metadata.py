@@ -973,6 +973,28 @@ class ExtraSchedulersMetadataGroupTests(unittest.TestCase):
         self.assertNotIn("Flow Cosmos", groups.get("other", ""))
 
 
+class ExtraSamplersMetadataGroupTests(unittest.TestCase):
+    """sam-extra Extra Samplers 의 infotext 4키는 확장 그룹, 'Sampler'·'Hires sampler' 는 생성 줄·Hires 줄(계획 A-XSa2 마커
+    'er sde'·'extra samplers')."""
+
+    def test_keys_group_as_extensions(self):
+        from core import extra_samplers
+        from core.image_metadata import group_parameters, parse_infotext
+        text = ("a cat\nSteps: 28, Sampler: ER SDE (Tunable), Schedule type: Normal, Seed: 7, Hires sampler: Euler SMEA Dy, "
+                "ER SDE max stage: 2, ER SDE eta: 0.5, ER SDE noise window: 0.2-0.8, "
+                "Extra Samplers status: dy sub-steps skipped (Spectrum); noise window skipped (no percent_to_sigma), "
+                "Version: f2")
+        groups = group_parameters(parse_infotext(text).parameters)
+        for key in (f"{extra_samplers.KEY_MAX_STAGE}: 2", f"{extra_samplers.KEY_ETA}: 0.5",
+                    f"{extra_samplers.KEY_NOISE_WINDOW}: 0.2-0.8", f"{extra_samplers.STATUS_KEY}: "):
+            with self.subTest(key=key):
+                self.assertIn(key, groups["extensions"])
+        self.assertIn("Sampler: ER SDE (Tunable)", groups["generation"])
+        self.assertIn("Hires sampler: Euler SMEA Dy", groups["hires"])
+        self.assertNotIn("ER SDE", groups.get("other", ""))
+        self.assertNotIn("Extra Samplers", groups.get("other", ""))
+
+
 class AnimaSpeedMetadataGroupTests(unittest.TestCase):
     """sam-extra Anima SPEED 의 infotext 3키는 확장 그룹(계획 A-SP3 마커 'anima speed')."""
 

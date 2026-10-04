@@ -450,8 +450,10 @@ _GROUP_MODEL = ("Model", "Model hash", "VAE", "Clip skip")
 # (core/anima_speed INFOTEXT_KEYS)
 # 'colorcraft': sam-extra Colorcraft 의 'SAM Extra Colorcraft'·'… status'·'… pre-DD sigma'(core/colorcraft INFOTEXT_KEYS)와
 # 업스트림·aoleg 포크의 'Colorcraft'(붙여 넣기로 읽는 열쇠)
+# 'er sde'·'extra samplers': sam-extra Extra Samplers 의 'ER SDE max stage'·'ER SDE eta'·'ER SDE noise window'·'Extra Samplers
+# status'(core/extra_samplers KEY_*·STATUS_KEY — 'Sampler' 는 위 생성 줄이 먼저 가져간다)
 _EXTENSION_MARKERS = ("adetailer", "sam3", "negpip", "controlnet", "ad_", "tiled", "degrid", "laplace",
-                      "custom scheduler", "flow cosmos", "anima speed", "colorcraft")
+                      "custom scheduler", "flow cosmos", "anima speed", "colorcraft", "er sde", "extra samplers")
 
 
 def group_parameters(params: dict) -> dict[str, str]:

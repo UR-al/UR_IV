@@ -1376,6 +1376,177 @@ class ExtraSchedulersNoticeTests(_QuietAssumption):
         self.assertTrue(propagated.message.endswith(sn.PROPAGATED_SUFFIX))
 
 
+# ── Extra Samplers (계획 A-XSa2) ───────────────────────────────────────────────
+def xsamp_payload(**values):
+    from core import extra_samplers
+    block = extra_samplers.as_block(extra_samplers.ExtraSamplersSettings(**values))
+    return {"prompt": "1girl", "cfg_scale": 4.5, "alwayson_scripts": {extra_samplers.SCRIPT_NAME: block}}
+
+
+def _quote(value: str) -> str:
+    """A1111 create_infotext 의 따옴표 규칙(쉼표·콜론·줄바꿈이 든 값만 JSON 따옴표)."""
+    return json.dumps(value) if any(ch in value for ch in ",:\n") else value
+
+
+def xsamp_infotext(sampler: str = "ER SDE (Reverse-time)", *, hires: str = "", status: str = "", keys: str = "") -> str:
+    """확장이 쓰는 모양 — 'Sampler'·'Hires sampler'(다를 때만)·값 키·'Extra Samplers status'."""
+    text = _HEAD.replace("Sampler: Euler a", f"Sampler: {sampler}")
+    if hires:
+        text += f"Hires sampler: {hires}, "
+    text += keys
+    if status:
+        text += f"Extra Samplers status: {_quote(status)}, "
+    return text + _TAIL
+
+
+def _caps_with_xsamp_argc(argc):
+    from core import extra_samplers
+    from core.sam_extra_capabilities import SamExtraCapabilities, _freeze
+    detail = {"present": True, "img2img": True, "live_argc": argc, "spec_argc": 5, "trailing_unmapped": [],
+              "extra_live_args": 0}
+    return SamExtraCapabilities(status="ok", installed=True,
+                                scripts=_freeze({extra_samplers.SCRIPT_NAME.lower(): detail}))
+
+
+_DY_SPECTRUM = "dy sub-steps skipped (Spectrum)"
+_DY_SPECTRUM_PID = "dy sub-steps skipped (Spectrum + PiD lq_latent)"
+_WINDOW_SKIPPED = "noise window skipped (no percent_to_sigma)"
+XSAMP_OK = xsamp_infotext(keys="ER SDE max stage: 2, ER SDE eta: 0.5, ER SDE noise window: 0.2-0.8, ")
+XSAMP_DY_OK = xsamp_infotext("Euler SMEA Dy CFG++")
+XSAMP_DY_SPECTRUM = xsamp_infotext("Euler SMEA Dy CFG++", status=_DY_SPECTRUM)
+XSAMP_DY_SPECTRUM_PID = xsamp_infotext("Euler Dy", status=_DY_SPECTRUM_PID)
+XSAMP_WINDOW_SKIPPED = xsamp_infotext("ER SDE (Tunable)", hires="Euler SMEA Dy", status=f"{_DY_SPECTRUM}; {_WINDOW_SKIPPED}",
+                                      keys="ER SDE eta: 0.5, ")
+XSAMP_NO_WINDOW_KEY = xsamp_infotext(keys="ER SDE eta: 0.5, ")      # 인자 2개 sam-extra — 구간 키가 없다
+
+
+class ExtraSamplersNoticeTests(_QuietAssumption):
+    def _xsamp(self, info, payload=None, capabilities=None):
+        return [n for n in sn.result_notices(info, xsamp_payload() if payload is None else payload,
+                                             capabilities=capabilities) if n.feature == "extra_samplers"]
+
+    def test_quiet_without_a_status_part_or_a_window_problem(self):
+        window = xsamp_payload(max_stage=2, eta=0.5, noise_window=True)
+        five, two = _caps_with_xsamp_argc(5), _caps_with_xsamp_argc(2)
+        for info, payload, capabilities in (
+                (info_of(XSAMP_OK), window, five),                                  # 0.33.0 이 구간을 적었다
+                (info_of(XSAMP_DY_OK), None, None),                                 # Dy 가 보조 스텝으로 돌았다
+                (info_of(XSAMP_NO_WINDOW_KEY), window, None),                       # 스냅샷을 모르면 말하지 않는다
+                (info_of(XSAMP_NO_WINDOW_KEY), window, five),
+                (info_of(XSAMP_NO_WINDOW_KEY), xsamp_payload(eta=0.5), two),        # 구간을 켜지 않았다
+                (info_of(xsamp_infotext("Euler a")), window, two),                  # 구간을 읽는 샘플러가 돌지 않았다
+                (info_of(xsamp_infotext(LABEL_ODE)), window, two),
+                (info_of(XSAMP_NO_WINDOW_KEY), {"prompt": "x"}, two),               # 블록을 보내지 않았다
+                (info_of(xsamp_infotext(status="something new (x)")), None, None)):  # 모르는 부분
+            with self.subTest(info=info[150:260], capabilities=capabilities):
+                self.assertEqual(self._xsamp(info, payload, capabilities), [])
+        self.assertEqual(sn.extra_samplers_result_notices(xsamp_payload(), []), [])
+
+    def test_dy_substeps_skipped_is_one_info_notice_with_korean_reasons(self):
+        [notice] = self._xsamp(info_of(XSAMP_DY_SPECTRUM, XSAMP_DY_OK, XSAMP_DY_SPECTRUM_PID), {"prompt": "x"})
+        self.assertEqual((notice.code, notice.level, notice.feature),
+                         (sn.CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED, sn.LEVEL_INFO, "extra_samplers"))
+        self.assertEqual(notice.detail, "Spectrum + PiD lq_latent")
+        self.assertIn("2/3장에서", notice.message)
+        self.assertIn("Forge Spectrum Integrated 가 켜져 있습니다", notice.message)
+        self.assertIn("PiD 저화질 latent", notice.message)
+        self.assertIn("'Extra Samplers status'", notice.message)
+        [single] = sn.extra_samplers_result_notices(None, [{"Extra Samplers status": _DY_SPECTRUM}])
+        self.assertNotIn("장", single.message.split("건너뛰고")[0])
+        self.assertEqual(single.detail, "Spectrum")
+        [unknown] = sn.extra_samplers_result_notices(None, [{"Extra Samplers status": "dy sub-steps skipped (Future)"}])
+        self.assertIn("Future", unknown.message)                          # 모르는 이유는 원문 그대로
+
+    def test_window_skipped_is_read_after_splitting_the_status_parts(self):
+        notices = self._xsamp(info_of(XSAMP_WINDOW_SKIPPED, XSAMP_OK), xsamp_payload(eta=0.5, noise_window=True),
+                              _caps_with_xsamp_argc(5))
+        self.assertEqual([(n.code, n.level) for n in notices],
+                         [(sn.CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED, sn.LEVEL_INFO),
+                          (sn.CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED, sn.LEVEL_INFO)])
+        window = notices[1]
+        self.assertEqual(window.detail, _WINDOW_SKIPPED)
+        self.assertIn("1/2장에서", window.message)
+        self.assertIn("percent_to_sigma", window.message)
+        for status in (_WINDOW_SKIPPED, f"{_WINDOW_SKIPPED}; {_DY_SPECTRUM}", f" {_WINDOW_SKIPPED} ;something new (x)"):
+            with self.subTest(status=status):
+                codes_ = [n.code for n in sn.extra_samplers_result_notices(None, [{"Extra Samplers status": status}])]
+                self.assertIn(sn.CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED, codes_)
+
+    def test_window_on_a_two_argument_sam_extra_is_a_warning(self):
+        from core import extra_samplers
+        window = xsamp_payload(eta=0.5, noise_window=True)
+        two = _caps_with_xsamp_argc(2)
+        for info in (info_of(XSAMP_NO_WINDOW_KEY), info_of(xsamp_infotext("Euler a", hires=LABEL_TUNABLE)),
+                     info_of(xsamp_infotext("er_sde_reverse_time"))):
+            with self.subTest(info=info[150:260]):
+                [notice] = self._xsamp(info, window, two)
+                self.assertEqual((notice.code, notice.level, notice.feature, notice.detail),
+                                 (sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, sn.LEVEL_WARNING, "extra_samplers",
+                                  "live_argc=2"))
+                self.assertIn(extra_samplers.WINDOW_UNSUPPORTED_TEXT, notice.message)
+                self.assertIn("인자가 2개", notice.message)
+                self.assertIn(f"'{extra_samplers.KEY_NOISE_WINDOW}'", notice.message)
+                self.assertIn(extra_samplers.WINDOW_MIN_VERSION, notice.message)
+        # 0.31·0.32 는 구간을 모르므로 건너뜀 부분도 쓰지 않는다 — Dy 부분과는 따로 나온다
+        notices = self._xsamp(info_of(xsamp_infotext(LABEL_TUNABLE, hires="Euler Dy", status=_DY_SPECTRUM)), window, two)
+        self.assertEqual([n.code for n in notices],
+                         [sn.CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED, sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED])
+
+    def test_requested_features_read_the_block_like_the_extension(self):
+        from core import extra_samplers
+        request = sn.requested_features(xsamp_payload(max_stage=2, eta=0.5, noise_window=True))
+        self.assertEqual(request.extra_samplers,
+                         extra_samplers.ExtraSamplersSettings(max_stage=2, eta=0.5, noise_window=True))
+        loose = {"alwayson_scripts": {"EXTRA SAMPLERS": {"args": ["2", "12", "on", -1, "0.6"]}}}
+        self.assertEqual(sn.requested_features(loose).extra_samplers,
+                         extra_samplers.ExtraSamplersSettings(max_stage=2, eta=10.0, noise_window=True, noise_start=0.0,
+                                                              noise_end=0.6))
+        old = {"alwayson_scripts": {"Extra Samplers": {"args": [1, 0.25]}}}          # 0.32 까지의 두 인자
+        self.assertEqual(sn.requested_features(old).extra_samplers,
+                         extra_samplers.ExtraSamplersSettings(max_stage=1, eta=0.25))
+        self.assertEqual(sn.requested_features({"alwayson_scripts": {"Extra Samplers": "x"}}).extra_samplers,
+                         extra_samplers.APP_DEFAULTS)
+        self.assertIsNone(sn.requested_features({"prompt": "x"}).extra_samplers)
+
+    def test_throttling_exports_and_feature_name(self):
+        from core import extra_samplers
+        for name in ("CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED", "CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED",
+                     "CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED"):
+            with self.subTest(code=name):
+                notice = sn.Notice(getattr(sn, name), sn.LEVEL_WARNING, "m")
+                self.assertEqual(sn.notice_ttl(notice, sn.RESULT_NOTICE_TTL_S), sn.PRE_GENERATION_NOTICE_TTL_S)
+                self.assertIn(name, sn.__all__)
+        self.assertIn("extra_samplers_result_notices", sn.__all__)
+        self.assertEqual((sn.KEY_ER_SDE_MAX_STAGE, sn.KEY_ER_SDE_ETA, sn.KEY_ER_SDE_NOISE_WINDOW, sn.KEY_EXTRA_SAMPLERS_STATUS),
+                         (extra_samplers.KEY_MAX_STAGE, extra_samplers.KEY_ETA, extra_samplers.KEY_NOISE_WINDOW,
+                          extra_samplers.STATUS_KEY))
+        self.assertEqual(set(sn._XSAMP_DY_REASON_TEXTS), set(extra_samplers.DY_REASONS))
+        text = sn.explain_rejected_request(422, {"detail": "always on script Extra Samplers not found"}, xsamp_payload())
+        self.assertIn("켠 기능: Extra Samplers 값", text)
+        self.assertEqual(sn.block_not_sent_notice("Extra Samplers", img2img=False).feature, "extra_samplers")
+        [propagated] = sn.result_notices(info_of(XSAMP_DY_SPECTRUM), xsamp_payload(),
+                                         propagated_titles=("extra samplers",))
+        self.assertTrue(propagated.message.endswith(sn.PROPAGATED_SUFFIX))
+
+
+LABEL_ODE, LABEL_TUNABLE = "ER SDE (ODE)", "ER SDE (Tunable)"
+
+
+@requires_extension
+class ExtraSamplersExtensionSourceTests(unittest.TestCase):
+    """Extra Samplers 알림이 기대는 상태 줄 모양 — 부분을 '; ' 로 잇고 Dy 부분은 '<머리> (<이유> + <이유>)'(핀은 상수만 본다)."""
+
+    def test_status_shapes(self):
+        with open(os.path.join(EXT_ROOT, "sam3ext", "extra_samplers", "substep_guard.py"), encoding="utf-8") as fh:
+            guard = fh.read()
+        with open(os.path.join(EXT_ROOT, "sam3ext", "extra_samplers", "registry.py"), encoding="utf-8") as fh:
+            registry = fh.read()
+        self.assertIn('value = "; ".join(parts.values())', guard)
+        self.assertIn("text = f\"{_STATUS_PREFIX} ({' + '.join(seen)})\"", guard)
+        self.assertIn('substep_guard.record_status_part(p, "noise_window", sampler_params.WINDOW_SKIPPED_STATUS)',
+                      registry)
+
+
 # ── Anima SPEED (계획 A-SP3) ───────────────────────────────────────────────────
 def speed_payload(**values):
     from core import anima_speed

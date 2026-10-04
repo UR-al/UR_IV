@@ -99,6 +99,9 @@ EXT_VERSION_AUDITED = "0.33.0"
 # 결과는 그대로(CHANGELOG — 기존 대조 테스트 그대로). 픽스처는 설치된 0.33.0 을 불러온 테스트 Forge(7862)에서 읽기 전용
 # GET 으로 다시 받았다(captured_at 2026-10-04T11:35:16+00:00) — 'Extra Samplers'·'Extra Schedulers (sam-extra)' 두 항목
 # (각 txt2img·img2img)에 칸 셋씩 붙은 것 말고는 0.32.1 픽스처와 같다.
+# 2026-10-05 Extra Samplers 앱 노출(확장은 그대로 d05afd9): SCRIPTS·MODULES 둘을 HOLD → mapped(위치 인자 다섯 블록 — 메인
+# 요청과 모든 보조 패스, main_retry), XYZ [Extra Samplers] 세 축은 P18(앱 XYZ 의 Sampler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS
+# extra_samplers_*(+ 결과 알림이 읽는 Dy 상태 줄 머리·이유 넷 — 팩 거울 '_comfy' 는 C0).
 EXT_COMMIT_AUDITED = "d05afd9"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
@@ -626,26 +629,71 @@ SCRIPTS = MappingProxyType({
                   "뒤 core/extra_schedulers.check_text). 잘못된 식은 Forge 가 'Extra Schedulers: …' 로 멈춘다",
                   "Forge HTTP 500 본문은 앱 옵션 재시도 때만 읽는다 — 스케줄러 오류 원문(explain_scheduler_error)은 아직 "
                   "생성 오류 문구에 붙지 않는다"))),
+    # 2026-10-05 앱 노출(보류 → mapped, 계획 A-XSa2): 위치 인자 다섯 블록·정규화·붙여 넣기·infotext·상태 줄 거울(core/
+    # extra_samplers), 모든 보조 패스 전달 행(main_retry — 계획 X5), 결과 알림(Dy 보조 스텝·잡음 구간 건너뜀·옛 sam-extra 의
+    # 구간 미지원 — X10). 상수 계약은 SEMANTIC_PINS extra_samplers_*. ComfyUI(팩 1.7.0 의 샘플러 12개 등록·값 운반 노드)는 계획
+    # C 단계.
     "Extra Samplers": _script(
         file="scripts/anima_extra_samplers.py", form="positional", live_argc=5, shape="3ee8b4de008d",
-        ui_return=("max_stage", "eta", "noise_window", "noise_start", "noise_end"),
+        ui_return="app_spec", app_title="core.extra_samplers:SCRIPT_NAME",
+        app_spec=("core.extra_samplers:ARG_SPEC", "xsamp_"),
         api_note="위치 인자 [max_stage(1-3, 기본 3), eta(0-10, 기본 1.0), noise_window(기본 False), noise_start(0-1, 기본 "
                  "0.2), noise_end(0-1, 기본 0.8)] — 뒤에서부터 생략 가능(sam3ext/extra_samplers/params.py settings_from_args — "
                  "스크립트 클래스 밖이라 api_reads 는 비어 있다). v0.33.0 이 뒤 셋을 덧붙였다 — 0.32 까지의 []·[max_stage]·"
-                 "[max_stage, eta] 요청은 구간 끔으로 전과 같다. max stage 는 ER SDE (Reverse-time)·(ODE)·(Tunable), η·잡음 "
-                 "구간은 Reverse-time·Tunable 만 읽는다(시작 ≥ 끝은 빈 구간). 샘플러 18개(ER SDE 셋·DPM++ 4M SDE·Euler Dy "
+                 "[max_stage, eta] 요청은 구간 끔으로 전과 같다. Forge API 는 설치된 스크립트의 인자 수만큼만 넘기므로 "
+                 "(modules/api/api.py — min(args_to − args_from, len(args))) 0.31·0.32 는 다섯 개 블록의 뒤 셋을 조용히 버린다"
+                 "(계획 X10). max stage 는 ER SDE (Reverse-time)·(ODE)·(Tunable), η·잡음 "
+                 "구간은 Reverse-time·Tunable 만 읽는다(시작 ≥ 끝은 빈 구간). 값은 process() 가 요청에 붙이고(블록이 없는 요청은 "
+                 "ui() 기본값) 그 요청의 모든 패스가 읽는다 — ADetailer 안쪽 img2img 는 스크립트를 걸러 직전 요청 값(_ACTIVE)을 "
+                 "쓴다. 샘플러 18개(ER SDE 셋·DPM++ 4M SDE·Euler Dy "
                  "CFG++·Euler SMEA Dy CFG++·Euler Dy·Euler SMEA Dy·DPM++ 2M SDE Heun·flow ODE 셋·UniPC bh2·CFG++ UD10 AB·IPNDM·"
                  "IPNDM_V·DEIS·Restart (flow))는 불러올 때 Forge 목록에 등록돼 /sdapi/v1/samplers 로 나온다(계열 순서 — "
-                 "scripts/list_order.py) — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고를 수 있고, 이 블록 없이 확장 "
-                 "기본값(3·1.0·구간 끔)으로 돈다. ComfyUI 는 KSampler sampler_name 에 없는 이름이라 컴파일 오류('지원하지 않는 "
+                 "scripts/list_order.py) — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고른다. ComfyUI 는 KSampler "
+                 "sampler_name 에 없는 이름이라 컴파일 오류('지원하지 않는 "
                  "값') — 계획 C1·C3(코어 이름 dpmpp_2m_sde_heun·uni_pc_bh2·cfgpp_ud10_ab·ipndm·ipndm_v·deis 는 별칭만, 나머지 "
                  "12개는 팩 1.7.0). 'ER SDE (Reverse-time)'·'(ODE)'·'(Tunable)' 은 Comfy SamplerER_SDE 노드의 잡음 척도라 "
                  "KSampler er_sde(Forge 'ER SDE')로 잇지 않는다. infotext 'ER SDE max stage'·'ER SDE eta'(기본값과 다를 때)·"
                  "'ER SDE noise window'(구간을 켜고 Reverse-time·Tunable 이 돈 때 — '0.2-0.8')·'Extra Samplers status'(부분을 "
                  "'; ' 로 잇는다 — Dy 보조 스텝·잡음 구간 건너뜀).",
-        classification=deferred(HOLD, "ER SDE max stage·η·잡음 구간 칸 — 앱 노출은 계획 Lane A A-XSa2..5(core/extra_samplers "
-                                      "는 표·정규화·infotext 까지 있다, 상수 계약은 SEMANTIC_PINS extra_samplers_*). 앱이 아직 "
-                                      "블록을 만들지 않는다(core/alwayson_propagation NEVER)")),
+        classification=mapped(
+            "core/extra_samplers.py:SCRIPT_NAME", "core/extra_samplers.py:ARG_SPEC", "core/extra_samplers.py:as_block",
+            "core/extra_samplers.py:parse_script_block", "core/extra_samplers.py:coerce_args", "core/extra_samplers.py:plan",
+            "core/extra_samplers.py:from_infotext", "core/extra_samplers.py:infotext_items",
+            "core/extra_samplers.py:parse_status", "core/extra_samplers.py:resolve_sampler",
+            "core/extra_samplers.py:value_sampler_passes", "core/extra_samplers.py:passes_from_widgets",
+            "core/extra_samplers.py:window_unsupported",
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용 — 계획 R7 의 마지막)·저장·붙여 넣기(계획 A-R1 이 '이 설정으로
+            # 생성'에 잇는다)
+            "ui/extra_samplers_ui.py:contribute", "ui/extra_samplers_ui.py:apply_saved_settings",
+            "ui/extra_samplers_ui.py:apply_infotext", "ui/extra_samplers_ui.py:init_extra_samplers_proxies",
+            "ui/sampling_blocks.py:CONTRIBUTORS",
+            # 보조 패스 전달(모든 보조 img2img — 값은 요청마다 process() 가 정한다)·기능 스냅샷(인자 수 → 잡음 구간 지원)
+            "core/alwayson_propagation.py:TITLE_EXTRA_SAMPLERS", "core/alwayson_propagation.py:PROPAGATION",
+            "core/sam_extra_capabilities.py:TITLE_EXTRA_SAMPLERS", "core/sam_extra_capabilities.py:POSITIONAL_SPECS",
+            # 결과 'Extra Samplers status'(Dy 보조 스텝·잡음 구간 건너뜀 — 정보)·옛 sam-extra 의 잡음 구간 미지원(X10) → 알림
+            "core/sam_extra_notices.py:CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED",
+            "core/sam_extra_notices.py:CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED",
+            "core/sam_extra_notices.py:CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED",
+            "core/sam_extra_notices.py:extra_samplers_result_notices",
+            # 결과 infotext 4키를 확장 그룹으로(PNG Info·갤러리·히스토리 — 'er sde'·'extra samplers')
+            "core/image_metadata.py:_EXTENSION_MARKERS",
+            # 파라미터 카드 Sampler/Scheduler 줄 바로 아래 ER SDE 칸 — ER SDE 셋을 쓰는 패스가 있을 때만 보인다. 잡음 구간 경고
+            # 줄(시작 ≥ 끝 = 빈 구간, 연결된 sam-extra 가 인자 2개라 구간을 버림 — X10)은 파이썬 판정의 거울
+            "frontend/src/components/params/ExtraSamplersPanel.vue",
+            "frontend/src/utils/extraSamplers.ts:passesUsing", "frontend/src/utils/extraSamplers.ts:windowUnsupported",
+            note="위치 인자 다섯(늘 다섯 — 계획 X10; int·float·bool·float·float, 정규화된 값)으로 보낸다. 기능 스냅샷이 "
+                 "스크립트를 확인하면 값이 기본값이어도 늘 보낸다(XYZ Sampler 축이 ER SDE 로 바꾸는 칸·사용자 ui-config "
+                 "기본값과 무관하게 같은 요청 — 계획 X5, Extra Schedulers 와 같은 규칙), 확인 못 했으면 어느 패스가 ER SDE 셋 "
+                 "중 하나를 쓸 때만(모르면 사용자 값만, 없다고 하면 빼고 알림). 앱 기본값 = 확장 기본값(3·1.0·구간 끔). 메인 "
+                 "요청과 모든 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같은 블록 — 블록 없는 요청은 ui() 기본값으로 "
+                 "돌므로. 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). Krea2 는 보내지 않는다. 연결된 "
+                 "sam-extra 가 인자 2개(0.31·0.32)이고 잡음 구간을 켰으면 결과 알림이 구간이 빠졌다고 말한다",
+            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/extra_samplers.plan 'comfy_pending', 계획 R16). "
+                  "ComfyUI 는 아직 KSampler 에 없는 이름이라 컴파일 오류('지원하지 않는 값') — 샘플러 12개 등록과 값 운반 노드 "
+                  "ForgeNeoExtraSamplerSettings 는 팩 1.7.0(계획 C1·C3·C6)",
+                  "P18: XYZ [Extra Samplers] 세 축(max stage·η·잡음 구간)은 앱 XYZ 에 없다(Sampler 축은 있다)",
+                  "Forge 설정 Sampler Parameters(Eta·sigma churn/tmin/tmax/noise)는 Forge 전용 — 앱은 보내지 않는다(DPM++ 4M "
+                  "SDE·2M SDE Heun 의 Eta, Dy 의 churn 은 Forge 값)"))),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -844,7 +892,6 @@ ROUTES = MappingProxyType({
 #    2026-10-03 미커밋 26: [Colorcraft] 14, [Anima SPEED] 6, [Extra Schedulers (sam-extra)] 4, [Extra Samplers] 2;
 #    v0.33.0 +4: [Extra Schedulers (sam-extra)] Flow Cosmos 셋, [Extra Samplers] ER SDE noise window) ──
 _XYZ_GUIDANCE = deferred("P18", "G17 — 앱 XYZ 가 가이던스 spec 키·인덱스를 바꿔 가며 돌릴 수 없다")
-_XYZ_HOLD = deferred(HOLD, "스크립트가 보류(HOLD) — 앱이 그 블록을 만들지 않으므로 축으로 바꿀 값도 없다. 노출하면 P18(앱 XYZ) 대상")
 XYZ_AXES = MappingProxyType({
     "[SAM3]": {**deferred("P18", "S9 — 앱 XYZ 가 SAM3 state 키를 바꿔 가며 돌릴 수 없다"), "labels": (
         "CFG Scale", "CN Enable", "CN Guidance End", "CN Guidance Start", "CN Model", "CN Module",
@@ -900,7 +947,9 @@ XYZ_AXES = MappingProxyType({
                                                          "Dynamic 둘 다에 닿는다"), "labels": (
         "Custom expression", "Custom sigma list", "Flow Cosmos rho", "Flow Cosmos sigma max", "Flow Cosmos sigma min",
         "Laplace beta", "Laplace mu")},
-    "[Extra Samplers]": {**_XYZ_HOLD, "labels": ("ER SDE eta", "ER SDE max stage", "ER SDE noise window")},
+    "[Extra Samplers]": {**deferred("P18", "앱 XYZ 에 ER SDE max stage·η·잡음 구간 축이 없다 — Sampler 축은 이미 있고(앱 "
+                                           "XYZ 'Sampler'), 블록은 그 칸에도 카드 값으로 같이 간다(core/extra_samplers.plan)"),
+                         "labels": ("ER SDE eta", "ER SDE max stage", "ER SDE noise window")},
 })
 
 # ── Gradio 전용 기능 (이름 엔드포인트 = 함수 이름) — 앱이 기대면 안 되는 것 ──────────────
@@ -999,10 +1048,11 @@ MODULES = MappingProxyType({
         "core/extra_schedulers.py:SCRIPT_NAME", "core/extra_schedulers.py:SCHEDULER_NAMES",
         note="SCRIPTS['Extra Schedulers (sam-extra)'] — 불러올 때 스케줄러 9개(v0.33.0 +3)를 Forge 목록에 등록한다(앱 Forge 스케줄러 "
              "콤보에 라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). XYZ [Extra Schedulers (sam-extra)] 도 여기서(P18)"),
-    "scripts/anima_extra_samplers.py": deferred(
-        HOLD, "SCRIPTS['Extra Samplers'] — 불러올 때 샘플러 18개(v0.33.0 +13)를 Forge 목록에 등록한다(앱 Forge 샘플러 콤보에 "
-              "라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). 인자 5개(v0.33.0 잡음 구간 셋)·XYZ [Extra Samplers] 셋도 "
-              "여기서. 앱 노출은 Lane A A-XSa2..5"),
+    "scripts/anima_extra_samplers.py": mapped(
+        "core/extra_samplers.py:SCRIPT_NAME", "core/extra_samplers.py:LABELS", "core/extra_samplers.py:XYZ_PREFIX",
+        note="SCRIPTS['Extra Samplers'] — 불러올 때 샘플러 18개(v0.33.0 +13)를 Forge 목록에 등록한다(앱 Forge 샘플러 콤보에 "
+             "라이브로 보인다 — 등록 자체는 앱 코드가 필요 없다). 인자 5개(v0.33.0 잡음 구간 셋)·XYZ [Extra Samplers] 세 축"
+             "(P18)도 여기서. 앱은 18개 라벨·별칭 표(core/extra_samplers LABELS·ALIASES)로 카드 종류와 ComfyUI 이름을 고른다"),
     "scripts/appearance_progress_bar.py": ignored(
         "진행 막대 — 설정 sam3_progress_* 와 GET /sam-extra/progress 등록만(스크립트 클래스·생성 훅 없음)"),
     "scripts/mcp_settings.py": ignored(
@@ -1153,13 +1203,19 @@ MODULES = MappingProxyType({
              "정규화 규칙·이름 표·오류 머리·Flow Cosmos 검사(flow_cosmos_range_ok·flow_cosmos_dynamic_rho_ok)만 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현, 계획 "
              "C 단계). tests/test_extra_schedulers_core.py 가 설치된 settings·registry 와 비교한다",
         gaps=("C7: 식·목록 검사(expression·sigma_list)를 앱이 미리 하지 않는다",)),
-    "sam3ext/extra_samplers/": deferred(HOLD, "샘플러 18개(v0.33.0 +13 — 새 파일 dpmpp_flow.py(flow ODE 셋)·unipc.py(UniPC "
-                                              "bh2)·cfgpp_ud10_ab.py·er_sde_window.py(ER SDE 잡음 구간)·ipndm_deis.py(IPNDM·IPNDM_V·"
-                                              "DEIS)·restart_flow.py(Restart (flow)), 기존 er_sde·euler_dy·params·registry·"
-                                              "substep_guard 확장)·ER SDE 값(params — 인자 5개·infotext·붙여 넣기)·Forge 등록. 앱 "
-                                              "core/extra_samplers 는 표·정규화·infotext 를 거울로 두었고(A-XSa1, 상수 계약 "
-                                              "SEMANTIC_PINS extra_samplers_*) 아직 블록을 보내지 않는다(Lane A A-XSa2..5). "
-                                              "샘플러 이름은 Forge 목록으로 고른다"),
+    "sam3ext/extra_samplers/": mapped(
+        "core/extra_samplers.py:coerce_args", "core/extra_samplers.py:ALIASES", "core/extra_samplers.py:from_infotext",
+        "core/extra_samplers.py:infotext_items", "core/extra_samplers.py:parse_noise_window",
+        "core/extra_samplers.py:parse_status", "core/extra_samplers.py:DY_REASONS",
+        note="샘플러 18개(v0.33.0 +13 — 새 파일 dpmpp_flow.py(flow ODE 셋)·unipc.py(UniPC bh2)·cfgpp_ud10_ab.py·"
+             "er_sde_window.py(ER SDE 잡음 구간)·ipndm_deis.py(IPNDM·IPNDM_V·DEIS)·restart_flow.py(Restart (flow)), 기존 "
+             "er_sde·euler_dy·params·registry·substep_guard 확장)·ER SDE 값(params — 인자 5개·정규화·infotext·붙여 넣기)·Dy "
+             "보조 스텝 가드와 상태 줄(substep_guard)·Forge 등록(registry). 앱은 정규화·붙여 넣기·infotext 기록·상태 줄 "
+             "규칙과 이름 표만 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현하거나 코어 함수를 "
+             "쓴다, 계획 C 단계). tests/test_extra_samplers_core.py 가 설치된 params·substep_guard·registry 와 같은 입력으로 "
+             "비교한다",
+        gaps=("Comfy: 팩 1.7.0 단계 전 — 계산(ER SDE 셋·4M SDE·Dy 넷·flow ODE 셋·Restart (flow) 등록, 잡음 구간·"
+              "ForgeNeoExtraSamplerSettings)은 C0 에서 들어온다",)),
     "sam3ext/ui_extra_schedulers.py": mapped(
         "core/extra_schedulers.py:ARG_NAMES", "core/extra_schedulers.py:coerce_args",
         "core/extra_schedulers.py:from_infotext", "core/extra_schedulers.py:infotext_items",
@@ -1479,10 +1535,9 @@ _XSCHED_PINS = (
                   "그 거울 '_comfy')"),
 )
 
-# Extra Samplers 상수 계약(sam-extra v0.33.0 — 계획 PLAN_amend_v033 §4, S3 에서 만든다) — 앱(core/extra_samplers, A-XSa1)이 같은
-# 값을 하드코딩한다. 앱 노출(SCRIPTS 행 mapped)은 Lane A A-XSa2..5 — 그때까지 행은 HOLD 지만 표·정규화·infotext 상수는 이미
-# core 에 있어 여기서 지킨다. 라벨은 params.py(ER SDE 셋)·registry.py(나머지 15 — registry 의 ER SDE 라벨은 params 를 가리키는
-# 이름이라 AST 로 안 풀린다). 팩 거울('_comfy' — 노드 입력 기본값·범위, Restart 상수)은 계획 C0.
+# Extra Samplers 상수 계약(sam-extra v0.33.0 — 계획 PLAN_amend_v033 §4, S3 에서 만들고 A-XSa2 가 Dy 상태 줄을 더했다) — 앱
+# (core/extra_samplers)이 같은 값을 하드코딩한다. 라벨은 params.py(ER SDE 셋)·registry.py(나머지 15 — registry 의 ER SDE 라벨은
+# params 를 가리키는 이름이라 AST 로 안 풀린다). 팩 거울('_comfy' — 노드 입력 기본값·범위, Restart 상수)은 계획 C0.
 _XSAMP_PARAMS = "sam3ext/extra_samplers/params.py"
 _XSAMP_REGISTRY = "sam3ext/extra_samplers/registry.py"
 _XSAMP_TITLE = "Extra Samplers"
@@ -1550,6 +1605,16 @@ _XSAMP_PINS = (
            "'Extra Samplers status' 의 잡음 구간 건너뜀 부분(예측기에 percent_to_sigma 가 없다) — 결과 알림이 찾는다"),
           ("sam3ext/extra_samplers/substep_guard.py", "STATUS_KEY", "Extra Samplers status",
            "infotext status 키 — 부분을 '; ' 로 잇는다(Dy 보조 스텝 건너뜀·잡음 구간 건너뜀)"))),
+    # Dy 부분 'dy sub-steps skipped (<이유> + <이유>)' — 결과 알림(CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED)이 머리로 찾고 이유를
+    # 한국어로 바꾼다. 이유 글자가 바뀌면 알림이 원문을 그대로 보인다
+    _xsamp_pin("extra_samplers_dy_status_prefix", "sam3ext/extra_samplers/substep_guard.py", "_STATUS_PREFIX",
+               "dy sub-steps skipped", "'Extra Samplers status' 의 Dy 부분 머리(parse_status 가 '; ' 로 나눈 뒤 찾는다)",
+               app="DY_SKIPPED_PREFIX"),
+    *(_xsamp_pin(f"extra_samplers_reason_{short}", "sam3ext/extra_samplers/substep_guard.py", f"REASON_{name}", value,
+                 "Dy 보조 스텝을 끈 이유(Dy 부분 괄호 안, ' + ' 로 잇는다) — 결과 알림이 한국어로 바꾼다",
+                 app=f"DY_REASON_{name}")
+      for short, name, value in (("spectrum", "SPECTRUM", "Spectrum"), ("wan", "WAN", "Wan I2V concat_latent"),
+                                 ("pid", "PID", "PiD lq_latent"), ("extra_concat", "EXTRA_CONCAT", "extra_concat_condition"))),
     *(_xsamp_pin(f"extra_samplers_{name.lower()}", "sam3ext/extra_samplers/restart_flow.py", name, value,
                  "Restart (flow) 계획 상수(arXiv 2306.14878 + A1111 규칙) — 앱은 NFE 안내, 팩은 같은 상수로 다시 구현(거울 C0)")
       for name, value in (("RESTART_S_MIN", 0.1), ("RESTART_S_MAX", 2.0), ("RESTART_MIN_STEPS", 20), ("RESTART_TIMES", 1),

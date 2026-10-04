@@ -868,6 +868,59 @@ class SamExtra031FeatureTests(unittest.TestCase):
         self.assertTrue(caps.colorcraft and caps.extra_schedulers and caps.extra_samplers)
 
 
+class ExtraSamplersArgCountTests(unittest.TestCase):
+    """Extra Samplers(계획 A-XSa2·X10): 앱은 늘 위치 인자 다섯(core/extra_samplers.ARG_SPEC)을 보낸다. 0.31·0.32 는 인자 2개라
+    Forge 가 뒤 셋(잡음 구간)을 버린다 — 'args_fewer' 가 무시될 기능을 '잡음 구간' 으로 말하고, 카드·결과 알림은 live_argc 로
+    판단한다(core/extra_samplers.window_supported)."""
+
+    def test_spec_is_the_five_argument_block(self):
+        from core import extra_samplers
+        self.assertEqual(caps_mod.POSITIONAL_SPECS[caps_mod.TITLE_EXTRA_SAMPLERS],
+                         tuple(key for key, *_ in extra_samplers.ARG_SPEC))
+        self.assertEqual(len(caps_mod.POSITIONAL_SPECS[caps_mod.TITLE_EXTRA_SAMPLERS]), len(extra_samplers.ARG_NAMES))
+
+    def test_live_fixture_has_five_arguments_and_no_warning(self):
+        from core import extra_samplers
+        caps, _ = build(live_bodies())
+        detail = caps.script(extra_samplers.SCRIPT_NAME)
+        self.assertEqual((detail["live_argc"], detail["spec_argc"]), (5, 5))
+        self.assertEqual((tuple(detail["trailing_unmapped"]), detail["extra_live_args"]), ((), 0))
+        self.assertNotIn("extra_samplers", [w["feature"] for w in caps.warnings])
+        self.assertIs(extra_samplers.window_supported(caps), True)
+
+    def test_two_argument_build_drops_the_noise_window(self):
+        from core import extra_samplers
+        bodies = live_bodies()
+        for img2img in (False, True):
+            entry = _script(bodies, caps_mod.TITLE_EXTRA_SAMPLERS, img2img=img2img)
+            entry["args"] = entry["args"][:2]
+        caps, _ = build(bodies)
+        detail = caps.script(extra_samplers.SCRIPT_NAME)
+        self.assertEqual((detail["live_argc"], detail["spec_argc"]), (2, 5))
+        self.assertEqual(list(detail["trailing_unmapped"]),
+                         ["xsamp_noise_window", "xsamp_noise_start", "xsamp_noise_end"])
+        [fewer] = [w for w in caps.warnings if w["code"] == "args_fewer"]
+        self.assertEqual(fewer["feature"], "extra_samplers")
+        self.assertIn(caps_mod._FEATURE_LABELS["extra_samplers"], fewer["message"])
+        self.assertIn("확장 인자가 2개로 앱(5개)보다 적습니다", fewer["message"])
+        self.assertTrue(fewer["message"].endswith("무시될 기능: 잡음 구간"), fewer["message"])
+        self.assertTrue(caps.extra_samplers and caps.may_use("extra_samplers"))     # 스크립트는 있다 — 값 둘은 간다
+        self.assertIs(extra_samplers.window_supported(caps), False)
+        on = extra_samplers.ExtraSamplersSettings(noise_window=True)
+        self.assertTrue(extra_samplers.window_unsupported(on, caps))
+        self.assertFalse(extra_samplers.window_unsupported(extra_samplers.APP_DEFAULTS, caps))
+
+    def test_newer_build_with_more_arguments_is_args_more(self):
+        bodies = live_bodies()
+        for img2img in (False, True):
+            entry = _script(bodies, caps_mod.TITLE_EXTRA_SAMPLERS, img2img=img2img)
+            entry["args"] = entry["args"] + [dict(entry["args"][-1], label="Future")]
+        caps, _ = build(bodies)
+        self.assertEqual(caps.script(caps_mod.TITLE_EXTRA_SAMPLERS)["extra_live_args"], 1)
+        [more] = [w for w in caps.warnings if w["code"] == "args_more"]
+        self.assertEqual(more["feature"], "extra_samplers")
+
+
 class FrontendMirrorTests(unittest.TestCase):
     """Vue 토스트의 '켜짐' 판단 표가 파이썬 활성화 키와 같아야 한다."""
 

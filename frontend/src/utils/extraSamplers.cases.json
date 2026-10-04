@@ -1,0 +1,1693 @@
+{
+  "//": "Extra Samplers 골든 사례 — core/extra_samplers.py 가 만든 기대값(scratchpad impl/xsa4/gen_cases.py). tests/test_extra_samplers_panel_mirror.py(파이썬)와 utils/extraSamplers.test.ts(TS)가 같은 파일을 읽는다: 샘플러 이름 풀이(resolve — 표기·ComfyUI 이름·별칭 → 표기와 종류), ER SDE 셋을 쓰는 패스 판정(passes — 위젯 값 그대로: 체크는 'true'/'false' 문자열), 칸 값 정규화와 요약(settings — 위젯 글자 → parse_settings ↔ parseValues, describe ↔ describe, window_empty ↔ windowEmpty), 옛 sam-extra 의 잡음 구간 판정(window — 스냅샷 → window_supported·window_unsupported). 두 구현이 갈라지면 둘 중 한쪽 테스트가 실패한다.",
+  "describe_samplers": {
+    "all": null,
+    "reverse_time": [
+      "ER SDE (Reverse-time)"
+    ],
+    "ode": [
+      "ER SDE (ODE)"
+    ],
+    "ode_and_tunable": [
+      "ER SDE (ODE)",
+      "er_sde_tunable"
+    ],
+    "other": [
+      "Euler a",
+      "DPM++ 4M SDE"
+    ]
+  },
+  "resolve": [
+    {
+      "text": "ER SDE (Reverse-time)",
+      "label": "ER SDE (Reverse-time)",
+      "kind": "er_sde"
+    },
+    {
+      "text": "er_sde_reverse_time",
+      "label": "ER SDE (Reverse-time)",
+      "kind": "er_sde"
+    },
+    {
+      "text": "  er sde (REVERSE-TIME) ",
+      "label": "ER SDE (Reverse-time)",
+      "kind": "er_sde"
+    },
+    {
+      "text": "ER SDE (ODE)",
+      "label": "ER SDE (ODE)",
+      "kind": "er_sde"
+    },
+    {
+      "text": "er_sde_ode",
+      "label": "ER SDE (ODE)",
+      "kind": "er_sde"
+    },
+    {
+      "text": "ER SDE (Tunable)",
+      "label": "ER SDE (Tunable)",
+      "kind": "er_sde"
+    },
+    {
+      "text": "er_sde_tunable",
+      "label": "ER SDE (Tunable)",
+      "kind": "er_sde"
+    },
+    {
+      "text": "DPM++ 4M SDE",
+      "label": "DPM++ 4M SDE",
+      "kind": ""
+    },
+    {
+      "text": "dpmpp_4m_sde",
+      "label": "DPM++ 4M SDE",
+      "kind": ""
+    },
+    {
+      "text": "Euler Dy CFG++",
+      "label": "Euler Dy CFG++",
+      "kind": "dy"
+    },
+    {
+      "text": "euler_dy_cfg_pp",
+      "label": "Euler Dy CFG++",
+      "kind": "dy"
+    },
+    {
+      "text": "Euler SMEA Dy CFG++",
+      "label": "Euler SMEA Dy CFG++",
+      "kind": "smea"
+    },
+    {
+      "text": "euler_smea_dy_cfg_pp",
+      "label": "Euler SMEA Dy CFG++",
+      "kind": "smea"
+    },
+    {
+      "text": "Euler Dy",
+      "label": "Euler Dy",
+      "kind": "dy"
+    },
+    {
+      "text": "euler_dy",
+      "label": "Euler Dy",
+      "kind": "dy"
+    },
+    {
+      "text": "k_euler_dy",
+      "label": "Euler Dy",
+      "kind": "dy"
+    },
+    {
+      "text": "Euler SMEA Dy",
+      "label": "Euler SMEA Dy",
+      "kind": "smea"
+    },
+    {
+      "text": "euler_smea_dy",
+      "label": "Euler SMEA Dy",
+      "kind": "smea"
+    },
+    {
+      "text": "K_EULER_SMEA_DY",
+      "label": "Euler SMEA Dy",
+      "kind": "smea"
+    },
+    {
+      "text": "DPM++ 2M SDE Heun",
+      "label": "DPM++ 2M SDE Heun",
+      "kind": ""
+    },
+    {
+      "text": "dpmpp_2m_sde_heun",
+      "label": "DPM++ 2M SDE Heun",
+      "kind": ""
+    },
+    {
+      "text": "k_dpmpp_2m_sde_heun",
+      "label": "DPM++ 2M SDE Heun",
+      "kind": ""
+    },
+    {
+      "text": "DPM++ 2M (flow ODE)",
+      "label": "DPM++ 2M (flow ODE)",
+      "kind": ""
+    },
+    {
+      "text": "dpmpp_2m_flow_ode",
+      "label": "DPM++ 2M (flow ODE)",
+      "kind": ""
+    },
+    {
+      "text": "DPM++ 2M Heun (flow ODE)",
+      "label": "DPM++ 2M Heun (flow ODE)",
+      "kind": ""
+    },
+    {
+      "text": "dpmpp_2m_heun_flow_ode",
+      "label": "DPM++ 2M Heun (flow ODE)",
+      "kind": ""
+    },
+    {
+      "text": "DPM++ 3M (flow ODE)",
+      "label": "DPM++ 3M (flow ODE)",
+      "kind": ""
+    },
+    {
+      "text": "dpmpp_3m_flow_ode",
+      "label": "DPM++ 3M (flow ODE)",
+      "kind": ""
+    },
+    {
+      "text": "UniPC bh2",
+      "label": "UniPC bh2",
+      "kind": ""
+    },
+    {
+      "text": "uni_pc_bh2",
+      "label": "UniPC bh2",
+      "kind": ""
+    },
+    {
+      "text": "CFG++ UD10 AB",
+      "label": "CFG++ UD10 AB",
+      "kind": "cfg_pp"
+    },
+    {
+      "text": "cfgpp_ud10_ab",
+      "label": "CFG++ UD10 AB",
+      "kind": "cfg_pp"
+    },
+    {
+      "text": "IPNDM",
+      "label": "IPNDM",
+      "kind": ""
+    },
+    {
+      "text": "ipndm",
+      "label": "IPNDM",
+      "kind": ""
+    },
+    {
+      "text": "IPNDM_V",
+      "label": "IPNDM_V",
+      "kind": ""
+    },
+    {
+      "text": "ipndm_v",
+      "label": "IPNDM_V",
+      "kind": ""
+    },
+    {
+      "text": "DEIS",
+      "label": "DEIS",
+      "kind": ""
+    },
+    {
+      "text": "deis",
+      "label": "DEIS",
+      "kind": ""
+    },
+    {
+      "text": "Restart (flow)",
+      "label": "Restart (flow)",
+      "kind": "restart"
+    },
+    {
+      "text": "restart_flow",
+      "label": "Restart (flow)",
+      "kind": "restart"
+    },
+    {
+      "text": "ER SDE",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "er_sde",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "Euler",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "Euler a",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "DPM++ 2M",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "Restart",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "UniPC",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "Use same sampler",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "",
+      "label": null,
+      "kind": null
+    },
+    {
+      "text": "  ",
+      "label": null,
+      "kind": null
+    }
+  ],
+  "passes": [
+    {
+      "name": "main only",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ]
+      ]
+    },
+    {
+      "name": "main comfy name",
+      "widgets": {
+        "sampler_combo": "er_sde_tunable"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Tunable)"
+        ]
+      ]
+    },
+    {
+      "name": "main other sampler",
+      "widgets": {
+        "sampler_combo": "Euler a"
+      },
+      "passes": []
+    },
+    {
+      "name": "nothing set",
+      "widgets": {},
+      "passes": []
+    },
+    {
+      "name": "hires off ignores hires sampler",
+      "widgets": {
+        "sampler_combo": "Euler",
+        "hires_options_group": "false",
+        "hires_sampler_combo": "ER SDE (ODE)"
+      },
+      "passes": []
+    },
+    {
+      "name": "hires use same follows main",
+      "widgets": {
+        "sampler_combo": "ER SDE (Tunable)",
+        "hires_options_group": "true",
+        "hires_sampler_combo": "Use same sampler"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Tunable)"
+        ],
+        [
+          "hires",
+          "ER SDE (Tunable)"
+        ]
+      ]
+    },
+    {
+      "name": "hires empty follows main",
+      "widgets": {
+        "sampler_combo": "ER SDE (ODE)",
+        "hires_options_group": "true",
+        "hires_sampler_combo": ""
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (ODE)"
+        ],
+        [
+          "hires",
+          "ER SDE (ODE)"
+        ]
+      ]
+    },
+    {
+      "name": "hires own sampler",
+      "widgets": {
+        "sampler_combo": "Euler",
+        "hires_options_group": "true",
+        "hires_sampler_combo": "ER SDE (ODE)"
+      },
+      "passes": [
+        [
+          "hires",
+          "ER SDE (ODE)"
+        ]
+      ]
+    },
+    {
+      "name": "hires boolean check",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)",
+        "hires_options_group": true,
+        "hires_sampler_combo": "Euler"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ]
+      ]
+    },
+    {
+      "name": "adetailer slot follows main",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)",
+        "adetailer_group": "true",
+        "ad_slot1_group": "true",
+        "_ad_s1_use_sampler": "false",
+        "_ad_s1_sampler": "Euler"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ],
+        [
+          "adetailer_1",
+          "ER SDE (Reverse-time)"
+        ]
+      ]
+    },
+    {
+      "name": "adetailer slot own sampler",
+      "widgets": {
+        "sampler_combo": "Euler",
+        "adetailer_group": "true",
+        "ad_slot1_group": "true",
+        "ad_slot2_group": "true",
+        "_ad_s1_use_sampler": "true",
+        "_ad_s1_sampler": "Euler a",
+        "_ad_s2_use_sampler": "true",
+        "_ad_s2_sampler": "ER SDE (Tunable)"
+      },
+      "passes": [
+        [
+          "adetailer_2",
+          "ER SDE (Tunable)"
+        ]
+      ]
+    },
+    {
+      "name": "adetailer slot own use same",
+      "widgets": {
+        "sampler_combo": "ER SDE (ODE)",
+        "adetailer_group": "true",
+        "ad_slot2_group": "true",
+        "_ad_s2_use_sampler": "true",
+        "_ad_s2_sampler": "Use same sampler"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (ODE)"
+        ],
+        [
+          "adetailer_2",
+          "ER SDE (ODE)"
+        ]
+      ]
+    },
+    {
+      "name": "adetailer off",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)",
+        "adetailer_group": "false",
+        "ad_slot1_group": "true"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ]
+      ]
+    },
+    {
+      "name": "adetailer slot off",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)",
+        "adetailer_group": "true",
+        "ad_slot1_group": "false",
+        "ad_slot2_group": "false"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ]
+      ]
+    },
+    {
+      "name": "sam3 follows main",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)",
+        "sam3_group": "true",
+        "_sam3_mode": "Inpaint"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ],
+        [
+          "sam3",
+          "ER SDE (Reverse-time)"
+        ]
+      ]
+    },
+    {
+      "name": "sam3 own sampler",
+      "widgets": {
+        "sampler_combo": "Euler",
+        "sam3_group": "true",
+        "_sam3_mode": "Inpaint",
+        "_sam3_use_sampler": "true",
+        "_sam3_sampler": "er_sde_ode"
+      },
+      "passes": [
+        [
+          "sam3",
+          "ER SDE (ODE)"
+        ]
+      ]
+    },
+    {
+      "name": "sam3 mask only",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)",
+        "sam3_group": "true",
+        "_sam3_mode": "Mask only"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ]
+      ]
+    },
+    {
+      "name": "sam3 own empty follows main",
+      "widgets": {
+        "sampler_combo": "ER SDE (Tunable)",
+        "sam3_group": "true",
+        "_sam3_mode": "",
+        "_sam3_use_sampler": "true",
+        "_sam3_sampler": ""
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Tunable)"
+        ],
+        [
+          "sam3",
+          "ER SDE (Tunable)"
+        ]
+      ]
+    },
+    {
+      "name": "every pass",
+      "widgets": {
+        "sampler_combo": "ER SDE (Reverse-time)",
+        "hires_options_group": "true",
+        "hires_sampler_combo": "ER SDE (ODE)",
+        "adetailer_group": "true",
+        "ad_slot1_group": "true",
+        "ad_slot2_group": "true",
+        "_ad_s1_use_sampler": "false",
+        "_ad_s2_use_sampler": "true",
+        "_ad_s2_sampler": "ER SDE (Tunable)",
+        "sam3_group": "true",
+        "_sam3_mode": "Inpaint",
+        "_sam3_use_sampler": "true",
+        "_sam3_sampler": "Euler Dy"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (Reverse-time)"
+        ],
+        [
+          "hires",
+          "ER SDE (ODE)"
+        ],
+        [
+          "adetailer_1",
+          "ER SDE (Reverse-time)"
+        ],
+        [
+          "adetailer_2",
+          "ER SDE (Tunable)"
+        ]
+      ]
+    },
+    {
+      "name": "dy and 4m read nothing",
+      "widgets": {
+        "sampler_combo": "Euler Dy CFG++",
+        "hires_options_group": "true",
+        "hires_sampler_combo": "DPM++ 4M SDE"
+      },
+      "passes": []
+    },
+    {
+      "name": "case and spaces",
+      "widgets": {
+        "sampler_combo": "  er sde  (ode) ",
+        "hires_options_group": "TRUE",
+        "hires_sampler_combo": "use same sampler"
+      },
+      "passes": [
+        [
+          "main",
+          "ER SDE (ODE)"
+        ],
+        [
+          "hires",
+          "ER SDE (ODE)"
+        ]
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "name": "app defaults",
+      "values": {},
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "store defaults",
+      "values": {
+        "max_stage": "3",
+        "eta": "1",
+        "noise_window": "0",
+        "noise_start": "0.2",
+        "noise_end": "0.8"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage 2 eta 0.5",
+      "values": {
+        "max_stage": "2",
+        "eta": "0.5"
+      },
+      "settings": {
+        "max_stage": 2,
+        "eta": 0.5,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 2 · η 0.5",
+        "reverse_time": "ER SDE 차수 2 · η 0.5",
+        "ode": "ER SDE 차수 2",
+        "ode_and_tunable": "ER SDE 차수 2 · η 0.5",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage rounds half to even 2.5",
+      "values": {
+        "max_stage": "2.5"
+      },
+      "settings": {
+        "max_stage": 2,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 2 · η 1",
+        "reverse_time": "ER SDE 차수 2 · η 1",
+        "ode": "ER SDE 차수 2",
+        "ode_and_tunable": "ER SDE 차수 2 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage rounds half to even 1.5",
+      "values": {
+        "max_stage": "1.5"
+      },
+      "settings": {
+        "max_stage": 2,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 2 · η 1",
+        "reverse_time": "ER SDE 차수 2 · η 1",
+        "ode": "ER SDE 차수 2",
+        "ode_and_tunable": "ER SDE 차수 2 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage rounds 2.6",
+      "values": {
+        "max_stage": "2.6"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage clamps low",
+      "values": {
+        "max_stage": "0"
+      },
+      "settings": {
+        "max_stage": 1,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 1 · η 1",
+        "reverse_time": "ER SDE 차수 1 · η 1",
+        "ode": "ER SDE 차수 1",
+        "ode_and_tunable": "ER SDE 차수 1 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage clamps high",
+      "values": {
+        "max_stage": "7"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage negative half",
+      "values": {
+        "max_stage": "-0.5"
+      },
+      "settings": {
+        "max_stage": 1,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 1 · η 1",
+        "reverse_time": "ER SDE 차수 1 · η 1",
+        "ode": "ER SDE 차수 1",
+        "ode_and_tunable": "ER SDE 차수 1 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage text",
+      "values": {
+        "max_stage": "abc"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage empty",
+      "values": {
+        "max_stage": ""
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage spaces",
+      "values": {
+        "max_stage": " 1 "
+      },
+      "settings": {
+        "max_stage": 1,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 1 · η 1",
+        "reverse_time": "ER SDE 차수 1 · η 1",
+        "ode": "ER SDE 차수 1",
+        "ode_and_tunable": "ER SDE 차수 1 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "stage exponent",
+      "values": {
+        "max_stage": "2e0"
+      },
+      "settings": {
+        "max_stage": 2,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 2 · η 1",
+        "reverse_time": "ER SDE 차수 2 · η 1",
+        "ode": "ER SDE 차수 2",
+        "ode_and_tunable": "ER SDE 차수 2 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta zero",
+      "values": {
+        "eta": "0"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 0.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 0",
+        "reverse_time": "ER SDE 차수 3 · η 0",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 0",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta clamps high",
+      "values": {
+        "eta": "12.5"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 10.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 10",
+        "reverse_time": "ER SDE 차수 3 · η 10",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 10",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta clamps low",
+      "values": {
+        "eta": "-1"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 0.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 0",
+        "reverse_time": "ER SDE 차수 3 · η 0",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 0",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta 1.0 spelling",
+      "values": {
+        "eta": "1.0"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta point five",
+      "values": {
+        "eta": ".5"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 0.5,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 0.5",
+        "reverse_time": "ER SDE 차수 3 · η 0.5",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 0.5",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta trailing dot",
+      "values": {
+        "eta": "2."
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 2.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 2",
+        "reverse_time": "ER SDE 차수 3 · η 2",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 2",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta inf text",
+      "values": {
+        "eta": "inf"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta nan text",
+      "values": {
+        "eta": "nan"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta float sum",
+      "values": {
+        "eta": "0.30000000000000004"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 0.30000000000000004,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 0.30000000000000004",
+        "reverse_time": "ER SDE 차수 3 · η 0.30000000000000004",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 0.30000000000000004",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta tiny",
+      "values": {
+        "eta": "0.00001"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1e-05,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1e-05",
+        "reverse_time": "ER SDE 차수 3 · η 1e-05",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1e-05",
+        "other": ""
+      }
+    },
+    {
+      "name": "eta small",
+      "values": {
+        "eta": "0.0001"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 0.0001,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 0.0001",
+        "reverse_time": "ER SDE 차수 3 · η 0.0001",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 0.0001",
+        "other": ""
+      }
+    },
+    {
+      "name": "window on",
+      "values": {
+        "noise_window": "1"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "other": ""
+      }
+    },
+    {
+      "name": "window true",
+      "values": {
+        "noise_window": "true"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "other": ""
+      }
+    },
+    {
+      "name": "window TRUE spaced",
+      "values": {
+        "noise_window": " TRUE "
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "other": ""
+      }
+    },
+    {
+      "name": "window on word",
+      "values": {
+        "noise_window": "on"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "other": ""
+      }
+    },
+    {
+      "name": "window yes",
+      "values": {
+        "noise_window": "yes"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "other": ""
+      }
+    },
+    {
+      "name": "window off 0",
+      "values": {
+        "noise_window": "0"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "window false",
+      "values": {
+        "noise_window": "false"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "window 1.0 is off",
+      "values": {
+        "noise_window": "1.0"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "window empty text",
+      "values": {
+        "noise_window": ""
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "window values",
+      "values": {
+        "noise_window": "1",
+        "noise_start": "0.1",
+        "noise_end": "0.9"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.1,
+        "noise_end": 0.9
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.1–0.9",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.1–0.9",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.1–0.9",
+        "other": ""
+      }
+    },
+    {
+      "name": "window empty start = end",
+      "values": {
+        "noise_window": "1",
+        "noise_start": "0.5",
+        "noise_end": "0.5"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.5,
+        "noise_end": 0.5
+      },
+      "window_empty": true,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.5–0.5 (빈 구간)",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.5–0.5 (빈 구간)",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.5–0.5 (빈 구간)",
+        "other": ""
+      }
+    },
+    {
+      "name": "window empty start > end",
+      "values": {
+        "noise_window": "1",
+        "noise_start": "0.8",
+        "noise_end": "0.2"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.8,
+        "noise_end": 0.2
+      },
+      "window_empty": true,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.8–0.2 (빈 구간)",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.8–0.2 (빈 구간)",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.8–0.2 (빈 구간)",
+        "other": ""
+      }
+    },
+    {
+      "name": "window off start > end",
+      "values": {
+        "noise_window": "0",
+        "noise_start": "0.8",
+        "noise_end": "0.2"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": false,
+        "noise_start": 0.8,
+        "noise_end": 0.2
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1",
+        "reverse_time": "ER SDE 차수 3 · η 1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1",
+        "other": ""
+      }
+    },
+    {
+      "name": "window full",
+      "values": {
+        "noise_window": "1",
+        "noise_start": "0",
+        "noise_end": "1"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.0,
+        "noise_end": 1.0
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0–1",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0–1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0–1",
+        "other": ""
+      }
+    },
+    {
+      "name": "window clamps",
+      "values": {
+        "noise_window": "1",
+        "noise_start": "-0.5",
+        "noise_end": "1.5"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.0,
+        "noise_end": 1.0
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0–1",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0–1",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0–1",
+        "other": ""
+      }
+    },
+    {
+      "name": "window unreadable bounds",
+      "values": {
+        "noise_window": "1",
+        "noise_start": "x",
+        "noise_end": ""
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 0.2,
+        "noise_end": 0.8
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 0.2–0.8",
+        "other": ""
+      }
+    },
+    {
+      "name": "window tiny start",
+      "values": {
+        "noise_window": "1",
+        "noise_start": "0.00005",
+        "noise_end": "0.75"
+      },
+      "settings": {
+        "max_stage": 3,
+        "eta": 1.0,
+        "noise_window": true,
+        "noise_start": 5e-05,
+        "noise_end": 0.75
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 3 · η 1 · 잡음 5e-05–0.75",
+        "reverse_time": "ER SDE 차수 3 · η 1 · 잡음 5e-05–0.75",
+        "ode": "ER SDE 차수 3",
+        "ode_and_tunable": "ER SDE 차수 3 · η 1 · 잡음 5e-05–0.75",
+        "other": ""
+      }
+    },
+    {
+      "name": "all set",
+      "values": {
+        "max_stage": "1",
+        "eta": "3.25",
+        "noise_window": "true",
+        "noise_start": "0.25",
+        "noise_end": "0.6"
+      },
+      "settings": {
+        "max_stage": 1,
+        "eta": 3.25,
+        "noise_window": true,
+        "noise_start": 0.25,
+        "noise_end": 0.6
+      },
+      "window_empty": false,
+      "describe": {
+        "all": "ER SDE 차수 1 · η 3.25 · 잡음 0.25–0.6",
+        "reverse_time": "ER SDE 차수 1 · η 3.25 · 잡음 0.25–0.6",
+        "ode": "ER SDE 차수 1",
+        "ode_and_tunable": "ER SDE 차수 1 · η 3.25 · 잡음 0.25–0.6",
+        "other": ""
+      }
+    }
+  ],
+  "window": [
+    {
+      "name": "unknown snapshot",
+      "caps": {
+        "status": "unknown",
+        "known": false,
+        "scripts": {
+          "extra samplers": {
+            "present": true,
+            "img2img": true,
+            "live_argc": 2,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": null,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "comfyui",
+      "caps": {
+        "status": "not_applicable",
+        "known": false,
+        "scripts": {}
+      },
+      "supported": null,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "v0.33.0 five args",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {
+          "extra samplers": {
+            "present": true,
+            "img2img": true,
+            "live_argc": 5,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": true,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "newer seven args",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {
+          "extra samplers": {
+            "present": true,
+            "img2img": true,
+            "live_argc": 7,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": true,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "v0.32 two args",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {
+          "extra samplers": {
+            "present": true,
+            "img2img": true,
+            "live_argc": 2,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": false,
+      "unsupported_when_on": true,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "four args",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {
+          "extra samplers": {
+            "present": true,
+            "img2img": true,
+            "live_argc": 4,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": false,
+      "unsupported_when_on": true,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "script absent",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {
+          "extra samplers": {
+            "present": false,
+            "img2img": false,
+            "live_argc": null,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": null,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "script missing from map",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {}
+      },
+      "supported": null,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "not present but counted",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {
+          "extra samplers": {
+            "present": false,
+            "img2img": false,
+            "live_argc": 2,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": null,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    },
+    {
+      "name": "argc unknown",
+      "caps": {
+        "status": "ok",
+        "known": true,
+        "scripts": {
+          "extra samplers": {
+            "present": true,
+            "img2img": true,
+            "live_argc": null,
+            "spec_argc": 5,
+            "trailing_unmapped": [],
+            "extra_live_args": 0
+          }
+        }
+      },
+      "supported": null,
+      "unsupported_when_on": false,
+      "unsupported_when_off": false
+    }
+  ]
+}

@@ -33,6 +33,12 @@ def _extra_schedulers_settings(host) -> dict:
     return get_settings(host)
 
 
+def _extra_samplers_settings(host) -> dict:
+    """Extra Samplers ER SDE 값 칸(ui/extra_samplers_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
+    from ui.extra_samplers_ui import get_settings
+    return get_settings(host)
+
+
 def _speed_settings(host) -> dict:
     """Anima SPEED 카드 값(ui/anima_speed_ui.get_settings) — 위젯이 없는 호스트는 빈 dict."""
     from ui.anima_speed_ui import get_settings
@@ -201,6 +207,8 @@ class SettingsMixin:
             "vae_degrid_settings": _degrid_settings(self),
             # Extra Schedulers 값 칸(core/extra_schedulers.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
             "extra_schedulers_settings": _extra_schedulers_settings(self),
+            # Extra Samplers ER SDE 값 칸(core/extra_samplers.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
+            "extra_samplers_settings": _extra_samplers_settings(self),
             # Anima SPEED 카드(core/anima_speed.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict
             "anima_speed_settings": _speed_settings(self),
             # Colorcraft 카드(core/colorcraft.SETTINGS_KEY) — 위젯이 없는 호스트는 빈 dict

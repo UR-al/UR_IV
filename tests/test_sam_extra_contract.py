@@ -952,18 +952,49 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
 
 
 class ExtraSamplersV033RegistryTests(unittest.TestCase):
-    """sam-extra v0.33.0 Extra Samplers(계획 S3 — 앱 노출 A-XSa2..5 전) — 확장 없이 도는 레지스트리 검사: 행은 HOLD 그대로 인자
-    5개, 앱 core/extra_samplers(A-XSa1)가 하드코딩한 확장 값마다 핀(PLAN_amend_v033 §4)."""
+    """sam-extra v0.33.0 Extra Samplers 앱 노출(계획 A-XSa2, 보류 → mapped) — 확장 없이 도는 레지스트리 검사: 행은 인자 5개의
+    위치 spec(app_spec — 픽스처·ui() 와 비교), ComfyUI 는 팩 1.7.0 단계 전의 틈, 앱 core/extra_samplers 가 하드코딩한 확장
+    값마다 핀(PLAN_amend_v033 §4 + 결과 알림이 읽는 Dy 상태 줄)."""
 
-    def test_row_is_held_with_five_arguments(self):
+    def test_mapped_with_the_comfy_pending_gap(self):
         from core import extra_samplers as xsamp
         entry = reg.SCRIPTS[xsamp.SCRIPT_NAME]
-        self.assertEqual((entry["status"], entry["package"]), (reg.DEFERRED, reg.HOLD))
+        self.assertEqual(entry["status"], reg.MAPPED)
         self.assertEqual((entry["form"], entry["live_argc"], entry["shape"]), ("positional", 5, "3ee8b4de008d"))
-        self.assertEqual(tuple(entry["ui_return"]), xsamp.ARG_NAMES)
+        self.assertEqual(entry["app_title"], "core.extra_samplers:SCRIPT_NAME")
+        self.assertEqual(entry["app_spec"], ("core.extra_samplers:ARG_SPEC", xsamp.SPEC_PREFIX))
+        self.assertEqual(entry["ui_return"], "app_spec")
+        self.assertEqual(tuple(key[len(xsamp.SPEC_PREFIX):] for key, *_ in xsamp.ARG_SPEC), xsamp.ARG_NAMES)
+        self.assertEqual(entry["api_reads"], "", "params.settings_from_args 는 스크립트 클래스 밖 — 인덱스를 AST 로 못 읽는다")
+        for ref in ("core/extra_samplers.py:plan", "core/extra_samplers.py:as_block", "core/extra_samplers.py:from_infotext",
+                    "core/extra_samplers.py:parse_status", "core/alwayson_propagation.py:TITLE_EXTRA_SAMPLERS",
+                    "core/sam_extra_capabilities.py:POSITIONAL_SPECS",
+                    "core/sam_extra_notices.py:CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED",
+                    "core/sam_extra_notices.py:CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED",
+                    "core/sam_extra_notices.py:CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED",
+                    "core/image_metadata.py:_EXTENSION_MARKERS",
+                    # A-XSa3 — 기여자·저장·붙여 넣기
+                    "ui/extra_samplers_ui.py:contribute", "ui/extra_samplers_ui.py:apply_saved_settings",
+                    "ui/extra_samplers_ui.py:apply_infotext", "ui/sampling_blocks.py:CONTRIBUTORS",
+                    # A-XSa5 — 파라미터 카드의 ER SDE 칸(TS 거울)
+                    "frontend/src/components/params/ExtraSamplersPanel.vue",
+                    "frontend/src/utils/extraSamplers.ts:passesUsing",
+                    "frontend/src/utils/extraSamplers.ts:windowUnsupported"):
+            self.assertIn(ref, entry["app"])
+        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
+        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
+        self.assertIn("comfy_pending", entry["gaps"][0])
+        self.assertTrue(any(gap.startswith("P18") for gap in entry["gaps"]))
+        rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
+                for key, row in table.items() if "extra_samplers" in key.lower() or "extra samplers" in key.lower()}
+        self.assertEqual(sorted(rows), ["MODULES[sam3ext/extra_samplers/]", "MODULES[scripts/anima_extra_samplers.py]",
+                                        "SCRIPTS[Extra Samplers]", "XYZ_AXES[[Extra Samplers]]"])
+        self.assertEqual(sorted(k for k, row in rows.items() if row.get("package") == reg.HOLD), [])
+        self.assertEqual(sorted(k for k, row in rows.items() if row["status"] == reg.MAPPED), [
+            "MODULES[sam3ext/extra_samplers/]", "MODULES[scripts/anima_extra_samplers.py]", "SCRIPTS[Extra Samplers]"])
         xyz = reg.XYZ_AXES[xsamp.XYZ_PREFIX]
         self.assertEqual(xyz["labels"], tuple(sorted(axis[len(xsamp.XYZ_PREFIX) + 1:] for axis in xsamp.XYZ_AXES)))
-        self.assertEqual(xyz["package"], reg.HOLD)
+        self.assertEqual((xyz["status"], xyz["package"]), (reg.DEFERRED, "P18"))
 
     def test_pins_mirror_every_shared_app_constant(self):
         from core import extra_samplers as xsamp
@@ -978,8 +1009,14 @@ class ExtraSamplersV033RegistryTests(unittest.TestCase):
                  "KEY_ETA", "KEY_NOISE_WINDOW", "NOISE_WINDOW_OFF", "WINDOW_SKIPPED_STATUS", "STATUS_KEY", "RESTART_S_MIN",
                  "RESTART_S_MAX", "RESTART_MIN_STEPS", "RESTART_TIMES", "RESTART_TIMES_LONG", "RESTART_LONG_FROM",
                  "UD10_HISTORY_WEIGHT", "UD10_ZERO_WEIGHT", "UD10_UNCOND_HISTORY_WEIGHT", "IPNDM_MAX_ORDER", "DEIS_MAX_ORDER",
-                 "DEIS_MODE")
+                 "DEIS_MODE",
+                 # A-XSa2 — 결과 알림(CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED)이 읽는 Dy 상태 줄 머리·이유
+                 "DY_SKIPPED_PREFIX", "DY_REASON_SPECTRUM", "DY_REASON_WAN", "DY_REASON_PID", "DY_REASON_EXTRA_CONCAT")
         self.assertEqual(sorted({f"core.extra_samplers:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
+        self.assertEqual(tuple(pins[f"extra_samplers_reason_{short}"]["app"] for short in
+                               ("spectrum", "wan", "pid", "extra_concat")),
+                         tuple(f"core.extra_samplers:DY_REASON_{name}" for name in ("SPECTRUM", "WAN", "PID", "EXTRA_CONCAT")))
+        self.assertEqual(len(xsamp.DY_REASONS), 4)
         self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
                          {"scripts/anima_extra_samplers.py", "sam3ext/extra_samplers/params.py",
                           "sam3ext/extra_samplers/registry.py", "sam3ext/extra_samplers/substep_guard.py",

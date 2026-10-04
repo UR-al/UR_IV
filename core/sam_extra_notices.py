@@ -28,6 +28,9 @@
                                             'Custom scheduler …'·'Flow Cosmos rho')이 없음(다른 확장의 같은 이름 스케줄러). ``xsched_invalid_text_notice`` 는 쓸 수 없는
                                             custom 식·목록(생성 전 — 계산기는 계획 C7 이 잇는다), ``explain_scheduler_error``
                                             는 확장 스케줄러 오류('Extra Schedulers: …') 원문에 한국어 머리를 붙인다
+- Extra Samplers                            결과: 'Extra Samplers status'(부분을 '; ' 로 잇는다)의 Dy 보조 스텝 건너뜀·ER SDE
+                                            잡음 구간 건너뜀(정보, 'n/m장'), 잡음 구간을 켰는데 연결된 sam-extra 가 인자 2개
+                                            (0.31·0.32 — Forge 가 뒤 셋을 버린다, 계획 X10)라 구간 없이 돈 생성(경고)
 - Anima SPEED                               결과: 'Anima SPEED status' 의 패스마다 — 설정 오류·실패 뒤 순정 재샘플링(경고),
                                             건너뜀(정보, 이유 한 번), 보냈는데 'Anima SPEED' 기록 없음(옛 sam-extra·스크립트
                                             오류). ``speed_static_skip_notice`` 는 생성 전에 앱이 아는 건너뜀(정보)
@@ -65,8 +68,8 @@ from pathlib import PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 from urllib.parse import urlsplit
 
-from core import (anima38, anima_guidance, anima_model_kind, anima_speed, colorcraft, dora_infer_mode, extra_schedulers,
-                  sam3_args, vae_degrid)
+from core import (anima38, anima_guidance, anima_model_kind, anima_speed, colorcraft, dora_infer_mode, extra_samplers,
+                  extra_schedulers, sam3_args, vae_degrid)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,13 @@ KEY_SPARSE_LORA_GUESS = "Anima sparse LoRA"
 # VAE DeGrid(sam3ext/ui_vae_degrid.py) — 성공이면 model·mode·strength·tile(+precision), 실패면 error 하나만(장마다)
 KEY_DEGRID_MODEL = vae_degrid.KEY_MODEL
 KEY_DEGRID_ERROR = vae_degrid.KEY_ERROR
+# Extra Samplers(sam3ext/extra_samplers/params.py·substep_guard.py — 앱 상수는 core/extra_samplers 하나, 핀 extra_samplers_*):
+# 'ER SDE max stage'(≠ 3)·'ER SDE eta'·'ER SDE noise window'(구간을 켜고 Reverse-time·Tunable 이 η > 0 으로 돈 때) — 값 기록,
+# 'Extra Samplers status' — Dy 보조 스텝·잡음 구간 건너뜀(부분을 '; ' 로 잇는다)
+KEY_ER_SDE_MAX_STAGE = extra_samplers.KEY_MAX_STAGE
+KEY_ER_SDE_ETA = extra_samplers.KEY_ETA
+KEY_ER_SDE_NOISE_WINDOW = extra_samplers.KEY_NOISE_WINDOW
+KEY_EXTRA_SAMPLERS_STATUS = extra_samplers.STATUS_KEY
 
 # generation info 에 알림을 싣는 키 (list[dict]) — 백엔드가 넣고 UI 가 읽는다. '_' 로 시작해 메타데이터로 새지 않는다.
 INFO_KEY = "_sam_extra_notices"
@@ -128,6 +138,10 @@ CODE_DEGRID_COMFY_UNAVAILABLE = "degrid_comfy_unavailable"   # ComfyUI: 노드(�
 # Extra Schedulers(core/extra_schedulers)
 CODE_XSCHED_NOT_APPLIED = "xsched_not_applied"        # 결과: 값 스케줄러로 돌았는데 값 기록이 없음(다른 확장의 스케줄러)
 CODE_XSCHED_INVALID_TEXT = "xsched_invalid_text"      # 생성 전: custom 식·시그마 목록을 쓸 수 없다(보내기는 한다 — 경고)
+# Extra Samplers(core/extra_samplers) — 결과 'Extra Samplers status'·기능 스냅샷의 인자 수
+CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED = "extra_samplers_substeps_skipped"   # 결과: Dy 보조 스텝 없이 Euler 스텝으로(정보)
+CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED = "extra_samplers_window_skipped"       # 결과: 예측기에 percent_to_sigma 가 없어 구간 없이(정보)
+CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED = "extra_samplers_window_unsupported"   # 결과: 인자 2개 sam-extra 가 구간 칸을 버림(경고, X10)
 # Anima SPEED(core/anima_speed) — 결과 'Anima SPEED status' 의 패스마다
 CODE_SPEED_INVALID = "speed_invalid"                  # 결과: 'invalid settings - …' — 그 패스는 SPEED 없이(경고)
 CODE_SPEED_FALLBACK = "speed_fallback"                # 결과: 'fell back to plain sampling after …' — 실패 뒤 순정 재샘플링(경고)
@@ -197,6 +211,10 @@ NOTICE_MIN_TTL_S = {
     # Extra Schedulers 도 설정·설치가 그대로면 요청마다 같다
     CODE_XSCHED_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_XSCHED_INVALID_TEXT: PRE_GENERATION_NOTICE_TTL_S,
+    # Extra Samplers 도 설정·설치·모델이 그대로면 요청마다 같다
+    CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED: PRE_GENERATION_NOTICE_TTL_S,
     # Anima SPEED 도 설정·모델이 그대로면 요청마다 같다(배치 100장이 30초마다 다시 띄우지 않게)
     CODE_SPEED_INVALID: PRE_GENERATION_NOTICE_TTL_S,
     CODE_SPEED_FALLBACK: PRE_GENERATION_NOTICE_TTL_S,
@@ -217,6 +235,7 @@ REFRESH_CAPABILITIES_CODES = frozenset({CODE_PROPAGATION_RETRIED, CODE_APP_BLOCK
 _TITLE_DORA = dora_infer_mode.SCRIPT_NAME
 _TITLE_DEGRID = vae_degrid.SCRIPT_NAME
 _TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME
+_TITLE_EXTRA_SAMPLERS = extra_samplers.SCRIPT_NAME
 _TITLE_SPEED = anima_speed.SCRIPT_NAME
 _TITLE_COLORCRAFT = colorcraft.SCRIPT_NAME
 _TITLE_VAE2X = "Anima VAE 2x (spacepxl decoder)"
@@ -230,6 +249,7 @@ SAM_EXTRA_FEATURES = {
     _TITLE_VAE2X.lower(): ("vae2x", "VAE 2x"),
     _TITLE_DEGRID.lower(): ("degrid", "VAE DeGrid"),
     _TITLE_EXTRA_SCHEDULERS.lower(): ("extra_schedulers", "Extra Schedulers 값(custom 식·Laplace μ/β·Flow Cosmos ρ/σ̃)"),
+    _TITLE_EXTRA_SAMPLERS.lower(): ("extra_samplers", "Extra Samplers 값(ER SDE 차수·η·잡음 구간)"),
     _TITLE_SPEED.lower(): ("speed", _TITLE_SPEED),
     _TITLE_COLORCRAFT.lower(): ("colorcraft", "Colorcraft"),
 }
@@ -442,6 +462,7 @@ class RequestedFeatures:
     dora: Optional[dora_infer_mode.DoraSettings] = None   # 블록을 보냈을 때만(확장이 읽는 규칙 — parse_script_block)
     degrid: Optional[vae_degrid.DegridSettings] = None     # 블록을 보냈을 때만(확장 coerce_args 규칙)
     extra_schedulers: Optional[extra_schedulers.ExtraSchedulerSettings] = None   # 블록을 보냈을 때만(coerce_args 규칙)
+    extra_samplers: Optional[extra_samplers.ExtraSamplersSettings] = None   # 블록을 보냈을 때만(settings_from_args 규칙 — 보낸 다섯)
     speed: Optional[anima_speed.ScriptSettings] = None     # 블록을 보냈을 때만(확장 coerce_settings 규칙 — a/0 은 error)
     colorcraft: Optional[colorcraft.Config] = None         # 블록을 보냈고 첫 인자가 한 값 형식일 때만(확장 parse_own 규칙)
     cfg_scale: Optional[float] = None
@@ -554,6 +575,7 @@ def requested_features(payload: Any, *, live_pag_argc: Optional[int] = None) -> 
         dora=dora_infer_mode.parse_script_block(_script_block(payload, dora_infer_mode.SCRIPT_NAME)),
         degrid=vae_degrid.parse_script_block(_script_block(payload, vae_degrid.SCRIPT_NAME)),
         extra_schedulers=extra_schedulers.parse_script_block(_script_block(payload, extra_schedulers.SCRIPT_NAME)),
+        extra_samplers=extra_samplers.parse_script_block(_script_block(payload, extra_samplers.SCRIPT_NAME)),
         speed=anima_speed.parse_script_block(_script_block(payload, anima_speed.SCRIPT_NAME)),
         colorcraft=_colorcraft_block(payload),
         cfg_scale=_number(payload.get("cfg_scale")),
@@ -1021,6 +1043,82 @@ def explain_scheduler_error(text: Any) -> Optional[str]:
     return f"{XSCHED_ERROR_LEAD}: {_short(detail, 300)}" if detail else XSCHED_ERROR_LEAD
 
 
+# ── Extra Samplers ──────────────────────────────────────────────────────────────
+# Dy 보조 스텝을 끈 이유(substep_guard.REASON_* — 핀 extra_samplers_reason_*) → 한국어. 모르는 이유는 원문 그대로.
+_XSAMP_DY_REASON_TEXTS = {
+    extra_samplers.DY_REASON_SPECTRUM: "Forge Spectrum Integrated 가 켜져 있습니다(예측기가 출력 크기 하나만 기억합니다)",
+    extra_samplers.DY_REASON_WAN: "Wan 2.2 I2V 의 concat_latent 가 원래 크기로 붙어 있습니다",
+    extra_samplers.DY_REASON_PID: "PiD 저화질 latent 조건이 원래 크기로 붙어 있습니다",
+    extra_samplers.DY_REASON_EXTRA_CONCAT: "다른 확장이 unet.extra_concat_condition(원래 크기 조건)을 걸었습니다",
+}
+
+
+def _xsamp_ran(params: Mapping, labels: Sequence[str]) -> bool:
+    """그 장의 'Sampler'·'Hires sampler' 가 ``labels`` 중 하나인가(이 확장의 표기·ComfyUI 이름)."""
+    return any(extra_samplers.resolve_sampler(params.get(key)) in labels
+               for key in (extra_samplers.KEY_SAMPLER, extra_samplers.KEY_HIRES_SAMPLER))
+
+
+def _xsamp_result_notices(request: RequestedFeatures, images: Sequence[Mapping], capabilities: Any = None) -> list[Notice]:
+    """Extra Samplers 결과 알림.
+
+    - 'Extra Samplers status' 를 먼저 '; ' 로 나눠 읽는다(``core/extra_samplers.parse_status`` — v0.33.0 부터 Dy 부분과 잡음
+      구간 부분을 잇는다). Dy 보조 스텝 건너뜀(Spectrum·Wan·PiD·extra_concat — 그 생성은 보조 스텝 없는 Euler 스텝)과 잡음
+      구간 건너뜀(예측기에 percent_to_sigma 가 없다 — 구간 없이)은 정보 알림 한 번씩('n/m장'). 블록을 보냈는지와 무관하다
+      (Dy 는 샘플러 이름만으로 돈다).
+    - 보낸 블록의 잡음 구간이 켜져 있고 기능 스냅샷이 인자 2개(0.31·0.32 — Forge API 가 뒤 셋을 버린다, 계획 X10)를
+      확인했는데 어느 장이 Reverse-time·Tunable 로 돌았으면 구간이 빠졌다(경고). 스냅샷을 모르면 말하지 않는다.
+    읽을 결과가 없으면 말하지 않는다."""
+    if not images:
+        return []
+    xs = extra_samplers
+    total = len(images)
+
+    def scope(count: int, suffix: str) -> str:
+        return f"{count}/{total}장{suffix}" if total > 1 and count < total else ""
+
+    out: list[Notice] = []
+    dy_reasons: list = []
+    dy_images = window_images = 0
+    for params in images:
+        status = xs.parse_status(params.get(xs.STATUS_KEY))
+        if status.dy_reasons:
+            dy_images += 1
+            dy_reasons.extend(reason for reason in status.dy_reasons if reason not in dy_reasons)
+        if status.window_skipped:
+            window_images += 1
+    if dy_images:
+        why = "; ".join(_XSAMP_DY_REASON_TEXTS.get(reason, reason) for reason in dy_reasons)
+        out.append(Notice(
+            CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED, LEVEL_INFO,
+            f"Euler (SMEA) Dy 의 보조 스텝을 {scope(dy_images, '에서 ')}건너뛰고 보조 스텝 없는 Euler 스텝으로 "
+            f"생성했습니다 — {why}. (결과 정보 '{xs.STATUS_KEY}')",
+            feature="extra_samplers", detail=xs.DY_REASON_SEPARATOR.join(dy_reasons)))
+    if window_images:
+        out.append(Notice(
+            CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED, LEVEL_INFO,
+            f"ER SDE 잡음 구간을 {scope(window_images, '에서 ')}적용하지 못했습니다 — 모델 예측기에 percent_to_sigma 가 "
+            f"없습니다(구간 없이 모든 스텝에 잡음을 넣었습니다). (결과 정보 '{xs.STATUS_KEY}')",
+            feature="extra_samplers", detail=xs.WINDOW_SKIPPED_STATUS))
+    sent = request.extra_samplers
+    if sent is not None and xs.window_unsupported(sent, capabilities) \
+            and any(_xsamp_ran(params, xs.WINDOW_LABELS) for params in images):
+        argc = xs.live_argc(capabilities)
+        out.append(Notice(
+            CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, LEVEL_WARNING,
+            f"ER SDE {xs.WINDOW_UNSUPPORTED_TEXT} — 연결된 sam-extra 의 Extra Samplers 는 인자가 {argc}개라 Forge 가 "
+            f"잡음 구간 칸을 버리고 구간 없이 생성했습니다('{xs.KEY_NOISE_WINDOW}' 기록 없음). sam-extra 를 "
+            f"{xs.WINDOW_MIN_VERSION} 이상으로 업데이트하세요.",
+            feature="extra_samplers", detail=f"live_argc={argc}"))
+    return out
+
+
+def extra_samplers_result_notices(payload: Any, params_list: Iterable[Any], *, capabilities: Any = None) -> list[Notice]:
+    """보낸 페이로드 + 이미지마다 infotext 식 파라미터 → Extra Samplers 결과 알림(``result_notices`` 와 같은 규칙)."""
+    images = [dict(p) for p in (params_list or ()) if isinstance(p, Mapping)]
+    return _xsamp_result_notices(requested_features(payload), images, capabilities)
+
+
 # ── Anima SPEED ─────────────────────────────────────────────────────────────────
 # 확장이 SPEED 를 건너뛴 이유(영어 원문 — sam3ext/speed/forge_host.py runtime_guard·attach·UNSUPPORTED_SAMPLERS,
 # schedule.build_plan 의 PlanError(skip)) → (억제 키, 한국어 설명). 앞에서부터 처음 맞는 것. 없으면 원문(숫자는 '#').
@@ -1382,6 +1480,7 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
     out.extend(_dora_result_notices(request, images))
     out.extend(_degrid_result_notices(request, images))
     out.extend(_xsched_result_notices(request, images))
+    out.extend(_xsamp_result_notices(request, images, capabilities))
     out.extend(_speed_result_notices(request, images))
     out.extend(_colorcraft_result_notices(request, images))
 
@@ -1873,4 +1972,7 @@ __all__ = [
     "speed_result_notices", "speed_skip_hint", "speed_static_skip_notice",
     "CODE_COLORCRAFT_ERROR", "CODE_COLORCRAFT_MISSING", "CODE_COLORCRAFT_NO_BASIS", "CODE_COLORCRAFT_NOT_APPLIED",
     "colorcraft_result_notices", "colorcraft_status_parts",
+    "CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED", "CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED", "CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED",
+    "KEY_ER_SDE_ETA", "KEY_ER_SDE_MAX_STAGE", "KEY_ER_SDE_NOISE_WINDOW", "KEY_EXTRA_SAMPLERS_STATUS",
+    "extra_samplers_result_notices",
 ]

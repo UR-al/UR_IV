@@ -1,5 +1,5 @@
 # core/alwayson_propagation.py
-"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid·Extra Schedulers·Anima SPEED·Colorcraft)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
+"""샘플링 블록(NegPiP·가이던스·Anima38·DoRA·VAE DeGrid·Extra Schedulers·Extra Samplers·Anima SPEED·Colorcraft)의 제목별 전달 규칙 — 순수 로직(Qt·네트워크·torch 없음).
 
 메인 생성은 T2I 패널의 샘플링 블록을 ``alwayson_scripts`` 로 보낸다. 보조 패스(Refine·단독/배치 SAM3·단독 ADetailer·
 손 재구성)도 같은 블록을 받아야 Forge 생성 안의 SAM3 패스·🎯 퀵 버튼과 결과가 같다(P7). 이 모듈은
@@ -47,8 +47,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
 
-from core import (anima38, anima_guidance, anima_model_kind, anima_speed, colorcraft, dora_infer_mode, extra_schedulers,
-                  sam3_args, vae_degrid)
+from core import (anima38, anima_guidance, anima_model_kind, anima_speed, colorcraft, dora_infer_mode, extra_samplers,
+                  extra_schedulers, sam3_args, vae_degrid)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,7 @@ TITLE_NEGPIP = "NegPiP"
 TITLE_DORA = dora_infer_mode.SCRIPT_NAME   # 확장 scripts/dora_infer_mode.py DORA_INFER_NAME
 TITLE_DEGRID = vae_degrid.SCRIPT_NAME      # 확장 sam3ext/ui_vae_degrid.py TITLE (앱 노출)
 TITLE_EXTRA_SCHEDULERS = extra_schedulers.SCRIPT_NAME   # 확장 sam3ext/ui_extra_schedulers.py TITLE (앱 노출)
+TITLE_EXTRA_SAMPLERS = extra_samplers.SCRIPT_NAME       # 확장 scripts/anima_extra_samplers.py TITLE (앱 노출)
 TITLE_SPEED = anima_speed.SCRIPT_NAME      # 확장 scripts/anima_speed.py TITLE (앱 노출)
 TITLE_COLORCRAFT = colorcraft.SCRIPT_NAME  # 확장 scripts/colorcraft.py TITLE (앱 노출)
 
@@ -207,6 +208,16 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
                "쓰이므로 늘 보내도 결과가 같다. 스냅샷이 확인하면 값이 기본값이어도 앱이 스스로 싣는 블록이라(core/"
                "extra_schedulers.plan, 계획 X5) 모르는 Forge 의 422 는 빼고 한 번 더(main_retry). 앱 기본값 블록은 확인 "
                "전에는 보내지 않는다(Forge 도 블록 없이 같은 기본값으로 돈다)"),
+    TITLE_EXTRA_SAMPLERS: Rule(
+        passes=frozenset(AUX_PASSES), backends=_ALL_BACKENDS, feature="extra_samplers",
+        when_unknown=_unknown(user=SEND, app_default=SKIP), main_retry=True,
+        reason="요청 단위 값 — process() 가 요청에 ER SDE 값을 붙이고(블록 없는 요청은 ui() 기본값, scripts/"
+               "anima_extra_samplers.py) 그 요청의 모든 패스가 읽는다. 블록 없는 보조 img2img 는 기본값(차수 3·η 1·구간 끔)"
+               "으로 돌아 ER SDE 셋의 샘플링이 메인과 달라진다(ADetailer 안쪽 패스만 직전 요청 값 _ACTIVE). 값은 그 패스가 "
+               "ER SDE (Reverse-time)·(ODE)·(Tunable) 일 때만 쓰이므로 늘 보내도 결과가 같다. 스냅샷이 확인하면 값이 "
+               "기본값이어도 앱이 스스로 싣는 블록이라(core/extra_samplers.plan, 계획 X5 — Extra Schedulers 와 같은 규칙) "
+               "모르는 Forge 의 422 는 빼고 한 번 더(main_retry). 앱 기본값 블록은 확인 전에는 보내지 않는다(Forge 도 블록 "
+               "없이 같은 기본값으로 돈다)"),
     TITLE_SPEED: Rule(
         passes=frozenset(), backends=_ALL_BACKENDS, feature="speed",
         when_unknown=_unknown(user=SEND, app_default=SKIP),   # main_retry 기본 False — Rule 문서의 규칙(사용자가 켠 블록)
@@ -231,8 +242,6 @@ NEVER: Mapping[str, str] = MappingProxyType({
     "ADetailer": "이미지 패스 — 복사하면 부모 패스 뒤에 T2I 얼굴 보정이 한 번 더 돈다(_ad_disabled 는 SAM3 p2 에만)",
     "Anima VAE 2x (spacepxl decoder)": "HOLD(M9) — 앱이 만들지 않는다. 2x 디코더가 인페인트 패스 출력 크기를 바꿀 수 있다",
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
-    # 2026-10-03 sam-extra v0.31.0 의 네 기능 중 아직 HOLD 인 것(core/sam_extra_contract SCRIPTS)
-    "Extra Samplers": "HOLD — ER SDE 값 칸 — 앱이 만들지 않는다(샘플러 이름은 Forge 목록으로 고른다)",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
 })
@@ -521,7 +530,8 @@ __all__ = [
     "AUX_ADETAILER", "AUX_HAND", "AUX_PASSES", "AUX_REFINE", "AUX_SAM3", "BACKEND_COMFY", "BACKEND_KREA2",
     "BACKEND_WEBUI", "ENVELOPE_VERSION", "GateResult", "NEVER", "PROPAGATION", "PROVENANCES",
     "PROVENANCE_APP_DEFAULT", "PROVENANCE_KEY", "PROVENANCE_USER", "Rule", "SEND", "SETTINGS_KEY", "SKIP", "TARGETS",
-    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_COLORCRAFT", "TITLE_DEGRID", "TITLE_DORA", "TITLE_EXTRA_SCHEDULERS",
+    "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_COLORCRAFT", "TITLE_DEGRID", "TITLE_DORA", "TITLE_EXTRA_SAMPLERS",
+    "TITLE_EXTRA_SCHEDULERS",
     "TITLE_NEGPIP", "TITLE_SPEED", "apply", "aux_label",
     "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance",
     "final_image_titles", "gate",

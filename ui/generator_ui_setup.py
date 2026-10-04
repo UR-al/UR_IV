@@ -513,6 +513,11 @@ class UISetupMixin:
         from ui.extra_schedulers_ui import init_extra_schedulers_proxies
         self.extra_schedulers_widgets = init_extra_schedulers_proxies(b)
 
+        # ── Extra Samplers(sam-extra 'Extra Samplers') — _xsamp_<인자> 프록시 5개, 초기값은 앱 기본값(= 확장 기본값: ER SDE
+        #    차수 3·η 1·잡음 구간 끔('0')·시작 0.2·끝 0.8 — 뒤 셋은 v0.33.0). 판정·정규화는 core/extra_samplers.py.
+        from ui.extra_samplers_ui import init_extra_samplers_proxies
+        self.extra_samplers_widgets = init_extra_samplers_proxies(b)
+
         # ── Anima SPEED(sam-extra 'Anima SPEED') — _aspeed_<key> 프록시, 초기값은 앱 기본값(= 확장 기본값: 꺼짐·transition·
         #    neo_shift·anima·0.5,1.0 … + 앱 전용 'I2I에도 적용' 끔). 판정·정규화는 core/anima_speed.py.
         from ui.anima_speed_ui import init_speed_proxies

@@ -61,6 +61,8 @@
         <CustomSelect v-model="storeWidgets.scheduler_combo" :options="schedulerItems" placeholder="Scheduler..." />
       </div>
     </div>
+    <!-- sam-extra Extra Samplers ER SDE 값 — 어느 패스가 ER SDE 셋일 때만(계획 R8: Sampler/Scheduler 줄 바로 아래) -->
+    <ExtraSamplersPanel />
     <!-- sam-extra Extra Schedulers 값 — 어느 패스가 laplace·custom 일 때만(계획 R8: Extra Samplers 칸 다음 자리) -->
     <ExtraSchedulerFields />
     <div class="ext-row">
@@ -81,6 +83,7 @@
 import type { PropType } from 'vue'
 import CustomSelect from '../CustomSelect.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
+import ExtraSamplersPanel from './ExtraSamplersPanel.vue'
 import ExtraSchedulerFields from './ExtraSchedulerFields.vue'
 import { requestAction, useWidgetStore } from '../../stores/widgetStore.js'
 import { useParamItems } from '../../composables/useParamItems'

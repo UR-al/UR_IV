@@ -95,12 +95,15 @@ EXTENSION_FOLDERS = ("forge_sam3_extension", "sam-extra")
 # SAM3 는 dict 한 개로 보내므로 인자 수 대신 키 집합을 비교한다. DoRA 는 이름 붙은 dict 한 개로 보내므로(인자를 뒤에만
 # 덧붙이는 확장이라 인자 수와 무관) 여기 없고 라이브 선택지로 검사한다(dora_choices_unknown·core/dora_infer_mode).
 # VAE 2x 는 앱이 보내지 않는다. VAE DeGrid 도 dict 한 개로 보낸다(모델 목록은 degrid_models 선택지).
+# Extra Samplers 는 늘 위치 인자 다섯(core/extra_samplers.ARG_SPEC — 계획 X10): 0.31·0.32(인자 2개)는 뒤 셋(잡음 구간)을
+# 버린다 — 'args_fewer' 경고가 '무시될 기능: 잡음 구간' 으로 말하고, 카드·결과 알림은 live_argc 로 판단한다.
 POSITIONAL_SPECS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     TITLE_PAG: tuple(key for key, *_ in anima_guidance.PERTURBATION_SPEC),
     TITLE_SKIMMED: tuple(key for key, *_ in anima_guidance.SKIMMED_SPEC),
     TITLE_DETAIL_DAEMON: tuple(key for key, *_ in anima_guidance.DETAIL_DAEMON_SPEC),
     TITLE_OPTIMAL_SCALE: tuple(key for key, *_ in anima_guidance.OPTIMAL_SCALE_SPEC),
     TITLE_ANIMA38: tuple(anima38.ARG_NAMES),
+    TITLE_EXTRA_SAMPLERS: tuple(key for key, *_ in extra_samplers.ARG_SPEC),
 })
 
 # 고정 칸(anima_guidance.FIXED)은 사용자 설정이 아니라 늘 확장 기본값이다 — 그 칸이 없는 옛 빌드여도 앱 기능이
@@ -109,6 +112,8 @@ _FIXED_KEYS = frozenset(key for spec in anima_guidance.SPECS.values()
                         for key, kind, *_rest in spec if kind == anima_guidance.FIXED)
 # '무시될 기능' 묶음 이름 — 키 둘째 마디의 대문자가 읽기 어려운 것만(디테일 묶음: guid_mg_* → Momentum 등).
 _GROUP_LABELS = {"MG": "Momentum", "HIGS": "HiGS", "HIFLOW": "HiFlow"}
+# 접두가 guid_·skim_·dd_ 가 아닌 스펙 키의 묶음 이름(Extra Samplers v0.33.0 의 뒤 세 칸 — 계획 X10)
+_KEY_GROUPS = {f"{extra_samplers.SPEC_PREFIX}{name}": "잡음 구간" for name in ("noise_window", "noise_start", "noise_end")}
 # v0.21.2 계열 PAG 빌드의 인자 수. 이 빌드는 SMC 프리셋이 'Off' 가 아니면 SMC 를 켠다(나-5).
 PAG_OLD_BUILD_ARGC = 57
 # Detail Daemon Hires Pass 인자 위치(맨 뒤 append) — 앱 스펙의 dd_hires 자리.
@@ -351,6 +356,8 @@ def _feature_groups(keys: Iterable[str]) -> list[str]:
             label = "S²"   # SLG mode 는 S² 를 고르는 칸이다
         elif key == "guid_smc_mode" or key.startswith("guid_smc_adaptive_"):
             label = "Adaptive SMC"
+        elif key in _KEY_GROUPS:
+            label = _KEY_GROUPS[key]
         else:
             label = _GROUP_LABELS.get(label, label)
         if label not in groups:

@@ -351,6 +351,11 @@ def apply_generation_settings(host, settings: Mapping[str, Any], *, only_present
     from ui.extra_schedulers_ui import apply_saved_settings as _apply_extra_schedulers_settings
     _apply_extra_schedulers_settings(host, settings, only_present=only_present)
 
+    # Extra Samplers — 같은 규칙(키가 없으면 프리셋은 그대로, 옛 설정은 앱 기본값 = 확장 기본값이라 안내 없음. 저장값에
+    # 빠진 칸 — v0.33.0 전 계획의 두 칸 저장값의 잡음 구간 셋 — 도 앱 기본값)
+    from ui.extra_samplers_ui import apply_saved_settings as _apply_extra_samplers_settings
+    _apply_extra_samplers_settings(host, settings, only_present=only_present)
+
     # Anima SPEED — 같은 규칙(키가 없으면 프리셋은 그대로, 옛 설정은 앱 기본값 꺼짐 — 동작이 같아 안내 없음)
     from ui.anima_speed_ui import apply_saved_settings as _apply_speed_settings
     _apply_speed_settings(host, settings, only_present=only_present)
