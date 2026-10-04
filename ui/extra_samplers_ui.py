@@ -17,9 +17,10 @@
 - ``get_settings``/``set_settings``/``apply_saved_settings``  prompt_settings.json·생성 프리셋(``extra_samplers_settings``,
   키 = ARG_NAMES 다섯). 옛 설정 파일에 키가 없거나 저장값에 칸이 빠졌으면(v0.33.0 전 계획의 두 칸 — 차수·η) 그 칸은 앱
   기본값 — 확장 기본값과 같아 동작이 바뀌지 않으므로 안내하지 않는다.
-- ``apply_infotext(host, params)``  붙여 넣은 infotext(PNG Info·'이 설정으로 생성' — 계획 A-R1 이 연결)의 값을 칸에
-  되살린다(``core/extra_samplers.from_infotext`` — 확장 paste_* 다섯처럼 늘 다섯 칸을 정한다: 키가 없으면 기본값, ER SDE
-  (Reverse-time) 이미지의 Forge 'Eta' 는 η 로 읽는다).
+- ``apply_infotext(host, params)``  붙여 넣은 infotext 의 값을 칸에 되살린다(``core/extra_samplers.from_infotext`` — 확장
+  paste_* 다섯처럼 늘 다섯 칸을 정한다: 키가 없으면 기본값, ER SDE (Reverse-time) 이미지의 Forge 'Eta' 는 η 로 읽는다)
+- ``restore_from_metadata(host, params)``  '이 설정으로 생성'(ui/image_metadata_actions — 계획 A-R1·X3b): 이미지의 메인·
+  Hires 샘플러가 ER SDE 셋일 때만 그 샘플러가 읽는 칸을 함께 되살린다(``core/extra_samplers.restore_from_infotext``).
 
 모두 GUI 스레드에서 부른다(위젯을 읽는다).
 """
@@ -137,6 +138,29 @@ def apply_infotext(host, params: Any) -> Optional[xsa.ExtraSamplersSettings]:
     return restored
 
 
+def restore_from_metadata(host, params: Any) -> Optional[xsa.ExtraSamplersSettings]:
+    """'이 설정으로 생성'(계획 A-R1·X3b) — 이미지의 메인·Hires 샘플러가 ER SDE 셋일 때만 그 샘플러가 읽는 칸을
+    되살린다(``core/extra_samplers.restore_from_infotext`` — 차수는 셋 다, η·잡음 구간은 Reverse-time·Tunable, Forge 'Eta'
+    대체 포함). 값이 바뀐 칸만 쓰고 나머지 칸의 글자는 건드리지 않는다. 아무 패스도 ER SDE 가 아니거나 위젯이 없는
+    호스트면 None(칸 그대로)."""
+    current = current_settings(host)
+    if current is None:
+        return None
+    restored = xsa.restore_from_infotext(params, base=current)
+    if restored is None:
+        return None
+    if restored != current:
+        widgets = getattr(host, _WIDGETS_ATTR)
+        values = xsa.widget_values(restored)
+        for key in xsa.WIDGET_KEYS:
+            proxy = widgets.get(key)
+            if getattr(restored, key) != getattr(current, key) and proxy is not None and hasattr(proxy, "setText"):
+                proxy.setText(values[key])
+        logger.info("Extra Samplers 값 되살림(이 설정으로 생성 — %s): %s",
+                    ", ".join(xsa.infotext_er_sde_samplers(params)), xsa.describe(restored))
+    return restored
+
+
 def pass_values(host) -> dict:
     """패스 판정에 쓰는 화면 값(위젯 id → 콤보 글자·체크 bool, 없으면 None) — ``passes_from_widgets`` 의 입력."""
     values: dict = {}
@@ -191,5 +215,5 @@ def contribute(host, ctx) -> Any:
 
 __all__ = [
     "apply_infotext", "apply_saved_settings", "contribute", "current_settings", "get_settings",
-    "init_extra_samplers_proxies", "pass_values", "passes_in_use", "set_settings",
+    "init_extra_samplers_proxies", "pass_values", "passes_in_use", "restore_from_metadata", "set_settings",
 ]

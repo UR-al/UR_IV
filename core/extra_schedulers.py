@@ -685,6 +685,51 @@ def from_infotext(params: Any, *, base: ExtraSchedulerSettings = APP_DEFAULTS) -
     return replace(base, **values)
 
 
+# '이 설정으로 생성'이 되살리는 칸 — 그 칸을 읽는 스케줄러(이름)마다(계획 X3b: 스케줄러와 그 값을 함께)
+_FLOW_COSMOS_FIELDS = ("flow_cosmos_rho", "flow_cosmos_sigma_max", "flow_cosmos_sigma_min")
+RESTORE_FIELDS = MappingProxyType({
+    NAME_CUSTOM: ("custom_mode", "custom_expression", "custom_sigmas"),
+    NAME_LAPLACE: ("laplace_mu", "laplace_beta"),
+    NAME_FLOW_COSMOS_RHO7: _FLOW_COSMOS_FIELDS,
+    NAME_FLOW_COSMOS_DYNAMIC: _FLOW_COSMOS_FIELDS,
+})
+
+
+def infotext_value_schedulers(params: Any) -> tuple:
+    """infotext 의 메인('Schedule type')·Hires('Hires schedule type') 스케줄러 중 값을 읽는 것(VALUE_SCHEDULERS 의
+    이름, 메인 먼저·중복 없이). 표기는 ``resolve_scheduler`` 로 접어 읽는다 — 앱 콤보가 이름·라벨·별칭을 같은 항목으로
+    고르는 것과 같다(ui/generation_settings_apply.apply_sampler_scheduler). 'Use same scheduler'·다른 스케줄러는 뺀다."""
+    params = params if isinstance(params, Mapping) else {}
+    names: list = []
+    for key in (KEY_SCHEDULE_TYPE, KEY_HIRES_SCHEDULE_TYPE):
+        name = resolve_scheduler(params.get(key))
+        if name in VALUE_SCHEDULERS and name not in names:
+            names.append(name)
+    return tuple(names)
+
+
+def restore_from_infotext(params: Any, *, base: ExtraSchedulerSettings = APP_DEFAULTS
+                          ) -> Optional[ExtraSchedulerSettings]:
+    """'이 설정으로 생성'(계획 A-R1·X3b) — 이미지의 메인·Hires 스케줄러가 값을 읽는 스케줄러(custom·Laplace·Flow
+    Cosmos rho7·Dynamic)일 때만 **그 스케줄러의** 칸(``RESTORE_FIELDS``)을 ``from_infotext`` 규칙(확장 paste_*)으로
+    되살린다 — 스케줄러 이름만 오고 값이 남으면 다른 그림이 된다. 쓰지 않은 스케줄러의 칸은 키가 있어도 ``base`` 그대로,
+    어느 패스도 값 스케줄러가 아니면 None(칸을 건드리지 않는다).
+
+    접어 읽은 표기('LAPLACE'·'flow_cosmos_rho7'·README 별칭)는 확장 라벨로 바꿔 ``from_infotext`` 에 넘긴다 — 그 안의
+    '키 없으면 기본값' 규칙(확장의 정확한 라벨 비교)이 앱이 고른 스케줄러와 같은 것을 보게."""
+    used = infotext_value_schedulers(params)
+    if not used:
+        return None
+    pasted = dict(params)
+    for key in (KEY_SCHEDULE_TYPE, KEY_HIRES_SCHEDULE_TYPE):
+        name = resolve_scheduler(pasted.get(key))
+        if name is not None:
+            pasted[key] = SCHEDULER_LABELS[name]
+    restored = from_infotext(pasted, base=base)
+    fields = {field_name for name in used for field_name in RESTORE_FIELDS[name]}
+    return replace(base, **{field_name: getattr(restored, field_name) for field_name in sorted(fields)})
+
+
 def infotext_items(settings: ExtraSchedulerSettings, schedulers: Iterable[Any]) -> dict:
     """생성이 쓴 스케줄러(메인·Hires — 이름이나 라벨)에 맞는 infotext 키(확장 infotext_items 의 거울): custom 이면
     쓴 모드의 글자(공백 한 칸으로), Laplace 면 μ·β 둘 다(repr), Flow Cosmos rho7·Dynamic 이면 ρ·σ̃ max·σ̃ min 셋 다(repr — eps/v
@@ -722,12 +767,14 @@ __all__ = [
     "LAPLACE_MU_MAX", "LAPLACE_MU_MIN", "LAPLACE_MU_STEP", "MAIN_SCHEDULER_WIDGET", "MODES", "MODE_EXPRESSION", "MODE_LABELS", "MODE_SIGMAS",
     "NAME_CUSTOM", "NAME_FLOW_COSMOS_DYNAMIC", "NAME_FLOW_COSMOS_RHO7", "NAME_LAPLACE", "NAME_REACT_DYNSF", "PASS_HIRES", "PASS_MAIN", "PASS_SAM3", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "README_LABELS",
     "REACT_DYNSF_FACTOR", "REASON_COMFY_PENDING", "REASON_KREA2", "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_UNCONFIRMED",
-    "PassUse", "SAM3_GROUP_WIDGET", "SAM3_MODE_WIDGET", "SAM3_SCHEDULER_WIDGET", "SAM3_USE_SCHEDULER_WIDGET",
+    "RESTORE_FIELDS", "PassUse", "SAM3_GROUP_WIDGET", "SAM3_MODE_WIDGET", "SAM3_SCHEDULER_WIDGET", "SAM3_USE_SCHEDULER_WIDGET",
     "SCHEDULER_LABELS", "SCHEDULER_NAMES", "SCRIPT_NAME", "SETTINGS_KEY", "TARGET_AUX", "TARGET_I2I", "TARGET_T2I",
     "USE_SAME_SCHEDULER", "VALUE_SCHEDULERS", "WIDGET_KEYS", "WIDGET_PREFIX", "adetailer_pass", "as_block", "coerce", "coerce_args",
     "coerce_float", "coerce_flow_cosmos_rho", "coerce_flow_cosmos_sigma_max", "coerce_flow_cosmos_sigma_min",
     "coerce_laplace_beta", "coerce_laplace_mu", "coerce_mode", "coerce_text", "describe", "flow_cosmos_dynamic_rho_ok", "flow_cosmos_range_ok",
-    "format_number", "from_infotext", "infotext_items", "infotext_labels", "is_default", "normalize_text",
+    "format_number", "from_infotext", "infotext_items", "infotext_labels", "infotext_value_schedulers", "is_default",
+    "normalize_text",
     "parse_script_block", "parse_settings", "pass_label", "pass_widget_ids", "passes_from_widgets", "plan",
-    "resolve_scheduler", "script_confirmed", "value_scheduler_passes", "widget_id", "widget_number", "widget_values",
+    "resolve_scheduler", "restore_from_infotext", "script_confirmed", "value_scheduler_passes", "widget_id",
+    "widget_number", "widget_values",
 ]

@@ -107,6 +107,18 @@ def _to_float(value: Any, default: float) -> float:
         return default
 
 
+def generation_parameters(info: Any) -> dict:
+    """메타데이터의 생성 파라미터 dict — 키는 infotext 그대로('Schedule type'·'Laplace mu'·'ER SDE eta'). core 가
+    파싱한 ``parameters`` 를 쓰고, 없으면(레거시 페이로드) WebUI raw 를 core 파서로 읽는다. ComfyUI 원문은 다시 읽지
+    않는다. 없으면 빈 dict(복사본 — 호출처가 고쳐도 원본이 그대로다)."""
+    if not isinstance(info, dict):
+        return {}
+    parameters = info.get("parameters")
+    if not isinstance(parameters, dict) and info.get("source") != "comfyui" and isinstance(info.get("raw"), str):
+        parameters = parse_infotext(info["raw"]).parameters
+    return dict(parameters) if isinstance(parameters, dict) else {}
+
+
 def build_generation_item(info: dict, defaults: dict, *, preserve_seed: bool = False) -> Optional[dict]:
     """메타데이터 → 큐/즉시 생성 아이템.
 
@@ -120,10 +132,7 @@ def build_generation_item(info: dict, defaults: dict, *, preserve_seed: bool = F
     negative = str(info.get("negative") or "")
     if not prompt:
         return None
-    parameters = info.get("parameters")
-    if not isinstance(parameters, dict) and info.get("source") != "comfyui" and isinstance(info.get("raw"), str):
-        parameters = parse_infotext(info["raw"]).parameters
-    params = _lower_keys(parameters)
+    params = _lower_keys(generation_parameters(info))
     item = {
         "prompt": prompt,
         "negative_prompt": negative,

@@ -379,6 +379,49 @@ class PasteParityTests(unittest.TestCase):
                 self.assertEqual(_fields(xsa.from_infotext(params)), tuple(_key(value) for value in want))
         self.assertEqual(xsa.from_infotext(None), xsa.APP_DEFAULTS)
 
+    def test_generate_from_metadata_restore(self):
+        """계획 A-R1(X3b) — ``restore_from_infotext``: 메인·Hires 가 ER SDE 셋이면 차수는 paste_max_stage, Reverse-time·
+        Tunable 이 있으면 η·잡음 구간도 paste_*(접은 표기는 확장 표기로 바꾼 붙여 넣기 — 'Eta' 대체가 앱 콤보가 고른
+        샘플러를 본다), 다른 칸은 base 그대로(키가 있어도), ER SDE 가 없으면 None."""
+        cases = _PASTE_CASES + (
+            {"Sampler": "ER SDE (ODE)", "ER SDE max stage": 1, "ER SDE eta": 0.4, "ER SDE noise window": "0.1-0.9"},
+            {"Sampler": "ER SDE (ODE)", "Hires sampler": "ER SDE (Tunable)", "ER SDE eta": "2.5"},
+            {"Sampler": "Euler a", "ER SDE max stage": 1, "ER SDE eta": 0.4, "Eta": 0.3},
+            {"Sampler": "ER SDE", "ER SDE max stage": 2, "Eta": 0.3},
+            {"Sampler": "er_sde_tunable", "Hires sampler": "Use same sampler", "ER SDE noise window": "0.3-0.6"},
+            {"Sampler": "Euler", "Hires sampler": "er_sde_reverse_time", "Eta": "0.45"},
+        )
+        bases = (xsa.APP_DEFAULTS, xsa.ExtraSamplersSettings(max_stage=1, eta=4.5, noise_window=True, noise_start=0.3,
+                                                             noise_end=0.7))
+        keys = (xsa.KEY_SAMPLER, xsa.KEY_HIRES_SAMPLER)
+        seen = {"none": 0, "stage_only": 0, "all": 0}
+        for base in bases:
+            for params in cases:
+                with self.subTest(base=base, params=params):
+                    used = {xsa.resolve_sampler(params.get(key)) for key in keys} & set(xsa.ER_SDE_LABELS)
+                    restored = xsa.restore_from_infotext(params, base=base)
+                    if not used:
+                        seen["none"] += 1
+                        self.assertIsNone(restored)
+                        continue
+                    labelled = dict(params)
+                    for key in keys:
+                        label = xsa.resolve_sampler(params.get(key))
+                        if label is not None:
+                            labelled[key] = label
+                    pasted = {"max_stage": self.ext.paste_max_stage(labelled), "eta": self.ext.paste_eta(labelled),
+                              "noise_window": self.ext.paste_noise_window(labelled),
+                              "noise_start": self.ext.paste_noise_start(labelled),
+                              "noise_end": self.ext.paste_noise_end(labelled)}
+                    eta_used = not used.isdisjoint(xsa.ETA_LABELS)
+                    seen["all" if eta_used else "stage_only"] += 1
+                    fields = ("max_stage",) + (("eta", "noise_window", "noise_start", "noise_end") if eta_used else ())
+                    want = tuple(_key(pasted[name] if name in fields else getattr(base, name)) for name in xsa.ARG_NAMES)
+                    self.assertEqual(_fields(restored), want)
+        self.assertGreater(seen["none"], 10)
+        self.assertGreater(seen["stage_only"], 1)
+        self.assertGreater(seen["all"], 10)
+
 
 _RECORD_SETTINGS = (
     xsa.ExtraSamplersSettings(),
@@ -754,6 +797,77 @@ class ImportTests(unittest.TestCase):
             elif isinstance(item, ast.ImportFrom):
                 imported.add((item.module or "").split(".")[0])
         self.assertLessEqual(imported, {"__future__", "math", "re", "dataclasses", "types", "typing", "core"})
+
+
+class RestoreFromInfotextTests(unittest.TestCase):
+    """계획 A-R1(X3b) — '이 설정으로 생성'은 이미지의 메인·Hires 샘플러가 ER SDE 셋일 때만 그 샘플러가 읽는 칸을 샘플러와
+    함께 되살린다(차수는 셋 다, η·잡음 구간은 Reverse-time·Tunable). 확장 없이(확장 비교는
+    ``PasteParityTests.test_generate_from_metadata_restore``)."""
+
+    USER = xsa.ExtraSamplersSettings(max_stage=1, eta=4.5, noise_window=True, noise_start=0.3, noise_end=0.7)
+    ALL_KEYS = {"ER SDE max stage": "2", "ER SDE eta": "0.5", "ER SDE noise window": "0.1-0.9", "Eta": "0.7"}
+    RT, ODE, TUN = xsa.LABEL_ER_SDE_REVERSE_TIME, xsa.LABEL_ER_SDE_ODE, xsa.LABEL_ER_SDE_TUNABLE
+
+    def test_reverse_time_and_tunable_restore_all_five(self):
+        for sampler in (self.RT, self.TUN, "er_sde_reverse_time", "ER SDE (TUNABLE)"):
+            with self.subTest(sampler=sampler):
+                restored = xsa.restore_from_infotext({"Sampler": sampler, **self.ALL_KEYS}, base=self.USER)
+                self.assertEqual(restored, xsa.ExtraSamplersSettings(max_stage=2, eta=0.5, noise_window=True,
+                                                                     noise_start=0.1, noise_end=0.9))
+        # 키가 없다 — 확장 붙여 넣기처럼 기본값(그 샘플러가 읽는 칸 전부)
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": self.RT}, base=self.USER), xsa.APP_DEFAULTS)
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": self.TUN, "ER SDE noise window": "off"}, base=self.USER),
+                         xsa.APP_DEFAULTS)
+
+    def test_forge_eta_fallback_is_reverse_time_only(self):
+        """aoleg/Neo_ExtraSchedulers 이미지: 'ER SDE eta' 없이 Forge 'Eta' — Reverse-time 일 때만 η(설계 §4.3)."""
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": self.RT, "Eta": "0.7"}, base=self.USER),
+                         xsa.ExtraSamplersSettings(eta=0.7))
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": self.RT, "Eta": "0.7", "ER SDE eta": "2"}, base=self.USER),
+                         xsa.ExtraSamplersSettings(eta=2.0))
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": self.TUN, "Eta": "0.7"}, base=self.USER),
+                         xsa.ExtraSamplersSettings(eta=1.0))
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": "Euler a", "Hires sampler": self.RT, "Eta": "0.4"},
+                                                   base=self.USER), xsa.ExtraSamplersSettings(eta=0.4))
+        # ComfyUI 이름도 앱 콤보처럼 같은 샘플러 — 'Eta' 대체도 그 샘플러를 본다(확장 paste 는 정확한 표기만 안다)
+        self.assertEqual(xsa.from_infotext({"Sampler": "er_sde_reverse_time", "Eta": "0.4"}).eta, 1.0)
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": "er_sde_reverse_time", "Eta": "0.4"}, base=self.USER),
+                         xsa.ExtraSamplersSettings(eta=0.4))
+
+    def test_ode_restores_only_the_stage(self):
+        restored = xsa.restore_from_infotext({"Sampler": self.ODE, **self.ALL_KEYS}, base=self.USER)
+        self.assertEqual(restored, replace(self.USER, max_stage=2))
+        self.assertEqual(xsa.restore_from_infotext({"Sampler": self.ODE}, base=self.USER), replace(self.USER, max_stage=3))
+        # ODE 메인 + Tunable Hires — η·구간도
+        restored = xsa.restore_from_infotext({"Sampler": self.ODE, "Hires sampler": self.TUN, **self.ALL_KEYS},
+                                             base=self.USER)
+        self.assertEqual(restored, xsa.ExtraSamplersSettings(max_stage=2, eta=0.5, noise_window=True, noise_start=0.1,
+                                                             noise_end=0.9))
+        self.assertEqual(xsa.infotext_er_sde_samplers({"Sampler": self.ODE, "Hires sampler": "er_sde_tunable"}),
+                         (self.ODE, self.TUN))
+        self.assertEqual(xsa.infotext_er_sde_samplers({"Sampler": self.RT, "Hires sampler": "er_sde_reverse_time"}),
+                         (self.RT,))
+
+    def test_values_present_but_not_used_leave_the_fields_alone(self):
+        for params in ({"Sampler": "Euler a", **self.ALL_KEYS},
+                       {"Sampler": "Euler a", "Hires sampler": xsa.USE_SAME_SAMPLER, **self.ALL_KEYS},
+                       {"Sampler": "ER SDE", **self.ALL_KEYS},                         # Forge 자체 ER SDE(= Comfy er_sde)
+                       {"Sampler": "DPM++ 2M SDE", **self.ALL_KEYS},
+                       {"Sampler": xsa.LABEL_DPMPP_4M_SDE, "Hires sampler": xsa.LABEL_EULER_DY, **self.ALL_KEYS},
+                       {"Sampler": "ER SDE (Reverse-time) Karras", **self.ALL_KEYS},   # 옛 결합 표기 — 콤보도 못 고른다
+                       {"Schedule type": "Laplace", **self.ALL_KEYS}, {"Sampler": "", **self.ALL_KEYS},
+                       {}, self.ALL_KEYS):
+            with self.subTest(params=params):
+                self.assertIsNone(xsa.restore_from_infotext(params, base=self.USER))
+                self.assertEqual(xsa.infotext_er_sde_samplers(params), ())
+        self.assertIsNone(xsa.restore_from_infotext(None, base=self.USER))
+        params = {"Sampler": "er_sde_reverse_time", "Eta": "0.4"}
+        xsa.restore_from_infotext(params, base=self.USER)
+        self.assertEqual(params, {"Sampler": "er_sde_reverse_time", "Eta": "0.4"}, "넘긴 dict 를 고치지 않는다")
+
+    def test_restore_fields_are_the_widget_keys(self):
+        self.assertEqual(xsa.RESTORE_STAGE_FIELDS + xsa.RESTORE_ETA_FIELDS, xsa.ARG_NAMES)
+        self.assertEqual(xsa.ETA_LABELS, (self.RT, self.TUN))
 
 
 if __name__ == "__main__":

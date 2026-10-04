@@ -15,8 +15,10 @@
 - ``get_settings``/``set_settings``/``apply_saved_settings``  prompt_settings.json·생성 프리셋(``extra_schedulers_settings``).
   옛 설정 파일에 키가 없으면 앱 기본값 — 확장 기본값과 같아 동작이 바뀌지 않으므로 안내하지 않는다. v0.33.0 전에 저장한
   값(키 다섯)의 Flow Cosmos 셋도 앱 기본값이다(확장이 키 없는 옛 요청을 읽는 것과 같다).
-- ``apply_infotext(host, params)``  붙여 넣은 infotext(PNG Info·'이 설정으로 생성' — 계획 A-R1 이 연결)의 값을 칸에
-  되살린다(``core/extra_schedulers.from_infotext`` — 이미지가 쓰지 않은 스케줄러의 칸은 그대로).
+- ``apply_infotext(host, params)``  붙여 넣은 infotext 의 값을 칸에 되살린다(``core/extra_schedulers.from_infotext`` —
+  확장 붙여 넣기 규칙: 이미지가 쓰지 않은 스케줄러의 μ/β·Flow Cosmos 칸은 키가 없으면 그대로)
+- ``restore_from_metadata(host, params)``  '이 설정으로 생성'(ui/image_metadata_actions — 계획 A-R1·X3b): 이미지의 메인·
+  Hires 스케줄러가 값 스케줄러일 때만 그 스케줄러의 칸을 함께 되살린다(``core/extra_schedulers.restore_from_infotext``).
 
 식·목록 문법 검사와 그 결과를 칸 아래에 보이는 일(``pushWidgetProperty(…, 'error', …)``)은 계획 C7 이다(계산기가 ComfyUI
 팩에 있다). 모두 GUI 스레드에서 부른다(위젯을 읽는다).
@@ -134,6 +136,28 @@ def apply_infotext(host, params: Any) -> Optional[xs.ExtraSchedulerSettings]:
     return restored
 
 
+def restore_from_metadata(host, params: Any) -> Optional[xs.ExtraSchedulerSettings]:
+    """'이 설정으로 생성'(계획 A-R1·X3b) — 이미지의 메인·Hires 스케줄러가 값 스케줄러일 때만 그 스케줄러의 칸을
+    되살린다(``core/extra_schedulers.restore_from_infotext`` — 스케줄러와 그 값을 함께). 값이 바뀐 칸만 쓰고 나머지 칸의
+    글자는 건드리지 않는다. 아무 패스도 값 스케줄러가 아니거나 위젯이 없는 호스트면 None(칸 그대로)."""
+    current = current_settings(host)
+    if current is None:
+        return None
+    restored = xs.restore_from_infotext(params, base=current)
+    if restored is None:
+        return None
+    if restored != current:
+        widgets = getattr(host, _WIDGETS_ATTR)
+        values = xs.widget_values(restored)
+        for key in xs.WIDGET_KEYS:
+            proxy = widgets.get(key)
+            if getattr(restored, key) != getattr(current, key) and proxy is not None and hasattr(proxy, "setText"):
+                proxy.setText(values[key])
+        logger.info("Extra Schedulers 값 되살림(이 설정으로 생성 — %s): %s",
+                    ", ".join(xs.infotext_value_schedulers(params)), xs.describe(restored))
+    return restored
+
+
 def pass_values(host) -> dict:
     """패스 판정에 쓰는 화면 값(위젯 id → 콤보 글자·체크 bool, 없으면 None) — ``passes_from_widgets`` 의 입력."""
     values: dict = {}
@@ -182,5 +206,5 @@ def contribute(host, ctx) -> Any:
 
 __all__ = [
     "apply_infotext", "apply_saved_settings", "contribute", "current_settings", "get_settings",
-    "init_extra_schedulers_proxies", "pass_values", "passes_in_use", "set_settings",
+    "init_extra_schedulers_proxies", "pass_values", "passes_in_use", "restore_from_metadata", "set_settings",
 ]

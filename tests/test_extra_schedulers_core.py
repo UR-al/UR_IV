@@ -712,6 +712,37 @@ class PasteParityTests(unittest.TestCase):
                 with self.subTest(params=params):
                     self.assertEqual(set(xs.infotext_labels(params)), self.ui._labels_in_params(params))
 
+    def test_generate_from_metadata_restore(self):
+        """계획 A-R1(X3b) — ``restore_from_infotext``: 메인·Hires 가 값 스케줄러면 그 스케줄러의 칸만 확장 paste_* 의 값
+        (접은 표기는 확장 라벨로 바꾼 붙여 넣기 — 앱 콤보가 고른 스케줄러와 같게), 다른 칸은 base 그대로(키가 있어도),
+        값 스케줄러가 없으면 None."""
+        bases = (xs.APP_DEFAULTS, xs.ExtraSchedulerSettings("sigmas", "M * 0.5", "[2, 1, 0]", -1.0, 4.0, 3.5, 500.0,
+                                                            0.01))
+        keys = (xs.KEY_SCHEDULE_TYPE, xs.KEY_HIRES_SCHEDULE_TYPE)
+        seen = {"none": 0, "partial": 0}
+        for base in bases:
+            for params in _INFOTEXT_CASES:
+                with self.subTest(base=base, params=params):
+                    names = {xs.resolve_scheduler(params.get(key)) for key in keys}
+                    used = names & set(xs.VALUE_SCHEDULERS)
+                    restored = xs.restore_from_infotext(params, base=base)
+                    if not used:
+                        seen["none"] += 1
+                        self.assertIsNone(restored)
+                        continue
+                    labelled = dict(params)
+                    for key in keys:
+                        name = xs.resolve_scheduler(params.get(key))
+                        if name is not None:
+                            labelled[key] = xs.SCHEDULER_LABELS[name]
+                    pasted = self._ext_paste(labelled, base)
+                    fields = {field for name in used for field in xs.RESTORE_FIELDS[name]}
+                    seen["partial"] += len(fields) < len(xs.ARG_NAMES)
+                    want = tuple(_key(getattr(pasted if name in fields else base, name)) for name in xs.ARG_NAMES)
+                    self.assertEqual(_fields(restored), want)
+        self.assertGreater(seen["none"], 10)
+        self.assertGreater(seen["partial"], 20)
+
 
 @requires_extension
 @requires_torch
@@ -1349,6 +1380,104 @@ class FlowCosmosDynamicOracleTests(unittest.TestCase):
                     with self.assertRaises(sch.KarrasDynamicError) as caught:
                         self._run(block, 28, model=model, sigma_range=sigma_range)
                     self.assertTrue(str(caught.exception).startswith(xs.ERROR_PREFIX), str(caught.exception))
+
+
+class RestoreFromInfotextTests(unittest.TestCase):
+    """계획 A-R1(X3b) — '이 설정으로 생성'은 이미지의 메인·Hires 스케줄러가 값을 읽을 때만 **그 스케줄러의** 칸을 스케줄러와
+    함께 되살린다. 확장 없이(확장 비교는 ``PasteParityTests.test_generate_from_metadata_restore``)."""
+
+    USER = xs.ExtraSchedulerSettings("sigmas", "  M * 0.5 ", "[2, 1, 0]", -1.0, 4.0, 3.5, 500.0, 0.01)
+    ALL_KEYS = {"Custom scheduler expression": "m + (M - m) * (1 - x) ** 3", "Custom scheduler sigmas": "[1.0, 0.0]",
+                "Laplace mu": "0.25", "Laplace beta": "1.5", "Flow Cosmos rho": "5.5",
+                "Flow Cosmos sigma max": "240.0", "Flow Cosmos sigma min": "0.006"}
+
+    def test_laplace_restores_mu_and_beta_only(self):
+        restored = xs.restore_from_infotext({"Schedule type": "Laplace", **self.ALL_KEYS}, base=self.USER)
+        self.assertEqual(restored, replace(self.USER, laplace_mu=0.25, laplace_beta=1.5))
+        # 키 없이 Laplace — 확장처럼 그 스케줄러의 기본값(다른 도구·옛 이미지)
+        self.assertEqual(xs.restore_from_infotext({"Schedule type": "Laplace"}, base=self.USER),
+                         replace(self.USER, laplace_mu=xs.LAPLACE_MU_DEFAULT, laplace_beta=xs.LAPLACE_BETA_DEFAULT))
+        # 범위 밖은 확장처럼 자른다
+        self.assertEqual(xs.restore_from_infotext({"Schedule type": "Laplace", "Laplace mu": "12"}, base=self.USER),
+                         replace(self.USER, laplace_mu=10.0, laplace_beta=xs.LAPLACE_BETA_DEFAULT))
+
+    def test_custom_restores_mode_and_text(self):
+        base = xs.ExtraSchedulerSettings(laplace_mu=2.0, flow_cosmos_rho=9.0)
+        restored = xs.restore_from_infotext({"Schedule type": "custom", **self.ALL_KEYS}, base=base)
+        self.assertEqual(restored, replace(base, custom_mode=xs.MODE_SIGMAS,
+                                           custom_expression="m + (M - m) * (1 - x) ** 3", custom_sigmas="[1.0, 0.0]"))
+        restored = xs.restore_from_infotext({"Schedule type": "custom", "Custom scheduler expression": "  M * x  ",
+                                             "Laplace mu": "3"}, base=self.USER)
+        self.assertEqual(restored, replace(self.USER, custom_mode=xs.MODE_EXPRESSION, custom_expression="M * x"))
+        restored = xs.restore_from_infotext({"Schedule type": "custom", "Custom scheduler sigmas": "[0.9, 0.1]"},
+                                            base=xs.APP_DEFAULTS)
+        self.assertEqual(restored, replace(xs.APP_DEFAULTS, custom_mode=xs.MODE_SIGMAS, custom_sigmas="[0.9, 0.1]"))
+        # custom 인데 키가 없다 — 확장 붙여 넣기처럼 칸 그대로(무엇을 썼는지 모른다)
+        self.assertEqual(xs.restore_from_infotext({"Schedule type": "custom"}, base=self.USER), self.USER)
+
+    def test_flow_cosmos_values_for_either_label(self):
+        cosmos = {"flow_cosmos_rho": 5.5, "flow_cosmos_sigma_max": 240.0, "flow_cosmos_sigma_min": 0.006}
+        defaults = {"flow_cosmos_rho": xs.FLOW_COSMOS_RHO_DEFAULT, "flow_cosmos_sigma_max": xs.FLOW_COSMOS_SIGMA_MAX_DEFAULT,
+                    "flow_cosmos_sigma_min": xs.FLOW_COSMOS_SIGMA_MIN_DEFAULT}
+        for label in (xs.LABEL_FLOW_COSMOS_RHO7, xs.LABEL_FLOW_COSMOS_DYNAMIC, xs.NAME_FLOW_COSMOS_RHO7,
+                      xs.NAME_FLOW_COSMOS_DYNAMIC, "FLOW COSMOS DYNAMIC"):
+            with self.subTest(label=label):
+                restored = xs.restore_from_infotext({"Schedule type": label, **self.ALL_KEYS}, base=self.USER)
+                self.assertEqual(restored, replace(self.USER, **cosmos))
+                self.assertEqual(xs.restore_from_infotext({"Schedule type": label, "Schedule rho": "3"}, base=self.USER),
+                                 replace(self.USER, **defaults))
+
+    def test_hires_pass_counts_and_both_passes_combine(self):
+        restored = xs.restore_from_infotext({"Schedule type": "Karras", "Hires schedule type": "Laplace",
+                                             **self.ALL_KEYS}, base=self.USER)
+        self.assertEqual(restored, replace(self.USER, laplace_mu=0.25, laplace_beta=1.5))
+        restored = xs.restore_from_infotext({"Schedule type": "Laplace", "Hires schedule type": "Flow Cosmos Dynamic",
+                                             **self.ALL_KEYS}, base=self.USER)
+        self.assertEqual(restored, replace(self.USER, laplace_mu=0.25, laplace_beta=1.5, flow_cosmos_rho=5.5,
+                                           flow_cosmos_sigma_max=240.0, flow_cosmos_sigma_min=0.006))
+        restored = xs.restore_from_infotext({"Schedule type": "Laplace", "Hires schedule type": xs.USE_SAME_SCHEDULER,
+                                             **self.ALL_KEYS}, base=self.USER)
+        self.assertEqual(restored, replace(self.USER, laplace_mu=0.25, laplace_beta=1.5))
+        self.assertEqual(xs.infotext_value_schedulers({"Schedule type": "laplace", "Hires schedule type": "Laplace"}),
+                         (xs.NAME_LAPLACE,))
+        self.assertEqual(xs.infotext_value_schedulers({"Schedule type": "custom",
+                                                       "Hires schedule type": "Flow Cosmos rho7"}),
+                         (xs.NAME_CUSTOM, xs.NAME_FLOW_COSMOS_RHO7))
+
+    def test_values_present_but_not_used_leave_the_fields_alone(self):
+        for params in ({"Schedule type": "Karras", **self.ALL_KEYS},
+                       {"Schedule type": "Karras", "Hires schedule type": xs.USE_SAME_SCHEDULER, **self.ALL_KEYS},
+                       {"Schedule type": "Karras Dynamic", **self.ALL_KEYS},
+                       {"Schedule type": xs.LABEL_REACT_DYNSF, **self.ALL_KEYS},
+                       {"Schedule type": "CosineExponential blend", "Hires schedule type": "Cosine", **self.ALL_KEYS},
+                       {"Sampler": "Euler a", **self.ALL_KEYS}, {"Schedule type": "", **self.ALL_KEYS},
+                       {"Schedule type": None, "Hires schedule type": None, **self.ALL_KEYS},
+                       {}, self.ALL_KEYS):
+            with self.subTest(params=params):
+                self.assertIsNone(xs.restore_from_infotext(params, base=self.USER))
+                self.assertEqual(xs.infotext_value_schedulers(params), ())
+        self.assertIsNone(xs.restore_from_infotext(None, base=self.USER))
+        self.assertIsNone(xs.restore_from_infotext("Laplace", base=self.USER))
+
+    def test_folded_labels_restore_like_the_combo_choice(self):
+        """앱 콤보는 'LAPLACE'·README 별칭도 그 스케줄러로 고른다 — 값도 같이(키 없으면 그 스케줄러의 기본값). 확장
+        paste 는 정확한 표기만 알아 ``from_infotext`` 는 그대로 두지만, '이 설정으로 생성'은 고른 스케줄러를 따른다."""
+        self.assertEqual(xs.from_infotext({"Schedule type": "LAPLACE"}, base=self.USER), self.USER)
+        self.assertEqual(xs.restore_from_infotext({"Schedule type": "LAPLACE"}, base=self.USER),
+                         replace(self.USER, laplace_mu=xs.LAPLACE_MU_DEFAULT, laplace_beta=xs.LAPLACE_BETA_DEFAULT))
+        self.assertEqual(xs.restore_from_infotext({"Schedule type": " flow   cosmos rho7 "}, base=self.USER),
+                         replace(self.USER, flow_cosmos_rho=xs.FLOW_COSMOS_RHO_DEFAULT,
+                                 flow_cosmos_sigma_max=xs.FLOW_COSMOS_SIGMA_MAX_DEFAULT,
+                                 flow_cosmos_sigma_min=xs.FLOW_COSMOS_SIGMA_MIN_DEFAULT))
+        params = {"Schedule type": "LAPLACE", "Laplace mu": "1"}
+        xs.restore_from_infotext(params, base=self.USER)
+        self.assertEqual(params, {"Schedule type": "LAPLACE", "Laplace mu": "1"}, "넘긴 dict 를 고치지 않는다")
+
+    def test_restore_fields_cover_every_value_scheduler(self):
+        self.assertEqual(set(xs.RESTORE_FIELDS), set(xs.VALUE_SCHEDULERS))
+        covered = {field for fields in xs.RESTORE_FIELDS.values() for field in fields}
+        self.assertEqual(covered, set(xs.ARG_NAMES))
+        self.assertEqual(xs.RESTORE_FIELDS[xs.NAME_FLOW_COSMOS_RHO7], xs.RESTORE_FIELDS[xs.NAME_FLOW_COSMOS_DYNAMIC])
 
 
 if __name__ == "__main__":

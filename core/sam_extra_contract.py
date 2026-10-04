@@ -600,9 +600,13 @@ SCRIPTS = MappingProxyType({
             # 보조 패스 전달(모든 보조 img2img — 확장 전역 상태가 요청마다 덮인다)·기능 스냅샷
             "core/alwayson_propagation.py:TITLE_EXTRA_SCHEDULERS", "core/alwayson_propagation.py:PROPAGATION",
             "core/sam_extra_capabilities.py:TITLE_EXTRA_SCHEDULERS",
-            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용)·저장·붙여 넣기(계획 A-R1 이 '이 설정으로 생성'에 잇는다)
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용)·저장·붙여 넣기
             "ui/extra_schedulers_ui.py:contribute", "ui/extra_schedulers_ui.py:apply_saved_settings",
             "ui/extra_schedulers_ui.py:apply_infotext", "ui/sampling_blocks.py:CONTRIBUTORS",
+            # '이 설정으로 생성'(계획 A-R1·X3b) — 이미지의 메인·Hires 스케줄러가 값 스케줄러일 때만 그 스케줄러의 칸을 함께
+            # 되살린다(쓰지 않은 스케줄러의 칸은 키가 있어도 그대로)
+            "core/extra_schedulers.py:restore_from_infotext", "ui/extra_schedulers_ui.py:restore_from_metadata",
+            "ui/image_metadata_actions.py:restore_sampling_values",
             # 결과 'Schedule type' 이 Laplace·custom·Flow Cosmos 인데 값 기록 없음(다른 확장의 같은 이름 스케줄러) → 알림(P4 규칙)
             "core/sam_extra_notices.py:CODE_XSCHED_NOT_APPLIED", "core/sam_extra_notices.py:explain_scheduler_error",
             # 결과 infotext 7키를 확장 그룹으로(PNG Info·갤러리·히스토리 — 'laplace'·'custom scheduler'·'flow cosmos')
@@ -662,11 +666,14 @@ SCRIPTS = MappingProxyType({
             "core/extra_samplers.py:parse_status", "core/extra_samplers.py:resolve_sampler",
             "core/extra_samplers.py:value_sampler_passes", "core/extra_samplers.py:passes_from_widgets",
             "core/extra_samplers.py:window_unsupported",
-            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용 — 계획 R7 의 마지막)·저장·붙여 넣기(계획 A-R1 이 '이 설정으로
-            # 생성'에 잇는다)
+            # 샘플링 블록 기여자(메인 t2i·i2i·보조 패스 봉투 공용 — 계획 R7 의 마지막)·저장·붙여 넣기
             "ui/extra_samplers_ui.py:contribute", "ui/extra_samplers_ui.py:apply_saved_settings",
             "ui/extra_samplers_ui.py:apply_infotext", "ui/extra_samplers_ui.py:init_extra_samplers_proxies",
             "ui/sampling_blocks.py:CONTRIBUTORS",
+            # '이 설정으로 생성'(계획 A-R1·X3b) — 이미지의 메인·Hires 샘플러가 ER SDE 셋일 때만 그 샘플러가 읽는 칸(차수, Reverse-
+            # time·Tunable 이면 η·잡음 구간 — Forge 'Eta' 대체 포함)을 함께 되살린다
+            "core/extra_samplers.py:restore_from_infotext", "ui/extra_samplers_ui.py:restore_from_metadata",
+            "ui/image_metadata_actions.py:restore_sampling_values",
             # 보조 패스 전달(모든 보조 img2img — 값은 요청마다 process() 가 정한다)·기능 스냅샷(인자 수 → 잡음 구간 지원)
             "core/alwayson_propagation.py:TITLE_EXTRA_SAMPLERS", "core/alwayson_propagation.py:PROPAGATION",
             "core/sam_extra_capabilities.py:TITLE_EXTRA_SAMPLERS", "core/sam_extra_capabilities.py:POSITIONAL_SPECS",

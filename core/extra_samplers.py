@@ -785,6 +785,46 @@ def from_infotext(params: Any) -> ExtraSamplersSettings:
                                  noise_start=noise_start, noise_end=noise_end)
 
 
+# '이 설정으로 생성'이 되살리는 칸 — 차수는 ER SDE 셋, η·잡음 구간은 Reverse-time·Tunable 이 읽는다(계획 X3b)
+RESTORE_STAGE_FIELDS = ("max_stage",)
+RESTORE_ETA_FIELDS = ("eta", "noise_window", "noise_start", "noise_end")
+
+
+def infotext_er_sde_samplers(params: Any) -> tuple:
+    """infotext 의 메인('Sampler')·Hires('Hires sampler') 샘플러 중 ER SDE 셋(표기, 메인 먼저·중복 없이). 표기는
+    ``resolve_sampler`` 로 접어 읽는다 — 앱 콤보가 표기·ComfyUI 이름·별칭을 같은 항목으로 고르는 것과 같다
+    (ui/generation_settings_apply.apply_sampler_scheduler). 'Use same sampler'·다른 샘플러는 뺀다."""
+    params = params if isinstance(params, Mapping) else {}
+    labels: list = []
+    for key in (KEY_SAMPLER, KEY_HIRES_SAMPLER):
+        label = resolve_sampler(params.get(key))
+        if label in ER_SDE_LABELS and label not in labels:
+            labels.append(label)
+    return tuple(labels)
+
+
+def restore_from_infotext(params: Any, *, base: ExtraSamplersSettings = APP_DEFAULTS
+                          ) -> Optional[ExtraSamplersSettings]:
+    """'이 설정으로 생성'(계획 A-R1·X3b) — 이미지의 메인·Hires 샘플러가 ER SDE 셋일 때만 **그 샘플러가 읽는** 칸을
+    ``from_infotext`` 규칙(확장 paste_* — 키 없으면 기본값, Reverse-time 이미지의 Forge 'Eta' 는 η)으로 되살린다: 차수는
+    셋 다, η·잡음 구간은 Reverse-time·Tunable 이 있을 때만(ODE 만이면 그대로). 샘플러 이름만 오고 값이 남으면 다른
+    그림이 된다. 어느 패스도 ER SDE 가 아니면 None(칸을 건드리지 않는다).
+
+    접어 읽은 표기('er_sde_reverse_time' 같은 ComfyUI 이름)는 확장 표기로 바꿔 ``from_infotext`` 에 넘긴다 — 그 안의
+    'Eta' 대체 규칙(확장의 정확한 표기 비교)이 앱이 고른 샘플러와 같은 것을 보게."""
+    used = infotext_er_sde_samplers(params)
+    if not used:
+        return None
+    pasted = dict(params)
+    for key in (KEY_SAMPLER, KEY_HIRES_SAMPLER):
+        label = resolve_sampler(pasted.get(key))
+        if label is not None:
+            pasted[key] = label
+    restored = from_infotext(pasted)
+    fields = RESTORE_STAGE_FIELDS + (RESTORE_ETA_FIELDS if any(label in ETA_LABELS for label in used) else ())
+    return replace(base, **{field_name: getattr(restored, field_name) for field_name in fields})
+
+
 # ── 상태 줄 ────────────────────────────────────────────────────────────────────
 class SamplerStatus(NamedTuple):
     dy_reasons: tuple       # Dy 보조 스텝을 끈 이유(DY_REASONS 의 글자, 적힌 순서)
@@ -828,16 +868,19 @@ __all__ = [
     "MAX_STAGE_MIN", "MAX_STAGE_STEP", "NOISE_PERCENT_MAX", "NOISE_PERCENT_MIN", "NOISE_PERCENT_STEP", "NOISE_WINDOW_OFF",
     "PACK_SAMPLERS", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "PassUse", "REASON_COMFY_PENDING", "REASON_KREA2",
     "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_UNCONFIRMED", "RESTART_LABELS", "RESTART_LONG_FROM",
-    "RESTART_MIN_STEPS", "RESTART_S_MAX", "RESTART_S_MIN", "RESTART_TIMES", "RESTART_TIMES_LONG", "SAM3_GROUP_WIDGET",
+    "RESTART_MIN_STEPS", "RESTART_S_MAX", "RESTART_S_MIN", "RESTART_TIMES", "RESTART_TIMES_LONG", "RESTORE_ETA_FIELDS",
+    "RESTORE_STAGE_FIELDS", "SAM3_GROUP_WIDGET",
     "SAM3_MODE_WIDGET", "SAM3_SAMPLER_WIDGET", "SAM3_USE_SAMPLER_WIDGET", "SCRIPT_NAME", "SETTINGS_KEY", "SPEC_PREFIX",
     "STATUS_KEY", "STATUS_SEPARATOR", "SamplerStatus", "TARGET_AUX", "TARGET_I2I", "TARGET_T2I",
     "UD10_HISTORY_WEIGHT", "UD10_UNCOND_HISTORY_WEIGHT", "UD10_ZERO_WEIGHT", "USE_SAME_SAMPLER", "WIDGET_KEYS",
     "WIDGET_PREFIX", "WINDOW_LABELS", "WINDOW_MIN_VERSION", "WINDOW_SKIPPED_STATUS", "WINDOW_UNSUPPORTED_TEXT",
     "XYZ_AXES", "XYZ_PREFIX", "adetailer_pass", "as_block", "coerce_args", "coerce_eta", "coerce_max_stage",
     "coerce_noise_end", "coerce_noise_percent", "coerce_noise_start", "coerce_noise_window", "comfy_name", "describe",
-    "format_noise_window", "from_infotext", "infotext_items", "is_cfg_pp", "is_default", "live_argc",
+    "format_noise_window", "from_infotext", "infotext_er_sde_samplers", "infotext_items", "is_cfg_pp", "is_default",
+    "live_argc",
     "parse_noise_window", "parse_script_block", "parse_settings", "parse_status", "pass_label", "pass_widget_ids",
-    "passes_from_widgets", "plan", "resolve_sampler", "sampler_kind", "script_confirmed", "uses_eta", "uses_values",
+    "passes_from_widgets", "plan", "resolve_sampler", "restore_from_infotext", "sampler_kind", "script_confirmed",
+    "uses_eta", "uses_values",
     "uses_window", "value_sampler_passes", "widget_id", "widget_number", "widget_values", "window_supported",
     "window_unsupported",
 ]

@@ -926,6 +926,14 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
         xyz = reg.XYZ_AXES["[Extra Schedulers (sam-extra)]"]
         self.assertEqual((xyz["status"], xyz["package"]), (reg.DEFERRED, "P18"))
 
+    def test_generate_from_metadata_restore_is_registered(self):
+        """계획 A-R1(X3b) — '이 설정으로 생성'이 스케줄러와 그 값을 함께 되살리는 곳이 행에 있다."""
+        from core import extra_schedulers as xs
+        entry = reg.SCRIPTS[xs.SCRIPT_NAME]
+        for ref in ("core/extra_schedulers.py:restore_from_infotext", "ui/extra_schedulers_ui.py:restore_from_metadata",
+                    "ui/image_metadata_actions.py:restore_sampling_values", "ui/extra_schedulers_ui.py:apply_infotext"):
+            self.assertIn(ref, entry["app"])
+
     def test_pins_mirror_every_shared_app_constant(self):
         """앱이 확장 값을 하드코딩한 곳마다 핀이 있다 — 빠지면 확장이 바뀌어도 앱만 조용히 어긋난다."""
         pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("xsched_")}
@@ -995,6 +1003,14 @@ class ExtraSamplersV033RegistryTests(unittest.TestCase):
         xyz = reg.XYZ_AXES[xsamp.XYZ_PREFIX]
         self.assertEqual(xyz["labels"], tuple(sorted(axis[len(xsamp.XYZ_PREFIX) + 1:] for axis in xsamp.XYZ_AXES)))
         self.assertEqual((xyz["status"], xyz["package"]), (reg.DEFERRED, "P18"))
+
+    def test_generate_from_metadata_restore_is_registered(self):
+        """계획 A-R1(X3b) — '이 설정으로 생성'이 샘플러와 ER SDE 값을 함께 되살리는 곳이 행에 있다."""
+        from core import extra_samplers as xsamp
+        entry = reg.SCRIPTS[xsamp.SCRIPT_NAME]
+        for ref in ("core/extra_samplers.py:restore_from_infotext", "ui/extra_samplers_ui.py:restore_from_metadata",
+                    "ui/image_metadata_actions.py:restore_sampling_values", "ui/extra_samplers_ui.py:apply_infotext"):
+            self.assertIn(ref, entry["app"])
 
     def test_pins_mirror_every_shared_app_constant(self):
         from core import extra_samplers as xsamp

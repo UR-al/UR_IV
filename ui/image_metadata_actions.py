@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 from core.metadata_actions import (
     NO_GENERATION_INFO_MESSAGE,
     build_generation_item,
+    generation_parameters,
     resolve_action_metadata,
 )
 
@@ -47,12 +48,26 @@ def queue_item_from_metadata(host: Any, info: dict, *, preserve_seed: bool = Fal
     return build_generation_item(info, generation_defaults(host), preserve_seed=preserve_seed)
 
 
+def restore_sampling_values(host: Any, info: dict) -> None:
+    """'이 설정으로 생성' — sam-extra Extra Schedulers·Extra Samplers 값을 그 스케줄러·샘플러와 함께 되살린다(계획
+    A-R1·X3b): 이미지의 메인·Hires 스케줄러가 custom·Laplace·Flow Cosmos 둘이면 그 칸(식·목록·μ/β·ρ/σ̃), 샘플러가 ER SDE
+    셋이면 차수(와 Reverse-time·Tunable 이면 η·잡음 구간 — Forge 'Eta' 대체 포함). 그 밖이면 칸을 건드리지 않는다. 카드
+    기능(Colorcraft·SPEED)은 여기서 되살리지 않는다(가져오기 버튼 — X3c)."""
+    from ui.extra_samplers_ui import restore_from_metadata as restore_samplers
+    from ui.extra_schedulers_ui import restore_from_metadata as restore_schedulers
+
+    params = generation_parameters(info)
+    restore_schedulers(host, params)
+    restore_samplers(host, params)
+
+
 def start_generation_from_metadata(host: Any, info: dict) -> bool:
     """메타데이터 그대로(seed 포함) T2I 위젯에 적용하고 바로 생성한다.
 
     ComfyUI·WebUI 가 같은 경로다 — 모델/LoRA 는 메타데이터에서 불러오지 않고 현재 값을
     유지하며, 프롬프트는 prefix/suffix 를 다시 붙이지 않은 '완성된 전체 프롬프트'로 적용한다
-    (큐 항목 적용과 같은 규칙).
+    (큐 항목 적용과 같은 규칙). 샘플러·스케줄러와 함께 그것이 읽는 sam-extra 값도 되살린다
+    (``restore_sampling_values``).
     """
     item = host._build_queue_payload_from_exif(info, preserve_seed=True)
     if not item:
@@ -60,6 +75,7 @@ def start_generation_from_metadata(host: Any, info: dict) -> bool:
         return False
     host.main_prompt_text.setPlainText(item['prompt'])
     host._apply_payload_to_ui(item)
+    restore_sampling_values(host, info)
     host.start_generation()
     return True
 
