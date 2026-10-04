@@ -145,7 +145,7 @@ it('toggles write true/false strings', async () => {
   expect(widgets[speed.WIDGET_IDS.apply_img2img]).toBe('true')
 })
 
-it('backend line: Forge, old Forge, ComfyUI pending, Krea2', async () => {
+it('backend line: Forge, old Forge, ComfyUI pack 1.7.0 (not a warning), Krea2', async () => {
   caps.value = { status: 'ok', known: true, features: { speed: true } }
   const root = await mount()
   expect(text(root)).toContain(speed.FORGE_NOTE)
@@ -154,7 +154,8 @@ it('backend line: Forge, old Forge, ComfyUI pending, Krea2', async () => {
   expect(text(root)).toContain(speed.OLD_FORGE_NOTE)
   caps.value = { status: 'not_applicable', known: false }
   await Vue.nextTick()
-  expect(text(root)).toContain(speed.COMFY_PENDING_NOTE)
+  expect(text(root)).toContain(speed.COMFY_NOTE)
+  expect(all(root, 'div').filter(d => String(d.props.class ?? '').includes('speed-warnline'))).toEqual([])  // 계획 C6
   widgets.generation_family_combo = 'Krea2'
   await Vue.nextTick()
   expect(text(root)).toContain(speed.KREA2_NOTE)

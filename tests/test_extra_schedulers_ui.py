@@ -3,7 +3,8 @@
 GPU·Forge 없이: 기능 스냅샷은 가짜(``tests.test_alwayson_propagation.caps``), Forge 요청은 가짜 requests.post.
 규칙(계획 X5·R7·R16): 스냅샷이 스크립트를 확인하면 늘(기본값이면 앱 기본값 출처), 확인 못 하면 laplace·custom·
 flow_cosmos_rho7·flow_cosmos_dynamic 을 쓰는 패스가 있을 때만 싣는다. 메인 요청과 모든 보조 img2img 에 같은 블록(늘 키 8개 — v0.33.0 D19 의
-Flow Cosmos 셋 포함). ComfyUI 는 팩 1.7.0 단계 전이라 싣지 않는다.
+Flow Cosmos 셋 포함). ComfyUI 는 늘 싣는다(계획 C6 — 컴파일러가 값 스케줄러 패스가 있을 때만 앱 노드 팩 1.7.0 의 노드를
+넣는다).
 """
 import copy
 import json
@@ -162,10 +163,15 @@ class ContributorTests(unittest.TestCase):
         i2i_caps = caps(present=(XS,), img2img=(XS,))
         self.assertEqual(sb.build_sampling_blocks(XschedHost(i2i_caps), ap.TARGET_I2I).blocks[XS], DEFAULT_BLOCK)
 
-    def test_comfy_and_krea2_build_nothing(self):
+    def test_comfy_always_carries_the_block_and_krea2_nothing(self):
         with mock.patch("backends.get_backend_type", return_value=BackendType.COMFYUI):
             comfy = sb.build_sampling_blocks(XschedHost(None, scheduler="Laplace", laplace_mu="1"), ap.TARGET_T2I)
-        self.assertNotIn(XS, comfy.blocks)                                        # 팩 1.7.0 단계 전(R16)
+            plain = sb.build_sampling_blocks(XschedHost(None), ap.TARGET_T2I)
+        # 계획 C6 — ComfyUI 는 늘 싣는다(값 스케줄러가 아니어도, 기본값이어도 — 노드는 컴파일러가 그 패스가 있을 때만)
+        self.assertEqual(comfy.blocks[XS], xs.as_block(xs.ExtraSchedulerSettings(laplace_mu=1.0)))
+        self.assertEqual(comfy.provenance[XS], ap.PROVENANCE_USER)
+        self.assertEqual(plain.blocks[XS], xs.as_block(xs.APP_DEFAULTS))
+        self.assertEqual(plain.provenance[XS], ap.PROVENANCE_APP_DEFAULT)
         krea2 = sb.build_sampling_blocks(XschedHost(PRESENT), ap.TARGET_T2I, krea2=True)
         self.assertNotIn(XS, krea2.blocks)
 
@@ -208,7 +214,8 @@ class MainRequestTests(unittest.TestCase):
         self.assertEqual(ap.main_retry_titles(user), (XS,))
 
     def test_requests_without_the_feature_stay_byte_identical(self):
-        """스냅샷이 확인하지 않았고 laplace·custom 패스가 없으면(지금까지의 모든 요청) 요청이 칸이 없던 때와 같다."""
+        """스냅샷이 확인하지 않았고 laplace·custom 패스가 없으면(지금까지의 모든 요청) 요청이 칸이 없던 때와 같다. ComfyUI
+        는 블록 하나만 더해진다(계획 C6 — 그래프는 값 스케줄러 패스가 없으면 그대로: tests/test_comfy_extra_schedulers_compiler.py)."""
         for label, capabilities, backend in (("unknown", None, BackendType.WEBUI),
                                              ("known without the script", WITHOUT_XS, BackendType.WEBUI),
                                              ("comfy", None, BackendType.COMFYUI)):
@@ -218,6 +225,9 @@ class MainRequestTests(unittest.TestCase):
                     mock.patch("core.spectrum_settings.spectrum_payload_from_prefs", return_value={}):
                 before, _ = ChainHost(capabilities=capabilities)._build_generation_payload(snapshot=True)
                 after, _ = XschedHost(capabilities, laplace_mu="3")._build_generation_payload(snapshot=True)
+                if label == "comfy":
+                    before = copy.deepcopy(before)
+                    before["alwayson_scripts"][XS] = xs.as_block(xs.ExtraSchedulerSettings(laplace_mu=3.0))
                 self.assertEqual(json.dumps(after, sort_keys=True), json.dumps(before, sort_keys=True))
 
     def test_frozen_payload_keeps_the_block_unless_the_snapshot_says_missing(self):
@@ -406,6 +416,76 @@ class ApplyInfotextTests(unittest.TestCase):
         self.assertEqual(xui.get_settings(host)["flow_cosmos_rho"], "4.5")
         xui.apply_infotext(host, {"Schedule type": "flow_cosmos_dynamic"})
         self.assertEqual(xui.current_settings(host), xs.ExtraSchedulerSettings(laplace_mu=3.0))
+
+
+class TextCheckTests(unittest.TestCase):
+    """계획 C7 — custom 식·시그마 목록 칸이 바뀌면(Vue 입력·setText 모두) 파이썬이 검사해 그 칸의 오류 줄
+    (``pushWidgetProperty(id, 'error', 문구|None)``)을 보낸다. 바뀔 때만 보내고, 처음(앱 기본값)에는 보내지 않는다."""
+
+    def _errors(self, bridge):
+        return [args for args in bridge.properties if args[1] == xs.ERROR_PROPERTY]
+
+    def test_error_line_follows_the_text(self):
+        bridge = _Bridge()
+        widgets = xui.init_extra_schedulers_proxies(bridge)
+        self.assertEqual(self._errors(bridge), [])
+        expression_id, sigmas_id = xs.widget_id("custom_expression"), xs.widget_id("custom_sigmas")
+        unknown_q = xs.check_text(xs.MODE_EXPRESSION, "q + 1")
+        self.assertIn("unknown name 'q'", unknown_q)
+        widgets["custom_expression"]._on_vue_changed("q + 1")           # Vue 입력
+        widgets["custom_expression"]._on_vue_changed("q + 2")           # 같은 문구 — 다시 보내지 않는다
+        widgets["custom_expression"]._on_vue_changed("M * (1 - x)")
+        widgets["custom_sigmas"].setText("[1.0]")                        # 저장값·붙여 넣기(setText)도
+        widgets["custom_sigmas"].setText("")                             # 같은 문구
+        widgets["custom_sigmas"].setText(xs.DEFAULT_SIGMAS)
+        widgets["laplace_mu"]._on_vue_changed("abc")                     # 다른 칸은 검사하지 않는다
+        self.assertEqual(self._errors(bridge), [
+            (expression_id, "error", unknown_q), (expression_id, "error", None),
+            (sigmas_id, "error", "a sigma list needs at least two numbers"), (sigmas_id, "error", None)])
+
+    def test_property_name_is_the_card_mirror(self):
+        ts = (REPO / "frontend" / "src" / "utils" / "extraSchedulers.ts").read_text(encoding="utf-8")
+        self.assertIn(f"export const ERROR_PROPERTY = '{xs.ERROR_PROPERTY}'", ts)
+
+    def test_bridge_without_properties_or_after_shutdown(self):
+        class Quiet:
+            def _register_proxy(self, *_):
+                pass
+
+            def pushWidgetValue(self, *_):
+                pass
+
+        widgets = xui.init_extra_schedulers_proxies(Quiet())
+        widgets["custom_expression"]._on_vue_changed("q")               # pushWidgetProperty 없음 — 조용히
+        gone = _Bridge()
+        gone.pushWidgetProperty = mock.Mock(side_effect=RuntimeError("wrapped C/C++ object has been deleted"))
+        widgets = xui.init_extra_schedulers_proxies(gone)
+        widgets["custom_expression"]._on_vue_changed("q")
+        gone.pushWidgetProperty.assert_called_once()
+
+    def test_invalid_custom_text_warns_before_generation_but_still_sends(self):
+        _webui(self)
+        bad = sb.build_sampling_blocks(XschedHost(PRESENT, scheduler="custom", custom_expression="q +"), ap.TARGET_T2I)
+        self.assertEqual(bad.blocks[XS], user_block(custom_expression="q +"))
+        notices = [n for n in bad.notices if n.code == sn.CODE_XSCHED_INVALID_TEXT]
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0].detail, xs.check_text(xs.MODE_EXPRESSION, "q +"))
+        self.assertIn("custom 식을", notices[0].message)
+        listed = sb.build_sampling_blocks(
+            XschedHost(PRESENT, scheduler="custom", custom_mode="sigmas", custom_sigmas="[1.0]", custom_expression="q +"),
+            ap.TARGET_T2I)
+        self.assertEqual([n.detail for n in listed.notices if n.code == sn.CODE_XSCHED_INVALID_TEXT],
+                         ["a sigma list needs at least two numbers"])
+        self.assertIn("시그마 목록을", [n for n in listed.notices if n.code == sn.CODE_XSCHED_INVALID_TEXT][0].message)
+        for label, host, target in (
+                ("aux envelope", XschedHost(PRESENT, scheduler="custom", custom_expression="q +"), ap.TARGET_AUX),
+                ("not custom", XschedHost(PRESENT, scheduler="Laplace", custom_expression="q +"), ap.TARGET_T2I),
+                ("valid", XschedHost(PRESENT, scheduler="custom", custom_expression="M * (1 - x)"), ap.TARGET_T2I),
+                ("i2i main has no scheduler", XschedHost(PRESENT, scheduler="custom", custom_expression="q +"),
+                 ap.TARGET_I2I)):
+            with self.subTest(label):
+                result = sb.build_sampling_blocks(host, target)
+                self.assertEqual([n for n in result.notices if n.code == sn.CODE_XSCHED_INVALID_TEXT], [])
 
 
 if __name__ == "__main__":

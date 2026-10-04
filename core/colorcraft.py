@@ -1427,15 +1427,15 @@ def settings_of(config: Config, *, img2img: bool = False) -> ColorcraftSettings:
 TARGET_T2I, TARGET_I2I, TARGET_AUX = "t2i", "i2i", "aux"             # core/alwayson_propagation TARGETS
 BACKEND_WEBUI, BACKEND_COMFY, BACKEND_KREA2 = "webui", "comfyui", "krea2"
 PROVENANCE_USER = "user"                                            # core/alwayson_propagation PROVENANCE_USER
-REASON_OFF, REASON_KREA2, REASON_COMFY_PENDING, REASON_I2I_OFF, REASON_NO_ENTRIES, REASON_SEND = (
-    "off", "krea2", "comfy_pending", "i2i_off", "no_entries", "send")
+REASON_OFF, REASON_KREA2, REASON_I2I_OFF, REASON_NO_ENTRIES, REASON_SEND = (
+    "off", "krea2", "i2i_off", "no_entries", "send")
 
 
 @dataclass(frozen=True)
 class ColorcraftPlan:
     block: Optional[dict]          # alwayson 블록 {"args": [to_infotext]} | None(보내지 않음)
     notice: Any                    # 늘 None — 생성 전 알림 없음(결과 infotext 'SAM Extra Colorcraft status' 가 정답)
-    reason: str                    # off / krea2 / comfy_pending / i2i_off / no_entries / send
+    reason: str                    # off / krea2 / i2i_off / no_entries / send
     provenance: str = PROVENANCE_USER
     base_tags: tuple = ()          # 1차 패스(와 img2img)에서 도는 수정자
     hires_tags: tuple = ()         # Hires 패스에서 도는 수정자(i2i 는 늘 비어 있다 — Hires 패스가 없다)
@@ -1444,16 +1444,15 @@ class ColorcraftPlan:
 def plan(settings: ColorcraftSettings, *, target: str, backend: str, capabilities: Any = None) -> ColorcraftPlan:
     """이 요청에 Colorcraft 블록을 실을지. 스크립트 없음·확인 전은 여기서 보지 않는다(core/alwayson_propagation 게이트).
 
-    1 꺼짐 → 없음  2 Krea2 → 없음(카드가 말한다)  3 ComfyUI → 없음(``comfy_pending`` — 팩 1.7.0 연결 전, R16)
-    4 i2i 이고 'I2I·인페인트에도 적용' 끔 → 없음  5 돌 항목이 없음(켠 수정자가 없거나 모두 0 — 확장도 아무것도 붙이지
-    않는다; i2i 는 Base 패스만 본다) → 없음(``no_entries``, 카드가 '바뀌는 값 없음')  6 그 밖 → 블록. aux 도 같은 블록이다
-    (봉투가 메인 체인과 같게 — ``blocks_for`` 가 어느 보조 패스에도 주지 않는다). 출처는 늘 사용자 값."""
+    1 꺼짐 → 없음  2 Krea2 → 없음(카드가 말한다)  3 i2i 이고 'I2I·인페인트에도 적용' 끔 → 없음  4 돌 항목이 없음(켠
+    수정자가 없거나 모두 0 — 확장도 아무것도 붙이지 않는다; i2i 는 Base 패스만 본다) → 없음(``no_entries``, 카드가 '바뀌는
+    값 없음')  5 그 밖 → 블록. aux 도 같은 블록이다(봉투가 메인 체인과 같게 — ``blocks_for`` 가 어느 보조 패스에도 주지
+    않는다). Forge·ComfyUI 같은 규칙(ComfyUI 는 컴파일러가 항목이 있는 메인 패스마다 앱 노드 팩 1.7.0 의
+    ``ForgeNeoColorcraft`` 를 넣는다 — 계획 C5·C6). 출처는 늘 사용자 값."""
     if not settings.enabled:
         return ColorcraftPlan(None, None, REASON_OFF)
     if backend == BACKEND_KREA2:
         return ColorcraftPlan(None, None, REASON_KREA2)
-    if backend == BACKEND_COMFY:
-        return ColorcraftPlan(None, None, REASON_COMFY_PENDING)
     if target == TARGET_I2I and not settings.img2img:
         return ColorcraftPlan(None, None, REASON_I2I_OFF)
     config = config_of(settings)
@@ -1464,7 +1463,7 @@ def plan(settings: ColorcraftSettings, *, target: str, backend: str, capabilitie
     return ColorcraftPlan(as_block(config), None, REASON_SEND, PROVENANCE_USER, base, hires)
 
 
-# ── ComfyUI (앱 노드 팩 1.7.0 ``ForgeNeoColorcraft`` — 연결은 phase C) ─────────────────────────────
+# ── ComfyUI (앱 노드 팩 1.7.0 ``ForgeNeoColorcraft`` — core/comfy_workflow_compiler._add_colorcraft) ─────────
 COMFY_NODE_CLASS = "ForgeNeoColorcraft"
 COMFY_CONTRACT = "v1"                     # 노드 입력 'contract' 의 선택지 — 형식이 바뀌면 v2(옛 팩은 컴파일 전에 거절)
 COMFY_INPUTS = ("model", "vae", "settings_json", "contract", "pre_dd_sigma")
@@ -1483,7 +1482,7 @@ __all__ = [
     "KIND_TAKES_MASK", "LEAF_BY_NAME", "LEAF_FIELDS", "MARK_EDITED", "MARK_ON", "MASK_AXIS_OPTIONS", "MASK_CHOICES",
     "MASK_COUNT", "MASK_MODE_OPTIONS", "MASK_NONE", "MASK_TAGS", "MODIFIER_BY_NAME", "MODIFIER_COUNT",
     "MODIFIER_FIELDS", "MODIFIER_TAGS", "NODE_TAGS", "OPT_PRE_DD", "Overview", "PASS_BASE", "PASS_BOTH",
-    "PASS_CHOICES", "PASS_HIRES", "PRE_DD_INFOTEXT_KEY", "PROVENANCE_USER", "PassChain", "REASON_COMFY_PENDING",
+    "PASS_CHOICES", "PASS_HIRES", "PRE_DD_INFOTEXT_KEY", "PROVENANCE_USER", "PassChain",
     "REASON_I2I_OFF", "REASON_KREA2", "REASON_NO_ENTRIES", "REASON_OFF", "REASON_SEND", "SCHEDULE_NAMES",
     "SCHEMA_TS_PATH", "SCRIPT_NAME", "SETTINGS_KEY", "SHAPING_NAMES", "STATE_PATHS", "STATE_VERSION", "STATUS_KEY",
     "StateError", "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "UPSTREAM_COMBO_FIELDS", "UPSTREAM_LEAF_FIELDS",

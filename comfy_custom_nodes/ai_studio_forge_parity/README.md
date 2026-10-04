@@ -27,6 +27,15 @@ read back the same way. Creator workflows keep their own `SaveImage` nodes.
   `ForgeNeoAnimaDetailDaemon`, `ForgeNeoAnimaOptimalScale` (pack 1.6.0+; before
   the suite so its post-CFG function runs first)
 - Sampling: `ForgeNeoLatentInput`, `ForgeNeoKSamplerCNS`, `ForgeNeoHiresFix`
+- sam-extra features (pack 1.7.0+; each only when its feature is on, in this MODEL
+  order): `ForgeNeoExtraSchedulers` (right after the flow shift, only when the
+  request carries the Extra Schedulers values and a pass uses `laplace`, `custom`,
+  `flow_cosmos_rho7` or `flow_cosmos_dynamic`; without the node those four use the
+  defaults), `ForgeNeoExtraSamplerSettings` (only when an ER SDE
+  value differs from the defaults, on the MODEL every pass uses, before the
+  guidance stack), then per main pass after Detail Daemon `ForgeNeoAnimaSpeed`
+  and `ForgeNeoColorcraft` (last). Detailer passes get neither of the last two,
+  as in Forge
 - Detailers: `ForgeNeoADetailer`, `ForgeNeoSAM3Mask`, `ForgeNeoSAM3Detailer`,
   `ForgeNeoSAM3Refine`
 - Creator H3 conditioning cache: `ForgeNeoH3ConditioningCachePrepare`,
@@ -58,6 +67,162 @@ When the app generates from an ANIMA custom workflow it keeps
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.7.0 changes
+
+Four features of the sam-extra Forge extension on ComfyUI: Extra Schedulers, Extra Samplers and
+Anima SPEED (sam-extra v0.33.0), Colorcraft (sam-extra v0.32.1). The pack's code is its own
+or comes from permissive upstreams (`THIRD_PARTY_NOTICES.md`); the GPL-3.0 extension is never
+copied or imported — it is only the test oracle the pack is compared with, bit for bit on CPU.
+Restart ComfyUI after the app installs this pack.
+
+- **Extra Schedulers** (sam-extra v0.33.0 "Extra Schedulers (sam-extra)"): the nine schedulers sam-extra adds
+  to Forge's "Schedule type" list are registered in ComfyUI's KSampler scheduler table under their Forge
+  names — `cosine`, `cosine_exponential`, `phi`, `laplace`, `karras_dynamic`, `custom`,
+  `react_cosinusoidal_dynsf`, `flow_cosmos_rho7`, `flow_cosmos_dynamic` — so the app's base,
+  Hires, ADetailer (Impact FaceDetailer), SAM3 and custom-workflow samplers all build the schedule Forge
+  builds for the same steps and sigma range (`extra_schedulers.py`, pure part `extra_schedulers_math.py`).
+  A name another node pack (or a future ComfyUI) already provides is never replaced: it is skipped, logged
+  once and left out of the pack's `owned_names`, and the app refuses a graph that needs it.
+- New `ForgeNeoExtraSchedulers` (MODEL -> MODEL; inputs `custom_mode`, `custom_expression`,
+  `custom_sigmas`, `laplace_mu`, `laplace_beta`, `flow_cosmos_rho`, `flow_cosmos_sigma_max`,
+  `flow_cosmos_sigma_min` = the extension's block of eight values (v0.33.0 appended the last three; an
+  older five-value block gives them their defaults), plus the informational `owned_names` COMBO): the
+  values `laplace`, `custom`, `flow_cosmos_rho7` and `flow_cosmos_dynamic` use (the last two share the
+  three Flow Cosmos values), carried on a private copy of the MODEL's
+  `model_sampling` (a scheduler handler receives nothing else). Every later sampler of that MODEL — the
+  pack's nodes, stock `KSampler`/`KSamplerAdvanced`, `BasicScheduler`, Impact's module-level
+  `calculate_sigmas` — sees them; the pack's flow shift keeps them (every Hires pass with Shift > 0) and a
+  Hires checkpoint/UNET override gets them too. A ModelSampling* node placed *after* it drops them: the
+  app inserts the node after its own flow shift.
+- Bit-for-bit with the installed extension on CPU (`tests/test_comfy_extra_schedulers_parity.py`: settings
+  coercion, a 219-text expression corpus with the same messages, sigma lists with Forge's interpolation,
+  every float32 schedule over n x sigma ranges x mu/beta x rho grids, Flow Cosmos rho7 and Flow Cosmos
+  Dynamic on flow and eps/v models over a ρ x σ̃ grid incl. values past the node's ranges (same errors and
+  texts); real-ComfyUI tier
+  `tests/test_comfy_extra_schedulers_runtime.py`). A schedule that cannot be used stops the run with the
+  extension's English message (ComfyUI shows it as the sampler node's error), like Forge.
+- **Extra Samplers** (sam-extra v0.33.0 "Extra Samplers"): twelve of the 18 samplers sam-extra adds to Forge's
+  sampler list are registered in ComfyUI's KSampler sampler list under sam-extra's own names (its first aliases) —
+  `er_sde_reverse_time`, `er_sde_ode`, `er_sde_tunable`, `dpmpp_4m_sde`, `euler_dy_cfg_pp`, `euler_smea_dy_cfg_pp`,
+  `euler_dy`, `euler_smea_dy`, `dpmpp_2m_flow_ode`, `dpmpp_2m_heun_flow_ode`, `dpmpp_3m_flow_ode`, `restart_flow`
+  — so the app's base, Hires, ADetailer (Impact FaceDetailer), SAM3 and custom-workflow samplers find them by name
+  (`extra_samplers_register.py`). The other six are ComfyUI's own (`dpmpp_2m_sde_heun`, `uni_pc_bh2`,
+  `cfgpp_ud10_ab` from ComfyUI v0.35.0, `ipndm`, `ipndm_v`, `deis`): the app only maps the Forge label. A name another
+  node pack already provides is never replaced (e.g. Koishi-Star's own node registers `euler_dy`/`euler_smea_dy` with
+  its always-churn rule): it is skipped, logged once and left out of the pack's `owned_names`, and the app refuses a
+  graph that needs it. `dpmpp_4m_sde` and `dpmpp_3m_flow_ode` join `KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS`
+  (Forge's option of those entries).
+- New `ForgeNeoExtraSamplerSettings` (MODEL -> MODEL; inputs `max_stage`, `eta`, `noise_window`, `noise_start`,
+  `noise_end` = the extension's block, plus the informational `owned_names` COMBO): the ER SDE values, carried in
+  the MODEL's `model_options`, so every later sampler of that MODEL uses them; a Hires checkpoint/UNET override keeps
+  them. Without the node the samplers run the extension's defaults (3, 1.0, off, 0.2, 0.8).
+- Same latents as the installed extension on CPU for the same inputs (`tests/test_comfy_extra_samplers_parity.py`:
+  ER SDE trio incl. the noise window, DPM++ 4M SDE, Euler (SMEA) Dy (CFG++), the DPM++ flow ODE trio, Restart (flow)
+  — bit for bit on Forge's k-diffusion module; registration and node: `tests/test_comfy_extra_samplers_pack.py`;
+  on ComfyUI's real k-diffusion and sampler tables on CPU, incl. `er_sde_reverse_time`/`er_sde_tunable` == ComfyUI's
+  own `SamplerER_SDE` sampler and ComfyUI's `cfgpp_ud10_ab`, `ipndm`, `ipndm_v`, `deis`, `dpmpp_2m_sde_heun` ==
+  sam-extra's entries (`uni_pc_bh2`: the same algorithm, not claimed bit-equal):
+  `tests/test_comfy_extra_samplers_runtime.py`). Images still differ from Forge's for the same seed: the two hosts
+  draw their noise differently (ComfyUI's seeded generator / Brownian tree vs Forge's per-image streams).
+- **Anima SPEED** (sam-extra v0.33.0 "Anima SPEED", Spectral Progressive Diffusion, arXiv 2605.18736):
+  the early, noise-dominated steps of a pass run on a DCT-truncated coarse latent grid; at a
+  transition sigma the coarse spectrum is embedded in the full grid, the new frequencies are filled
+  with sigma-scaled noise and the state is rescaled by kappa. Computation modules (no torch at
+  import; written from the MIT upstreams howardhx/speed, aoleg/ComfyUI-SPEED and
+  sorryhyun/ComfyUI-Spectrum-KSampler — see THIRD_PARTY_NOTICES.md):
+  - `speed_schedule.py` — presets (anima, flux, flux2, krea-2, krea-2-raw, z-image, wan21, custom),
+    transition sigmas (delta tolerance, adaptive delta, neo_shift divisor, manual), the two plans
+    (`transition`: official/aoleg, only the hand-off sigma is patched; `respace`: sorryhyun, the rest
+    of the schedule is re-spaced) and the refusals (`PlanError` skip/invalid, incl. custom A <= 0 and
+    non-finite A/beta as settings errors, as in sam-extra 0.32.1; a zero denominator such as `1/0` in
+    the scales / manual sigmas text is a settings error too, as in sam-extra 0.33.0).
+  - `speed_spectral.py` — torch-only spectral maths in float64 on the latent's device (float32 on
+    MPS): cached orthonormal DCT-II basis, DCT downscale (T_Phi), amplitude-keeping resize, the DCT /
+    FFT (official ca7801c9 normalization, no `/sqrt(2)`) / one-level Haar noise expansions,
+    kappa / aligned time (Eq. 5/6), sorryhyun's respace arithmetic and even snap.
+  - `speed_runner.py` — the segmented run around any k-diffusion `sample_*`: DCT-truncated start
+    (img2img/hires starts flow-rescaled with per-seed top-up noise, sam-extra's default), coarse
+    segments, expansion per image seed (numpy `default_rng(seed + (k + 1) * 10000)` for
+    `transition`, `torch.Generator(seed + 10000)` for `respace` — a batch image equals the same seed
+    alone), the patched schedule published after each hand-off and restored afterwards, coarse noise
+    samplers from the host, the step offset for samplers that name `sam_extra_step_offset` (read
+    through CNS's `_forge_neo_base`), and the status summary.
+  Every plan, refusal message, transform, run output, published schedule and status equals the
+  installed extension's (`tests/test_comfy_speed_parity.py`, CPU, exact).
+  - `speed_nodes.py` — node **`ForgeNeoAnimaSpeed`** (MODEL -> MODEL; explicit inputs `enabled`, `mode`,
+    `threshold`, `preset`, `scales`, `delta`, `sigma_divisor`, `manual_sigmas`, `adaptive`, `transform`,
+    `spectrum_A`, `spectrum_beta`, `seed` (-1 = image seeds), `pass_label` (base / img2img / hires),
+    `image_seed` (the generation seed), `img2img_rescale`). Settings are read with sam-extra's rules and
+    messages; invalid settings leave the MODEL unchanged with an `[AnimaSPEED] … invalid settings` console
+    line. The node registers a SAMPLER_SAMPLE wrapper placed ahead of Detail Daemon (CNS, applied by the
+    sampler node, stays outermost): runtime order CNS -> SPEED -> Detail Daemon -> sampler.
+  - Per sampling run (KSAMPLER only; UniPC / DPM fast / adaptive are skipped) the wrapper checks, like
+    sam-extra: a 1-D sigma list, a 4-D/5-D latent, a flow-matching (`CONST`) model, sigma_max <= 1, no
+    inpainting mask, no reference latents / `c_concat` / ControlNet / Anima ControlNet-LLLite, no ComfyUI
+    Spectrum, and (ComfyUI only) no area/mask conds or several packed latents. Otherwise it plans and runs
+    SPEED; a SPEED failure samples the pass again without it; an interrupt goes through. Status lines
+    (`[AnimaSPEED] base: …`) use sam-extra's wording; nothing is written into the image.
+  - Sampler noise stays one stream across the size changes: a sampler that takes a `noise_sampler` gets
+    one generator for the run, made like ComfyUI's default one (`extra_args` seed, CPU `+1`); Brownian
+    SDE samplers get a per-image tree per coarse stage (`seed + (stage + 1) * 1_000_003`) and a plain-run
+    tree for the full-size tail (its range raised to an aligned hand-off sigma above the pass's range).
+  - The patched schedule is published as `transformer_options["sample_sigmas"]` (tagged as re-published)
+    while the run lasts. Detail Daemon follows it: inside SPEED it looks each sigma up in the published
+    copy (sam-extra's Detail Daemon reads Forge's current `sampling_sigmas`), so the aligned hand-off sigma
+    gets its own step's schedule value; the copied Detail Daemon node code is unchanged.
+  - A Hires checkpoint/UNET override keeps the pass's SPEED patch (`hires_carry`).
+  - `anima_lllite.apply_lllite` marks its MODEL (`model_options["forge_neo_lllite"]`) so SPEED steps aside.
+  - The legacy `speed_*` inputs of `ForgeNeoKSamplerCNS` (the external sorryhyun SpectrumSPDKSampler
+    provider) are unrelated and unchanged.
+- **Colorcraft** (sam-extra v0.32.1 "Colorcraft", muerrilla/ComfyUI-Colorcraft's sampling-time colour grading):
+  node **`ForgeNeoColorcraft`** (MODEL -> MODEL; inputs `model`, `vae`, `settings_json`, `contract` [v1],
+  `pre_dd_sigma`, default on). Exposure, tone compression, contrast, clarity/sharpness, temperature/tint,
+  vibrance/saturation, chroma contrast, Chroma Plus, colour shift — as up to ten scheduled modifiers, optionally
+  masked by latent-space masks and their combinations — applied to the CFG-combined prediction at every step.
+  - `vendor/comfyui_colorcraft/` — the MIT upstream's `lib_colorcraft/` vector, mask, colour and schedule
+    functions and the krea2/zimage basis vectors, unchanged (`UPSTREAM.md`); `vendor/comfyui_colorcraft_fork/` —
+    the Flux2 basis vectors of the aoleg fork. The vector files are `.safetensors`, now part of the pack
+    fingerprint: a vectors-only change also asks for a ComfyUI restart.
+  - `colorcraft_basis.py` (families: `Wan21` -> krea2 — Anima, Krea 2, Qwen-Image, Wan 2.1; `Flux` -> zimage;
+    `Flux2` -> flux2, 128 channels, 16x VAE; anything else — SD 1.5/SDXL — has no basis: only Contrast and
+    Color Shift apply) and `colorcraft_engine.py` (upstream's modifier loop, statement for statement, with the
+    sam-extra hook's three substitutions: anchors encoded before sampling, the family's VAE factor, schedule
+    values worked out first). Every result equals the installed extension's engine bit for bit on CPU
+    (`tests/test_comfy_colorcraft_parity.py`).
+  - `colorcraft_host.py` — sam-extra's host rules in ComfyUI terms: the colour anchors are VAE-encoded with the
+    pass's VAE when the node runs (flat 512x512 image, model-space lift with the encode's rank, float32; cached
+    across prompts per VAE and weight patches, 32 entries); the schedules are built on each sampling run's own
+    sigma list (the denoise tail on img2img/Hires) and looked up by the evaluation's sigma — with Detail Daemon,
+    by the sampler's own sigma it noted (`pre_dd_sigma`); Anima SPEED's re-published list is followed; Euler
+    (SMEA) Dy CFG++ sub-steps pass through; fp16/bf16 graded in fp32; a non-finite result or an error passes
+    the prediction through (one console line). The post-CFG function goes last, after Optimal Scale, the
+    guidance suite, Skimmed CFG and Detail Daemon (Forge's order). One console line per run:
+    `[AI Studio Colorcraft] base: krea2 (Wan21); mods I+II; 30 evals, 28 edited`.
+  - A Hires checkpoint/UNET override keeps the hires pass's Colorcraft (`hires_carry`), prepared again for the
+    override model's latent format and with its VAE. Detailer passes (ADetailer/SAM3) are never graded.
+- Shared ground for the four sam-extra ports (`guidance_common.py`, `compat.py`, `hires_carry.py`):
+  - sam-extra's coordination names, one definition each: `SUBSTEP_MARKER` (`sam_extra_substep`, Euler
+    (SMEA) Dy CFG++'s extra evaluations, read by `is_extra_sampler_substep`), `STEP_OFFSET_KWARG`
+    (`sam_extra_step_offset`, passed only to a sampler that names it — `declares_keyword`),
+    `REPUBLISHED_FROM` (`mark_republished`/`republished_from`, SPEED's re-published sigma list). Values
+    pinned to the installed extension (`tests/test_comfy_pack_foundation.py`); the code is the pack's own.
+  - `compat.register_names` registers sampler/scheduler names in ComfyUI's tables without ever replacing
+    another provider's entry (logged once, not published); nodes report what the pack owns through the
+    optional `owned_names` COMBO (`(none)` when nothing), which the app reads from `/object_info`.
+  - CNS's sampler function carries `_forge_neo_base` (the function it wraps), so SPEED can see whether
+    the real `sample_*` declares the step-offset keyword. `compat.make_first` orders SAMPLER_SAMPLE
+    wrappers (CNS stays outermost: it re-asserts itself at every sampler node).
+- `ForgeNeoHiresFix`: after a checkpoint/UNET override (and its flow shift) the pack features re-apply
+  their MODEL patches to the override model (`hires_carry.apply`, in registration order; a failing
+  carry fails the pass). Detail Daemon and the guidance suite still do not reach an override model.
+- The pack's flow shift (`ForgeNeoModelSamplingShift`, `ForgeNeoHiresFix` with Shift > 0, Anima Tile &
+  Repair) keeps the values features carry on `model_sampling` (registered attribute names) — before
+  1.7.0 nothing carried any; with Extra Schedulers it keeps μ/β/custom and the Flow Cosmos values on every
+  Hires pass.
+- `ForgeNeoKSamplerCNS` marks its clone `transformer_options["ai_studio_dy_substeps_off"]` when ComfyUI
+  Spectrum or the legacy SPEED provider (`speed_enabled`) samples: Euler (SMEA) Dy CFG++ then runs
+  without sub-steps (sam-extra's Spectrum rule). The pack's own SPEED node never sets it.
 
 ## 1.6.0 changes
 
@@ -282,6 +447,85 @@ DraconicDragon NAFNet-VAE-DeGrid model, the way the sam-extra Forge script
   node's UI output `ai_studio_degrid`: `status` (ok/skipped/off), `model`,
   `mode` (label), `strength`, `tile` (used), `precision` (`fp32`,
   `fp16-autocast`, `-` when nothing ran), `error`.
+
+## Extra Schedulers (pack 1.7.0+)
+
+| Scheduler | Schedule (p = i/(n-1); n sigmas + final 0, float32) |
+|---|---|
+| `cosine` | σmin + ½(σmax − σmin)(1 − cos(π(1 − √p))) |
+| `cosine_exponential` | (1 − p)·Cosine + p·Exponential (k-diffusion `get_sigmas_exponential`) |
+| `phi` | σmin + (σmax − σmin)(1 − p)^(φ²) — the idea of Extraltodeus's Golden Scheduler |
+| `laplace` | ComfyUI's `get_sigmas_laplace` with `laplace_mu`/`laplace_beta` (Hang et al., arXiv:2407.03297); where its clamp repeats a sigma (a flow model's σmax 1 with mu 0), the same curve over the part inside [σmin, σmax] |
+| `karras_dynamic` | the Karras/EDM ramp (arXiv:2206.00364) with a per-step ρᵢ = 7 + 2cos(2πi/n) |
+| `react_cosinusoidal_dynsf` | σmax·((σmin + (σmax − σmin)·cos(πp/2)) / σmax)^(2.15·p) — React Cosinusoidal DynSF, yoinked-h's published formula (reForge's label); a σ-range formula that keeps many steps at high σ (Anima shift 3, 28 steps: 17 above σ 0.5); no values |
+| `flow_cosmos_rho7` | Flow Cosmos rho7 (sam-extra's label; the name stays whatever ρ is). **Flow model** (ComfyUI `CONST`, e.g. Anima): the Karras ρ ramp over a VE-equivalent noise range σ̃, s = (σ̃max^(1/ρ) + p(σ̃min^(1/ρ) − σ̃max^(1/ρ)))^ρ, mapped to flow time t = s/(1 + s) — from σ̃max/(1 + σ̃max) to σ̃min/(1 + σ̃min), whatever the MODEL's sigma range. The defaults `flow_cosmos_rho` 7, `flow_cosmos_sigma_max` 80, `flow_cosmos_sigma_min` 0.002 are Cosmos-Predict2's schedule, a list from 80/81 ≈ 0.988 to ≈ 0.002 — the same numbers as the custom expression `(80**(1/7)+x*(0.002**(1/7)-80**(1/7)))**7/(1+(80**(1/7)+x*(0.002**(1/7)-80**(1/7)))**7)` (with other values: that expression with them in place of 7, 80 and 0.002). **Any other model** (SD/SDXL eps/v): ComfyUI's own `get_sigmas_karras` with `flow_cosmos_rho` on the MODEL's sigma range (with ρ 7 its `karras` schedule); σ̃ is not used there; one console line per process. Name and idea: KeithZ117/Comfyui-anima-sampler (credit only) |
+| `flow_cosmos_dynamic` | Flow Cosmos Dynamic (sam-extra's label; sam-extra's own composition of Karras Dynamic and Flow Cosmos rho7, not from another project). **Flow model**: Karras Dynamic's ramp with its per-step exponent ρᵢ = ρ + 2cos(2πi/n), written σ̃max((1 − p) + p(σ̃min/σ̃max)^(1/ρᵢ))^ρᵢ (exactly σ̃min at p = 1), over Flow Cosmos rho7's σ̃ range and mapped to flow time t = s/(1 + s); the same three values (`flow_cosmos_rho`, `flow_cosmos_sigma_max`, `flow_cosmos_sigma_min`; defaults ρ 7 on σ̃ 0.002–80), no values of its own; the MODEL's sigma range is not used. It meets Flow Cosmos rho7's list (same values) where cos(2πi/n) = 0 — the first and last step and, when 4 divides n, n/4 and 3n/4 — and lies below it in the first and last quarter, above it in the middle half. **Any other model**: Karras Dynamic itself (bit for bit `karras_dynamic`) with `flow_cosmos_rho` on the MODEL's sigma range; σ̃ is not used there; one console line per process |
+| `custom` | `custom_expression` (variables m, M, n, s, x; constants phi, pi, e; + − * / ** and 20 math functions; checked against a whitelist, never run as Python) or `custom_sigmas` (a list; 1.0 … 0.0 is scaled between σmax and σmin, log-linear interpolation = ComfyUI's `loglinear_interp`) |
+
+- A schedule with the same sigma twice before the final 0 is refused (a zero-length step makes multistep
+  samplers divide by zero); Karras Dynamic must fall at every step. React Cosinusoidal DynSF reaches that
+  limit near σmax from about 448 steps on an Anima range (434 on SDXL's); Flow Cosmos rho7 on a flow model
+  only from 1,119,764 steps with the default values, Flow Cosmos Dynamic from 1,277,194. Flow Cosmos rho7 also
+  stops on a sigma before the final 0 that is not a usable float32 (0, a subnormal, NaN — only values past the
+  node's ranges, or an eps/v MODEL with a tiny sigma_min, get there) and on an overflow of its maths, with the
+  extension's texts; Flow Cosmos Dynamic does so on a flow model only (on an eps/v MODEL it is Karras Dynamic,
+  which has no such rule).
+- ComfyUI has no Forge "rho"/"sigma min/max" settings: Karras Dynamic uses ρ 7 (the two Flow Cosmos schedulers
+  never read Forge's rho: they have their own), and every scheduler but the Flow Cosmos ones on a flow model the
+  MODEL's own sigma range.
+- Flow Cosmos rho7's values (sam-extra v0.33.0): `flow_cosmos_rho` 1–15 (step 0.1, default 7),
+  `flow_cosmos_sigma_max` 1–1000 (step 0.1, default 80), `flow_cosmos_sigma_min` 0.0001–1 (step 0.0001,
+  default 0.002) — sam-extra's slider ranges; σ̃ is the VE-equivalent noise level. Without
+  `ForgeNeoExtraSchedulers` (or with an older five-value block) the defaults apply, which give exactly the
+  list of before. Like Laplace's μ/β, a value that is not a finite number becomes the default and one outside
+  its range is clamped (the node coerces; ComfyUI itself refuses a widget value outside min/max). ρ must be
+  finite and above 0, and on a flow model 0 < σ̃ min < σ̃ max, both finite — only σ̃ min = σ̃ max = 1 passes the
+  ranges and still stops the run with the extension's message; an eps/v model does not use σ̃ and runs.
+  Scaling both σ̃ ends by k is the flow time shift k (t' = k·t/(1 + (k − 1)·t) ⇔ σ̃' = k·σ̃), so Anima's shift 3
+  on the default list corresponds to σ̃ 0.006–240 — a fact of the maths, not a quality claim. A narrow σ̃ range
+  reaches the flat-step limit much sooner (σ̃ 0.9999–1: from 841 steps).
+- Flow Cosmos Dynamic reads the same three values. Like Karras Dynamic it needs ρ above 2 (the node allows
+  1–15: ρ ≤ 2 stops the run with the extension's text, on every model) and a list that falls at every step:
+  below ρ ≈ 4 it rises mid-run for some step counts (σ̃ 0.002–80, also ×k: every ρ up to 3.8 for some n ≤ 300,
+  from 3.9 none), which stops the run like Karras Dynamic; on a flow model a flat step is refused first (its
+  text names ρ and σ̃). With the defaults Anima's 28 steps put 18 above 0.5 and 5 below 0.05 (Flow Cosmos
+  rho7: 17 and 5). Its quality on Anima is unverified (no A/B). The console line on a model that is not a flow
+  model is sam-extra's, separate from Flow Cosmos rho7's and with the ρ of that first run:
+  `[Extra Schedulers] Flow Cosmos Dynamic: not a flow model - using Karras Dynamic rho 7 on the model's own sigma range`.
+- Flow Cosmos rho7 is a Karras ramp seen in flow time, so many steps stay near t = 1 (Anima, 28 steps: 17
+  above 0.5, 5 below 0.05). Its quality on Anima is unverified beyond one 2-seed A/B on Forge with the
+  defaults; that A/B is an observation, not a claim, and other values are unverified. The console line on a
+  model that is not a flow model is sam-extra's, with the ρ of that first run:
+  `[Extra Schedulers] Flow Cosmos rho7: not a flow model - using Karras rho 7 on the model's own sigma range`.
+  ComfyUI's Cosmos-Predict2 sampling (`COSMOS_RFLOW`, EDM σ 0.002–80) is not `CONST` and takes that branch:
+  the same EDM ramp in that model's own σ units, which it maps to t = σ/(σ + 1) itself (the flow list up to
+  float32 rounding).
+- `AISTUDIO_XSCHED_DEBUG=1` in ComfyUI's environment logs every schedule a handler builds.
+
+## Extra Samplers (pack 1.7.0+)
+
+| ComfyUI name | Forge label (sam-extra) | What runs on ComfyUI |
+|---|---|---|
+| `er_sde_reverse_time` | ER SDE (Reverse-time) | ComfyUI's `sample_er_sde` with h(λ) = λ^(η+1) (η = 0 → the ODE); optional noise window |
+| `er_sde_ode` | ER SDE (ODE) | ComfyUI's `sample_er_sde` with h(λ) = λ, no noise |
+| `er_sde_tunable` | ER SDE (Tunable) | ComfyUI's `sample_er_sde` with h(λ) = λ(e^(λ^0.3)+10)^η — ComfyUI's `er_sde` at η 1 without a window; optional noise window |
+| `dpmpp_4m_sde` | DPM++ 4M SDE | Clybius' 4M SDE (BSD-3-Clause), momentum 0, half-log-SNR flow handling; Brownian-tree noise; penultimate sigma discarded |
+| `euler_dy_cfg_pp` / `euler_smea_dy_cfg_pp` | Euler Dy CFG++ / Euler SMEA Dy CFG++ | Koishi-Star's Dy/SMEA sub-steps (Apache-2.0) with the CFG++ update; CFG 1–2 recommended |
+| `euler_dy` / `euler_smea_dy` | Euler Dy / Euler SMEA Dy | the same sub-steps with plain Euler steps; churn only with `s_churn` > 0 (`min` rule) |
+| `dpmpp_2m_flow_ode` / `dpmpp_2m_heun_flow_ode` / `dpmpp_3m_flow_ode` | DPM++ 2M (flow ODE) / DPM++ 2M Heun (flow ODE) / DPM++ 3M (flow ODE) | ComfyUI's own `dpmpp_2m_sde` (midpoint / Heun correction) and `dpmpp_3m_sde` at η 0: DPM-Solver++ for the model's probability-flow ODE in its half-log-SNR λ; no noise is ever drawn (no `eta`, no noise sampler); `dpmpp_3m_flow_ode` discards the penultimate sigma like Forge's "DPM++ 3M SDE" (ComfyUI's own `dpmpp_3m_sde` does not) |
+| `restart_flow` | Restart (flow) | Restart sampling (Xu et al., arXiv:2306.14878) on the scheduler's own grid: Heun steps; from 20 steps, after the step that reaches s = σ/α ≈ 0.1 it jumps back to s ≈ 2 (σ ≈ 0.09 → 0.67 on a flow model) with the model's exact forward transition and re-walks those steps, once (twice from 36 steps) — about 1.4× Heun's model calls at 28 steps; fewer than 20 steps = plain Heun |
+
+- ER SDE values (`ForgeNeoExtraSamplerSettings`): `max_stage` 1–3 (solver order, all three ER SDE samplers), `eta`
+  0–10 (Reverse-time and Tunable), `noise_window` with `noise_start`/`noise_end` 0–1 (sampling progress, default
+  0.2–0.8): only the steps whose target σ lies in `[percent_to_sigma(end), percent_to_sigma(start)]` add SDE noise,
+  the others are ODE steps that draw nothing; `start ≥ end` = no noise at all. ComfyUI's own `er_sde` ignores them.
+- Euler (SMEA) Dy: the Dy step evaluates the (odd row, odd column) pixels — a half-resolution latent — at steps 2
+  and 3; SMEA adds a ×1.25 evaluation at step 0 (more VRAM) and the half-resolution one at step 1. The evaluations
+  carry `transformer_options["sam_extra_substep"]` so the pack's guidance keeps its step state; an inpainting mask,
+  latent and noise follow each evaluation's size. The sub-steps are skipped (plain (CFG++) Euler steps, logged once)
+  under ComfyUI Spectrum / the legacy SPEED provider of `ForgeNeoKSamplerCNS`, a Spectrum model-function wrapper,
+  concat conditioning (inpainting / fill models, Wan I2V) and area/mask conditioning.
+- ComfyUI has no Forge "Sampler parameters": η (ancestral), sigma noise and churn run at Forge's defaults (1, 1, 0).
 
 ## Anima ControlNet-LLLite (pack 1.4.0+)
 

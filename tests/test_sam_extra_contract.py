@@ -905,7 +905,7 @@ class TestInstalledExtension(unittest.TestCase):
 class ExtraSchedulersRegistryTests(unittest.TestCase):
     """Extra Schedulers 앱 노출(계획 A-XS3, 보류 → mapped) — 확장 없이 도는 레지스트리 검사."""
 
-    def test_mapped_with_the_comfy_pending_gap(self):
+    def test_mapped_with_the_comfy_wiring(self):
         from core import extra_schedulers as xs
         entry = reg.SCRIPTS[xs.SCRIPT_NAME]
         self.assertEqual(entry["status"], reg.MAPPED)
@@ -916,8 +916,25 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
                     "core/alwayson_propagation.py:TITLE_EXTRA_SCHEDULERS", "core/sam_extra_notices.py:CODE_XSCHED_NOT_APPLIED",
                     "core/image_metadata.py:_EXTENSION_MARKERS"):
             self.assertIn(ref, entry["app"])
-        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
-        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
+        # 계획 C6 — ComfyUI(앱 노드 팩 1.7.0)에 연결됐다: comfy 참조가 있고 '팩 1.7.0 단계 전' 틈은 없다
+        for ref in ("comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers.py:ForgeNeoExtraSchedulers",
+                    "comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers.py:install_extra_schedulers",
+                    "core/comfy_workflow_compiler.py:_add_extra_schedulers",
+                    "core/comfy_workflow_compiler.py:_check_extra_schedulers_reach",
+                    "core/comfy_workflow_compiler.py:_check_pack_owner",
+                    "core/comfy_metadata.py:_extra_schedulers_parameters",
+                    "core/comfy_workflow_controls.py:feature_preflight"):
+            self.assertIn(ref, entry["comfy"])
+        self.assertFalse([gap for gap in entry["gaps"] if "단계 전" in gap or "comfy_pending" in gap], entry["gaps"])
+        self.assertTrue(any('ρ 7·모델의 σ 범위' in gap for gap in entry["gaps"]), 'ρ 7·모델의 σ 범위')
+        # 계획 C7 — 식·목록 미리 검사가 연결됐다(오류 줄·생성 전 경고): 'C7' 틈은 없다
+        for ref in ("core/extra_schedulers.py:check_text", "ui/extra_schedulers_ui.py:watch_text_errors",
+                    "core/sam_extra_notices.py:CODE_XSCHED_INVALID_TEXT"):
+            self.assertIn(ref, entry["app"])
+        self.assertFalse([f"{key}: {gap}" for key in (xs.SCRIPT_NAME,) for gap in entry["gaps"] if gap.startswith("C7")])
+        self.assertFalse([gap for gap in reg.MODULES["sam3ext/extra_schedulers/"].get("gaps", ()) if gap.startswith("C7")])
+        self.assertTrue(any('model_sampling 사본' in gap for gap in entry["gaps"]), 'model_sampling 사본')
+        self.assertTrue(any('SamplerCustom·BasicScheduler' in gap for gap in entry["gaps"]), 'SamplerCustom·BasicScheduler')
         self.assertTrue(any(gap.startswith("P18") for gap in entry["gaps"]))
         rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
                 for key, row in table.items() if "extra_schedulers" in key.lower() or "extra schedulers" in key.lower()}
@@ -952,7 +969,9 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
         self.assertEqual(sorted({f"core.extra_schedulers:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
         self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
                          {"sam3ext/ui_extra_schedulers.py", "sam3ext/extra_schedulers/settings.py",
-                          "sam3ext/extra_schedulers/registry.py", "sam3ext/extra_schedulers/schedulers.py"})
+                          "sam3ext/extra_schedulers/registry.py", "sam3ext/extra_schedulers/schedulers.py",
+                          # 계획 C0 — 팩만 하드코딩하는 식 계산기·시그마 목록 한도(앱 상수 없음, '_comfy' 쌍둥이)
+                          "sam3ext/extra_schedulers/expression.py", "sam3ext/extra_schedulers/sigma_list.py"})
         self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
                          {(index, field) for index in (3, 4, 5, 6, 7) for field in ("minimum", "maximum", "step", "value")})
         logs = {pin["name"] for pin in pins.values() if pin["source"] == "ast" and pin["name"].endswith("_NOT_FLOW_LOG")}
@@ -961,10 +980,10 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
 
 class ExtraSamplersV033RegistryTests(unittest.TestCase):
     """sam-extra v0.33.0 Extra Samplers 앱 노출(계획 A-XSa2, 보류 → mapped) — 확장 없이 도는 레지스트리 검사: 행은 인자 5개의
-    위치 spec(app_spec — 픽스처·ui() 와 비교), ComfyUI 는 팩 1.7.0 단계 전의 틈, 앱 core/extra_samplers 가 하드코딩한 확장
+    위치 spec(app_spec — 픽스처·ui() 와 비교), ComfyUI 는 팩 1.7.0 연결(계획 C6), 앱 core/extra_samplers 가 하드코딩한 확장
     값마다 핀(PLAN_amend_v033 §4 + 결과 알림이 읽는 Dy 상태 줄)."""
 
-    def test_mapped_with_the_comfy_pending_gap(self):
+    def test_mapped_with_the_comfy_wiring(self):
         from core import extra_samplers as xsamp
         entry = reg.SCRIPTS[xsamp.SCRIPT_NAME]
         self.assertEqual(entry["status"], reg.MAPPED)
@@ -989,9 +1008,20 @@ class ExtraSamplersV033RegistryTests(unittest.TestCase):
                     "frontend/src/utils/extraSamplers.ts:passesUsing",
                     "frontend/src/utils/extraSamplers.ts:windowUnsupported"):
             self.assertIn(ref, entry["app"])
-        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
-        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
-        self.assertIn("comfy_pending", entry["gaps"][0])
+        # 계획 C6 — ComfyUI(앱 노드 팩 1.7.0)에 연결됐다: comfy 참조가 있고 '팩 1.7.0 단계 전' 틈은 없다
+        for ref in ("comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_nodes.py:ForgeNeoExtraSamplerSettings",
+                    "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_register.py:install_extra_samplers",
+                    "core/comfy_workflow_compiler.py:_add_extra_samplers",
+                    "core/comfy_workflow_compiler.py:_check_pack_sampler_names",
+                    "core/comfy_workflow_compiler.py:_check_pack_owner",
+                    "core/comfy_metadata.py:_extra_samplers_parameters",
+                    "core/comfy_workflow_controls.py:feature_preflight"):
+            self.assertIn(ref, entry["comfy"])
+        self.assertFalse([gap for gap in entry["gaps"] if "단계 전" in gap or "comfy_pending" in gap], entry["gaps"])
+        self.assertTrue(any('Restart (flow): Forge 는 재시작 구간에서 프롬프트 편집 스텝 카운터를 되감는다' in gap for gap in entry["gaps"]), 'Restart (flow): Forge 는 재시작 구간에서 프롬프트 편집 스텝 카운터를 되감는다')
+        self.assertTrue(any('UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음' in gap for gap in entry["gaps"]), 'UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음')
+        self.assertTrue(any('XSa-b' in gap for gap in entry["gaps"]), 'XSa-b')
+        self.assertTrue(any('XSa-d' in gap for gap in entry["gaps"]), 'XSa-d')
         self.assertTrue(any(gap.startswith("P18") for gap in entry["gaps"]))
         rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
                 for key, row in table.items() if "extra_samplers" in key.lower() or "extra samplers" in key.lower()}
@@ -1037,7 +1067,8 @@ class ExtraSamplersV033RegistryTests(unittest.TestCase):
                          {"scripts/anima_extra_samplers.py", "sam3ext/extra_samplers/params.py",
                           "sam3ext/extra_samplers/registry.py", "sam3ext/extra_samplers/substep_guard.py",
                           "sam3ext/extra_samplers/restart_flow.py", "sam3ext/extra_samplers/cfgpp_ud10_ab.py",
-                          "sam3ext/extra_samplers/ipndm_deis.py"})
+                          "sam3ext/extra_samplers/ipndm_deis.py",
+                          "sam3ext/extra_samplers/euler_dy.py"})   # 계획 C0 — Dy 규칙(팩만, '_comfy' 쌍둥이)
         self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
                          {(2, "value")} | {(index, field) for index in (3, 4) for field in ("minimum", "maximum", "step", "value")})
 
@@ -1055,7 +1086,7 @@ class ExtraSamplersV033RegistryTests(unittest.TestCase):
 class AnimaSpeedRegistryTests(unittest.TestCase):
     """Anima SPEED 앱 노출(계획 A-SP3, 보류 → mapped) — 확장 없이 도는 레지스트리 검사."""
 
-    def test_mapped_main_only_with_the_comfy_pending_gap(self):
+    def test_mapped_main_only_with_the_comfy_wiring(self):
         from core import anima_speed as sp
         entry = reg.SCRIPTS[sp.SCRIPT_NAME]
         self.assertEqual(entry["status"], reg.MAPPED)
@@ -1067,8 +1098,20 @@ class AnimaSpeedRegistryTests(unittest.TestCase):
                     "core/sam_extra_notices.py:CODE_SPEED_NOT_APPLIED", "core/sam_extra_notices.py:speed_result_notices",
                     "core/image_metadata.py:_EXTENSION_MARKERS"):
             self.assertIn(ref, entry["app"])
-        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
-        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
+        # 계획 C6 — ComfyUI(앱 노드 팩 1.7.0)에 연결됐다: comfy 참조가 있고 '팩 1.7.0 단계 전' 틈은 없다
+        for ref in ("comfy_custom_nodes/ai_studio_forge_parity/speed_nodes.py:ForgeNeoAnimaSpeed",
+                    "comfy_custom_nodes/ai_studio_forge_parity/speed_runner.py:run_speed",
+                    "core/comfy_workflow_compiler.py:_add_speed",
+                    "core/comfy_workflow_compiler.py:_speed_plan",
+                    "core/comfy_metadata.py:_speed_parameters",
+                    "core/comfy_workflow_controls.py:feature_preflight",
+                    "core/comfy_compatibility.py:RECIPES"):
+            self.assertIn(ref, entry["comfy"])
+        self.assertFalse([gap for gap in entry["gaps"] if "단계 전" in gap or "comfy_pending" in gap], entry["gaps"])
+        self.assertTrue(any("'Anima SPEED status'" in gap for gap in entry["gaps"]), "'Anima SPEED status'")
+        self.assertTrue(any('hires= 는 Hires 노드를 따른다' in gap for gap in entry["gaps"]), 'hires= 는 Hires 노드를 따른다')
+        self.assertTrue(any('노드가 받은 기본값' in gap for gap in entry["gaps"]), '노드가 받은 기본값')
+        self.assertTrue(any('build_plan 거절' in gap for gap in entry["gaps"]), 'build_plan 거절')
         self.assertTrue(any(gap.startswith("P18") for gap in entry["gaps"]))
         # 붙여 넣기는 가져오기(액션 sam_extra_import — 계획 A-CC12a/b)로 연결됐다: P16 틈은 닫혔다
         self.assertFalse(any(gap.startswith("P16") for gap in entry["gaps"]), entry["gaps"])
@@ -1096,7 +1139,8 @@ class AnimaSpeedRegistryTests(unittest.TestCase):
                  "DELTA_MIN", "DELTA_MAX", "DELTA_STEP", "DIVISOR_MIN", "DIVISOR_MAX", "DIVISOR_STEP")
         self.assertEqual(sorted({f"core.anima_speed:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
         self.assertEqual({pin["file"] for pin in pins.values() if pin["source"] == "ast"},
-                         {"scripts/anima_speed.py", "sam3ext/speed/forge_host.py", "sam3ext/speed/schedule.py"})
+                         {"scripts/anima_speed.py", "sam3ext/speed/forge_host.py", "sam3ext/speed/schedule.py",
+                          "sam3ext/speed/runner.py"})   # 계획 C0 — 런너 시드 오프셋(팩만, '_comfy' 쌍둥이)
         self.assertEqual({(pin["index"], pin["field"]) for pin in pins.values() if pin["source"] == "fixture"},
                          {(index, field) for index in (5, 6) for field in ("minimum", "maximum", "step")})
 
@@ -1104,7 +1148,7 @@ class AnimaSpeedRegistryTests(unittest.TestCase):
 class ColorcraftRegistryTests(unittest.TestCase):
     """Colorcraft 앱 노출(계획 A-CC5, 보류 → mapped) — 확장 없이 도는 레지스트리 검사."""
 
-    def test_mapped_main_only_with_the_comfy_pending_gap(self):
+    def test_mapped_main_only_with_the_comfy_wiring(self):
         from core import colorcraft as cc
         entry = reg.SCRIPTS[cc.SCRIPT_NAME]
         self.assertEqual(entry["status"], reg.MAPPED)
@@ -1118,8 +1162,17 @@ class ColorcraftRegistryTests(unittest.TestCase):
                     "ui/sampling_blocks.py:CONTRIBUTORS", "core/sam_extra_notices.py:CODE_COLORCRAFT_NOT_APPLIED",
                     "core/sam_extra_notices.py:colorcraft_result_notices", "core/image_metadata.py:_EXTENSION_MARKERS"):
             self.assertIn(ref, entry["app"])
-        self.assertEqual(entry["comfy"], (), "ComfyUI 참조는 팩 1.7.0 단계(계획 C6)가 더한다")
-        self.assertTrue(entry["gaps"][0].startswith("Comfy: 팩 1.7.0 단계 전"), entry["gaps"][0])
+        # 계획 C6 — ComfyUI(앱 노드 팩 1.7.0)에 연결됐다: comfy 참조가 있고 '팩 1.7.0 단계 전' 틈은 없다
+        for ref in ("comfy_custom_nodes/ai_studio_forge_parity/colorcraft_nodes.py:ForgeNeoColorcraft",
+                    "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_engine.py:apply_chain",
+                    "core/comfy_workflow_compiler.py:_add_colorcraft",
+                    "core/comfy_metadata.py:_colorcraft_parameters",
+                    "core/comfy_workflow_controls.py:feature_preflight",
+                    "core/comfy_compatibility.py:RECIPES"):
+            self.assertIn(ref, entry["comfy"])
+        self.assertFalse([gap for gap in entry["gaps"] if "단계 전" in gap or "comfy_pending" in gap], entry["gaps"])
+        self.assertTrue(any("'SAM Extra Colorcraft status'" in gap for gap in entry["gaps"]), "'SAM Extra Colorcraft status'")
+        self.assertTrue(any('디코드 VAE' in gap for gap in entry["gaps"]), '디코드 VAE')
         for package in ("P18", "HOLD"):
             self.assertTrue(any(gap.startswith(package) for gap in entry["gaps"]), package)
         self.assertFalse(any(gap.startswith("P16") for gap in entry["gaps"]), entry["gaps"])     # 가져오기로 연결됐다
@@ -1154,12 +1207,119 @@ class ColorcraftRegistryTests(unittest.TestCase):
         self.assertEqual(sorted({f"core.colorcraft:{name}" for name in names} - apps), [], "핀이 없는 앱 상수")
         self.assertEqual({pin["file"] for pin in pins.values()},
                          {"scripts/colorcraft.py", "sam3ext/colorcraft/spec.py", "sam3ext/colorcraft/engine.py",
-                          "sam3ext/colorcraft/masking.py", "sam3ext/colorcraft/panel_state.py"})
+                          "sam3ext/colorcraft/masking.py", "sam3ext/colorcraft/panel_state.py",
+                          # 계획 C0 — 기저 표·앵커 캐시(팩만, '_comfy' 쌍둥이)
+                          "sam3ext/colorcraft/basis.py", "sam3ext/colorcraft/hook.py"})
         self.assertEqual({pin["source"] for pin in pins.values()}, {"ast"})
         options = {pin["id"]: pin["app"] for pin in reg.SEMANTIC_PINS if pin["id"].startswith("opt_")}
         self.assertEqual(options["opt_colorcraft_pre_dd"], "core.forge_override_settings:OPT_COLORCRAFT_PRE_DD")
         self.assertEqual(options["opt_infotext_colorcraft_pre_dd"],
                          "core.forge_override_settings:INFOTEXT_COLORCRAFT_PRE_DD")
+
+class ComfyWiringRegistryTests(unittest.TestCase):
+    """계획 C6 — 네 기능의 MODULES 행(계산 모듈)도 팩 1.7.0 의 다시 구현을 comfy 로 가리키고, 어느 행에도 '팩 1.7.0 단계
+    전'·'comfy_pending' 틈이 남지 않는다."""
+
+    def test_module_rows_point_at_the_pack(self):
+        expected = {
+            "sam3ext/colorcraft/": "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_engine.py:apply_chain",
+            "sam3ext/speed/": "comfy_custom_nodes/ai_studio_forge_parity/speed_runner.py:run_speed",
+            "sam3ext/extra_schedulers/": "comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers_math.py:compile_expression",
+            "sam3ext/extra_samplers/": "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_register.py:install_extra_samplers",
+        }
+        for key, ref in expected.items():
+            with self.subTest(module=key):
+                self.assertEqual(reg.MODULES[key]["status"], reg.MAPPED)
+                self.assertIn(ref, reg.MODULES[key]["comfy"])
+        stale = [f"{section}[{key}]" for section, table in reg.classified_sections().items()
+                 for key, row in table.items() for gap in row.get("gaps", ())
+                 if "comfy_pending" in gap or "팩 1.7.0 단계 전" in gap or "C0 에서 들어온다" in gap]
+        self.assertEqual(stale, [])
+
+
+class ComfyPackMirrorPinTests(unittest.TestCase):
+    """계획 C0 — 본 트리에 들어온 팩 1.7.0 이 확장 값을 하드코딩한 곳마다 '<id>_comfy' 쌍둥이 핀이 있고, 쌍둥이는 짝 핀
+    (확장 값)과 같은 대상을 본다. 값 비교 자체는 test_app_constants_follow_pinned_extension_constants(팩 import)와
+    test_semantic_pins_on_source_constants·test_semantic_pins_on_live_values(설치된 확장)가 한다."""
+
+    PACK = "comfy_custom_nodes.ai_studio_forge_parity."
+
+    def test_every_comfy_twin_mirrors_its_extension_pin(self):
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS}
+        twins = {pin_id: pin for pin_id, pin in pins.items() if pin_id.endswith("_comfy")}
+        self.assertGreater(len(twins), 100)
+        keys = ("source", "file", "name", "expected", "script", "index", "field")
+        for pin_id, twin in sorted(twins.items()):
+            with self.subTest(pin=pin_id):
+                self.assertTrue(twin["app"].startswith(self.PACK), twin["app"])
+                base = pins.get(pin_id[:-len("_comfy")])
+                self.assertIsNotNone(base, "짝 핀(확장 값)이 없다")
+                self.assertEqual({key: base.get(key) for key in keys}, {key: twin.get(key) for key in keys})
+                self.assertFalse(base.get("app", "").startswith(self.PACK), "짝 핀의 app 은 앱 상수(또는 없음)")
+
+    def test_shared_markers_are_one_set_in_the_pack(self):
+        """계획 R4 — 보조 스텝 표시·스텝 오프셋 키워드·다시 내놓은 σ 표시는 확장 파일 셋의 상수 하나씩이고, 팩은
+        guidance_common 에 한 번만 둔다(기능별 중복 핀 colorcraft_substep_marker·speed_step_offset_kwarg_comfy 는 없다)."""
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS}
+        self.assertEqual({pin_id: (pins[pin_id]["file"], pins[pin_id]["name"], pins[f"{pin_id}_comfy"]["app"])
+                          for pin_id in ("shared_substep_marker", "shared_step_offset_kwarg", "shared_republished_attr")}, {
+            "shared_substep_marker": ("sam3ext/extra_samplers/common.py", "SUBSTEP_MARKER",
+                                      f"{self.PACK}guidance_common:SUBSTEP_MARKER"),
+            "shared_step_offset_kwarg": ("sam3ext/speed/runner.py", "STEP_OFFSET_KWARG",
+                                         f"{self.PACK}guidance_common:STEP_OFFSET_KWARG"),
+            "shared_republished_attr": ("sam3ext/guidance/sigmas.py", "REPUBLISHED_FROM",
+                                        f"{self.PACK}guidance_common:REPUBLISHED_FROM")})
+        for duplicate in ("colorcraft_substep_marker", "speed_step_offset_kwarg_comfy", "extra_samplers_substep_marker",
+                          "extra_samplers_step_offset_kwarg"):
+            self.assertNotIn(duplicate, pins)
+
+    def test_pack_constants_that_mirror_the_extension_are_pinned(self):
+        """팩이 확장 값을 그대로 하드코딩한 상수마다 쌍둥이 핀 — 빠지면 확장이 바뀌어도 팩만 조용히 어긋난다."""
+        apps = {pin["app"] for pin in reg.SEMANTIC_PINS if pin["id"].endswith("_comfy")}
+        cosmos = tuple(f"FLOW_COSMOS_{what}_{bound}" for what in ("RHO", "SIGMA_MAX", "SIGMA_MIN")
+                       for bound in ("MIN", "MAX", "STEP", "DEFAULT"))
+        wanted = {
+            "guidance_common": ("SUBSTEP_MARKER", "STEP_OFFSET_KWARG", "REPUBLISHED_FROM"),
+            "extra_schedulers_math": (
+                "ARG_NAMES", "MODES", "MODE_EXPRESSION", "MODE_SIGMAS", "DEFAULT_EXPRESSION", "DEFAULT_SIGMAS",
+                "LAPLACE_MU_MIN", "LAPLACE_MU_MAX", "LAPLACE_MU_DEFAULT", "LAPLACE_BETA_MIN", "LAPLACE_BETA_MAX",
+                "LAPLACE_BETA_DEFAULT", *cosmos, "REACT_DYNSF_FACTOR", "FLOW_COSMOS_SIGMA_MAX", "FLOW_COSMOS_SIGMA_MIN",
+                "FLOW_COSMOS_RHO", "FLOW_COSMOS_NOT_FLOW_LOG", "FLOW_COSMOS_DYNAMIC_NOT_FLOW_LOG",
+                "FLOW_COSMOS_VALUES_SOURCE", "MAX_LENGTH", "MAX_NODES", "MAX_DEPTH", "MAX_EXPONENT", "MAX_CALL_ARGS",
+                "VARIABLES", "MAX_TEXT_LENGTH", "MAX_VALUES", "KARRAS_DYNAMIC_RHO", "LAPLACE_EPSILON", "RHO_SOURCE",
+                "ZERO_LENGTH_STEP"),
+            "extra_samplers_math": (
+                "ARG_NAMES", "DEFAULT_MAX_STAGE", "MAX_STAGE_MIN", "MAX_STAGE_MAX", "DEFAULT_ETA", "ETA_MIN", "ETA_MAX",
+                "ETA_STEP", "DEFAULT_NOISE_WINDOW", "DEFAULT_NOISE_START", "DEFAULT_NOISE_END", "NOISE_PERCENT_MIN",
+                "NOISE_PERCENT_MAX", "NOISE_PERCENT_STEP"),
+            "extra_samplers_restart": ("RESTART_S_MIN", "RESTART_S_MAX", "RESTART_MIN_STEPS", "RESTART_TIMES",
+                                       "RESTART_TIMES_LONG", "RESTART_LONG_FROM"),
+            "extra_samplers_dy": ("SMEA_SCALE", "RESIZE_MODE", "CHURN_MIN", "CHURN_MAX"),
+            "speed_nodes": ("ARG_NAMES", "DEFAULTS", "ARG_ALIASES", "KEY", "BROWNIAN_STAGE_SEED_STRIDE"),
+            "speed_schedule": ("MODES", "THRESHOLDS", "TRANSFORMS", "PRESET_NAMES", "PRESETS", "REFERENCE_LATENT",
+                               "CUSTOM_DEFAULT_A", "CUSTOM_DEFAULT_BETA", "MAX_COARSE_FRACTION", "RESPACE_PATCH"),
+            "speed_runner": ("EXPANSION_SEED_STRIDE", "RESPACE_SEED_OFFSET", "INIT_NOISE_SEED_OFFSET"),
+            "colorcraft_engine": ("KINDS", "ADVANCED_KINDS", "NEUTRAL_COLOR"),
+            "colorcraft_host": ("MASK_AXES", "MASK_MODES", "COMBINE_OPERATIONS", "ANCHOR_CACHE_LIMIT"),
+            "colorcraft_basis": ("LATENT_FORMAT_TO_FAMILY", "MODEL_DEV_DEFAULTS", "VAE_DOWNSCALE_FACTORS",
+                                 "VAE_DOWNSCALE_FACTOR"),
+        }
+        self.assertEqual(sorted({f"{self.PACK}{module}:{name}" for module, names in wanted.items() for name in names}
+                                - apps), [], "쌍둥이 핀이 없는 팩 상수")
+        # 팩 노드 입력은 그 상수에서 나온다 — 노드 이름 순서·범위·기본값이 핀이 지키는 값과 같다
+        from comfy_custom_nodes.ai_studio_forge_parity import extra_samplers_math as xsm, extra_schedulers_math as xsc
+        from comfy_custom_nodes.ai_studio_forge_parity.extra_samplers_nodes import ForgeNeoExtraSamplerSettings
+        from comfy_custom_nodes.ai_studio_forge_parity.extra_schedulers import ForgeNeoExtraSchedulers
+        samplers = ForgeNeoExtraSamplerSettings.INPUT_TYPES()["required"]
+        self.assertEqual(tuple(name for name in samplers if name != "model"), xsm.ARG_NAMES)
+        self.assertEqual(samplers["eta"][1]["min"], xsm.ETA_MIN)
+        self.assertEqual((samplers["noise_start"][1]["max"], samplers["noise_end"][1]["default"]),
+                         (xsm.NOISE_PERCENT_MAX, xsm.DEFAULT_NOISE_END))
+        schedulers = ForgeNeoExtraSchedulers.INPUT_TYPES()["required"]
+        self.assertEqual(tuple(name for name in schedulers if name != "model"), xsc.ARG_NAMES)
+        self.assertEqual((schedulers["flow_cosmos_sigma_min"][1]["min"], schedulers["flow_cosmos_rho"][1]["default"]),
+                         (xsc.FLOW_COSMOS_SIGMA_MIN_MIN, xsc.FLOW_COSMOS_RHO_DEFAULT))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import ast
 import json
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+import comfy_custom_nodes.ai_studio_forge_parity as bundled_pack
+from comfy_custom_nodes.ai_studio_forge_parity import colorcraft_nodes
 from comfy_custom_nodes.ai_studio_forge_parity import compat
 from comfy_custom_nodes.ai_studio_forge_parity import degrid_nodes
+from comfy_custom_nodes.ai_studio_forge_parity import extra_samplers_nodes
+from comfy_custom_nodes.ai_studio_forge_parity import extra_samplers_register
+from comfy_custom_nodes.ai_studio_forge_parity import extra_schedulers
 from comfy_custom_nodes.ai_studio_forge_parity import generation
 from comfy_custom_nodes.ai_studio_forge_parity import guidance
 from comfy_custom_nodes.ai_studio_forge_parity import guidance_dave
+from comfy_custom_nodes.ai_studio_forge_parity import hires_carry
+from comfy_custom_nodes.ai_studio_forge_parity import speed_nodes
 from tests._optional_deps import load_torch, requires_torch
 
 
@@ -46,6 +56,60 @@ class TestForgeParityContracts(unittest.TestCase):
             degrid_nodes.NODE_DISPLAY_NAME_MAPPINGS,
             {"ForgeNeoAnimaVAEDeGrid": "Forge Neo Anima VAE DeGrid (NAFNet)"},
         )
+
+    def test_pack_1_7_0_feature_nodes_are_exported_and_named(self):
+        expected = {
+            extra_schedulers: ("ForgeNeoExtraSchedulers", "Forge Neo Extra Schedulers (sam-extra)"),
+            extra_samplers_nodes: ("ForgeNeoExtraSamplerSettings", "Forge Neo Extra Sampler Settings (sam-extra)"),
+            speed_nodes: ("ForgeNeoAnimaSpeed", "Forge Neo Anima SPEED (sam-extra)"),
+            colorcraft_nodes: ("ForgeNeoColorcraft", "Colorcraft (Forge parity)"),
+        }
+        for module, (node_id, display) in expected.items():
+            with self.subTest(module=module.__name__):
+                self.assertEqual(set(module.NODE_CLASS_MAPPINGS), {node_id})
+                self.assertEqual(module.NODE_DISPLAY_NAME_MAPPINGS, {node_id: display})
+                self.assertIs(bundled_pack.NODE_CLASS_MAPPINGS[node_id], module.NODE_CLASS_MAPPINGS[node_id])
+                self.assertEqual(bundled_pack.NODE_DISPLAY_NAME_MAPPINGS[node_id], display)
+                self.assertEqual(module.NODE_CLASS_MAPPINGS[node_id].RETURN_TYPES, ("MODEL",))
+
+    def test_pack_1_7_0_name_registration_is_a_no_op_outside_comfyui(self):
+        # The app's test process has no ComfyUI; the import-time calls in __init__ register nothing and
+        # never raise. Hide comfy even when another test put a ComfyUI checkout on sys.path.
+        hidden = {name: None for name in ("comfy", "comfy.samplers", "comfy.k_diffusion",
+                                          "comfy.k_diffusion.sampling")}
+        with mock.patch.dict(sys.modules, hidden):
+            self.assertEqual(extra_schedulers.install_extra_schedulers(), compat.NameRegistration())
+            self.assertEqual(extra_samplers_register.install_extra_samplers(), compat.NameRegistration())
+            self.assertEqual(extra_schedulers.owned_names(), ())
+            self.assertEqual(extra_samplers_register.owned_names(), ())
+            with self.assertRaises(RuntimeError):
+                extra_schedulers.install_extra_schedulers(required=True)
+            with self.assertRaises(RuntimeError):
+                extra_samplers_register.install_extra_samplers(required=True)
+
+    def test_init_registers_names_and_hires_carries_in_plan_order(self):
+        # PLAN R13: beta57 (compat, imported by the first node module) -> Extra Schedulers -> Extra Samplers,
+        # both with required=False. Hires carries run in import order: XS -> XSa -> SPEED -> Colorcraft.
+        source = Path(bundled_pack.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imports = [node.module for node in tree.body if isinstance(node, ast.ImportFrom) and node.level == 1]
+        features = ["extra_schedulers", "extra_samplers_nodes", "extra_samplers_register", "speed_nodes",
+                    "colorcraft_nodes"]
+        self.assertEqual([name for name in imports if name in features], features)
+        self.assertLess(imports.index("anima38_nodes"), imports.index("extra_schedulers"))
+        calls = [
+            (node.value.func.id, [(kw.arg, getattr(kw.value, "value", None)) for kw in node.value.keywords])
+            for node in tree.body
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+        ]
+        installs = [call for call in calls if call[0] in ("_install_extra_schedulers", "_install_extra_samplers")]
+        self.assertEqual(installs, [("_install_extra_schedulers", [("required", False)]),
+                                    ("_install_extra_samplers", [("required", False)])])
+        keys = [key for key in hires_carry.registered()
+                if key in ("extra_schedulers", "extra_samplers", "speed", "colorcraft")]
+        self.assertEqual(keys, ["extra_schedulers", "extra_samplers", "speed", "colorcraft"])
+        self.assertIn(extra_schedulers.CARRIER_ATTR, hires_carry.sampling_attrs())
 
     def test_compiler_facing_suite_and_daemon_contracts(self):
         suite = guidance.ForgeNeoAnimaGuidanceSuite

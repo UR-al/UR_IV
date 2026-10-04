@@ -4,11 +4,17 @@ Sampling progress from a sigma, ``settings_json`` parsing, block-index parsing,
 Anima/Cosmos block lookup and the Haar wavelet that CNS, DCW and CWM use.
 Imports are deliberately lazy so the app can validate contracts without
 loading ComfyUI or torch.
+
+Since pack 1.7.0 it also holds the names sam-extra's features use to find each
+other (sub-step marker, step-offset keyword, re-published sigma lists) and the
+small helpers that read them, so every pack port of a sam-extra feature writes
+and reads them one way. The values are sam-extra's; the code is the pack's own.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import inspect
+from typing import Any, Callable
 
 from .compat import json_object, require_torch
 
@@ -22,6 +28,35 @@ PRE_DD_SIGMAS_KEY = "ai_studio_pre_dd_sigmas"
 # S²-Guidance (guidance_s2): the blocks one SLG weak evaluation skips, from the suite's draw to the block
 # wrappers (guidance_dave._patch_anima_blocks). Absent = fixed SLG (every wrapped SLG block is skipped).
 S2_DROP_KEY = "forge_neo_slg_drop"
+
+# --- sam-extra coordination names (pack 1.7.0) ------------------------------------------------
+# The pack's ports of sam-extra features read what another port wrote under the extension's own
+# names. tests/test_comfy_pack_foundation.py pins each value to the installed extension's source.
+#
+# transformer_options key on the extra model evaluations of Euler (SMEA) Dy CFG++ (the
+# half-resolution Dy evaluation, the x1.25 SMEA one), value "dy" or "smea" — sam-extra
+# sam3ext/extra_samplers/common.py ``SUBSTEP_MARKER``. State kept per sampler step (momentum,
+# history, trajectories, e_prev) ignores those evaluations: ``is_extra_sampler_substep``.
+SUBSTEP_MARKER = "sam_extra_substep"
+# Keyword a sampler function names in its signature to learn where a segment starts in its pass:
+# SPEED calls the sampler once per segment, Dy places its sub-steps by the pass's step index —
+# sam-extra sam3ext/speed/runner.py ``STEP_OFFSET_KWARG``. Only passed to a function that names it
+# (``declares_keyword``), never through ``**kwargs``.
+STEP_OFFSET_KWARG = "sam_extra_step_offset"
+# Attribute on a sigma list published in place of the run's own list mid-run (SPEED's patched
+# copy), pointing at the run's list — sam-extra sam3ext/guidance/sigmas.py ``REPUBLISHED_FROM``.
+REPUBLISHED_FROM = "_sam_extra_republished_from"
+# Attribute a sampler-function wrapper without ``__wrapped__`` sets to the function it wraps
+# (guidance_cns.cns_sampler_function has no ``__wrapped__`` on purpose: a second CNS patch must see
+# it as a wrapper). ``sampler_base`` follows it to the real ``sample_*``.
+SAMPLER_BASE_ATTR = "_forge_neo_base"
+# transformer_options key (the pack's own): Euler (SMEA) Dy CFG++ runs without its sub-steps on
+# this MODEL's sampling runs. ForgeNeoKSamplerCNS sets it on its own clone when ComfyUI Spectrum
+# (DiTSpectrumPatch) or the legacy SPEED provider (SpectrumSPDKSampler, ``speed_enabled``) samples:
+# both forecast whole steps (sam-extra skips the sub-steps under Spectrum Integrated). The value
+# is the reason, for the console line. Never set for the pack's ForgeNeoAnimaSpeed: sam-extra keeps
+# Dy sub-steps under SPEED and passes ``STEP_OFFSET_KWARG`` instead.
+DY_SUBSTEPS_OFF_KEY = "ai_studio_dy_substeps_off"
 
 
 def parse_indices(spec: str, count: int, *, default: str = "") -> set[int]:
@@ -183,3 +218,110 @@ def _transformer_options(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[
     if len(args) > 6 and isinstance(args[6], dict):
         return args[6]
     return {}
+
+
+# --- sam-extra coordination helpers (pack 1.7.0) ----------------------------------------------
+
+
+def set_transformer_option(model: Any, key: str, value: Any) -> Any:
+    """Set ``model_options["transformer_options"][key]`` on ``model`` and return it.
+
+    ``model`` must be a clone the caller owns; the option dicts are copied first, so the
+    MODEL it was cloned from (and Comfy's cached outputs) never see the key.
+    """
+
+    options = dict(getattr(model, "model_options", None) or {})
+    transformer = dict(options.get("transformer_options") or {})
+    transformer[key] = value
+    options["transformer_options"] = transformer
+    model.model_options = options
+    return model
+
+
+def is_extra_sampler_substep(args: Any) -> bool:
+    """Is this evaluation one of Euler (SMEA) Dy CFG++'s extra sub-steps (``SUBSTEP_MARKER``)?
+
+    ``args`` is a post-CFG/pre-CFG dict (options under ``args["model_options"]``) or a
+    model-function-wrapper dict (options under ``args["c"]``). The model options' non-empty
+    ``transformer_options`` are read first, else the wrapper's — sam-extra's lookup order. A
+    sub-step's x0 is not the step's: step-keyed state is neither updated nor reset by it, while
+    stateless stages (TSR) still apply.
+    """
+
+    if not isinstance(args, dict):
+        return False
+    options = _first_options(args.get("model_options"), args.get("c"))
+    return bool(options.get(SUBSTEP_MARKER))
+
+
+def _first_options(*holders: Any) -> dict[str, Any]:
+    for holder in holders:
+        if isinstance(holder, dict):
+            options = holder.get("transformer_options")
+            if options:
+                return options if isinstance(options, dict) else {}
+    return {}
+
+
+def mark_republished(sigmas: Any, source: Any) -> Any:
+    """Return ``sigmas`` tagged as published in place of the run's list ``source``.
+
+    The tag always names the run's first list: re-publishing a published copy points back at
+    the list the copy stood for. A list that takes no attributes stays untagged.
+    """
+
+    origin = republished_from(source)
+    if origin is None:
+        origin = source
+    try:
+        setattr(sigmas, REPUBLISHED_FROM, origin)
+    except (AttributeError, TypeError):
+        pass
+    return sigmas
+
+
+def republished_from(sigmas: Any) -> Any:
+    """The run's list ``sigmas`` was published in place of (``mark_republished``), else None."""
+
+    return getattr(sigmas, REPUBLISHED_FROM, None)
+
+
+def sampler_base(function: Callable[..., Any]) -> Callable[..., Any]:
+    """The sampler function a chain of wrappers stands for.
+
+    Follows ``SAMPLER_BASE_ATTR`` (wrappers without ``__wrapped__``, CNS) and ``__wrapped__``
+    (``functools.wraps``) until neither is set; a cycle stops at the last new function and the
+    walk gives up after ``_SAMPLER_BASE_MAX_HOPS`` links (an object inventing attributes).
+    """
+
+    seen = {id(function)}
+    current = function
+    for _ in range(_SAMPLER_BASE_MAX_HOPS):
+        following = getattr(current, SAMPLER_BASE_ATTR, None)
+        if following is None:
+            following = getattr(current, "__wrapped__", None)
+        if following is None or not callable(following) or id(following) in seen:
+            return current
+        seen.add(id(following))
+        current = following
+    return current
+
+
+_SAMPLER_BASE_MAX_HOPS = 32
+
+
+def declares_keyword(function: Callable[..., Any], name: str) -> bool:
+    """Does the sampler behind ``function`` (``sampler_base``) name the keyword ``name`` itself?
+
+    A bare ``**kwargs`` does not count — sam-extra passes ``STEP_OFFSET_KWARG`` only to a
+    sampler that names it. An unreadable signature counts as not declared.
+    """
+
+    try:
+        parameter = inspect.signature(sampler_base(function)).parameters.get(name)
+    except (TypeError, ValueError):
+        return False
+    return parameter is not None and parameter.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )

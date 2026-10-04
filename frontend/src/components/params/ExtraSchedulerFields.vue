@@ -65,6 +65,7 @@
       <p v-if="dynamicRhoRefused" class="xs-note xs-warnline" role="alert">{{ FLOW_COSMOS_DYNAMIC_RHO_WARNING }}</p>
     </template>
     <p v-if="note" class="xs-note xs-warnline" role="status">{{ note }}</p>
+    <p v-else-if="comfyLine" class="xs-note">{{ comfyLine }}</p>
   </section>
 </template>
 
@@ -80,7 +81,8 @@
  *
  * Scheduler 줄 바로 아래 힌트(flow 에 맞지 않는 스케줄러, Karras Dynamic 의 ρ, v0.33.0 의 React DynSF·Flow Cosmos 둘)는 칸과
  * 상관없이 보인다. 식·목록 오류 줄은
- * 파이썬이 `pushWidgetProperty(…, 'error', …)` 로 보낸 문구다(계획 C7 — 그 전에는 비어 있다). 새 브리지 이름은 없다.
+ * 파이썬이 칸이 바뀔 때마다 검사해(core/extra_schedulers.check_text — 팩 계산기, 계획 C7) `pushWidgetProperty(…, 'error', …)`
+ * 로 보낸 확장의 영어 문구다(쓸 수 있으면 null 로 지운다). 새 브리지 이름은 없다.
  * App.vue 를 거치지 않고 스토어를 직접 읽는다(ParamsBasicCard 안에서 그린다).
  */
 import { computed } from 'vue'
@@ -90,7 +92,7 @@ import { isKrea2Family } from '../../utils/generationFamily'
 import {
   BETA_RANGE, DEFAULTS, ERROR_PROPERTY, FLOW_COSMOS_DYNAMIC_RHO_WARNING, FLOW_COSMOS_FIELDS, FLOW_COSMOS_NOTE,
   FLOW_COSMOS_RANGE_WARNING, MODE_OPTIONS, MU_RANGE, RHO_RANGE, SIGMA_MAX_RANGE, SIGMA_MIN_RANGE, WIDGET_IDS, cardNote,
-  flowCosmosDynamicRhoOk, flowCosmosRangeOk, isDefault, passesUsing, readValues, schedulerHints, subtitle, usesCustom,
+  comfyNote, flowCosmosDynamicRhoOk, flowCosmosRangeOk, isDefault, passesUsing, readValues, schedulerHints, subtitle, usesCustom,
   usesFlowCosmos, usesFlowCosmosDynamic, usesLaplace, type XschedKey,
 } from '../../utils/extraSchedulers'
 
@@ -114,6 +116,7 @@ const rangeOk = computed(() => flowCosmosRangeOk(values.value))
 const dynamicRhoRefused = computed(() => usesFlowCosmosDynamic(passes.value) && !flowCosmosDynamicRhoOk(values.value))
 const atDefaults = computed(() => isDefault(values.value))
 const note = computed(() => cardNote(capabilities.value, isKrea2Family(storeWidgets.generation_family_combo)))
+const comfyLine = computed(() => comfyNote(capabilities.value))
 
 function errorText(key: XschedKey): string {
   const value = getProperty(WIDGET_IDS[key], ERROR_PROPERTY, null)

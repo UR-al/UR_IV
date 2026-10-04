@@ -42,14 +42,38 @@ PACK_ID = "ai_studio_forge_parity"
 # ForgeNeoAnimaOptimalScale node. The suite's settings_json hides the new keys from the input
 # contract check, so the compiler refuses a graph that turns one on when /object_info lacks
 # ForgeNeoAnimaOptimalScale (``_DETAIL_SUITE_MARKER``) instead of letting a 1.5.0 pack ignore it.
-PACK_VERSION = "1.6.0"
+# 1.7.0: four sam-extra features (v0.33.0 samplers/schedulers/SPEED, v0.32.1 Colorcraft), re-implemented
+# and checked bit for bit against the extension on CPU (the GPL extension is a test oracle only):
+# Extra Schedulers: nine KSampler schedulers (cosine, cosine_exponential, phi, laplace,
+# karras_dynamic, custom, react_cosinusoidal_dynsf, flow_cosmos_rho7, flow_cosmos_dynamic) and ForgeNeoExtraSchedulers
+# (values on a model_sampling copy: custom, Laplace mu/beta and the rho / sigma~ max / sigma~ min Flow Cosmos rho7 and
+# Flow Cosmos Dynamic share — the extension's eight-value block); older packs lack the class and the names -> the
+# compiler refuses (owner
+# check, ``owned_names``).
+# Extra Samplers: twelve KSampler samplers (er_sde_reverse_time/ode/tunable, dpmpp_4m_sde,
+# euler_dy(_cfg_pp), euler_smea_dy(_cfg_pp), dpmpp_2m/2m_heun/3m_flow_ode, restart_flow) and
+# ForgeNeoExtraSamplerSettings (ER SDE values in model_options); older packs lack the class and
+# the names -> the compiler refuses (owner check, ``owned_names``).
+# Anima SPEED: ForgeNeoAnimaSpeed (coarse-to-fine sampling, a SAMPLER_SAMPLE wrapper ahead of
+# Detail Daemon); Detail Daemon follows SPEED's re-published sigma list; Anima LLLite marks its
+# MODEL. Older packs lack the class -> the compiler refuses the graph (validate missing class).
+# Colorcraft: ForgeNeoColorcraft (sampling-time colour grading, the last post-CFG function on the
+# sampler's MODEL); the MIT upstream's library files and basis vectors are vendored under
+# vendor/comfyui_colorcraft*/ (".safetensors" now fingerprinted). Older packs lack the class ->
+# the compiler refuses the graph with the 1.7.0 hint.
+# Shared: ForgeNeoHiresFix re-applies the features to a checkpoint/UNET override (``hires_carry``),
+# the pack's flow shift keeps carried ``model_sampling`` values, and Euler (SMEA) Dy CFG++
+# sub-steps leave the guidance suite's step state alone.
+PACK_VERSION = "1.7.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 
 # Everything copied/verified as part of the pack (tamper detection covers docs
 # and licenses too) versus what ComfyUI actually imports or reads at runtime.
-_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt"})
-_RUNTIME_SUFFIXES = frozenset({".py", ".json"})
+# .safetensors: the Colorcraft basis vectors under vendor/ (1.7.0) are read at run
+# time, so a vectors-only change must change the fingerprint and ask for a restart.
+_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors"})
+_RUNTIME_SUFFIXES = frozenset({".py", ".json", ".safetensors"})
 
 
 class ComfyNodePackError(RuntimeError):

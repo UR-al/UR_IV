@@ -466,7 +466,13 @@ class PlanTests(unittest.TestCase):
         off = cc.ColorcraftSettings(False, False, False, on.state)
         self.assertEqual(cc.plan(off, target="t2i", backend="webui").reason, cc.REASON_OFF)
         self.assertEqual(cc.plan(on, target="t2i", backend="krea2").reason, cc.REASON_KREA2)
-        self.assertEqual(cc.plan(on, target="t2i", backend="comfyui").reason, cc.REASON_COMFY_PENDING)
+        # 계획 C6 — ComfyUI 도 Forge 와 같은 규칙·같은 블록(컴파일러가 앱 노드 팩 1.7.0 의 노드로 — C5)
+        for settings in (on, off, cc.ColorcraftSettings(True), cc.settings_of(_on(exposure=0.3), img2img=True)):
+            for target in ("t2i", "i2i", "aux"):
+                with self.subTest(target=target):
+                    self.assertEqual(cc.plan(settings, target=target, backend="comfyui"),
+                                     cc.plan(settings, target=target, backend="webui"))
+        self.assertEqual(cc.plan(on, target="t2i", backend="comfyui").reason, cc.REASON_SEND)
         self.assertEqual(cc.plan(on, target="i2i", backend="webui").reason, cc.REASON_I2I_OFF)
         self.assertEqual(cc.plan(cc.ColorcraftSettings(True), target="t2i", backend="webui").reason,
                          cc.REASON_NO_ENTRIES)

@@ -517,15 +517,21 @@ class StaticSkipTests(unittest.TestCase):
 
 
 class PlanTests(unittest.TestCase):
-    def test_off_krea2_comfy_pending_and_i2i(self):
+    def test_off_krea2_and_i2i_and_comfy_follows_the_forge_rule(self):
         on = card(enabled=True)
         self.assertEqual(sp.plan(sp.APP_DEFAULTS, target="t2i", backend="webui").reason, sp.REASON_OFF)
         self.assertEqual(sp.plan(on, target="t2i", backend="krea2").reason, sp.REASON_KREA2)
-        pending = sp.plan(on, target="t2i", backend="comfyui")
-        self.assertEqual((pending.block, pending.reason), (None, sp.REASON_COMFY_PENDING))
         self.assertEqual(sp.plan(on, target="i2i", backend="webui").reason, sp.REASON_I2I_OFF)
         sent = sp.plan(dataclasses.replace(on, apply_img2img=True), target="i2i", backend="webui")
         self.assertEqual(sent.reason, sp.REASON_SEND)
+        # 계획 C6 — ComfyUI 도 Forge 와 같은 규칙·같은 블록(컴파일러가 앱 노드 팩 1.7.0 의 노드로 — C4a)
+        for settings, target in ((sp.APP_DEFAULTS, "t2i"), (on, "t2i"), (on, "aux"), (on, "i2i"),
+                                 (dataclasses.replace(on, apply_img2img=True), "i2i"),
+                                 (card(enabled=True, scales="0.5,0.4"), "t2i")):
+            with self.subTest(target=target, settings=settings):
+                self.assertEqual(sp.plan(settings, target=target, backend="comfyui"),
+                                 sp.plan(settings, target=target, backend="webui"))
+        self.assertEqual(sp.plan(on, target="t2i", backend="comfyui").block, sp.as_block(on))
 
     def test_send(self):
         on = card(enabled=True, hires=True)

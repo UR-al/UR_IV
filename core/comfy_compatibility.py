@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from core import vae_degrid
+from core import anima_speed, colorcraft, vae_degrid
 from core.storage_paths import PROJECT_ROOT, config_file
 from utils.atomic_json import atomic_write_json
 
@@ -57,6 +57,23 @@ RECIPES = [
      "note": f"번들 노드 팩 {vae_degrid.COMFY_MIN_PACK_VERSION} 이상이 필요합니다(없으면 앱이 DeGrid 를 빼고 생성하며 알립니다). "
              "모델은 ComfyUI 의 models/upscale_models 또는 models/degrid 의 NAFNet 파일입니다. Forge 의 장치·정밀도·VRAM "
              "상주 설정은 적용되지 않고 auto · fp32 · 끔으로 계산합니다. 목록 확인만으로 화질·VRAM 은 검증되지 않습니다."},
+    {"id": "anima-speed", "title": anima_speed.SCRIPT_NAME, "scope": "실험 · 앱 기본 Comfy 워크플로 메인 샘플링 패스",
+     "nodes": {anima_speed.COMFY_NODE_CLASS: {
+         "model": "MODEL", "enabled": "BOOLEAN", "mode": "CHOICE", "threshold": "CHOICE", "preset": "CHOICE",
+         "scales": "STRING", "delta": "FLOAT", "sigma_divisor": "FLOAT", "manual_sigmas": "STRING",
+         "adaptive": "BOOLEAN", "transform": "CHOICE", "spectrum_A": "FLOAT", "spectrum_beta": "FLOAT", "seed": "INT",
+         "pass_label": "CHOICE", "image_seed": "INT", "img2img_rescale": "BOOLEAN"}},
+     "models": [], "repoUrl": "",
+     "note": f"번들 노드 팩 {anima_speed.COMFY_MIN_PACK_VERSION} 이상이 필요합니다(없으면 SPEED 를 켠 생성은 컴파일 단계에서 "
+             "막힙니다). sam-extra 와 같은 계산을 팩이 다시 구현했고 CPU 비트 동일 시험으로 맞췄습니다. Spectrum 을 켜면 "
+             "SPEED 는 건너뜁니다. 목록 확인만으로 속도·화질은 검증되지 않습니다."},
+    {"id": "colorcraft", "title": colorcraft.SCRIPT_NAME, "scope": "앱 기본 Comfy 워크플로 메인 샘플링 패스",
+     "nodes": {colorcraft.COMFY_NODE_CLASS: {"model": "MODEL", "vae": "VAE", "settings_json": "STRING",
+                                             "contract": "CHOICE", "pre_dd_sigma": "BOOLEAN"}},
+     "models": [], "repoUrl": "",
+     "note": f"번들 노드 팩 {colorcraft.COMFY_MIN_PACK_VERSION} 이상이 필요합니다(없으면 Colorcraft 를 켠 생성은 컴파일 단계에서 "
+             "막힙니다). 색 벡터 파일은 팩에 들어 있어 따로 받을 모델이 없습니다. 목록 확인만으로 색 보정 결과는 검증되지 "
+             "않습니다."},
     {"id": "relight", "title": "조명·그림자 보정", "scope": "실험 · 독립 번들 알고리즘",
      "nodes": {"AIStudioRelight": {"image": "IMAGE"}}, "models": [], "repoUrl": "",
      "note": "깊이·법선 맵은 선택 입력입니다. DepthAnything/DSINE 같은 외부 추정 노드는 사용자 워크플로에서 별도로 연결하며 자동 설치·추론하지 않습니다."},

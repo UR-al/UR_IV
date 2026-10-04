@@ -19,6 +19,10 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from core import anima38
 from core import anima_model_kind
+from core import anima_speed
+from core import colorcraft
+from core import extra_samplers
+from core import extra_schedulers
 from core import vae_degrid
 from core.comfy_node_classes import (
     CHECKPOINT_LOADER_NODES,
@@ -70,6 +74,15 @@ class _Anima38Plan:
     @property
     def v2(self) -> bool:
         return self.loader_kind == "v2"
+
+
+@dataclass(frozen=True)
+class _SpeedPlan:
+    """The request's sam-extra Anima SPEED settings (as sam-extra reads them) and the ``ForgeNeoAnimaSpeed`` inputs they
+    give (without ``model``, ``pass_label``, ``image_seed``, ``img2img_rescale``) — ``_speed_plan``."""
+
+    script: anima_speed.ScriptSettings
+    inputs: Mapping[str, Any]
 
 
 @dataclass(eq=False)
@@ -154,6 +167,17 @@ _FORGE_SAMPLER_ALIASES = {
     "dpm fast": "dpm_fast", "dpm adaptive": "dpm_adaptive",
     "unipc": "uni_pc", "uni pc": "uni_pc", "uni_pc": "uni_pc",
     "lcm": "lcm", "ddim": "ddim", "er sde": "er_sde", "er-sde": "er_sde",
+    # sam-extra Extra Samplers (v0.33.0, 18 labels — core/extra_samplers.COMFY_NAMES; "DPM++ 2M SDE Heun" is above).
+    # Twelve are names the bundled pack 1.7.0 registers (core/extra_samplers.PACK_SAMPLERS, owner-checked in
+    # _runtime_sampler_values); uni_pc_bh2/cfgpp_ud10_ab/ipndm/ipndm_v/deis are ComfyUI core's (plan X11).
+    "er sde (reverse-time)": "er_sde_reverse_time", "er sde (ode)": "er_sde_ode",
+    "er sde (tunable)": "er_sde_tunable", "dpm++ 4m sde": "dpmpp_4m_sde",
+    "euler dy cfg++": "euler_dy_cfg_pp", "euler smea dy cfg++": "euler_smea_dy_cfg_pp",
+    "euler dy": "euler_dy", "euler smea dy": "euler_smea_dy",
+    "dpm++ 2m (flow ode)": "dpmpp_2m_flow_ode", "dpm++ 2m heun (flow ode)": "dpmpp_2m_heun_flow_ode",
+    "dpm++ 3m (flow ode)": "dpmpp_3m_flow_ode",
+    "unipc bh2": "uni_pc_bh2", "uni pc bh2": "uni_pc_bh2", "cfg++ ud10 ab": "cfgpp_ud10_ab",
+    "ipndm": "ipndm", "ipndm_v": "ipndm_v", "deis": "deis", "restart (flow)": "restart_flow",
 }
 # Old combined labels ("DPM++ 2M Karras") carry the scheduler as a suffix.
 _FORGE_SAMPLER_SCHEDULER_SUFFIXES = (
@@ -168,15 +192,74 @@ _FORGE_SCHEDULER_ALIASES = {
     "beta": "beta",
     "beta57": "beta57", "beta 57": "beta57",
     "beta57 (res4lyf)": "beta57", "beta 57 (res4lyf)": "beta57",
+    # sam-extra Extra Schedulers (v0.33.0, nine names the bundled pack 1.7.0 registers under the same names —
+    # core/extra_schedulers.SCHEDULER_NAMES; labels and README aliases resolve to them).
+    "cosine": "cosine", "cosineexponential blend": "cosine_exponential",
+    "cosine-exponential blend": "cosine_exponential", "cosine_exponential": "cosine_exponential",
+    "phi": "phi", "laplace": "laplace", "karras dynamic": "karras_dynamic", "karras_dynamic": "karras_dynamic",
+    "custom": "custom", "react cosinusoidal dynsf": "react_cosinusoidal_dynsf",
+    "flow cosmos rho7": "flow_cosmos_rho7", "flow cosmos dynamic": "flow_cosmos_dynamic",
 }
 _FORGE_SAME_SCHEDULER = frozenset({"use same scheduler", "same", "automatic", "auto", ""})
+# Forge "Automatic" = the sampler's own default scheduler (modules/sd_samplers_kdiffusion.py get_sigmas reads the
+# sampler's options["scheduler"]).  Every other sampler keeps today's automatic -> normal (decision U4); DPM++ 4M SDE
+# follows Forge (core/extra_samplers.COMFY_AUTOMATIC_SCHEDULER, mirrored by the pack's ADetailer normaliser).
+_FORGE_AUTOMATIC_SCHEDULER = frozenset({"automatic", "auto"})
 # ComfyUI comfy/samplers.py ``KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS``:
 # these samplers build their sigma array for steps+1 and drop the next-to-last
 # sigma, so one step index is a different noise level than for any other
 # sampler.  Passes that split one schedule must stay on the same side.
+# dpmpp_4m_sde / dpmpp_3m_flow_ode: the bundled pack (1.7.0) adds them to that
+# set when it registers them (core/extra_samplers.COMFY_DISCARD_PENULTIMATE).
 _PENULTIMATE_SIGMA_DISCARD_SAMPLERS = frozenset({
     "dpm_2", "dpm_2_ancestral", "uni_pc", "uni_pc_bh2",
+    "dpmpp_4m_sde", "dpmpp_3m_flow_ode",
 })
+# sam-extra names the bundled pack registers in ComfyUI (plan R6/X12): KSampler input -> (pack names, the pack node
+# whose optional ``owned_names`` COMBO lists the names it owns there, kind for messages).  A name another provider
+# registered first (the pack never overwrites one) or that an older pack does not know is refused before /prompt —
+# the same name would run other maths than Forge's sam-extra.
+_PACK_OWNED_NAMES: Mapping[str, tuple[frozenset, str, str, str]] = MappingProxyType({
+    "sampler_name": (frozenset(extra_samplers.PACK_SAMPLERS), extra_samplers.COMFY_SETTINGS_NODE,
+                     extra_samplers.COMFY_REPORT_INPUT, "샘플러"),
+    "scheduler": (frozenset(extra_schedulers.SCHEDULER_NAMES), extra_schedulers.COMFY_NODE_CLASS,
+                  extra_schedulers.COMFY_REPORT_INPUT, "스케줄러"),
+})
+_PACK_NAMES_MIN_VERSION = extra_samplers.COMFY_MIN_PACK_VERSION   # == extra_schedulers.COMFY_MIN_PACK_VERSION (1.7.0)
+_PACK_SAMPLER_NAMES = frozenset(extra_samplers.PACK_SAMPLERS)
+# sam-extra feature nodes the bundled pack 1.7.0 brought -> what the user turned on (validate()'s hint when ComfyUI does
+# not list the class: an older pack, or the new one before a restart).
+_PACK_170_FEATURE_NODES: Mapping[str, str] = MappingProxyType({
+    extra_schedulers.COMFY_NODE_CLASS: "Extra Schedulers 값",
+    extra_samplers.COMFY_SETTINGS_NODE: "Extra Samplers 값(ER SDE)",
+    anima_speed.COMFY_NODE_CLASS: "Anima SPEED",
+    colorcraft.COMFY_NODE_CLASS: "Colorcraft",
+})
+# ForgeNeoColorcraft settings_json format (pack colorcraft_host.SETTINGS_VERSION / PASSES — pinned by
+# tests/test_comfy_colorcraft_compiler); a later format is a new ``contract`` choice (core/colorcraft.COMFY_CONTRACT).
+_COLORCRAFT_SETTINGS_VERSION = 1
+_COLORCRAFT_PASS_BASE, _COLORCRAFT_PASS_HIRES = "base", "hires"
+# ForgeNeoAnimaSpeed number inputs whose ComfyUI range is narrower than what sam-extra accepts through its API (pack
+# speed_nodes.ForgeNeoAnimaSpeed.INPUT_TYPES — tests/test_comfy_speed_compiler pins them). ComfyUI refuses a value
+# outside min/max, so _speed_node_values sends the default for a value the plan does not read and refuses one it does.
+_SPEED_NODE_RANGES: Mapping[str, tuple] = MappingProxyType({
+    "delta": (0.0, 1.0), "sigma_divisor": (0.0, 100.0), "spectrum_A": (-1e12, 1e12), "spectrum_beta": (-1e12, 1e12),
+    "seed": (-1, 0xFFFFFFFFFFFFFFFF),
+})
+# build_plan refusals that depend on the settings only (every pass refuses them — sam-extra: status "invalid settings",
+# plain sampling); the dwt ratio depends on which transitions a pass reaches and stays with the node.
+_SPEED_SETTINGS_REFUSALS = frozenset({
+    anima_speed.ERR_DIVISOR, anima_speed.ERR_SPECTRUM_A, anima_speed.ERR_SPECTRUM_BETA, anima_speed.ERR_MANUAL_COUNT,
+})
+# Euler (SMEA) Dy (CFG++) — their half-/1.25x-resolution sub-steps are off on a sampler that runs ComfyUI Spectrum (the
+# pack's ForgeNeoKSamplerCNS marks its clone, sam-extra's Spectrum Integrated rule, plan R3); CFG++ samplers (Dy CFG++
+# pair, CFG++ UD10 AB): Forge logs "CFG between 1.0 ~ 2.0 is recommended when using CFG++ samplers" above CFG 2
+# (sam3ext/extra_samplers/registry._warn_cfg) — compile warnings, the graph is unchanged.
+_DY_SAMPLER_NAMES = frozenset(extra_samplers.COMFY_NAMES[label] for label in extra_samplers.DY_KIND)
+_CFG_PP_SAMPLER_NAMES = frozenset(extra_samplers.COMFY_NAMES[label] for label in extra_samplers.CFG_PP_LABELS)
+_CFG_PP_MAX_CFG = 2.0
+_WARN_XSAMP_SUBSTEPS = "extra_samplers_substeps_skipped"   # = core/sam_extra_notices.CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED
+_WARN_XSAMP_CFG_PP = "extra_samplers_cfg_pp"
 # Fallbacks for the CNS sampler inputs = the original CNSSamplerPatch defaults
 # (strength 1.0, gamma_power 0.5, gamma_scale 2.0; the pack's
 # ``guidance_cns.CNS_INPUTS``) — origin:
@@ -532,6 +615,10 @@ class ComfyWorkflowCompiler:
         (core/comfy_degrid_report).  ``cause`` is one of
         ``vae_degrid.COMFY_OMIT_*``; only ``vae_degrid.COMFY_SCHEMA_FIXABLE``
         causes can change with a fresh ``/object_info``.
+        sam-extra Extra Samplers adds informational entries (``feature``
+        ``"extra_samplers"``, ``cause`` None — the graph is unchanged): Euler
+        (SMEA) Dy (CFG++) without sub-steps under ComfyUI Spectrum, a CFG++
+        sampler above CFG 2 (``_extra_samplers_warnings``).
         ``None`` builds the same graph and only logs.
         """
         normalized = {
@@ -602,6 +689,8 @@ class ComfyWorkflowCompiler:
                 )
             except WorkflowControlError as exc:
                 raise WorkflowCompileError(str(exc)) from exc
+        self._check_extra_schedulers_reach(graph, local_payload)
+        self._extra_samplers_warnings(graph, warnings)
         self.validate(graph, uploaded_inputs=(uploaded_image, uploaded_mask))
         return graph
 
@@ -822,6 +911,8 @@ class ComfyWorkflowCompiler:
         self._add_output_image(
             graph, image, local_payload, "AIStudio/postprocess", "Save postprocessed image",
         )
+        self._check_extra_schedulers_reach(graph.nodes, local_payload)
+        self._extra_samplers_warnings(graph.nodes, None)
         self.validate(graph.nodes, uploaded_inputs=(uploaded_image,))
         return graph.nodes
 
@@ -914,6 +1005,12 @@ class ComfyWorkflowCompiler:
                 " ComfyUI를 재시작하고 AI Studio Forge Parity custom node pack 연결을 확인하세요."
                 if forge_nodes else " 대상 ComfyUI의 custom nodes/버전을 확인하세요."
             )
+            features = [_PACK_170_FEATURE_NODES[name] for name in missing if name in _PACK_170_FEATURE_NODES]
+            if features:
+                hint += (
+                    f" {'·'.join(features)}에는 AI Studio Forge Parity 노드 팩 {_PACK_NAMES_MIN_VERSION} 이상이 "
+                    "필요합니다 — 번들 노드 팩을 갱신하고 ComfyUI 를 재시작하세요."
+                )
             raise WorkflowCompileError(
                 "ComfyUI에 필요한 노드가 없습니다: " + ", ".join(missing) + "." + hint
             )
@@ -994,6 +1091,7 @@ class ComfyWorkflowCompiler:
                     f"(node {node_id}; {'; '.join(details)}). "
                     "번들 노드 팩을 갱신하고 ComfyUI를 재시작하세요."
                 )
+        self._check_pack_sampler_names(workflow)
 
     # ---- default graph -------------------------------------------------
 
@@ -1025,9 +1123,18 @@ class ComfyWorkflowCompiler:
         )
         # Detail Daemon 은 샘플링 패스마다 _add_detail_daemon 이 고른다(base 또는 hires 한 곳) — model 자체에는
         # 없다. 디테일러가 받는 모델은 _add_image_extensions(last_pass_model=) 이 정한다.
+        # sam-extra Anima SPEED: main passes only, after the pass's Detail Daemon (plan R9); the detailers keep
+        # pass_model (Forge's inner passes are masked or start below the transition sigma).
+        # sam-extra Colorcraft: last on each main pass's MODEL (after SPEED — its post-CFG function is the last one,
+        # Forge's order), never on the detailers (Forge skips the SAM3/ADetailer inner passes).
+        speed = self._speed_plan(payload, mode, warnings)
+        tint = self._colorcraft_plan(payload, warnings)
         pass_model = self._add_detail_daemon(graph, model, payload)
         sampler = self._add_sampler(
-            graph, pass_model,
+            graph, self._add_colorcraft(
+                graph, self._add_speed(graph, pass_model, speed, payload, pass_label=self._speed_pass_label(mode)),
+                vae, tint, hires=False,
+            ),
             positive_ref, negative_ref, latent, payload, sampler_options,
             mode=mode,
         )
@@ -1035,7 +1142,10 @@ class ComfyWorkflowCompiler:
         if _bool(payload.get("enable_hr")):
             pass_model = self._add_detail_daemon(graph, model, payload, hires_pass=True)
             samples, decode_vae = self._add_hires(
-                graph, pass_model,
+                graph, self._add_colorcraft(
+                    graph, self._add_speed(graph, pass_model, speed, payload, pass_label=anima_speed.PASS_HIRES),
+                    vae, tint, hires=True,
+                ),
                 clip, vae, positive_ref, negative_ref, samples, payload,
                 sampler_options=sampler_options, anima_plan=anima_plan,
             )
@@ -1077,6 +1187,7 @@ class ComfyWorkflowCompiler:
         """
         model, base_clip, vae = self._add_loaders(graph, model_name, payload, anima_plan)
         base_model = self._add_flow_shift(graph, model, payload)
+        base_model = self._add_extra_schedulers(graph, base_model, payload)
         model, clip = self._add_lora_patches(
             graph, base_model, base_clip, payload, loras, anima_plan,
         )
@@ -1089,6 +1200,7 @@ class ComfyWorkflowCompiler:
             loras=tuple(loras), prompt_loras=tuple(prompt_loras),
             anima_plan=anima_plan, payload=payload, prompt=main_prompt,
         )
+        model = self._add_extra_samplers(graph, model, payload)
         model, sampler_options = self._add_anima_guidance(
             graph, model, clip, positive, negative, payload, hiflow_pass=hiflow_pass,
         )
@@ -1104,6 +1216,220 @@ class ComfyWorkflowCompiler:
             }, "Forge flow shift (preserve timestep scale)")
             model = [shift_node, 0]
         return model
+
+    @classmethod
+    def _extra_schedulers_state(
+        cls, payload: Mapping[str, Any],
+    ) -> Optional[extra_schedulers.ExtraSchedulerSettings]:
+        """The request's Extra Schedulers values (sam-extra ``Extra Schedulers (sam-extra)`` block), None without one.
+
+        ``core/extra_schedulers.parse_script_block`` reads it with the extension's ``coerce_args`` rules (one dict or
+        positional; an older five-value block gives Flow Cosmos ρ/σ̃ their defaults; out-of-range → clamped,
+        not a finite number → default) — so the node gets values inside its input ranges (ComfyUI refuses a value
+        outside min/max instead of clamping)."""
+        return extra_schedulers.parse_script_block(cls._script(payload, extra_schedulers.SCRIPT_NAME))
+
+    @classmethod
+    def _extra_schedulers_needed(cls, payload: Mapping[str, Any]) -> tuple:
+        """The passes whose scheduler reads the block's values (``laplace``, ``custom``, ``flow_cosmos_rho7``,
+        ``flow_cosmos_dynamic`` — ``extra_schedulers.VALUE_SCHEDULERS``), as ``core/extra_schedulers.PassUse``.
+
+        The scan reads what each pass reads (main ``scheduler``; ``hr_scheduler`` with ``enable_hr``, empty/"Use same"
+        → main; enabled ADetailer slots: ``ad_scheduler`` with ``ad_use_sampler``, else main; SAM3 Inpaint:
+        ``sam3_scheduler``, "Use same" → main) resolved with this compiler's ``_comfy_scheduler``.  It may name a
+        pass the graph then runs on another schedule (a combined "DPM++ 2M Karras" label, ADetailer's own "Use same
+        scheduler" → ``normal``) — the node is then only unused; the reverse would leave a pass without the values,
+        which ``_check_extra_schedulers_reach`` refuses."""
+        return extra_schedulers.value_scheduler_passes(payload, resolve=cls._comfy_scheduler)
+
+    def _add_extra_schedulers(self, graph: _Graph, model: list, payload: Mapping[str, Any]) -> list:
+        """``ForgeNeoExtraSchedulers`` right after the flow shift (before LoRA), when the request carries the block
+        and any pass uses a value scheduler; otherwise ``model`` unchanged (the graph stays byte-identical).
+
+        The node puts the eight values on a private copy of the MODEL's ``model_sampling``; every later sampler of
+        that MODEL — base, Hires (the pack's flow shift and a Hires checkpoint override keep them), each ADetailer
+        slot and SAM3 pass (their LoRA branches start here), Detail Daemon passes — reads them when it builds its
+        sigmas.  Nothing after this point replaces ``model_sampling`` (the app's flow shift is above)."""
+        settings = self._extra_schedulers_state(payload)
+        if settings is None or not self._extra_schedulers_needed(payload):
+            return model
+        node = graph.add(extra_schedulers.COMFY_NODE_CLASS, {
+            "model": model, **settings.as_arg(),
+        }, "Extra Schedulers values (sam-extra)")
+        return [node, 0]
+
+    def _check_extra_schedulers_reach(self, graph: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
+        """Every pass that samples with a value scheduler reads the block's values (plan C2b, R2b).
+
+        With the block present, every node whose literal ``scheduler``/``base_scheduler`` input resolves to one of
+        ``extra_schedulers.VALUE_SCHEDULERS`` (KSampler, KSamplerAdvanced, ForgeNeoKSamplerCNS, ForgeNeoHiresFix, the
+        SAM3 detailers, a user workflow's own node) and every ``ForgeNeoADetailer`` whose settings name one must find
+        ``ForgeNeoExtraSchedulers`` up its ``model`` chain with no ``ModelSampling*``/``ForgeNeoModelSamplingShift``
+        node between them — such a node installs a new ``model_sampling`` without the values, and the pass would
+        silently build the default schedule.  ``ForgeNeoHiresFix``'s own Shift > 0 is not a graph node: the pack's flow
+        shift copies the values onto the new ``model_sampling`` (R2b), and a Hires checkpoint override gets them through
+        ``hires_carry``.  This catches a workflow sampler whose model link the app did not rewire and any drift between
+        ``_extra_schedulers_needed`` and the built graph.  Without the block nothing is checked (no values to carry:
+        Forge and the pack both use the defaults)."""
+        if self._extra_schedulers_state(payload) is None:
+            return
+        for node_id, node in graph.items():
+            if not isinstance(node, Mapping):
+                continue
+            inputs = self._node_inputs(node)
+            texts = [inputs.get(key) for key in ("scheduler", "base_scheduler")]
+            if node.get("class_type") == "ForgeNeoADetailer":
+                try:
+                    settings = json.loads(str(inputs.get("settings_json") or "{}"))
+                except ValueError:
+                    settings = {}
+                texts.append(settings.get("scheduler") if isinstance(settings, Mapping) else None)
+            if not any(
+                isinstance(text, str) and self._comfy_scheduler(text) in extra_schedulers.VALUE_SCHEDULERS
+                for text in texts
+            ):
+                continue
+            if not self._reaches_extra_schedulers(graph, inputs.get("model")):
+                meta = node.get("_meta")
+                title = meta.get("title") if isinstance(meta, Mapping) else None
+                raise WorkflowCompileError(
+                    "Extra Schedulers 값이 닿지 않는 샘플러가 있습니다: "
+                    f"{title or node.get('class_type')} (node {node_id}) — 그 패스의 model 이 "
+                    f"{extra_schedulers.COMFY_NODE_CLASS} 를 거치지 않거나 그 뒤에 ModelSampling 노드가 있어 "
+                    "Forge(sam-extra)와 다른 시그마가 됩니다."
+                )
+
+    @staticmethod
+    def _reaches_extra_schedulers(graph: Mapping[str, Any], link: Any) -> bool:
+        """``ForgeNeoExtraSchedulers`` is up the ``model`` chain from ``link`` before any node that replaces
+        ``model_sampling`` (``ModelSampling*``, the pack's ``ForgeNeoModelSamplingShift``)."""
+        seen: set[str] = set()
+        while _is_link(link):
+            key = str(link[0])
+            node = graph.get(key)
+            if key in seen or not isinstance(node, Mapping):
+                return False
+            seen.add(key)
+            class_type = str(node.get("class_type") or "")
+            if class_type == extra_schedulers.COMFY_NODE_CLASS:
+                return True
+            if class_type.startswith("ModelSampling") or class_type == "ForgeNeoModelSamplingShift":
+                return False
+            link = ComfyWorkflowCompiler._node_inputs(node).get("model")
+        return False
+
+    @classmethod
+    def _extra_samplers_state(cls, payload: Mapping[str, Any]) -> Optional[extra_samplers.ExtraSamplersSettings]:
+        """The request's Extra Samplers values (sam-extra ``Extra Samplers`` block), None without one.
+
+        ``core/extra_samplers.parse_script_block`` reads it like the extension's ``process``: positional, missing
+        values are the defaults (an older two-value block from a preset or history gets the noise window's defaults),
+        out of range → clamped, not a finite number → default — so the node gets values inside its input ranges."""
+        return extra_samplers.parse_script_block(cls._script(payload, extra_samplers.SCRIPT_NAME))
+
+    def _add_extra_samplers(self, graph: _Graph, model: list, payload: Mapping[str, Any]) -> list:
+        """``ForgeNeoExtraSamplerSettings`` on ``model`` when the request carries values other than the defaults
+        (plan R5/X5 — ComfyUI rule); otherwise ``model`` unchanged (graphs without such values stay byte-identical).
+
+        The node only writes the five values into the MODEL's ``model_options``; ``CFGGuider`` hands them to every
+        sampler function of this MODEL, so placing it once on the stack the passes share (right before the guidance
+        stack: the default graph, each ADetailer/SAM3 LoRA branch, a custom workflow) reaches the base, Hires (a Hires
+        checkpoint override keeps them — ``hires_carry``), ADetailer, SAM3 and Detail Daemon passes.  Without the
+        node the pack's ER SDE samplers run the defaults, like Forge for a request without the block."""
+        settings = self._extra_samplers_state(payload)
+        if settings is None or extra_samplers.is_default(settings):
+            return model
+        node = graph.add(extra_samplers.COMFY_SETTINGS_NODE, {
+            "model": model, **dict(zip(extra_samplers.ARG_NAMES, settings.as_args())),
+        }, "Extra Samplers values (sam-extra)")
+        return [node, 0]
+
+    @staticmethod
+    def _literal_sampler_names(node: Any) -> list[str]:
+        """The literal sampler names a graph node runs: ``sampler_name``/``base_sampler_name`` string inputs and a
+        ``ForgeNeoADetailer``'s settings JSON ``sampler_name`` (its pass resolves the name inside the node)."""
+        if not isinstance(node, Mapping):
+            return []
+        inputs = ComfyWorkflowCompiler._node_inputs(node)
+        texts = [inputs.get(key) for key in ("sampler_name", "base_sampler_name")]
+        if node.get("class_type") == "ForgeNeoADetailer":
+            try:
+                settings = json.loads(str(inputs.get("settings_json") or "{}"))
+            except ValueError:
+                settings = {}
+            texts.append(settings.get("sampler_name") if isinstance(settings, Mapping) else None)
+        return [text for text in texts if isinstance(text, str) and text]
+
+    def _check_pack_sampler_names(self, workflow: Mapping[str, Any]) -> None:
+        """``validate``: every pack-registered sam-extra sampler name a node runs (the twelve of
+        ``core/extra_samplers.PACK_SAMPLERS``) must be the bundled pack's own entry (plan R6/X12) — also for the
+        nodes ``_runtime_sampler_values`` never sees (a user workflow's other samplers, ``KSamplerSelect``)."""
+        for node in workflow.values():
+            for name in self._literal_sampler_names(node):
+                if name in _PACK_SAMPLER_NAMES:
+                    self._check_pack_owner("sampler_name", name)
+
+    def _extra_samplers_warnings(self, graph: Mapping[str, Any], warnings: Optional[list]) -> None:
+        """Informational compile warnings for the sam-extra samplers (the graph is not changed):
+
+        * ComfyUI Spectrum on a sampler that runs Euler (SMEA) Dy (CFG++): the pack runs it without its sub-steps
+          (Forge's ``Extra Samplers status: dy sub-steps skipped (Spectrum)``; plan R3 — Spectrum only: the app's
+          Anima SPEED keeps the sub-steps, as in sam-extra);
+        * a CFG++ sampler (Euler (SMEA) Dy CFG++, CFG++ UD10 AB) with CFG above 2 — Forge logs its CFG++ warning.
+        Logged once per text; appended to ``warnings`` (``feature`` ``"extra_samplers"``) when a list is given."""
+        texts: list[tuple[str, str]] = []
+        for node_id, node in graph.items():
+            if not isinstance(node, Mapping):
+                continue
+            inputs = self._node_inputs(node)
+            meta = node.get("_meta")
+            title = (meta.get("title") if isinstance(meta, Mapping) else None) or node.get("class_type")
+            cfgs = [inputs.get("cfg")]
+            if node.get("class_type") == "ForgeNeoADetailer":
+                try:
+                    settings = json.loads(str(inputs.get("settings_json") or "{}"))
+                except ValueError:
+                    settings = {}
+                cfgs = [settings.get("cfg") if isinstance(settings, Mapping) else None]
+            # the sampler the node runs (a Hires node's base_sampler_name is only its fallback, as in the pack)
+            for name in self._literal_sampler_names(node)[:1]:
+                if name in _DY_SAMPLER_NAMES and inputs.get("spectrum_enabled") is True:
+                    texts.append((_WARN_XSAMP_SUBSTEPS, (
+                        f"Spectrum 실험 기능이 켜진 샘플러({title}, node {node_id})라 Euler (SMEA) Dy (CFG++) "
+                        f"'{name}' 는 보조 스텝 없이 일반 스텝으로 돕니다 — Forge(sam-extra)의 Spectrum Integrated 와 같은 "
+                        "규칙(Extra Samplers status: dy sub-steps skipped (Spectrum))")))
+                if name in _CFG_PP_SAMPLER_NAMES:
+                    for cfg in cfgs:
+                        if isinstance(cfg, (int, float)) and not isinstance(cfg, bool) and cfg > _CFG_PP_MAX_CFG:
+                            texts.append((_WARN_XSAMP_CFG_PP, (
+                                f"CFG++ 샘플러 '{name}' 는 CFG 1~2 를 권장합니다 — {title}(node {node_id})의 CFG 가 "
+                                f"{cfg:g} 입니다(Forge 도 같은 경고를 남깁니다)")))
+        seen: set[str] = set()
+        for code, reason in texts:
+            if reason in seen:
+                continue
+            seen.add(reason)
+            _logger.warning("[Extra Samplers] %s", reason)
+            if warnings is not None:
+                warnings.append({"code": code, "reason": reason, "feature": "extra_samplers", "cause": None})
+
+    @classmethod
+    def _pass_sampler_names(cls, payload: Mapping[str, Any]) -> tuple[str, ...]:
+        """The ComfyUI sampler names the passes of ``payload`` resolve (``_comfy_sampler``), in pass order without
+        repeats: main; Hires (``enable_hr`` — ``hr_sampler_name``, else main); enabled ADetailer slots (``ad_sampler``
+        with ``ad_use_sampler``, else main); SAM3 Inpaint (``sam3_sampler``, "Use same sampler"/empty → main) — the
+        same expressions the graph builders give ``_runtime_sampler_values``."""
+        main = payload.get("sampler_name") or "euler"
+        texts = [main]
+        if _bool(payload.get("enable_hr")):
+            texts.append(payload.get("hr_sampler_name") or main)
+        for slot in cls._adetailer_slots(payload):
+            texts.append(str(slot.get("ad_sampler") or "euler") if _bool(slot.get("ad_use_sampler")) else str(main))
+        state = cls._sam3_state(payload)
+        if state is not None and str(state.get("sam3_mode") or "Inpaint").casefold() != "mask only":
+            sampler = str(state.get("sam3_sampler") or main)
+            texts.append(main if sampler.casefold() == "use same sampler" else sampler)
+        return tuple(dict.fromkeys(cls._comfy_sampler(text) for text in texts))
 
     def _add_lora_patches(
         self,
@@ -1819,6 +2145,173 @@ class ComfyWorkflowCompiler:
         return [node, 0]
 
     @staticmethod
+    def _feature_warning(warnings: Optional[list], feature: str, code: str, reason: str) -> None:
+        """A sam-extra feature left out of the graph on purpose (or a note about it): logged, and appended to the
+        caller's ``warnings`` as ``{"code", "reason", "feature", "cause": None}`` (``feature_preflight`` shows the row
+        as skipped with the reason)."""
+        _logger.warning("[%s] %s", feature, reason)
+        if warnings is not None:
+            warnings.append({"code": code, "reason": reason, "feature": feature, "cause": None})
+
+    @classmethod
+    def _speed_state(cls, payload: Mapping[str, Any]) -> Optional[anima_speed.ScriptSettings]:
+        """The request's enabled sam-extra Anima SPEED settings as the extension reads them
+        (``core/anima_speed.parse_script_block`` — positional, one dict, infotext aliases), None without one."""
+        script = anima_speed.parse_script_block(cls._script(payload, anima_speed.SCRIPT_NAME))
+        return script if script is not None and script.enabled else None
+
+    @staticmethod
+    def _speed_pass_label(mode: str) -> str:
+        """sam-extra's pass label of the main sampling pass (``forge_host.pass_label``): base for txt2img, else img2img."""
+        return anima_speed.PASS_BASE if mode == "txt2img" else anima_speed.PASS_IMG2IMG
+
+    @staticmethod
+    def _speed_card(script: anima_speed.ScriptSettings) -> anima_speed.SpeedSettings:
+        """``script`` as card settings (texts written with ``repr`` — they parse back to the same floats)."""
+        return anima_speed.SpeedSettings(
+            enabled=True, mode=script.mode, threshold=script.threshold, preset=script.preset,
+            scales=",".join(repr(float(value)) for value in script.scales), delta=float(script.delta),
+            sigma_divisor=float(script.sigma_divisor),
+            manual_sigmas=",".join(repr(float(value)) for value in script.manual_sigmas), adaptive=bool(script.adaptive),
+            transform=script.transform, spectrum_A=float(script.spectrum_A), spectrum_beta=float(script.spectrum_beta),
+            seed=int(script.seed), hires=bool(script.hires),
+        )
+
+    def _speed_plan(self, payload: Mapping[str, Any], mode: str, warnings: Optional[list]) -> Optional[_SpeedPlan]:
+        """What the main passes of this request get from sam-extra Anima SPEED (plan C4a), or None.
+
+        None with a warning — the node is left out, the image is the plain sampling Forge makes then:
+        * settings sam-extra refuses (``coerce_settings`` error, or a ``build_plan`` refusal that depends on the settings
+          only — divisor ≤ 0, custom A ≤ 0, manual sigma count) → ``CODE_SPEED_INVALID`` (Forge: "invalid settings");
+        * a skip the app knows before sampling (``core/anima_speed.static_skip_reason`` on ComfyUI: inpaint, ControlNet,
+          ComfyUI Spectrum — D6, read like the sampler's own ``spectrum_enabled`` — or a single scale) →
+          ``CODE_SPEED_SKIPPED``.
+        Everything that depends on the latent or the schedule is the node's runtime guard (sam-extra's wording)."""
+        script = self._speed_state(payload)
+        if script is None:
+            return None
+        from core import sam_extra_notices as notices
+        from core.spectrum_settings import skips_anima_speed
+
+        problems = [script.error] if script.error else [
+            anima_speed.VALIDATION_MESSAGES[code] for code in anima_speed.validate(self._speed_card(script))
+            if code in _SPEED_SETTINGS_REFUSALS
+        ]
+        if problems:
+            self._feature_warning(warnings, "speed", notices.CODE_SPEED_INVALID,
+                                  "Anima SPEED 설정 오류로 적용하지 않았습니다 — " + "; ".join(problems))
+            return None
+        facts = {**payload, "spectrum_enabled": skips_anima_speed(payload)}
+        if mode == "inpaint":
+            facts["use_image_alpha_as_mask"] = True
+        reason = anima_speed.static_skip_reason(script, facts, backend=anima_speed.BACKEND_COMFY)
+        if reason is not None:
+            self._feature_warning(warnings, "speed", notices.CODE_SPEED_SKIPPED, anima_speed.SKIP_MESSAGES[reason])
+            return None
+        return _SpeedPlan(script, self._speed_node_values(script))
+
+    @staticmethod
+    def _speed_node_values(script: anima_speed.ScriptSettings) -> dict[str, Any]:
+        """``ForgeNeoAnimaSpeed``'s settings inputs (``core/anima_speed.COMFY_INPUTS`` order) from the coerced
+        ``script`` — the node coerces them again with the same rules and gets the same values.
+
+        A number outside the node's ComfyUI range (``_SPEED_NODE_RANGES``) is sent as the extension default when the
+        plan does not read it (delta and divisor under the manual threshold, the divisor under delta_optimal — only
+        its sign is checked, and it is positive here —, A/β unless the custom preset sets the spectrum); a value the
+        plan reads that the node cannot take is a compile error (sending another value would be another computation)."""
+        values: dict[str, Any] = {
+            "enabled": True, "mode": script.mode, "threshold": script.threshold, "preset": script.preset,
+            "scales": ",".join(repr(float(value)) for value in script.scales), "delta": float(script.delta),
+            "sigma_divisor": float(script.sigma_divisor),
+            "manual_sigmas": ",".join(repr(float(value)) for value in script.manual_sigmas),
+            "adaptive": bool(script.adaptive), "transform": script.transform,
+            "spectrum_A": float(script.spectrum_A), "spectrum_beta": float(script.spectrum_beta),
+            "seed": int(script.seed),
+        }
+        spectrum = script.threshold != anima_speed.THRESHOLD_MANUAL
+        custom = spectrum and script.preset == anima_speed.PRESET_CUSTOM
+        read = {"delta": spectrum, "sigma_divisor": script.threshold == anima_speed.THRESHOLD_NEO_SHIFT,
+                "spectrum_A": custom, "spectrum_beta": custom, "seed": True}
+        for name, (low, high) in _SPEED_NODE_RANGES.items():
+            if low <= values[name] <= high:
+                continue
+            if not read[name]:
+                values[name] = anima_speed.DEFAULTS[name]
+                continue
+            raise WorkflowCompileError(
+                f"Anima SPEED 값 {name}={values[name]!r} 은(는) ComfyUI 노드가 받는 범위({low:g}~{high:g}) 밖이라 같은 "
+                "계산을 보낼 수 없습니다 — 값을 범위 안으로 바꾸거나 SPEED 를 끄세요."
+            )
+        return values
+
+    def _add_speed(
+        self, graph: _Graph, model: list, speed: Optional[_SpeedPlan], payload: Mapping[str, Any], *, pass_label: str,
+    ) -> list:
+        """``ForgeNeoAnimaSpeed`` on a main pass's sampler MODEL (base/img2img; Hires only with the block's ``hires``),
+        else ``model``. ``image_seed`` = the generation seed (image i of a batch uses +i, Forge's ``p.seeds``);
+        ``img2img_rescale`` = the extension default (the P10 option is Forge-only, D7). The node registers its sampler
+        wrapper in front of the MODEL's others, so the runtime order is CNS → SPEED → Detail Daemon → sampler whatever
+        the chain order (the pack's ``make_first``)."""
+        if speed is None or (pass_label == anima_speed.PASS_HIRES and not speed.script.hires):
+            return model
+        node = graph.add(anima_speed.COMFY_NODE_CLASS, {
+            "model": model, **speed.inputs, "pass_label": pass_label, "image_seed": concrete_seed(payload.get("seed")),
+            "img2img_rescale": bool(anima_speed.COMFY_IMG2IMG_RESCALE),
+        }, f"Anima SPEED ({pass_label} pass)")
+        return [node, 0]
+
+    @classmethod
+    def _colorcraft_state(cls, payload: Mapping[str, Any]) -> Optional[colorcraft.Config]:
+        """The request's sam-extra Colorcraft configuration (``core/colorcraft.parse_script_block`` — the compact
+        infotext string the app sends, or the dict form), None without a block. A block whose first argument is
+        neither is an app bug — a compile error, never silently dropped (design §7.1)."""
+        try:
+            return colorcraft.parse_script_block(cls._script(payload, colorcraft.SCRIPT_NAME))
+        except colorcraft.BlockError as exc:
+            raise WorkflowCompileError(f"Colorcraft 블록을 읽지 못했습니다: {exc}") from exc
+
+    def _colorcraft_plan(self, payload: Mapping[str, Any], warnings: Optional[list]) -> Optional[colorcraft.Config]:
+        """The configuration when a main pass of this graph grades something (base — also the img2img pass — or, with
+        Hires, the hires pass: ``core/colorcraft.build_chain``), else None; a block with nothing to run on these passes
+        (every modifier off or a no-op, only Hires modifiers without Hires, Colorcraft off) is left out with a warning
+        (``feature_preflight``: skipped) — the extension attaches nothing then either."""
+        config = self._colorcraft_state(payload)
+        if config is None:
+            return None
+        passes = [False, True] if _bool(payload.get("enable_hr")) else [False]
+        if any(colorcraft.build_chain(config, hires).entries for hires in passes):
+            return config
+        self._feature_warning(warnings, "colorcraft", "colorcraft_no_entries", (
+            "Colorcraft 를 켰지만 이 생성의 패스에서 도는 수정자가 없어 넣지 않았습니다(켠 수정자가 없거나 값이 모두 0, "
+            "또는 Hires 전용 수정자인데 Hires 가 꺼짐)"))
+        return None
+
+    def _add_colorcraft(
+        self, graph: _Graph, model: list, vae: Any, config: Optional[colorcraft.Config], *, hires: bool,
+    ) -> list:
+        """``ForgeNeoColorcraft`` as the last patch on a main pass's sampler MODEL when that pass has chain entries
+        (``core/colorcraft.build_chain(config, hires)`` — Pass Base/Hires/Both), else ``model``.
+
+        ``settings_json`` holds that pass only: ``{"v", "pass", "entries", "infotext", "tags"}`` — the entries the
+        extension's hook would build, the configuration's infotext (written into ComfyUI PNG metadata) and the modifier
+        tags (console lines). No seed in it (ComfyUI's cache stays seed-independent). ``vae`` = the pass's VAE: the
+        node encodes the colour anchors with it before sampling, as Forge does; ``pre_dd_sigma`` = the extension
+        default (the P10 option is Forge-only)."""
+        chain = colorcraft.build_chain(config, hires) if config is not None else None
+        if chain is None or not chain.entries:
+            return model
+        settings = {
+            "v": _COLORCRAFT_SETTINGS_VERSION, "pass": _COLORCRAFT_PASS_HIRES if hires else _COLORCRAFT_PASS_BASE,
+            "entries": chain.entries, "infotext": colorcraft.to_infotext(config), "tags": list(chain.tags),
+        }
+        node = graph.add(colorcraft.COMFY_NODE_CLASS, {
+            "model": model, "vae": vae,
+            "settings_json": json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            "contract": colorcraft.COMFY_CONTRACT, "pre_dd_sigma": bool(colorcraft.COMFY_PRE_DD_SIGMA),
+        }, "Colorcraft (hires pass)" if hires else "Colorcraft (base pass)")
+        return [node, 0]
+
+    @staticmethod
     def _detail_daemon_scripts(payload: Mapping[str, Any]) -> dict[str, Any]:
         """payload 의 Detail Daemon 스크립트 블록(없으면 빈 dict) — 순차 SAM3 패스가 DD 를 다시 판정하게 넘긴다."""
         from core import anima_guidance
@@ -2352,7 +2845,7 @@ class ComfyWorkflowCompiler:
         self, graph: _Graph, base: _PassLoraBase, loras: Sequence[LoraSpec], label: str,
         *, last_pass: Optional[tuple[list, list]] = None,
     ) -> tuple[list, list, list, list]:
-        """LoRA 앞(로더 + flow shift)에서 가른 보조 패스 스택: 그 패스 LoRA → NegPiP → 조건 → 가이던스.
+        """LoRA 앞(로더 + flow shift)에서 가른 보조 패스 스택: 그 패스 LoRA → NegPiP → 조건 → Extra Samplers 값 → 가이던스.
 
         메인과 같은 함수·순서다(로더 종류·``_resolve_choice``·NegPiP·가이던스 블록은 ``base.payload`` 의 것). 새 노드
         제목에는 ``({label} LoRA branch)`` 를 붙인다(label: "SAM3"·"ADetailer").
@@ -2381,6 +2874,7 @@ class ComfyWorkflowCompiler:
             graph, (base.positive, base.negative),
             {_link_key(base.main_model): model, _link_key(base.main_clip): clip},
         )
+        model = self._add_extra_samplers(graph, model, base.payload)
         model, _sampler_options = self._add_anima_guidance(
             graph, model, clip, positive, negative, base.payload,
         )
@@ -2608,6 +3102,8 @@ class ComfyWorkflowCompiler:
             }
 
         base_model = self._add_flow_shift(graph, model, payload)
+        # Extra Schedulers 값: 워크플로 자체의 ModelSampling* 노드는 모두 이 앞(위)에 남는다.
+        base_model = self._add_extra_schedulers(graph, base_model, payload)
         base_clip = clip
         model, clip = self._add_lora_patches(
             graph, base_model, base_clip, payload, loras, anima_plan,
@@ -2626,13 +3122,24 @@ class ComfyWorkflowCompiler:
             loras=tuple(loras), prompt_loras=tuple(prompt_loras),
             anima_plan=anima_plan, payload=payload, prompt=main_prompt,
         )
+        model = self._add_extra_samplers(graph, model, payload)
         model, sampler_options = self._add_anima_guidance(
             graph, model, clip, positive, negative, payload,
             hiflow_pass=mode == "txt2img" and _bool(payload.get("enable_hr")),
         )
         # Detail Daemon 은 이 sampler(base) 또는 hires 한 곳에만 — model 자체에는 없다. 디테일러가 받는 모델은
         # _add_image_extensions(last_pass_model=) 이 정한다.
-        inputs["model"] = pass_model = self._add_detail_daemon(graph, model, payload)
+        speed = self._speed_plan(payload, mode, warnings)
+        tint = self._colorcraft_plan(payload, warnings)
+        if tint is not None and not _is_link(vae):
+            raise WorkflowCompileError(
+                "Colorcraft 에 필요한 VAE 연결을 사용자 워크플로에서 찾지 못했습니다(색 기준점을 그 VAE 로 인코딩합니다)."
+            )
+        pass_model = self._add_detail_daemon(graph, model, payload)
+        inputs["model"] = self._add_colorcraft(
+            graph, self._add_speed(graph, pass_model, speed, payload, pass_label=self._speed_pass_label(mode)),
+            vae, tint, hires=False,
+        )
 
         if mode != "txt2img":
             if not uploaded_image:
@@ -2700,7 +3207,10 @@ class ComfyWorkflowCompiler:
         if _bool(payload.get("enable_hr")):
             pass_model = self._add_detail_daemon(graph, model, payload, hires_pass=True)
             samples, decode_vae = self._add_hires(
-                graph, pass_model,
+                graph, self._add_colorcraft(
+                    graph, self._add_speed(graph, pass_model, speed, payload, pass_label=anima_speed.PASS_HIRES),
+                    vae, tint, hires=True,
+                ),
                 clip, vae, positive, negative, samples, payload,
                 sampler_options=sampler_options, anima_plan=anima_plan,
             )
@@ -3696,12 +4206,21 @@ class ComfyWorkflowCompiler:
         raw = str(value or "normal").strip()
         folded = re.sub(r"\s+", " ", raw).casefold()
         if folded in _FORGE_SAME_SCHEDULER:
+            if folded in _FORGE_AUTOMATIC_SCHEDULER and sampler_text:
+                automatic = extra_samplers.COMFY_AUTOMATIC_SCHEDULER.get(
+                    ComfyWorkflowCompiler._comfy_sampler(sampler_text)
+                )
+                if automatic:
+                    return automatic
             return "normal"
         if folded in _FORGE_SCHEDULER_ALIASES:
             return _FORGE_SCHEDULER_ALIASES[folded]
         return folded.replace(" ", "_") if " " in folded else raw
 
     def _runtime_sampler_values(self, sampler: Any, scheduler: Any) -> tuple[str, str]:
+        """Forge sampler/scheduler → the KSampler values every app pass sends (base, Hires, ADetailer, SAM3,
+        custom workflow).  With a capability document both must be KSampler choices, and a sam-extra name the
+        bundled pack registers must be the pack's own entry (``_check_pack_owner``)."""
         original_sampler = str(sampler or "euler")
         sampler_value = self._comfy_sampler(original_sampler)
         scheduler_value = self._comfy_scheduler(scheduler, sampler_text=original_sampler)
@@ -3714,12 +4233,57 @@ class ComfyWorkflowCompiler:
                 if matched is None:
                     raise WorkflowCompileError(
                         f"ComfyUI KSampler.{input_name}에서 지원하지 않는 값입니다: {value}"
+                        + self._unsupported_name_hint(input_name, value)
                     )
+                self._check_pack_owner(input_name, matched)
                 if input_name == "sampler_name":
                     sampler_value = matched
                 else:
                     scheduler_value = matched
         return sampler_value, scheduler_value
+
+    @staticmethod
+    def _unsupported_name_hint(input_name: str, value: str) -> str:
+        """Why a sam-extra name can be missing from KSampler's list (appended to the "지원하지 않는 값" error)."""
+        names, _node, _report, kind = _PACK_OWNED_NAMES[input_name]
+        if value in names:
+            return (f" (앱 노드 팩 {_PACK_NAMES_MIN_VERSION} 의 sam-extra {kind}입니다 — 번들 노드 팩을 갱신했으면 "
+                    "ComfyUI 를 재시작하세요)")
+        if input_name == "sampler_name" and value == extra_samplers.COMFY_NAMES[extra_samplers.LABEL_CFGPP_UD10_AB]:
+            return f" (ComfyUI v{extra_samplers.CFGPP_UD10_MIN_COMFY} 이상이 필요한 코어 샘플러입니다)"
+        return ""
+
+    def _check_pack_owner(self, input_name: str, value: str) -> None:
+        """Refuse a sam-extra name the bundled pack registers when ComfyUI's entry is not the pack's (plan R6).
+
+        Read from ``/object_info``: the pack node's optional ``owned_names`` COMBO lists the names whose ComfyUI
+        entry is the pack's.  No such node → a pack older than 1.7.0 (or not restarted) while some other provider
+        put the name in KSampler's list; the name missing from the list → another provider registered it first
+        (the pack never overwrites one).  A probe that publishes class names only (no inputs) is not checked,
+        like ``validate``'s contract check."""
+        names, node_class, report_input, kind = _PACK_OWNED_NAMES[input_name]
+        if value not in names or self.object_info is None:
+            return
+        schema = self.object_info.get(node_class)
+        input_doc = schema.get("input") if isinstance(schema, Mapping) else None
+        sections = [input_doc.get(section) for section in ("required", "optional")] \
+            if isinstance(input_doc, Mapping) else []
+        sections = [section for section in sections if isinstance(section, Mapping)]
+        if isinstance(schema, Mapping) and not any(sections):
+            return
+        if not isinstance(schema, Mapping) or not any(report_input in section for section in sections):
+            raise WorkflowCompileError(
+                f"ComfyUI 의 '{value}' {kind}는 앱 노드 팩 {_PACK_NAMES_MIN_VERSION} 의 것이 아닙니다 — 팩의 "
+                f"{node_class}({report_input})가 없어(옛 팩이거나 갱신 뒤 재시작 전) 다른 노드가 등록한 같은 이름이 "
+                "남아 있습니다. Forge(sam-extra)와 같은 계산이 아니므로 생성하지 않습니다. 번들 노드 팩을 갱신하고 "
+                "ComfyUI 를 재시작하세요."
+            )
+        owned = self._choices(node_class, report_input) or []
+        if value not in owned:
+            raise WorkflowCompileError(
+                f"다른 노드 팩이 '{value}' {kind}를 먼저 등록해 앱 노드 팩이 덮어쓰지 않았습니다 — Forge(sam-extra)와 "
+                f"같은 계산이 아니므로 생성하지 않습니다. 그 팩을 끄거나 다른 {kind}를 고르세요."
+            )
 
     @staticmethod
     def _find_sampler(workflow: Mapping[str, Any]) -> str:

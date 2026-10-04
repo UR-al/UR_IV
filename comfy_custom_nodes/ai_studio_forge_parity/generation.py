@@ -8,7 +8,9 @@ import math
 import secrets
 from typing import Any
 
+from . import hires_carry
 from .compat import (
+    clone_model,
     filename_choices,
     folder_paths_module,
     invoke_provider,
@@ -27,6 +29,7 @@ from .guidance_cns import (
     cns_float_input,
     model_cns_settings,
 )
+from .guidance_common import DY_SUBSTEPS_OFF_KEY, set_transformer_option
 from .guidance_detail import PASS_BASE, PASS_HIRES, with_pass_tag
 from .anima_lora_nodes import (
     AnimaLoraStateCache,
@@ -364,6 +367,12 @@ class ForgeNeoKSamplerCNS:
         if speed_enabled:
             # CNS rides on the MODEL's sampler wrapper, so it also colours the
             # SPEED sampler's steps (Path B when SPEED wraps sample_*).
+            # The legacy provider forecasts whole steps: Euler (SMEA) Dy CFG++ runs without
+            # its sub-steps here (guidance_common.DY_SUBSTEPS_OFF_KEY).
+            model = set_transformer_option(
+                clone_model(model, "SPEED sampler"), DY_SUBSTEPS_OFF_KEY,
+                "SPEED (SpectrumSPDKSampler)",
+            )
             if spectrum_enabled and (
                 float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps),
                 float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size),
@@ -379,6 +388,9 @@ class ForgeNeoKSamplerCNS:
             # containers (comfy.utils.deepcopy_list_dict) while sharing tensors
             # and GPU handles, so the upstream cached MODEL is never modified.
             model = model.clone()
+            # Spectrum forecasts whole steps: Euler (SMEA) Dy CFG++ runs without its
+            # sub-steps on this clone, as sam-extra does under Spectrum Integrated.
+            set_transformer_option(model, DY_SUBSTEPS_OFF_KEY, "Spectrum")
             model = invoke_provider(
                 "DiTSpectrumPatch", method="patch", feature="Spectrum sampler",
                 args=(model, int(steps), float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps), float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size), True, bool(spectrum_one_sampler_only), bool(spectrum_verbose)),
@@ -393,9 +405,15 @@ def _patch_flow_shift(model: Any, shift: float):
     while Anima is trained with multiplier 1.0.  Forge changes only ``shift``
     on the existing predictor, so forwarding the model's current multiplier is
     required for parity (and prevents Anima generations from remaining noise).
+
+    ``ModelSamplingSD3`` installs a new ``model_sampling``; the values pack
+    features carry on the old one (``hires_carry.register_sampling_attr``,
+    Extra Schedulers) are copied over, so the Hires pass keeps them with
+    Shift > 0 like Forge, which keeps its one predictor.
     """
 
     multiplier = 1000.0
+    original = None
     get_model_object = getattr(model, "get_model_object", None)
     if callable(get_model_object):
         original = get_model_object("model_sampling")
@@ -406,12 +424,13 @@ def _patch_flow_shift(model: Any, shift: float):
         raise RuntimeError(
             f"Invalid discrete-flow timestep multiplier: {multiplier!r}"
         )
-    return invoke_provider(
+    patched = invoke_provider(
         "ModelSamplingSD3",
         method="patch",
         feature="Forge flow shift",
         args=(model, float(shift), multiplier),
     )[0]
+    return hires_carry.copy_sampling_attrs(original, patched)
 
 
 class ForgeNeoModelSamplingShift:
@@ -509,6 +528,9 @@ class ForgeNeoHiresFix:
             active_clip = invoke_provider("CLIPLoader", method="load_clip", feature="hires text encoder override", args=(text_encoder_name, clip_type, "default"))[0]
         if not is_disabled_choice(vae_name):
             active_vae = invoke_provider("VAELoader", method="load_vae", feature="hires VAE override", args=(vae_name,))[0]
+        # A checkpoint/UNET override samples a fresh MODEL: the pack features re-apply their
+        # patches to it below (hires_carry). Detail Daemon and the guidance suite do not (gap).
+        model_overridden = active_model is not model
         clip_changed = active_clip is not base_clip
         if positive_text.strip() or negative_text.strip() or clip_changed:
             if active_clip is None:
@@ -521,6 +543,8 @@ class ForgeNeoHiresFix:
                 negative = invoke_provider("CLIPTextEncode", method="encode", feature="hires negative prompt", args=(active_clip, negative_source))[0]
         if float(shift) > 0:
             active_model = _patch_flow_shift(active_model, float(shift))
+        if model_overridden:
+            active_model = hires_carry.apply(model, active_model, active_vae)
         tensor = samples["samples"]
         ratio_method = getattr(active_vae, "spacial_compression_decode", None)
         try:
@@ -941,6 +965,15 @@ _AD_SAMPLER_ALIASES = {
     "dpm fast": "dpm_fast", "dpm adaptive": "dpm_adaptive",
     "unipc": "uni_pc", "uni pc": "uni_pc", "uni_pc": "uni_pc",
     "lcm": "lcm", "ddim": "ddim", "er sde": "er_sde", "er-sde": "er_sde",
+    # sam-extra Extra Samplers (v0.33.0): twelve names this pack registers, five ComfyUI core names.
+    "er sde (reverse-time)": "er_sde_reverse_time", "er sde (ode)": "er_sde_ode",
+    "er sde (tunable)": "er_sde_tunable", "dpm++ 4m sde": "dpmpp_4m_sde",
+    "euler dy cfg++": "euler_dy_cfg_pp", "euler smea dy cfg++": "euler_smea_dy_cfg_pp",
+    "euler dy": "euler_dy", "euler smea dy": "euler_smea_dy",
+    "dpm++ 2m (flow ode)": "dpmpp_2m_flow_ode", "dpm++ 2m heun (flow ode)": "dpmpp_2m_heun_flow_ode",
+    "dpm++ 3m (flow ode)": "dpmpp_3m_flow_ode",
+    "unipc bh2": "uni_pc_bh2", "uni pc bh2": "uni_pc_bh2", "cfg++ ud10 ab": "cfgpp_ud10_ab",
+    "ipndm": "ipndm", "ipndm_v": "ipndm_v", "deis": "deis", "restart (flow)": "restart_flow",
 }
 
 _AD_SAMPLER_SCHEDULER_SUFFIXES = (
@@ -956,9 +989,19 @@ _AD_SCHEDULER_ALIASES = {
     "beta": "beta",
     "beta57": "beta57", "beta 57": "beta57",
     "beta57 (res4lyf)": "beta57", "beta 57 (res4lyf)": "beta57",
+    # sam-extra Extra Schedulers (v0.33.0): the nine names this pack registers under the same names.
+    "cosine": "cosine", "cosineexponential blend": "cosine_exponential",
+    "cosine-exponential blend": "cosine_exponential", "cosine_exponential": "cosine_exponential",
+    "phi": "phi", "laplace": "laplace", "karras dynamic": "karras_dynamic", "karras_dynamic": "karras_dynamic",
+    "custom": "custom", "react cosinusoidal dynsf": "react_cosinusoidal_dynsf",
+    "flow cosmos rho7": "flow_cosmos_rho7", "flow cosmos dynamic": "flow_cosmos_dynamic",
 }
 
 _AD_SAME_SCHEDULER = frozenset({"use same scheduler", "same", "automatic", "auto", ""})
+# Forge "Automatic" is the sampler's own default scheduler; every sampler keeps automatic -> normal here except
+# DPM++ 4M SDE, which Forge runs on "exponential" (the app compiler's rule, decision U4).
+_AD_AUTOMATIC_SCHEDULER = frozenset({"automatic", "auto"})
+_AD_AUTOMATIC_SCHEDULERS = {"dpmpp_4m_sde": "exponential"}
 
 
 def _normalize_ad_sampler(sampler: Any, scheduler: Any) -> tuple[str, str]:
@@ -976,7 +1019,9 @@ def _normalize_ad_sampler(sampler: Any, scheduler: Any) -> tuple[str, str]:
     normalized_sampler = _AD_SAMPLER_ALIASES.get(lowered, lowered.replace(" ", "_"))
     scheduler_lower = " ".join(scheduler_text.split()).casefold()
     if scheduler_lower in _AD_SAME_SCHEDULER:
-        normalized_scheduler = inferred_scheduler or "normal"
+        automatic = (_AD_AUTOMATIC_SCHEDULERS.get(normalized_sampler)
+                     if scheduler_lower in _AD_AUTOMATIC_SCHEDULER else None)
+        normalized_scheduler = inferred_scheduler or automatic or "normal"
     else:
         normalized_scheduler = _AD_SCHEDULER_ALIASES.get(
             scheduler_lower, scheduler_lower.replace(" ", "_")

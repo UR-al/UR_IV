@@ -11,8 +11,8 @@
   ER SDE (Reverse-time)·(ODE)·(Tunable) 을 쓰는 패스(``pass_values`` → ``core/extra_samplers.passes_from_widgets``)를 ``plan``
   에 넘긴다 — 스냅샷이 스크립트를 확인했으면 늘, 확인 못 했으면 그런 패스가 있을 때만 싣는다(계획 X5). 출처는 ``plan`` 이
   값으로 정한다(기본값이면 앱 기본값). 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다. aux(보조 패스 봉투)는 t2i 와
-  같은 블록이고 모든 보조 img2img 로 간다(블록 없는 요청은 확장 ui() 기본값으로 돈다). ComfyUI 는 팩 1.7.0 단계(계획 C6)
-  전이라 ``plan`` 이 'comfy_pending' 으로 싣지 않는다(R16 — 그래프가 바이트 단위로 그대로). 블록은 늘 위치 인자 다섯이다
+  같은 블록이고 모든 보조 img2img 로 간다(블록 없는 요청은 확장 ui() 기본값으로 돈다). ComfyUI 는 늘 싣는다(계획 C6 —
+  컴파일러가 값이 기본값과 다를 때만 앱 노드 팩 1.7.0 의 노드를 넣는다, 기본값이면 그래프가 바이트 단위로 그대로). 블록은 늘 위치 인자 다섯이다
   (계획 X10 — 인자 2개인 0.31·0.32 는 뒤 셋을 버린다: 카드와 결과 알림이 말한다)
 - ``get_settings``/``set_settings``/``apply_saved_settings``  prompt_settings.json·생성 프리셋(``extra_samplers_settings``,
   키 = ARG_NAMES 다섯). 옛 설정 파일에 키가 없거나 저장값에 칸이 빠졌으면(v0.33.0 전 계획의 두 칸 — 차수·η) 그 칸은 앱
@@ -207,9 +207,6 @@ def contribute(host, ctx) -> Any:
         if xsa.window_unsupported(settings, ctx.capabilities):
             logger.info("Extra Samplers: %s — 연결된 sam-extra 의 인자 %s개(잡음 구간 칸은 Forge 가 버린다)",
                         xsa.WINDOW_UNSUPPORTED_TEXT, xsa.live_argc(ctx.capabilities))
-    elif result.reason == xsa.REASON_COMFY_PENDING and not xsa.is_default(settings):
-        logger.debug("Extra Samplers: ComfyUI 는 노드 팩 1.7.0 단계 전이라 ER SDE 값을 보내지 않는다(%s)",
-                     xsa.describe(settings))
     return contribution
 
 

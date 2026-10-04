@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import cases from './animaSpeed.cases.json'
 import {
-  COMFY_PENDING_NOTE, DEFAULTS, DEFAULT_SETTINGS, DELTA_RANGE, DIVISOR_RANGE, FORGE_NOTE, INVALID_NOTE, KREA2_NOTE,
+  COMFY_NOTE, DEFAULTS, DEFAULT_SETTINGS, DELTA_RANGE, DIVISOR_RANGE, FORGE_NOTE, INVALID_NOTE, KREA2_NOTE,
   LABELS, MODES, MODE_OPTIONS, OLD_FORGE_NOTE, PRESET_A, PRESET_NAMES, THRESHOLDS, THRESHOLD_OPTIONS, TRANSFORMS,
   TRANSFORM_OPTIONS, VALIDATION_MESSAGES, WIDGET_IDS, cardNote, isDefault, numbers, parseSettings, pyFloat,
   readSettings, summary, validate, validationMessages, visibleFields, type SpeedKey, type SpeedSettings,
@@ -93,7 +93,7 @@ describe('card display', () => {
     expect(cardNote(forge(true) as never)).toBe(FORGE_NOTE)
     expect(cardNote(forge(false) as never)).toBe(OLD_FORGE_NOTE)
     expect(cardNote(null)).toBe(FORGE_NOTE)                                       // 모르면 막지 않는다
-    expect(cardNote({ status: 'not_applicable', known: false } as never)).toBe(COMFY_PENDING_NOTE)
+    expect(cardNote({ status: 'not_applicable', known: false } as never)).toBe(COMFY_NOTE)             // 계획 C6
     expect(cardNote(forge(true) as never, true)).toBe(KREA2_NOTE)
   })
 })

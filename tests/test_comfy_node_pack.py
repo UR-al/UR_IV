@@ -48,15 +48,32 @@ COMPILER_BUILT_NODES = frozenset({
     "ForgeNeoH3ConditioningCachePrepare",
     "ForgeNeoH3ConditioningCacheLoad",
     "ForgeNeoAnimaVAEDeGrid",
+    "ForgeNeoExtraSchedulers",
+    "ForgeNeoExtraSamplerSettings",
+    "ForgeNeoAnimaSpeed",
+    "ForgeNeoColorcraft",
 })
 # 컴파일러가 따옴표 리터럴이 아니라 앱 상수로 만드는 노드 — (그 상수를 정의한 모듈, 상수 이름).
 # 컴파일러 소스는 ``<모듈 이름>.<상수>`` 로 참조해야 하고, 상수 값은 노드 ID 와 같아야 한다.
 COMPILER_NODE_CONSTANTS = {
     "ForgeNeoAnimaVAEDeGrid": ("core/vae_degrid.py", "COMFY_NODE_CLASS"),
+    # C2a: 요청에 Extra Schedulers 값이 있고 어느 패스가 laplace·custom·flow_cosmos_rho7·flow_cosmos_dynamic 이면
+    # flow shift 바로 뒤(LoRA 앞)에 넣는다(core/comfy_workflow_compiler._add_extra_schedulers).
+    "ForgeNeoExtraSchedulers": ("core/extra_schedulers.py", "COMFY_NODE_CLASS"),
+    # C3: ER SDE 값이 기본값과 다를 때만, 패스들이 쓰는 모델 스택의 가이던스 앞에 넣는다(기본 그래프·ADetailer/SAM3 LoRA
+    # 분기·사용자 워크플로 — core/comfy_workflow_compiler._add_extra_samplers).
+    "ForgeNeoExtraSamplerSettings": ("core/extra_samplers.py", "COMFY_SETTINGS_NODE"),
+    # C4a: Anima SPEED 블록이 켜져 있으면 메인 패스(base/img2img, hires 는 블록의 hires 일 때)마다 Detail Daemon 뒤에
+    # 넣는다(core/comfy_workflow_compiler._add_speed). 디테일러 패스에는 넣지 않는다.
+    "ForgeNeoAnimaSpeed": ("core/anima_speed.py", "COMFY_NODE_CLASS"),
+    # C5: Colorcraft 블록에 그 패스에서 도는 수정자가 있으면 메인 패스(base/img2img, hires)마다 SPEED 뒤 마지막에 넣는다
+    # (core/comfy_workflow_compiler._add_colorcraft). 디테일러 패스에는 넣지 않는다.
+    "ForgeNeoColorcraft": ("core/colorcraft.py", "COMFY_NODE_CLASS"),
 }
 # 팩에 먼저 들어온 컴파일러용 노드 → 사유(필수). 컴파일러가 아직 만들지 않으므로 소스 검사를 건너뛰고,
 # 컴파일러 소스에 나타나면(리터럴이든 상수 참조든) 낡은 항목으로 실패한다 — 그때 여기서 지운다.
-PENDING_COMPILER_NODES: dict[str, str] = {}
+PENDING_COMPILER_NODES: dict[str, str] = {
+}
 CUSTOM_WORKFLOW_NODES = frozenset({
     "ForgeNeoAnimaLoraLoaderModelOnly",
     "ForgeNeoAnimaDAVE",
@@ -153,7 +170,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 38)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 42)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
@@ -435,3 +452,36 @@ class TestComfyBackendNodePackPreflight(unittest.TestCase):
 
         import base64
         self.assertEqual(base64.b64decode(encoded), b"last")
+
+
+PACK_DIR = Path(bundled_pack.__file__).resolve().parent
+# Pack 1.7.0's sam-extra ports (THIRD_PARTY_NOTICES.md "sam-extra ports (pack 1.7.0)" table).
+SAM_EXTRA_PORT_PREFIXES = ("extra_schedulers", "extra_samplers", "speed_", "colorcraft_")
+
+
+class TestPackNotices(unittest.TestCase):
+    def setUp(self):
+        self.notices = (PACK_DIR / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+
+    def test_every_license_file_is_named_in_the_notices_and_back(self):
+        files = sorted(path.name for path in (PACK_DIR / "LICENSES").iterdir() if path.is_file())
+        self.assertEqual(len(files), 15)
+        for name in files:
+            with self.subTest(license=name):
+                self.assertIn(f"LICENSES/{name}", self.notices)
+        import re
+        for name in sorted(set(re.findall(r"LICENSES/([A-Za-z0-9_.\-]+\.txt)", self.notices))):
+            with self.subTest(named=name):
+                self.assertIn(name, files)
+
+    def test_every_sam_extra_port_module_is_in_the_test_oracle_table(self):
+        # sam-extra is GPL-3.0: where the pack re-implements what sam-extra implements, the notices say that the
+        # extension was used only as a test oracle. Every port module must be in that table.
+        start = self.notices.index("## sam-extra ports (pack 1.7.0)")
+        section = self.notices[start:self.notices.index("\n## ", start + 1)]
+        self.assertIn("only as a test oracle", section)
+        modules = sorted(path.name for path in PACK_DIR.glob("*.py") if path.name.startswith(SAM_EXTRA_PORT_PREFIXES))
+        self.assertEqual(len(modules), 18)
+        for name in modules:
+            with self.subTest(module=name):
+                self.assertIn(f"`{name}`", section)

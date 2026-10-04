@@ -371,14 +371,15 @@ export function isDefault(settings: SpeedSettings): boolean {
 
 export const FORGE_NOTE = "Forge 확장 'Anima SPEED' 로 보냅니다"
 export const OLD_FORGE_NOTE = '연결된 Forge 의 sam-extra 에 Anima SPEED 가 없어(0.31.0 이상 필요) 보내지 않습니다.'
-export const COMFY_PENDING_NOTE = 'ComfyUI 는 앱 노드 팩 1.7.0 단계 뒤에 같은 계산으로 돌립니다 — 지금은 ComfyUI 로 가지 않습니다.'
+export const COMFY_NOTE = 'ComfyUI 는 앱 노드 팩(1.7.0)의 같은 계산으로 돌립니다. img2img·Hires 시작 latent 맞춤은 확장 '
+  + '기본값(켬)을 씁니다.'
 export const KREA2_NOTE = 'Krea2 생성에는 보내지 않습니다.'
 
-/** 카드 아래 백엔드 줄: Krea2 → 안 보냄, ComfyUI → 팩 1.7.0 단계 뒤(계획 R16), 확장 확인됐는데 없음 → 옛 Forge, 그 밖 → Forge. */
+/** 카드 아래 백엔드 줄: Krea2 → 안 보냄, ComfyUI → 앱 노드 팩 1.7.0(계획 C6), 확장 확인됐는데 없음 → 옛 Forge, 그 밖 → Forge. */
 export function cardNote(caps: Pick<SamExtraCapabilitiesEvent, 'status' | 'known' | 'features'> | null | undefined,
   krea2 = false): string {
   if (krea2) return KREA2_NOTE
-  if (caps?.status === 'not_applicable') return COMFY_PENDING_NOTE
+  if (caps?.status === 'not_applicable') return COMFY_NOTE
   if (caps?.known && caps.features?.speed !== true) return OLD_FORGE_NOTE
   return FORGE_NOTE
 }

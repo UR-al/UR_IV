@@ -20,8 +20,12 @@
 - ``restore_from_metadata(host, params)``  '이 설정으로 생성'(ui/image_metadata_actions — 계획 A-R1·X3b): 이미지의 메인·
   Hires 스케줄러가 값 스케줄러일 때만 그 스케줄러의 칸을 함께 되살린다(``core/extra_schedulers.restore_from_infotext``).
 
-식·목록 문법 검사와 그 결과를 칸 아래에 보이는 일(``pushWidgetProperty(…, 'error', …)``)은 계획 C7 이다(계산기가 ComfyUI
-팩에 있다). 모두 GUI 스레드에서 부른다(위젯을 읽는다).
+- 식·목록 미리 검사(계획 C7): custom 식·시그마 목록 칸이 바뀔 때마다(Vue 입력·setText 모두 ``textChanged``)
+  ``core/extra_schedulers.check_text`` 로 보고 ``pushWidgetProperty('_xsched_custom_expression' | '_xsched_custom_sigmas',
+  'error', 문구|None)`` — 카드가 그 칸 아래 오류 줄로 보인다(새 브리지 이름 없음). 생성 전에는 ``contribute`` 가 custom 을
+  쓰는 패스가 있고 그 방식의 글자를 쓸 수 없으면 경고 알림(``CODE_XSCHED_INVALID_TEXT``)을 단다 — 요청은 그대로 보낸다.
+
+모두 GUI 스레드에서 부른다(위젯을 읽는다).
 """
 from __future__ import annotations
 
@@ -54,7 +58,8 @@ _PASS_SOURCES = {
 
 
 def init_extra_schedulers_proxies(bridge) -> dict:
-    """``_xsched_<인자>`` 프록시 8개 — 앱 기본값을 문자열로 심어 둔다(Vue 가 값을 보내기 전에도 같은 블록이 나가게)."""
+    """``_xsched_<인자>`` 프록시 8개 — 앱 기본값을 문자열로 심어 둔다(Vue 가 값을 보내기 전에도 같은 블록이 나가게).
+    custom 식·시그마 목록 칸은 바뀔 때마다 미리 검사해 오류 줄을 보낸다(``watch_text_errors`` — 계획 C7)."""
     from ui.widget_proxies import LineEditProxy
 
     values = xs.widget_values(xs.APP_DEFAULTS)
@@ -63,7 +68,43 @@ def init_extra_schedulers_proxies(bridge) -> dict:
         proxy = LineEditProxy(bridge, xs.widget_id(key))
         proxy.setText(values[key])
         widgets[key] = proxy
+    watch_text_errors(bridge, widgets)
     return widgets
+
+
+# 미리 검사하는 칸 → 그 칸을 읽는 custom 방식
+_CHECKED_TEXTS = (("custom_expression", xs.MODE_EXPRESSION), ("custom_sigmas", xs.MODE_SIGMAS))
+
+
+def push_text_error(bridge, key: str, message: Optional[str]) -> None:
+    """칸 ``key`` 의 오류 줄(위젯 속성 ``core/extra_schedulers.ERROR_PROPERTY``) — None 이면 지운다. 종료 중이면 조용히."""
+    push = getattr(bridge, "pushWidgetProperty", None)
+    if not callable(push):
+        return
+    try:
+        push(xs.widget_id(key), xs.ERROR_PROPERTY, message)
+    except RuntimeError:
+        pass   # 종료 중 QObject 가 이미 사라졌다
+
+
+def watch_text_errors(bridge, widgets: Mapping) -> None:
+    """custom 식·시그마 목록 칸의 ``textChanged`` → ``check_text`` → 오류 줄. 같은 문구는 다시 보내지 않는다(타자마다
+    부르지만 바뀔 때만 보낸다). 지금 값(앱 기본값 — 쓸 수 있다)은 오류가 없어 처음에는 보내지 않는다."""
+    shown: dict = {}
+    for key, mode in _CHECKED_TEXTS:
+        signal = getattr(widgets.get(key), "textChanged", None)
+        connect = getattr(signal, "connect", None)
+        if not callable(connect):
+            continue
+        shown[key] = None
+
+        def _check(text, key=key, mode=mode):
+            message = xs.check_text(mode, text)
+            if message != shown.get(key):
+                shown[key] = message
+                push_text_error(bridge, key, message)
+
+        connect(_check)
 
 
 def _call(widget: Any, name: str) -> Any:
@@ -182,9 +223,24 @@ def passes_in_use(host, *, img2img: bool = False) -> tuple:
     return xs.passes_from_widgets(pass_values(host), img2img=img2img)
 
 
+def _invalid_text_notice(host, settings: xs.ExtraSchedulerSettings, *, img2img: bool) -> Any:
+    """생성 전 경고(계획 C7, 설계 XS §3.2): 어느 패스가 custom 을 쓰는데 그 방식의 글자를 쓸 수 없으면 — 요청은 그대로
+    보낸다(Forge·ComfyUI 가 같은 영어 문구로 멈춘다). custom 을 쓰지 않거나 쓸 수 있으면 None."""
+    if not any(use.scheduler == xs.NAME_CUSTOM for use in passes_in_use(host, img2img=img2img)):
+        return None
+    message = xs.check_settings(settings)
+    if message is None:
+        return None
+    from core import sam_extra_notices as sn
+
+    logger.warning("Extra Schedulers: custom %s 을 쓸 수 없다 — %s",
+                   "시그마 목록" if settings.custom_mode == xs.MODE_SIGMAS else "식", message)
+    return sn.xsched_invalid_text_notice(message, sigmas=settings.custom_mode == xs.MODE_SIGMAS)
+
+
 def contribute(host, ctx) -> Any:
-    """ui/sampling_blocks 기여자 — Extra Schedulers 블록 하나(또는 없음). 알림은 없다(빠지면 게이트가, 다른 확장의
-    스케줄러가 돌았으면 결과 알림이 말한다).
+    """ui/sampling_blocks 기여자 — Extra Schedulers 블록 하나(또는 없음). 알림은 custom 식·목록을 쓸 수 없을 때의 생성 전
+    경고 하나뿐이다(t2i·i2i — ``_invalid_text_notice``; 빠지면 게이트가, 다른 확장의 스케줄러가 돌았으면 결과 알림이 말한다).
 
     ctx.target: 't2i'(T2I 계열 전부) · 'i2i'(I2I·인페인트·채팅 편집 — 그 요청은 스케줄러를 싣지 않아 메인 패스는 값을 읽지
     않는다) · 'aux'(보조 패스 봉투 — t2i 와 같은 블록)."""
@@ -198,6 +254,10 @@ def contribute(host, ctx) -> Any:
     contribution = Contribution()
     if result.block is not None:
         contribution.add(xs.SCRIPT_NAME, result.block, provenance=result.provenance)
+        if ctx.target != xs.TARGET_AUX:
+            notice = _invalid_text_notice(host, settings, img2img=ctx.target == xs.TARGET_I2I)
+            if notice is not None:
+                contribution.notices.append(notice)
         # 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다 — 여기서는 준비만 기록한다
         logger.debug("Extra Schedulers 블록 준비(%s, %s): %s", ctx.target, result.reason,
                      xs.describe(settings, [use.scheduler for use in passes] if passes else None))
@@ -206,5 +266,6 @@ def contribute(host, ctx) -> Any:
 
 __all__ = [
     "apply_infotext", "apply_saved_settings", "contribute", "current_settings", "get_settings",
-    "init_extra_schedulers_proxies", "pass_values", "passes_in_use", "restore_from_metadata", "set_settings",
+    "init_extra_schedulers_proxies", "pass_values", "passes_in_use", "push_text_error", "restore_from_metadata",
+    "set_settings", "watch_text_errors",
 ]

@@ -3,7 +3,8 @@
 GPU·Forge 없이: 기능 스냅샷은 가짜(``tests.test_alwayson_propagation.caps``), Forge 요청은 가짜 requests.post.
 결정(design_colorcraft §3·§4·§5.1, 계획 R7·R16): 메인 요청(T2I·대기열·XYZ·시드 탐색·채팅·만화 컷, I2I·인페인트·채팅 편집은
 카드 'I2I·인페인트에도 적용' 토글)에만 첫 인자 하나(확장 infotext 문자열)의 블록을 싣고, 보조 작업(Refine·단독/배치 SAM3·
-ADetailer·손 재구성)에는 싣지 않는다. 돌 항목이 없으면 싣지 않는다. ComfyUI 는 팩 1.7.0 단계 전이라 싣지 않는다.
+ADetailer·손 재구성)에는 싣지 않는다. 돌 항목이 없으면 싣지 않는다. ComfyUI 도 같은 블록이다(계획 C6 — 컴파일러가 앱
+노드 팩 1.7.0 의 노드로).
 """
 import copy
 import json
@@ -151,10 +152,15 @@ class ContributorTests(unittest.TestCase):
         gone = sb.build_sampling_blocks(ColorcraftHost(caps(present=(CC,), img2img=()), img2img="true"), ap.TARGET_I2I)
         self.assertNotIn(CC, gone.blocks)
 
-    def test_comfy_and_krea2_build_nothing(self):
+    def test_comfy_carries_the_forge_block_and_krea2_nothing(self):
         with mock.patch("backends.get_backend_type", return_value=BackendType.COMFYUI):
             comfy = sb.build_sampling_blocks(ColorcraftHost(None), ap.TARGET_T2I)
-        self.assertNotIn(CC, comfy.blocks)                                         # 팩 1.7.0 단계 전(R16)
+            comfy_i2i = sb.build_sampling_blocks(ColorcraftHost(None), ap.TARGET_I2I)
+            empty = sb.build_sampling_blocks(ColorcraftHost(None, paths={}), ap.TARGET_T2I)
+        self.assertEqual(comfy.blocks[CC], ON_BLOCK)                                 # 계획 C6
+        self.assertEqual(comfy.provenance[CC], ap.PROVENANCE_USER)
+        self.assertNotIn(CC, comfy_i2i.blocks)                                       # 'I2I·인페인트에도 적용' 끔
+        self.assertNotIn(CC, empty.blocks)                                           # 돌 항목 없음
         krea2 = sb.build_sampling_blocks(ColorcraftHost(PRESENT), ap.TARGET_T2I, krea2=True)
         self.assertNotIn(CC, krea2.blocks)
 
@@ -194,8 +200,8 @@ class MainRequestTests(unittest.TestCase):
         self.assertEqual((cc.build_chain(sent, False).tags, cc.build_chain(sent, True).tags), (["I"], ["III"]))
 
     def test_requests_without_the_feature_stay_byte_identical(self):
-        """카드가 꺼져 있거나(앱 기본값) 돌 항목이 없으면 Colorcraft 위젯이 없던 때와 요청이 같다. ComfyUI 는 켜도 같다
-        (팩 1.7.0 단계 전)."""
+        """카드가 꺼져 있거나(앱 기본값) 돌 항목이 없으면 Colorcraft 위젯이 없던 때와 요청이 같다. ComfyUI 에서 켜면 그
+        요청에 Forge 와 같은 블록 하나만 더해진다(계획 C6)."""
         for label, capabilities, backend, enabled, paths in (
                 ("unknown", None, BackendType.WEBUI, "false", EXPOSURE),
                 ("known", PRESENT, BackendType.WEBUI, "false", EXPOSURE),
@@ -209,6 +215,9 @@ class MainRequestTests(unittest.TestCase):
                 before, _ = ChainHost(capabilities=capabilities)._build_generation_payload(snapshot=True)
                 after, _ = ColorcraftHost(capabilities, enabled=enabled, paths=paths)._build_generation_payload(
                     snapshot=True)
+                if label == "comfy on":
+                    before = copy.deepcopy(before)
+                    before["alwayson_scripts"][CC] = ON_BLOCK
                 self.assertEqual(json.dumps(after, sort_keys=True), json.dumps(before, sort_keys=True))
 
     def test_image_tab_entry_follows_the_toggle(self):

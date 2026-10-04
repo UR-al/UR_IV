@@ -95,7 +95,8 @@ export const FLOW_COSMOS_DYNAMIC_RHO_ABOVE = 2
 /** Forge 의 '같은 스케줄러'(파이썬 USE_SAME_SCHEDULER). */
 export const USE_SAME_SCHEDULER = 'Use same scheduler'
 
-/** 식·목록 오류를 칸 아래에 보일 위젯 속성(파이썬 계획 C7 이 pushWidgetProperty 로 보낸다). */
+/** 식·목록 오류를 칸 아래에 보일 위젯 속성(파이썬 core/extra_schedulers.ERROR_PROPERTY — ui/extra_schedulers_ui 가 칸이 바뀔
+ * 때마다 check_text 결과를 pushWidgetProperty 로 보낸다, 계획 C7). */
 export const ERROR_PROPERTY = 'error'
 
 /** 패스 판정에 쓰는 위젯 스토어 키 — 파이썬 MAIN_SCHEDULER_WIDGET·…·ADETAILER_SLOT_WIDGETS·SAM3_*(pass_widget_ids 순서). */
@@ -309,15 +310,21 @@ export const FLOW_COSMOS_DYNAMIC_RHO_WARNING = 'Flow Cosmos Dynamic 은 ρ 가 2
   + '생성이 오류로 멈춥니다.'
 
 export const OLD_FORGE_NOTE = '연결된 Forge 의 sam-extra 에 Extra Schedulers 가 없어(0.31.0 이상 필요) 이 값은 전달되지 않습니다.'
-export const COMFY_PENDING_NOTE = 'ComfyUI 는 앱 노드 팩 1.7.0 단계 뒤에 이 값을 보냅니다 — 지금은 ComfyUI 로 가지 않습니다'
-  + '(ComfyUI 에서는 아직 laplace·custom·Flow Cosmos 스케줄러를 고를 수 없습니다).'
+/** ComfyUI 일 때 칸 아래 안내 줄(계획 C6 — 값은 늘 보내고 컴파일러가 값 스케줄러 패스가 있을 때 노드를 넣는다, XS-e). */
+export const COMFY_NOTE = 'ComfyUI 는 앱 노드 팩 1.7.0 의 같은 계산으로 돌립니다(이 값을 쓰는 스케줄러가 있을 때 노드로 '
+  + '보냅니다). Forge 설정 rho·sigma min/max(Settings → Sampler Parameters)는 ComfyUI 에 없어 Karras Dynamic 은 ρ 7·모델의 '
+  + 'σ 범위를 씁니다.'
 export const KREA2_NOTE = 'Krea2 생성에는 보내지 않습니다.'
 
-/** 칸 아래 상태 한 줄(없으면 ''): Krea2 → 안 보냄, ComfyUI → 팩 1.7.0 단계 뒤(계획 R16), 확장 확인됐는데 없음 → 옛 Forge. */
+/** 칸 아래 경고 한 줄(없으면 ''): Krea2 → 안 보냄, 확장 확인됐는데 없음 → 옛 Forge. ComfyUI 는 경고가 아니다(comfyNote). */
 export function cardNote(caps: Pick<SamExtraCapabilitiesEvent, 'status' | 'known' | 'features'> | null | undefined,
   krea2 = false): string {
   if (krea2) return KREA2_NOTE
-  if (caps?.status === 'not_applicable') return COMFY_PENDING_NOTE
   if (caps?.known && caps.features?.extra_schedulers !== true) return OLD_FORGE_NOTE
   return ''
+}
+
+/** ComfyUI(스냅샷 'not_applicable')면 안내 줄 COMFY_NOTE, 그 밖은 ''. */
+export function comfyNote(caps: Pick<SamExtraCapabilitiesEvent, 'status'> | null | undefined): string {
+  return caps?.status === 'not_applicable' ? COMFY_NOTE : ''
 }

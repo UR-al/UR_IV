@@ -54,8 +54,20 @@ import logging
 import threading
 from typing import Any, Callable
 
-from .compat import clone_model, require_torch
-from .guidance_common import CATEGORY, _haar_dwt, _haar_idwt, _pad_even
+from .compat import (
+    SAMPLER_SAMPLE_FALLBACK,
+    clone_model,
+    make_first,
+    require_torch,
+    sampler_sample_wrapper_type,
+)
+from .guidance_common import (
+    CATEGORY,
+    SAMPLER_BASE_ATTR,
+    _haar_dwt,
+    _haar_idwt,
+    _pad_even,
+)
 
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -71,7 +83,7 @@ CNS_DEFAULTS: dict[str, float] = {name: spec["default"] for name, spec in CNS_IN
 
 # One CNS wrapper per MODEL: applying CNS again replaces the settings.
 CNS_WRAPPER_KEY = "ai_studio_forge_parity.cns"
-_SAMPLER_SAMPLE_FALLBACK = "sampler_sample"   # comfy.patcher_extension.WrappersMP.SAMPLER_SAMPLE
+_SAMPLER_SAMPLE_FALLBACK = SAMPLER_SAMPLE_FALLBACK   # comfy.patcher_extension.WrappersMP.SAMPLER_SAMPLE
 _SETTINGS_ATTR = "forge_neo_cns"
 _ACTIVE = threading.local()   # >0 while a colouring noise sampler is installed
 
@@ -284,7 +296,10 @@ def cns_sampler_function(
 
     ``kd_module`` defaults to ``comfy.k_diffusion.sampling`` (tests pass a fake).
     The returned function deliberately has no ``__wrapped__``: a second CNS
-    patch sees it as a wrapper (Path B), as with the original.
+    patch sees it as a wrapper (Path B), as with the original.  It carries
+    ``guidance_common.SAMPLER_BASE_ATTR`` = ``original`` instead, so a host that
+    must read the real sampler's signature (SPEED's ``sam_extra_step_offset``,
+    ``guidance_common.declares_keyword``) can see through it.
     """
 
     settings = _settings(strength, gamma_power, gamma_scale)
@@ -323,16 +338,12 @@ def cns_sampler_function(
                 setattr(module, name, function)
 
     setattr(cns_sampler, _SETTINGS_ATTR, dict(settings))
+    setattr(cns_sampler, SAMPLER_BASE_ATTR, original)
     return cns_sampler
 
 
 def _sampler_sample_wrapper_type() -> str:
-    try:
-        import comfy.patcher_extension as patcher_extension  # lazy: only inside ComfyUI
-    except Exception:
-        return _SAMPLER_SAMPLE_FALLBACK
-    wrappers = getattr(patcher_extension, "WrappersMP", None)
-    return str(getattr(wrappers, "SAMPLER_SAMPLE", _SAMPLER_SAMPLE_FALLBACK))
+    return sampler_sample_wrapper_type()   # compat: shared with the pack's other sampler wrappers
 
 
 def cns_sampler_sample_wrapper(
@@ -403,22 +414,9 @@ def apply_cns(
 
 
 def _make_outermost(patched: Any, wrapper_type: str, key: str) -> None:
-    """Move ``key`` to the front of ``patched.wrappers[wrapper_type]``.
+    """Move ``key`` to the front of ``patched.wrappers[wrapper_type]`` (``compat.make_first``)."""
 
-    ``comfy.patcher_extension.get_all_wrappers`` lists the wrappers in the
-    dict's order and ``WrapperExecutor`` calls the first one first (outermost).
-    ``ModelPatcher.clone`` gives the clone its own per-type dicts, so the model
-    that was cloned keeps its order.
-    """
-
-    wrappers = getattr(patched, "wrappers", None)
-    registered = wrappers.get(wrapper_type) if isinstance(wrappers, dict) else None
-    if not isinstance(registered, dict) or key not in registered:
-        return
-    wrappers[wrapper_type] = {
-        key: registered[key],
-        **{name: items for name, items in registered.items() if name != key},
-    }
+    make_first(patched, wrapper_type, key)
 
 
 def model_cns_settings(model: Any) -> dict[str, float] | None:

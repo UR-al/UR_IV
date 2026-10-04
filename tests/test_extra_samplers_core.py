@@ -573,7 +573,8 @@ def _caps_with_argc(argc, *, img2img=True):
 
 
 class PlanTests(unittest.TestCase):
-    """싣는 규칙(계획 X5): 확인되면 늘, 확인 못 하면 ER SDE 패스가 있을 때만, ComfyUI 는 C6 전이라 없음. X10 경고."""
+    """싣는 규칙(계획 X5): 확인되면 늘, 확인 못 하면 ER SDE 패스가 있을 때만, ComfyUI 는 늘(계획 C6 — 노드는 값이
+    기본값과 다를 때만 컴파일러가 넣는다). X10 경고."""
 
     CONFIRMED = caps(present=(xsa.SCRIPT_NAME,))
     ABSENT = caps(present=(), img2img=())
@@ -584,8 +585,12 @@ class PlanTests(unittest.TestCase):
         for settings in (xsa.APP_DEFAULTS, self.USER):
             self.assertEqual(xsa.plan(settings, target="t2i", backend="krea2", capabilities=self.CONFIRMED,
                                       passes=("main",)).reason, xsa.REASON_KREA2)
-            result = xsa.plan(settings, target="t2i", backend="comfyui", passes=("main",))
-            self.assertEqual((result.block, result.reason), (None, xsa.REASON_COMFY_PENDING))
+            for target in ("t2i", "i2i", "aux"):
+                for passes in (("main",), ()):
+                    result = xsa.plan(settings, target=target, backend="comfyui", passes=passes)
+                    self.assertEqual((result.block, result.reason, result.provenance), (
+                        xsa.as_block(settings), xsa.REASON_COMFY,
+                        xsa.PROVENANCE_APP_DEFAULT if settings is xsa.APP_DEFAULTS else xsa.PROVENANCE_USER))
 
     def test_confirmed_always_sends_with_value_provenance(self):
         for target in ("t2i", "i2i", "aux"):

@@ -610,23 +610,26 @@ export interface CardStatus { level: CardLevel; text: string }
 
 export const OFF_NOTE = "꺼져 있습니다 — 켜면 Forge 확장 'Colorcraft (sam-extra)' 로 보냅니다"
 export const OLD_FORGE_NOTE = '연결된 Forge 의 sam-extra 에 Colorcraft 가 없어(0.31.0 이상 필요) 보내지 않습니다.'
-export const COMFY_PENDING_NOTE = 'ComfyUI 는 앱 노드 팩 1.7.0 단계 뒤에 같은 계산으로 돌립니다 — 지금은 ComfyUI 로 가지 않습니다.'
+export const COMFY_OFF_NOTE = '꺼져 있습니다 — 켜면 ComfyUI 앱 노드 팩 1.7.0 의 같은 계산(ForgeNeoColorcraft)으로 돌립니다'
+/** ComfyUI 로 보낼 때 상태 줄 머리(계획 C6 — 컴파일러가 항목이 있는 메인 패스마다 노드를 넣는다). */
+export const COMFY_TARGET = 'ComfyUI(앱 노드 팩 1.7.0)'
 export const KREA2_NOTE = 'Krea2 생성에는 보내지 않습니다.'
 export const NO_ENTRIES_NOTE = '켰지만 바뀌는 값이 없습니다(켠 수정자가 없거나 모두 0) — 보내지 않습니다.'
 
-/** 카드 상태 줄 — 꺼짐 / Krea2 / ComfyUI(팩 1.7.0 단계 전) / 옛 Forge / 바뀌는 값 없음 / 보냄(수정자 수). */
+/** 카드 상태 줄 — 꺼짐 / Krea2 / 옛 Forge / 바뀌는 값 없음 / 보냄(수정자 수 — Forge 또는 ComfyUI 앱 노드 팩 1.7.0). */
 export function cardStatus(config: ColorcraftConfig,
   caps: Pick<SamExtraCapabilitiesEvent, 'status' | 'known' | 'features'> | null | undefined,
   krea2 = false): CardStatus {
-  if (!config.enabled) return { level: 'off', text: OFF_NOTE }
+  const comfy = caps?.status === 'not_applicable'
+  if (!config.enabled) return { level: 'off', text: comfy ? COMFY_OFF_NOTE : OFF_NOTE }
   if (krea2) return { level: 'warn', text: KREA2_NOTE }
-  if (caps?.status === 'not_applicable') return { level: 'warn', text: COMFY_PENDING_NOTE }
-  if (caps?.known && caps.features?.colorcraft !== true) return { level: 'warn', text: OLD_FORGE_NOTE }
+  if (!comfy && caps?.known && caps.features?.colorcraft !== true) return { level: 'warn', text: OLD_FORGE_NOTE }
   const base = buildChain(config, false).tags
   const hires = buildChain(config, true).tags
   if (!base.length && !hires.length) return { level: 'warn', text: NO_ENTRIES_NOTE }
   const count = new Set([...base, ...hires]).size
-  return { level: 'ok', text: `Forge 로 보냅니다 — 수정자 ${count}개(Base ${base.length}·Hires ${hires.length})` }
+  return { level: 'ok',
+    text: `${comfy ? COMFY_TARGET : 'Forge'} 로 보냅니다 — 수정자 ${count}개(Base ${base.length}·Hires ${hires.length})` }
 }
 
 /** 카드 머리 배지 — 켠 수정자 요약(꺼졌으면 ''). */

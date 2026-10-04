@@ -138,7 +138,7 @@ it('hires switch, steps and an unreadable saved state reach the editor, preview 
   expect(one(root, 'preview').props.steps).toBe(0)
 })
 
-it('backend line: Forge, old Forge, ComfyUI pending, Krea2; reset all', async () => {
+it('backend line: Forge, old Forge, ComfyUI pack 1.7.0, Krea2; reset all', async () => {
   widgets[ID.enabled] = 'true'
   widgets[ID.state] = '{"v":1,"I.exposure":0.3}'
   caps.value = { status: 'ok', known: true, features: { colorcraft: true } }
@@ -149,7 +149,7 @@ it('backend line: Forge, old Forge, ComfyUI pending, Krea2; reset all', async ()
   expect(status(root)).toBe(colorcraft.OLD_FORGE_NOTE)
   caps.value = { status: 'not_applicable', known: false }
   await Vue.nextTick()
-  expect(status(root)).toBe(colorcraft.COMFY_PENDING_NOTE)
+  expect(status(root)).toContain(`${colorcraft.COMFY_TARGET} 로 보냅니다`)               // 계획 C6
   widgets.generation_family_combo = 'Krea2'
   await Vue.nextTick()
   expect(status(root)).toBe(colorcraft.KREA2_NOTE)

@@ -72,6 +72,8 @@ generated_images/
 *.pth
 *.onnx
 *.safetensors
+# Colorcraft basis vectors ship inside the bundled ComfyUI node pack (MIT, byte copies of upstream/fork):
+!comfy_custom_nodes/ai_studio_forge_parity/vendor/comfyui_colorcraft*/vectors/*.safetensors
 
 # Generated output
 generated_images/

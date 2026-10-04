@@ -480,9 +480,13 @@ class PlanTests(unittest.TestCase):
         for settings in (xs.APP_DEFAULTS, self.USER):
             self.assertEqual(xs.plan(settings, target="t2i", backend="krea2", capabilities=self.CONFIRMED,
                                      passes=("main",)).reason, xs.REASON_KREA2)
-            result = xs.plan(settings, target="t2i", backend="comfyui", passes=("main",))
-            self.assertIsNone(result.block)
-            self.assertEqual(result.reason, xs.REASON_COMFY_PENDING)
+            # 계획 C6 — ComfyUI 는 늘 싣는다(노드는 값 스케줄러 패스가 있을 때만 컴파일러가 넣는다 — C2a)
+            for target in ("t2i", "i2i", "aux"):
+                for passes in (("main",), ()):
+                    result = xs.plan(settings, target=target, backend="comfyui", passes=passes)
+                    self.assertEqual((result.block, result.reason, result.provenance), (
+                        xs.as_block(settings), xs.REASON_COMFY,
+                        xs.PROVENANCE_APP_DEFAULT if settings is xs.APP_DEFAULTS else xs.PROVENANCE_USER))
 
     def test_confirmed_always_sends_with_value_provenance(self):
         for target in ("t2i", "i2i", "aux"):
@@ -1478,6 +1482,113 @@ class RestoreFromInfotextTests(unittest.TestCase):
         covered = {field for fields in xs.RESTORE_FIELDS.values() for field in fields}
         self.assertEqual(covered, set(xs.ARG_NAMES))
         self.assertEqual(xs.RESTORE_FIELDS[xs.NAME_FLOW_COSMOS_RHO7], xs.RESTORE_FIELDS[xs.NAME_FLOW_COSMOS_DYNAMIC])
+
+
+# ── custom 식·시그마 목록 미리 검사(계획 C7) ───────────────────────────────────────────
+_EXPRESSIONS = (
+    "M * (m / M) ** x", "m + (M - m) * (1 - x) ** 3", "  M*(m/M)**x  ", "max(m, M * (1 - x) ** 2)", "phi ** -x * M",
+    "", "   ", "q + 1", "M * (", "__import__('os')", "M.real", "M if x else m", "[M]", "lambda: M", "M ** 65",
+    "M ** 64", "abs()", "min(m)", "sqrt(M, m)", "1e400", "x" + " + x" * 120, "f(M)", "'text'", "M @ m", "M // 2",
+    "M % 2", "not M", "M < m", "True", "None", "M ** x ** x", "log(m, M, 2)",
+)
+_SIGMA_LISTS = (
+    "[1.0, 0.6, 0.25, 0.1, 0.0]", "1, 0.5, 0", "(14.6, 7.0, 3.0, 0.03)", "[0.9 0.5 0.1]", "  [1.0,0.0]  ",
+    "", "[1.0]", "[1.0, 0.6", "(1.0, 0.5]", "[1.0, x, 0.0]", "[1.0, nan, 0.0]", "[1.0, -0.5, 0.0]", "[0.5, 0.0, 0.1]",
+    "[0.0, 0.5]", "[1, 2, ٣]", "[1_0, 0]", "[" + ", ".join(["0.5"] * 1001) + "]", "[1e400, 0]", "[2, 0.0, 0.0]",
+)
+
+
+class CheckTextTests(unittest.TestCase):
+    """계획 C7 — ``check_text`` 는 팩 계산기(순수 파이썬)를 지연 import 해 σ 와 무관한 검사만 한다."""
+
+    def test_defaults_and_valid_texts_pass(self):
+        self.assertIsNone(xs.check_text(xs.MODE_EXPRESSION, xs.DEFAULT_EXPRESSION))
+        self.assertIsNone(xs.check_text(xs.MODE_SIGMAS, xs.DEFAULT_SIGMAS))
+        self.assertIsNone(xs.check_text("Sigma list", "[14.6, 7.0, 3.0, 0.03]"))     # 라벨도 목록 모드(coerce_mode)
+        self.assertIsNone(xs.check_settings(xs.APP_DEFAULTS))
+
+    def test_messages_are_the_pack_evaluator_texts(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import extra_schedulers_math as pm
+        for text in _EXPRESSIONS:
+            with self.subTest(expression=text):
+                try:
+                    pm.compile_expression(text.strip())
+                    expected = None
+                except pm.ExpressionError as exc:
+                    expected = str(exc)
+                self.assertEqual(xs.check_text(xs.MODE_EXPRESSION, text), expected)
+        self.assertEqual(xs.check_text(xs.MODE_EXPRESSION, ""), "the expression is empty")
+        above_zero = {"[0.5, 0.0, 0.1]": 2, "[0.0, 0.5]": 1, "[2, 0.0, 0.0]": 2}   # 끝이 아닌 0 — σ 와 무관한 규칙
+        for text in _SIGMA_LISTS:
+            with self.subTest(sigmas=text):
+                result = xs.check_text(xs.MODE_SIGMAS, text)
+                if text in above_zero:
+                    self.assertTrue(result.startswith(f"sigma #{above_zero[text]} is 0; sigmas before the end must be "
+                                                      "above 0"), result)
+                    continue
+                try:
+                    pm.parse_sigma_list(text.strip())
+                    expected = None
+                except pm.SigmaListError as exc:
+                    expected = str(exc)
+                self.assertEqual(result, expected)
+
+    def test_check_settings_reads_only_the_active_mode(self):
+        bad_expression = replace(xs.APP_DEFAULTS, custom_expression="q")
+        bad_list = replace(xs.APP_DEFAULTS, custom_mode=xs.MODE_SIGMAS, custom_sigmas="[1.0]")
+        self.assertIn("unknown name 'q'", xs.check_settings(bad_expression))
+        self.assertIsNone(xs.check_settings(replace(bad_expression, custom_mode=xs.MODE_SIGMAS)))
+        self.assertEqual(xs.check_settings(bad_list), "a sigma list needs at least two numbers")
+        self.assertIsNone(xs.check_settings(replace(bad_list, custom_mode=xs.MODE_EXPRESSION)))
+
+    def test_sigma_dependent_checks_are_left_to_generation(self):
+        """값이 유한·양수인지(σ 에 따라 다르다)·보간은 보지 않는다 — 생성할 때 확장·팩이 같은 문구로 멈춘다."""
+        self.assertIsNone(xs.check_text(xs.MODE_EXPRESSION, "M - 2 * M * x"))       # 끝에서 음수 — σ 와 상관
+        self.assertIsNone(xs.check_text(xs.MODE_EXPRESSION, "1 / (M - 1)"))         # flow M = 1 이면 0 나누기
+
+    def test_without_the_pack_nothing_is_checked(self):
+        with mock.patch.object(xs, "PACK_MATH_MODULE", "comfy_custom_nodes.no_such_module"):
+            self.assertIsNone(xs.check_text(xs.MODE_EXPRESSION, "q +"))
+            self.assertIsNone(xs.check_text(xs.MODE_SIGMAS, "[1.0]"))
+
+    def test_the_check_needs_neither_torch_nor_comfy(self):
+        source = (pathlib_root() / "comfy_custom_nodes" / "ai_studio_forge_parity" / "extra_schedulers_math.py").read_text(
+            encoding="utf-8")
+        tree = ast.parse(source)
+        top = {alias.name.split(".")[0] for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))
+               for alias in (node.names if isinstance(node, ast.Import) else [ast.alias(node.module or "")])}
+        self.assertFalse(top & {"torch", "comfy", "numpy"}, top)
+
+
+def pathlib_root():
+    from pathlib import Path
+    return Path(ROOT)
+
+
+@requires_extension
+class CheckTextParityTests(unittest.TestCase):
+    """계획 C7 — 미리 검사가 설치된 확장(sam3ext.extra_schedulers.expression·sigma_list — torch 없음)과 같은 글자를 거절하고
+    같은 영어 문구를 낸다(Forge HTTP 500 'Extra Schedulers: …' 의 그 부분)."""
+
+    def test_same_rejections_and_texts_as_the_extension(self):
+        expression = _ext("extra_schedulers.expression")
+        sigma_list = _ext("extra_schedulers.sigma_list")
+        for text in _EXPRESSIONS:
+            with self.subTest(expression=text):
+                try:
+                    expression.compile_expression(text.strip())
+                    expected = None
+                except expression.ExpressionError as exc:
+                    expected = str(exc)
+                self.assertEqual(xs.check_text(xs.MODE_EXPRESSION, text), expected)
+        for text in _SIGMA_LISTS:
+            with self.subTest(sigmas=text):
+                try:
+                    sigma_list.sigmas_from_list(text.strip(), 0, 0.0292, 14.6146)   # SDXL σ 범위 — 스텝 0: 글자 검사만
+                    expected = None
+                except sigma_list.SigmaListError as exc:
+                    expected = str(exc)
+                self.assertEqual(xs.check_text(xs.MODE_SIGMAS, text), expected)
 
 
 if __name__ == "__main__":

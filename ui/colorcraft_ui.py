@@ -113,7 +113,7 @@ def contribute(host, ctx) -> Any:
 
     ctx.target: 't2i'(T2I 계열 전부 — 대기열·XYZ·시드 탐색·채팅·만화 컷) · 'i2i'(I2I·인페인트·채팅 이미지 편집 — 카드의
     'I2I·인페인트에도 적용' 토글, Base 패스 수정자만 돈다) · 'aux'(보조 패스 봉투 — t2i 와 같은 블록, 보내지는 않는다:
-    passes=()). ComfyUI 는 팩 1.7.0 단계 전이라 싣지 않는다(``comfy_pending``, 계획 R16), Krea2 는 싣지 않는다."""
+    passes=()). ComfyUI 도 같은 블록(컴파일러가 앱 노드 팩 1.7.0 의 노드로 — 계획 C6), Krea2 는 싣지 않는다."""
     from ui.sampling_blocks import Contribution
 
     settings = current_settings(host)

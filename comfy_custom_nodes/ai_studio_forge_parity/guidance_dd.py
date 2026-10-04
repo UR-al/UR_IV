@@ -29,6 +29,13 @@ origin: Jonseed/ComfyUI-Detail-Daemon@3394e44afea04ed0188fb37b21f0d9952469766b:d
   to SAM3 detailer passes without Hires Pass (the extension re-runs the script on its img2img
   pass, with that pass's CFG and sampler). Standalone post-processing gets none. Each detailer
   sampling run builds its schedule from its own sigma list, as the extension does.
+* With the pack's Anima SPEED (pack 1.7.0) the run's schedule changes mid-run: SPEED re-publishes
+  a patched copy as ``transformer_options['sample_sigmas']`` after each hand-off
+  (``guidance_common.mark_republished``). sam-extra's Detail Daemon looks each sigma up in
+  Forge's current ``sampling_sigmas``, so it finds the aligned hand-off sigma exactly; here
+  ``_PreDDSigmaSampler`` writes the published copy into the node's lookup list while it is
+  published (``_PublishedSchedule``) and the run's own values back afterwards. The copied node
+  code is unchanged; without SPEED nothing is re-published and nothing changes.
 
 numpy and torch are imported lazily (the app imports this module without them); the copied
 functions use the module globals ``np`` and ``torch`` that ``_bind_numpy``/``_bind_torch`` fill.
@@ -40,7 +47,14 @@ import importlib
 from typing import Any
 
 from .compat import clone_model, require_torch
-from .guidance_common import CATEGORY, PRE_DD_SIGMAS_KEY, _as_bool, _json_settings, _setting
+from .guidance_common import (
+    CATEGORY,
+    PRE_DD_SIGMAS_KEY,
+    _as_bool,
+    _json_settings,
+    _setting,
+    republished_from,
+)
 
 ORIGIN = "Jonseed/ComfyUI-Detail-Daemon@3394e44afea04ed0188fb37b21f0d9952469766b:detail_daemon_node.py"
 
@@ -358,6 +372,61 @@ def detail_daemon_schedule(steps: int, values: dict[str, Any]):
     )
 
 
+def _closure_value(function: Any, name: str) -> Any:
+    """The value ``function`` closes over under ``name`` (None when there is no such cell)."""
+    code = getattr(function, "__code__", None)
+    cells = getattr(function, "__closure__", None) or ()
+    for variable, cell in zip(getattr(code, "co_freevars", ()), cells):
+        if variable == name:
+            try:
+                return cell.cell_contents
+            except ValueError:
+                return None
+    return None
+
+
+class _PublishedSchedule:
+    """Keeps Detail Daemon's sigma lookup on a schedule re-published mid-run (Anima SPEED).
+
+    ``detail_daemon_sampler`` looks every model call's sigma up in ``sigmas_cpu``, its CPU copy of
+    the run's list. When ``transformer_options['sample_sigmas']`` holds a copy re-published in
+    place of that list (``guidance_common.republished_from`` is the run's list, or, for a list
+    another wrapper handed on, the same length and first sigma), ``follow`` writes the copy's
+    values into ``sigmas_cpu``; once the run's own list is back it restores the run's values.
+    The sigma range and the schedule length stay the run's: SPEED never patches the first or
+    the last sigma. A ``model_wrapper`` without that cell (not the node's) is left alone.
+    """
+
+    def __init__(self, model_wrapper: Any, sigmas: Any):
+        table = _closure_value(model_wrapper, "sigmas_cpu")
+        usable = getattr(table, "ndim", None) == 1 and callable(getattr(table, "copy_", None))
+        self.table = table if usable else None
+        self.own = self.table.clone() if self.table is not None else None
+        self.run_sigmas = sigmas
+        self.current = None   # the published copy the table holds (None: the run's own values)
+
+    def _republished(self, listed: Any) -> bool:
+        origin = republished_from(listed)
+        if origin is None or getattr(listed, "ndim", None) != 1 or len(listed) != len(self.table):
+            return False
+        if origin is self.run_sigmas:
+            return True
+        try:
+            return float(listed[0]) == float(self.own[0])
+        except (TypeError, ValueError, IndexError):
+            return False
+
+    def follow(self, listed: Any) -> None:
+        if self.table is None:
+            return
+        source = listed if self._republished(listed) else None
+        if source is self.current:
+            return
+        values = self.own if source is None else source
+        self.table.copy_(values.detach().to(device=self.table.device, dtype=self.table.dtype))
+        self.current = source
+
+
 class _PreDDSigmaSampler:
     """``sampler`` whose model calls first note the sampler's own sigma for the DAVE gate.
 
@@ -365,7 +434,8 @@ class _PreDDSigmaSampler:
     ``dds_wrapped_sampler.sampler_function``; this stands in for that sampler, so the sampler calls
     the recorder with its own sigma, and the recorder calls the unchanged ``model_wrapper``. The
     note goes into this sampling run's ``model_options["transformer_options"]`` (a per-run clone),
-    which every model call copies into its forward's ``transformer_options``.
+    which every model call copies into its forward's ``transformer_options``. Before each call the
+    recorder also points the node's lookup at a schedule re-published mid-run (``_PublishedSchedule``).
     """
 
     def __init__(self, sampler: Any):
@@ -373,10 +443,14 @@ class _PreDDSigmaSampler:
         self.extra_options = sampler.extra_options
 
     def sampler_function(self, model_wrapper, x, sigmas, **kwargs):
+        published = _PublishedSchedule(model_wrapper, sigmas)
+
         def noting_wrapper(x, sigma, **extra_args):
             model_options = extra_args.get("model_options")
             if isinstance(model_options, dict):
-                model_options.setdefault("transformer_options", {})[PRE_DD_SIGMAS_KEY] = sigma
+                transformer_options = model_options.setdefault("transformer_options", {})
+                transformer_options[PRE_DD_SIGMAS_KEY] = sigma
+                published.follow(transformer_options.get("sample_sigmas"))
             return model_wrapper(x, sigma, **extra_args)
 
         for key in ("inner_model", "sigmas"):

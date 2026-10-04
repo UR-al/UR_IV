@@ -30,8 +30,9 @@ dict 하나로 보낸다 — Forge 가 캐시한 위치 인자 기본값이나 �
   정수(float 로 못 바꾸는 int)는 기본값으로 읽는다. ``coerce`` 는 어떤 입력에도 예외를 올리지 않는다(0.32.1 까지는 ``a/0`` 의
   ``ZeroDivisionError`` 가 ``coerce_settings`` 밖으로 나가 Forge 스크립트 오류였다 — 그런 옛 확장의 결과는 결과 알림
   'Anima SPEED 기록 없음'(CODE_SPEED_NOT_APPLIED)이 말한다).
-- ComfyUI 는 앱 노드 팩 1.7.0 의 ``ForgeNeoAnimaSpeed`` 가 같은 계산을 한다 — 그 연결(phase C)이 끝날 때까지 ``plan`` 은
-  ComfyUI 에 ``comfy_pending`` 을 돌려준다(R16). img2img·Hires 시작 latent 맞춤(P10 옵션)은 ComfyUI 에서 확장 기본값(켬)이다
+- ComfyUI 는 앱 노드 팩 1.7.0 의 ``ForgeNeoAnimaSpeed`` 가 같은 계산을 한다 — ``plan`` 은 Forge 와 같은 규칙으로 블록을
+  싣고(계획 C6), 컴파일러가 메인 패스마다 노드를 넣거나 설정 오류·생성 전에 아는 건너뜀(인페인트·ControlNet·Spectrum)이면
+  경고와 함께 뺀다(C4a). img2img·Hires 시작 latent 맞춤(P10 옵션)은 ComfyUI 에서 확장 기본값(켬)이다
   (D7, ``COMFY_IMG2IMG_RESCALE``).
 - 앱 기본값 = 확장 기본값(꺼짐·transition·neo_shift·anima·0.5,1.0·δ 0.01·1.03·0.7·적응형·dct·A·β·시드 -1·Hires 끔) + I2I 끔.
 
@@ -823,15 +824,14 @@ def static_skip_reason(settings: SpeedSettings, payload: Optional[Mapping] = Non
 # ── 블록 판정 ─────────────────────────────────────────────────────────────────
 TARGET_T2I, TARGET_I2I, TARGET_AUX = "t2i", "i2i", "aux"             # core/alwayson_propagation TARGETS
 PROVENANCE_USER = "user"                                            # core/alwayson_propagation PROVENANCE_USER
-REASON_OFF, REASON_KREA2, REASON_COMFY_PENDING, REASON_I2I_OFF, REASON_SEND = (
-    "off", "krea2", "comfy_pending", "i2i_off", "send")
+REASON_OFF, REASON_KREA2, REASON_I2I_OFF, REASON_SEND = ("off", "krea2", "i2i_off", "send")
 
 
 @dataclass(frozen=True)
 class SpeedPlan:
     block: Optional[dict]          # alwayson 블록 {"args": [dict]} | None(보내지 않음)
     notice: Any                    # 늘 None — 생성 전 알림 없음(결과 infotext 'Anima SPEED status' 가 정답)
-    reason: str                    # off / krea2 / comfy_pending / i2i_off / send
+    reason: str                    # off / krea2 / i2i_off / send
     provenance: str = PROVENANCE_USER
     errors: tuple = ()             # validate 코드 — 있어도 보낸다(Forge 가 invalid settings 로 기록하고 평소처럼 샘플링)
 
@@ -839,20 +839,20 @@ class SpeedPlan:
 def plan(settings: SpeedSettings, *, target: str, backend: str, capabilities: Any = None) -> SpeedPlan:
     """이 요청에 SPEED 블록을 실을지. 스크립트 없음·확인 전은 여기서 보지 않는다(core/alwayson_propagation 게이트).
 
-    1 꺼짐 → 없음  2 Krea2 → 없음  3 ComfyUI → 없음(``comfy_pending`` — 팩 1.7.0 연결 전, R16)  4 i2i 이고 'I2I에도
-    적용' 끔 → 없음  5 그 밖 → 블록(aux 도 같은 블록 — ``blocks_for`` 가 어느 보조 패스에도 주지 않는다). 설정 오류도
-    보낸다(``errors`` 에 코드). 출처는 늘 사용자 값(앱 기본값이 꺼짐이라 켜진 블록은 사용자가 켠 것)."""
+    1 꺼짐 → 없음  2 Krea2 → 없음  3 i2i 이고 'I2I에도 적용' 끔 → 없음  4 그 밖 → 블록(aux 도 같은 블록 —
+    ``blocks_for`` 가 어느 보조 패스에도 주지 않는다). Forge·ComfyUI 같은 규칙(ComfyUI 는 컴파일러가 노드를 넣고 설정
+    오류·생성 전에 아는 건너뜀은 경고와 함께 뺀다 — 계획 C4a·C6). 설정 오류도 보낸다(``errors`` 에 코드). 출처는 늘
+    사용자 값(앱 기본값이 꺼짐이라 켜진 블록은 사용자가 켠 것)."""
     if not settings.enabled:
         return SpeedPlan(None, None, REASON_OFF)
     if backend == BACKEND_KREA2:
         return SpeedPlan(None, None, REASON_KREA2)
-    if backend == BACKEND_COMFY:
-        return SpeedPlan(None, None, REASON_COMFY_PENDING)
     if target == TARGET_I2I and not settings.apply_img2img:
         return SpeedPlan(None, None, REASON_I2I_OFF)
     errors = validate(settings)
     if errors:
-        logger.info("[AnimaSPEED] 설정 오류로 Forge 가 적용하지 않는다(그대로 보내 기록을 남긴다): %s",
+        logger.info("[AnimaSPEED] 설정 오류로 적용되지 않는다(그대로 보내 Forge 는 기록을 남기고, ComfyUI 컴파일러는 "
+                    "경고와 함께 노드를 뺀다): %s",
                     "; ".join(VALIDATION_MESSAGES[code] for code in errors))
     return SpeedPlan(as_block(settings), None, REASON_SEND, PROVENANCE_USER, errors)
 
@@ -890,7 +890,7 @@ __all__ = [
     "ERR_MANUAL_COUNT", "ERR_SCALES", "ERR_SPECTRUM_A", "ERR_SPECTRUM_BETA", "EXTENSION_DEFAULTS",
     "INFOTEXT_IMG2IMG_RESCALE", "INFOTEXT_KEY", "INFOTEXT_KEYS", "INVALID_NOTE", "MODES", "MODE_RESPACE",
     "MODE_TRANSITION", "OPT_IMG2IMG_RESCALE", "OPT_LOG", "PASS_BASE", "PASS_HIRES", "PASS_IMG2IMG", "PASS_LABELS",
-    "PASTE_FIELDS", "PRESETS", "PRESET_CUSTOM", "PRESET_NAMES", "PROVENANCE_USER", "PassStatus", "REASON_COMFY_PENDING",
+    "PASTE_FIELDS", "PRESETS", "PRESET_CUSTOM", "PRESET_NAMES", "PROVENANCE_USER", "PassStatus",
     "REASON_I2I_OFF", "REASON_KREA2", "REASON_OFF", "REASON_SEND", "REFERENCE_LATENT",
     "SCRIPT_NAME", "SETTINGS_KEY", "SKIP_COMFY_SPECTRUM", "SKIP_CONTROLNET", "SKIP_INPAINT", "SKIP_MESSAGES",
     "SKIP_NO_COARSE_STAGE", "STATUS_APPLIED", "STATUS_FALLBACK", "STATUS_INTERRUPTED", "STATUS_INVALID", "STATUS_KEY",

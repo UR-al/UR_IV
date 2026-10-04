@@ -222,7 +222,7 @@ it('sampler hints show without the box; CFG++ warns above CFG 2', async () => {
   expect(text(root)).toContain(xsa.RESTART_HINT)
 })
 
-it('status line: old Forge, ComfyUI pending, Krea2 replace the Forge parameters note', async () => {
+it('status line: old Forge, Krea2 replace the Forge parameters note; ComfyUI gets its own note (no warning)', async () => {
   widgets.sampler_combo = 'ER SDE (Reverse-time)'
   caps.value = { status: 'ok', known: true, features: { extra_samplers: false } }
   const root = await mount()
@@ -234,7 +234,9 @@ it('status line: old Forge, ComfyUI pending, Krea2 replace the Forge parameters 
   expect(text(root)).toContain(xsa.FORGE_PARAMS_NOTE)
   caps.value = { status: 'not_applicable', known: false, features: {} }
   await Vue.nextTick()
-  expect(text(root)).toContain(xsa.COMFY_PENDING_NOTE)
+  expect(text(root)).toContain(xsa.COMFY_PARAMS_NOTE)                         // 계획 C6
+  expect(text(root)).not.toContain(xsa.FORGE_PARAMS_NOTE)
+  expect(all(root, 'p').filter(p => String(p.props.class ?? '').includes('xsa-warnline'))).toEqual([])
   widgets.generation_family_combo = 'Krea2'
   await Vue.nextTick()
   expect(text(root)).toContain(xsa.KREA2_NOTE)

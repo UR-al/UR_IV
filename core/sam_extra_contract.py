@@ -80,12 +80,12 @@ EXT_VERSION_AUDITED = "0.33.0"
 # 옵션·제목 그대로(둘 다 앱은 HOLD). 픽스처는 릴리스 직후 7860 에서 읽기 전용 GET 으로 다시 받았다(captured_at
 # 2026-10-03T15:07:21+00:00) — scripts 부분은 0.32.0 픽스처와 바이트 단위로 같다.
 # 2026-10-04 Extra Schedulers 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 셋을 HOLD → mapped, XYZ 축은 P18(앱 XYZ 의
-# Scheduler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS xsched_*(앱 쪽 — ComfyUI 팩 거울 '_comfy' 는 팩 1.7.0 단계 C0).
+# Scheduler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS xsched_*(+ 팩 거울 '_comfy' — 아래 2026-10-05 ComfyUI 연결).
 # 2026-10-04 Anima SPEED 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 둘을 HOLD → mapped(메인 요청 전용 — 전달 행
-# passes=()), XYZ [Anima SPEED] 6축은 P18, 상수 계약은 SEMANTIC_PINS speed_*(앱 쪽 — 팩 거울 '_comfy' 는 C0).
+# passes=()), XYZ [Anima SPEED] 6축은 P18, 상수 계약은 SEMANTIC_PINS speed_*(+ 팩 거울 '_comfy').
 # 2026-10-04 Colorcraft 앱 노출(확장은 그대로 6101f05): SCRIPTS·MODULES 둘을 HOLD → mapped(첫 인자 하나 = 확장 infotext
 # 문자열, 메인 요청 전용 — 전달 행 passes=()), XYZ [Colorcraft] 14축은 P18, 상수 계약은 SEMANTIC_PINS colorcraft_*(앱 쪽 —
-# 팩 거울 '_comfy' 는 C0). 화면 JS 셋은 그대로 N6.
+# + 팩 거울 '_comfy'). 화면 JS 셋은 그대로 N6.
 # 2026-10-04 v0.33.0(b33708c, master 머지 d05afd9 — 트리 같음, 태그 v0.33.0): 샘플러 13종(18종 — 새 파일 dpmpp_flow·unipc·
 # cfgpp_ud10_ab·er_sde_window·ipndm_deis·restart_flow 는 기존 'sam3ext/extra_samplers/' 단위 안)과 스케줄러 3종(9종 — React
 # Cosinusoidal DynSF·Flow Cosmos rho7·Flow Cosmos Dynamic, DESIGN D18·D20). 'Extra Samplers' 인자 2 → 5(noise_window·
@@ -101,7 +101,14 @@ EXT_VERSION_AUDITED = "0.33.0"
 # (각 txt2img·img2img)에 칸 셋씩 붙은 것 말고는 0.32.1 픽스처와 같다.
 # 2026-10-05 Extra Samplers 앱 노출(확장은 그대로 d05afd9): SCRIPTS·MODULES 둘을 HOLD → mapped(위치 인자 다섯 블록 — 메인
 # 요청과 모든 보조 패스, main_retry), XYZ [Extra Samplers] 세 축은 P18(앱 XYZ 의 Sampler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS
-# extra_samplers_*(+ 결과 알림이 읽는 Dy 상태 줄 머리·이유 넷 — 팩 거울 '_comfy' 는 C0).
+# extra_samplers_*(+ 결과 알림이 읽는 Dy 상태 줄 머리·이유 넷, 팩 거울 '_comfy').
+# 2026-10-05 sam-extra 네 기능의 ComfyUI 연결(확장은 그대로 d05afd9 — 계획 C0–C8, 앱 노드 팩 1.7.0): 팩이 네 계산을 다시
+# 구현하고(GPL 코드는 옮기지 않는다 — 설치된 확장과 CPU 비트 대조) Extra Samplers 12개·Extra Schedulers 9개 이름을 ComfyUI
+# KSampler 목록에 같은 이름으로 등록하며(남의 이름은 덮지 않고, 다른 팩이 먼저 가진 이름은 컴파일러가 거절 — owned_names),
+# 컴파일러가 ForgeNeoExtraSchedulers(flow shift 바로 뒤)·ForgeNeoExtraSamplerSettings(가이던스 앞)·ForgeNeoAnimaSpeed·
+# ForgeNeoColorcraft(메인 패스마다 Detail Daemon 뒤 — R9)를 넣는다. 네 plan() 은 ComfyUI 에도 블록을 싣는다(comfy_pending 없음 —
+# 값 블록 둘은 늘, SPEED·Colorcraft 는 Forge 규칙). SCRIPTS·MODULES 행에 comfy 참조, 팩 상수는 SEMANTIC_PINS '<id>_comfy'
+# 쌍둥이(공유 표시 R4 셋 포함). 기능이 꺼진 요청의 ComfyUI 그래프·Forge 페이로드는 P0.1 기준과 바이트 단위로 같다.
 EXT_COMMIT_AUDITED = "d05afd9"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
@@ -455,7 +462,7 @@ SCRIPTS = MappingProxyType({
             gaps=("P16: 붙여 넣은 infotext 'Anima Optimal Scale' 을 앱이 되살리지 않는다(가이던스 공통)",))),
     # 2026-10-04 앱 노출(보류 → mapped): 첫 인자 하나 = 확장 infotext 문자열(core/colorcraft.to_infotext) — 상태·infotext·
     # 붙여 넣기·체인 거울(core/colorcraft), 메인 전용 전달 행, 결과 status 알림. 상수 계약은 SEMANTIC_PINS colorcraft_*.
-    # ComfyUI(팩 1.7.0 ForgeNeoColorcraft — 업스트림 MIT 엔진 + 앱 호스트, CPU 비트 대조)는 계획 C 단계.
+    # 2026-10-05 ComfyUI 연결(계획 C5·C6): 팩 1.7.0 ForgeNeoColorcraft — 업스트림 MIT 엔진 + 앱 호스트, CPU 비트 대조.
     "Colorcraft (sam-extra)": _script(
         file="scripts/colorcraft.py", form="positional_or_dict", live_argc=67, shape="456003a0acc3",
         app_title="core.colorcraft:SCRIPT_NAME",
@@ -505,16 +512,30 @@ SCRIPTS = MappingProxyType({
                  "꺼짐). Refine·단독/배치 SAM3·ADetailer·손 재구성에는 보내지 않는다(PROPAGATION passes=() — 확장도 내부 "
                  "패스에서 붙지 않는다). 돌 항목이 없으면(켠 수정자가 없거나 모두 0) 보내지 않는다. 사용자가 켠 블록이라 "
                  "스냅샷이 없다고 하면 빼고 block_not_sent 알림, 모르면 보낸다(main_retry 없음). Krea2 는 보내지 않는다. "
-                 "계산은 Forge 에서 확장이 한다",
-            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/colorcraft.plan 'comfy_pending', 계획 R16)",
-                  "P18: XYZ [Colorcraft] 14축(수정자 I 13축·Enable)은 앱 XYZ 에 없다",
+                 "계산은 Forge 에서 확장이, ComfyUI 에서는 팩 1.7.0 ForgeNeoColorcraft 가 한다(같은 블록 — 컴파일러가 항목이 "
+                 "있는 메인 패스(base·img2img, Hires)마다 Detail Daemon·SPEED 뒤 마지막 patch 로 넣는다(R9 — post-CFG 맨 끝, "
+                 "디테일러 패스에는 걸지 않는다). settings_json = 패스의 체인 + to_infotext, pre_dd_sigma 는 확장 기본값 켬. "
+                 "그 패스에 항목이 없으면 노드 없이 경고 colorcraft_no_entries. Hires 체크포인트·UNET 교체는 팩이 새 VAE 로 "
+                 "앵커를 다시 인코딩해 싣는다(hires_carry)",
+            comfy=("comfy_custom_nodes/ai_studio_forge_parity/colorcraft_nodes.py:ForgeNeoColorcraft",
+                   "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_host.py:parse_settings", "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_host.py:apply_colorcraft",
+                   "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_engine.py:apply_chain", "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_basis.py:LATENT_FORMAT_TO_FAMILY",
+                   "comfy_custom_nodes/ai_studio_forge_parity/hires_carry.py:register",
+                   "core/colorcraft.py:COMFY_NODE_CLASS", "core/comfy_workflow_compiler.py:_colorcraft_state",
+                   "core/comfy_workflow_compiler.py:_colorcraft_plan", "core/comfy_workflow_compiler.py:_add_colorcraft",
+                   "core/comfy_metadata.py:_colorcraft_parameters", "core/comfy_workflow_controls.py:feature_preflight",
+                   "core/comfy_compatibility.py:RECIPES", "frontend/src/utils/colorcraft.ts:COMFY_TARGET"),
+            gaps=("P18: XYZ [Colorcraft] 14축(수정자 I 13축·Enable)은 앱 XYZ 에 없다",
                   "HOLD: Debug 패널(마스크·축 미리보기)은 Forge 화면 전용 — 앱은 debug 를 보내지 않는다",
                   "HOLD: 앱 Krea2 생성 경로(core/krea2_generation)에는 걸리지 않는다",
                   "Forge 옵션 sam3_colorcraft_pre_dd_sigma 는 OPTIONS P10(Forge 전용 — ComfyUI 는 확장 기본값 켬), "
-                  "sam3_colorcraft_log 는 쓰지 않는다"))),
+                  "sam3_colorcraft_log 는 쓰지 않는다",
+                  "Comfy: PNG 에는 'SAM Extra Colorcraft'(노드 settings_json 의 infotext — 붙여 넣기로 되읽힌다)만 있고 "
+                  "'SAM Extra Colorcraft status'·'… pre-DD sigma' 는 없다(실행 중 사실 — 패스별 status 는 범위 밖, CC-f)",
+                  "Comfy: 사용자 워크플로에 디코드 VAE 연결이 없으면 Colorcraft 를 거절한다(앵커 인코딩에 VAE 가 필요)"))),
     # 2026-10-04 앱 노출(보류 → mapped): 메인 요청 전용 샘플러 래퍼 — 정규화·블록·검사·붙여 넣기 거울(core/anima_speed),
-    # 메인 전용 전달 행, 결과 status 알림. 상수 계약은 SEMANTIC_PINS speed_*. ComfyUI(팩 1.7.0 ForgeNeoAnimaSpeed — 같은 계산을
-    # 다시 구현해 CPU 비트 대조)는 계획 C 단계.
+    # 메인 전용 전달 행, 결과 status 알림. 상수 계약은 SEMANTIC_PINS speed_*. 2026-10-05 ComfyUI 연결(계획 C4a·C4b·C6): 팩
+    # 1.7.0 ForgeNeoAnimaSpeed — 같은 계산을 다시 구현해 CPU 비트 대조.
     "Anima SPEED": _script(
         file="scripts/anima_speed.py", form="positional_or_dict", live_argc=14, shape="c6889a2ed8d6",
         ui_return=("enabled", "mode", "threshold", "preset", "scales", "delta", "divisor", "manual", "adaptive",
@@ -561,14 +582,31 @@ SCRIPTS = MappingProxyType({
                  "img2img 아코디언도 꺼짐). Refine·단독/배치 SAM3·ADetailer·손 재구성에는 보내지 않는다(PROPAGATION "
                  "passes=()). 사용자가 켠 블록이라 스냅샷이 없다고 하면 빼고 block_not_sent 알림, 모르면 보낸다(main_retry "
                  "없음). 잘못된 설정도 보낸다 — Forge 가 'invalid settings' 로 기록하고 평소처럼 샘플링한다(카드가 validate "
-                 "로 미리 알린다). Krea2 는 보내지 않는다. 계산은 Forge 에서 확장이 한다",
-            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/anima_speed.plan 'comfy_pending', 계획 R16)",
-                  "P18: XYZ [Anima SPEED] 6축은 앱 XYZ 에 없다",
+                 "로 미리 알린다). Krea2 는 보내지 않는다. 계산은 Forge 에서 확장이, ComfyUI 에서는 팩 1.7.0 "
+                 "ForgeNeoAnimaSpeed 가 한다(같은 블록 — 컴파일러가 메인 패스(base·img2img, 블록의 hires 면 Hires)마다 Detail "
+                 "Daemon 뒤에 넣고 디테일러에는 넣지 않는다. 설정 오류·생성 전에 아는 건너뜀(인페인트·마스크·ControlNet·ComfyUI "
+                 "Spectrum — D6·SP-f, 비율 하나)이면 경고와 함께 노드를 뺀다. 런너는 CNS → SPEED → DD 순서로 감싸고 "
+                 "Hires 체크포인트·UNET 교체는 팩이 다시 싣는다(hires_carry))",
+            comfy=("comfy_custom_nodes/ai_studio_forge_parity/speed_nodes.py:ForgeNeoAnimaSpeed", "comfy_custom_nodes/ai_studio_forge_parity/speed_nodes.py:apply_speed",
+                   "comfy_custom_nodes/ai_studio_forge_parity/speed_runner.py:run_speed", "comfy_custom_nodes/ai_studio_forge_parity/speed_schedule.py:build_plan",
+                   "comfy_custom_nodes/ai_studio_forge_parity/hires_carry.py:register",
+                   "core/anima_speed.py:COMFY_NODE_CLASS", "core/comfy_workflow_compiler.py:_speed_state",
+                   "core/comfy_workflow_compiler.py:_speed_plan", "core/comfy_workflow_compiler.py:_add_speed",
+                   "core/spectrum_settings.py:skips_anima_speed", "core/comfy_metadata.py:_speed_parameters",
+                   "core/comfy_workflow_controls.py:feature_preflight", "core/comfy_compatibility.py:RECIPES",
+                   "frontend/src/utils/animaSpeed.ts:COMFY_NOTE"),
+            gaps=("P18: XYZ [Anima SPEED] 6축은 앱 XYZ 에 없다",
                   "Forge 옵션 sam3_speed_img2img_rescale 은 OPTIONS P10(Forge 전용 — ComfyUI 는 확장 기본값 켬, 계획 D7), "
-                  "sam3_speed_log 는 쓰지 않는다"))),
+                  "sam3_speed_log 는 쓰지 않는다",
+                  "Comfy: status 는 컴파일 경고·콘솔만 — PNG 에는 'Anima SPEED'(요약)만 있고 'Anima SPEED status'·'… img2img "
+                  "rescale' 은 없다(실행 중 사실, SP-h·D8)",
+                  "Comfy: PNG 'Anima SPEED' 의 hires= 는 Hires 노드를 따른다(Forge 는 Hires 를 끈 요청에도 블록의 hires 를 "
+                  "쓴다). 계획이 읽지 않는 값 중 노드 범위 밖인 값은 노드가 받은 기본값으로 보인다(계획 C4b)",
+                  "Comfy: 설정만 보고 아는 build_plan 거절(나눔값 ≤ 0·custom A ≤ 0·수동 σ 개수)도 컴파일 때 경고와 함께 노드를 "
+                  "뺀다 — Forge 는 'invalid settings' 기록 후 평소대로 샘플링(같은 그림, 계획 C4a)"))),
     # 2026-10-04 앱 노출(보류 → mapped): 파라미터 카드의 값 칸·샘플링 블록 기여자·보조 패스 전달 규칙·결과 알림·붙여 넣기
-    # 규칙. 상수 계약은 SEMANTIC_PINS xsched_*. 같은 날 v0.33.0(인자 8개·스케줄러 9개 — 계획 S3)으로 맞췄다. ComfyUI(팩
-    # 1.7.0 의 스케줄러 등록·값 운반 노드)는 계획 C 단계.
+    # 규칙. 상수 계약은 SEMANTIC_PINS xsched_*. 같은 날 v0.33.0(인자 8개·스케줄러 9개 — 계획 S3)으로 맞췄다. 2026-10-05
+    # ComfyUI 연결(계획 C1·C2a·C2b·C6): 팩 1.7.0 의 스케줄러 9개 등록·값 운반 노드 ForgeNeoExtraSchedulers.
     "Extra Schedulers (sam-extra)": _script(
         file="scripts/anima_extra_schedulers.py", form="positional_or_dict", live_argc=8, shape="7c291b1a040a",
         app_title="core.extra_schedulers:SCRIPT_NAME",
@@ -616,6 +654,11 @@ SCRIPTS = MappingProxyType({
             "frontend/src/components/params/ExtraSchedulerFields.vue",
             "frontend/src/utils/extraSchedulers.ts:passesUsing", "frontend/src/utils/extraSchedulers.ts:flowCosmosRangeOk",
             "core/extra_schedulers.py:flow_cosmos_range_ok", "core/extra_schedulers.py:flow_cosmos_dynamic_rho_ok",
+            # custom 식·시그마 목록 미리 검사(계획 C7 — 팩의 순수 계산기를 지연 import): 칸 아래 오류 줄(위젯 속성 'error')과
+            # custom 을 쓰는 패스가 있을 때의 생성 전 경고(요청은 그대로 보낸다)
+            "core/extra_schedulers.py:check_text", "core/extra_schedulers.py:check_settings",
+            "ui/extra_schedulers_ui.py:watch_text_errors", "ui/extra_schedulers_ui.py:push_text_error",
+            "core/sam_extra_notices.py:CODE_XSCHED_INVALID_TEXT", "frontend/src/utils/extraSchedulers.ts:ERROR_PROPERTY",
             note="dict 한 개(8키 — v0.33.0, 늘 여덟; 0.31–0.32 는 뒤 셋을 버리고 그 판에는 그 값을 읽는 스케줄러도 없다)로 "
                  "보낸다 — Forge 가 캐시한 위치 기본값·사용자 ui-config 기본값과 무관하다. 기능 스냅샷이 "
                  "스크립트를 확인하면 값이 기본값이어도 늘 보낸다(XYZ Scheduler 축이 Laplace 로 바꾸는 칸도 같은 값 — 계획 "
@@ -623,20 +666,39 @@ SCRIPTS = MappingProxyType({
                  "값만, 없다고 하면 빼고 알림). "
                  "앱 기본값 = 확장 기본값. 메인 요청과 모든 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같은 블록 — "
                  "확장 전역 상태가 요청마다 덮이므로. 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). "
-                 "Krea2 는 보내지 않는다. 결과에 이 확장의 값 키가 없으면 다른 확장의 같은 이름 스케줄러가 돈 것 — 알림",
-            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/extra_schedulers.plan 'comfy_pending', 계획 R16). "
-                  "ComfyUI 는 아직 KSampler 에 없는 이름이라 컴파일 오류('지원하지 않는 값'). 작업 중인 팩 1.7.0(pack-int)은 "
-                  "스케줄러 8개까지 — Flow Cosmos Dynamic(D20)은 아직 없다",
-                  "P18: XYZ μ/β/식·Flow Cosmos ρ/σ̃ 축은 앱 XYZ 에 없다(Scheduler 축은 있다)",
-                  "Forge 설정 rho·sigma min/max(Settings → Sampler Parameters)는 Forge 전용 — 앱은 보내지 않는다",
-                  "C7: custom 식·목록을 앱이 미리 검사하지 않는다(계산기는 ComfyUI 팩 extra_schedulers_math — 팩 1.7.0 단계 "
-                  "뒤 core/extra_schedulers.check_text). 잘못된 식은 Forge 가 'Extra Schedulers: …' 로 멈춘다",
+                 "Krea2 는 보내지 않는다. 결과에 이 확장의 값 키가 없으면 다른 확장의 같은 이름 스케줄러가 돈 것 — 알림. "
+                 "ComfyUI: 팩 1.7.0 이 아홉 이름을 같은 이름으로 KSampler 스케줄러 목록에 등록하고(남의 이름은 덮지 않는다 — "
+                 "다른 팩이 먼저 가진 이름이면 컴파일러가 owned_names 로 거절), 블록은 늘 싣는다(REASON_COMFY). 컴파일러는 "
+                 "값 스케줄러(laplace·custom·flow_cosmos_rho7·flow_cosmos_dynamic)를 쓰는 패스가 있을 때만 flow shift 바로 "
+                 "뒤에 ForgeNeoExtraSchedulers(입력 8개, coerce 한 값)를 넣어 MODEL 의 model_sampling 사본에 값을 싣고, "
+                 "그 값이 닿지 않는 샘플러는 거절한다(reach 검사). HiresFix 의 Shift·체크포인트 교체는 팩이 값을 다시 "
+                 "싣는다(R2b·hires_carry). PNG 에는 Forge 와 같은 키(메인·Hires 만)",
+            comfy=("comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers.py:ForgeNeoExtraSchedulers",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers.py:install_extra_schedulers",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers_math.py:compile_expression", "comfy_custom_nodes/ai_studio_forge_parity/generation.py:_patch_flow_shift",
+                   "comfy_custom_nodes/ai_studio_forge_parity/hires_carry.py:register_sampling_attr",
+                   "core/extra_schedulers.py:COMFY_NODE_CLASS", "core/comfy_workflow_compiler.py:_extra_schedulers_state",
+                   "core/comfy_workflow_compiler.py:_extra_schedulers_needed",
+                   "core/comfy_workflow_compiler.py:_add_extra_schedulers",
+                   "core/comfy_workflow_compiler.py:_check_extra_schedulers_reach",
+                   "core/comfy_workflow_compiler.py:_check_pack_owner", "core/comfy_metadata.py:_extra_schedulers_parameters",
+                   "core/comfy_workflow_controls.py:feature_preflight", "frontend/src/utils/extraSchedulers.ts:COMFY_NOTE"),
+            gaps=("P18: XYZ μ/β/식·Flow Cosmos ρ/σ̃ 축은 앱 XYZ 에 없다(Scheduler 축은 있다)",
+                  "Forge 설정 rho·sigma min/max(Settings → Sampler Parameters)는 Forge 전용 — 앱은 보내지 않는다. ComfyUI 에는 "
+                  "없어 Karras Dynamic 은 ρ 7·모델의 σ 범위로 계산한다(XS-e)",
+                  "Comfy: 값은 MODEL 의 model_sampling 사본에 실린다 — 그 뒤에서 model_sampling 을 바꾸는 노드(ModelSampling*·"
+                  "flow shift)를 지나면 기본값으로 돈다(앱 그래프·사용자 워크플로는 flow shift 바로 뒤에 두고, 닿지 않는 "
+                  "샘플러는 reach 검사가 거절)",
+                  "Comfy: SamplerCustom·BasicScheduler 경로는 앱이 만들지 않는다(CUSTOM_SAMPLER_NODES 거절과 같다). Flow "
+                  "Cosmos 의 eps/v 안내 줄은 ComfyUI 로그(INFO)로 간다",
+                  "custom 식·목록의 미리 검사(check_text)는 σ·스텝 수와 무관한 것만 — 값이 유한·양수인지·평평한 스텝·보간은 "
+                  "생성할 때 Forge('Extra Schedulers: …', HTTP 500)·ComfyUI(노드 오류)가 같은 영어 문구로 멈춘다",
                   "Forge HTTP 500 본문은 앱 옵션 재시도 때만 읽는다 — 스케줄러 오류 원문(explain_scheduler_error)은 아직 "
                   "생성 오류 문구에 붙지 않는다"))),
     # 2026-10-05 앱 노출(보류 → mapped, 계획 A-XSa2): 위치 인자 다섯 블록·정규화·붙여 넣기·infotext·상태 줄 거울(core/
     # extra_samplers), 모든 보조 패스 전달 행(main_retry — 계획 X5), 결과 알림(Dy 보조 스텝·잡음 구간 건너뜀·옛 sam-extra 의
-    # 구간 미지원 — X10). 상수 계약은 SEMANTIC_PINS extra_samplers_*. ComfyUI(팩 1.7.0 의 샘플러 12개 등록·값 운반 노드)는 계획
-    # C 단계.
+    # 구간 미지원 — X10). 상수 계약은 SEMANTIC_PINS extra_samplers_*. 2026-10-05 ComfyUI 연결(계획 C1·C3·C6): 팩 1.7.0 의
+    # 샘플러 12개 등록·값 운반 노드 ForgeNeoExtraSamplerSettings.
     "Extra Samplers": _script(
         file="scripts/anima_extra_samplers.py", form="positional", live_argc=5, shape="3ee8b4de008d",
         ui_return="app_spec", app_title="core.extra_samplers:SCRIPT_NAME",
@@ -652,11 +714,13 @@ SCRIPTS = MappingProxyType({
                  "쓴다. 샘플러 18개(ER SDE 셋·DPM++ 4M SDE·Euler Dy "
                  "CFG++·Euler SMEA Dy CFG++·Euler Dy·Euler SMEA Dy·DPM++ 2M SDE Heun·flow ODE 셋·UniPC bh2·CFG++ UD10 AB·IPNDM·"
                  "IPNDM_V·DEIS·Restart (flow))는 불러올 때 Forge 목록에 등록돼 /sdapi/v1/samplers 로 나온다(계열 순서 — "
-                 "scripts/list_order.py) — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고른다. ComfyUI 는 KSampler "
-                 "sampler_name 에 없는 이름이라 컴파일 오류('지원하지 않는 "
-                 "값') — 계획 C1·C3(코어 이름 dpmpp_2m_sde_heun·uni_pc_bh2·cfgpp_ud10_ab·ipndm·ipndm_v·deis 는 별칭만, 나머지 "
-                 "12개는 팩 1.7.0). 'ER SDE (Reverse-time)'·'(ODE)'·'(Tunable)' 은 Comfy SamplerER_SDE 노드의 잡음 척도라 "
-                 "KSampler er_sde(Forge 'ER SDE')로 잇지 않는다. infotext 'ER SDE max stage'·'ER SDE eta'(기본값과 다를 때)·"
+                 "scripts/list_order.py) — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고른다. ComfyUI 는 팩 1.7.0 이 12개를 "
+                 "Forge 첫 별칭과 같은 이름(er_sde_reverse_time·er_sde_ode·er_sde_tunable·dpmpp_4m_sde·euler_dy_cfg_pp·"
+                 "euler_smea_dy_cfg_pp·euler_dy·euler_smea_dy·dpmpp_2m_flow_ode·dpmpp_2m_heun_flow_ode·dpmpp_3m_flow_ode·"
+                 "restart_flow)으로 KSampler 목록에 등록하고(남의 이름은 덮지 않는다 — 다른 팩이 먼저 가진 이름은 컴파일러가 "
+                 "owned_names 로 거절), 코어 이름 여섯(dpmpp_2m_sde_heun·uni_pc_bh2·cfgpp_ud10_ab — ComfyUI v0.35.0 이상·ipndm·"
+                 "ipndm_v·deis)은 별칭만이다. 'ER SDE (Reverse-time)'·'(ODE)'·'(Tunable)' 은 Comfy SamplerER_SDE 노드의 잡음 "
+                 "척도라 KSampler er_sde(Forge 'ER SDE')로 잇지 않는다. infotext 'ER SDE max stage'·'ER SDE eta'(기본값과 다를 때)·"
                  "'ER SDE noise window'(구간을 켜고 Reverse-time·Tunable 이 돈 때 — '0.2-0.8')·'Extra Samplers status'(부분을 "
                  "'; ' 로 잇는다 — Dy 보조 스텝·잡음 구간 건너뜀).",
         classification=mapped(
@@ -694,13 +758,36 @@ SCRIPTS = MappingProxyType({
                  "중 하나를 쓸 때만(모르면 사용자 값만, 없다고 하면 빼고 알림). 앱 기본값 = 확장 기본값(3·1.0·구간 끔). 메인 "
                  "요청과 모든 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같은 블록 — 블록 없는 요청은 ui() 기본값으로 "
                  "돌므로. 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). Krea2 는 보내지 않는다. 연결된 "
-                 "sam-extra 가 인자 2개(0.31·0.32)이고 잡음 구간을 켰으면 결과 알림이 구간이 빠졌다고 말한다",
-            gaps=("Comfy: 팩 1.7.0 단계 전 — ComfyUI 에는 보내지 않는다(core/extra_samplers.plan 'comfy_pending', 계획 R16). "
-                  "ComfyUI 는 아직 KSampler 에 없는 이름이라 컴파일 오류('지원하지 않는 값') — 샘플러 12개 등록과 값 운반 노드 "
-                  "ForgeNeoExtraSamplerSettings 는 팩 1.7.0(계획 C1·C3·C6)",
-                  "P18: XYZ [Extra Samplers] 세 축(max stage·η·잡음 구간)은 앱 XYZ 에 없다(Sampler 축은 있다)",
+                 "sam-extra 가 인자 2개(0.31·0.32)이고 잡음 구간을 켰으면 결과 알림이 구간이 빠졌다고 말한다. ComfyUI 는 블록을 늘 "
+                 "싣고(REASON_COMFY) 컴파일러가 값이 기본값과 다를 때만 ForgeNeoExtraSamplerSettings(입력 5개)를 패스들이 "
+                 "쓰는 모델 스택의 가이던스 앞에 넣는다(기본 그래프·ADetailer/SAM3 LoRA 분기·사용자 워크플로 — R9). DPM++ "
+                 "4M SDE 의 Automatic 은 exponential(U4), 4M SDE·3M flow ODE 는 끝에서 두 번째 σ 를 버린다. Spectrum 과 "
+                 "Euler (SMEA) Dy (CFG++), CFG++ 샘플러의 CFG > 2 는 컴파일 경고(정보). Hires 체크포인트 교체는 팩이 값을 "
+                 "다시 싣는다(hires_carry). PNG 에는 Forge 와 같은 ER SDE 키(메인·Hires 만)",
+            comfy=("comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_nodes.py:ForgeNeoExtraSamplerSettings",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_register.py:install_extra_samplers",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_math.py:sample_er_sde_ode",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_dpmpp_4m.py:sample_dpmpp_4m_sde",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_flow.py:sample_dpmpp_3m_flow_ode",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_restart.py:sample_restart_flow",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_dy.py:SMEA_SCALE", "comfy_custom_nodes/ai_studio_forge_parity/hires_carry.py:register",
+                   "core/extra_samplers.py:COMFY_SETTINGS_NODE", "core/comfy_workflow_compiler.py:_extra_samplers_state",
+                   "core/comfy_workflow_compiler.py:_add_extra_samplers",
+                   "core/comfy_workflow_compiler.py:_check_pack_sampler_names",
+                   "core/comfy_workflow_compiler.py:_check_pack_owner",
+                   "core/comfy_workflow_compiler.py:_extra_samplers_warnings",
+                   "core/comfy_metadata.py:_extra_samplers_parameters", "core/comfy_workflow_controls.py:feature_preflight",
+                   "frontend/src/utils/extraSamplers.ts:COMFY_PARAMS_NOTE"),
+            gaps=("P18: XYZ [Extra Samplers] 세 축(max stage·η·잡음 구간)은 앱 XYZ 에 없다(Sampler 축은 있다)",
                   "Forge 설정 Sampler Parameters(Eta·sigma churn/tmin/tmax/noise)는 Forge 전용 — 앱은 보내지 않는다(DPM++ 4M "
-                  "SDE·2M SDE Heun 의 Eta, Dy 의 churn 은 Forge 값)"))),
+                  "SDE·2M SDE Heun 의 Eta, Dy 의 churn 은 Forge 값). ComfyUI 는 기본값으로 돈다(XSa-d)",
+                  "Comfy: 같은 스텝 계산(CPU 비트 대조)이지 같은 시드의 같은 그림이 아니다 — SDE 샘플러(ER SDE Reverse-time·"
+                  "Tunable·DPM++ 4M SDE)는 잡음 원천이 다르다(XSa-b)",
+                  "Comfy: Dy 보조 스텝은 concat 조건(인페인트 모델)·영역/마스크 조건·Spectrum 에서 건너뛴다(Forge 는 Wan·PiD·"
+                  "extra_concat·Spectrum). 마스크 패스는 ComfyUI KSamplerX0Inpaint 규칙으로 섞인다",
+                  "Restart (flow): Forge 는 재시작 구간에서 프롬프트 편집 스텝 카운터를 되감는다 — ComfyUI 에는 카운터가 "
+                  "없다(같은 결과, 표시만 다름)",
+                  "UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음(UniPC 와 같음)"))),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -1190,26 +1277,34 @@ MODULES = MappingProxyType({
              "Gradio 패널, 색 벡터 data/*.safetensors 셋(krea2·zimage·flux2). v0.32.0 패널 인자(panel_state: 67개 "
              "ARG_NAMES·숨은 state·편집기 겹치기·옛 579개 거절·붙여 넣기·colorcraft_schema.js 생성). 앱은 표·형식·체인·한눈에 "
              "보기 규칙을 다시 구현해 두고(GPL 코드는 옮기지 않는다) tests/test_colorcraft_spec_parity.py 가 설치된 spec·"
-             "panel_state 와 같은 입력으로 비교한다. 계산(engine·hook·basis)은 Forge 에서는 확장이 한다",
-        gaps=("Comfy: 팩 1.7.0 단계 전 — 계산(colorcraft_basis·colorcraft_engine·colorcraft_host·colorcraft_nodes, 업스트림 "
-              "MIT lib_colorcraft·벡터)은 C0 에서 들어온다",
-              "HOLD: Debug 패널(debug_panel·debug)은 Forge 화면 전용")),
+             "panel_state 와 같은 입력으로 비교한다. 계산(engine·hook·basis)은 Forge 에서는 확장이, ComfyUI 에서는 팩 "
+             "1.7.0 이 한다(업스트림 MIT 엔진·벡터 + 앱 호스트 — tests/test_comfy_colorcraft_parity.py 가 설치된 engine·hook 과 "
+             "비트 대조)",
+        comfy=("comfy_custom_nodes/ai_studio_forge_parity/colorcraft_engine.py:apply_chain", "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_host.py:apply_colorcraft",
+               "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_basis.py:MODEL_DEV_DEFAULTS", "comfy_custom_nodes/ai_studio_forge_parity/colorcraft_nodes.py:ForgeNeoColorcraft"),
+        gaps=("HOLD: Debug 패널(debug_panel·debug)은 Forge 화면 전용",)),
     "sam3ext/speed/": mapped(
         "core/anima_speed.py:coerce", "core/anima_speed.py:ScriptSettings", "core/anima_speed.py:PRESETS",
         "core/anima_speed.py:parse_status", "core/anima_speed.py:UNSUPPORTED_SAMPLERS",
         note="SPEED 런타임 — ARG_NAMES·coerce_settings·infotext·status(forge_host), 전환 계획(schedule)·스펙트럼 변환"
              "(spectral)·샘플러 래퍼(runner). 앱은 정규화(coerce)·요약·status 문구·설정만 보고 아는 build_plan 거절"
-             "(validate)을 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현, 계획 C 단계). "
+             "(validate)을 거울로 둔다 — 계산은 Forge 에서는 확장이, ComfyUI 에서는 팩 1.7.0 이 다시 구현한다(세 MIT "
+             "원본 — tests/test_comfy_speed_parity.py 가 설치된 schedule·spectral·runner 와 비트 대조). "
              "tests/test_anima_speed.py 가 설치된 forge_host·schedule 과 같은 입력으로 비교한다",
-        gaps=("Comfy: 팩 1.7.0 단계 전 — 계산(speed_schedule·speed_spectral·speed_runner·speed_nodes)은 C0 에서 들어온다",)),
+        comfy=("comfy_custom_nodes/ai_studio_forge_parity/speed_schedule.py:build_plan", "comfy_custom_nodes/ai_studio_forge_parity/speed_runner.py:run_speed",
+               "comfy_custom_nodes/ai_studio_forge_parity/speed_spectral.py", "comfy_custom_nodes/ai_studio_forge_parity/speed_nodes.py:ForgeNeoAnimaSpeed")),
     "sam3ext/extra_schedulers/": mapped(
         "core/extra_schedulers.py:coerce", "core/extra_schedulers.py:SCHEDULER_LABELS",
         "core/extra_schedulers.py:README_LABELS", "core/extra_schedulers.py:ERROR_PREFIX",
+        "core/extra_schedulers.py:check_text",
         note="스케줄러 9개(v0.33.0: React DynSF·Flow Cosmos rho7·Flow Cosmos Dynamic — 뒤 둘은 같은 Flow Cosmos 세 값)·안전 식 "
              "계산기(AST 화이트리스트)·시그마 목록 보간·값 정규화(settings — v0.33.0 Flow Cosmos 범위)·Forge 등록(registry). 앱은 "
-             "정규화 규칙·이름 표·오류 머리·Flow Cosmos 검사(flow_cosmos_range_ok·flow_cosmos_dynamic_rho_ok)만 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현, 계획 "
-             "C 단계). tests/test_extra_schedulers_core.py 가 설치된 settings·registry 와 비교한다",
-        gaps=("C7: 식·목록 검사(expression·sigma_list)를 앱이 미리 하지 않는다",)),
+             "정규화 규칙·이름 표·오류 머리·Flow Cosmos 검사(flow_cosmos_range_ok·flow_cosmos_dynamic_rho_ok)만 거울로 두고, 식·"
+             "목록 미리 검사(check_text — 계획 C7)는 팩의 같은 계산기(expression·sigma_list 의 다시 구현)를 부른다 — "
+             "계산은 Forge 에서는 확장이, ComfyUI 에서는 팩 1.7.0 이 다시 구현한다(tests/test_comfy_extra_schedulers_parity.py 가 "
+             "설치된 schedulers 와 torch.equal). tests/test_extra_schedulers_core.py 가 설치된 settings·registry 와 비교한다",
+        comfy=("comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers_math.py:compile_expression",
+               "comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers.py:install_extra_schedulers")),
     "sam3ext/extra_samplers/": mapped(
         "core/extra_samplers.py:coerce_args", "core/extra_samplers.py:ALIASES", "core/extra_samplers.py:from_infotext",
         "core/extra_samplers.py:infotext_items", "core/extra_samplers.py:parse_noise_window",
@@ -1218,11 +1313,12 @@ MODULES = MappingProxyType({
              "er_sde_window.py(ER SDE 잡음 구간)·ipndm_deis.py(IPNDM·IPNDM_V·DEIS)·restart_flow.py(Restart (flow)), 기존 "
              "er_sde·euler_dy·params·registry·substep_guard 확장)·ER SDE 값(params — 인자 5개·정규화·infotext·붙여 넣기)·Dy "
              "보조 스텝 가드와 상태 줄(substep_guard)·Forge 등록(registry). 앱은 정규화·붙여 넣기·infotext 기록·상태 줄 "
-             "규칙과 이름 표만 거울로 둔다 — 계산은 Forge 에서는 확장이(ComfyUI 는 팩 1.7.0 이 다시 구현하거나 코어 함수를 "
-             "쓴다, 계획 C 단계). tests/test_extra_samplers_core.py 가 설치된 params·substep_guard·registry 와 같은 입력으로 "
-             "비교한다",
-        gaps=("Comfy: 팩 1.7.0 단계 전 — 계산(ER SDE 셋·4M SDE·Dy 넷·flow ODE 셋·Restart (flow) 등록, 잡음 구간·"
-              "ForgeNeoExtraSamplerSettings)은 C0 에서 들어온다",)),
+             "규칙과 이름 표만 거울로 둔다 — 계산은 Forge 에서는 확장이, ComfyUI 에서는 팩 1.7.0 이 다시 구현하거나 코어 "
+             "함수를 감싼다(tests/test_comfy_extra_samplers_parity.py 가 설치된 확장과 비트 대조). "
+             "tests/test_extra_samplers_core.py 가 설치된 params·substep_guard·registry 와 같은 입력으로 비교한다",
+        comfy=("comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_register.py:install_extra_samplers",
+               "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_math.py:sample_er_sde_ode", "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_dy.py:SMEA_SCALE",
+               "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_restart.py:sample_restart_flow")),
     "sam3ext/ui_extra_schedulers.py": mapped(
         "core/extra_schedulers.py:ARG_NAMES", "core/extra_schedulers.py:coerce_args",
         "core/extra_schedulers.py:from_infotext", "core/extra_schedulers.py:infotext_items",
@@ -1426,7 +1522,7 @@ _APP_XSCHED = "core.extra_schedulers"
 
 
 def _xsched_pins(pin_id: str, file: str, name: str, expected, meaning: str, *, app: str = "") -> tuple:
-    """확장 ``file:name`` 핀 — ``app`` 은 앱 상수 이름(core.extra_schedulers). 팩 거울(``<id>_comfy``)은 계획 C0 이 더한다."""
+    """확장 ``file:name`` 핀 — ``app`` 은 앱 상수 이름(core.extra_schedulers). 팩 거울(``<id>_comfy``)은 _COMFY_TWIN_ROWS."""
     base = {"id": pin_id, "source": "ast", "file": file, "name": name, "expected": expected, "meaning": meaning}
     return ({**base, **({"app": f"{_APP_XSCHED}:{app}"} if app else {})},)
 
@@ -1502,7 +1598,7 @@ _XSCHED_PINS = (
     _xsched_slider_pin("xsched_ui_beta_default", 4, "value", 0.5, "LAPLACE_BETA_DEFAULT",
                        "β 기본값(ComfyUI LaplaceScheduler 와 같다)"),
     # v0.33.0 D19 — Flow Cosmos ρ·σ̃ max·σ̃ min 슬라이더(settings.py 의 튜플 대입이라 AST 대신 픽스처, Laplace 처럼). 카드 입력
-    # 범위·step(frontend/src/utils/extraSchedulers.ts RHO_RANGE·SIGMA_MAX_RANGE·SIGMA_MIN_RANGE)과 자르기 범위. 팩 거울은 C0.
+    # 범위·step(frontend/src/utils/extraSchedulers.ts RHO_RANGE·SIGMA_MAX_RANGE·SIGMA_MIN_RANGE)과 자르기 범위. 팩 거울(노드 입력)은 _COMFY_TWIN_ROWS.
     *(_xsched_slider_pin(f"xsched_ui_cosmos_{short}_{suffix}", index, field, expected, f"{prefix}_{const}",
                          f"Flow Cosmos {what} 슬라이더 {suffix} — 칸·자르기(coerce_flow_cosmos_*)가 같은 값을 쓴다")
       for index, short, prefix, what, values in (
@@ -1544,7 +1640,7 @@ _XSCHED_PINS = (
 
 # Extra Samplers 상수 계약(sam-extra v0.33.0 — 계획 PLAN_amend_v033 §4, S3 에서 만들고 A-XSa2 가 Dy 상태 줄을 더했다) — 앱
 # (core/extra_samplers)이 같은 값을 하드코딩한다. 라벨은 params.py(ER SDE 셋)·registry.py(나머지 15 — registry 의 ER SDE 라벨은
-# params 를 가리키는 이름이라 AST 로 안 풀린다). 팩 거울('_comfy' — 노드 입력 기본값·범위, Restart 상수)은 계획 C0.
+# params 를 가리키는 이름이라 AST 로 안 풀린다). 팩 거울('_comfy' — 노드 입력 기본값·범위, Restart 상수, Dy 규칙)은 아래 _COMFY_TWIN_ROWS(계획 C0).
 _XSAMP_PARAMS = "sam3ext/extra_samplers/params.py"
 _XSAMP_REGISTRY = "sam3ext/extra_samplers/registry.py"
 _XSAMP_TITLE = "Extra Samplers"
@@ -1623,7 +1719,7 @@ _XSAMP_PINS = (
       for short, name, value in (("spectrum", "SPECTRUM", "Spectrum"), ("wan", "WAN", "Wan I2V concat_latent"),
                                  ("pid", "PID", "PiD lq_latent"), ("extra_concat", "EXTRA_CONCAT", "extra_concat_condition"))),
     *(_xsamp_pin(f"extra_samplers_{name.lower()}", "sam3ext/extra_samplers/restart_flow.py", name, value,
-                 "Restart (flow) 계획 상수(arXiv 2306.14878 + A1111 규칙) — 앱은 NFE 안내, 팩은 같은 상수로 다시 구현(거울 C0)")
+                 "Restart (flow) 계획 상수(arXiv 2306.14878 + A1111 규칙) — 앱은 NFE 안내, 팩은 같은 상수로 다시 구현(거울 '_comfy')")
       for name, value in (("RESTART_S_MIN", 0.1), ("RESTART_S_MAX", 2.0), ("RESTART_MIN_STEPS", 20), ("RESTART_TIMES", 1),
                           ("RESTART_TIMES_LONG", 2), ("RESTART_LONG_FROM", 36))),
     *(_xsamp_pin(f"extra_samplers_{name.lower()}", "sam3ext/extra_samplers/cfgpp_ud10_ab.py", name, value,
@@ -1647,7 +1743,7 @@ _XSAMP_PINS = (
 # Anima SPEED 상수 계약 — 앱(core/anima_speed)이 같은 값을 하드코딩한다. 인자 이름·기본값·별칭·infotext 키는
 # sam3ext/speed/forge_host.py, 선택지·프리셋은 schedule.py(모두 AST 로 풀린다). δ·σ 나눔값 슬라이더는 script-info(픽스처).
 # status 문구(f-string)는 tests/test_sam_extra_notices.py 가 설치된 소스에서 찾는다. 팩 거울(<id>_comfy — 런너 시드
-# 오프셋·MAX_COARSE_FRACTION·RESPACE_PATCH 등)은 계획 C0 이 더한다.
+# 오프셋·MAX_COARSE_FRACTION·RESPACE_PATCH 등)은 아래 _COMFY_TWIN_ROWS(계획 C0).
 _SPEED_SCRIPT = "scripts/anima_speed.py"
 _SPEED_HOST = "sam3ext/speed/forge_host.py"
 _SPEED_SCHEDULE = "sam3ext/speed/schedule.py"
@@ -1715,7 +1811,7 @@ _SPEED_PINS = (
         "flux2": {"A": 520.495848, "beta": 1.915461, "ref_latent": 64},
         "anima": {"A": 8664.998524, "beta": 2.422687, "ref_latent": 128, "ref_shift": 3.0},
         "custom": None}, "PRESETS",
-        "프리셋 A·β·기준 latent·shift — 앱 validate(custom A ≤ 0)·preset_params 가 쓴다(팩 거울은 C0)"),
+        "프리셋 A·β·기준 latent·shift — 앱 validate(custom A ≤ 0)·preset_params 가 쓴다(팩 거울 '_comfy')"),
     _speed_pin("speed_reference_latent", _SPEED_SCHEDULE, "REFERENCE_LATENT", 128, "REFERENCE_LATENT",
                "1024 px 기준 latent 짧은 변(적응형 δ)"),
     _speed_pin("speed_custom_default_a", _SPEED_SCHEDULE, "CUSTOM_DEFAULT_A", 203.615097, "CUSTOM_DEFAULT_A",
@@ -1736,7 +1832,7 @@ _SPEED_PINS = (
 # 개수·선택지·종류 표는 sam3ext/colorcraft/spec.py, 종류는 engine.py, 마스크 축은 masking.py, 묶음 순서는 panel_state.py
 # (모두 AST 로 풀린다). 필드 표·_KIND_PARAMS·패스 선택지(튜플 풀기 대입이라 AST 로 안 풀린다)처럼 리터럴이 아닌 표는
 # tests/test_colorcraft_spec_parity.py 가 설치된 모듈과 비교한다. status 문구(f-string)는 tests/test_sam_extra_notices.py 가 설치된 소스에서 찾는다. 팩 거울(<id>_comfy — 기저·VAE
-# 배율·종류·마스크 축)은 계획 C0 이 더한다.
+# 배율·종류·마스크 축)은 아래 _COMFY_TWIN_ROWS(계획 C0).
 _CC_SCRIPT = "scripts/colorcraft.py"
 _CC_SPEC = "sam3ext/colorcraft/spec.py"
 _CC_ENGINE = "sam3ext/colorcraft/engine.py"
@@ -1803,6 +1899,204 @@ _COLORCRAFT_PINS = (
             ("luma", "contrast", "detail", "chroma", "chroma_plus", "color_shift", "dev"), "GROUP_ORDER",
             "편집기 묶음 순서(확장 공유 편집기와 같은 순서로 보인다)"),
 )
+
+# ── ComfyUI 팩 거울 '<id>_comfy'(계획 C0 — 팩 1.7.0 이 본 트리에 들어온 뒤) ──────────────────────────────
+# 팩(comfy_custom_nodes/ai_studio_forge_parity — 1.7.0 의 sam-extra 네 기능)은 확장 계산을 다시 구현하며(GPL 코드는 옮기지
+# 않는다) 같은 상수를 하드코딩한다. 위 핀(확장 값)마다 그 값을 쓰는 팩 상수 하나를 '<id>_comfy' 쌍둥이로 묶어(같은 source·
+# file·name·expected 또는 script·index·field — app 만 팩), 확장이 값을 바꾸면 앱 상수와 팩 상수가 함께 실패하게 한다
+# (_degrid_pins 와 같은 규칙). 앱 상수가 없는 값(공유 표시 R4, 팩만 쓰는 계산 상수)은 앱 없는 확장 핀을 두고 그 쌍둥이를 단다.
+# 리터럴로 안 풀리는 값(Dy 의 _CHURN_LIMIT = 2 ** 0.5 - 1, 식 계산기 상수표)·팩이 ComfyUI 몫을 더한 표(SPEED
+# UNSUPPORTED_SAMPLERS)·모양이 다른 값(Colorcraft BASIS_FAMILIES 목록 ↔ 튜플)은 설치된 확장을 import 하는 팩 패리티 테스트
+# (tests/test_comfy_*_parity.py)가 본다.
+_XSCHED_EXPRESSION = "sam3ext/extra_schedulers/expression.py"
+_XSCHED_SIGMA_LIST = "sam3ext/extra_schedulers/sigma_list.py"
+_XSAMP_DY = "sam3ext/extra_samplers/euler_dy.py"
+_SPEED_RUNNER = "sam3ext/speed/runner.py"
+_CC_BASIS = "sam3ext/colorcraft/basis.py"
+_CC_HOOK = "sam3ext/colorcraft/hook.py"
+
+
+def _ext_pin(pin_id: str, file: str, name: str, expected, meaning: str) -> dict:
+    """앱 상수가 없는 확장 ``file:name`` 핀 — 팩 거울('<id>_comfy')의 짝."""
+    return {"id": pin_id, "source": "ast", "file": file, "name": name, "expected": expected, "meaning": meaning}
+
+
+# 공유 표시(계획 R4) — 네 기능이 서로를 알아보는 표시 셋. 팩은 guidance_common 에 한 번만 둔다.
+_SHARED_PINS = (
+    _ext_pin("shared_substep_marker", "sam3ext/extra_samplers/common.py", "SUBSTEP_MARKER", "sam_extra_substep",
+             "Euler (SMEA) Dy 보조 스텝 평가의 transformer_options 표시 — 가이던스(APG·ADG·SMC·Momentum·HiFlow 상태)·"
+             "Colorcraft 가 이 표시가 붙은 평가에서는 상태를 갱신하지 않고 지나간다"),
+    _ext_pin("shared_step_offset_kwarg", _SPEED_RUNNER, "STEP_OFFSET_KWARG", "sam_extra_step_offset",
+             "SPEED 가 단계마다 샘플러에 넘기는 '이 단계가 몇 번째 스텝에서 시작하나' 키워드 — Dy 가 보조 스텝 자리를 "
+             "전체 스케줄 기준으로 정한다"),
+    _ext_pin("shared_republished_attr", "sam3ext/guidance/sigmas.py", "REPUBLISHED_FROM", "_sam_extra_republished_from",
+             "SPEED 가 단계마다 다시 내놓는 σ 목록에 붙이는 원본 표시 — Detail Daemon·Colorcraft 가 이 표시로 전체 "
+             "스케줄의 위치를 찾는다"),
+)
+
+# 팩만 하드코딩하는 확장 값(앱 상수 없음) — 그 '_comfy' 쌍둥이는 아래 _COMFY_TWIN_ROWS.
+_PACK_MIRROR_ONLY_PINS = (
+    # Extra Schedulers — custom 식 계산기·시그마 목록 한도(같은 식·목록이 Forge 와 ComfyUI 에서 같은 문구로 거절된다)
+    *(_ext_pin(f"xsched_expression_{name.lower()}", _XSCHED_EXPRESSION, name, value,
+               "custom 식 계산기 한도·변수 — 넘으면 'Extra Schedulers: …' 로 거절(같은 식이 두 쪽에서 같은 결과)")
+      for name, value in (("MAX_LENGTH", 500), ("MAX_NODES", 200), ("MAX_DEPTH", 32), ("MAX_EXPONENT", 64.0),
+                          ("MAX_CALL_ARGS", 8), ("VARIABLES", ("m", "M", "n", "s", "x")))),
+    *(_ext_pin(f"xsched_sigma_list_{name.lower()}", _XSCHED_SIGMA_LIST, name, value,
+               "custom 시그마 목록 한도 — 넘으면 거절(같은 목록이 두 쪽에서 같은 결과)")
+      for name, value in (("MAX_TEXT_LENGTH", 20000), ("MAX_VALUES", 1000))),
+    _ext_pin("xsched_karras_dynamic_rho", _XSCHED_SCHEDULERS, "KARRAS_DYNAMIC_RHO", 7.0,
+             "Karras Dynamic 기준 ρ(ρᵢ = ρ + 2cos(2πi/n)) — 팩의 karras_dynamic 이 같은 값으로 목록을 만든다"),
+    _ext_pin("xsched_laplace_epsilon", _XSCHED_SCHEDULERS, "LAPLACE_EPSILON", 1e-5,
+             "get_sigmas_laplace 의 log(0) 회피 ε — Laplace 목록의 끝 값이 이 수로 정해진다"),
+    _ext_pin("xsched_rho_source", _XSCHED_SCHEDULERS, "RHO_SOURCE",
+             "Settings → Sampler Parameters → rho (shared with Karras; listed with --adv-samplers), or a 'Schedule rho' "
+             "override from pasted infotext",
+             "Karras Dynamic 오류 문구가 ρ 의 출처로 드는 글 — 팩은 같은 문구로 거절한다(패리티 테스트가 문구까지 비교)"),
+    _ext_pin("xsched_zero_length_step", _XSCHED_SCHEDULERS, "ZERO_LENGTH_STEP",
+             "a step that keeps sigma where it was is wasted with Euler and makes multistep samplers such as Res "
+             "Multistep divide by zero (NaN, a black image)",
+             "평평한 스텝(σ 가 그대로)을 거절하는 이유 문구"),
+    _ext_pin("xsched_cosmos_values_source", _XSCHED_SCHEDULERS, "FLOW_COSMOS_VALUES_SOURCE",
+             "Extra Schedulers accordion → Flow Cosmos rho / sigma max / sigma min",
+             "Flow Cosmos 두 스케줄러 오류 문구가 값의 출처로 드는 글(팩은 노드 입력이 같은 세 값)"),
+    # Extra Samplers — Euler (SMEA) Dy 규칙(Koishi-Star Apache-2.0 포팅 — 팩 extra_samplers_dy)
+    _ext_pin("extra_samplers_smea_scale", _XSAMP_DY, "_SMEA_SCALE", (1.25, 1.25),
+             "SMEA 보조 스텝 확대 배율(smea_sampling_step) — 보조 스텝 해상도가 같아야 같은 결과"),
+    _ext_pin("extra_samplers_resize_mode", _XSAMP_DY, "_RESIZE_MODE", "nearest-exact",
+             "보조 스텝 크기 바꾸기 방식(smea_sampling_step·_Rescaler)"),
+    _ext_pin("extra_samplers_churn_min", _XSAMP_DY, "CHURN_MIN", "min",
+             "churn 규칙 이름 — k-diffusion sample_euler 의 min(Karras 2022 Algorithm 2), Forge Dy 의 기본"),
+    _ext_pin("extra_samplers_churn_max", _XSAMP_DY, "CHURN_MAX", "max",
+             "churn 규칙 이름 — Koishi-Star sample_euler_dy 의 max"),
+    # Anima SPEED — 거친 단계 상한·respace 패치·시드 오프셋(같은 잡음 스트림)
+    _ext_pin("speed_max_coarse_fraction", _SPEED_SCHEDULE, "MAX_COARSE_FRACTION", 0.8,
+             "거친(저해상도) 단계가 차지할 수 있는 스텝 비율 상한 — 전환 σ 가 같아야 같은 계획"),
+    _ext_pin("speed_respace_patch", _SPEED_SCHEDULE, "RESPACE_PATCH", 2, "respace 모드의 패치 크기"),
+    _ext_pin("speed_expansion_seed_stride", _SPEED_RUNNER, "EXPANSION_SEED_STRIDE", 10000,
+             "단계 확장 잡음 시드 간격 — 같은 시드에서 같은 잡음 스트림"),
+    _ext_pin("speed_respace_seed_offset", _SPEED_RUNNER, "RESPACE_SEED_OFFSET", 10_000, "respace 잡음 시드 오프셋"),
+    _ext_pin("speed_init_noise_seed_offset", _SPEED_RUNNER, "INIT_NOISE_SEED_OFFSET", 7919,
+             "img2img 시작 잡음 시드 오프셋"),
+    _ext_pin("speed_brownian_stage_stride", _SPEED_HOST, "BROWNIAN_STAGE_SEED_STRIDE", 1_000_003,
+             "Brownian 잡음 샘플러(SDE)의 단계별 시드 간격"),
+    # Colorcraft — 기저 묶음·VAE 배율·중립색·앵커 캐시(basis.py·engine.py·hook.py)
+    _ext_pin("colorcraft_families", _CC_BASIS, "LATENT_FORMAT_TO_FAMILY", {"Wan21": "krea2", "Flux": "zimage", "Flux2": "flux2"},
+             "latent_format 클래스 이름 → 기저 벡터 묶음 — 어느 모델에서 색 벡터가 걸리는지(SD·SDXL 은 없음)"),
+    _ext_pin("colorcraft_dev_defaults", _CC_BASIS, "MODEL_DEV_DEFAULTS", {
+        "krea2": {"vibrance_k": 1.0, "max_chroma": 2.5, "recenter": 0.5, "chroma_plane": "temp_tint",
+                  "exposure_scale": 3.5, "color_scale": 3.0, "detail_scale": 4.0, "hue_bias": -0.1},
+        "zimage": {"vibrance_k": 1.5, "max_chroma": 5.0, "recenter": 0.5, "chroma_plane": "temp_tint",
+                   "exposure_scale": 7.5, "color_scale": 6.0, "detail_scale": 4.0, "hue_bias": -0.4},
+        "flux2": {"vibrance_k": 1.83, "max_chroma": 4.6, "recenter": 0.5, "chroma_plane": "temp_tint",
+                  "exposure_scale": 4.0, "color_scale": 3.9, "detail_scale": 4.0, "hue_bias": 0.12}},
+        "묶음마다 보정값(색 평면 계산) — 같은 수정자가 같은 색 변화를 낸다"),
+    _ext_pin("colorcraft_vae_factors", _CC_BASIS, "VAE_DOWNSCALE_FACTORS", {"krea2": 8, "zimage": 8, "flux2": 16},
+             "묶음별 VAE 축소 배율 — 마스크 블러 반경(이미지 픽셀 → latent 픽셀)"),
+    _ext_pin("colorcraft_vae_factor", _CC_BASIS, "VAE_DOWNSCALE_FACTOR", 8, "묶음을 모를 때의 VAE 축소 배율"),
+    _ext_pin("colorcraft_neutral_color", _CC_ENGINE, "NEUTRAL_COLOR", (0.0, 0.0, 0.0, 0.0),
+             "색 이동의 중립색(움직이지 않음)"),
+    _ext_pin("colorcraft_anchor_cache_limit", _CC_HOOK, "ANCHOR_CACHE_LIMIT", 32,
+             "앵커 인코딩 캐시 크기(같은 결과 — 다시 인코딩할 뿐이지만 팩도 같은 크기)"),
+)
+
+# (확장 핀 id, 팩 '모듈:이름', 그 값을 쓰는 팩 자리) — 쌍둥이 '<id>_comfy' 의 표.
+_COMFY_TWIN_ROWS = (
+    # 공유 표시(R4)
+    ("shared_substep_marker", "guidance_common:SUBSTEP_MARKER", "guidance·guidance_dcw·guidance_detail·colorcraft_host"),
+    ("shared_step_offset_kwarg", "guidance_common:STEP_OFFSET_KWARG", "speed_nodes → extra_samplers_dy"),
+    ("shared_republished_attr", "guidance_common:REPUBLISHED_FROM", "speed_nodes·guidance_dd·colorcraft_host"),
+    # Extra Schedulers — ForgeNeoExtraSchedulers 입력(이름·범위·기본값)과 스케줄러 계산(extra_schedulers_math)
+    ("xsched_arg_names", "extra_schedulers_math:ARG_NAMES", "ForgeNeoExtraSchedulers 입력 순서"),
+    ("xsched_modes", "extra_schedulers_math:MODES", "custom_mode 선택지"),
+    ("xsched_mode_expression", "extra_schedulers_math:MODE_EXPRESSION", "custom_mode"),
+    ("xsched_mode_sigmas", "extra_schedulers_math:MODE_SIGMAS", "custom_mode"),
+    ("xsched_default_expression", "extra_schedulers_math:DEFAULT_EXPRESSION", "노드 기본값"),
+    ("xsched_default_sigmas", "extra_schedulers_math:DEFAULT_SIGMAS", "노드 기본값"),
+    *((f"xsched_ui_{what}_{suffix}", f"extra_schedulers_math:LAPLACE_{what.upper()}_{const}",
+       "ForgeNeoExtraSchedulers 입력 범위·기본값")
+      for what in ("mu", "beta") for suffix, const in (("min", "MIN"), ("max", "MAX"), ("default", "DEFAULT"))),
+    *((f"xsched_ui_cosmos_{short}_{suffix}", f"extra_schedulers_math:FLOW_COSMOS_{short.upper()}_{suffix.upper()}",
+       "ForgeNeoExtraSchedulers 입력 범위·step·기본값")
+      for short in ("rho", "sigma_max", "sigma_min") for suffix in ("min", "max", "step", "default")),
+    ("xsched_react_factor", "extra_schedulers_math:REACT_DYNSF_FACTOR", "react_cosinusoidal_dynsf"),
+    ("xsched_cosmos_sigma_max", "extra_schedulers_math:FLOW_COSMOS_SIGMA_MAX", "flow_cosmos_rho7·_dynamic"),
+    ("xsched_cosmos_sigma_min", "extra_schedulers_math:FLOW_COSMOS_SIGMA_MIN", "flow_cosmos_rho7·_dynamic"),
+    ("xsched_cosmos_rho", "extra_schedulers_math:FLOW_COSMOS_RHO", "flow_cosmos_rho7·_dynamic"),
+    ("xsched_cosmos_not_flow_log", "extra_schedulers_math:FLOW_COSMOS_NOT_FLOW_LOG",
+     "flow_cosmos_rho7 — eps/v 에서 ComfyUI 로그(INFO)에 한 번"),
+    ("xsched_cosmos_dynamic_not_flow_log", "extra_schedulers_math:FLOW_COSMOS_DYNAMIC_NOT_FLOW_LOG",
+     "flow_cosmos_dynamic — eps/v 에서 ComfyUI 로그(INFO)에 한 번"),
+    ("xsched_cosmos_values_source", "extra_schedulers_math:FLOW_COSMOS_VALUES_SOURCE", "Flow Cosmos 오류 문구"),
+    *((f"xsched_expression_{name.lower()}", f"extra_schedulers_math:{name}", "custom 식 계산기")
+      for name in ("MAX_LENGTH", "MAX_NODES", "MAX_DEPTH", "MAX_EXPONENT", "MAX_CALL_ARGS", "VARIABLES")),
+    *((f"xsched_sigma_list_{name.lower()}", f"extra_schedulers_math:{name}", "custom 시그마 목록")
+      for name in ("MAX_TEXT_LENGTH", "MAX_VALUES")),
+    ("xsched_karras_dynamic_rho", "extra_schedulers_math:KARRAS_DYNAMIC_RHO", "karras_dynamic"),
+    ("xsched_laplace_epsilon", "extra_schedulers_math:LAPLACE_EPSILON", "laplace"),
+    ("xsched_rho_source", "extra_schedulers_math:RHO_SOURCE", "Karras Dynamic 오류 문구"),
+    ("xsched_zero_length_step", "extra_schedulers_math:ZERO_LENGTH_STEP", "평평한 스텝 오류 문구"),
+    # Extra Samplers — ForgeNeoExtraSamplerSettings 입력(이름·범위·기본값)·Restart (flow)·Dy
+    ("extra_samplers_arg_names", "extra_samplers_math:ARG_NAMES", "ForgeNeoExtraSamplerSettings 입력 순서"),
+    *((f"extra_samplers_{name.lower()}", f"extra_samplers_math:{name}", "ForgeNeoExtraSamplerSettings 입력 범위·기본값")
+      for name in ("DEFAULT_MAX_STAGE", "MAX_STAGE_MIN", "MAX_STAGE_MAX", "DEFAULT_ETA", "ETA_MIN", "ETA_MAX", "ETA_STEP",
+                   "DEFAULT_NOISE_WINDOW", "DEFAULT_NOISE_START", "DEFAULT_NOISE_END", "NOISE_PERCENT_MIN",
+                   "NOISE_PERCENT_MAX", "NOISE_PERCENT_STEP")),
+    ("extra_samplers_ui_noise_window_default", "extra_samplers_math:DEFAULT_NOISE_WINDOW", "노드 noise_window 기본값"),
+    *((f"extra_samplers_ui_noise_{end}_{suffix}", f"extra_samplers_math:{const}", f"노드 noise_{end} 입력")
+      for end, default_const in (("start", "DEFAULT_NOISE_START"), ("end", "DEFAULT_NOISE_END"))
+      for suffix, const in (("min", "NOISE_PERCENT_MIN"), ("max", "NOISE_PERCENT_MAX"), ("step", "NOISE_PERCENT_STEP"),
+                            ("default", default_const))),
+    *((f"extra_samplers_{name.lower()}", f"extra_samplers_restart:{name}", "restart_flow")
+      for name in ("RESTART_S_MIN", "RESTART_S_MAX", "RESTART_MIN_STEPS", "RESTART_TIMES", "RESTART_TIMES_LONG",
+                   "RESTART_LONG_FROM")),
+    ("extra_samplers_smea_scale", "extra_samplers_dy:SMEA_SCALE", "euler_smea_dy(_cfg_pp)"),
+    ("extra_samplers_resize_mode", "extra_samplers_dy:RESIZE_MODE", "euler_(smea_)dy(_cfg_pp)"),
+    ("extra_samplers_churn_min", "extra_samplers_dy:CHURN_MIN", "euler_(smea_)dy(_cfg_pp) churn"),
+    ("extra_samplers_churn_max", "extra_samplers_dy:CHURN_MAX", "euler_(smea_)dy(_cfg_pp) churn"),
+    # Anima SPEED — ForgeNeoAnimaSpeed 입력(이름·기본값·별칭)·계획(speed_schedule)·런너(speed_runner·speed_nodes)
+    ("speed_arg_names", "speed_nodes:ARG_NAMES", "ForgeNeoAnimaSpeed 설정 이름"),
+    ("speed_defaults", "speed_nodes:DEFAULTS", "ForgeNeoAnimaSpeed 기본값"),
+    ("speed_aliases", "speed_nodes:ARG_ALIASES", "ForgeNeoAnimaSpeed 설정 별칭"),
+    ("speed_infotext_key", "speed_nodes:KEY", "콘솔·status 머리"),
+    *((f"speed_{name.lower()}", f"speed_schedule:{name}", "speed_schedule.build_plan")
+      for name in ("MODES", "THRESHOLDS", "TRANSFORMS", "PRESET_NAMES", "PRESETS", "REFERENCE_LATENT")),
+    ("speed_custom_default_a", "speed_schedule:CUSTOM_DEFAULT_A", "speed_schedule.build_plan"),
+    ("speed_custom_default_beta", "speed_schedule:CUSTOM_DEFAULT_BETA", "speed_schedule.build_plan"),
+    ("speed_max_coarse_fraction", "speed_schedule:MAX_COARSE_FRACTION", "speed_schedule.build_plan"),
+    ("speed_respace_patch", "speed_schedule:RESPACE_PATCH", "speed_schedule.build_plan"),
+    ("speed_expansion_seed_stride", "speed_runner:EXPANSION_SEED_STRIDE", "speed_runner.run_speed"),
+    ("speed_respace_seed_offset", "speed_runner:RESPACE_SEED_OFFSET", "speed_runner.run_speed"),
+    ("speed_init_noise_seed_offset", "speed_runner:INIT_NOISE_SEED_OFFSET", "speed_runner.run_speed"),
+    ("speed_brownian_stage_stride", "speed_nodes:BROWNIAN_STAGE_SEED_STRIDE", "ComfySpeedHost Brownian 시드"),
+    # Colorcraft — 엔진·마스크·기저(colorcraft_engine·colorcraft_host·colorcraft_basis)
+    ("colorcraft_kinds", "colorcraft_engine:KINDS", "colorcraft_engine.apply_chain"),
+    ("colorcraft_advanced_kinds", "colorcraft_engine:ADVANCED_KINDS", "colorcraft_engine — 기저가 필요한 종류"),
+    ("colorcraft_mask_axes", "colorcraft_host:MASK_AXES", "ForgeNeoColorcraft settings_json 마스크 축"),
+    ("colorcraft_mask_modes", "colorcraft_host:MASK_MODES", "ForgeNeoColorcraft settings_json 마스크 방식"),
+    ("colorcraft_combo_ops", "colorcraft_host:COMBINE_OPERATIONS", "ForgeNeoColorcraft settings_json 조합 연산"),
+    ("colorcraft_families", "colorcraft_basis:LATENT_FORMAT_TO_FAMILY", "colorcraft_basis"),
+    ("colorcraft_dev_defaults", "colorcraft_basis:MODEL_DEV_DEFAULTS", "colorcraft_basis"),
+    ("colorcraft_vae_factors", "colorcraft_basis:VAE_DOWNSCALE_FACTORS", "colorcraft_basis"),
+    ("colorcraft_vae_factor", "colorcraft_basis:VAE_DOWNSCALE_FACTOR", "colorcraft_basis"),
+    ("colorcraft_neutral_color", "colorcraft_engine:NEUTRAL_COLOR", "colorcraft_engine"),
+    ("colorcraft_anchor_cache_limit", "colorcraft_host:ANCHOR_CACHE_LIMIT", "colorcraft_host 앵커 캐시"),
+)
+
+
+def _comfy_twins(pins: tuple, rows: tuple) -> tuple:
+    """``rows`` 의 확장 핀마다 '<id>_comfy' — 같은 비교 대상, app 은 팩 상수(없는 핀 id 는 import 때 KeyError)."""
+    by_id = {pin["id"]: pin for pin in pins}
+    twins = []
+    for pin_id, ref, where in rows:
+        base = {key: value for key, value in by_id[pin_id].items() if key != "app"}
+        twins.append({**base, "id": f"{pin_id}_comfy", "app": f"{_PACK}.{ref}",
+                      "meaning": f"{base['meaning']} — Comfy 팩({where})도 같은 값이어야 ComfyUI 가 Forge 와 같다"})
+    return tuple(twins)
+
+
+_COMFY_TWINS = _comfy_twins(
+    (*_XSCHED_PINS, *_XSAMP_PINS, *_SPEED_PINS, *_COLORCRAFT_PINS, *_SHARED_PINS, *_PACK_MIRROR_ONLY_PINS),
+    _COMFY_TWIN_ROWS)
 
 SEMANTIC_PINS = (
     {"id": "dd_amount_max", "source": "fixture", "script": "Anima Detail Daemon", "index": 2,
@@ -2020,14 +2314,18 @@ SEMANTIC_PINS = (
      "meaning": "SPEED 의 img2img rescale 값이 남는 infotext 이름"},
     # VAE DeGrid — 위 _DEGRID_PINS(앱·Comfy 팩 거울)
     *_DEGRID_PINS,
-    # Extra Schedulers — 위 _XSCHED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    # Extra Schedulers — 위 _XSCHED_PINS(앱 쪽)
     *_XSCHED_PINS,
-    # Extra Samplers — 위 _XSAMP_PINS(v0.33.0, 앱 core/extra_samplers 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    # Extra Samplers — 위 _XSAMP_PINS(v0.33.0, 앱 core/extra_samplers 쪽)
     *_XSAMP_PINS,
-    # Anima SPEED — 위 _SPEED_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    # Anima SPEED — 위 _SPEED_PINS(앱 쪽)
     *_SPEED_PINS,
-    # Colorcraft — 위 _COLORCRAFT_PINS(앱 쪽 — 팩 거울 '_comfy' 는 계획 C0)
+    # Colorcraft — 위 _COLORCRAFT_PINS(앱 쪽)
     *_COLORCRAFT_PINS,
+    # 네 기능의 공유 표시(R4)·팩만 쓰는 확장 값, 그리고 팩 1.7.0 거울 '<id>_comfy'(계획 C0 — 위 _COMFY_TWIN_ROWS)
+    *_SHARED_PINS,
+    *_PACK_MIRROR_ONLY_PINS,
+    *_COMFY_TWINS,
 )
 
 # ── ui() 컴포넌트에서 AST 로 못 읽는 칸 (script, index) → 필드와 사유 ─────────────────────

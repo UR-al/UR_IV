@@ -1,0 +1,174 @@
+"""Extra Samplers for ComfyUI (pack 1.7.0): sam-extra's sampler names in ComfyUI's KSampler list.
+
+sam-extra v0.33.0 adds 18 samplers to Forge's list. Six of them ComfyUI already has under the same
+name and the same maths (``CORE_SAMPLERS``: ``dpmpp_2m_sde_heun``, ``uni_pc_bh2``, ``cfgpp_ud10_ab`` from
+ComfyUI v0.35.0, ``ipndm``, ``ipndm_v``, ``deis`` — the app only maps the Forge label to the name). The
+other twelve (``PACK_SAMPLERS`` = sam-extra's first aliases, in its table order) are registered here, the
+way ``compat.install_forge_scheduler_support`` adds ``beta57``, so every pass the app compiles
+(``ForgeNeoKSamplerCNS``, ``ForgeNeoHiresFix``, ADetailer through Impact, SAM3, a custom workflow's stock
+``KSampler``/``KSamplerSelect``) finds them by name:
+
+* the function goes into ``comfy.k_diffusion.sampling`` as ``sample_<name>`` (what
+  ``comfy.samplers.ksampler`` looks up) — a thin ``functools.wraps`` wrapper tagged with the pack's owner
+  (``compat.mark_owned``), so CNS's direct-sampler detection sees through it and finds its
+  ``noise_sampler`` parameter;
+* the name is appended to ``KSAMPLER_NAMES``, ``SAMPLER_NAMES`` and ``KSampler.SAMPLERS`` (each distinct
+  list once), and ``dpmpp_4m_sde`` / ``dpmpp_3m_flow_ode`` to ``KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS``
+  (Forge's ``discard_next_to_last_sigma`` option of those two entries);
+* a name another provider already registered is never overwritten (``compat.register_names``): it is
+  left alone, logged once and not reported as the pack's — the app refuses a graph that would run a
+  different algorithm under it (e.g. Koishi-Star's own ComfyUI node registers ``euler_dy`` /
+  ``euler_smea_dy`` with its always-churn rule).
+
+The four Dy entries run through ``extra_samplers_dy_host.guarded`` (ComfyUI's sub-step inputs, the
+sub-step guard). A name whose implementation module is not in this pack yet (``IMPLEMENTATIONS``) is
+not registered and is listed by ``unavailable_names``. No torch or ComfyUI import at module level;
+outside ComfyUI (the app's tests) registration does nothing.
+"""
+
+from __future__ import annotations
+
+import functools
+import importlib
+import logging
+from typing import Any, Callable
+
+from .compat import NameRegistration, entry_owner, mark_owned, register_names
+
+LOGGER = logging.getLogger("ai_studio_forge_parity")
+
+OWNER = "extra_samplers"
+
+# sam-extra v0.33.0 registry.SPECS order (first alias = the ComfyUI name).
+PACK_SAMPLERS = (
+    "er_sde_reverse_time",
+    "er_sde_ode",
+    "er_sde_tunable",
+    "dpmpp_4m_sde",
+    "euler_dy_cfg_pp",
+    "euler_smea_dy_cfg_pp",
+    "euler_dy",
+    "euler_smea_dy",
+    "dpmpp_2m_flow_ode",
+    "dpmpp_2m_heun_flow_ode",
+    "dpmpp_3m_flow_ode",
+    "restart_flow",
+)
+# sam-extra entries whose ComfyUI name is core's own (same maths; never registered by the pack).
+CORE_SAMPLERS = ("dpmpp_2m_sde_heun", "uni_pc_bh2", "cfgpp_ud10_ab", "ipndm", "ipndm_v", "deis")
+# Forge options discard_next_to_last_sigma (uni_pc_bh2 is already in ComfyUI's set).
+DISCARD_PENULTIMATE_SIGMA = ("dpmpp_4m_sde", "dpmpp_3m_flow_ode")
+# The Dy entries and whether they are CFG++ (their console line names the step kind).
+DY_SAMPLERS = {"euler_dy_cfg_pp": True, "euler_smea_dy_cfg_pp": True, "euler_dy": False, "euler_smea_dy": False}
+# Where each name's function lives in the pack: (module, attribute).
+IMPLEMENTATIONS = {
+    "er_sde_reverse_time": ("extra_samplers_math", "sample_er_sde_reverse_time"),
+    "er_sde_ode": ("extra_samplers_math", "sample_er_sde_ode"),
+    "er_sde_tunable": ("extra_samplers_math", "sample_er_sde_tunable"),
+    "dpmpp_4m_sde": ("extra_samplers_dpmpp_4m", "sample_dpmpp_4m_sde"),
+    "euler_dy_cfg_pp": ("extra_samplers_dy", "sample_euler_dy_cfg_pp"),
+    "euler_smea_dy_cfg_pp": ("extra_samplers_dy", "sample_euler_smea_dy_cfg_pp"),
+    "euler_dy": ("extra_samplers_dy", "sample_euler_dy"),
+    "euler_smea_dy": ("extra_samplers_dy", "sample_euler_smea_dy"),
+    "dpmpp_2m_flow_ode": ("extra_samplers_flow", "sample_dpmpp_2m_flow_ode"),
+    "dpmpp_2m_heun_flow_ode": ("extra_samplers_flow", "sample_dpmpp_2m_heun_flow_ode"),
+    "dpmpp_3m_flow_ode": ("extra_samplers_flow", "sample_dpmpp_3m_flow_ode"),
+    "restart_flow": ("extra_samplers_restart", "sample_restart_flow"),
+}
+
+
+def implementation(name: str) -> Callable[..., Any] | None:
+    """The pack's function for ``name``, or None while its module is not in the pack."""
+    module_name, attribute = IMPLEMENTATIONS[name]
+    try:
+        module = importlib.import_module(f".{module_name}", __package__)
+    except ModuleNotFoundError as exc:
+        if exc.name != f"{__package__}.{module_name}":
+            raise
+        return None
+    function = getattr(module, attribute, None)
+    return function if callable(function) else None
+
+
+def unavailable_names() -> tuple[str, ...]:
+    """``PACK_SAMPLERS`` the pack cannot register yet (no implementation)."""
+    return tuple(name for name in PACK_SAMPLERS if implementation(name) is None)
+
+
+def sampler_entry(name: str) -> Callable[..., Any]:
+    """The ``sample_<name>`` function the pack puts into ``comfy.k_diffusion.sampling``."""
+    function = implementation(name)
+    if function is None:
+        raise LookupError(f"the pack has no implementation of the sampler {name!r} yet")
+    if name in DY_SAMPLERS:
+        from .extra_samplers_dy_host import guarded
+
+        function = guarded(function, name, cfg_pp=DY_SAMPLERS[name])
+
+    @functools.wraps(function)
+    def entry(*args, **kwargs):
+        return function(*args, **kwargs)
+
+    entry.__name__ = entry.__qualname__ = "sample_" + name
+    return mark_owned(entry, OWNER)
+
+
+def _comfy_modules() -> tuple[Any, Any] | None:
+    try:
+        return (importlib.import_module("comfy.samplers"), importlib.import_module("comfy.k_diffusion.sampling"))
+    except ModuleNotFoundError:
+        return None
+
+
+def install_extra_samplers(*, required: bool = False) -> NameRegistration:
+    """Register ``PACK_SAMPLERS`` in ComfyUI (module docstring). Called once when the pack is imported;
+    again is harmless. Outside ComfyUI it does nothing. Without ``required`` it never raises: a host it
+    cannot register in is logged and nothing is owned (the app's owner check then names the problem)."""
+
+    try:
+        return _install(required)
+    except Exception:
+        if required:
+            raise
+        LOGGER.exception("AI Studio pack: Extra Samplers were not registered in ComfyUI.")
+        return NameRegistration()
+
+
+def _install(required: bool) -> NameRegistration:
+    modules = _comfy_modules()
+    if modules is None:
+        if required:
+            raise RuntimeError("Extra Samplers registration requires a ComfyUI host.")
+        return NameRegistration()
+    comfy_samplers, k_sampling = modules
+    ksampler = getattr(comfy_samplers, "KSampler", None)
+    available = [name for name in PACK_SAMPLERS if implementation(name) is not None]
+    registration = register_names(
+        k_sampling,
+        {name: functools.partial(sampler_entry, name) for name in available},
+        owner=OWNER,
+        name_lists=(getattr(comfy_samplers, "KSAMPLER_NAMES", None), getattr(comfy_samplers, "SAMPLER_NAMES", None),
+                    getattr(ksampler, "SAMPLERS", None)),
+        prefix="sample_",
+        label="sampler",
+        required=required,
+    )
+    discard = getattr(ksampler, "DISCARD_PENULTIMATE_SIGMA_SAMPLERS", None)
+    if registration.published and isinstance(discard, set):
+        discard.update(name for name in DISCARD_PENULTIMATE_SIGMA if name in registration.owned)
+    return registration
+
+
+def owned_names() -> tuple[str, ...]:
+    """The names whose ``sample_*`` function is the pack's and that KSampler offers — read live, so a
+    provider that replaced a function after the pack's import is not reported as the pack's."""
+
+    modules = _comfy_modules()
+    if modules is None:
+        return ()
+    comfy_samplers, k_sampling = modules
+    offered = getattr(getattr(comfy_samplers, "KSampler", None), "SAMPLERS", None)
+    if not isinstance(offered, list):
+        return ()
+    return tuple(name for name in PACK_SAMPLERS
+                 if entry_owner(getattr(k_sampling, "sample_" + name, None)) == OWNER and name in offered)

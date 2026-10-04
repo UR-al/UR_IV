@@ -1,8 +1,23 @@
-"""Opt-in Spectrum settings. No provider installation or global model eviction."""
+"""Opt-in Spectrum settings. No provider installation or global model eviction.
+
+Spectrum and SPEED on ComfyUI (plan D6/R8, C4a):
+
+- the **legacy** SPEED inputs (``speed_enabled`` … — the external sorryhyun ``SpectrumSPDKSampler`` provider behind
+  ``ForgeNeoKSamplerCNS``; the app never sends them) cannot be combined with Spectrum: ``validate_spectrum_payload``
+  refuses that pair, unchanged;
+- sam-extra's **Anima SPEED** (alwayson block ``Anima SPEED``, pack 1.7.0 ``ForgeNeoAnimaSpeed``) is not refused: like
+  Forge's Spectrum Integrated, SPEED steps aside when Spectrum is on — the compiler leaves the SPEED node out and warns
+  (``core/anima_speed.SKIP_COMFY_SPECTRUM``). ``skips_anima_speed`` is that test, with the truth rule the compiler uses
+  for the sampler's own ``spectrum_enabled`` input, so "Spectrum runs" and "SPEED steps aside" cannot disagree.
+"""
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+
+LEGACY_SPEED_KEY = "speed_enabled"     # ForgeNeoKSamplerCNS legacy provider input (not sam-extra Anima SPEED)
+# core/comfy_workflow_compiler._bool — the values it reads as off (anything else non-empty is on)
+_OFF_TEXTS = frozenset({"", "0", "false", "no", "off", "none"})
 
 
 FIELDS = {
@@ -36,6 +51,19 @@ def spectrum_payload_from_prefs(prefs: Mapping) -> dict:
     return payload
 
 
+def skips_anima_speed(payload: Mapping) -> bool:
+    """Does this ComfyUI request run Spectrum on its sampler (``spectrum_enabled`` read like the compiler reads it for
+    ``ForgeNeoKSamplerCNS``) — then sam-extra Anima SPEED is left out with a warning (plan D6)."""
+    value = payload.get("spectrum_enabled") if isinstance(payload, Mapping) else None
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().casefold() not in _OFF_TEXTS
+
+
 def validate_spectrum_payload(payload: Mapping, object_info: Mapping) -> None:
     if payload.get("spectrum_enabled") not in (True, "true", 1):
         return
@@ -46,5 +74,7 @@ def validate_spectrum_payload(payload: Mapping, object_info: Mapping) -> None:
     steps = int(payload.get("steps", 20))
     if int(settings["warmup_steps"]) + int(settings["tail_actual_steps"]) >= steps:
         raise ValueError("Spectrum 준비 단계 + 마지막 실제 계산 단계는 전체 Steps보다 작아야 합니다.")
-    if payload.get("speed_enabled") in (True, "true", 1):
-        raise ValueError("Spectrum 실험 기능과 SPEED는 함께 켤 수 없습니다. 독립적으로 A/B 비교하세요.")
+    if payload.get(LEGACY_SPEED_KEY) in (True, "true", 1):
+        # legacy provider keys only — sam-extra Anima SPEED is skipped with a warning instead (skips_anima_speed)
+        raise ValueError("Spectrum 실험 기능과 옛 SPEED 입력(speed_enabled — SpectrumSPDKSampler)은 함께 켤 수 없습니다. "
+                         "독립적으로 A/B 비교하세요.")

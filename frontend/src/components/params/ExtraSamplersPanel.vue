@@ -41,7 +41,7 @@
     <p v-if="emptyWindow" class="xsa-note xsa-warnline" role="alert">{{ WINDOW_EMPTY_WARNING }}</p>
     <p v-if="windowDropped" class="xsa-note xsa-warnline" role="status">{{ WINDOW_UNSUPPORTED_TEXT }}</p>
     <p v-if="note" class="xsa-note xsa-warnline" role="status">{{ note }}</p>
-    <p v-else class="xsa-note">{{ FORGE_PARAMS_NOTE }}</p>
+    <p v-else class="xsa-note">{{ paramsLine }}</p>
   </section>
   <p v-else-if="!atDefaults" class="xsa-hidden">
     <span>{{ hiddenText }}</span>
@@ -69,9 +69,9 @@ import { useWidgetStore } from '../../stores/widgetStore.js'
 import { useSamExtraCapabilities } from '../../composables/useSamExtraCapabilities'
 import { isKrea2Family } from '../../utils/generationFamily'
 import {
-  DEFAULTS, ETA_HELP, ETA_RANGE, FORGE_PARAMS_NOTE, NOISE_RANGE, ODE_NOTE, STAGE_HELP, STAGE_OPTIONS, WIDGET_IDS,
-  WINDOW_EMPTY_WARNING, WINDOW_HELP, WINDOW_UNSUPPORTED_TEXT, cardNote, hiddenNote, isDefault, parseValues, passesUsing,
-  readValues, samplerHints, subtitle, usesEta, windowEmpty, windowUnsupported, type XsampKey,
+  DEFAULTS, ETA_HELP, ETA_RANGE, NOISE_RANGE, ODE_NOTE, STAGE_HELP, STAGE_OPTIONS, WIDGET_IDS,
+  WINDOW_EMPTY_WARNING, WINDOW_HELP, WINDOW_UNSUPPORTED_TEXT, cardNote, hiddenNote, isDefault, paramsNote, parseValues,
+  passesUsing, readValues, samplerHints, subtitle, usesEta, windowEmpty, windowUnsupported, type XsampKey,
 } from '../../utils/extraSamplers'
 
 const storeWidgets = useWidgetStore().widgets as Record<string, any>
@@ -89,6 +89,7 @@ const atDefaults = computed(() => isDefault(values.value))
 const subtitleText = computed(() => subtitle(passes.value))
 const hiddenText = computed(() => hiddenNote(settings.value))
 const note = computed(() => cardNote(capabilities.value, isKrea2Family(storeWidgets.generation_family_combo)))
+const paramsLine = computed(() => paramsNote(capabilities.value))
 
 function setWindow(on: boolean) {
   if (etaUsed.value) storeWidgets[WIDGET_IDS.noise_window] = on ? '1' : '0'

@@ -392,15 +392,20 @@ export function hiddenNote(settings: SamplerSettings): string {
 }
 
 export const OLD_FORGE_NOTE = '연결된 Forge 의 sam-extra 에 Extra Samplers 가 없어(0.31.0 이상 필요) 이 값은 전달되지 않습니다.'
-export const COMFY_PENDING_NOTE = 'ComfyUI 는 앱 노드 팩 1.7.0 단계 뒤에 이 값을 보냅니다 — 지금은 ComfyUI 로 가지 않습니다'
-  + '(ComfyUI 에서는 아직 ER SDE 셋을 고를 수 없습니다).'
+/** ComfyUI 일 때 FORGE_PARAMS_NOTE 자리(계획 C6 — 값은 늘 보내고 컴파일러가 기본값과 다를 때만 노드를 넣는다, D6). */
+export const COMFY_PARAMS_NOTE = 'ComfyUI 는 앱 노드 팩 1.7.0 의 같은 계산으로 돌립니다(값이 기본값과 다를 때만 노드로 '
+  + '보냅니다). Forge 설정의 Sampler Parameters(sigma noise·Eta·churn)는 ComfyUI 에 없어 기본값으로 돕니다.'
 export const KREA2_NOTE = 'Krea2 생성에는 보내지 않습니다.'
 
-/** 칸 아래 상태 한 줄(없으면 ''): Krea2 → 안 보냄, ComfyUI → 팩 1.7.0 단계 뒤(계획 R16), 확장 확인됐는데 없음 → 옛 Forge. */
+/** 칸 아래 경고 한 줄(없으면 ''): Krea2 → 안 보냄, 확장 확인됐는데 없음 → 옛 Forge. ComfyUI 는 경고가 아니다(paramsNote). */
 export function cardNote(caps: Pick<SamExtraCapabilitiesEvent, 'status' | 'known' | 'features'> | null | undefined,
   krea2 = false): string {
   if (krea2) return KREA2_NOTE
-  if (caps?.status === 'not_applicable') return COMFY_PENDING_NOTE
   if (caps?.known && caps.features?.extra_samplers !== true) return OLD_FORGE_NOTE
   return ''
+}
+
+/** 경고가 없을 때의 안내 줄 — Forge 는 FORGE_PARAMS_NOTE, ComfyUI(스냅샷 'not_applicable')는 COMFY_PARAMS_NOTE. */
+export function paramsNote(caps: Pick<SamExtraCapabilitiesEvent, 'status'> | null | undefined): string {
+  return caps?.status === 'not_applicable' ? COMFY_PARAMS_NOTE : FORGE_PARAMS_NOTE
 }

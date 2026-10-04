@@ -2,6 +2,8 @@
 import ast
 import unittest
 
+from core import extra_samplers as xsa
+from core import extra_schedulers as xs
 from core.comfy_workflow_compiler import _FORGE_SAMPLER_ALIASES, _FORGE_SCHEDULER_ALIASES
 from core.main_module_choices import resolve_te_selection
 from core.preset_choice import (
@@ -104,6 +106,24 @@ class ForgeScheduleTypeLabelTests(unittest.TestCase):
         self.assertEqual(match_scheduler('CosineExponential', FORGE_SCHEDULER_NAMES), -1)
         self.assertEqual(match_sampler('Restart', FORGE_SAMPLERS), -1)
 
+    def test_sam_extra_v033_names_and_labels_pick_each_other(self):
+        """sam-extra v0.33.0(계획 C1): 새 샘플러 표기 ↔ ComfyUI 이름, 새 스케줄러 표기 ↔ 이름 — 프리셋·'이 설정으로 생성'."""
+        comfy_samplers = [*COMFY_SAMPLERS, *xsa.COMFY_NAMES.values()]
+        forge_samplers = [*FORGE_SAMPLERS, *xsa.LABELS]
+        for label, name in (('ER SDE (Tunable)', 'er_sde_tunable'), ('UniPC bh2', 'uni_pc_bh2'),
+                            ('IPNDM_V', 'ipndm_v'), ('IPNDM', 'ipndm'), ('DPM++ 3M (flow ODE)', 'dpmpp_3m_flow_ode'),
+                            *xsa.COMFY_NAMES.items()):
+            with self.subTest(sampler=label):
+                self.assertEqual(comfy_samplers[match_sampler(label, comfy_samplers)], name)
+                self.assertEqual(forge_samplers[match_sampler(name, forge_samplers)], label)
+        names = [*FORGE_SCHEDULER_NAMES, 'react_cosinusoidal_dynsf', 'flow_cosmos_rho7', 'flow_cosmos_dynamic']
+        for name in xs.SCHEDULER_NAMES:
+            for text in (name, xs.SCHEDULER_LABELS[name], *((xs.README_LABELS[name],) if name in xs.README_LABELS else ())):
+                with self.subTest(scheduler=text):
+                    self.assertEqual(names[match_scheduler(text, names)], name)
+        self.assertEqual(names[match_scheduler('Flow Cosmos rho7', names)], 'flow_cosmos_rho7')
+        self.assertEqual(match_scheduler('Flow Cosmos', names), -1)
+
     def test_the_label_table_only_holds_labels_that_do_not_fold_to_their_name(self):
         for label, name in FORGE_SCHEDULER_LABELS.items():
             with self.subTest(label=label):
@@ -113,9 +133,15 @@ class ForgeScheduleTypeLabelTests(unittest.TestCase):
 
 
 def _call_rows(path, func_name):
-    """``func_name(name, label, …, aliases=…)`` 호출에서 (이름, 표기, 별칭들) — 상수 dict 첨자도 푼다."""
+    """``func_name(name, label, …, aliases=…)`` 호출에서 (이름, 표기, 별칭들) — 상수 dict 첨자와 모듈 문자열 상수
+    (``SchedulerSpec("flow_cosmos_rho7", LABEL_FLOW_COSMOS_RHO7, …)``)도 푼다."""
     tree = ast.parse(path.read_text(encoding='utf-8'))
-    tables = {}
+    tables, constants = {}, {}
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+            if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant)                     and isinstance(node.value.value, str):
+                constants[target.id] = node.value.value
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
             target = node.targets[0] if isinstance(node, ast.Assign) else node.target
@@ -128,18 +154,23 @@ def _call_rows(path, func_name):
     def value(expr):
         if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Name):
             return tables[expr.value.id][ast.literal_eval(expr.slice)]
+        if isinstance(expr, ast.Name) and expr.id in constants:
+            return constants[expr.id]
         return ast.literal_eval(expr)
+
+    def readable(expr):
+        return isinstance(expr, ast.Constant) or (isinstance(expr, ast.Name) and expr.id in constants)
 
     rows = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == func_name:
-            if len(node.args) < 2 or not all(isinstance(a, (ast.Constant,)) for a in node.args[:2]):
+            if len(node.args) < 2 or not all(readable(a) for a in node.args[:2]):
                 continue
             aliases = []
             for keyword in node.keywords:
                 if keyword.arg == 'aliases':
                     aliases = [value(item) for item in keyword.value.elts]
-            rows.append((node.args[0].value, node.args[1].value, tuple(aliases)))
+            rows.append((value(node.args[0]), value(node.args[1]), tuple(aliases)))
     return rows
 
 
@@ -159,6 +190,11 @@ class InstalledForgeScheduleLabelTests(unittest.TestCase):
         names = [name for name, _label, _aliases in rows]
         self.assertIn('karras', names)
         self.assertIn('cosine_exponential', names)
+        # 표기가 상수 이름인 행(v0.33.0 의 셋)도 읽힌다 — 확장 registry 와 앱 표가 같은 아홉
+        self.assertEqual([row for row in rows if row[0] in xs.SCHEDULER_NAMES and row[1] in xs.SCHEDULER_LABELS.values()],
+                         [row for row in rows if row[0] in xs.SCHEDULER_NAMES])
+        self.assertEqual({name: label for name, label, _aliases in rows if name in xs.SCHEDULER_NAMES},
+                         dict(xs.SCHEDULER_LABELS))
         problems = []
         for name, label, aliases in rows:
             for text in (label, *aliases):

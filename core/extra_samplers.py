@@ -12,7 +12,8 @@
   쓴다. 그래서 블록은 메인 요청과 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같이 간다(core/alwayson_propagation).
 - **언제 싣나**(계획 X5 — Extra Schedulers 와 같은 규칙, ``plan``): Forge 기능 스냅샷이 스크립트를 확인했으면 늘(XYZ
   Sampler 축이 ER SDE 로 바꾸는 칸·사용자 ui-config 기본값과 무관하게), 확인 못 했으면 어느 패스가 ER SDE 셋 중 하나를
-  쓸 때만. ComfyUI 는 노드 팩 1.7.0 단계(계획 C6) 전이라 보내지 않는다(``comfy_pending``). Krea2 는 보내지 않는다.
+  쓸 때만. ComfyUI 는 늘 싣는다(계획 C6 — 컴파일러가 값이 기본값과 다를 때만 앱 노드 팩 1.7.0 의
+  ``ForgeNeoExtraSamplerSettings`` 를 넣는다 — 기본값이면 그래프가 바이트 단위로 그대로). Krea2 는 보내지 않는다.
 - **인자 수**(계획 X10): 앱은 늘 다섯을 보낸다. Forge API 는 설치된 스크립트가 가진 수만큼만 넘기므로 sam-extra
   0.31·0.32(인자 2개)는 뒤 셋(잡음 구간)을 조용히 버린다 — 스냅샷이 인자 2개를 보이고 구간이 켜져 있으면
   ``window_unsupported`` 가 참이다(카드·결과 알림이 ``WINDOW_UNSUPPORTED_TEXT`` 로 말한다). 0.33.0 이 옛 2개 블록을 받으면
@@ -498,7 +499,7 @@ PROVENANCE_USER, PROVENANCE_APP_DEFAULT = "user", "app_default"     # core/alway
 REASON_SEND = "send"                    # 스냅샷이 스크립트를 확인했다 — 늘 싣는다
 REASON_SEND_UNCONFIRMED = "send_unconfirmed"   # 확인 못 했지만 어느 패스가 ER SDE — 게이트가 정한다
 REASON_NOT_NEEDED = "not_needed"        # 확인 못 했고 값을 읽는 패스가 없다 — 싣지 않는다(알림 없음)
-REASON_COMFY_PENDING = "comfy_pending"  # ComfyUI — 노드 팩 1.7.0 단계(계획 C6) 전
+REASON_COMFY = "comfy"                  # ComfyUI — 늘 싣는다(노드를 넣을지는 컴파일러가 정한다, 계획 C6)
 REASON_KREA2 = "krea2"
 
 
@@ -560,7 +561,8 @@ def plan(settings: ExtraSamplersSettings, *, target: str, backend: str, capabili
          passes: Iterable[Any] = ()) -> ExtraSamplersPlan:
     """이 요청에 Extra Samplers 블록을 실을지(계획 X5 — core/extra_schedulers.plan 과 같은 규칙).
 
-    1 Krea2 → 없음  2 ComfyUI → 없음(``comfy_pending`` — 팩 1.7.0 단계 C6 전, 그래프가 바이트 단위로 그대로)
+    1 Krea2 → 없음  2 ComfyUI → 늘 블록(``REASON_COMFY`` — 스냅샷·게이트가 없다. 컴파일러가 값이 기본값과 다를 때만
+      ``ForgeNeoExtraSamplerSettings`` 를 넣어 다른 그래프는 바이트 단위로 그대로 — 계획 R5·C3·C6)
     3 Forge 스냅샷이 스크립트를 확인 → 늘 블록(값은 ER SDE 패스만 읽어 결과가 같다 — XYZ Sampler 축 칸·사용자 ui-config
       기본값과 무관하게 같은 요청이 된다)
     4 확인 못 함(모름·없음) → ``passes``(ER SDE 셋을 쓰는 패스 — ``passes_from_widgets``)가 있을 때만 블록. 그 뒤는
@@ -571,9 +573,9 @@ def plan(settings: ExtraSamplersSettings, *, target: str, backend: str, capabili
     스냅샷의 img2img 목록을 본다. 블록은 늘 인자 다섯이다(X10 — 옛 확장의 경고는 ``window_unsupported``)."""
     if backend == BACKEND_KREA2:
         return ExtraSamplersPlan(None, None, REASON_KREA2)
-    if backend == BACKEND_COMFY:
-        return ExtraSamplersPlan(None, None, REASON_COMFY_PENDING)
     provenance = PROVENANCE_APP_DEFAULT if is_default(settings) else PROVENANCE_USER
+    if backend == BACKEND_COMFY:
+        return ExtraSamplersPlan(as_block(settings), None, REASON_COMFY, provenance)
     if script_confirmed(capabilities, img2img=target == TARGET_I2I) is True:
         return ExtraSamplersPlan(as_block(settings), None, REASON_SEND, provenance)
     if any(True for _ in passes or ()):
@@ -866,7 +868,7 @@ __all__ = [
     "LABEL_EULER_DY", "LABEL_EULER_DY_CFG_PP", "LABEL_EULER_SMEA_DY", "LABEL_EULER_SMEA_DY_CFG_PP", "LABEL_IPNDM",
     "LABEL_IPNDM_V", "LABEL_OF_COMFY", "LABEL_RESTART_FLOW", "LABEL_UNIPC_BH2", "MAIN_SAMPLER_WIDGET", "MAX_STAGE_MAX",
     "MAX_STAGE_MIN", "MAX_STAGE_STEP", "NOISE_PERCENT_MAX", "NOISE_PERCENT_MIN", "NOISE_PERCENT_STEP", "NOISE_WINDOW_OFF",
-    "PACK_SAMPLERS", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "PassUse", "REASON_COMFY_PENDING", "REASON_KREA2",
+    "PACK_SAMPLERS", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "PassUse", "REASON_COMFY", "REASON_KREA2",
     "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_UNCONFIRMED", "RESTART_LABELS", "RESTART_LONG_FROM",
     "RESTART_MIN_STEPS", "RESTART_S_MAX", "RESTART_S_MIN", "RESTART_TIMES", "RESTART_TIMES_LONG", "RESTORE_ETA_FIELDS",
     "RESTORE_STAGE_FIELDS", "SAM3_GROUP_WIDGET",

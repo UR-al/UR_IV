@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import cases from './extraSchedulers.cases.json'
 import {
-  BETA_RANGE, COMFY_PENDING_NOTE, DEFAULTS, FLOW_COSMOS_DYNAMIC_HINT, FLOW_COSMOS_DYNAMIC_RHO_ABOVE, FLOW_COSMOS_FIELDS,
+  BETA_RANGE, COMFY_NOTE, DEFAULTS, FLOW_COSMOS_DYNAMIC_HINT, FLOW_COSMOS_DYNAMIC_RHO_ABOVE, FLOW_COSMOS_FIELDS,
   FLOW_COSMOS_HINT, FLOW_COSMOS_SCHEDULERS, FLOW_HINT, FLOW_UNSUITABLE, KARRAS_DYNAMIC_HINT, KREA2_NOTE, MODE_OPTIONS,
   MU_RANGE, OLD_FORGE_NOTE, PASS_WIDGETS, REACT_DYNSF_HINT, RHO_RANGE, SCHEDULERS, SIGMA_MAX_RANGE, SIGMA_MIN_RANGE,
-  VALUE_SCHEDULERS, WIDGET_IDS, cardNote, flag, flowCosmosDynamicRhoOk, flowCosmosRangeOk, isDefault, passLabel,
+  VALUE_SCHEDULERS, WIDGET_IDS, cardNote, comfyNote, flag, flowCosmosDynamicRhoOk, flowCosmosRangeOk, isDefault, passLabel,
   passesUsing, readValues, resolveScheduler, schedulerHints, subtitle, usesCustom, usesFlowCosmos, usesFlowCosmosDynamic,
   usesLaplace,
 } from './extraSchedulers'
@@ -132,13 +132,17 @@ describe('hints and notes', () => {
     expect(FLOW_COSMOS_DYNAMIC_HINT).toContain('2 보다 커야')
   })
 
-  it('card note: Krea2, ComfyUI pending, old Forge, otherwise none', () => {
+  it('card note: Krea2, old Forge, otherwise none; ComfyUI gets its own info line', () => {
     const forge = (has: boolean) => ({ status: 'ok', known: true, features: { extra_schedulers: has } }) as never
     expect(cardNote(forge(true))).toBe('')
     expect(cardNote(forge(false))).toBe(OLD_FORGE_NOTE)
     expect(cardNote({ status: 'unknown', known: false, features: {} } as never)).toBe('')
     expect(cardNote(null)).toBe('')
-    expect(cardNote({ status: 'not_applicable', known: false, features: {} } as never)).toBe(COMFY_PENDING_NOTE)
+    // 계획 C6 — ComfyUI 는 경고가 아니다: 따로 안내 줄
+    expect(cardNote({ status: 'not_applicable', known: false, features: {} } as never)).toBe('')
+    expect(comfyNote({ status: 'not_applicable' } as never)).toBe(COMFY_NOTE)
+    expect(comfyNote({ status: 'ok' } as never)).toBe('')
+    expect(comfyNote(null)).toBe('')
     expect(cardNote(forge(true), true)).toBe(KREA2_NOTE)
   })
 })

@@ -315,9 +315,12 @@ def controls_for_wire(binding: Mapping | None, schema: Mapping) -> dict | None:
 
 def feature_preflight(compiler, model_name: str, payload: Mapping, *, workflow=None, workflow_controls=None) -> dict:
     """Dry compilation: no /prompt, model loads, downloads or generation calls."""
-    from core import vae_degrid
+    from core import anima_speed, colorcraft, extra_samplers, extra_schedulers, vae_degrid
 
     sam = compiler._sam3_state(payload)
+    xsamp_state = compiler._extra_samplers_state(payload)
+    xsamp_values = xsamp_state is not None and not extra_samplers.is_default(xsamp_state)
+    xsamp_names = [name for name in compiler._pass_sampler_names(payload) if name in extra_samplers.PACK_SAMPLERS]
     requested = [
         ("hires", "Hires.fix 업스케일", bool(payload.get("enable_hr")), "ForgeNeoHiresFix"),
         ("adetailer", "ADetailer", bool(compiler._adetailer_slots(payload)), "ForgeNeoADetailer"),
@@ -327,6 +330,26 @@ def feature_preflight(compiler, model_name: str, payload: Mapping, *, workflow=N
         # 최종 이미지 후처리 — 노드(팩 1.5.0)·모델·출력 자리가 없으면 컴파일러가 빼고 생성한다(경고). 그 행은
         # '건너뜀'(skipped)이라 검증 실패가 아니다(core/comfy_workflow_compiler._add_degrid).
         ("degrid", "VAE DeGrid", compiler._degrid_state(payload) is not None, vae_degrid.COMFY_NODE_CLASS),
+        # sam-extra Extra Schedulers 값 — 블록이 있고 어느 패스가 laplace·custom·Flow Cosmos rho7·Dynamic 일 때만(그때 컴파일러가
+        # 노드를 넣는다). 남의 이름·옛 팩은 컴파일 오류(_check_pack_owner)로 '막힘'이 된다.
+        ("extra_schedulers", "Extra Schedulers 값",
+         compiler._extra_schedulers_state(payload) is not None and bool(compiler._extra_schedulers_needed(payload)),
+         extra_schedulers.COMFY_NODE_CLASS),
+        # sam-extra Extra Samplers — 패스가 팩이 등록하는 12 이름 중 하나를 쓰거나(이름 확인 = 컴파일의 소유 검사, 노드
+        # 없음 → 클래스 None) ER SDE 값이 기본값이 아닐 때(그때 컴파일러가 노드를 넣는다). 남의 이름·옛 팩은 컴파일
+        # 오류로 '막힘'이 된다.
+        ("extra_samplers",
+         "Extra Samplers" + (f" — {', '.join(xsamp_names)}" if xsamp_names else "")
+         + (" · ER SDE 값" if xsamp_values else ""),
+         bool(xsamp_names) or xsamp_values,
+         extra_samplers.COMFY_SETTINGS_NODE if xsamp_values else None),
+        # sam-extra Anima SPEED — 켠 블록이면 메인 패스에 노드가 들어간다. 설정 오류·생성 전에 아는 건너뜀(Spectrum 등)은
+        # 컴파일러가 노드를 빼고 경고하므로 '건너뜀'과 그 이유가 된다(core/comfy_workflow_compiler._speed_plan).
+        ("speed", anima_speed.SCRIPT_NAME, compiler._speed_state(payload) is not None, anima_speed.COMFY_NODE_CLASS),
+        # sam-extra Colorcraft — 블록이 있으면 돌 항목이 있는 메인 패스마다 노드가 들어간다. 이 생성의 패스에 돌 수정자가
+        # 없으면 컴파일러가 빼고 경고한다('건너뜀'). 읽을 수 없는 블록은 컴파일 오류('막힘')다.
+        ("colorcraft", "Colorcraft", compiler._script(payload, colorcraft.SCRIPT_NAME) is not None,
+         colorcraft.COMFY_NODE_CLASS),
     ]
     if sam is not None:
         requested.append(("sam3_targets", f"SAM3 대상: {sam.get('sam3_prompt', 'face')}", True, "ForgeNeoSAM3Mask"))
@@ -347,7 +370,8 @@ def feature_preflight(compiler, model_name: str, payload: Mapping, *, workflow=N
         for row, (_, _, enabled, class_type) in zip(rows, requested):
             if not enabled:
                 continue
-            if class_type in classes:
+            if class_type is None or class_type in classes:
+                # None: 노드 없이 이름·설정만 확인하는 행 — 컴파일(소유·스키마 검사)이 통과하면 준비됨
                 row["state"] = "ready"
             elif row["id"] in skipped:
                 row["state"], row["reason"] = "skipped", skipped[row["id"]]

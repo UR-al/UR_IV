@@ -26,7 +26,7 @@
                                             infotext 키로 바꿔 같은 규칙으로 알린다(core/vae_degrid.report_params)
 - Extra Schedulers                          결과: Laplace·custom·Flow Cosmos(rho7·Dynamic)로 돌았는데 값 기록('Laplace mu'·
                                             'Custom scheduler …'·'Flow Cosmos rho')이 없음(다른 확장의 같은 이름 스케줄러). ``xsched_invalid_text_notice`` 는 쓸 수 없는
-                                            custom 식·목록(생성 전 — 계산기는 계획 C7 이 잇는다), ``explain_scheduler_error``
+                                            custom 식·목록(생성 전 — core/extra_schedulers.check_text, 계획 C7), ``explain_scheduler_error``
                                             는 확장 스케줄러 오류('Extra Schedulers: …') 원문에 한국어 머리를 붙인다
 - Extra Samplers                            결과: 'Extra Samplers status'(부분을 '; ' 로 잇는다)의 Dy 보조 스텝 건너뜀·ER SDE
                                             잡음 구간 건너뜀(정보, 'n/m장'), 잡음 구간을 켰는데 연결된 sam-extra 가 인자 2개

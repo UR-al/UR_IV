@@ -27,6 +27,7 @@ import math
 from typing import Any
 
 from .compat import clone_model, invoke_provider, provider
+from .guidance_common import is_extra_sampler_substep
 
 # Re-exports (see the module docstring) — also used by the suite below.
 from .guidance_common import (  # noqa: F401
@@ -190,6 +191,11 @@ def _patch_adaptive_guidance(
     (``_skip_perturbation_on_adg_steps``). The step is then plain cond like
     sam-extra's ADG step (``_post_cfg``: ``has_pert = not adg_skipped and``).
 
+    The step counter follows the sampler's steps: a Dy/SMEA sub-step
+    (``guidance_common.is_extra_sampler_substep``) is decided as the step it
+    belongs to and moves nothing (sam-extra evaluates it with Forge's step count
+    of its step and leaves the count where it was, ``euler_dy`` item 6).
+
     Every call records in ``model_options[ADG_STEP_KEY]`` whether it ran
     cond-only, for the suite's CFG stage (``_patch_cfg_stage``). The nested
     dict is copied into each sampling run's options and the original PAG node
@@ -210,13 +216,14 @@ def _patch_adaptive_guidance(
         import comfy.samplers  # lazy: only reachable inside ComfyUI
 
         sigma = args.get("sigma", 1.0)
-        current = _scalar_sigma(sigma)
-        last = state["sigma"]
-        if last is None or current > float(last) + 1e-6:
-            state["step"] = 0
-        elif abs(current - float(last)) > 1e-8:
-            state["step"] += 1
-        state["sigma"] = current
+        if not is_extra_sampler_substep(args):
+            current = _scalar_sigma(sigma)
+            last = state["sigma"]
+            if last is None or current > float(last) + 1e-6:
+                state["step"] = 0
+            elif abs(current - float(last)) > 1e-8:
+                state["step"] += 1
+            state["sigma"] = current
         conds = list(args.get("conds") or [])
         if not conds:
             raise RuntimeError("Adaptive Guidance received no sampler conditioning.")
@@ -332,7 +339,8 @@ def _patch_cfg_stage(
 
     - A call adaptive guidance ran cond-only (uncond := cond) returns the cond
       prediction: no SMC/APG/CWM, APG momentum cleared, SMC's ``e_prev`` kept
-      (plan §3.3 F; sam-extra ``_post_cfg`` and ``reset_cfg_state``).
+      (plan §3.3 F; sam-extra ``_post_cfg`` and ``reset_cfg_state``). A Dy/SMEA
+      sub-step's cond-only call clears nothing (sam-extra resets on a step only).
     - APG does not run at CFG ~ 1 (sam-extra ``_cfg_base_skip_reason``); SMC and
       CWM still do, as in the original. With APG alone
       ``disable_cfg1_optimization`` is not kept, so CFG 1 runs no uncond pass.
@@ -374,7 +382,8 @@ def _patch_cfg_stage(
         marker = run_options.get(ADG_STEP_KEY)
         if isinstance(marker, dict) and marker.get("skipped"):
             apg_state = run_options.get(APG_STATE_KEY)
-            if isinstance(apg_state, dict):
+            # a sub-step's options are a shallow copy: the state dict is the run's own
+            if isinstance(apg_state, dict) and not is_extra_sampler_substep(args):
                 apg_state.clear()
             return args["cond"]
         if apg_settings is not None and math.isclose(float(args.get("cond_scale", 7.0)), 1.0):

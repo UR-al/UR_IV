@@ -17,6 +17,11 @@ Two consumers share one application path, the pinned kohya node
   rejects it: 'controlnet file is invalid'). The mask reaches the node only for
   4-channel (inpaint) weights, exactly the case the original node requires it.
 
+The MODEL ``apply_lllite`` returns carries ``LLLITE_MODEL_OPTION`` in its
+``model_options`` (pack 1.7.0): the LLLite hint is tied to the full latent grid,
+so the pack's Anima SPEED steps aside on it (``speed_nodes.comfy_runtime_guard``),
+as sam-extra's SPEED does for Forge's ControlNet-LLLite.
+
 Everything at import time is stdlib only: the header reader needs no torch, and
 the vendored node (torch, ``folder_paths``) is imported when a node runs.
 """
@@ -62,6 +67,9 @@ CONTROLNET_FOLDER = "controlnet"
 META_TITLE = "modelspec.title"
 TILE_REPAIR_MARK = "tile"
 NONE = "None"
+# model_options key on the MODEL apply_lllite returns (its own clone): an Anima LLLite is on.
+# Read by speed_nodes.comfy_runtime_guard ("ControlNet-LLLite is on").
+LLLITE_MODEL_OPTION = "forge_neo_lllite"
 
 # nodes.py:130-133 — the original node's inputs, repeated here unchanged.
 LLLITE_APPLY_INPUTS = {
@@ -273,7 +281,15 @@ def apply_lllite(model: Any, lllite_name: str, image: Any, strength: float,
         model, lllite_name, image, float(strength), float(start_percent),
         float(end_percent), preserve_wrapper=bool(preserve_wrapper), mask=mask,
     )
-    return output[0]
+    return _mark_lllite(output[0])
+
+
+def _mark_lllite(model: Any) -> Any:
+    """``model`` (the node's own clone) with ``LLLITE_MODEL_OPTION`` set in its model_options."""
+    options = getattr(model, "model_options", None)
+    if isinstance(options, dict):
+        options[LLLITE_MODEL_OPTION] = True
+    return model
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────

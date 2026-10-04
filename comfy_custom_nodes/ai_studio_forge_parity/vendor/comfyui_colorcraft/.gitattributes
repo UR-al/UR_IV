@@ -1,0 +1,2 @@
+# Basis vectors are binary: never let a checkout touch their bytes (tests pin their SHA-256).
+*.safetensors binary

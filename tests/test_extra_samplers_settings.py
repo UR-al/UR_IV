@@ -3,7 +3,7 @@
 GPU·Forge 없이: 기능 스냅샷은 가짜(``tests.test_alwayson_propagation.caps``), Forge 요청은 가짜 requests.post.
 규칙(계획 X5·X10·R7·R16): 스냅샷이 스크립트를 확인하면 늘(기본값이면 앱 기본값 출처), 확인 못 하면 ER SDE (Reverse-time)·
 (ODE)·(Tunable) 을 쓰는 패스가 있을 때만 싣는다. 블록은 늘 위치 인자 다섯이고 메인 요청과 모든 보조 img2img 에 같다.
-ComfyUI 는 팩 1.7.0 단계 전이라 싣지 않는다('comfy_pending'). 저장 키 ``extra_samplers_settings``(키 다섯 — 빠진 칸은 앱 기본값).
+ComfyUI 는 늘 싣는다(계획 C6 — 컴파일러가 값이 기본값과 다를 때만 앱 노드 팩 1.7.0 의 노드를 넣는다). 저장 키 ``extra_samplers_settings``(키 다섯 — 빠진 칸은 앱 기본값).
 """
 import copy
 import json
@@ -150,13 +150,18 @@ class ContributorTests(unittest.TestCase):
         i2i_caps = caps(present=(XSA,), img2img=(XSA,))
         self.assertEqual(sb.build_sampling_blocks(XsampHost(i2i_caps), ap.TARGET_I2I).blocks[XSA], DEFAULT_BLOCK)
 
-    def test_comfy_and_krea2_build_nothing(self):
+    def test_comfy_always_carries_the_block_and_krea2_nothing(self):
         with mock.patch("backends.get_backend_type", return_value=BackendType.COMFYUI):
+            plain = sb.build_sampling_blocks(XsampHost(None), ap.TARGET_T2I)
             comfy = sb.build_sampling_blocks(XsampHost(PRESENT, sampler="er_sde_reverse_time", eta="0.5"),
                                              ap.TARGET_T2I)
-        self.assertNotIn(XSA, comfy.blocks)                                       # 팩 1.7.0 단계 전(R16)
+        # 계획 C6 — ComfyUI 는 늘 싣는다(ER SDE 가 아니어도, 기본값이어도 — 노드는 컴파일러가 값이 다를 때만)
+        self.assertEqual(comfy.blocks[XSA], {"args": [3, 0.5, False, 0.2, 0.8]})
+        self.assertEqual(comfy.provenance[XSA], ap.PROVENANCE_USER)
+        self.assertEqual(plain.blocks[XSA], {"args": [3, 1.0, False, 0.2, 0.8]})
+        self.assertEqual(plain.provenance[XSA], ap.PROVENANCE_APP_DEFAULT)
         self.assertEqual(xsa.plan(xsa.ExtraSamplersSettings(eta=0.5), target="t2i", backend="comfyui").reason,
-                         xsa.REASON_COMFY_PENDING)
+                         xsa.REASON_COMFY)
         krea2 = sb.build_sampling_blocks(XsampHost(PRESENT), ap.TARGET_T2I, krea2=True)
         self.assertNotIn(XSA, krea2.blocks)
 
@@ -208,7 +213,8 @@ class MainRequestTests(unittest.TestCase):
         self.assertEqual(list(both["alwayson_scripts"])[-2:], [xs.SCRIPT_NAME, XSA])
 
     def test_requests_without_the_feature_stay_byte_identical(self):
-        """스냅샷이 확인하지 않았고 ER SDE 패스가 없으면(지금까지의 모든 요청) 요청이 칸이 없던 때와 같다."""
+        """스냅샷이 확인하지 않았고 ER SDE 패스가 없으면(지금까지의 모든 요청) 요청이 칸이 없던 때와 같다. ComfyUI 는
+        블록 하나만 더해진다(계획 C6 — 그래프는 값이 기본값이면 그대로: tests/test_comfy_extra_samplers_compiler.py)."""
         for label, capabilities, backend in (("unknown", None, BackendType.WEBUI),
                                              ("known without the script", WITHOUT_XSA, BackendType.WEBUI),
                                              ("comfy", None, BackendType.COMFYUI)):
@@ -218,6 +224,9 @@ class MainRequestTests(unittest.TestCase):
                     mock.patch("core.spectrum_settings.spectrum_payload_from_prefs", return_value={}):
                 before, _ = ChainHost(capabilities=capabilities)._build_generation_payload(snapshot=True)
                 after, _ = XsampHost(capabilities, eta="3", noise_window="1")._build_generation_payload(snapshot=True)
+                if label == "comfy":
+                    before = copy.deepcopy(before)
+                    before["alwayson_scripts"][XSA] = {"args": [3, 3.0, True, 0.2, 0.8]}
                 self.assertEqual(json.dumps(after, sort_keys=True), json.dumps(before, sort_keys=True))
 
     def test_frozen_payload_keeps_the_block_unless_the_snapshot_says_missing(self):

@@ -38,11 +38,13 @@ flow_cosmos_sigma_max, flow_cosmos_sigma_min]`` 또는 **dict 한 개** — sam3
 - **언제 싣나**(계획 X5 — Extra Samplers 와 같은 규칙, ``plan``): Forge 기능 스냅샷이 스크립트를 확인했으면 늘(XYZ
   Scheduler 축이 Laplace 로 바꾸는 칸·사용자 ui-config 기본값과 무관하게), 확인 못 했으면(모름·없음) 어느 패스가
   laplace·custom·flow_cosmos_rho7·flow_cosmos_dynamic 을 쓸 때만 — 그때는 core/alwayson_propagation 게이트가 출처(값이 기본값이면 앱
-  기본값)로 보낼지 정하고 빠지면 알린다. ComfyUI 는 노드 팩 1.7.0 단계(계획 C6) 전이라 보내지 않는다(``comfy_pending`` —
-  컴파일러가 모르는 제목을 조용히 버리지 않게). Krea2 는 보내지 않는다.
-- 붙여 넣기·'이 설정으로 생성'(``from_infotext``)은 확장 paste_* 규칙의 거울이다. 식·목록의 문법 검사는 여기서 하지
-  않는다(그 계산기는 ComfyUI 팩 ``extra_schedulers_math`` — 계획 C7 이 앱에 잇는다). 잘못된 식은 생성할 때 Forge 가
-  같은 영어 문구로 멈춘다.
+  기본값)로 보낼지 정하고 빠지면 알린다. ComfyUI 는 늘 싣는다(계획 C6 — 기능 스냅샷·게이트가 없고, 컴파일러가 값
+  스케줄러를 쓰는 패스가 있을 때만 앱 노드 팩 1.7.0 의 ``ForgeNeoExtraSchedulers`` 를 넣는다 — 없으면 그래프가 바이트
+  단위로 그대로). Krea2 는 보내지 않는다.
+- 붙여 넣기·'이 설정으로 생성'(``from_infotext``)은 확장 paste_* 규칙의 거울이다. 식·목록의 미리 검사(``check_text`` —
+  계획 C7)는 계산기를 다시 쓰지 않고 ComfyUI 팩의 순수 파이썬 ``extra_schedulers_math`` 를 지연 import 해 부른다(팩 패리티
+  테스트가 설치된 확장과 같은 거절·같은 영어 문구를 지킨다). σ·스텝 수와 무관한 검사만 한다 — 그 밖은 생성할 때 Forge·
+  ComfyUI 가 같은 영어 문구로 멈춘다.
 
 확장 코드는 GPL-3.0 이라 옮기지 않았다 — 규칙(범위·별칭·자르기·붙여 넣기)을 다시 구현했다. ``tests/test_extra_schedulers_core.py``
 가 설치된 확장(settings.coerce·ui_extra_schedulers.coerce_args·build_controls·paste_*·infotext_items·registry·schedulers)과
@@ -50,6 +52,7 @@ flow_cosmos_sigma_max, flow_cosmos_sigma_min]`` 또는 **dict 한 개** — sam3
 """
 from __future__ import annotations
 
+import importlib
 import logging
 import math
 from dataclasses import dataclass, replace
@@ -148,6 +151,15 @@ VALUE_SCHEDULERS = (NAME_LAPLACE, NAME_CUSTOM, *FLOW_COSMOS_SCHEDULERS)
 # σ 범위식이지만 이 목록이 아니다(높은 σ 쪽에 스텝이 몰린다 — 카드가 따로 알린다, 계획 A-XS5/6). Flow Cosmos rho7·Dynamic 도
 # 아니다(flow 용 — eps/v 에서는 Forge 의 Karras·Karras Dynamic 과 같다)
 FLOW_UNSUITABLE = ("cosine", "cosine_exponential", "phi", "karras_dynamic")
+
+# ── ComfyUI 계약(노드 팩 1.7.0 — 계획 PB-XS4·C1·C2a) ────────────────────────────────────
+# 팩(comfy_custom_nodes/ai_studio_forge_parity/extra_schedulers.py)은 SCHEDULER_NAMES 아홉을 같은 이름으로 ComfyUI 스케줄러
+# 표에 넣고(남의 것은 덮지 않는다), 이 노드가 MODEL 의 model_sampling 사본에 값 여덟을 싣는다. 노드의 선택 입력
+# ``owned_names`` 의 선택지 = 그 ComfyUI 에서 팩이 가진 이름 — 컴파일러가 /object_info 에서 읽어 남의 이름이면 거절한다(R6).
+COMFY_NODE_CLASS = "ForgeNeoExtraSchedulers"
+COMFY_INPUTS = ("model", *ARG_NAMES)          # 필수 입력(팩 1.7.0 — 여덟 값 모두 필수, 범위 밖은 ComfyUI 가 거절)
+COMFY_REPORT_INPUT = "owned_names"           # compat.owned_names_input — 팩이 가진 이름(R6)
+COMFY_MIN_PACK_VERSION = "1.7.0"
 
 # ── 위젯·저장 ───────────────────────────────────────────────────────────────
 WIDGET_KEYS = ARG_NAMES
@@ -358,6 +370,54 @@ def flow_cosmos_dynamic_rho_ok(settings: ExtraSchedulerSettings) -> bool:
     return rho > FLOW_COSMOS_DYNAMIC_RHO_ABOVE
 
 
+# ── custom 식·시그마 목록 미리 검사(계획 C7) ─────────────────────────────────────────
+# 계산기는 ComfyUI 팩의 순수 파이썬 모듈(torch·ComfyUI 없음 — ui/relight_actions 가 팩 relight 를 부르는 것과 같은 지연
+# import). 팩이 없거나 읽을 수 없으면 검사하지 않는다(None — 생성은 확장이 판정한다).
+PACK_MATH_MODULE = "comfy_custom_nodes.ai_studio_forge_parity.extra_schedulers_math"
+ERROR_PROPERTY = "error"     # 칸 아래 오류 줄의 위젯 속성(frontend/src/utils/extraSchedulers.ts ERROR_PROPERTY)
+# 시그마 목록의 σ 와 무관한 검사만: 정규화 목록(1.0…0.0)은 어떤 양수 범위로 늘려도 모두 0 보다 크다
+_CHECK_SIGMA_RANGE = (1.0, 2.0)
+
+
+def _pack_math() -> Any:
+    try:
+        return importlib.import_module(PACK_MATH_MODULE)
+    except Exception as exc:   # 팩이 없는 배포·깨진 파일 — 미리 검사만 빠진다
+        logger.debug("Extra Schedulers 미리 검사 생략 — %s 를 불러오지 못했다: %s", PACK_MATH_MODULE, exc)
+        return None
+
+
+def _no_interp(_values: Any, _count: int) -> Any:   # 스텝 0 이라 부르지 않는다
+    raise AssertionError("interpolation is not used by the text check")
+
+
+def check_text(mode: Any, text: Any) -> Optional[str]:
+    """custom 식(``mode`` expression)·시그마 목록(sigmas) 글자를 확장과 같은 규칙으로 검사 — 쓸 수 없으면 확장의 영어
+    오류 원문(Forge 'Extra Schedulers: …'·ComfyUI 노드 오류의 그 부분과 같은 문구), 쓸 수 있으면 None.
+
+    ``text`` 는 보낼 값과 같게 읽는다(``coerce_text`` — 앞뒤 공백만 뗀다, 빈 글자는 빈 식). σ·스텝 수에 따라 달라지는 검사
+    (식의 값이 유한하고 0 보다 큰가, 평평한 스텝, 보간)는 하지 않는다 — 생성할 때 확장·팩이 같은 문구로 멈춘다."""
+    module = _pack_math()
+    if module is None:
+        return None
+    sigmas = coerce_mode(mode) == MODE_SIGMAS
+    value = coerce_text(text, DEFAULT_SIGMAS if sigmas else DEFAULT_EXPRESSION)
+    try:
+        if sigmas:
+            module.sigmas_from_list(value, 0, *_CHECK_SIGMA_RANGE, interp=_no_interp)
+        else:
+            module.compile_expression(value)
+    except ValueError as exc:      # ExpressionError·SigmaListError
+        return str(exc)
+    return None
+
+
+def check_settings(settings: ExtraSchedulerSettings) -> Optional[str]:
+    """그 설정의 custom 방식이 쓰는 글자(식 모드면 식, 목록 모드면 시그마 목록)의 ``check_text``."""
+    sigmas = settings.custom_mode == MODE_SIGMAS
+    return check_text(settings.custom_mode, settings.custom_sigmas if sigmas else settings.custom_expression)
+
+
 def as_block(settings: ExtraSchedulerSettings) -> dict:
     """alwayson 블록 — dict 형식 인자 하나(키 8개 — 늘 8개, 옛 sam-extra 는 뒤 셋을 버린다)."""
     return {"args": [settings.as_arg()]}
@@ -416,7 +476,7 @@ PROVENANCE_USER, PROVENANCE_APP_DEFAULT = "user", "app_default"     # core/alway
 REASON_SEND = "send"                    # 스냅샷이 스크립트를 확인했다 — 늘 싣는다
 REASON_SEND_UNCONFIRMED = "send_unconfirmed"   # 확인 못 했지만 어느 패스가 값 스케줄러 — 게이트가 정한다
 REASON_NOT_NEEDED = "not_needed"        # 확인 못 했고 값을 읽는 패스가 없다 — 싣지 않는다(알림 없음)
-REASON_COMFY_PENDING = "comfy_pending"  # ComfyUI — 노드 팩 1.7.0 단계(계획 C6) 전
+REASON_COMFY = "comfy"                  # ComfyUI — 늘 싣는다(노드를 넣을지는 컴파일러가 정한다, 계획 C6)
 REASON_KREA2 = "krea2"
 
 
@@ -450,7 +510,8 @@ def plan(settings: ExtraSchedulerSettings, *, target: str, backend: str, capabil
          passes: Iterable[Any] = ()) -> ExtraSchedulersPlan:
     """이 요청에 Extra Schedulers 블록을 실을지(계획 X5).
 
-    1 Krea2 → 없음  2 ComfyUI → 없음(``comfy_pending`` — 팩 1.7.0 단계 C6 전, 그래프가 바이트 단위로 그대로)
+    1 Krea2 → 없음  2 ComfyUI → 늘 블록(``REASON_COMFY`` — 스냅샷·게이트가 없다. 컴파일러가 값 스케줄러 패스가 있을 때만
+      ``ForgeNeoExtraSchedulers`` 를 넣어 다른 그래프는 바이트 단위로 그대로 — 계획 C2a·C6)
     3 Forge 스냅샷이 스크립트를 확인 → 늘 블록(값은 VALUE_SCHEDULERS 패스만 읽어 결과가 같다 — XYZ
       Scheduler 축 칸·사용자 ui-config 기본값과 무관하게 같은 요청이 된다)
     4 확인 못 함(모름·없음) → ``passes``(값 스케줄러를 쓰는 패스 — ``passes_from_widgets``)가 있을 때만 블록. 그
@@ -462,9 +523,9 @@ def plan(settings: ExtraSchedulerSettings, *, target: str, backend: str, capabil
     (옛 sam-extra 는 Flow Cosmos 셋을 버리고, 그 판에는 그 값을 읽는 스케줄러도 없다 — 모듈 설명)."""
     if backend == BACKEND_KREA2:
         return ExtraSchedulersPlan(None, None, REASON_KREA2)
-    if backend == BACKEND_COMFY:
-        return ExtraSchedulersPlan(None, None, REASON_COMFY_PENDING)
     provenance = PROVENANCE_APP_DEFAULT if is_default(settings) else PROVENANCE_USER
+    if backend == BACKEND_COMFY:
+        return ExtraSchedulersPlan(as_block(settings), None, REASON_COMFY, provenance)
     if script_confirmed(capabilities, img2img=target == TARGET_I2I) is True:
         return ExtraSchedulersPlan(as_block(settings), None, REASON_SEND, provenance)
     if any(True for _ in passes or ()):
@@ -752,8 +813,9 @@ def infotext_items(settings: ExtraSchedulerSettings, schedulers: Iterable[Any]) 
 
 
 __all__ = [
-    "ADETAILER_GROUP_WIDGET", "ADETAILER_SLOT_WIDGETS", "APP_DEFAULTS", "ARG_NAMES", "BACKEND_COMFY", "BACKEND_KREA2", "BACKEND_WEBUI", "DEFAULTS", "DEFAULT_EXPRESSION",
-    "DEFAULT_SIGMAS", "ERROR_PREFIX", "EXTENSION_DEFAULTS", "ExtraSchedulerSettings", "ExtraSchedulersPlan",
+    "ADETAILER_GROUP_WIDGET", "ADETAILER_SLOT_WIDGETS", "APP_DEFAULTS", "ARG_NAMES", "BACKEND_COMFY", "BACKEND_KREA2", "BACKEND_WEBUI",
+    "COMFY_INPUTS", "COMFY_MIN_PACK_VERSION", "COMFY_NODE_CLASS", "COMFY_REPORT_INPUT", "DEFAULTS", "DEFAULT_EXPRESSION",
+    "DEFAULT_SIGMAS", "ERROR_PREFIX", "ERROR_PROPERTY", "EXTENSION_DEFAULTS", "ExtraSchedulerSettings", "ExtraSchedulersPlan",
     "FLOW_COSMOS_DYNAMIC_RHO_ABOVE", "FLOW_COSMOS_LABELS", "FLOW_COSMOS_SCHEDULERS",
     "FLOW_COSMOS_RHO", "FLOW_COSMOS_RHO_DEFAULT", "FLOW_COSMOS_RHO_MAX", "FLOW_COSMOS_RHO_MIN", "FLOW_COSMOS_RHO_STEP",
     "FLOW_COSMOS_SIGMA_MAX", "FLOW_COSMOS_SIGMA_MAX_DEFAULT", "FLOW_COSMOS_SIGMA_MAX_MAX", "FLOW_COSMOS_SIGMA_MAX_MIN",
@@ -765,11 +827,11 @@ __all__ = [
     "LABEL_REACT_DYNSF",
     "LAPLACE_BETA_DEFAULT", "LAPLACE_BETA_MAX", "LAPLACE_BETA_MIN", "LAPLACE_BETA_STEP", "LAPLACE_MU_DEFAULT",
     "LAPLACE_MU_MAX", "LAPLACE_MU_MIN", "LAPLACE_MU_STEP", "MAIN_SCHEDULER_WIDGET", "MODES", "MODE_EXPRESSION", "MODE_LABELS", "MODE_SIGMAS",
-    "NAME_CUSTOM", "NAME_FLOW_COSMOS_DYNAMIC", "NAME_FLOW_COSMOS_RHO7", "NAME_LAPLACE", "NAME_REACT_DYNSF", "PASS_HIRES", "PASS_MAIN", "PASS_SAM3", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "README_LABELS",
-    "REACT_DYNSF_FACTOR", "REASON_COMFY_PENDING", "REASON_KREA2", "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_UNCONFIRMED",
+    "NAME_CUSTOM", "NAME_FLOW_COSMOS_DYNAMIC", "NAME_FLOW_COSMOS_RHO7", "NAME_LAPLACE", "NAME_REACT_DYNSF", "PACK_MATH_MODULE", "PASS_HIRES", "PASS_MAIN", "PASS_SAM3", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "README_LABELS",
+    "REACT_DYNSF_FACTOR", "REASON_COMFY", "REASON_KREA2", "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_UNCONFIRMED",
     "RESTORE_FIELDS", "PassUse", "SAM3_GROUP_WIDGET", "SAM3_MODE_WIDGET", "SAM3_SCHEDULER_WIDGET", "SAM3_USE_SCHEDULER_WIDGET",
     "SCHEDULER_LABELS", "SCHEDULER_NAMES", "SCRIPT_NAME", "SETTINGS_KEY", "TARGET_AUX", "TARGET_I2I", "TARGET_T2I",
-    "USE_SAME_SCHEDULER", "VALUE_SCHEDULERS", "WIDGET_KEYS", "WIDGET_PREFIX", "adetailer_pass", "as_block", "coerce", "coerce_args",
+    "USE_SAME_SCHEDULER", "VALUE_SCHEDULERS", "WIDGET_KEYS", "WIDGET_PREFIX", "adetailer_pass", "as_block", "check_settings", "check_text", "coerce", "coerce_args",
     "coerce_float", "coerce_flow_cosmos_rho", "coerce_flow_cosmos_sigma_max", "coerce_flow_cosmos_sigma_min",
     "coerce_laplace_beta", "coerce_laplace_mu", "coerce_mode", "coerce_text", "describe", "flow_cosmos_dynamic_rho_ok", "flow_cosmos_range_ok",
     "format_number", "from_infotext", "infotext_items", "infotext_labels", "infotext_value_schedulers", "is_default",

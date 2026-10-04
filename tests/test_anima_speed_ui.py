@@ -3,7 +3,7 @@
 GPU·Forge 없이: 기능 스냅샷은 가짜(``tests.test_alwayson_propagation.caps``), Forge 요청은 가짜 requests.post.
 결정(design_speed D3·D4·D5, 계획 R7·R16): 메인 요청(T2I·대기열·XYZ·시드 탐색·채팅·만화 컷, I2I·인페인트·채팅 편집은
 카드 'I2I에도 적용' 토글)에만 14키 dict 블록 하나를 싣고, 보조 작업(Refine·단독/배치 SAM3·ADetailer·손 재구성)에는 싣지
-않는다. ComfyUI 는 팩 1.7.0 단계 전이라 싣지 않는다.
+않는다. ComfyUI 도 같은 블록이다(계획 C6 — 컴파일러가 앱 노드 팩 1.7.0 의 노드로).
 """
 import copy
 import json
@@ -118,10 +118,13 @@ class ContributorTests(unittest.TestCase):
                                         ap.TARGET_I2I)
         self.assertNotIn(SPEED, gone.blocks)
 
-    def test_comfy_and_krea2_build_nothing(self):
+    def test_comfy_carries_the_forge_block_and_krea2_nothing(self):
         with mock.patch("backends.get_backend_type", return_value=BackendType.COMFYUI):
             comfy = sb.build_sampling_blocks(SpeedHost(None), ap.TARGET_T2I)
-        self.assertNotIn(SPEED, comfy.blocks)                                     # 팩 1.7.0 단계 전(R16)
+            comfy_i2i = sb.build_sampling_blocks(SpeedHost(None), ap.TARGET_I2I)
+        self.assertEqual(comfy.blocks[SPEED], ON_BLOCK)                              # 계획 C6
+        self.assertEqual(comfy.provenance[SPEED], ap.PROVENANCE_USER)
+        self.assertNotIn(SPEED, comfy_i2i.blocks)                                    # 'I2I에도 적용' 끔
         krea2 = sb.build_sampling_blocks(SpeedHost(PRESENT), ap.TARGET_T2I, krea2=True)
         self.assertNotIn(SPEED, krea2.blocks)
 
@@ -175,7 +178,8 @@ class MainRequestTests(unittest.TestCase):
             "spectrum_A": 100.0, "spectrum_beta": 2.5, "seed": 42, "hires": True}]})
 
     def test_requests_without_the_feature_stay_byte_identical(self):
-        """카드가 꺼져 있으면(앱 기본값) SPEED 위젯이 없던 때와 요청이 같다. ComfyUI 는 켜도 같다(팩 1.7.0 단계 전)."""
+        """카드가 꺼져 있으면(앱 기본값) SPEED 위젯이 없던 때와 요청이 같다. ComfyUI 에서 켜면 그 요청에 Forge 와 같은
+        블록 하나만 더해진다(계획 C6)."""
         for label, capabilities, backend, enabled in (("unknown", None, BackendType.WEBUI, "false"),
                                                       ("known", PRESENT, BackendType.WEBUI, "false"),
                                                       ("comfy off", None, BackendType.COMFYUI, "false"),
@@ -186,6 +190,9 @@ class MainRequestTests(unittest.TestCase):
                     mock.patch("core.spectrum_settings.spectrum_payload_from_prefs", return_value={}):
                 before, _ = ChainHost(capabilities=capabilities)._build_generation_payload(snapshot=True)
                 after, _ = SpeedHost(capabilities, enabled=enabled)._build_generation_payload(snapshot=True)
+                if label == "comfy on":
+                    before = copy.deepcopy(before)
+                    before["alwayson_scripts"][SPEED] = ON_BLOCK
                 self.assertEqual(json.dumps(after, sort_keys=True), json.dumps(before, sort_keys=True))
 
     def test_image_tab_entry_follows_the_toggle(self):

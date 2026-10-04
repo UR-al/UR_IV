@@ -27,6 +27,12 @@ Behaviour that matches the original node:
 APG is this pack's addition for Forge-extension parity. It rides in the same
 CFG hook (after SMC, before CWM), keeps its state under its own key and is off
 unless the guidance suite asks for it.
+
+Pack 1.7.0: a call marked as a Dy/SMEA sub-step (``guidance_common.is_extra_sampler_substep``
+-- Euler (SMEA) Dy's extra model call at another resolution inside a step) reads SMC's
+``e_prev`` and APG's momentum but stores neither, and gets DCW without RDC: the cross-step
+state is neither updated nor reset by it, as in sam-extra (``scripts/anima_safe_pag.py``
+``keep_smc``, ``_apply_apg``, ``rdc_state=None if substep``).
 """
 
 from __future__ import annotations
@@ -36,7 +42,14 @@ import math
 from typing import Any, Callable
 
 from .compat import clone_model, require_torch
-from .guidance_common import CATEGORY, PRE_DD_SIGMAS_KEY, _haar_dwt, _haar_idwt, _scalar_sigma
+from .guidance_common import (
+    CATEGORY,
+    PRE_DD_SIGMAS_KEY,
+    _haar_dwt,
+    _haar_idwt,
+    _scalar_sigma,
+    is_extra_sampler_substep,
+)
 
 
 def _sampler_sigma(args: dict[str, Any]) -> float | None:
@@ -221,19 +234,20 @@ def apply_dcw(
 # SMC, CWM and APG (CFG combination)
 # ---------------------------------------------------------------------------
 
-def _smc_error(error: Any, previous: Any, strength: float, k: float):
+def _smc_error(error: Any, previous: Any, strength: float, k: float, *, note_restart: bool = True):
     """One sliding-mode correction of the guidance error (in fp32).
 
     ``surface = (e - e_prev) + strength * e_prev``. The step is
     ``-k * surface / ||surface||`` (L2 norm per sample), clamped to half the
     sample's mean ``|e|``. Returns ``(corrected, next_previous)``. A missing
     ``previous``, or one whose shape changed, starts from ``e`` itself.
+    ``note_restart=False`` (a Dy/SMEA sub-step, which stores nothing) logs no restart.
     """
 
     torch = require_torch()
     current = error.to(dtype=torch.float32)
     if previous is None or previous.shape != current.shape:
-        if previous is not None:
+        if previous is not None and note_restart:
             LOGGER.info(
                 "DCW(+a) SMC: latent shape changed %s -> %s; SMC state restarted.",
                 list(previous.shape), list(current.shape),
@@ -382,6 +396,7 @@ def _guided_noise(
     smc_mode: str = SMC_MODE_UNIT,
     smc_alpha: float = SMC_ADAPTIVE_ALPHA,
     smc_sigma: float | None = None,
+    substep: bool = False,
 ) -> Any:
     """Combine noise-space ``cond``/``uncond`` the way the DCW(+a) hook does.
 
@@ -389,7 +404,8 @@ def _guided_noise(
     CWM and APG all inactive this is exactly plain CFG. ``smc_mode`` Adaptive
     sign runs sam-extra's adaptive controller (``_smc_adaptive_error``, lambda =
     ``smc_lambda``, gain ``smc_alpha``, the sampler sigma ``smc_sigma``) instead
-    of the original unit-L2 step.
+    of the original unit-L2 step. ``smc_state`` receives the next SMC state; for a
+    Dy/SMEA sub-step (``substep``) the hook passes a throw-away copy.
     """
 
     adaptive = smc_mode == SMC_MODE_ADAPTIVE
@@ -410,7 +426,7 @@ def _guided_noise(
         error = corrected.to(dtype=dtype)
     elif smc_on:
         corrected, smc_state["e_prev"] = _smc_error(
-            error, smc_state.get("e_prev"), smc_lambda, smc_k
+            error, smc_state.get("e_prev"), smc_lambda, smc_k, note_restart=not substep
         )
         error = corrected.to(dtype=dtype)
     if apg is not None:
@@ -513,6 +529,22 @@ def resolve_smc(model: Any, preset: Any, smc_lambda: float, smc_k: float):
 # Hooks and model patching
 # ---------------------------------------------------------------------------
 
+def _step_state(options: dict[str, Any], key: str, substep: bool) -> dict[str, Any]:
+    """The sampling run's cross-step state under ``key``.
+
+    A Dy/SMEA sub-step (``substep``: Euler (SMEA) Dy's extra evaluation at another
+    resolution inside a step) gets a throw-away copy: it reads what the steps stored (a
+    stored tensor of another shape is not used, as on any shape change) but stores and
+    resets nothing, so the next step carries on as if it had not happened (sam-extra
+    ``scripts/anima_safe_pag.py``: ``keep_smc``, ``_apply_apg``). The copy is shallow --
+    the state functions replace entries, they never change a stored tensor in place.
+    """
+
+    if substep:
+        return dict(options.get(key) or {})
+    return options.setdefault(key, {})
+
+
 def _cfg_hook(
     fallback_options: dict[str, Any],
     *,
@@ -530,13 +562,14 @@ def _cfg_hook(
         if cond is None or uncond is None:
             return _plain_cfg(cond, uncond, scale)
         options = args.get("model_options", fallback_options)
-        smc_state = options.setdefault(SMC_STATE_KEY, {})
+        substep = is_extra_sampler_substep(args)
+        smc_state = _step_state(options, SMC_STATE_KEY, substep)
         sigma = args.get("sigma")
         # Adaptive SMC reads the sampler's own sigma (Detail Daemon's note), like sam-extra's sampler_sigma
         smc_sigma = _sampler_sigma(args) if smc_mode == SMC_MODE_ADAPTIVE else None
         apg = None
         if apg_settings is not None:
-            apg_state = options.setdefault(APG_STATE_KEY, {})
+            apg_state = _step_state(options, APG_STATE_KEY, substep)
             direction = args.get("cond_denoised")
             if direction is None:
                 direction = args["input"] - cond
@@ -552,6 +585,7 @@ def _cfg_hook(
                 alpha_low=alpha_low, alpha_high=alpha_high,
                 smc_lambda=smc_lambda, smc_k=smc_k, smc_state=smc_state, apg=apg,
                 smc_mode=smc_mode, smc_alpha=smc_alpha, smc_sigma=smc_sigma,
+                substep=substep,
             )
         except Exception as exc:
             LOGGER.warning("DCW(+a) CWM/SMC skipped for this step: %s", exc)
@@ -577,12 +611,18 @@ def _dcw_hook(
             return denoised
         try:
             state = None
+            tau = rdc_tau
             if recurrent:
-                options = args.get("model_options", fallback_options)
-                state = options.setdefault(RDC_STATE_KEY, {})
+                if is_extra_sampler_substep(args):
+                    # RDC's average is per step at the step's resolution: a Dy/SMEA sub-step gets
+                    # DCW only and leaves the average alone (sam-extra ``rdc_state=None if substep``).
+                    tau = 0.0
+                else:
+                    options = args.get("model_options", fallback_options)
+                    state = options.setdefault(RDC_STATE_KEY, {})
             return apply_dcw(
                 denoised, live, sigma, lambda_low, lambda_high,
-                rdc_tau=rdc_tau, rdc_alpha_low=rdc_alpha_low,
+                rdc_tau=tau, rdc_alpha_low=rdc_alpha_low,
                 rdc_alpha_high=rdc_alpha_high, state=state,
             )
         except Exception as exc:

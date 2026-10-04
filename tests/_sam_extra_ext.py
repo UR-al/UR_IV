@@ -7,11 +7,16 @@ forge_sam3_extension 과 sam-extra 둘 다 본다. 환경 변수를 지정했으
 
 확장이 없으면 skip 하되 이유(찾아본 곳)를 남긴다. AISTUDIO_REQUIRE_FORGE_EXT=1 이면 skip 대신 실패한다
 (확장이 꼭 있어야 하는 검증 — /verify 나 확장 동기화 작업 중).
+
+Forge 의 파일을 실행하는 오라클 테스트(k_diffusion, sd_schedulers …)는 `forge_root()` 로 Forge 를 찾는다:
+SAM3_FORGE_ROOT(확장 자체 테스트 픽스처와 같은 변수)가 있으면 그 경로만, 없으면 확장 두 단계 위
+(`<forge>/extensions/<ext>`). 확장 작업 트리(Forge 밖)를 오라클로 쓸 때 필요하다.
 """
 from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 
 from core.sam_extra_scan import (
     EXTENSION_DIR_ENV,
@@ -23,6 +28,19 @@ from core.sam_extra_scan import (
 
 EXT_ROOT = find_installed_extension()
 REQUIRED = os.environ.get(REQUIRE_EXTENSION_ENV, "").strip() == "1"
+FORGE_ROOT_ENV = "SAM3_FORGE_ROOT"
+
+
+def forge_root() -> Path | None:
+    """오라클이 실행하는 Forge 체크아웃: SAM3_FORGE_ROOT 가 있으면 그 경로만(다른 곳으로 조용히 바꾸지 않는다),
+    없으면 EXT_ROOT 의 두 단계 위(`<forge>/extensions/<ext>`), 확장이 없으면 None."""
+    configured = os.environ.get(FORGE_ROOT_ENV, "").strip()
+    if configured:
+        return Path(configured)
+    return EXT_ROOT.parents[1] if EXT_ROOT is not None else None
+
+
+FORGE_ROOT = forge_root()
 
 
 def skip_reason() -> str:

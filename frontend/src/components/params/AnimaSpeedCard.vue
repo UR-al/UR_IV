@@ -64,7 +64,7 @@
       <p class="speed-line">{{ INVALID_NOTE }}</p>
     </div>
     <div class="ext-note">{{ SKIP_NOTE }}</div>
-    <div class="ext-note" :class="{ 'speed-warnline': note !== FORGE_NOTE }" role="status">{{ note }}</div>
+    <div class="ext-note" :class="{ 'speed-warnline': note !== FORGE_NOTE && note !== COMFY_NOTE }" role="status">{{ note }}</div>
     <div class="speed-actions">
       <button type="button" class="speed-reset" :class="{ 'speed-muted': atDefaults }" :title="RESET_TITLE"
         @click="resetDefaults">기본값</button>
@@ -88,7 +88,7 @@ import { widgetFlag } from '../../composables/widgetFlag'
 import { useSamExtraCapabilities } from '../../composables/useSamExtraCapabilities'
 import { isKrea2Family } from '../../utils/generationFamily'
 import {
-  DEFAULTS, DELTA_RANGE, DIVISOR_RANGE, FORGE_NOTE, HINTS, INVALID_NOTE, LABELS, LEAD_NOTE, MODE_OPTIONS,
+  COMFY_NOTE, DEFAULTS, DELTA_RANGE, DIVISOR_RANGE, FORGE_NOTE, HINTS, INVALID_NOTE, LABELS, LEAD_NOTE, MODE_OPTIONS,
   PRESET_NAMES, RESET_TITLE, SKIP_NOTE, THRESHOLD_OPTIONS, TRANSFORM_OPTIONS, WIDGET_IDS, cardNote, isDefault,
   readSettings, summary, validationMessages, visibleFields, type SpeedKey, type SpeedOption, type VisibleField,
 } from '../../utils/animaSpeed'

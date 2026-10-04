@@ -34,6 +34,12 @@ Host rules shared with the extension:
   carries no tag and is the base pass too (S² reads an untagged run the same way). A detailer run after
   the hires pass records into a trajectory nothing reads; the next generation's base run clears it.
   The app compiler turns HiFlow on only for a txt2img Hires.fix generation (the extension's rule).
+- Pack 1.7.0: an evaluation marked as a Dy/SMEA sub-step (``guidance_common.is_extra_sampler_substep``
+  -- Euler (SMEA) Dy's extra model call at another resolution inside a step) is not a step: HiFlow
+  neither records nor aligns it, MG/HiGS neither apply to it nor update or reset their history
+  (also on an Adaptive Guidance cond-only step), and the next step carries on as if it had not
+  happened; stateless TSR still rescales it (sam-extra ``scripts/anima_safe_pag.py``
+  ``_apply_detail_stages``/``_hiflow_record``).
 
 Host differences: a hires pass that loads another checkpoint gets a fresh MODEL without this suite
 (``ForgeNeoHiresFix``), so HiFlow cannot align there; sam-extra keeps aligning when the latent
@@ -49,7 +55,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .compat import clone_model, require_torch
-from .guidance_common import PRE_DD_SIGMAS_KEY, _as_bool, _setting
+from .guidance_common import PRE_DD_SIGMAS_KEY, _as_bool, _setting, is_extra_sampler_substep
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
 
@@ -663,7 +669,10 @@ def _hiflow_apply(run: DetailRun, args: dict[str, Any], result: Any, sigma: floa
 
 
 def apply_detail_stages(run: DetailRun, args: dict[str, Any], result: Any, *, adg_skipped: bool = False) -> Any:
-    """HiFlow (hires run) -> Momentum Guidance -> HiGS -> TSR on the guided x0 (the extension's order)."""
+    """HiFlow (hires run) -> Momentum Guidance -> HiGS -> TSR on the guided x0 (the extension's order).
+
+    A Dy/SMEA sub-step gets TSR only: HiFlow and MG/HiGS leave it and their state alone.
+    """
     torch = require_torch()
     settings = run.settings
     x = args.get("input")
@@ -675,14 +684,15 @@ def apply_detail_stages(run: DetailRun, args: dict[str, Any], result: Any, *, ad
         run.warn_once("sigma", "Anima detail stages skipped: the post-CFG call carries no sigma.")
         return result
     flow = is_flow(args)
+    substep = is_extra_sampler_substep(args)   # Dy/SMEA sub-step: no step state read-modify-write
 
-    if settings.hiflow and pass_tag(args) == PASS_HIRES and sigma > 0.0:
+    if settings.hiflow and pass_tag(args) == PASS_HIRES and sigma > 0.0 and not substep:
         try:
             result = _hiflow_apply(run, args, result, sigma)
         except Exception as exc:   # noqa: BLE001 - one stage must not lose the earlier guidance
             run.warn_once("hiflow", f"Anima HiFlow fallback (earlier guidance kept): {type(exc).__name__}: {exc}")
 
-    if settings.mg or settings.higs:
+    if (settings.mg or settings.higs) and not substep:
         history = run.history
         if adg_skipped:
             history.reset()
@@ -727,9 +737,11 @@ def apply_detail_stages(run: DetailRun, args: dict[str, Any], result: Any, *, ad
 def record_hiflow(run: DetailRun, args: dict[str, Any], result: Any) -> None:
     """Base run of a Hires.fix generation: keep this evaluation's final x0 at the sampler's sigma (last wins).
 
-    Every run but the hires one is a base run here -- tagged ``base`` or untagged (a custom workflow's sampler)."""
+    Every run but the hires one is a base run here -- tagged ``base`` or untagged (a custom workflow's sampler).
+    A Dy/SMEA sub-step is not recorded: its x0 is another resolution's, and a record of another shape would
+    start the trajectory over (``Trajectory.record``)."""
     torch = require_torch()
-    if pass_tag(args) == PASS_HIRES:
+    if pass_tag(args) == PASS_HIRES or is_extra_sampler_substep(args):
         return
     sigma = sampler_sigma(args)
     if sigma is None or sigma <= 0.0 or not torch.is_tensor(result):

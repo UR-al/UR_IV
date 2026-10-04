@@ -3,7 +3,7 @@ import stateGolden from '../../../tests/fixtures/colorcraft_state_golden.json'
 import cases from './colorcraft.cases.json'
 import {
   COMBO_TAGS, DEFAULT_STATE, MARK_EDITED, MARK_ON, MASK_TAGS, MODIFIER_TAGS, NO_ENTRIES_NOTE, OFF_NOTE, OLD_FORGE_NOTE,
-  COMFY_PENDING_NOTE, KREA2_NOTE, SCHEMA, STATE_PATHS, StateError, WIDGET_IDS, badge, buildChain, canonicalState,
+  COMFY_OFF_NOTE, COMFY_TARGET, KREA2_NOTE, SCHEMA, STATE_PATHS, StateError, WIDGET_IDS, badge, buildChain, canonicalState,
   cardStatus, choiceLabel, comboRefChoices, configFromMapping, configFromState, defaultConfig, dumpState, edited,
   formatG10, outOfRange, overview, parseState, readCard, resetNode, scheduleValues, setPath, toInfotext, visibleGroups,
 } from './colorcraft'
@@ -141,7 +141,13 @@ describe('card helpers', () => {
     expect(cardStatus(on, null)).toEqual({ level: 'ok', text: 'Forge 로 보냅니다 — 수정자 2개(Base 1·Hires 1)' })
     expect(cardStatus(on, caps(true))).toEqual(cardStatus(on, null))
     expect(cardStatus(on, caps(false)).text).toBe(OLD_FORGE_NOTE)
-    expect(cardStatus(on, caps(true, 'not_applicable')).text).toBe(COMFY_PENDING_NOTE)
+    // 계획 C6 — ComfyUI 는 Forge 와 같은 판정으로 보낸다(옛 Forge 판정은 하지 않는다)
+    expect(cardStatus(on, caps(true, 'not_applicable'))).toEqual(
+      { level: 'ok', text: `${COMFY_TARGET} 로 보냅니다 — 수정자 2개(Base 1·Hires 1)` })
+    expect(cardStatus(on, caps(false, 'not_applicable')).level).toBe('ok')
+    expect(cardStatus(off, caps(true, 'not_applicable'))).toEqual({ level: 'off', text: COMFY_OFF_NOTE })
+    expect(cardStatus(nothing, caps(true, 'not_applicable'))).toEqual({ level: 'warn', text: NO_ENTRIES_NOTE })
+    expect(cardStatus(on, caps(true, 'not_applicable'), true).text).toBe(KREA2_NOTE)
     expect(cardStatus(on, null, true).text).toBe(KREA2_NOTE)
     expect(badge(off)).toBe('')
     expect(badge(on)).toBe('I Advanced, II Punch (Hires)')

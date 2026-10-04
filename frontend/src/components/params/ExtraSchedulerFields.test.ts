@@ -183,7 +183,7 @@ it('flow-unsuitable and Karras Dynamic hints show without the fields', async () 
   expect(text(root)).toContain(xs.KARRAS_DYNAMIC_HINT)
 })
 
-it('status line: old Forge, ComfyUI pending, Krea2', async () => {
+it('status line: old Forge, ComfyUI pack 1.7.0 (not a warning), Krea2', async () => {
   widgets.scheduler_combo = 'laplace'
   caps.value = { status: 'ok', known: true, features: { extra_schedulers: false } }
   const root = await mount()
@@ -193,7 +193,8 @@ it('status line: old Forge, ComfyUI pending, Krea2', async () => {
   expect(text(root)).not.toContain(xs.OLD_FORGE_NOTE)
   caps.value = { status: 'not_applicable', known: false, features: {} }
   await Vue.nextTick()
-  expect(text(root)).toContain(xs.COMFY_PENDING_NOTE)
+  expect(text(root)).toContain(xs.COMFY_NOTE)                                  // 계획 C6
+  expect(all(root, 'p').filter(p => String(p.props.class ?? '').includes('xs-warnline'))).toEqual([])
   widgets.generation_family_combo = 'Krea2'
   await Vue.nextTick()
   expect(text(root)).toContain(xs.KREA2_NOTE)

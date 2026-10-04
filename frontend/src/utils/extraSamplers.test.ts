@@ -1,11 +1,11 @@
 import { describe as group, expect, it } from 'vitest'
 import cases from './extraSamplers.cases.json'
 import {
-  ARG_COUNT, CFG_PP_LABELS, COMFY_PENDING_NOTE, DEFAULTS, DEFAULT_SETTINGS, DY_CFGPP_HINT, DY_PLAIN_HINT, ER_SDE_LABELS,
+  ARG_COUNT, CFG_PP_LABELS, COMFY_PARAMS_NOTE, DEFAULTS, DEFAULT_SETTINGS, DY_CFGPP_HINT, DY_PLAIN_HINT, ER_SDE_LABELS,
   ETA_LABELS, ETA_RANGE, FLOW_ODE_HINT, FLOW_ODE_LABELS, IPNDM_HINT, KREA2_NOTE, NOISE_RANGE, OLD_FORGE_NOTE, PASS_WIDGETS,
   RESTART_HINT, SAMPLERS, SCRIPT_TITLE, SMEA_CFGPP_HINT, STAGE_OPTIONS, STAGE_RANGE, TUNABLE_HINT, UD10_HINT, WIDGET_IDS,
-  cardNote, cfgWarning, describe, hiddenNote, isCfgPp, isDefault, parseValues, passesUsing, readValues, resolveSampler,
-  samplerHints, samplerKind, subtitle, usesEta, widgetNumber, windowEmpty, windowSummary, windowSupported,
+  FORGE_PARAMS_NOTE, cardNote, cfgWarning, describe, hiddenNote, isCfgPp, isDefault, paramsNote, parseValues,
+  passesUsing, readValues, resolveSampler, samplerHints, samplerKind, subtitle, usesEta, widgetNumber, windowEmpty, windowSummary, windowSupported,
   windowUnsupported, type XsampKey,
 } from './extraSamplers'
 
@@ -152,13 +152,17 @@ group('passes, hints and notes', () => {
     expect(cfgWarning(2.5)).toBe('CFG++ 샘플러는 CFG 1~2 를 권장합니다 (지금 2.5)')
   })
 
-  it('card note: Krea2, ComfyUI pending, old Forge, otherwise none', () => {
+  it('card note: Krea2, old Forge, otherwise none; ComfyUI gets the params note instead', () => {
     const forge = (has: boolean) => ({ status: 'ok', known: true, features: { extra_samplers: has } }) as never
     expect(cardNote(forge(true))).toBe('')
     expect(cardNote(forge(false))).toBe(OLD_FORGE_NOTE)
     expect(cardNote({ status: 'unknown', known: false, features: {} } as never)).toBe('')
     expect(cardNote(null)).toBe('')
-    expect(cardNote({ status: 'not_applicable', known: false, features: {} } as never)).toBe(COMFY_PENDING_NOTE)
+    // 계획 C6 — ComfyUI 는 경고가 아니다: 안내 줄이 Forge 설정 줄 대신 ComfyUI 줄이 된다
+    expect(cardNote({ status: 'not_applicable', known: false, features: {} } as never)).toBe('')
+    expect(paramsNote({ status: 'not_applicable' } as never)).toBe(COMFY_PARAMS_NOTE)
+    expect(paramsNote({ status: 'ok' } as never)).toBe(FORGE_PARAMS_NOTE)
+    expect(paramsNote(null)).toBe(FORGE_PARAMS_NOTE)
     expect(cardNote(forge(true), true)).toBe(KREA2_NOTE)
   })
 })
