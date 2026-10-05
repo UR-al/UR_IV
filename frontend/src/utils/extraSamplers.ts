@@ -31,9 +31,9 @@ export interface SamplerSettings {
 
 export interface SamplerRow {
   label: string             // Forge 샘플러 표기(/sdapi/v1/samplers 이름 = 앱이 보내는 값)
-  name: string              // ComfyUI 이름(확장의 첫 별칭)
+  name: string              // ComfyUI 이름(확장의 첫 별칭 — IPNDM_V 만 팩의 ipndm_v_fixed, 파이썬 COMFY_NAMES)
   kind: SamplerKind
-  alias?: string            // 확장의 둘째 별칭(reForge k_* — 그 셋만)
+  alias?: string            // ComfyUI 이름이 아닌 확장 별칭(reForge k_* 셋, IPNDM_V 의 ipndm_v)
 }
 
 export interface PassUse {
@@ -97,7 +97,7 @@ export const SAMPLERS: readonly SamplerRow[] = [
   { label: 'UniPC bh2', name: 'uni_pc_bh2', kind: '' },
   { label: 'CFG++ UD10 AB', name: 'cfgpp_ud10_ab', kind: 'cfg_pp' },
   { label: 'IPNDM', name: 'ipndm', kind: '' },
-  { label: 'IPNDM_V', name: 'ipndm_v', kind: '' },
+  { label: 'IPNDM_V', name: 'ipndm_v_fixed', kind: '', alias: 'ipndm_v' },
   { label: 'DEIS', name: 'deis', kind: '' },
   { label: 'Restart (flow)', name: 'restart_flow', kind: 'restart' },
 ]
@@ -353,11 +353,17 @@ export const UD10_HINT = 'CFG++ UD10 AB: ComfyUI 가 Anima 용으로 만든 CFG+
   + 'Euler 와 같습니다.'
 export const FLOW_ODE_HINT = 'DPM++ 2M · 2M Heun · 3M (flow ODE): 잡음 없는 DPM-Solver++ — flow 의 λ 좌표에서 풉니다(Res '
   + 'Multistep 의 flow 판 비교용). Eta 를 쓰지 않습니다.'
-/** 10-05 Anima 확인(GPU part 2 O2)에서 본 것만 — 권장하지 않는다(다른 스케줄·모델은 확인하지 않았다). */
-export const IPNDM_HINT = 'IPNDM · IPNDM_V · UniPC bh2: 10-05 Anima 확인(Linear Quadratic, 28 스텝)에서 IPNDM 은 정상이었고 '
-  + 'IPNDM_V(녹색 잡음)·UniPC bh2(무너짐)는 깨졌습니다 — 다른 스케줄은 확인하지 않았습니다.'
-/** 그 힌트를 보이는 샘플러(파이썬 LABEL_IPNDM·LABEL_IPNDM_V·LABEL_UNIPC_BH2). */
-export const IPNDM_HINT_LABELS: readonly string[] = ['IPNDM', 'IPNDM_V', 'UniPC bh2']
+/** IPNDM_V 의 4차 계수 오타를 고친 sam-extra 버전(파이썬 IPNDM_V_FIX_VERSION). ComfyUI 는 팩 1.7.0 의 ipndm_v_fixed. */
+export const IPNDM_V_FIX_VERSION = '0.33.1'
+/** IPNDM_V + Linear Quadratic 은 버전과 상관없이 못 쓴다 — 상류(zju-pi·ComfyUI ipndm_v) 4차 계수 오타(옛 판의 녹색 잡음)는
+ *  0.33.1·팩에서 고쳤지만, 고친 판도 두 호스트 모두 탄 그림이다(10-05 GPU: 스텝 크기가 3.7배로 뛰는 곳에서 4차 외삽 계수가
+ *  커진다 — 샘플러·스케줄 조합). 앱은 막지 않고 이 힌트만 보인다. */
+export const IPNDM_V_HINT = 'IPNDM_V: Linear Quadratic 에서는 버전과 상관없이 쓸 수 없습니다 — '
+  + `sam-extra ${IPNDM_V_FIX_VERSION}·노드 팩 1.7.0 의 계수 수정으로 녹색 잡음은 없어졌지만 그림이 타고 번집니다. `
+  + 'Simple 이나 IPNDM 을 쓰세요.'
+/** UniPC bh2 + Linear Quadratic 은 샘플러와 스케줄의 조합 문제(코드는 그대로) — 다른 스케줄은 CPU 대조로 확인. */
+export const UNIPC_BH2_HINT = 'UniPC bh2: Linear Quadratic 에서 불안정합니다 — 샘플러와 스케줄의 조합 문제로, 내장 UniPC 도 '
+  + '같은 것으로 보입니다(GPU 로는 확인하지 않음). Simple·Normal·SGM Uniform 은 괜찮습니다(CPU 확인).'
 export const RESTART_HINT = 'Restart (flow): 스케줄을 유지한 채 σ 0.09~0.67 구간을 한 번(36 스텝부터 두 번) 다시 밟습니다 — 모델 '
   + '호출이 Heun 의 약 1.4배(28 스텝).'
 /** CFG++ 샘플러인데 CFG 가 2 를 넘을 때(Forge 도 'CFG between 1.0 ~ 2.0 is recommended' 를 로그에 남긴다). */
@@ -400,7 +406,8 @@ export function samplerHints(widgets: Record<string, unknown>, comfy = false): s
   if (has('Euler Dy') || has('Euler SMEA Dy')) hints.push(DY_PLAIN_HINT)
   if (has('CFG++ UD10 AB')) hints.push(UD10_HINT)
   if (labels.some(label => FLOW_ODE_LABELS.includes(label))) hints.push(FLOW_ODE_HINT)
-  if (labels.some(label => IPNDM_HINT_LABELS.includes(label))) hints.push(IPNDM_HINT)
+  if (has('IPNDM_V')) hints.push(IPNDM_V_HINT)
+  if (has('UniPC bh2')) hints.push(UNIPC_BH2_HINT)
   if (has('Restart (flow)')) hints.push(RESTART_HINT)
   hints.push(...cfgWarnings(widgets, comfy))
   return hints

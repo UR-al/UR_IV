@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.33.0"
+EXT_VERSION_AUDITED = "0.33.1"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -115,7 +115,28 @@ EXT_VERSION_AUDITED = "0.33.0"
 # 쌍둥이(공유 표시 R4 셋 포함). 기능이 꺼진 요청의 ComfyUI 그래프·Forge 페이로드는 P0.1 기준과 바이트 단위로 같다.
 # 2026-10-05 GPU 대조(테스트 Forge 7862, Anima 3.8B): 네 기능의 확장 형식과 앱 형식 요청의 PNG md5 가 모두 같다
 # (docs/sam_extra_sync.md 'GPU 대조 결과').
-EXT_COMMIT_AUDITED = "d05afd9"
+# 2026-10-05 IPNDM_V 4차 계수(sam-extra 0.33.1 — 아래 v0.33.1 릴리스): 상류(zju-pi → ComfyUI
+# sample_ipndm_v → sam-extra ipndm_deis.py)의 coeff4 마지막 인자 h_{n-1}/h_{n-2} 는 오타다(3계 차분의 마지막 항은
+# −q·h_{n-2}/h_{n-3}). 계수 합이 1 + q·temp2·(h_{n-2}/h_{n-3} − h_{n-1}/h_{n-2}) 라 Anima Linear Quadratic 28 스텝의 16번째
+# 스텝에서 약 −174 — Forge·ComfyUI 모두 녹색 잡음이었다(10-05 GPU 2부 관찰). 0.33.1 은 그 한 인자만 고친다(temp1 괄호·temp2
+# 부호는 알려진 상류 부정확으로 그대로 — 계수 합은 1, 스텝 비율이 일정한 목록에서는 계수가 ComfyUI ipndm_v 와 수학적으로 같고,
+# 결과가 비트 단위로 같은 것은 간격이 이진수로 정확한 목록뿐 — 보통의 float 고른 간격·등비 목록은 반올림 수준 차이). 인자·이름·
+# 표기·infotext 는 그대로이고 결과만 버전에 따라 다르다. 이 수정은 일관성(계수 합 1)일 뿐 Linear Quadratic 을 살리지 못한다:
+# 10-05 GPU(E-ipndm)에서 0.33.1·팩 ipndm_v_fixed 도 녹색 잡음 대신 탄 그림이었다(두 호스트, 앱 형식 = 확장 형식 md5) — 15번째
+# 스텝부터 스텝 크기가 3.71·2.46·1.59배로 뛰어 스텝 크기를 아는 4차 외삽의 계수가 155(정확한 가변 스텝 AB4 도 117)까지
+# 커진다(샘플러·스케줄 조합). Simple 은 깨끗하고 Normal 은 거칠다. 확장 CHANGELOG·도움말의 'Linear Quadratic 정상' 문구는 이
+# 결과와 다르다. 앱은 막지 않고 Sampler 줄 힌트로 Simple·IPNDM 을 안내한다(frontend/src/utils/extraSamplers.ts IPNDM_V_HINT —
+# 버전과 상관없이 못 쓴다). ComfyUI 는 팩 1.7.0 의
+# ipndm_v_fixed(코어 ipndm_v 는 덮지 않는다 — core/extra_samplers.COMFY_NAME_OVERRIDES)로 0.33.1 과 비트 단위로 같다
+# (tests/test_comfy_extra_samplers_parity.py IpndmVFixedParityTests — 오라클은 설치된 0.33.1 그대로, tests/_ipndm_v_oracle;
+# 기준이 0.33.0 이던 동기화 전에는 그 파일의 그 한 줄만 고친 사본이었다. 기준이 0.33.1 이라 고친 줄이 없는 오라클은 실패).
+# 2026-10-05 v0.33.1(d821adb·b04ff89, master 머지 643e911 — 트리 같음, 태그 v0.33.1; 그 앞 798c0a6 머지는 확장 tests/ 만):
+# 위 IPNDM_V coeff4 한 인자 수정뿐 — 인자·이름·표기·infotext·ui()·옵션·제목 그대로(CHANGELOG v0.33.1). 나머지는 ipndm_deis·
+# extra_samplers/__init__·registry 의 주석·docstring 과 scripts/anima_extra_samplers.py 의 도움말 문구(_HELP — IPNDM_V 설명,
+# Linear Quadratic 안내)다. 계약 테스트는 설치된 확장(feat b04ff89 — 643e911 과 트리 같음)으로 엄격 모드에서 돌렸다.
+# 픽스처(tests/fixtures/sam_extra_script_info.json)는 2026-10-05 테스트 Forge(7862)의 0.33.1(b04ff89)에서 읽기 전용 GET 으로
+# 다시 받았다 — 머리(captured_at·ext_version·commit)만 바뀌고 스크립트 16개·항목 32개는 그대로다.
+EXT_COMMIT_AUDITED = "643e9118d61c7aba20fdb173dad63c935f95af0b"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -711,7 +732,7 @@ SCRIPTS = MappingProxyType({
     # 2026-10-05 앱 노출(보류 → mapped, 계획 A-XSa2): 위치 인자 다섯 블록·정규화·붙여 넣기·infotext·상태 줄 거울(core/
     # extra_samplers), 모든 보조 패스 전달 행(main_retry — 계획 X5), 결과 알림(Dy 보조 스텝·잡음 구간 건너뜀·옛 sam-extra 의
     # 구간 미지원 — X10). 상수 계약은 SEMANTIC_PINS extra_samplers_*. 2026-10-05 ComfyUI 연결(계획 C1·C3·C6): 팩 1.7.0 의
-    # 샘플러 12개 등록·값 운반 노드 ForgeNeoExtraSamplerSettings.
+    # 샘플러 13개 등록(IPNDM_V 는 sam-extra 0.33.1 의 계수 수정판 ipndm_v_fixed)·값 운반 노드 ForgeNeoExtraSamplerSettings.
     "Extra Samplers": _script(
         file="scripts/anima_extra_samplers.py", form="positional", live_argc=5, shape="3ee8b4de008d",
         ui_return="app_spec", app_title="core.extra_samplers:SCRIPT_NAME",
@@ -727,12 +748,15 @@ SCRIPTS = MappingProxyType({
                  "쓴다. 샘플러 18개(ER SDE 셋·DPM++ 4M SDE·Euler Dy "
                  "CFG++·Euler SMEA Dy CFG++·Euler Dy·Euler SMEA Dy·DPM++ 2M SDE Heun·flow ODE 셋·UniPC bh2·CFG++ UD10 AB·IPNDM·"
                  "IPNDM_V·DEIS·Restart (flow))는 불러올 때 Forge 목록에 등록돼 /sdapi/v1/samplers 로 나온다(계열 순서 — "
-                 "scripts/list_order.py) — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고른다. ComfyUI 는 팩 1.7.0 이 12개를 "
-                 "Forge 첫 별칭과 같은 이름(er_sde_reverse_time·er_sde_ode·er_sde_tunable·dpmpp_4m_sde·euler_dy_cfg_pp·"
-                 "euler_smea_dy_cfg_pp·euler_dy·euler_smea_dy·dpmpp_2m_flow_ode·dpmpp_2m_heun_flow_ode·dpmpp_3m_flow_ode·"
-                 "restart_flow)으로 KSampler 목록에 등록하고(남의 이름은 덮지 않는다 — 다른 팩이 먼저 가진 이름은 컴파일러가 "
-                 "owned_names 로 거절), 코어 이름 여섯(dpmpp_2m_sde_heun·uni_pc_bh2·cfgpp_ud10_ab — ComfyUI v0.35.0 이상·ipndm·"
-                 "ipndm_v·deis)은 별칭만이다. 'ER SDE (Reverse-time)'·'(ODE)'·'(Tunable)' 은 Comfy SamplerER_SDE 노드의 잡음 "
+                 "scripts/list_order.py) — 앱 Forge 샘플러 콤보는 라이브 목록이라 그대로 고른다. ComfyUI 는 팩 1.7.0 이 13개를 "
+                 "KSampler 목록에 등록한다 — 12개는 Forge 첫 별칭과 같은 이름(er_sde_reverse_time·er_sde_ode·er_sde_tunable·"
+                 "dpmpp_4m_sde·euler_dy_cfg_pp·euler_smea_dy_cfg_pp·euler_dy·euler_smea_dy·dpmpp_2m_flow_ode·"
+                 "dpmpp_2m_heun_flow_ode·dpmpp_3m_flow_ode·restart_flow), IPNDM_V 는 ipndm_v_fixed(sam-extra 0.33.1 의 4차 계수 "
+                 "수정 — 같은 이름의 코어 ipndm_v 는 상류 오타 그대로이고, 팩은 코어 이름을 덮지 않는다. Linear Quadratic "
+                 "에서는 고친 판도 못 쓴다 — gaps). "
+                 "남의 이름은 덮지 않는다 — 다른 팩이 먼저 가진 이름은 컴파일러가 owned_names 로 거절. 코어 이름 다섯"
+                 "(dpmpp_2m_sde_heun·uni_pc_bh2·cfgpp_ud10_ab — ComfyUI v0.35.0 이상·ipndm·deis)은 별칭만이다. "
+                 "'ER SDE (Reverse-time)'·'(ODE)'·'(Tunable)' 은 Comfy SamplerER_SDE 노드의 잡음 "
                  "척도라 KSampler er_sde(Forge 'ER SDE')로 잇지 않는다. infotext 'ER SDE max stage'·'ER SDE eta'(기본값과 다를 때)·"
                  "'ER SDE noise window'(구간을 켜고 Reverse-time·Tunable 이 돈 때 — '0.2-0.8')·'Extra Samplers status'(부분을 "
                  "'; ' 로 잇는다 — Dy 보조 스텝·잡음 구간 건너뜀).",
@@ -788,6 +812,7 @@ SCRIPTS = MappingProxyType({
                    "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_dpmpp_4m.py:sample_dpmpp_4m_sde",
                    "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_flow.py:sample_dpmpp_3m_flow_ode",
                    "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_restart.py:sample_restart_flow",
+                   "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_ipndm.py:sample_ipndm_v_fixed",
                    "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_dy.py:SMEA_SCALE", "comfy_custom_nodes/ai_studio_forge_parity/hires_carry.py:register",
                    "core/extra_samplers.py:COMFY_SETTINGS_NODE", "core/comfy_workflow_compiler.py:_extra_samplers_state",
                    "core/comfy_workflow_compiler.py:_add_extra_samplers",
@@ -806,7 +831,12 @@ SCRIPTS = MappingProxyType({
                   "extra_concat·Spectrum). 마스크 패스는 ComfyUI KSamplerX0Inpaint 규칙으로 섞인다",
                   "Restart (flow): Forge 는 재시작 구간에서 프롬프트 편집 스텝 카운터를 되감는다 — ComfyUI 에는 카운터가 "
                   "없다(같은 결과, 표시만 다름)",
-                  "UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음(UniPC 와 같음)",
+                  "UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음(UniPC 와 같음). Linear Quadratic 과 함께 쓰면 두 경로 "
+                  "모두 무너진다 — 샘플러·스케줄 조합 문제라 코드는 그대로, Sampler 줄 힌트(UNIPC_BH2_HINT)로만 알린다",
+                  "IPNDM_V: 결과가 sam-extra 버전에 따라 다르다 — 0.33.0 이하의 Forge 는 상류 4차 계수 오타, 0.33.1 과 "
+                  "ComfyUI(팩 ipndm_v_fixed)는 고친 계산이다. Linear Quadratic 에서는 어느 쪽도 못 쓴다 — 옛 판은 녹색 잡음, "
+                  "고친 판은 탄 그림(10-05 GPU, 두 경로 — 스텝 크기가 3.71배로 뛰는 곳의 4차 외삽, 샘플러·스케줄 조합). "
+                  "앱은 막지 않는다(힌트 IPNDM_V_HINT 가 Simple·IPNDM 을 안내)",
                   "ADetailer 만 ER SDE 를 쓰는 생성(메인·Hires 는 다른 샘플러): 확장이 ER SDE 값(차수·η·잡음 구간)을 "
                   "infotext 에 적지 않는다 — 값은 ADetailer 안쪽 패스에 닿지만(10-05 GPU 확인 O3) 'ER SDE …' 키가 없어 "
                   "'이 설정으로 생성'·붙여 넣기가 되살릴 수 없다(메인·Hires 샘플러만 본다)"))),
@@ -1331,8 +1361,11 @@ MODULES = MappingProxyType({
         "core/extra_samplers.py:coerce_args", "core/extra_samplers.py:ALIASES", "core/extra_samplers.py:from_infotext",
         "core/extra_samplers.py:infotext_items", "core/extra_samplers.py:parse_noise_window",
         "core/extra_samplers.py:parse_status", "core/extra_samplers.py:DY_REASONS",
+        "core/extra_samplers.py:COMFY_NAME_OVERRIDES", "core/extra_samplers.py:IPNDM_V_FIX_VERSION",
         note="샘플러 18개(v0.33.0 +13 — 새 파일 dpmpp_flow.py(flow ODE 셋)·unipc.py(UniPC bh2)·cfgpp_ud10_ab.py·"
-             "er_sde_window.py(ER SDE 잡음 구간)·ipndm_deis.py(IPNDM·IPNDM_V·DEIS)·restart_flow.py(Restart (flow)), 기존 "
+             "er_sde_window.py(ER SDE 잡음 구간)·ipndm_deis.py(IPNDM·IPNDM_V·DEIS — 0.33.1 이 IPNDM_V 의 4차 계수 오타를 "
+             "고쳤다 — 일관성 수정, Linear Quadratic 은 그래도 못 쓴다. ComfyUI 는 팩 ipndm_v_fixed)·restart_flow.py"
+             "(Restart (flow)), 기존 "
              "er_sde·euler_dy·params·registry·substep_guard 확장)·ER SDE 값(params — 인자 5개·정규화·infotext·붙여 넣기)·Dy "
              "보조 스텝 가드와 상태 줄(substep_guard)·Forge 등록(registry). 앱은 정규화·붙여 넣기·infotext 기록·상태 줄 "
              "규칙과 이름 표만 거울로 둔다 — 계산은 Forge 에서는 확장이, ComfyUI 에서는 팩 1.7.0 이 다시 구현하거나 코어 "
@@ -1340,7 +1373,8 @@ MODULES = MappingProxyType({
              "tests/test_extra_samplers_core.py 가 설치된 params·substep_guard·registry 와 같은 입력으로 비교한다",
         comfy=("comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_register.py:install_extra_samplers",
                "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_math.py:sample_er_sde_ode", "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_dy.py:SMEA_SCALE",
-               "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_restart.py:sample_restart_flow")),
+               "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_restart.py:sample_restart_flow",
+               "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_ipndm.py:sample_ipndm_v_fixed")),
     "sam3ext/ui_extra_schedulers.py": mapped(
         "core/extra_schedulers.py:ARG_NAMES", "core/extra_schedulers.py:coerce_args",
         "core/extra_schedulers.py:from_infotext", "core/extra_schedulers.py:infotext_items",
@@ -1748,7 +1782,8 @@ _XSAMP_PINS = (
                  "CFG++ UD10 AB 의 가중치 — ComfyUI sample_cfgpp_ud10_ab 이 넘기는 값과 같다(계획 X11: Comfy 는 코어 이름)")
       for name, value in (("UD10_HISTORY_WEIGHT", 0.25), ("UD10_ZERO_WEIGHT", 1.0), ("UD10_UNCOND_HISTORY_WEIGHT", 0.1))),
     *(_xsamp_pin(f"extra_samplers_{name.lower()}", "sam3ext/extra_samplers/ipndm_deis.py", name, value,
-                 "IPNDM·DEIS 차수·DEIS 방식 — ComfyUI KSampler 기본과 같다(계획 X11: Comfy 는 코어 이름)")
+                 "IPNDM·IPNDM_V·DEIS 차수·DEIS 방식 — ComfyUI KSampler 기본과 같다(계획 X11: Comfy 는 코어 이름, IPNDM_V 만 "
+                 "팩 ipndm_v_fixed — 0.33.1 의 계수 수정)")
       for name, value in (("IPNDM_MAX_ORDER", 4), ("DEIS_MAX_ORDER", 3), ("DEIS_MODE", "tab"))),
     # script-info(픽스처) — 잡음 구간 체크·시작·끝 슬라이더(v0.33.0). 앞 둘(max stage·η)은 ui() 를 AST 로 읽어 픽스처와 비교한다.
     _xsamp_slider_pin("extra_samplers_ui_noise_window_default", 2, "value", False, "DEFAULT_NOISE_WINDOW",
@@ -2076,6 +2111,7 @@ _COMFY_TWIN_ROWS = (
     ("extra_samplers_resize_mode", "extra_samplers_dy:RESIZE_MODE", "euler_(smea_)dy(_cfg_pp)"),
     ("extra_samplers_churn_min", "extra_samplers_dy:CHURN_MIN", "euler_(smea_)dy(_cfg_pp) churn"),
     ("extra_samplers_churn_max", "extra_samplers_dy:CHURN_MAX", "euler_(smea_)dy(_cfg_pp) churn"),
+    ("extra_samplers_ipndm_max_order", "extra_samplers_ipndm:IPNDM_MAX_ORDER", "ipndm_v_fixed 기본 차수"),
     # Anima SPEED — ForgeNeoAnimaSpeed 입력(이름·기본값·별칭)·계획(speed_schedule)·런너(speed_runner·speed_nodes)
     ("speed_arg_names", "speed_nodes:ARG_NAMES", "ForgeNeoAnimaSpeed 설정 이름"),
     ("speed_defaults", "speed_nodes:DEFAULTS", "ForgeNeoAnimaSpeed 기본값"),

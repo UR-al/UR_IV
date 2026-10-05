@@ -39,6 +39,8 @@ torch = None  # filled by bind_torch() in the @requires_torch classes
 
 # sam-extra's flow ODE entries: no eta, no noise_sampler (they never draw)
 _FLOW_ODE = ("dpmpp_2m_flow_ode", "dpmpp_2m_heun_flow_ode", "dpmpp_3m_flow_ode")
+# every entry that draws no noise (sam-extra's signatures): the flow ODE trio and IPNDM_V (the pack's ipndm_v_fixed)
+_NO_NOISE = (*_FLOW_ODE, "ipndm_v_fixed")
 
 
 def _stock_sampler(model, x, sigmas, extra_args=None, callback=None, disable=None):
@@ -83,7 +85,9 @@ class RegistrationTests(unittest.TestCase):
     """``install_extra_samplers`` in fake ComfyUI tables (no torch)."""
 
     def test_the_tables(self):
-        self.assertEqual(len(reg.PACK_SAMPLERS), 12)
+        self.assertEqual(len(reg.PACK_SAMPLERS), 13)
+        self.assertEqual(reg.PACK_SAMPLERS[-1], "ipndm_v_fixed")       # sam-extra 0.33.1's IPNDM_V (core ipndm_v keeps the typo)
+        self.assertEqual(reg.CORE_SAMPLERS, ("dpmpp_2m_sde_heun", "uni_pc_bh2", "cfgpp_ud10_ab", "ipndm", "deis"))
         self.assertEqual(set(reg.IMPLEMENTATIONS), set(reg.PACK_SAMPLERS))
         self.assertFalse(set(reg.PACK_SAMPLERS) & set(reg.CORE_SAMPLERS))
         self.assertLessEqual(set(reg.DY_SAMPLERS), set(reg.PACK_SAMPLERS))
@@ -122,7 +126,7 @@ class RegistrationTests(unittest.TestCase):
                     self.assertEqual(compat.entry_owner(entry), reg.OWNER)
                     self.assertEqual(entry.__name__, "sample_" + name)
                     parameters = inspect.signature(entry).parameters
-                    if name in _FLOW_ODE:
+                    if name in _NO_NOISE:
                         self.assertNotIn("noise_sampler", parameters)
                         self.assertNotIn("eta", parameters)
                     else:
@@ -136,7 +140,7 @@ class RegistrationTests(unittest.TestCase):
             reg.install_extra_samplers()
         self.assertIs(guidance_cns._unwrapped(kd.sample_er_sde_tunable), xs.sample_er_sde_tunable)
         self.assertTrue(guidance_cns._takes_noise_sampler(kd.sample_dpmpp_4m_sde))
-        for name in _FLOW_ODE:   # nothing drawn: CNS Path A runs them as they are
+        for name in _NO_NOISE:   # nothing drawn: CNS Path A runs them as they are
             self.assertFalse(guidance_cns._takes_noise_sampler(getattr(kd, "sample_" + name)))
         table = guidance_cns._kd_samplers(kd)
         self.assertTrue(table["sample_euler_dy_cfg_pp"][1])
@@ -145,7 +149,8 @@ class RegistrationTests(unittest.TestCase):
                 entry = getattr(kd, "sample_" + name)
                 self.assertTrue(guidance_common.declares_keyword(entry, guidance_common.STEP_OFFSET_KWARG))
                 self.assertNotIn("kd", inspect.signature(entry).parameters)
-        for name in ("er_sde_reverse_time", "er_sde_ode", "er_sde_tunable", "dpmpp_4m_sde", *_FLOW_ODE, "restart_flow"):
+        for name in ("er_sde_reverse_time", "er_sde_ode", "er_sde_tunable", "dpmpp_4m_sde", *_FLOW_ODE, "restart_flow",
+                     "ipndm_v_fixed"):
             self.assertFalse(guidance_common.declares_keyword(getattr(kd, "sample_" + name),
                                                               guidance_common.STEP_OFFSET_KWARG))
 

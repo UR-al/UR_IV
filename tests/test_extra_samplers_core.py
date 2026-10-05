@@ -211,9 +211,24 @@ class SamplerTableTests(unittest.TestCase):
         self.assertEqual({label: tuple(aliases) for label, aliases, *_ in self.specs}, dict(xsa.ALIASES))
         self.assertEqual(len(set(xsa.COMFY_NAMES.values())), 18)
         self.assertEqual(set(xsa.PACK_SAMPLERS) | set(xsa.CORE_SAMPLERS), set(xsa.COMFY_NAMES.values()))
-        self.assertEqual((len(xsa.PACK_SAMPLERS), len(xsa.CORE_SAMPLERS)), (12, 6))
+        self.assertEqual((len(xsa.PACK_SAMPLERS), len(xsa.CORE_SAMPLERS)), (13, 5))
         self.assertFalse(set(xsa.PACK_SAMPLERS) & set(xsa.CORE_SAMPLERS))
         self.assertEqual({xsa.LABEL_OF_COMFY[name] for name in xsa.COMFY_NAMES.values()}, set(xsa.LABELS))
+        # ComfyUI 이름 = 확장 첫 별칭 — IPNDM_V 만 팩의 ipndm_v_fixed(코어 ipndm_v 는 상류 계수 오타를 그대로 둔다,
+        # sam-extra 0.33.1 이 고쳤다). 확장 별칭 ipndm_v 는 그대로 IPNDM_V 로 풀리고, ComfyUI 이름도 풀린다
+        self.assertEqual(dict(xsa.COMFY_NAME_OVERRIDES), {xsa.LABEL_IPNDM_V: "ipndm_v_fixed"})
+        self.assertEqual(xsa.COMFY_NAMES[xsa.LABEL_IPNDM_V], xsa.COMFY_IPNDM_V_FIXED)
+        self.assertEqual(xsa.ALIASES[xsa.LABEL_IPNDM_V], ("ipndm_v",))
+        for label, aliases in xsa.ALIASES.items():
+            if label not in xsa.COMFY_NAME_OVERRIDES:
+                self.assertEqual(xsa.COMFY_NAMES[label], aliases[0], label)
+        self.assertEqual(xsa.PACK_SAMPLERS[-1], "ipndm_v_fixed")
+        self.assertNotIn("ipndm_v", xsa.PACK_SAMPLERS + xsa.CORE_SAMPLERS)
+        for text in ("IPNDM_V", "ipndm_v", "ipndm_v_fixed", "  IPNDM_V_FIXED "):
+            with self.subTest(text=text):
+                self.assertEqual(xsa.resolve_sampler(text), xsa.LABEL_IPNDM_V)
+                self.assertEqual(xsa.comfy_name(text), "ipndm_v_fixed")
+        self.assertEqual(xsa.IPNDM_V_FIX_VERSION, "0.33.1")
 
     def test_groups_follow_kind_and_cfg_pp(self):
         kinds = {label: kind for label, _aliases, kind, _cfg in self.specs}
@@ -692,11 +707,13 @@ class PlanTests(unittest.TestCase):
 class NameTests(unittest.TestCase):
     def test_resolve_folds_labels_comfy_names_and_reforge_aliases(self):
         for label, aliases in xsa.ALIASES.items():
+            name = xsa.COMFY_NAMES[label]     # first alias; IPNDM_V -> the pack's ipndm_v_fixed (sam-extra 0.33.1's fix)
             for text in (label, label.upper(), f"  {label.lower()} ", label.replace(" ", "  "), *aliases,
-                         *(alias.upper() for alias in aliases)):
+                         *(alias.upper() for alias in aliases), name, name.upper()):
                 with self.subTest(text=text):
                     self.assertEqual(xsa.resolve_sampler(text), label)
-            self.assertEqual(xsa.comfy_name(label), aliases[0])
+            self.assertEqual(xsa.comfy_name(label), name)
+            self.assertEqual(name, "ipndm_v_fixed" if label == xsa.LABEL_IPNDM_V else aliases[0])
         for text in ("ER SDE", "er_sde", "Euler", "Euler a", "UniPC", "Restart", "DPM++ 3M SDE", "", None,
                      xsa.USE_SAME_SAMPLER, "ER SDE (Reverse-time) Karras", "euler dy cfg pp"):
             with self.subTest(text=text):

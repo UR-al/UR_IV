@@ -132,15 +132,26 @@ ALIASES = MappingProxyType({
     LABEL_RESTART_FLOW: ("restart_flow",),
 })
 LABELS = tuple(ALIASES)
-COMFY_NAMES = MappingProxyType({label: aliases[0] for label, aliases in ALIASES.items()})
+# ComfyUI 이름이 확장 첫 별칭과 다른 표기 — IPNDM_V: 확장 별칭과 같은 ComfyUI 코어 ipndm_v 는 상류(zju-pi) 4차 계수의 오타
+# (마지막 인자 h_{n-1}/h_{n-2} — 3계 차분은 h_{n-2}/h_{n-3})를 그대로 둬 계수 합이 1 이 아니다(Anima Linear Quadratic 28 스텝의
+# 16번째 스텝에서 약 −174 → 녹색 잡음). sam-extra 0.33.1 이 그 한 인자를 고쳤다(IPNDM_V_FIX_VERSION — 계수 합이 1 이 되는
+# 일관성 수정일 뿐: 10-05 GPU 에서 고친 판도 Linear Quadratic 은 두 호스트 모두 탄 그림이다. 스텝 크기가 3.71·2.46·1.59배로
+# 뛰는 곳에서 스텝 크기를 아는 4차 외삽은 계수가 커진다(정확한 가변 스텝 AB4 도 117) — 샘플러·스케줄 조합이라 힌트로 Simple·
+# IPNDM 을 안내한다). 팩은 코어 이름을 덮지 않으므로 고친 샘플러를 제 이름으로 등록하고(팩 extra_samplers_ipndm),
+# 앱은 IPNDM_V 를 그 이름으로 보낸다. 표기와 코어 이름이 같은 키('ipndm_v')로 접혀 앱 패스는 코어 ipndm_v 를 돌리지 않는다.
+COMFY_IPNDM_V_FIXED = "ipndm_v_fixed"
+IPNDM_V_FIX_VERSION = "0.33.1"
+COMFY_NAME_OVERRIDES = MappingProxyType({LABEL_IPNDM_V: COMFY_IPNDM_V_FIXED})
+COMFY_NAMES = MappingProxyType({label: COMFY_NAME_OVERRIDES.get(label, aliases[0]) for label, aliases in ALIASES.items()})
 LABEL_OF_COMFY = MappingProxyType({name: label for label, name in COMFY_NAMES.items()})
-# ComfyUI 쪽(계획 X11·X12): 앱 노드 팩이 등록하는 12개 / ComfyUI 코어에 이미 같은 계산으로 있는 6개(별칭 행만)
+# ComfyUI 쪽(계획 X11·X12): 앱 노드 팩이 등록하는 13개(확장 첫 별칭 12 + ipndm_v_fixed) / ComfyUI 코어에 이미 같은 계산으로
+# 있는 5개(별칭 행만)
 PACK_SAMPLERS = (
     "er_sde_reverse_time", "er_sde_ode", "er_sde_tunable", "dpmpp_4m_sde", "euler_dy_cfg_pp",
     "euler_smea_dy_cfg_pp", "euler_dy", "euler_smea_dy", "dpmpp_2m_flow_ode", "dpmpp_2m_heun_flow_ode",
-    "dpmpp_3m_flow_ode", "restart_flow",
+    "dpmpp_3m_flow_ode", "restart_flow", COMFY_IPNDM_V_FIXED,
 )
-CORE_SAMPLERS = ("dpmpp_2m_sde_heun", "uni_pc_bh2", "cfgpp_ud10_ab", "ipndm", "ipndm_v", "deis")
+CORE_SAMPLERS = ("dpmpp_2m_sde_heun", "uni_pc_bh2", "cfgpp_ud10_ab", "ipndm", "deis")
 CFGPP_UD10_MIN_COMFY = "0.35.0"   # cfgpp_ud10_ab 이 ComfyUI 코어에 들어온 버전(3ac5d794)
 
 # 묶음(registry SamplerSpec 의 kind·cfg_pp 와 params 의 표)
@@ -166,7 +177,7 @@ RESTART_LONG_FROM = 36
 UD10_HISTORY_WEIGHT = 0.25          # cfgpp_ud10_ab.py — ComfyUI sample_cfgpp_ud10_ab 이 넘기는 값
 UD10_ZERO_WEIGHT = 1.0
 UD10_UNCOND_HISTORY_WEIGHT = 0.1
-IPNDM_MAX_ORDER = 4                 # ipndm_deis.py — ComfyUI KSampler 기본과 같다
+IPNDM_MAX_ORDER = 4                 # ipndm_deis.py — ComfyUI KSampler 기본·팩 extra_samplers_ipndm 과 같다
 DEIS_MAX_ORDER = 3
 DEIS_MODE = "tab"
 
@@ -442,6 +453,7 @@ def _fold(text: Any) -> str:
 _FOLDED_SAMPLERS = MappingProxyType({
     **{_fold(label): label for label in LABELS},
     **{_fold(alias): label for label, aliases in ALIASES.items() for alias in aliases},
+    **{_fold(name): label for label, name in COMFY_NAMES.items()},     # ComfyUI 이름(ipndm_v_fixed — ComfyUI PNG 의 Sampler)
 })
 
 
@@ -486,7 +498,7 @@ uses_window = uses_eta
 
 
 def comfy_name(text: Any) -> Optional[str]:
-    """ComfyUI 에서 쓰는 이름(첫 별칭). 이 확장 샘플러가 아니면 None."""
+    """ComfyUI 에서 쓰는 이름(첫 별칭 — IPNDM_V 만 팩의 ipndm_v_fixed). 이 확장 샘플러가 아니면 None."""
     label = resolve_sampler(text)
     return COMFY_NAMES[label] if label else None
 
@@ -867,13 +879,15 @@ def parse_status(value: Any) -> SamplerStatus:
 __all__ = [
     "ADETAILER_GROUP_WIDGET", "ADETAILER_SLOT_WIDGETS", "ALIASES", "APP_DEFAULTS", "ARG_NAMES", "ARG_SPEC",
     "BACKEND_COMFY", "BACKEND_KREA2", "BACKEND_WEBUI", "CFGPP_UD10_MIN_COMFY", "CFG_PP_LABELS", "COMFY_AUTOMATIC_SCHEDULER",
-    "COMFY_DISCARD_PENULTIMATE", "COMFY_INPUTS", "COMFY_MIN_PACK_VERSION", "COMFY_MODEL_OPTIONS_KEY", "COMFY_NAMES",
+    "COMFY_DISCARD_PENULTIMATE", "COMFY_INPUTS", "COMFY_IPNDM_V_FIXED", "COMFY_MIN_PACK_VERSION", "COMFY_MODEL_OPTIONS_KEY",
+    "COMFY_NAMES", "COMFY_NAME_OVERRIDES",
     "COMFY_REPORT_INPUT", "COMFY_SETTINGS_NODE", "CORE_SAMPLERS", "DEFAULTS", "DEFAULT_ETA", "DEFAULT_MAX_STAGE",
     "DEFAULT_NOISE_END", "DEFAULT_NOISE_START", "DEFAULT_NOISE_WINDOW", "DEIS_MAX_ORDER", "DEIS_MODE", "DY_KIND",
     "DY_REASONS", "DY_REASON_EXTRA_CONCAT", "DY_REASON_PID", "DY_REASON_SEPARATOR", "DY_REASON_SPECTRUM", "DY_REASON_WAN",
     "DY_SKIPPED_PREFIX", "ER_SDE_LABELS", "ETA_LABELS", "ETA_MAX", "ETA_MIN", "ETA_STEP", "EXTENSION_DEFAULTS",
     "ExtraSamplersPlan", "ExtraSamplersSettings", "FLOW_ODE_LABELS", "HIRES_GROUP_WIDGET", "HIRES_SAMPLER_WIDGET",
-    "IPNDM_MAX_ORDER", "KEY_ETA", "KEY_FORGE_ETA", "KEY_HIRES_SAMPLER", "KEY_MAX_STAGE", "KEY_NOISE_WINDOW", "KEY_SAMPLER",
+    "IPNDM_MAX_ORDER", "IPNDM_V_FIX_VERSION", "KEY_ETA", "KEY_FORGE_ETA", "KEY_HIRES_SAMPLER", "KEY_MAX_STAGE",
+    "KEY_NOISE_WINDOW", "KEY_SAMPLER",
     "KIND_CFG_PP", "KIND_DY", "KIND_ER_SDE", "KIND_OTHER", "KIND_RESTART", "KIND_SMEA", "LABELS", "LABEL_CFGPP_UD10_AB",
     "LABEL_DEIS", "LABEL_DPMPP_2M_FLOW_ODE", "LABEL_DPMPP_2M_HEUN_FLOW_ODE", "LABEL_DPMPP_2M_SDE_HEUN",
     "LABEL_DPMPP_3M_FLOW_ODE", "LABEL_DPMPP_4M_SDE", "LABEL_ER_SDE_ODE", "LABEL_ER_SDE_REVERSE_TIME", "LABEL_ER_SDE_TUNABLE",

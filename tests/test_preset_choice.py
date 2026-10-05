@@ -111,7 +111,7 @@ class ForgeScheduleTypeLabelTests(unittest.TestCase):
         comfy_samplers = [*COMFY_SAMPLERS, *xsa.COMFY_NAMES.values()]
         forge_samplers = [*FORGE_SAMPLERS, *xsa.LABELS]
         for label, name in (('ER SDE (Tunable)', 'er_sde_tunable'), ('UniPC bh2', 'uni_pc_bh2'),
-                            ('IPNDM_V', 'ipndm_v'), ('IPNDM', 'ipndm'), ('DPM++ 3M (flow ODE)', 'dpmpp_3m_flow_ode'),
+                            ('IPNDM_V', 'ipndm_v_fixed'), ('IPNDM', 'ipndm'), ('DPM++ 3M (flow ODE)', 'dpmpp_3m_flow_ode'),
                             *xsa.COMFY_NAMES.items()):
             with self.subTest(sampler=label):
                 self.assertEqual(comfy_samplers[match_sampler(label, comfy_samplers)], name)
@@ -123,6 +123,19 @@ class ForgeScheduleTypeLabelTests(unittest.TestCase):
                     self.assertEqual(names[match_scheduler(text, names)], name)
         self.assertEqual(names[match_scheduler('Flow Cosmos rho7', names)], 'flow_cosmos_rho7')
         self.assertEqual(match_scheduler('Flow Cosmos', names), -1)
+
+    def test_ipndm_v_picks_an_item_that_runs_the_fixed_sampler(self):
+        """IPNDM_V 는 ComfyUI 에서 팩의 ipndm_v_fixed(sam-extra 0.33.1 의 계수 수정)로 돈다. 실제 ComfyUI 목록에는 코어 ipndm_v
+        (상류 오타)도 있고 표기와 같은 키로 접힌다 — 어느 항목이 골라져도 컴파일러는 고친 샘플러를 보낸다."""
+        from core.comfy_workflow_compiler import ComfyWorkflowCompiler
+
+        for items in ([*COMFY_SAMPLERS, 'ipndm', 'ipndm_v', 'deis', 'ipndm_v_fixed'], [*COMFY_SAMPLERS, 'ipndm_v_fixed']):
+            for text in ('IPNDM_V', 'ipndm_v', 'ipndm_v_fixed'):
+                with self.subTest(items=len(items), text=text):
+                    picked = items[match_sampler(text, items)]
+                    self.assertEqual(ComfyWorkflowCompiler._comfy_sampler(picked), 'ipndm_v_fixed')
+        self.assertEqual([*FORGE_SAMPLERS, *xsa.LABELS][match_sampler('ipndm_v_fixed', [*FORGE_SAMPLERS, *xsa.LABELS])],
+                         'IPNDM_V')
 
     def test_the_label_table_only_holds_labels_that_do_not_fold_to_their_name(self):
         for label, name in FORGE_SCHEDULER_LABELS.items():

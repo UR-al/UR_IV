@@ -1329,6 +1329,7 @@ class ComfyPackMirrorPinTests(unittest.TestCase):
             "extra_samplers_restart": ("RESTART_S_MIN", "RESTART_S_MAX", "RESTART_MIN_STEPS", "RESTART_TIMES",
                                        "RESTART_TIMES_LONG", "RESTART_LONG_FROM"),
             "extra_samplers_dy": ("SMEA_SCALE", "RESIZE_MODE", "CHURN_MIN", "CHURN_MAX"),
+            "extra_samplers_ipndm": ("IPNDM_MAX_ORDER",),
             "speed_nodes": ("ARG_NAMES", "DEFAULTS", "ARG_ALIASES", "BROWNIAN_STAGE_SEED_STRIDE"),
             "speed_schedule": ("MODES", "THRESHOLDS", "TRANSFORMS", "PRESET_NAMES", "PRESETS", "REFERENCE_LATENT",
                                "CUSTOM_DEFAULT_A", "CUSTOM_DEFAULT_BETA", "MAX_COARSE_FRACTION", "RESPACE_PATCH"),

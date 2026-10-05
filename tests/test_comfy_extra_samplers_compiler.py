@@ -1,9 +1,10 @@
 """Extra Samplers (sam-extra v0.33.0) on ComfyUI — the compiler side (plan C3, PLAN_amend C3).
 
-The bundled pack (1.7.0) registers twelve of sam-extra's eighteen samplers in ComfyUI under their Forge aliases (the
-other six are ComfyUI core's own) and ``ForgeNeoExtraSamplerSettings`` (MODEL -> MODEL) carries the block's five ER SDE
-values (``max_stage``, ``eta``, ``noise_window``, ``noise_start``, ``noise_end``) in the MODEL's ``model_options`` so
-every later sampler of that MODEL reads them.  The compiler adds the node only when a value differs from the defaults
+The bundled pack (1.7.0) registers thirteen of sam-extra's eighteen samplers in ComfyUI — twelve under their Forge
+aliases and IPNDM_V as ``ipndm_v_fixed`` (sam-extra 0.33.1's fourth-order weight fix; ComfyUI core's ``ipndm_v`` keeps
+the upstream typo; the other five are ComfyUI core's own) — and ``ForgeNeoExtraSamplerSettings`` (MODEL -> MODEL)
+carries the block's five ER SDE values (``max_stage``, ``eta``, ``noise_window``, ``noise_start``, ``noise_end``) in
+the MODEL's ``model_options`` so every later sampler of that MODEL reads them.  The compiler adds the node only when a value differs from the defaults
 (plan R5/X5, ComfyUI rule — every other graph stays byte-identical), once on each model stack the passes share, right
 before the guidance stack (default graph, each ADetailer/SAM3 LoRA branch, a custom workflow).  ``validate`` checks
 that every pack sampler name a node runs is the pack's own; informational compile warnings mirror Forge's Spectrum +
@@ -45,7 +46,7 @@ DETAIL_DAEMON = {anima_guidance.SCRIPT_DETAIL_DAEMON: {"args": {"dd_enabled": Tr
 
 
 def caps(*, owned=None) -> dict:
-    """Capabilities with all eighteen names in KSampler's list; the pack owns its twelve (or ``owned``)."""
+    """Capabilities with all eighteen names in KSampler's list; the pack owns its thirteen (or ``owned``)."""
     result = _owner_caps(samplers=(*xsa.PACK_SAMPLERS, *xsa.CORE_SAMPLERS), owned_samplers=owned)
     result["KSamplerSelect"] = {"input": {"required": {"sampler_name": result["KSampler"]["input"]["required"]
                                                        ["sampler_name"]}}}
@@ -544,11 +545,19 @@ class ExtraSamplersPreflightTests(unittest.TestCase):
         self.assertTrue(both["ok"], both)
         self.assertEqual((self._row(both)["state"], self._row(both)["label"]),
                          ("ready", "Extra Samplers — euler_dy · ER SDE 값"))
-        for body in (payload(), payload(sampler="IPNDM_V", xsa_block=block())):
+        for body in (payload(), payload(sampler="IPNDM", xsa_block=block())):
             with self.subTest(body=body):
                 result = feature_preflight(compiler, "checkpoint.safetensors", body)
                 self.assertTrue(result["ok"])
                 self.assertEqual((self._row(result)["state"], self._row(result)["requested"]), ("off", False))
+        # IPNDM_V runs the pack's ipndm_v_fixed (sam-extra 0.33.1's fix) — a pack name, owner-checked like the others
+        fixed = feature_preflight(compiler, "checkpoint.safetensors", payload(sampler="IPNDM_V", xsa_block=block()))
+        self.assertTrue(fixed["ok"], fixed)
+        self.assertEqual((self._row(fixed)["state"], self._row(fixed)["label"]), ("ready", "Extra Samplers — ipndm_v_fixed"))
+        foreign_fixed = feature_preflight(ComfyWorkflowCompiler(caps(owned=())), "checkpoint.safetensors",
+                                          payload(sampler="IPNDM_V"))
+        self.assertFalse(foreign_fixed["ok"])
+        self.assertIn("다른 노드 팩이 'ipndm_v_fixed' 샘플러를 먼저 등록", foreign_fixed["error"])
         foreign = feature_preflight(ComfyWorkflowCompiler(caps(owned=())), "checkpoint.safetensors",
                                     payload(sampler="DPM++ 4M SDE"))
         self.assertFalse(foreign["ok"])

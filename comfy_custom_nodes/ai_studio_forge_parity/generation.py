@@ -972,7 +972,9 @@ _AD_SAMPLER_ALIASES = {
     "dpm fast": "dpm_fast", "dpm adaptive": "dpm_adaptive",
     "unipc": "uni_pc", "uni pc": "uni_pc", "uni_pc": "uni_pc",
     "lcm": "lcm", "ddim": "ddim", "er sde": "er_sde", "er-sde": "er_sde",
-    # sam-extra Extra Samplers (v0.33.0): twelve names this pack registers, five ComfyUI core names.
+    # sam-extra Extra Samplers (v0.33.0): thirteen names this pack registers, four ComfyUI core names (the fifth,
+    # dpmpp_2m_sde_heun, is above). "IPNDM_V" -> the pack's ipndm_v_fixed (sam-extra 0.33.1's fix; ComfyUI core's ipndm_v
+    # keeps the upstream typo) — the Forge label and that core name fold to the same key.
     "er sde (reverse-time)": "er_sde_reverse_time", "er sde (ode)": "er_sde_ode",
     "er sde (tunable)": "er_sde_tunable", "dpm++ 4m sde": "dpmpp_4m_sde",
     "euler dy cfg++": "euler_dy_cfg_pp", "euler smea dy cfg++": "euler_smea_dy_cfg_pp",
@@ -980,7 +982,7 @@ _AD_SAMPLER_ALIASES = {
     "dpm++ 2m (flow ode)": "dpmpp_2m_flow_ode", "dpm++ 2m heun (flow ode)": "dpmpp_2m_heun_flow_ode",
     "dpm++ 3m (flow ode)": "dpmpp_3m_flow_ode",
     "unipc bh2": "uni_pc_bh2", "uni pc bh2": "uni_pc_bh2", "cfg++ ud10 ab": "cfgpp_ud10_ab",
-    "ipndm": "ipndm", "ipndm_v": "ipndm_v", "deis": "deis", "restart (flow)": "restart_flow",
+    "ipndm": "ipndm", "ipndm_v": "ipndm_v_fixed", "deis": "deis", "restart (flow)": "restart_flow",
 }
 
 _AD_SAMPLER_SCHEDULER_SUFFIXES = (

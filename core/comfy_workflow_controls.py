@@ -335,7 +335,7 @@ def feature_preflight(compiler, model_name: str, payload: Mapping, *, workflow=N
         ("extra_schedulers", "Extra Schedulers 값",
          compiler._extra_schedulers_state(payload) is not None and bool(compiler._extra_schedulers_needed(payload)),
          extra_schedulers.COMFY_NODE_CLASS),
-        # sam-extra Extra Samplers — 패스가 팩이 등록하는 12 이름 중 하나를 쓰거나(이름 확인 = 컴파일의 소유 검사, 노드
+        # sam-extra Extra Samplers — 패스가 팩이 등록하는 13 이름(IPNDM_V → ipndm_v_fixed 포함) 중 하나를 쓰거나(이름 확인 = 컴파일의 소유 검사, 노드
         # 없음 → 클래스 None) ER SDE 값이 기본값이 아닐 때(그때 컴파일러가 노드를 넣는다). 남의 이름·옛 팩은 컴파일
         # 오류로 '막힘'이 된다.
         ("extra_samplers",

@@ -20,9 +20,14 @@ same toy model, sigmas and deterministic noise — and the latents must be equal
   come back; an all-ones mask == no mask);
 * the DPM++ flow ODE trio (== sam-extra and == ComfyUI's ``dpmpp_2m_sde``/``dpmpp_3m_sde`` at η 0, the noise stub
   never called); Restart (flow) (fewer than 20 steps == ComfyUI's ``sample_heun``);
-* the free core names (X11): the extension's ``cfgpp_ud10_ab``, ``ipndm``, ``ipndm_v``, ``deis`` (Forge's
-  k-diffusion and ``deis.py``) == ComfyUI's core functions bit for bit; ``dpmpp_2m_sde_heun`` too with a shared
-  noise sampler.
+* the free core names (X11): the extension's ``cfgpp_ud10_ab``, ``ipndm``, ``deis`` (Forge's k-diffusion and
+  ``deis.py``) == ComfyUI's core functions bit for bit; ``dpmpp_2m_sde_heun`` too with a shared noise sampler;
+* IPNDM_V: the pack's ``ipndm_v_fixed`` (sam-extra 0.33.1's fourth-order weight fix; ComfyUI core's ``ipndm_v`` keeps the
+  upstream typo and stays ComfyUI's) == sam-extra 0.33.1's IPNDM_V on ComfyUI's schedules incl. Anima's Linear Quadratic
+  (``tests/_ipndm_v_oracle`` — before the registry's sync the installed 0.33.0 file with its one line fixed), == core
+  ``ipndm_v`` bit for bit where the step ratio is constant and the steps are exact in binary (within rounding on
+  ComfyUI's float ``exponential`` list), and the constant-velocity probe through ComfyUI's tables (``ipndm_v_fixed``
+  exact; core ``ipndm_v`` about −174 at step 15, 0-based).
 
 Skipped unless ``AISTUDIO_COMFY_TEST_ROOT`` is set (and without the extension; ``AISTUDIO_REQUIRE_FORGE_EXT=1`` makes
 that a failure). Run it with the portable python, the repo (or worktree) first on ``sys.path``,
@@ -183,6 +188,11 @@ class ExtraSamplersOnRealComfyTests(unittest.TestCase):
         with cls._forge():
             cls.ext = {name: import_ext(f"sam3ext.extra_samplers.{name}") for name in (
                 "er_sde", "dpmpp_4m_sde", "euler_dy", "dpmpp_flow", "restart_flow", "cfgpp_ud10_ab", "ipndm_deis")}
+        from tests import _ipndm_v_oracle
+
+        cls.ipndm_helpers = _ipndm_v_oracle
+        function, cls.ipndm_v_how = _ipndm_v_oracle.ipndm_v_oracle(cls.ext["ipndm_deis"])
+        cls.ipndm_v_oracle = staticmethod(function)
 
     @classmethod
     def _forge(cls):
@@ -279,6 +289,11 @@ class ExtraSamplersOnRealComfyTests(unittest.TestCase):
                 if name != "uni_pc_bh2":
                     self.assertIsNotNone(entry)
                 self.assertNotEqual(self.reg.entry_owner(entry), reg.OWNER)
+        # ComfyUI core's ipndm_v (the upstream typo) is left alone and stays offered; the pack's fixed one is its own
+        self.assertIn("ipndm_v", samplers.KSampler.SAMPLERS)
+        self.assertNotEqual(self.reg.entry_owner(self.ckd.sample_ipndm_v), reg.OWNER)
+        self.assertNotIn("ipndm_v", reg.PACK_SAMPLERS + reg.CORE_SAMPLERS)
+        self.assertEqual(self.reg.entry_owner(self._entry("ipndm_v_fixed")), reg.OWNER)
         again = reg.install_extra_samplers(required=True)
         self.assertEqual((again.owned, again.inserted), (reg.PACK_SAMPLERS, ()))
 
@@ -555,7 +570,6 @@ class ExtraSamplersOnRealComfyTests(unittest.TestCase):
         cases = (
             ("cfgpp_ud10_ab", self.ext["cfgpp_ud10_ab"].sample_cfgpp_ud10_ab, _CfgModel, {}),
             ("ipndm", self.ext["ipndm_deis"].sample_ipndm, _StableModel, {}),
-            ("ipndm_v", self.ext["ipndm_deis"].sample_ipndm_v, _StableModel, {}),
             ("deis", self.ext["ipndm_deis"].sample_deis, _StableModel, {}),
         )
         for (name, theirs, kind, kwargs), flow, steps, shape in itertools.product(
@@ -574,6 +588,81 @@ class ExtraSamplersOnRealComfyTests(unittest.TestCase):
                 self._same(self._pair(self.ckd.sample_dpmpp_2m_sde_heun,
                                       (self.ext["dpmpp_flow"].sample_dpmpp_2m_sde_heun, "forge"), flow=flow,
                                       shape=shape, ours_kwargs=kwargs, theirs_kwargs=kwargs), f"eta={eta}")
+
+
+    # -- IPNDM_V: sam-extra 0.33.1's fourth-order weight fix (the pack's ipndm_v_fixed) ---------------------------------
+
+    def test_the_lq28_constant_is_comfyuis_linear_quadratic_list(self):
+        self.assertTrue(torch.equal(_bits(self._sigmas(True, 28, "linear_quadratic")),
+                                    _bits(torch.tensor(self.ipndm_helpers.LQ28, dtype=torch.float32))))
+
+    def test_ipndm_v_fixed_is_sam_extra_0331s_ipndm_v(self):
+        """The registered ``sample_ipndm_v_fixed`` on ComfyUI's module == sam-extra 0.33.1's IPNDM_V on Forge's (before the
+        registry's sync: the installed 0.33.0 file with its one coeff4 line fixed — ``tests/_ipndm_v_oracle``), bit for
+        bit, on ComfyUI's own schedules incl. Anima's Linear Quadratic."""
+        theirs = self.ipndm_v_oracle
+        cases = 0
+        for scheduler, flow, steps, shape in itertools.product(
+                ("linear_quadratic", "simple", "normal", "sgm_uniform", "beta", "karras", "exponential"), (True, False),
+                (6, 13, 28), _SHAPES):
+            with self.subTest(scheduler=scheduler, flow=flow, steps=steps, shape=shape, oracle=self.ipndm_v_how):
+                ours = self._entry("ipndm_v_fixed")
+                self._same(self._pair(lambda *a, noise_sampler=None, **k: ours(*a, **k),
+                                      (lambda *a, noise_sampler=None, **k: theirs(*a, **k), "forge"),
+                                      flow=flow, steps=steps, shape=shape, noise=False, scheduler=scheduler),
+                           f"ipndm_v_fixed {scheduler}", draws=False)
+                cases += 1
+        self.assertEqual(cases, 84)
+
+    def test_ipndm_v_fixed_is_comfys_ipndm_v_where_the_step_ratio_is_constant(self):
+        """Only the typo differs from ComfyUI core's ``ipndm_v``: on lists whose step ratio is constant and whose steps
+        are exact in binary (power-of-two equal steps, doubling and halving steps) the latents are bit for bit ComfyUI's;
+        on a geometric list in floating point (``exponential``) only within rounding — equal ratios alone do not make
+        the two coeff4 expressions round alike — and on Linear Quadratic they part."""
+        core, ours = self.ckd.sample_ipndm_v, self._entry("ipndm_v_fixed")
+        lists = []
+        for n in (4, 8, 16, 32):
+            equal = torch.arange(n, -1, -1, dtype=torch.float32) / n
+            lists += [(f"equal {n}", equal), (f"equal {n} x8", equal * 8)]
+        lists.append(("doubling", torch.tensor([2.0 ** k for k in range(4, -9, -1)] + [0.0])))
+        lists.append(("halving", torch.tensor([1.0 - (2.0 ** k - 1) / 64 for k in range(7)] + [0.0])))
+        for (label, sigmas), dtype, shape in itertools.product(lists, (torch.float32, torch.float64), _SHAPES):
+            with self.subTest(sigmas=label, dtype=dtype, shape=shape):
+                runs = []
+                for function in (core, ours):
+                    model = _StableModel(self.sampling[True], comfy_layout=True)
+                    x = self._latent(shape, sigmas).to(dtype)
+                    runs.append((function(model, x, sigmas.to(dtype), extra_args={}, disable=True), model.calls))
+                self.assertTrue(torch.equal(_bits(runs[0][0]), _bits(runs[1][0])), label)
+                self.assertEqual([c[:2] for c in runs[0][1]], [c[:2] for c in runs[1][1]])
+        for scheduler, close in (("exponential", True), ("linear_quadratic", False)):
+            with self.subTest(scheduler=scheduler):
+                sigmas = self._sigmas(False, 20, scheduler) if scheduler == "exponential" else self._sigmas(True, 28, scheduler)
+                outs = []
+                for function in (core, ours):
+                    model = _StableModel(self.sampling[scheduler == "linear_quadratic"], comfy_layout=True)
+                    outs.append(function(model, self._latent(_SHAPES[0], sigmas).double(), sigmas.double(), extra_args={},
+                                         disable=True))
+                if close:
+                    self.assertTrue(torch.allclose(outs[0], outs[1], rtol=1e-5, atol=1e-6))   # float32 schedule: ratios equal to ~1e-7
+                else:
+                    self.assertGreater(float((outs[0] - outs[1]).abs().max()), 1e-3)
+
+    def test_the_constant_velocity_probe_through_comfyuis_tables(self):
+        """``D = x − σ·v`` (``d = v``): the entry ComfyUI's KSampler runs for ``ipndm_v_fixed`` takes exact steps on Anima's
+        Linear Quadratic list (weights summing to 1); ComfyUI's core ``ipndm_v`` sums to about −174 at step 15 (0-based;
+        σ 0.968 → 0.952) — the green noise of the 10-05 GPU check."""
+        sigmas = self._sigmas(True, 28, "linear_quadratic").double()
+        for name in ("ipndm_v_fixed", "ipndm_v"):
+            with self.subTest(sampler=name):
+                function = self.samplers.sampler_object(name).sampler_function
+                probe = self.ipndm_helpers.ConstantVelocity()
+                sums = probe.step_sums(sigmas, function(probe, probe.x0.clone(), sigmas, extra_args={}, disable=True))
+                if name == "ipndm_v_fixed":
+                    self.assertIs(function, self._entry(name))
+                    self.assertLess(max(abs(value - 1) for value in sums), 1e-9, sums)
+                else:
+                    self.assertTrue(-180 < sums[15] < -170, sums[15])
 
 
 if __name__ == "__main__":

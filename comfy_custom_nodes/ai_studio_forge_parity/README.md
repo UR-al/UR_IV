@@ -110,9 +110,10 @@ itself; restart a ComfyUI you started yourself.
   sampler list are registered in ComfyUI's KSampler sampler list under sam-extra's own names (its first aliases) —
   `er_sde_reverse_time`, `er_sde_ode`, `er_sde_tunable`, `dpmpp_4m_sde`, `euler_dy_cfg_pp`, `euler_smea_dy_cfg_pp`,
   `euler_dy`, `euler_smea_dy`, `dpmpp_2m_flow_ode`, `dpmpp_2m_heun_flow_ode`, `dpmpp_3m_flow_ode`, `restart_flow`
-  — so the app's base, Hires, ADetailer (Impact FaceDetailer), SAM3 and custom-workflow samplers find them by name
-  (`extra_samplers_register.py`). The other six are ComfyUI's own (`dpmpp_2m_sde_heun`, `uni_pc_bh2`,
-  `cfgpp_ud10_ab` from ComfyUI v0.35.0, `ipndm`, `ipndm_v`, `deis`): the app only maps the Forge label. A name another
+  — and a thirteenth, `ipndm_v_fixed`, is sam-extra 0.33.1's IPNDM_V (next item), so the app's base, Hires,
+  ADetailer (Impact FaceDetailer), SAM3 and custom-workflow samplers find them by name
+  (`extra_samplers_register.py`). The other five are ComfyUI's own (`dpmpp_2m_sde_heun`, `uni_pc_bh2`,
+  `cfgpp_ud10_ab` from ComfyUI v0.35.0, `ipndm`, `deis`): the app only maps the Forge label. A name another
   node pack already provides is never replaced (e.g. Koishi-Star's own node registers `euler_dy`/`euler_smea_dy` with
   its always-churn rule): it is skipped, logged once and left out of the pack's `owned_names`, and the app refuses a
   graph that needs it. `dpmpp_4m_sde` and `dpmpp_3m_flow_ode` join `KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS`
@@ -120,6 +121,23 @@ itself; restart a ComfyUI you started yourself.
   with its own discard list, so for those two the pack hands it `scheduler_func_opt`
   (`extra_samplers_register.impact_scheduler_func`): the same sigmas as KSampler's (one step more, the penultimate
   dropped), as Forge discards on the ADetailer pass too.
+- **IPNDM_V fix** (`ipndm_v_fixed`, `extra_samplers_ipndm.py`): ComfyUI's `ipndm_v` and sam-extra's IPNDM_V up to
+  0.33.0 carry an upstream (zju-pi) typo in the fourth-order weight — `h_{n-1}/h_{n-2}` where the third divided
+  difference needs `h_{n-2}/h_{n-3}` — so the weights do not sum to 1 where the step ratio changes: about -174 at
+  step 15 (0-based) of Anima's Linear Quadratic 28-step list, and the image turns to green noise. sam-extra 0.33.1
+  fixes that one factor — a consistency fix, not a cure for Linear Quadratic: with it the image is no longer green
+  noise but still burnt and smeared on Forge and on ComfyUI (2026-10-05 GPU check). That list's step size jumps
+  ×3.71, ×2.46, ×1.59 after 14 tiny steps, and any step-size-aware fourth-order extrapolation weights the old
+  derivatives up to about 155 there (the exact variable-step Adams–Bashforth weights reach 117) — a sampler ×
+  scheduler combination. Use IPNDM_V with Simple (Normal is coherent but grainy), or IPNDM, which is fine on Linear
+  Quadratic. The pack never replaces ComfyUI's core `ipndm_v`, so it registers the fixed sampler as
+  `ipndm_v_fixed` and the app sends Forge's "IPNDM_V" there (the label and the core name fold to the same key, so
+  the app's passes never run the core one). Two other upstream inaccuracies are kept on purpose (`temp1`'s
+  parenthesisation, the sign of `temp2`'s second term — the weights still sum to 1). The result equals sam-extra
+  0.33.1's IPNDM_V bit for bit on every list. Where the step ratio is constant (equal steps, geometric lists) its
+  weights are ComfyUI's `ipndm_v` ones in exact arithmetic, and the latents ComfyUI's bit for bit only when the step
+  sizes are exact in binary (power-of-two equal steps, halving or doubling lists); float32/float64 linspace or
+  geometric schedules differ at rounding level.
 - New `ForgeNeoExtraSamplerSettings` (MODEL -> MODEL; inputs `max_stage`, `eta`, `noise_window`, `noise_start`,
   `noise_end` = the extension's block, plus the informational `owned_names` COMBO): the ER SDE values, carried in
   the MODEL's `model_options`, so every later sampler of that MODEL uses them; a Hires checkpoint/UNET override keeps
@@ -128,8 +146,10 @@ itself; restart a ComfyUI you started yourself.
   ER SDE trio incl. the noise window, DPM++ 4M SDE, Euler (SMEA) Dy (CFG++), the DPM++ flow ODE trio, Restart (flow)
   — bit for bit on Forge's k-diffusion module; registration and node: `tests/test_comfy_extra_samplers_pack.py`;
   on ComfyUI's real k-diffusion and sampler tables on CPU, incl. `er_sde_reverse_time`/`er_sde_tunable` == ComfyUI's
-  own `SamplerER_SDE` sampler and ComfyUI's `cfgpp_ud10_ab`, `ipndm`, `ipndm_v`, `deis`, `dpmpp_2m_sde_heun` ==
-  sam-extra's entries (`uni_pc_bh2`: the same algorithm, not claimed bit-equal):
+  own `SamplerER_SDE` sampler and ComfyUI's `cfgpp_ud10_ab`, `ipndm`, `deis`, `dpmpp_2m_sde_heun` ==
+  sam-extra's entries (`uni_pc_bh2`: the same algorithm, not claimed bit-equal), `ipndm_v_fixed` == sam-extra
+  0.33.1's IPNDM_V (Linear Quadratic and random lists) and == ComfyUI's `ipndm_v` on constant-ratio lists whose
+  steps are exact in binary (within rounding on ComfyUI's float `exponential` list):
   `tests/test_comfy_extra_samplers_runtime.py`). Images still differ from Forge's for the same seed: the two hosts
   draw their noise differently (ComfyUI's seeded generator / Brownian tree vs Forge's per-image streams).
 - **Anima SPEED** (sam-extra v0.33.0 "Anima SPEED", Spectral Progressive Diffusion, arXiv 2605.18736):
@@ -532,6 +552,7 @@ DraconicDragon NAFNet-VAE-DeGrid model, the way the sam-extra Forge script
 | `euler_dy_cfg_pp` / `euler_smea_dy_cfg_pp` | Euler Dy CFG++ / Euler SMEA Dy CFG++ | Koishi-Star's Dy/SMEA sub-steps (Apache-2.0) with the CFG++ update; CFG 1–2 recommended |
 | `euler_dy` / `euler_smea_dy` | Euler Dy / Euler SMEA Dy | the same sub-steps with plain Euler steps; churn only with `s_churn` > 0 (`min` rule) |
 | `dpmpp_2m_flow_ode` / `dpmpp_2m_heun_flow_ode` / `dpmpp_3m_flow_ode` | DPM++ 2M (flow ODE) / DPM++ 2M Heun (flow ODE) / DPM++ 3M (flow ODE) | ComfyUI's own `dpmpp_2m_sde` (midpoint / Heun correction) and `dpmpp_3m_sde` at η 0: DPM-Solver++ for the model's probability-flow ODE in its half-log-SNR λ; no noise is ever drawn (no `eta`, no noise sampler); `dpmpp_3m_flow_ode` discards the penultimate sigma like Forge's "DPM++ 3M SDE" (ComfyUI's own `dpmpp_3m_sde` does not) |
+| `ipndm_v_fixed` | IPNDM_V | zju-pi's variable-step iPNDM (Apache-2.0) with the fourth-order weight fixed as in sam-extra 0.33.1 (ComfyUI's core `ipndm_v` keeps the upstream typo); one model call per step, orders 1–4 (default 4). Not usable with Linear Quadratic (green noise before the fix, a burnt image after it) — use Simple, or `ipndm` |
 | `restart_flow` | Restart (flow) | Restart sampling (Xu et al., arXiv:2306.14878) on the scheduler's own grid: Heun steps; from 20 steps, after the step that reaches s = σ/α ≈ 0.1 it jumps back to s ≈ 2 (σ ≈ 0.09 → 0.67 on a flow model) with the model's exact forward transition and re-walks those steps, once (twice from 36 steps) — about 1.4× Heun's model calls at 28 steps; fewer than 20 steps = plain Heun |
 
 - ER SDE values (`ForgeNeoExtraSamplerSettings`): `max_stage` 1–3 (solver order, all three ER SDE samplers), `eta`

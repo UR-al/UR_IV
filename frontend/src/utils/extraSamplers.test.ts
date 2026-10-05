@@ -2,8 +2,9 @@ import { describe as group, expect, it } from 'vitest'
 import cases from './extraSamplers.cases.json'
 import {
   ARG_COUNT, CFG_PP_LABELS, COMFY_PARAMS_NOTE, DEFAULTS, DEFAULT_SETTINGS, DY_CFGPP_HINT, DY_PLAIN_HINT, ER_SDE_LABELS,
-  ETA_LABELS, ETA_RANGE, FLOW_ODE_HINT, FLOW_ODE_LABELS, IPNDM_HINT, KREA2_NOTE, NOISE_RANGE, OLD_FORGE_NOTE, PASS_WIDGETS,
-  RESTART_HINT, SAMPLERS, SCRIPT_TITLE, SMEA_CFGPP_HINT, STAGE_OPTIONS, STAGE_RANGE, TUNABLE_HINT, UD10_HINT, WIDGET_IDS,
+  ETA_LABELS, ETA_RANGE, FLOW_ODE_HINT, FLOW_ODE_LABELS, IPNDM_V_FIX_VERSION, IPNDM_V_HINT, KREA2_NOTE, NOISE_RANGE,
+  OLD_FORGE_NOTE, PASS_WIDGETS, RESTART_HINT, SAMPLERS, SCRIPT_TITLE, SMEA_CFGPP_HINT, STAGE_OPTIONS, STAGE_RANGE, TUNABLE_HINT,
+  UD10_HINT, UNIPC_BH2_HINT, WIDGET_IDS,
   FORGE_DEFAULT_HR_CFG, FORGE_PARAMS_NOTE, cardNote, cfgWarning, describe, hiddenNote, hiresCfgWarning, isCfgPp, isDefault,
   paramsNote, parseValues,
   passesUsing, readValues, resolveSampler, samplerHints, samplerKind, subtitle, usesEta, widgetNumber, windowEmpty, windowSummary, windowSupported,
@@ -37,7 +38,12 @@ group('tables', () => {
     }
     expect(SAMPLERS.filter(r => r.kind === 'er_sde').map(r => r.label)).toEqual(ER_SDE_LABELS)
     expect(ETA_LABELS.every(label => ER_SDE_LABELS.includes(label))).toBe(true)
-    expect(SAMPLERS.filter(r => r.alias).map(r => r.alias)).toEqual(['k_euler_dy', 'k_euler_smea_dy', 'k_dpmpp_2m_sde_heun'])
+    expect(SAMPLERS.filter(r => r.alias).map(r => r.alias))
+      .toEqual(['k_euler_dy', 'k_euler_smea_dy', 'k_dpmpp_2m_sde_heun', 'ipndm_v'])
+    // IPNDM_V: ComfyUI 는 팩의 ipndm_v_fixed(sam-extra 0.33.1 의 계수 수정), 확장 별칭 ipndm_v 도 같은 표기로 풀린다
+    expect(SAMPLERS.find(r => r.label === 'IPNDM_V')).toEqual({ label: 'IPNDM_V', name: 'ipndm_v_fixed', kind: '', alias: 'ipndm_v' })
+    expect([resolveSampler('ipndm_v_fixed'), resolveSampler('ipndm_v'), resolveSampler(' IPNDM_V_FIXED ')])
+      .toEqual(['IPNDM_V', 'IPNDM_V', 'IPNDM_V'])
     expect(FLOW_ODE_LABELS.every(label => SAMPLERS.some(r => r.label === label && r.kind === ''))).toBe(true)
     expect(CFG_PP_LABELS.map(isCfgPp)).toEqual([true, true, true])
     expect([isCfgPp('Euler Dy'), isCfgPp('euler_cfg_pp'), isCfgPp('')]).toEqual([false, false, false])
@@ -134,16 +140,31 @@ group('passes, hints and notes', () => {
   it('one-line hints follow main and a separate hires sampler', () => {
     expect(samplerHints({ sampler_combo: 'ER SDE (Reverse-time)' })).toEqual([])
     expect(samplerHints({ sampler_combo: 'ER SDE (Tunable)' })).toEqual([TUNABLE_HINT])
-    expect(samplerHints({ sampler_combo: 'Euler', hires_options_group: 'true', hires_sampler_combo: 'IPNDM' }))
-      .toEqual([IPNDM_HINT])
-    expect(samplerHints({ sampler_combo: 'Euler', hires_options_group: 'false', hires_sampler_combo: 'IPNDM' })).toEqual([])
-    // GPU part 2 O2: 10-05 Anima 확인의 사실만 — IPNDM_V·UniPC bh2 를 골라도 같은 한 줄(권장 문구 없음)
-    expect(samplerHints({ sampler_combo: 'ipndm_v' })).toEqual([IPNDM_HINT])
-    expect(samplerHints({ sampler_combo: 'UniPC bh2', hires_options_group: 'true', hires_sampler_combo: 'IPNDM' }))
-      .toEqual([IPNDM_HINT])
+    // IPNDM_V·UniPC bh2 는 Linear Quadratic 에서 못 쓴다(샘플러·스케줄 조합). IPNDM_V 의 상류 계수 오타 수정(sam-extra 0.33.1·팩)은
+    // 녹색 잡음만 없앴고 그림은 여전히 탄다(10-05 GPU). IPNDM(고정 계수)은 정상이라 힌트가 없다
+    expect(samplerHints({ sampler_combo: 'Euler', hires_options_group: 'true', hires_sampler_combo: 'IPNDM_V' }))
+      .toEqual([IPNDM_V_HINT])
+    expect(samplerHints({ sampler_combo: 'Euler', hires_options_group: 'false', hires_sampler_combo: 'IPNDM_V' })).toEqual([])
+    for (const text of ['ipndm_v', 'ipndm_v_fixed', 'IPNDM_V']) {
+      expect(samplerHints({ sampler_combo: text }), text).toEqual([IPNDM_V_HINT])
+    }
+    expect(samplerHints({ sampler_combo: 'UniPC bh2', hires_options_group: 'true', hires_sampler_combo: 'IPNDM_V' }))
+      .toEqual([IPNDM_V_HINT, UNIPC_BH2_HINT])
+    expect(samplerHints({ sampler_combo: 'uni_pc_bh2' })).toEqual([UNIPC_BH2_HINT])
+    expect(samplerHints({ sampler_combo: 'IPNDM' })).toEqual([])
     expect(samplerHints({ sampler_combo: 'DEIS' })).toEqual([])
-    expect(IPNDM_HINT).not.toContain('권장')
-    expect(IPNDM_HINT).toContain('Linear Quadratic')
+    expect(IPNDM_V_FIX_VERSION).toBe('0.33.1')
+    expect(IPNDM_V_HINT).toContain(`sam-extra ${IPNDM_V_FIX_VERSION}`)
+    expect(IPNDM_V_HINT).toContain('노드 팩 1.7.0')
+    expect(IPNDM_V_HINT).toContain('Linear Quadratic 에서는 버전과 상관없이 쓸 수 없습니다')
+    expect(IPNDM_V_HINT).toContain('Simple 이나 IPNDM 을 쓰세요')
+    expect(IPNDM_V_HINT).not.toContain('고쳤고')
+    for (const hint of [IPNDM_V_HINT, UNIPC_BH2_HINT]) {
+      expect(hint).toContain('Linear Quadratic')
+      expect(hint).not.toContain('권장')
+      expect(hint).not.toContain('10-05')
+    }
+    expect(UNIPC_BH2_HINT).toContain('Simple·Normal·SGM Uniform')
     expect(samplerHints({ sampler_combo: 'dpmpp_3m_flow_ode', hires_options_group: 'true',
       hires_sampler_combo: 'DPM++ 2M (flow ODE)' })).toEqual([FLOW_ODE_HINT])
     expect(samplerHints({ sampler_combo: 'Restart (flow)' })).toEqual([RESTART_HINT])

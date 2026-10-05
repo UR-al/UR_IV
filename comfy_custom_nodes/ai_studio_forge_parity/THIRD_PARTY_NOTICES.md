@@ -255,6 +255,11 @@ and the bit-equal tests fix its floating-point operations.
   arXiv:2406.08070), as ComfyUI's and Forge's `sample_euler_ancestral_cfg_pp` write it.
 - **ER SDE** (`extra_samplers_math.py`): the three noise scale functions h(λ) of ComfyUI's `SamplerER_SDE` node (Cui
   et al., arXiv:2309.06169). The solver is ComfyUI's own `sample_er_sde`, called at run time.
+- **IPNDM_V weights** (`extra_samplers_ipndm.weights`): the variable-step weights of zju-pi/diff-sampler's
+  `ipndm_v_sampler` (Apache-2.0, notice in the file header; Zhang & Chen, arXiv:2204.13902), as ComfyUI's
+  `sample_ipndm_v` writes them (code that ComfyUI marks as zju-pi's, under Apache 2), with the fourth-order weight's
+  last factor `h_{n−1}/h_{n−2}` replaced by `h_{n−2}/h_{n−3}` — sam-extra 0.33.1's fix. ComfyUI's own function keeps
+  the typo and is not called; the loop and the history are the pack's own code.
 
 ## sam-extra ports (pack 1.7.0): sam-extra code under the author's MIT grant, and the test oracle
 
@@ -277,7 +282,8 @@ the results bit for bit.
 | `extra_samplers_flow.py` | None: three calls of ComfyUI's own `sample_dpmpp_2m_sde` / `sample_dpmpp_3m_sde` at η = 0 | — | `sam3ext/extra_samplers/dpmpp_flow.py` | same |
 | `extra_samplers_restart.py` | `restart_kernel`, `_heun_step`; the restart window and step rules (Xu et al., arXiv:2306.14878, Algorithm 1) | The Heun step body is k-diffusion's `sample_heun` (MIT), as ComfyUI ships it | `sam3ext/extra_samplers/restart_flow.py` | same |
 | `extra_samplers_dy.py`, `extra_samplers_dy_host.py` | sam-extra's changes to the Dy port: `cfg_pp_target`, `churn`, `evaluate`, `dy_substep`, `smea_substep`, `euler_dy`, the entry functions (`_entry`'s `sampler`), `spatial_interpolate`, `SubstepInputs`, the uncond capture; the sub-step placement and the reasons the sub-steps step aside | Koishi-Star's Euler-Smea-Dyn-Sampler (Apache-2.0, below; notice in the file header). The CFG++ step is a formula shared with ComfyUI and Forge (previous section) | `sam3ext/extra_samplers/euler_dy.py`, `substep_guard.py` | same |
-| `extra_samplers_register.py`, `extra_samplers_nodes.py` | None. The registration and node code are this pack's own; the twelve names, their order and the penultimate-σ discard set are sam-extra's | — | `sam3ext/extra_samplers/registry.py`, `params.py` | `test_comfy_extra_samplers_pack.py`, `test_comfy_extra_samplers_runtime.py` |
+| `extra_samplers_ipndm.py` | `clamp_order` (sam-extra's `_order`, the 1–4 order rule). The rest is not sam-extra's own code: sam-extra's IPNDM_V is zju-pi's code as ComfyUI adapts it. The pack's loop and history (`sample_ipndm_v_fixed`, `step_sizes`, `combine`) are its own and follow sam-extra 0.33.1's rules (order 1 without history, the callback's current latent) | zju-pi/diff-sampler's IPNDM_V weights (Apache-2.0, below; notice in the file header). The weights are a formula shared with ComfyUI (previous section) | `sam3ext/extra_samplers/ipndm_deis.py` (`sample_ipndm_v`, sam-extra ≥ 0.33.1) | `test_comfy_extra_samplers_parity.py`, `test_comfy_extra_samplers_runtime.py` |
+| `extra_samplers_register.py`, `extra_samplers_nodes.py` | None. The registration and node code are this pack's own; the twelve sam-extra names, their order and the penultimate-σ discard set are sam-extra's (the thirteenth name, `ipndm_v_fixed`, is the pack's) | — | `sam3ext/extra_samplers/registry.py`, `params.py` | `test_comfy_extra_samplers_pack.py`, `test_comfy_extra_samplers_runtime.py` |
 | `extra_samplers_dpmpp_4m.py` | `_sample`: sam-extra's port (momentum 0, half-log-SNR flow handling, the noise rule) | Clybius' DPM++ 4M SDE (BSD-3-Clause, below; notice in the file header). The flow form of the step is a formula shared with ComfyUI (previous section) | `sam3ext/extra_samplers/dpmpp_4m_sde.py` | `test_comfy_extra_samplers_parity.py` |
 | `guidance.py`, `guidance_dcw.py`, `guidance_detail.py` (Dy sub-steps) | sam-extra's sub-step rule: the guidance suite keeps its step state (APG momentum, ADG, SMC `e_prev`, RDC, HiFlow, Momentum Guidance, HiGS) through Euler (SMEA) Dy sub-steps | — | `sam3ext/guidance/` | `test_comfy_detail_parity.py` |
 | `speed_schedule.py`, `speed_spectral.py`, `speed_runner.py`, `speed_nodes.py`, the Detail Daemon σ lookup in `guidance_dd.py` | `validate_scales`, `parse_sigmas`, `_transition_hand_offs`; `dct_basis`, `dct_downscale`, `amplitude_resize`, `_target` (`_check_target`), `expand_dct`, `expand_fft`, `expand_haar`; `_expand`, `_init_coarse`, `_apply_transition`, `run_speed` with its `segment`; `plan_for` (`_plan_for`), `_flag` (Colorcraft `spec.py` `_truthy`). Also sam-extra's changes to the upstreams: refusals incl. custom A ≤ 0, seeds and noise streams, the img2img rescale, guards, status lines, and Detail Daemon following the re-published σ list | The three MIT upstreams under "Anima SPEED" | `sam3ext/speed/` (`schedule.py`, `spectral.py`, `runner.py`, `forge_host.py`) | `test_comfy_speed_parity.py`, `test_comfy_speed_host.py`, `test_comfy_speed_runtime.py` |
@@ -331,13 +337,14 @@ The `extra_samplers_*.py` modules give ComfyUI the samplers the sam-extra Forge 
 AI Studio Pro, GPL-3.0-only) adds to Forge's sampler list. Much of their code is sam-extra's own code, licensed to
 this pack under MIT by its author (see "sam-extra ports (pack 1.7.0)"). The pack never imports the extension, and
 the installed extension is the test oracle (`tests/test_comfy_extra_samplers_parity.py` runs it next to the pack on
-CPU). Two modules are ports of permissive upstreams (in sam-extra's version), carrying their notices in the file
-header:
+CPU). Three modules are ports of permissive upstreams (two in sam-extra's version), carrying their notices in the
+file header:
 
 | File | Upstream | Commit | License |
 | --- | --- | --- | --- |
 | `extra_samplers_dy.py` (Euler Dy / Euler SMEA Dy and their CFG++ entries) | [Koishi-Star/Euler-Smea-Dyn-Sampler](https://github.com/Koishi-Star/Euler-Smea-Dyn-Sampler) `smea_sampling.py` (`sample_euler_dy`, `sample_euler_smea_dy`, `dy_sampling_step`, `smea_sampling_step`, `_Rescaler`) | `d98a504c8419be5274068ad91ca6bbf2e13635a8` | Apache-2.0, Copyright 2024 KBlueLeaf — `LICENSES/Euler-Smea-Dyn-Sampler-Apache-2.0.txt`. Modified (Apache-2.0 §4(b)): every change is listed in the module docstring |
 | `extra_samplers_dpmpp_4m.py` (DPM++ 4M SDE) | [Clybius/ComfyUI-Extra-Samplers](https://github.com/Clybius/ComfyUI-Extra-Samplers) `extra_samplers.py` `sample_clyb_4m_sde_momentumized` | `52eac1b7c847d2727e0ca93ca26d9ffd77029daa` | BSD-3-Clause, Copyright (c) 2024, Clybius — `LICENSES/ComfyUI-Extra-Samplers-BSD-3-Clause.txt` |
+| `extra_samplers_ipndm.py` (`ipndm_v_fixed` — IPNDM_V, `weights`) | [zju-pi/diff-sampler](https://github.com/zju-pi/diff-sampler) `diff-solvers-main/solvers.py` `ipndm_v_sampler`, as ComfyUI's `sample_ipndm_v` adapts it (comfyanonymous/ComfyUI `387f98aa`, marked there as zju-pi's code under Apache 2) | `68d5ce427f261962b89ce3b0ee8f6b29f0577328` | Apache-2.0 — `LICENSES/diff-sampler-Apache-2.0.txt` (the standard Apache License 2.0 text; that repository's LICENSE file was not read here, so no copyright line of it is reproduced — the repository and the commit are named, as ComfyUI does). Modified (Apache-2.0 §4(b)): the fourth-order weight's last factor (sam-extra 0.33.1's fix) and the other changes listed in the module docstring |
 
 Other modules (no other third-party code copied):
 

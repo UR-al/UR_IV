@@ -51,8 +51,9 @@ PACK_ID = "ai_studio_forge_parity"
 # Flow Cosmos Dynamic share — the extension's eight-value block); older packs lack the class and the names -> the
 # compiler refuses (owner
 # check, ``owned_names``).
-# Extra Samplers: twelve KSampler samplers (er_sde_reverse_time/ode/tunable, dpmpp_4m_sde,
-# euler_dy(_cfg_pp), euler_smea_dy(_cfg_pp), dpmpp_2m/2m_heun/3m_flow_ode, restart_flow) and
+# Extra Samplers: thirteen KSampler samplers (er_sde_reverse_time/ode/tunable, dpmpp_4m_sde,
+# euler_dy(_cfg_pp), euler_smea_dy(_cfg_pp), dpmpp_2m/2m_heun/3m_flow_ode, restart_flow, and ipndm_v_fixed — sam-extra
+# 0.33.1's IPNDM_V, whose fourth-order weight fix ComfyUI core's ipndm_v lacks) and
 # ForgeNeoExtraSamplerSettings (ER SDE values in model_options); older packs lack the class and
 # the names -> the compiler refuses (owner check, ``owned_names``).
 # Anima SPEED: ForgeNeoAnimaSpeed (coarse-to-fine sampling, a SAMPLER_SAMPLE wrapper ahead of

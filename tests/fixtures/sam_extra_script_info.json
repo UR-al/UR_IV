@@ -1,15 +1,15 @@
 {
  "schema": 1,
  "source": "GET /sdapi/v1/script-info (tools/refresh_sam_extra_fixture.py)",
- "captured_at": "2026-10-04T11:35:16+00:00",
+ "captured_at": "2026-10-05T07:02:28+00:00",
  "api_url": "http://127.0.0.1:7862",
- "ext_version": "0.33.0",
+ "ext_version": "0.33.1",
  "extension": {
   "name": "forge_sam3_extension",
   "branch": "feat/anima-character-reference",
-  "commit_hash": "b33708c52a578096a90a30a44ffbe4013968805c",
-  "commit_date": 1791113255,
-  "version": "b33708c5"
+  "commit_hash": "b04ff89676cf3a8ba33096e8ad50df501b036c2c",
+  "commit_date": 1791181815,
+  "version": "b04ff896"
  },
  "scripts": [
   {

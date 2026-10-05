@@ -28,6 +28,11 @@ equal bit for bit.
   and off, 4-D/5-D, odd and 1×1 sizes), the core's other rules (upstream's ``max`` churn, ``s_tmin``/``s_tmax``,
   CFG++ without an unconditional x0), where the sub-steps sit and what they carry (``sam_extra_substep``), and
   ``substeps=False`` == the host's ``sample_euler`` / ``sample_euler_cfg_pp``.
+* ``IpndmVFixedParityTests`` — torch: ``ipndm_v_fixed`` (IPNDM_V with sam-extra 0.33.1's fourth-order weight fix)
+  == sam-extra 0.33.1's IPNDM_V on Anima's Linear Quadratic 28 list, the flow/Karras grids and random lists (orders 1–4
+  and the order rules, latents, model calls, callbacks; ``tests/_ipndm_v_oracle``); the constant-velocity probe (the
+  weights sum to 1 — upstream's typo gives about −174 at step 15, 0-based) and upstream's weights, bit for bit, where
+  the step ratio is constant and the steps are power-of-two multiples of one another.
 * ``DyHostTests`` — torch, no extension (Forge's k-diffusion for the maths): ComfyUI's ``KSamplerX0Inpaint``
   inputs (denoise mask, inpainting latent, noise) follow each sub-step and come back (also when it raises),
   an all-ones mask gives the unmasked latent bit for bit; the guard's reasons (DY_SUBSTEPS_OFF_KEY, a
@@ -1461,6 +1466,158 @@ class RestartFlowParityTests(unittest.TestCase):
         ours = list(inspect.signature(self.restart.sample_restart_flow).parameters)
         theirs = list(inspect.signature(self.ext.sample_restart_flow).parameters)
         self.assertEqual(ours, [*theirs, "kd"])
+
+
+# ── IPNDM_V with sam-extra 0.33.1's fourth-order weight fix (the pack's ipndm_v_fixed) ─────────────────────────
+
+
+def _ipndm_grids(seed=9):
+    """``(label, sigmas)``: Anima's Linear Quadratic 28 list (float32/float64), the shift-3 flow and Karras grids and
+    seeded random decreasing lists ending in 0 — uneven step ratios, where the fix changes the result."""
+    import random
+
+    from tests._ipndm_v_oracle import LQ28
+
+    lq = torch.tensor(LQ28, dtype=torch.float32)
+    grids = [("lq28", lq), ("lq28 float64", lq.double())]
+    for flow, steps, dtype in itertools.product((True, False), (1, 2, 4, 5, 13, 28), (torch.float32, torch.float64)):
+        grids.append((f"{'flow' if flow else 'karras'} {steps} {dtype}", _sigmas(flow, steps, dtype)))
+    rng = random.Random(seed)
+    for n in range(24):
+        steps = rng.randrange(2, 41)
+        values = sorted((rng.uniform(0.0, 1.0 if n % 2 else 14.6) for _ in range(steps)), reverse=True)
+        grids.append((f"random {n}", torch.tensor(values + [0.0], dtype=torch.float32 if n % 3 else torch.float64)))
+    return grids
+
+
+@requires_torch
+@requires_extension
+class IpndmVFixedParityTests(unittest.TestCase):
+    """``ipndm_v_fixed`` (``extra_samplers_ipndm``) == sam-extra 0.33.1's IPNDM_V on Forge's k-diffusion module, bit for
+    bit — the latents, the model calls and every callback. sam-extra 0.33.1 changed one line of
+    ``ipndm_deis.sample_ipndm_v`` (the fourth-order weight's last factor ``h_n_1 / h_n_2`` → ``h_n_2 / h_n_3``, the upstream
+    typo that broke Linear Quadratic); before the registry's sync the oracle is the installed 0.33.0 file with that one
+    line changed (``tests/_ipndm_v_oracle``). The weights sum to 1 on every list, and where the step ratio is constant
+    they are upstream's (= ComfyUI's ``ipndm_v``) — bit for bit when the steps are power-of-two multiples of one
+    another, at rounding level on a float linspace or geometric list."""
+
+    @classmethod
+    def setUpClass(cls):
+        bind_torch(globals())
+        from comfy_custom_nodes.ai_studio_forge_parity import extra_samplers_ipndm as ipndm
+        from tests import _ipndm_v_oracle as oracle
+
+        cls.ipndm, cls.helpers = ipndm, oracle
+        cls.kd = forge_k_sampling()
+        with installed_k_sampling(cls.kd):
+            cls.module = import_ext("sam3ext.extra_samplers.ipndm_deis")
+        function, cls.how = oracle.ipndm_v_oracle(cls.module)
+        cls.oracle = staticmethod(function)
+
+    def _run(self, function, sigmas, *, ours, shape=_SHAPES[0], **kwargs):
+        model = StableToyModel(Predictor(True))
+        x = _latent(shape, sigmas.dtype) * float(sigmas[0])
+        seen = []
+        call = {"kd": self.kd} if ours else {}
+        with installed_k_sampling(self.kd):
+            out = function(model, x, sigmas, extra_args={}, disable=True,
+                           callback=lambda info: seen.append((info["i"], float(info["sigma"]), info["x"].clone(),
+                                                              info["denoised"].clone())), **call, **kwargs)
+        return out, [c[0] for c in model.calls], seen
+
+    def _same_run(self, ours, theirs, label):
+        _same_bits(self, ours[0], theirs[0], label)
+        self.assertTrue(torch.isfinite(ours[0]).all(), label)
+        self.assertEqual(ours[1], theirs[1], f"{label}: model calls")
+        self.assertEqual([c[:2] for c in ours[2]], [c[:2] for c in theirs[2]], f"{label}: callback steps")
+        for a, b in zip(ours[2], theirs[2]):
+            _same_bits(self, a[2], b[2], f"{label}: callback x at step {a[0]}")
+            _same_bits(self, a[3], b[3], f"{label}: callback denoised at step {a[0]}")
+
+    def test_equals_sam_extra_0331_over_the_grids(self):
+        cases = 0
+        for (label, sigmas), order in itertools.product(_ipndm_grids(), (1, 2, 3, 4)):
+            for shape in (_SHAPES if label.startswith("lq28") else _SHAPES[:1]):
+                with self.subTest(grid=label, order=order, shape=shape):
+                    self._same_run(self._run(self.ipndm.sample_ipndm_v_fixed, sigmas, ours=True, shape=shape,
+                                             max_order=order),
+                                   self._run(self.oracle, sigmas, ours=False, shape=shape, max_order=order),
+                                   f"{label} order {order} ({self.how})")
+                    cases += 1
+        self.assertEqual(cases, 4 * (len(_ipndm_grids()) + 2))
+
+    def test_the_default_order_and_the_order_rules_are_sam_extras(self):
+        sigmas = torch.tensor(self.helpers.LQ28, dtype=torch.float32)
+        self.assertEqual(self.ipndm.IPNDM_MAX_ORDER, ext_literals(self.helpers.IPNDM_DEIS)["IPNDM_MAX_ORDER"])
+        self._same_run(self._run(self.ipndm.sample_ipndm_v_fixed, sigmas, ours=True),
+                       self._run(self.oracle, sigmas, ours=False), "default order")
+        for order in (0, -3, 5, 9, 2.7, "3"):
+            with self.subTest(order=order):
+                self._same_run(self._run(self.ipndm.sample_ipndm_v_fixed, sigmas, ours=True, max_order=order),
+                               self._run(self.oracle, sigmas, ours=False, max_order=order), f"order {order!r}")
+        for short in ((1.0,), (1.0, 0.0), (0.9, 0.5), (1.0, 0.6, 0.0)):
+            with self.subTest(short=short):
+                sigmas = torch.tensor(short, dtype=torch.float32)
+                self._same_run(self._run(self.ipndm.sample_ipndm_v_fixed, sigmas, ours=True),
+                               self._run(self.oracle, sigmas, ours=False), f"{short}")
+
+    def test_the_fix_matters_on_linear_quadratic(self):
+        """The fix is the only difference from upstream, and it is not vacuous: on LQ28 the typo's latent differs, and
+        the constant-velocity probe (``d`` constant, the exact step is ``x + h·v``) sees the typo's weights sum to about
+        −174 at step 15 (0-based; σ 0.968 → 0.952) while the pack's and sam-extra 0.33.1's sum to 1 at every step."""
+        sigmas = torch.tensor(self.helpers.LQ28, dtype=torch.float32)
+        typo = self.helpers.with_line(self.module, self.helpers.TYPO_LINE)
+        ours = self._run(self.ipndm.sample_ipndm_v_fixed, sigmas, ours=True)
+        self.assertFalse(torch.equal(ours[0], self._run(typo, sigmas, ours=False)[0]))
+        double = sigmas.double()
+        for label, function, kwargs in (("pack", self.ipndm.sample_ipndm_v_fixed, {"kd": self.kd}),
+                                        ("sam-extra 0.33.1", self.oracle, {}), ("typo", typo, {})):
+            probe = self.helpers.ConstantVelocity()
+            with installed_k_sampling(self.kd):
+                final = function(probe, probe.x0.clone(), double, disable=True, **kwargs)
+            sums = probe.step_sums(double, final)
+            with self.subTest(sampler=label):
+                self.assertEqual(len(sums), 28)
+                if label == "typo":
+                    self.assertTrue(-180 < sums[15] < -170, sums[15])
+                    self.assertGreater(max(abs(value - 1) for value in sums), 100)
+                else:
+                    self.assertLess(max(abs(value - 1) for value in sums), 1e-9, sums)
+
+    def test_the_weights_sum_to_one_and_keep_upstreams_where_the_ratio_is_constant(self):
+        import random
+
+        rng = random.Random(4)
+        weights = self.ipndm.weights
+        for _ in range(500):
+            h = tuple(torch.tensor(-rng.uniform(0.01, 1.0), dtype=torch.float64) for _ in range(4))
+            for order in (2, 3, 4):
+                total = float(sum(weights(h[:order])))
+                self.assertAlmostEqual(total, 1.0, delta=1e-9 * max(1.0, *(abs(float(w)) for w in weights(h[:order]))))
+            self.assertEqual([float(w) for w in weights(h)],
+                             list(self.helpers.upstream_ipndm_v_weights(*(float(v) for v in h), fixed=True)))
+        # constant step ratio with steps that are one float times powers of two (equal steps, ratio 2 and 1/2), so the two
+        # ratios and the coeff4 products round alike: upstream's weights, bit for bit (on a float linspace or geometric
+        # list the two coeff4 expressions differ at rounding level, so no such list is used here)
+        for base, ratio in itertools.product((-0.0625, -0.3, -1.7, -1e-3), (1.0, 2.0, 0.5)):
+            h = (base, base / ratio, base / ratio ** 2, base / ratio ** 3)
+            with self.subTest(base=base, ratio=ratio):
+                ours = [float(w) for w in weights(tuple(torch.tensor(v, dtype=torch.float64) for v in h))]
+                self.assertEqual(ours, list(self.helpers.upstream_ipndm_v_weights(*h, fixed=False)))
+        # Anima LQ28 step 15 (0-based): the typo's sum, the fix's sum
+        s = [float(v) for v in torch.tensor(self.helpers.LQ28, dtype=torch.float32)]
+        h = (s[16] - s[15], s[15] - s[14], s[14] - s[13], s[13] - s[12])
+        self.assertTrue(-180 < sum(self.helpers.upstream_ipndm_v_weights(*h, fixed=False)) < -170)
+        self.assertAlmostEqual(sum(self.helpers.upstream_ipndm_v_weights(*h, fixed=True)), 1.0, places=9)
+
+    def test_signature_is_sam_extras(self):
+        import inspect
+
+        ours = list(inspect.signature(self.ipndm.sample_ipndm_v_fixed).parameters)
+        theirs = list(inspect.signature(self.module.sample_ipndm_v).parameters)
+        self.assertEqual(ours, [*theirs, "kd"])
+        self.assertEqual(self.ipndm.NAME, "ipndm_v_fixed")
+
 
 if __name__ == "__main__":
     unittest.main()

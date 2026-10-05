@@ -168,8 +168,12 @@ _FORGE_SAMPLER_ALIASES = {
     "unipc": "uni_pc", "uni pc": "uni_pc", "uni_pc": "uni_pc",
     "lcm": "lcm", "ddim": "ddim", "er sde": "er_sde", "er-sde": "er_sde",
     # sam-extra Extra Samplers (v0.33.0, 18 labels — core/extra_samplers.COMFY_NAMES; "DPM++ 2M SDE Heun" is above).
-    # Twelve are names the bundled pack 1.7.0 registers (core/extra_samplers.PACK_SAMPLERS, owner-checked in
-    # _runtime_sampler_values); uni_pc_bh2/cfgpp_ud10_ab/ipndm/ipndm_v/deis are ComfyUI core's (plan X11).
+    # Thirteen are names the bundled pack 1.7.0 registers (core/extra_samplers.PACK_SAMPLERS, owner-checked in
+    # _runtime_sampler_values); uni_pc_bh2/cfgpp_ud10_ab/ipndm/deis are ComfyUI core's (plan X11). "IPNDM_V" goes to the
+    # pack's ipndm_v_fixed (sam-extra 0.33.1's fourth-order weight fix): ComfyUI core's ipndm_v keeps the upstream typo
+    # (green noise on Linear Quadratic; the fixed one is still unusable there — a burnt image, a sampler x scheduler
+    # combination). The label and that core name fold to the same key, so no app pass runs core ipndm_v
+    # (core/extra_samplers.COMFY_NAME_OVERRIDES).
     "er sde (reverse-time)": "er_sde_reverse_time", "er sde (ode)": "er_sde_ode",
     "er sde (tunable)": "er_sde_tunable", "dpm++ 4m sde": "dpmpp_4m_sde",
     "euler dy cfg++": "euler_dy_cfg_pp", "euler smea dy cfg++": "euler_smea_dy_cfg_pp",
@@ -177,7 +181,7 @@ _FORGE_SAMPLER_ALIASES = {
     "dpm++ 2m (flow ode)": "dpmpp_2m_flow_ode", "dpm++ 2m heun (flow ode)": "dpmpp_2m_heun_flow_ode",
     "dpm++ 3m (flow ode)": "dpmpp_3m_flow_ode",
     "unipc bh2": "uni_pc_bh2", "uni pc bh2": "uni_pc_bh2", "cfg++ ud10 ab": "cfgpp_ud10_ab",
-    "ipndm": "ipndm", "ipndm_v": "ipndm_v", "deis": "deis", "restart (flow)": "restart_flow",
+    "ipndm": "ipndm", "ipndm_v": "ipndm_v_fixed", "deis": "deis", "restart (flow)": "restart_flow",
 }
 # Old combined labels ("DPM++ 2M Karras") carry the scheduler as a suffix.
 _FORGE_SAMPLER_SCHEDULER_SUFFIXES = (
@@ -1364,7 +1368,7 @@ class ComfyWorkflowCompiler:
         return [text for text in texts if isinstance(text, str) and text]
 
     def _check_pack_sampler_names(self, workflow: Mapping[str, Any]) -> None:
-        """``validate``: every pack-registered sam-extra sampler name a node runs (the twelve of
+        """``validate``: every pack-registered sam-extra sampler name a node runs (the thirteen of
         ``core/extra_samplers.PACK_SAMPLERS``) must be the bundled pack's own entry (plan R6/X12) — also for the
         nodes ``_runtime_sampler_values`` never sees (a user workflow's other samplers, ``KSamplerSelect``)."""
         for node in workflow.values():

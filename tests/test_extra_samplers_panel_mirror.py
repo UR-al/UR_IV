@@ -102,11 +102,15 @@ class ExtraSamplersPanelMirrorTests(unittest.TestCase):
     def test_sampler_table(self):
         rows = tuple(re.findall(r"\{ label: '([^']+)', name: '(\w+)', kind: '(\w*)'(?:, alias: '(\w+)')? \}",
                                 _block(self.ts, "export const SAMPLERS: readonly SamplerRow[] = [")))
-        expected = tuple((label, aliases[0], xsa.sampler_kind(label), aliases[1] if len(aliases) > 1 else "")
-                         for label, aliases in xsa.ALIASES.items())
+        # name = ComfyUI 이름(COMFY_NAMES — IPNDM_V 만 팩의 ipndm_v_fixed), alias = ComfyUI 이름이 아닌 확장 별칭
+        others = {label: tuple(alias for alias in aliases if alias != xsa.COMFY_NAMES[label])
+                  for label, aliases in xsa.ALIASES.items()}
+        expected = tuple((label, xsa.COMFY_NAMES[label], xsa.sampler_kind(label), others[label][0] if others[label] else "")
+                         for label in xsa.ALIASES)
         self.assertEqual(rows, expected)
         self.assertEqual(len(rows), 18)
-        self.assertTrue(all(len(aliases) <= 2 for aliases in xsa.ALIASES.values()), "TS 줄은 별칭 둘까지만 담는다")
+        self.assertTrue(all(len(extra) <= 1 for extra in others.values()), "TS 줄은 ComfyUI 이름 밖의 별칭을 하나까지만 담는다")
+        self.assertIn(("IPNDM_V", "ipndm_v_fixed", "", "ipndm_v"), rows)
         self.assertEqual(_list(self.ts, "ER_SDE_LABELS"), xsa.ER_SDE_LABELS)
         self.assertEqual(_list(self.ts, "ETA_LABELS"), xsa.ETA_LABELS)
         self.assertEqual(xsa.WINDOW_LABELS, xsa.ETA_LABELS)
@@ -169,8 +173,20 @@ class ExtraSamplersPanelMirrorTests(unittest.TestCase):
         generation = (REPO / "ui" / "generator_generation.py").read_text(encoding="utf-8").replace("\r\n", "\n")
         self.assertIn("hr_cfg = _widget_float(self.hires_cfg_input, 0.0)\n", generation)
         self.assertIn('if hr_cfg > 0:\n                hr_payload["hr_cfg"] = hr_cfg', generation)
-        # IPNDM 힌트(GPU part 2 O2)를 보이는 표기는 파이썬 표기
-        self.assertEqual(_list(self.ts, "IPNDM_HINT_LABELS"), (xsa.LABEL_IPNDM, xsa.LABEL_IPNDM_V, xsa.LABEL_UNIPC_BH2))
+        # IPNDM_V 힌트(Linear Quadratic 에서는 버전과 상관없이 못 쓴다 — sam-extra 0.33.1·팩 1.7.0 의 계수 오타 수정은 녹색 잡음만
+        # 없앴다)와 UniPC bh2 힌트(Linear Quadratic 조합)는 파이썬 표기로 보이고, 고친 판은 파이썬 상수다. 10-05 의 옛 힌트
+        # (IPNDM_HINT·IPNDM_HINT_LABELS)는 없다
+        self.assertIn(f"export const IPNDM_V_FIX_VERSION = '{xsa.IPNDM_V_FIX_VERSION}'\n", self.ts)
+        self.assertIn(f"if (has('{xsa.LABEL_IPNDM_V}')) hints.push(IPNDM_V_HINT)", self.ts)
+        self.assertIn(f"if (has('{xsa.LABEL_UNIPC_BH2}')) hints.push(UNIPC_BH2_HINT)", self.ts)
+        hint = re.search(r"export const IPNDM_V_HINT = (.*?)\n(?:/\*\*|export )", self.ts, re.S).group(1)
+        self.assertIn("sam-extra ${IPNDM_V_FIX_VERSION}", hint)
+        self.assertIn(f"노드 팩 {xsa.COMFY_MIN_PACK_VERSION}", hint)
+        self.assertIn("Linear Quadratic 에서는 버전과 상관없이 쓸 수 없습니다", hint)
+        self.assertIn("Simple 이나 IPNDM 을 쓰세요", hint)
+        self.assertNotIn("고쳤고", hint)
+        for gone in ("IPNDM_HINT_LABELS", "export const IPNDM_HINT ", "10-05 Anima 확인(Linear"):
+            self.assertNotIn(gone, self.ts)
         self.assertIn("extra_samplers", FEATURE_FLAGS)
         self.assertIn("caps.features?.extra_samplers !== true", self.ts)
 

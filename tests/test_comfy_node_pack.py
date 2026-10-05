@@ -483,7 +483,7 @@ class TestPackNotices(unittest.TestCase):
 
     def test_every_license_file_is_named_in_the_notices_and_back(self):
         files = sorted(path.name for path in (PACK_DIR / "LICENSES").iterdir() if path.is_file())
-        self.assertEqual(len(files), 16)
+        self.assertEqual(len(files), 17)      # 1.7.0: diff-sampler-Apache-2.0.txt (IPNDM_V weights, extra_samplers_ipndm)
         for name in files:
             with self.subTest(license=name):
                 self.assertIn(f"LICENSES/{name}", self.notices)
@@ -519,7 +519,7 @@ class TestPackNotices(unittest.TestCase):
         self.assertIn(SAM_EXTRA_GRANT, _flat(section))
         self.assertIn("test oracle", section)
         modules = sorted(path.name for path in PACK_DIR.glob("*.py") if path.name.startswith(SAM_EXTRA_PORT_PREFIXES))
-        self.assertEqual(len(modules), 18)
+        self.assertEqual(len(modules), 19)    # 1.7.0: + extra_samplers_ipndm.py (sam-extra 0.33.1's IPNDM_V)
         for name in modules:
             with self.subTest(module=name):
                 self.assertIn(f"`{name}`", section)

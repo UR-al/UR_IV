@@ -50,8 +50,8 @@ GOLDEN_SAMPLERS = {
     "DPM++ 2M SDE Exponential": ("dpmpp_2m_sde", "exponential"),
     "DPM++ 3M SDE Karras": ("dpmpp_3m_sde", "karras"),
     "DPM2 a Karras": ("dpm_2_ancestral", "karras"),
-    # sam-extra Extra Samplers v0.33.0 (PLAN_amend §3) — twelve pack names, five ComfyUI core names
-    # ("DPM++ 2M SDE Heun" above is the sixth core one).
+    # sam-extra Extra Samplers v0.33.0 (PLAN_amend §3) — thirteen pack names (IPNDM_V -> the pack's ipndm_v_fixed, sam-extra
+    # 0.33.1's fourth-order weight fix), four ComfyUI core names ("DPM++ 2M SDE Heun" above is the fifth core one).
     "ER SDE (Reverse-time)": ("er_sde_reverse_time", None),
     "ER SDE (ODE)": ("er_sde_ode", None),
     "ER SDE (Tunable)": ("er_sde_tunable", None),
@@ -66,7 +66,8 @@ GOLDEN_SAMPLERS = {
     "UniPC bh2": ("uni_pc_bh2", None),
     "CFG++ UD10 AB": ("cfgpp_ud10_ab", None),
     "IPNDM": ("ipndm", None),
-    "IPNDM_V": ("ipndm_v", None),
+    "IPNDM_V": ("ipndm_v_fixed", None),
+    "ipndm_v": ("ipndm_v_fixed", None),
     "DEIS": ("deis", None),
     "Restart (flow)": ("restart_flow", None),
 }
@@ -381,6 +382,68 @@ class PackOwnerCheckTests(unittest.TestCase):
         with self.assertRaises(WorkflowCompileError) as caught:
             self._compile(caps, {"sampler_name": "IPNDM"})
         self.assertTrue(str(caught.exception).endswith("지원하지 않는 값입니다: ipndm"))
+        # an older pack (or one not restarted) has no ipndm_v_fixed — even with ComfyUI's core ipndm_v in the list
+        with self.assertRaisesRegex(WorkflowCompileError, "지원하지 않는 값입니다: ipndm_v_fixed \\(앱 노드 팩 1\\.7\\.0 의 "
+                                                          "sam-extra 샘플러입니다"):
+            self._compile(_owner_caps(samplers=("ipndm_v",)), {"sampler_name": "IPNDM_V"})
+
+
+class IpndmVFixedMappingTests(unittest.TestCase):
+    """sam-extra 0.33.1 fixed the upstream typo in IPNDM_V's fourth-order weight; ComfyUI core's ``ipndm_v`` keeps it (Linear
+    Quadratic turns green). Every app pass sends Forge's "IPNDM_V" — and ComfyUI's core name ``ipndm_v``, which folds to
+    the same key — to the pack's ``ipndm_v_fixed``, owner-checked like the other pack names; ``ipndm`` and ``deis`` stay
+    ComfyUI's own."""
+
+    def _compile(self, caps, payload, *, workflow=None):
+        return ComfyWorkflowCompiler(caps).compile("txt2img", "checkpoint.safetensors", payload, workflow=workflow)
+
+    @staticmethod
+    def _used(graph) -> set:
+        used = set()
+        for node in graph.values():
+            inputs = node.get("inputs") if isinstance(node.get("inputs"), dict) else {}
+            if node.get("class_type") == "ForgeNeoADetailer":
+                inputs = json.loads(inputs["settings_json"])
+            if "sampler_name" in inputs:
+                used.add(inputs["sampler_name"])
+            if "base_sampler_name" in inputs:
+                used.add(inputs["base_sampler_name"])
+        return used
+
+    def test_every_pass_runs_the_fixed_sampler(self):
+        caps = _owner_caps(samplers=("ipndm_v", "ipndm_v_fixed", "ipndm", "deis"))
+        for text in ("IPNDM_V", "ipndm_v", "ipndm_v_fixed", " IPNDM_V "):
+            passes = [*_pass_payloads(text, "simple").items(), ("custom", {"sampler_name": text, "scheduler": "simple"})]
+            for label, payload in passes:
+                with self.subTest(text=text, label=label):
+                    graph = self._compile(caps, payload, workflow=_custom_workflow() if label == "custom" else None)
+                    used = self._used(graph)
+                    self.assertIn("ipndm_v_fixed", used)
+                    self.assertNotIn("ipndm_v", used)
+        for text, name in (("IPNDM", "ipndm"), ("DEIS", "deis")):
+            with self.subTest(core=text):
+                _sid, sampler = _node(self._compile(caps, {"sampler_name": text}), "ForgeNeoKSamplerCNS")
+                self.assertEqual(sampler["inputs"]["sampler_name"], name)
+
+    def test_a_foreign_ipndm_v_fixed_is_refused(self):
+        caps = _owner_caps(samplers=("ipndm_v", "ipndm_v_fixed"), owned_samplers=())
+        for text in ("IPNDM_V", "ipndm_v"):
+            with self.subTest(text=text), self.assertRaisesRegex(
+                    WorkflowCompileError, "다른 노드 팩이 'ipndm_v_fixed' 샘플러를 먼저 등록"):
+                self._compile(caps, {"sampler_name": text})
+
+    def test_the_tables_name_the_fixed_sampler(self):
+        from core import comfy_workflow_compiler as compiler_module
+
+        self.assertEqual(compiler_module._FORGE_SAMPLER_ALIASES["ipndm_v"], "ipndm_v_fixed")
+        self.assertEqual(generation._AD_SAMPLER_ALIASES["ipndm_v"], "ipndm_v_fixed")
+        self.assertIn("ipndm_v_fixed", extra_samplers_register.PACK_SAMPLERS)
+        self.assertNotIn("ipndm_v", extra_samplers_register.CORE_SAMPLERS)
+        self.assertEqual(extra_samplers_register.IMPLEMENTATIONS["ipndm_v_fixed"],
+                         ("extra_samplers_ipndm", "sample_ipndm_v_fixed"))
+        from comfy_custom_nodes.ai_studio_forge_parity import extra_samplers_ipndm
+
+        self.assertEqual(extra_samplers_ipndm.NAME, xsa.COMFY_IPNDM_V_FIXED)
 
 
 class LenientNumberTests(unittest.TestCase):

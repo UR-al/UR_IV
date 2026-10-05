@@ -1,12 +1,15 @@
 """Extra Samplers for ComfyUI (pack 1.7.0): sam-extra's sampler names in ComfyUI's KSampler list.
 
-sam-extra v0.33.0 adds 18 samplers to Forge's list. Six of them ComfyUI already has under the same
+sam-extra v0.33.0 adds 18 samplers to Forge's list. Five of them ComfyUI already has under the same
 name and the same maths (``CORE_SAMPLERS``: ``dpmpp_2m_sde_heun``, ``uni_pc_bh2``, ``cfgpp_ud10_ab`` from
-ComfyUI v0.35.0, ``ipndm``, ``ipndm_v``, ``deis`` — the app only maps the Forge label to the name). The
-other twelve (``PACK_SAMPLERS`` = sam-extra's first aliases, in its table order) are registered here, the
-way ``compat.install_forge_scheduler_support`` adds ``beta57``, so every pass the app compiles
-(``ForgeNeoKSamplerCNS``, ``ForgeNeoHiresFix``, ADetailer through Impact, SAM3, a custom workflow's stock
-``KSampler``/``KSamplerSelect``) finds them by name:
+ComfyUI v0.35.0, ``ipndm``, ``deis`` — the app only maps the Forge label to the name). The other thirteen
+(``PACK_SAMPLERS``: twelve under sam-extra's first aliases, in its table order, and ``ipndm_v_fixed``) are
+registered here, the way ``compat.install_forge_scheduler_support`` adds ``beta57``, so every pass the app
+compiles (``ForgeNeoKSamplerCNS``, ``ForgeNeoHiresFix``, ADetailer through Impact, SAM3, a custom workflow's
+stock ``KSampler``/``KSamplerSelect``) finds them by name. ``ipndm_v_fixed`` is sam-extra's "IPNDM_V" as of
+0.33.1 (``extra_samplers_ipndm``): ComfyUI's ``ipndm_v`` — sam-extra's alias for that entry — keeps the upstream
+typo in its fourth-order weight that sam-extra 0.33.1 fixed, and the pack never replaces a core name, so the
+fixed sampler has a name of its own and the app maps "IPNDM_V" to it:
 
 * the function goes into ``comfy.k_diffusion.sampling`` as ``sample_<name>`` (what
   ``comfy.samplers.ksampler`` looks up) — a thin ``functools.wraps`` wrapper tagged with the pack's owner
@@ -40,7 +43,8 @@ LOGGER = logging.getLogger("ai_studio_forge_parity")
 
 OWNER = "extra_samplers"
 
-# sam-extra v0.33.0 registry.SPECS order (first alias = the ComfyUI name).
+# sam-extra v0.33.0 registry.SPECS order (first alias = the ComfyUI name), then the pack's own name for sam-extra
+# 0.33.1's IPNDM_V (ComfyUI core's ``ipndm_v`` keeps the upstream typo sam-extra 0.33.1 fixed).
 PACK_SAMPLERS = (
     "er_sde_reverse_time",
     "er_sde_ode",
@@ -54,9 +58,10 @@ PACK_SAMPLERS = (
     "dpmpp_2m_heun_flow_ode",
     "dpmpp_3m_flow_ode",
     "restart_flow",
+    "ipndm_v_fixed",
 )
 # sam-extra entries whose ComfyUI name is core's own (same maths; never registered by the pack).
-CORE_SAMPLERS = ("dpmpp_2m_sde_heun", "uni_pc_bh2", "cfgpp_ud10_ab", "ipndm", "ipndm_v", "deis")
+CORE_SAMPLERS = ("dpmpp_2m_sde_heun", "uni_pc_bh2", "cfgpp_ud10_ab", "ipndm", "deis")
 # Forge options discard_next_to_last_sigma (uni_pc_bh2 is already in ComfyUI's set).
 DISCARD_PENULTIMATE_SIGMA = ("dpmpp_4m_sde", "dpmpp_3m_flow_ode")
 # The Dy entries and whether they are CFG++ (their console line names the step kind).
@@ -75,6 +80,7 @@ IMPLEMENTATIONS = {
     "dpmpp_2m_heun_flow_ode": ("extra_samplers_flow", "sample_dpmpp_2m_heun_flow_ode"),
     "dpmpp_3m_flow_ode": ("extra_samplers_flow", "sample_dpmpp_3m_flow_ode"),
     "restart_flow": ("extra_samplers_restart", "sample_restart_flow"),
+    "ipndm_v_fixed": ("extra_samplers_ipndm", "sample_ipndm_v_fixed"),
 }
 
 
