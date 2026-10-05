@@ -112,6 +112,22 @@ class ExecutionErrorTextTests(unittest.TestCase):
             with self.subTest(data=data):
                 self.assertEqual(execution_error_message(data), UNKNOWN_ERROR)
 
+    def test_exception_without_text_names_its_type_and_failing_frame(self):
+        # ComfyUI sends "{ex}\n{tips}" = "\n" for a bare assert / RuntimeError(): the type and the last frame
+        # stand in, so the result still points at the failing code (the old result showed the frames).
+        frames = ['  File "C:\\ComfyUI\\execution.py", line 496, in execute\n    output_data = get_output_data()\n',
+                  '  File "C:\\ComfyUI\\comfy\\model_patcher.py", line 1766, in load\n'
+                  '    assert load_device is not None\n']
+        bare_assert = {"exception_message": "\n", "exception_type": "AssertionError", "traceback": frames}
+        self.assertEqual(execution_error_message(bare_assert),
+                         "AssertionError — model_patcher.py:1766 (load): assert load_device is not None")
+        self.assertEqual(execution_error_message(dict(bare_assert, traceback="".join(frames))),
+                         "AssertionError — model_patcher.py:1766 (load): assert load_device is not None")
+        empty_runtime = {"exception_message": "\n", "exception_type": "builtins.RuntimeError", "traceback": []}
+        self.assertEqual(execution_error_message(empty_runtime), "RuntimeError")
+        self.assertEqual(execution_error_message({"exception_message": "", "traceback": frames}),
+                         "model_patcher.py:1766 (load): assert load_device is not None")
+
     def test_log_record_keeps_the_whole_traceback(self):
         record = execution_error_log(EXECUTION_ERROR)
         self.assertTrue(record.startswith(MESSAGE + " (node 10, type ForgeNeoKSamplerCNS, exception "))
