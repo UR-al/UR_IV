@@ -524,6 +524,63 @@ class TestPackNotices(unittest.TestCase):
             with self.subTest(module=name):
                 self.assertIn(f"`{name}`", section)
 
+    def test_the_forge_crop_rule_is_named_and_carries_no_forge_code(self):
+        """FIX-recheck(GD recheck): ``mask_ops.expand_crop_region`` was a near-copy (0.88) of Forge's AGPL-3.0
+        ``modules/masking.py`` function since pack 1.3.0 and the notices named no Forge code. The pack's own code now
+        follows only the rule (``TestPackCarriesNoForgeCode``); the notices say which rule and that no Forge code is
+        included."""
+        section = _flat(_section(self.notices, "## Forge inpaint crop rule (`mask_ops.py`)"))
+        for text in ("`mask_ops.py`", "`expand_crop_region`", "`modules/masking.py`", "AGPL-3.0",
+                     "No Forge code is included", "`tests/test_comfy_sam3_nodes.py`", "`tests/test_comfy_node_pack.py`"):
+            with self.subTest(text=text):
+                self.assertIn(text, section)
+
+    def test_a_module_with_shared_sam_extra_code_is_not_called_the_packs_own_without_naming_it(self):
+        """FIX-recheck(GD recheck, low): the 1.7.0 table's ``guidance_common.py`` row said 'None ... the code is this
+        pack's own', and so did the module docstring, while the shared-code table lists that module's Haar helpers as
+        sam-extra code under the grant. A row of the 1.7.0 table that grants nothing ('None'), and a module docstring
+        that calls the code the pack's own, must name the functions the shared-code table lists for that module."""
+        import ast
+        import re
+
+        def cells(line):
+            return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+        listed: dict = {}
+        shared = _section(self.notices, "## Code shared with the sam-extra Forge extension (MIT, by its author)")
+        for line in shared.splitlines():
+            row = cells(line)
+            if not line.startswith("| `") or len(row) != 3:
+                continue
+            modules = re.findall(r"`([a-z0-9_]+\.py)`", row[0])
+            groups = row[1].split(";")
+            if len(modules) > 1 and len(groups) == len(modules):
+                pairs = zip(modules, groups)
+            else:
+                pairs = ((module, row[1]) for module in modules)
+            for module, text in pairs:
+                listed.setdefault(module, []).extend(re.findall(r"`([A-Za-z_][A-Za-z0-9_.]*)`", text))
+        self.assertEqual(listed.get("guidance_common.py"), ["_pad_even", "_haar_dwt", "_haar_idwt", "_sigma_norm"])
+        checked = 0
+        for line in _section(self.notices, "## sam-extra ports (pack 1.7.0)").splitlines():
+            row = cells(line)
+            if not line.startswith("| `") or len(row) != 5 or not row[1].startswith("None"):
+                continue
+            for module in re.findall(r"`([a-z0-9_]+\.py)`", row[0]):
+                for function in listed.get(module, ()):
+                    checked += 1
+                    with self.subTest(row=module, function=function):
+                        self.assertIn(f"`{function}`", row[1])
+        self.assertGreaterEqual(checked, 4)
+        for module, functions in sorted(listed.items()):
+            docstring = " ".join((ast.get_docstring(ast.parse((PACK_DIR / module).read_text(encoding="utf-8")))
+                                  or "").split())
+            if "pack's own" not in docstring:
+                continue
+            for function in functions:
+                with self.subTest(docstring=module, function=function):
+                    self.assertIn(f"``{function}``", docstring)
+
 
 @requires_extension
 class TestSamExtraSharedCodeIsListed(unittest.TestCase):
@@ -558,3 +615,33 @@ class TestSamExtraSharedCodeIsListed(unittest.TestCase):
                        for block in blocks):
                 missing.append(f"{name} ({ratio:.2f} ~ {match})")
         self.assertEqual(missing, [])
+
+
+class TestPackCarriesNoForgeCode(unittest.TestCase):
+    """The pack is copied to the user's ComfyUI under MIT, so it carries no code of Forge Neo: A1111 webui's
+    ``modules/`` (AGPL-3.0) and Forge's own ``modules_forge/`` and ``backend/``. No pack function may be a near-copy of
+    a function there (difflib token ratio of the bodies >= 0.80 — the measure of ``tests/_copy_similarity.py`` that
+    keeps the sam-extra list complete). The third-party packages Forge ships in ``modules_forge/packages`` (k-diffusion,
+    ComfyUI, gguf …) keep their own licenses and are not compared here. Where the pack follows a Forge rule, it says so
+    in THIRD_PARTY_NOTICES.md ("Forge inpaint crop rule"). FIX-recheck: ``mask_ops.expand_crop_region`` was a 0.88
+    near-copy of ``modules/masking.py`` ``expand_crop_region`` from pack 1.3.0 on. Forge is found the way the Extra
+    Samplers oracle finds it (``tests/_forge_k_diffusion.require_forge`` — skips without Forge)."""
+
+    def test_no_pack_function_is_a_near_copy_of_forge_code(self):
+        from tests import _copy_similarity as similarity
+        from tests._forge_k_diffusion import require_forge
+
+        root = require_forge()
+        forge: dict = {}
+        unreadable = []
+        for sub in ("modules", "modules_forge", "backend"):
+            for path, relative in similarity.python_files(root / sub, excluded=similarity.EXCLUDED_DIRS | {"packages"}):
+                try:
+                    forge.update(similarity.function_tokens(path, f"{sub}/{relative}"))
+                except (SyntaxError, UnicodeDecodeError, ValueError):
+                    unreadable.append(f"{sub}/{relative}")
+        self.assertIn("modules/masking.py:expand_crop_region", forge)
+        self.assertGreater(len(forge), 2000)                     # 2,594 functions in the installed Forge (2026-10-05)
+        self.assertLessEqual(len(unreadable), 5, unreadable)
+        copies = similarity.near_copies(similarity.collect(PACK_DIR), forge)
+        self.assertEqual({name: f"{ratio:.2f} ~ {match}" for name, (ratio, match) in sorted(copies.items())}, {})

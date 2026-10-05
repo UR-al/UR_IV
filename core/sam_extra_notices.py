@@ -229,8 +229,10 @@ NOTICE_MIN_TTL_S = {
 }
 # 띄울 때 GUI 가 기능 스냅샷을 다시 받아야 하는 알림(연결 때 받은 스냅샷이 틀렸다는 뜻) —
 # ui/sam_extra_notices_ui.show_notices 가 _refresh_sam_extra_capabilities(force=True) 를 부른다.
+# 잡음 구간 미지원(X10)은 스냅샷이 낡았을 수 있어서다: 앱은 연결·수동 새로고침 때만 묻는데, 연결 뒤 sam-extra 를 올리고
+# Forge 를 다시 켜면 인자 2개 스냅샷이 남는다(ADetailer·SAM3 패스는 결과로 확인할 수 없다 — _xsamp_result_notices).
 REFRESH_CAPABILITIES_CODES = frozenset({CODE_PROPAGATION_RETRIED, CODE_APP_BLOCK_RETRIED, CODE_BLOCK_RETRIED,
-                                        CODE_FORGE_OPTION_REJECTED})
+                                        CODE_FORGE_OPTION_REJECTED, CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED})
 
 # ── alwayson 제목 → 사람이 읽는 이름 ─────────────────────────────────────────
 _TITLE_DORA = dora_infer_mode.SCRIPT_NAME
@@ -1070,11 +1072,14 @@ def _xsamp_result_notices(request: RequestedFeatures, images: Sequence[Mapping],
       구간 건너뜀(예측기에 percent_to_sigma 가 없다 — 구간 없이)은 정보 알림 한 번씩('n/m장'). 블록을 보냈는지와 무관하다
       (Dy 는 샘플러 이름만으로 돈다).
     - 보낸 블록의 잡음 구간이 켜져 있고 η > 0 이고(η 0 이면 구간은 어느 판에서도 아무 일도 하지 않는다) 기능 스냅샷이
-      인자 2개(0.31·0.32 — Forge API 가 뒤 셋을 버린다, 계획 X10)를 확인했는데 Reverse-time·Tunable 패스가 돌았으면 —
-      어느 장의 메인·Hires('Sampler'·'Hires sampler'), 또는 요청의 ADetailer·SAM3 패스(``value_sampler_passes`` — 그
-      안쪽 패스도 같은 값을 읽는다) — 구간이 빠졌다(경고). 어느 장이든 'ER SDE noise window' 가 있으면 구간이 돌았으므로
-      (스냅샷이 낡았다 — sam-extra 를 올리고 Forge 를 다시 켰는데 앱이 다시 받지 않았다) 말하지 않는다. 스냅샷을 모르면
-      말하지 않는다.
+      인자 2개(0.31·0.32 — Forge API 가 뒤 셋을 버린다, 계획 X10)를 확인했는데 Reverse-time·Tunable 패스가 돌았으면
+      구간이 빠졌다(경고 — 띄우면 GUI 가 스냅샷을 다시 받는다, ``REFRESH_CAPABILITIES_CODES``). 어느 장이든 0.33.0 이
+      쓰는 구간 기록 — 'ER SDE noise window' 또는 status 의 구간 건너뜀 — 이 있으면 연결된 sam-extra 는 구간을 안다
+      (스냅샷이 낡았다 — sam-extra 를 올리고 Forge 를 다시 켰는데 앱이 다시 받지 않았다) — 말하지 않는다.
+      근거는 둘이다. 어느 장의 메인·Hires('Sampler'·'Hires sampler')가 돌았으면 결과가 근거다(0.33.0 이면 그 장에
+      'ER SDE noise window' 가 있다). 요청의 ADetailer·SAM3 패스만 돌았으면(``value_sampler_passes`` — 그 안쪽 패스도
+      같은 값을 읽는다) 0.33.0 도 그 패스의 구간을 결과에 적지 않아(GPU part 2 ad_rt__a, O3) 스냅샷만 근거다 — 그렇게
+      말한다(detail '…; snapshot'). 스냅샷을 모르면 말하지 않는다.
     읽을 결과가 없으면 말하지 않는다."""
     if not images:
         return []
@@ -1108,18 +1113,30 @@ def _xsamp_result_notices(request: RequestedFeatures, images: Sequence[Mapping],
             f"없습니다(구간 없이 모든 스텝에 잡음을 넣었습니다). (결과 정보 '{xs.STATUS_KEY}')",
             feature="extra_samplers", detail=xs.WINDOW_SKIPPED_STATUS))
     sent = request.extra_samplers
-    inner_window_pass = any(use.sampler in xs.WINDOW_LABELS and use.pass_id not in (xs.PASS_MAIN, xs.PASS_HIRES)
-                            for use in request.extra_samplers_passes)
-    if sent is not None and xs.window_unsupported(sent, capabilities) \
-            and not any(xs.KEY_NOISE_WINDOW in params for params in images) \
-            and (inner_window_pass or any(_xsamp_ran(params, xs.WINDOW_LABELS) for params in images)):
-        argc = xs.live_argc(capabilities)
+    window_known = window_images or any(xs.KEY_NOISE_WINDOW in params for params in images)
+    if sent is None or window_known or not xs.window_unsupported(sent, capabilities):
+        return out
+    argc = xs.live_argc(capabilities)
+    if any(_xsamp_ran(params, xs.WINDOW_LABELS) for params in images):
         out.append(Notice(
             CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, LEVEL_WARNING,
             f"ER SDE {xs.WINDOW_UNSUPPORTED_TEXT} — 연결된 sam-extra 의 Extra Samplers 는 인자가 {argc}개라 Forge 가 "
             f"잡음 구간 칸을 버리고 구간 없이 생성했습니다('{xs.KEY_NOISE_WINDOW}' 기록 없음). sam-extra 를 "
             f"{xs.WINDOW_MIN_VERSION} 이상으로 업데이트하세요.",
             feature="extra_samplers", detail=f"live_argc={argc}"))
+        return out
+    inner = list(dict.fromkeys(xs.pass_label(use.pass_id) for use in request.extra_samplers_passes
+                               if use.sampler in xs.WINDOW_LABELS
+                               and use.pass_id not in (xs.PASS_MAIN, xs.PASS_HIRES)))
+    if inner:
+        out.append(Notice(
+            CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, LEVEL_WARNING,
+            f"ER SDE {xs.WINDOW_UNSUPPORTED_TEXT} — 연결 때 받은 기능 정보로는 sam-extra 의 Extra Samplers 인자가 "
+            f"{argc}개라 Forge 가 {'·'.join(inner)} 패스의 잡음 구간 칸을 버리고 구간 없이 생성했습니다(그 패스는 결과 "
+            f"정보에 구간을 적지 않아 결과로는 확인할 수 없습니다). sam-extra 를 {xs.WINDOW_MIN_VERSION} 이상으로 "
+            f"업데이트하세요 — 이미 업데이트하고 Forge 를 다시 켰다면 앱이 기능 정보를 다시 받으므로 다음 생성부터 이 "
+            f"알림은 나오지 않습니다.",
+            feature="extra_samplers", detail=f"live_argc={argc}; snapshot"))
     return out
 
 

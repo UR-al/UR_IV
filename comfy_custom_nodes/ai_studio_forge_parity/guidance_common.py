@@ -8,7 +8,11 @@ loading ComfyUI or torch.
 Since pack 1.7.0 it also holds the names sam-extra's features use to find each
 other (sub-step marker, step-offset keyword, re-published sigma lists) and the
 small helpers that read them, so every pack port of a sam-extra feature writes
-and reads them one way. The values are sam-extra's; the code is the pack's own.
+and reads them one way. The values are sam-extra's; the code of those helpers
+is the pack's own. The older Haar helpers (``_pad_even``, ``_haar_dwt``,
+``_haar_idwt``, ``_sigma_norm``) are sam-extra's code, licensed to this pack
+under MIT by its author (THIRD_PARTY_NOTICES.md, "Code shared with the
+sam-extra Forge extension").
 """
 
 from __future__ import annotations

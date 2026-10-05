@@ -132,6 +132,47 @@ class TestComfySam3NodePureContracts(unittest.TestCase):
         with self.assertRaises(ValueError):
             mask_ops.expand_crop_region((5, 5, 5, 9), 512, 512, 64, 64)
 
+    def test_expand_crop_region_equals_forges_function_on_a_grid(self):
+        """FIX-recheck: the pack carries no Forge (A1111, AGPL-3.0) code — ``expand_crop_region`` is the pack's own code
+        for Forge's crop rule (THIRD_PARTY_NOTICES.md "Forge inpaint crop rule"). Forge's ``modules/masking.py``
+        function (its file text, run read-only; no bytecode is written) is the oracle: every crop of a 12x9 image and
+        random crops of larger and odd-shaped images, at square, portrait, landscape and odd processing sizes."""
+        import random
+
+        from tests._forge_k_diffusion import forge_definition
+
+        namespace: dict = {}
+        exec(compile(forge_definition("modules/masking.py", "expand_crop_region"), "forge:modules/masking.py", "exec"),
+             namespace)
+        forge = namespace["expand_crop_region"]
+        processing = ((512, 512), (512, 768), (768, 512), (832, 1216), (1216, 832), (64, 96), (7, 3), (3, 7),
+                      (1000, 999), (1, 1))
+
+        def crops(width, height, rng=None, count=0):
+            if rng is None:
+                return [(x1, y1, x2, y2) for x1 in range(width) for x2 in range(x1 + 1, width + 1)
+                        for y1 in range(height) for y2 in range(y1 + 1, height + 1)]
+            out = []
+            for _ in range(count):
+                x1, y1 = rng.randrange(width), rng.randrange(height)
+                out.append((x1, y1, rng.randrange(x1 + 1, width + 1), rng.randrange(y1 + 1, height + 1)))
+            return out
+
+        rng = random.Random(20261005)
+        images = [(12, 9, crops(12, 9))]
+        images += [(w, h, crops(w, h, rng, 400)) for w, h in ((64, 64), (100, 200), (200, 100), (1024, 1024),
+                                                               (832, 1216), (1, 1), (3, 1000), (1000, 3))]
+        compared = 0
+        for width, height, regions in images:
+            for region in regions:
+                for processing_width, processing_height in processing:
+                    arguments = (region, processing_width, processing_height, width, height)
+                    expected = forge(*arguments)
+                    if mask_ops.expand_crop_region(*arguments) != expected:
+                        self.fail(f"{arguments}: pack {mask_ops.expand_crop_region(*arguments)} != Forge {expected}")
+                    compared += 1
+        self.assertGreater(compared, 60000)
+
     def test_fit_sample_size_never_stretches_the_crop(self):
         self.assertEqual(mask_ops.fit_sample_size(14, 21, 64, 96), (64, 96))
         # 이미지 경계 때문에 종횡비를 못 맞춘 크롭은 비율을 유지한 채 맞춘다

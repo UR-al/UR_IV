@@ -183,6 +183,18 @@ with the sam-extra Forge extension" names the functions. Their sources:
 
 This notice does not replace or modify the upstream licenses.
 
+## Forge inpaint crop rule (`mask_ops.py`)
+
+The SAM3 node's "only masked" inpaint widens the padded mask crop to the processing aspect ratio the way Forge
+does (`inpaint_full_res`), so the ComfyUI crop lands on the same pixels. `mask_ops.py`'s `expand_crop_region`
+follows the rule of Forge's `modules/masking.py` `expand_crop_region` (A1111 stable-diffusion-webui code,
+AGPL-3.0): the short side grows around its centre by the same integer amount, the crop slides back inside the
+image at an edge, and an image too small for the ratio cuts it. Only that rule is shared. No Forge code is
+included: the function is this pack's own code (one helper, `_grow_span`, for either side), and
+`tests/test_comfy_sam3_nodes.py` checks its results against Forge's function over a grid of crops.
+`tests/test_comfy_node_pack.py` also checks that no pack function is a near-copy of the code in Forge's `modules/`,
+`modules_forge/` (without its third-party `packages/`) or `backend/`.
+
 ## Code shared with the sam-extra Forge extension (MIT, by its author)
 
 The sam-extra Forge extension ([UR-al/sam-extra](https://github.com/UR-al/sam-extra), installed as
@@ -270,7 +282,7 @@ the results bit for bit.
 | `guidance.py`, `guidance_dcw.py`, `guidance_detail.py` (Dy sub-steps) | sam-extra's sub-step rule: the guidance suite keeps its step state (APG momentum, ADG, SMC `e_prev`, RDC, HiFlow, Momentum Guidance, HiGS) through Euler (SMEA) Dy sub-steps | — | `sam3ext/guidance/` | `test_comfy_detail_parity.py` |
 | `speed_schedule.py`, `speed_spectral.py`, `speed_runner.py`, `speed_nodes.py`, the Detail Daemon σ lookup in `guidance_dd.py` | `validate_scales`, `parse_sigmas`, `_transition_hand_offs`; `dct_basis`, `dct_downscale`, `amplitude_resize`, `_target` (`_check_target`), `expand_dct`, `expand_fft`, `expand_haar`; `_expand`, `_init_coarse`, `_apply_transition`, `run_speed` with its `segment`; `plan_for` (`_plan_for`), `_flag` (Colorcraft `spec.py` `_truthy`). Also sam-extra's changes to the upstreams: refusals incl. custom A ≤ 0, seeds and noise streams, the img2img rescale, guards, status lines, and Detail Daemon following the re-published σ list | The three MIT upstreams under "Anima SPEED" | `sam3ext/speed/` (`schedule.py`, `spectral.py`, `runner.py`, `forge_host.py`) | `test_comfy_speed_parity.py`, `test_comfy_speed_host.py`, `test_comfy_speed_runtime.py` |
 | `colorcraft_basis.py`, `colorcraft_engine.py`, `colorcraft_host.py`, `colorcraft_nodes.py` | sam-extra's three substitutions in `apply_chain`; `encode_anchors`, `_anchor_cache_key` (`_anchor_key`), `AnchorCache.put` (`_remember_anchor`), `RunReport.render`, `grid_downscale`, the anchor look-up `get_color_latent`; sam-extra's host rules: anchors, σ look-up, pre-Detail-Daemon σ, fp16/bf16, sub-step pass-through | The MIT upstream and fork under "Colorcraft": `resolve_dev`, `sigma_to_value`, `build_entries` and the modifier loop are theirs | `sam3ext/colorcraft/` (`engine.py`, `hook.py`, `basis.py`, `spec.py`, `schedule.py`) | `test_comfy_colorcraft_parity.py`, `test_comfy_colorcraft_runtime.py` |
-| `guidance_common.py`, `compat.py`, `hires_carry.py` | None. Only the values of sam-extra's coordination names (`sam_extra_substep`, `sam_extra_step_offset`, the re-published σ tag) are sam-extra's; the code is this pack's own | — | `sam3ext/extra_samplers/common.py`, `sam3ext/speed/runner.py`, `sam3ext/guidance/sigmas.py` | `test_comfy_pack_foundation.py` |
+| `guidance_common.py`, `compat.py`, `hires_carry.py` | None in their 1.7.0 additions. Only the values of sam-extra's coordination names (`sam_extra_substep`, `sam_extra_step_offset`, the re-published σ tag) are sam-extra's; the code that writes and reads them is this pack's own. The older Haar helpers of `guidance_common.py` (`_pad_even`, `_haar_dwt`, `_haar_idwt`, `_sigma_norm`) are sam-extra code under the grant (previous section) | — | `sam3ext/extra_samplers/common.py`, `sam3ext/speed/runner.py`, `sam3ext/guidance/sigmas.py` | `test_comfy_pack_foundation.py` |
 
 The sections below give each feature's upstreams and licenses. This notice does not replace or modify the
 upstream licenses.

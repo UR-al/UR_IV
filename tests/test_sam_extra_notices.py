@@ -1538,6 +1538,69 @@ class ExtraSamplersNoticeTests(_QuietAssumption):
         [notice] = self._xsamp(info_of(XSAMP_NO_WINDOW_KEY, XSAMP_NO_WINDOW_KEY), window, two)
         self.assertEqual(notice.code, sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED)
 
+    def test_window_warning_is_quiet_when_a_result_says_the_window_was_skipped(self):
+        """FIX-recheck: 'noise window skipped' 부분은 0.33.0 부터만 쓴다 — 연결된 sam-extra 는 구간을 안다(인자 2개
+        스냅샷이 낡았다). 구간 건너뜀 정보만 내고 '업데이트하세요' 경고는 내지 않는다(어느 장이든 하나라도)."""
+        two = _caps_with_xsamp_argc(2)
+        window = xsamp_payload(eta=0.5, noise_window=True)
+        skipped = xsamp_infotext(LABEL_TUNABLE, status=_WINDOW_SKIPPED, keys="ER SDE eta: 0.5, ")
+        for info in (info_of(skipped), info_of(XSAMP_NO_WINDOW_KEY, skipped)):
+            with self.subTest(images=info.count("Steps:")):
+                self.assertEqual([n.code for n in self._xsamp(info, window, two)],
+                                 [sn.CODE_EXTRA_SAMPLERS_WINDOW_SKIPPED])
+
+    def test_window_warning_for_inner_passes_only_says_it_rests_on_the_snapshot(self):
+        """FIX-recheck(claude:forge-notices #1+#3): sam-extra 0.33.0 은 ADetailer·SAM3 패스의 구간을 결과 정보에 적지 않는다
+        (실제 v0.33.0 Forge, GPU part 2 ad_rt__a — ER SDE 키가 하나도 없다, O3). 그 패스만 Reverse-time·Tunable 이면
+        결과로는 구간이 빠졌는지 알 수 없다 — 경고는 연결 때 받은 기능 정보가 근거라고 말하고 '기록 없음'을 근거로
+        대지 않는다. 메인·Hires 가 돈 장이 있으면 결과가 근거다(기존 문구)."""
+        from core import extra_samplers
+        two = _caps_with_xsamp_argc(2)
+        payload = xsamp_payload(eta=0.5, noise_window=True)
+        payload["sampler_name"] = "Res Multistep"
+        payload["alwayson_scripts"]["ADetailer"] = {"args": [True, False, {
+            "ad_model": "face_yolov8n.pt", "ad_use_sampler": True, "ad_sampler": "ER SDE (Reverse-time)"}]}
+        ad_rt = info_of(xsamp_infotext("Res Multistep", keys="ADetailer model: face_yolov8n.pt, "
+                                       "ADetailer use separate sampler: True, ADetailer sampler: ER SDE (Reverse-time), "))
+        [notice] = self._xsamp(ad_rt, payload, two)
+        self.assertEqual((notice.code, notice.level, notice.feature, notice.detail),
+                         (sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, sn.LEVEL_WARNING, "extra_samplers",
+                          "live_argc=2; snapshot"))
+        self.assertIn(extra_samplers.WINDOW_UNSUPPORTED_TEXT, notice.message)
+        self.assertIn("연결 때 받은 기능 정보", notice.message)
+        self.assertIn("ADetailer 1 패스", notice.message)
+        self.assertIn("결과로는 확인할 수 없습니다", notice.message)
+        self.assertIn(extra_samplers.WINDOW_MIN_VERSION, notice.message)
+        self.assertNotIn("기록 없음", notice.message)
+        payload["alwayson_scripts"]["SAM3 Mask"] = {"args": [{"sam3_enable": True, "sam3_mode": "Inpaint",
+                                                             "sam3_sampler": "er_sde_tunable"}]}
+        [both] = self._xsamp(ad_rt, payload, two)
+        self.assertIn("ADetailer 1·SAM3 패스", both.message)
+        # 메인이 Reverse-time 으로 돈 장이 있으면 결과가 근거다 — 기존 문구·detail
+        [main] = self._xsamp(info_of(XSAMP_NO_WINDOW_KEY), payload, two)
+        self.assertEqual(main.detail, "live_argc=2")
+        self.assertIn(f"'{extra_samplers.KEY_NOISE_WINDOW}' 기록 없음", main.message)
+        # 새 스냅샷(0.33.0, 인자 다섯)이면 같은 결과가 조용하다
+        self.assertEqual(self._xsamp(ad_rt, payload, _caps_with_xsamp_argc(5)), [])
+
+    def test_window_warning_refreshes_the_gui_snapshot_once_per_ttl(self):
+        """FIX-recheck(claude:forge-notices #3 선택 부분): 앱은 연결·수동 새로고침·REFRESH_CAPABILITIES_CODES 에서만 스냅샷을
+        다시 받는다 — 연결 뒤 sam-extra 를 0.33.0 으로 올리고 Forge 를 다시 켜면 인자 2개 스냅샷이 남아 ADetailer·SAM3 만
+        구간 샘플러인 생성마다(TTL 마다) 경고가 되풀이됐다. 경고를 띄우면 GUI 가 스냅샷(공용 캐시 포함)을 다시 받는다."""
+        from ui.sam_extra_notices_ui import show_result_notices
+        self.assertIn(sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, sn.REFRESH_CAPABILITIES_CODES)
+        now = [1000.0]
+        host = _host(_sam_extra_notice_throttle=sn.NoticeThrottle(lambda: now[0]),
+                     _refresh_sam_extra_capabilities=mock.Mock())
+        notices = self._xsamp(info_of(XSAMP_NO_WINDOW_KEY), xsamp_payload(eta=0.5, noise_window=True),
+                              _caps_with_xsamp_argc(2))
+        info = {sn.INFO_KEY: sn.notices_to_dicts(notices)}
+        with self.assertLogs("ui.sam_extra_notices_ui", "WARNING"):
+            self.assertEqual(show_result_notices(host, info), 1)
+            now[0] += 1
+            self.assertEqual(show_result_notices(host, info), 0)          # 억제된 반복은 다시 받지 않는다
+        host._refresh_sam_extra_capabilities.assert_called_once_with(force=True)
+
     def test_requested_features_read_the_block_like_the_extension(self):
         from core import extra_samplers
         request = sn.requested_features(xsamp_payload(max_stage=2, eta=0.5, noise_window=True))
