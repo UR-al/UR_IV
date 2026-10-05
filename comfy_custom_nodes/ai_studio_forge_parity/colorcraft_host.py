@@ -41,6 +41,9 @@ from .compat import LOGGER, clone_model, require_torch, sampler_sample_wrapper_t
 from .guidance_common import PRE_DD_SIGMAS_KEY, is_extra_sampler_substep, republished_from
 
 LOG_PREFIX = "[AI Studio Colorcraft]"
+# sam-extra's infotext key (``hook.INFOTEXT_PRE_DD``) for "the schedule was looked up by the sigma Detail Daemon noted
+# before scaling it". Forge writes it as a key of its own, not in the status line; the pack logs it on a line of its own.
+INFOTEXT_PRE_DD = "SAM Extra Colorcraft pre-DD sigma"
 SETTINGS_VERSION = 1
 PASSES = ("base", "hires")
 
@@ -499,7 +502,10 @@ def prepare(model, vae, settings: dict, pre_dd: bool = True, *, device=None,
 #   is the input, or not finite, passes the input through; an exception passes it through with one console line;
 # * on SPEED's coarse grid the mask blur keeps its image-pixel size (``grid_downscale``).
 #
-# One console summary per run: ``[AI Studio Colorcraft] base: krea2 (Wan21); mods I; 30 evals, 28 edited``.
+# One console summary per run, the extension's status line character for character:
+# ``[AI Studio Colorcraft] base: krea2 (Wan21); mods I; 30 evals, 28 edited``. When Detail Daemon's noted sigma
+# replaced a scaled one, a second line carries what Forge writes as its own infotext key (``INFOTEXT_PRE_DD``):
+# ``[AI Studio Colorcraft] base pass: SAM Extra Colorcraft pre-DD sigma: True (x16)``.
 
 RUN_KEY = "ai_studio_colorcraft_runs"            # transformer_options: {patch token: RunState} for this run
 PATCH_KEY = "forge_neo_colorcraft"               # model_options: the ColorcraftPatch (Hires carry reads it)
@@ -524,16 +530,15 @@ class RunReport:
     errors: int = 0
     last_error: str = ""
     nonfinite: int = 0
-    pre_dd: int = 0
+    pre_dd: int = 0              # lookups by Detail Daemon's noted sigma: ``pre_dd_line``, not the status line
     notes: list = field(default_factory=list)
 
     def render(self) -> str:
+        """The extension's ``PassStatus.render`` of an attached pass (a run that began is attached), unchanged."""
         parts = [self.family] if self.family else []
         if self.tags:
             parts.append("mods " + "+".join(self.tags))
         parts.append(f"{self.evals} evals, {self.edited} edited" if self.evals else "pending model evaluation")
-        if self.pre_dd:
-            parts.append(f"pre-DD sigma x{self.pre_dd}")
         if self.substeps:
             parts.append(f"Dy/SMEA sub-steps passed through x{self.substeps}")
         if self.foreign:
@@ -544,6 +549,13 @@ class RunReport:
             parts.append(f"error {self.last_error} x{self.errors} (input passed through)")
         parts += self.notes
         return f"{self.name}: " + "; ".join(parts)
+
+    def pre_dd_line(self) -> str | None:
+        """Forge's separate infotext fact ``SAM Extra Colorcraft pre-DD sigma: True`` (the extension writes it once
+        a lookup used Detail Daemon's noted sigma), with the count of those lookups; None when none did."""
+        if not self.pre_dd:
+            return None
+        return f"{self.name} pass: {INFOTEXT_PRE_DD}: True (x{self.pre_dd})"
 
 
 @dataclass
@@ -778,6 +790,9 @@ class ColorcraftPatch:
                 if state is not None:
                     patch.last_report, patch.last_state = state.report, state
                     log_line(state.report.render())
+                    pre_dd = state.report.pre_dd_line()
+                    if pre_dd:
+                        log_line(pre_dd)
 
         setattr(colorcraft_sampler_sample, OWNER_ATTR, OWNER)
         return colorcraft_sampler_sample

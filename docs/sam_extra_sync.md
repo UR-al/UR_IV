@@ -195,7 +195,7 @@ sam-extra 는 GPL-3.0-only 이고, 앱 노드 팩은 MIT 로 사용자 ComfyUI �
   - Hires ER SDE `[2, 0.5]` 의 infotext 키가 있고 ADetailer 칸 값이 안쪽 패스에 닿았다. Euler Dy CFG++ + Spectrum → `Extra Samplers status: dy sub-steps skipped (Spectrum)` 와 앱 알림. infotext 키 = 앱 `infotext_items`. Restart (flow) 의 모델 호출은 28 스텝 65, 40 스텝 111 — 로그의 σ 로 계산한 확장의 재시작 계획과 같다.
   - 앱 결함이 아닌 관찰: Forge 진행 막대는 Restart (flow) 가 다시 밟는 스텝을 세지 않는다. IPNDM_V·UniPC bh2(덜하게 DEIS·DPM++ 4M SDE·2M SDE Heun)는 Linear Quadratic 28 스텝·CFG 5 에서 두 경로 모두 같은 망가진 이미지다. ADetailer 안쪽 패스만 쓴 ER SDE 값은 저장된 infotext 에 남지 않는다(확장·ADetailer 동작 — 레지스트리 Extra Samplers gaps 에 적었다). 앱의 IPNDM 힌트는 이 관찰을 그대로 적는다: IPNDM 은 괜찮았고 IPNDM_V(녹색 잡음)·UniPC bh2(무너짐)가 깨졌으며 다른 스케줄은 확인하지 않았다(IPNDM·IPNDM_V·UniPC bh2 를 고르면 보인다).
 - **VRAM**: 전체 GPU 최고 23,657 MiB(1부 SPEED Hires 1.5배), 기본 요청 20.9–22.0 GB. 2부 최고 22,227 MiB. Windows(WDDM)에서는 PID 별 사용량이 `[N/A]` 다.
-- ComfyUI 쪽 GPU 대조는 이 결과에 없다. ComfyUI 동등성의 근거는 위의 CPU 비트 대조와 런타임 계층이다.
+- **ComfyUI(comfy-3)**(앱 `5bed42f`, ComfyUI 0.36.0, 팩 1.7.0): 두 번 실행 79/79 같음, 관계 16/16, XS σ 목록 42/42 = 확장 0.33.0, SPEED 콘솔 = Forge 7/7, 메타데이터 불일치 0, NaN·검은 이미지 없음. 남은 두 건은 결함이 아니었다 — cc_adv 의 Lab 부호 차이는 높은 σ 에서의 x0 편집이 내용을 바꾼 것(CPU: 앵커가 두 호스트의 실제 VAE 경로로 비트까지 같고, 팩 경로 = 확장 훅이 실제 σ 목록 28회 평가 모두 같음 — `tests/test_comfy_colorcraft_runtime.py` 의 cc_adv 두 테스트가 지킨다), cc_dd 의 콘솔 줄에 붙던 `; pre-DD sigma x16` 은 Forge 상태 줄에 없는 문구라 뺐다(같은 사실은 Forge 처럼 따로: `base pass: SAM Extra Colorcraft pre-DD sigma: True (x16)` 줄). ComfyUI 실행 오류의 결과 문구는 예외 메시지만 보이고 traceback 은 앱 로그에 남는다(`backends/comfyui_execution_error.py`). ComfyUI PNG 에는 실행 중 사실인 `… status`·`… pre-DD sigma` 키가 여전히 없다(그래프로 알 수 없다 — 레지스트리 gap).
 
 ## 참고
 

@@ -19,6 +19,7 @@ from backends.base import (
     AbstractBackend, BackendInfo, GenerationResult, MediaArtifact,
     ProgressCallback,
 )
+from backends.comfyui_execution_error import execution_error_log, execution_error_message
 from backends.comfyui_progress import ProgressTracker
 from backends.comfyui_preview import PreviewStream
 from backends.comfyui_workflow_inspector import (
@@ -960,13 +961,11 @@ class ComfyUIBackend(AbstractBackend):
                     break
 
             elif msg_type == 'execution_error':
+                # 결과에는 예외 메시지만 — traceback 은 앱 로그에 남긴다(comfy-3 O4).
                 d = data.get('data', {})
-                error_msg = d.get('exception_message', '알 수 없는 오류')
-                traceback_lines = d.get('traceback', [])
-                if traceback_lines:
-                    error_msg += "\n" + "".join(traceback_lines[-3:])
-                _logger.error(f"실행 오류: {error_msg}")
-                return GenerationResult(success=False, error=f"ComfyUI 실행 오류:\n{error_msg}")
+                _logger.error(f"실행 오류: {execution_error_log(d)}")
+                return GenerationResult(success=False,
+                                        error=f"ComfyUI 실행 오류:\n{execution_error_message(d)}")
 
             elif msg_type == 'execution_interrupted':
                 # interrupt() 호출로 서버가 실행을 중단함

@@ -207,8 +207,10 @@ itself; restart a ComfyUI you started yourself.
     by the sampler's own sigma it noted (`pre_dd_sigma`); Anima SPEED's re-published list is followed; Euler
     (SMEA) Dy CFG++ sub-steps pass through; fp16/bf16 graded in fp32; a non-finite result or an error passes
     the prediction through (one console line). The post-CFG function goes last, after Optimal Scale, the
-    guidance suite, Skimmed CFG and Detail Daemon (Forge's order). One console line per run:
-    `[AI Studio Colorcraft] base: krea2 (Wan21); mods I+II; 30 evals, 28 edited`.
+    guidance suite, Skimmed CFG and Detail Daemon (Forge's order). One console line per run, the extension's
+    status line character for character: `[AI Studio Colorcraft] base: krea2 (Wan21); mods I+II; 30 evals, 28 edited`.
+    When the lookup used Detail Daemon's noted sigma, a second line carries what Forge records as its own
+    infotext key: `[AI Studio Colorcraft] base pass: SAM Extra Colorcraft pre-DD sigma: True (x16)`.
   - A Hires checkpoint/UNET override keeps the hires pass's Colorcraft (`hires_carry`), prepared again for the
     override model's latent format and with its VAE. A Hires VAE-only override prepares it again with that VAE
     on the pass's own model (`hires_carry.apply_vae_change`), as Forge, which reloads the model with the new VAE

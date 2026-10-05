@@ -1535,8 +1535,25 @@ class HostRunParityTests(unittest.TestCase):
                 evals = _evals(full, rng, family="krea2")
                 for item in evals[1:-1]:
                     item["scaled"] = item["sigma"] * 0.93
-                report = self._run_both(callback, run, patch, full, 0, evals, label=f"pre_dd {pre_dd}")
+                with self.assertLogs("ai_studio_forge_parity", level="INFO") as logs:
+                    report = self._run_both(callback, run, patch, full, 0, evals, label=f"pre_dd {pre_dd}")
                 self.assertEqual(report.pre_dd > 0, pre_dd)
+                # comfy-3 F1: the console line is the extension's status line, character for character; the pre-DD
+                # fact Forge writes as its own infotext key goes on a line of its own (the extension writes the key
+                # once Detail Daemon scaled a sigma, "False" with the option off; the pack logs it when used).
+                status = run.status
+                self.assertTrue(status.attached)
+                self.assertEqual(report.render(), status.render())
+                self.assertNotIn("pre-DD", report.render())
+                self.assertEqual(self.host.INFOTEXT_PRE_DD, self.hook.INFOTEXT_PRE_DD)
+                self.assertEqual(run.params.get(self.hook.INFOTEXT_PRE_DD), str(pre_dd))
+                fact = f"base pass: {self.hook.INFOTEXT_PRE_DD}: True (x{report.pre_dd})" if pre_dd else None
+                self.assertEqual(report.pre_dd_line(), fact)
+                lines = [r.getMessage() for r in logs.records if r.getMessage().startswith(self.host.LOG_PREFIX)]
+                expected = [f"{self.host.LOG_PREFIX} {status.render()}"]
+                if pre_dd:
+                    expected.append(f"{self.host.LOG_PREFIX} {fact}")
+                self.assertEqual(lines, expected)
 
     def test_substeps_republished_and_foreign_lists(self):
         rng = random.Random(11)
