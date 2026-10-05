@@ -541,7 +541,8 @@ class WrapperOrderTests(unittest.TestCase):
 
 
 class PackNeverImportsSamExtraTests(unittest.TestCase):
-    """sam-extra is GPL-3.0: the pack re-implements, it never imports the extension."""
+    """The pack never imports the extension (GPL-3.0-only); the sam-extra code it contains is the author's, under
+    the MIT grant in THIRD_PARTY_NOTICES.md."""
 
     def test_no_pack_module_imports_sam3ext_or_extension_scripts(self):
         offenders = []
@@ -625,9 +626,9 @@ def _carry(model: _SamplingPatcher, settings: Any) -> _SamplingPatcher:
 class _Providers:
     """``generation.invoke_provider`` stand-in for the ComfyUI nodes HiresFix calls."""
 
-    def __init__(self, *, checkpoint=None, unet=None):
+    def __init__(self, *, checkpoint=None, unet=None, vae=None):
         self.calls: list[tuple[str, tuple]] = []
-        self.checkpoint, self.unet = checkpoint, unet
+        self.checkpoint, self.unet, self.vae = checkpoint, unet, vae
 
     def __call__(self, name, *, method, feature, args=(), kwargs=None):
         self.calls.append((name, tuple(args)))
@@ -640,6 +641,8 @@ class _Providers:
             return self.checkpoint
         if name == "UNETLoader":
             return (self.unet,)
+        if name == "VAELoader" and self.vae is not None:
+            return (self.vae,)
         if name == "CLIPTextEncode":
             return (f"encoded:{args[1]}",)
         raise AssertionError(f"unexpected provider {name}")
@@ -687,10 +690,13 @@ class _IsolatedCarryRegistry(unittest.TestCase):
 
     def setUp(self):
         carries = mock.patch.dict(hires_carry._CARRIES, clear=True)
+        vae_carries = mock.patch.dict(hires_carry._VAE_CARRIES, clear=True)
         attrs = mock.patch.dict(hires_carry._SAMPLING_ATTRS, clear=True)
         carries.start()
+        vae_carries.start()
         attrs.start()
         self.addCleanup(carries.stop)
+        self.addCleanup(vae_carries.stop)
         self.addCleanup(attrs.stop)
         hires_carry.register_sampling_attr(CARRIER)
 
@@ -902,6 +908,92 @@ class HiresOverrideCarryTests(_IsolatedCarryRegistry):
         )
         self.assertEqual(list(sampled.wrappers["sampler_sample"]),
                          [guidance_cns.CNS_WRAPPER_KEY, "speed"])
+
+
+class HiresVaeOverrideCarryTests(_IsolatedCarryRegistry):
+    """A Hires pass that overrides only the VAE: the carries registered with ``uses_vae`` (Colorcraft's anchors)
+    prepare their patch again with that VAE — Forge reloads the model with the new VAE for the pass."""
+
+    def _register(self, record):
+        def vae_carry(source, target, vae):
+            record.append(("vae", source, target, vae))
+            patched = target.clone()
+            patched.model_options = dict(patched.model_options, anchors_from=vae)
+            return patched
+
+        def model_carry(source, target, vae):
+            record.append(("model", source, target, vae))
+            return None
+
+        hires_carry.register(model_carry, key="extra_schedulers")
+        hires_carry.register(vae_carry, key="colorcraft", uses_vae=True)
+
+    def test_registry_runs_only_the_vae_carries_also_on_the_same_model(self):
+        record = []
+        self._register(record)
+        self.assertEqual(hires_carry.registered(), ("extra_schedulers", "colorcraft"))
+        self.assertEqual(hires_carry.registered_vae(), ("colorcraft",))
+        model = _SamplingPatcher(label="base")
+        result = hires_carry.apply_vae_change(model, model, "override-vae")
+        (kind, source, target, vae), = record
+        self.assertEqual((kind, vae), ("vae", "override-vae"))
+        self.assertIs(source, model)
+        self.assertIs(target, model)                                  # Shift 0: the incoming MODEL itself
+        self.assertIsNot(result, model)
+        self.assertEqual(result.model_options["anchors_from"], "override-vae")
+        # registering the key again without uses_vae drops the flag; unregister drops it too
+        hires_carry.register(lambda s, t, v: None, key="colorcraft")
+        self.assertEqual(hires_carry.registered_vae(), ())
+        hires_carry.register(lambda s, t, v: None, key="colorcraft", uses_vae=True)
+        hires_carry.unregister("colorcraft")
+        self.assertEqual(hires_carry.registered_vae(), ())
+        self.assertIs(hires_carry.apply_vae_change(model, model, "override-vae"), model)
+
+    def test_a_failing_vae_carry_fails_the_pass_with_its_key(self):
+        hires_carry.register(lambda s, t, v: 1 / 0, key="colorcraft", uses_vae=True)
+        with self.assertRaisesRegex(RuntimeError, "VAE override.*'colorcraft'") as caught:
+            hires_carry.apply_vae_change("base", "base", "vae2")
+        self.assertIsInstance(caught.exception.__cause__, ZeroDivisionError)
+
+    def test_vae_only_override_prepares_the_vae_carries_again_with_shift_0_and_3(self):
+        for shift in (0.0, 3.0):
+            with self.subTest(shift=shift):
+                record = []
+                self._register(record)
+                model = _carry(_SamplingPatcher(label="base"), {"laplace_mu": 0.2})
+                providers = _Providers(vae="override-vae")
+                sampled, vae, _ = _HiresHarness(providers).run(
+                    model, shift=shift, vae_name="other_vae.safetensors",
+                )
+                self.assertEqual(vae, "override-vae")
+                (kind, source, target, carry_vae), = record              # the MODEL carry does not run
+                self.assertEqual((kind, carry_vae), ("vae", "override-vae"))
+                self.assertIs(source, model)
+                if shift:
+                    self.assertIsNot(target, model)
+                    self.assertEqual(target.get_model_object("model_sampling").shift, 3.0)  # after the flow shift
+                else:
+                    self.assertIs(target, model)
+                self.assertEqual(sampled.model_options["anchors_from"], "override-vae")
+                self.assertEqual(getattr(sampled.get_model_object("model_sampling"), CARRIER), {"laplace_mu": 0.2})
+                self.assertEqual([name for name, _ in providers.calls],
+                                 ["VAELoader"] + (["ModelSamplingSD3"] if shift else []))
+
+    def test_no_vae_override_and_checkpoint_override_do_not_run_it_twice(self):
+        record = []
+        self._register(record)
+        model = _carry(_SamplingPatcher(label="base"), "values")
+        sampled, vae, _ = _HiresHarness(_Providers()).run(model, shift=0.0)
+        self.assertIs(sampled, model)
+        self.assertEqual((vae, record), ("base-vae", []))
+        fresh = _SamplingPatcher(_Sampling(1.0, multiplier=1.0), label="override")
+        providers = _Providers(checkpoint=(fresh, "override-clip", "override-vae"))
+        sampled, vae, _ = _HiresHarness(providers, _paths(checkpoint=True)).run(
+            model, shift=0.0, checkpoint_name="other.safetensors",
+        )
+        self.assertEqual(vae, "override-vae")
+        self.assertEqual([kind for kind, *_ in record], ["model", "vae"])  # hires_carry.apply: each carry once
+        self.assertEqual(sampled.model_options["anchors_from"], "override-vae")
 
 
 class DySubstepsFlagTests(unittest.TestCase):

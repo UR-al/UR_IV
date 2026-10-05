@@ -14,13 +14,13 @@ state by kappa (paper Eq. 5/6).
   in the larger grid and fill the new coefficients with ``sigma * noise``. They return the expansion
   *before* the kappa rescale; the caller multiplies (the official order) and casts back.
 
-The behaviour is sam-extra's (``forge_sam3_extension`` ``sam3ext/speed/spectral.py``): torch only
-(no scipy/numpy/PyWavelets at run time), the maths in float64 on the latent's device (float32 on
-MPS, which has no float64), the noise passed in by the caller (drawn per image seed), the FFT fill
-``sigma * (n_r + i n_i)`` without aoleg's ``/ sqrt(2)`` (the official ca7801c9 fix) and the one-level
-Haar synthesis written out with pywt's ``waverec2(..., "haar", mode="periodization")`` layout. The
-code is the pack's own, written from the MIT upstreams (full notices in THIRD_PARTY_NOTICES.md,
-texts in LICENSES/):
+The behaviour is sam-extra's (``forge_sam3_extension`` ``sam3ext/speed/spectral.py``): torch only (no
+scipy/numpy/PyWavelets at run time), the maths in float64 on the latent's device (float32 on MPS, which has no
+float64), the noise passed in by the caller (drawn per image seed), the FFT fill ``sigma * (n_r + i n_i)``
+without aoleg's ``/ sqrt(2)`` (the official ca7801c9 fix) and the one-level Haar synthesis written out with
+pywt's ``waverec2(..., "haar", mode="periodization")`` layout. The code follows sam-extra's ``spectral.py`` (its
+changes are sam-extra's code, licensed to this pack under MIT by its author (THIRD_PARTY_NOTICES.md)) on the MIT
+upstreams (full notices in THIRD_PARTY_NOTICES.md, texts in LICENSES/):
 
 * howardhx/speed@ca7801c9bdffe681742e9592345bcf4885959be5 ``utils.py`` — ``kappa``,
   ``align_timestep``, the DCT/DWT/FFT expansions (``_dct_expand_np``, ``_dwt_expand_np``,

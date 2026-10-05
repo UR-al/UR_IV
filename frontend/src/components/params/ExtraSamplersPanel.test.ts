@@ -103,6 +103,26 @@ it('Reverse-time shows stage, η and the noise window row with the extension ran
   expect(stages(root).map(b => b.props['aria-checked'])).toEqual([false, true, false])
 })
 
+it('each number input is bound to its own store key, both ways', async () => {
+  // FIX-forge(claude:forge-ui): 범위·disabled 만 보면 시작/끝을 바꿔 묶거나 η 를 구간 키에 묶어도 통과했다
+  widgets.sampler_combo = 'ER SDE (Reverse-time)'
+  widgets[xsa.WIDGET_IDS.eta] = '0.37'
+  widgets[xsa.WIDGET_IDS.noise_start] = '0.11'
+  widgets[xsa.WIDGET_IDS.noise_end] = '0.93'
+  const root = await mount()
+  expect(inputs(root).map(i => i.value)).toEqual(['0.37', '0.11', '0.93'])          // 스토어 → 칸
+  const keys = [xsa.WIDGET_IDS.eta, xsa.WIDGET_IDS.noise_start, xsa.WIDGET_IDS.noise_end]
+  for (const [index, key] of keys.entries()) {                                       // 칸 → 스토어(그 키만)
+    const before = { ...widgets }
+    inputs(root)[index]!.props['onUpdate:modelValue'](`0.5${index}`)
+    expect(Object.keys(widgets).filter(k => widgets[k] !== before[k]), key).toEqual([key])
+    expect(widgets[key]).toBe(`0.5${index}`)
+  }
+  widgets[xsa.WIDGET_IDS.noise_end] = '0.77'
+  await Vue.nextTick()
+  expect(inputs(root).map(i => i.value)).toEqual(['0.50', '0.51', '0.77'])
+})
+
 it('ODE only turns η and the window row off; a Tunable pass turns them on again', async () => {
   widgets.sampler_combo = 'er_sde_ode'
   const root = await mount()
@@ -158,6 +178,12 @@ it('X10 note: a 2-argument sam-extra drops the window when it is on', async () =
   expect(text(root)).not.toContain(xsa.WINDOW_UNSUPPORTED_TEXT)
   widgets[xsa.WIDGET_IDS.noise_window] = '1'
   widgets.sampler_combo = 'ER SDE (ODE)'   // the window is not read by ODE
+  await Vue.nextTick()
+  expect(text(root)).not.toContain(xsa.WINDOW_UNSUPPORTED_TEXT)
+  widgets.sampler_combo = 'ER SDE (Tunable)'
+  await Vue.nextTick()
+  expect(text(root)).toContain(xsa.WINDOW_UNSUPPORTED_TEXT)
+  widgets[xsa.WIDGET_IDS.eta] = '0'          // η 0: the window does nothing on any version — no update claim
   await Vue.nextTick()
   expect(text(root)).not.toContain(xsa.WINDOW_UNSUPPORTED_TEXT)
 })
@@ -220,6 +246,25 @@ it('sampler hints show without the box; CFG++ warns above CFG 2', async () => {
   await Vue.nextTick()
   expect(text(root)).not.toContain(xsa.cfgWarning(2.5))
   expect(text(root)).toContain(xsa.RESTART_HINT)
+})
+
+it('the Hires CFG++ warning reads the Hires pass CFG; with Hires CFG off ComfyUI uses the main CFG, Forge 1', async () => {
+  widgets.sampler_combo = 'Euler'
+  widgets.cfg_input = 7
+  widgets.hires_options_group = 'true'
+  widgets.hires_sampler_combo = 'CFG++ UD10 AB'
+  const root = await mount()
+  expect(text(root)).toContain(xsa.UD10_HINT)
+  expect(text(root)).not.toContain('권장합니다 (')                                  // Forge: Hires CFG 끔 → 1
+  caps.value = { status: 'not_applicable', known: false, features: {} }
+  await Vue.nextTick()
+  expect(text(root)).toContain(xsa.hiresCfgWarning(7))                              // ComfyUI: 메인 CFG
+  caps.value = null
+  widgets.cfg_input = 2
+  widgets.hires_cfg_input = 6
+  await Vue.nextTick()
+  expect(text(root)).toContain(xsa.hiresCfgWarning(6))
+  expect(text(root)).not.toContain(xsa.cfgWarning(2))
 })
 
 it('status line: old Forge, Krea2 replace the Forge parameters note; ComfyUI gets its own note (no warning)', async () => {

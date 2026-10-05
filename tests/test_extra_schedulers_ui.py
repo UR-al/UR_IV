@@ -257,6 +257,67 @@ class AuxPassTests(unittest.TestCase):
         snapshot = {"alwayson_scripts": {PAG: {"args": [1]}, XS: block}}
         self.assertEqual(_sampling_scripts(snapshot, backend="webui", capabilities=PRESENT)[XS], block)
 
+    def refine(self, host, refine_settings, request_caps):
+        from backends.webui_backend import WebUIBackend
+        from tests.test_webui_aux_propagation import ok, png_b64
+        from ui.aux_pass_snapshot import attach_sampling_snapshot
+
+        settings = attach_sampling_snapshot(host, refine_settings)
+        sent = []
+
+        def post(url, json=None, **_kw):
+            sent.append(copy.deepcopy(json))
+            return ok()
+
+        with mock.patch("core.sam_extra_probe.peek_capabilities", return_value=request_caps), \
+                mock.patch("core.forge_modules.resolve_sam3_checkpoint", side_effect=lambda name: name), \
+                mock.patch("backends.webui_backend.requests.post", side_effect=post):
+            WebUIBackend("http://127.0.0.1:7860").refine(png_b64(), settings)
+        return settings[ap.SETTINGS_KEY], sent[-1]
+
+    def test_unknown_snapshot_refine_with_its_own_value_scheduler_gets_the_values(self):
+        """FIX-forge(codex:forge — 같은 규칙): T2I 스케줄러 Beta·Refine 스케줄러 Laplace — 스냅샷을 모르면 예전에는 봉투에
+        블록이 없어 Refine 이 μ 0(기본값)으로 돌았다. 이제 봉투는 싣고 보내는 곳이 Refine 요청으로 판정한다."""
+        host = XschedHost(None, guidance={"guid_enabled": "false"}, laplace_mu="1.5")
+        for scheduler in ("laplace", "Flow Cosmos Dynamic"):
+            with self.subTest(scheduler=scheduler):
+                envelope, request = self.refine(host, {"target": "face", "scheduler": scheduler}, None)
+                self.assertEqual(envelope["blocks"][XS], user_block(laplace_mu=1.5))
+                self.assertEqual(request["scheduler"], scheduler)
+                self.assertEqual(request["alwayson_scripts"][XS], user_block(laplace_mu=1.5))
+        for refine_settings in ({"target": "face"}, {"target": "face", "scheduler": "karras"}):
+            with self.subTest(quiet=refine_settings):
+                _envelope, request = self.refine(host, refine_settings, None)
+                self.assertNotIn(XS, request["alwayson_scripts"])
+        _envelope, request = self.refine(host, {"target": "face", "scheduler": "laplace"}, WITHOUT_XS)
+        self.assertNotIn(XS, request["alwayson_scripts"])
+
+    def test_hand_repair_sends_the_values_only_when_its_t2i_scheduler_reads_them(self):
+        from ui.hand_reconstruction_actions import _sampling_gate
+        block = user_block(laplace_mu=1.5)
+        for scheduler, expected in (("laplace", True), ("custom", True), ("karras", False), (None, False)):
+            with self.subTest(scheduler=scheduler):
+                snapshot = {"scheduler": scheduler, "alwayson_scripts": {PAG: {"args": [1]}, XS: block}}
+                gated = _sampling_gate(snapshot, backend="webui", capabilities=None)
+                self.assertIs(XS in gated.kept, expected)
+                self.assertNotIn(XS, gated.dropped)
+
+    def test_chat_image_edit_counts_the_t2i_scheduler_it_carries(self):
+        """FIX-forge(claude:forge-block — 같은 규칙): 채팅 참조 이미지 편집(i2i)은 T2I 스케줄러를 싣는다. custom 식을 쓸 수
+        없으면 그 요청에서도 생성 전 경고가 난다. I2I 탭(요청에 스케줄러 없음)은 그대로."""
+        host = XschedHost(None, scheduler="laplace", laplace_mu="1.5")
+        _model, snapshot = host._chat_generation_snapshot("a cat", target="i2i")
+        self.assertEqual(snapshot["scheduler"], "laplace")
+        self.assertEqual(snapshot["alwayson_scripts"][XS], user_block(laplace_mu=1.5))
+        beta = XschedHost(None, laplace_mu="1.5")                                       # 메인 'Beta'
+        _model, snapshot = beta._chat_generation_snapshot("a cat", target="i2i")
+        self.assertNotIn(XS, snapshot["alwayson_scripts"])
+        self.assertNotIn(XS, sb.build_sampling_blocks(host, ap.TARGET_I2I).blocks)
+        bad = XschedHost(PRESENT, scheduler="custom", custom_expression="q +")
+        result = sb.build_sampling_blocks(bad, ap.TARGET_I2I, request={"scheduler": "custom"})
+        self.assertEqual([n.code for n in result.notices if n.code == sn.CODE_XSCHED_INVALID_TEXT],
+                         [sn.CODE_XSCHED_INVALID_TEXT])
+
     def test_forge_refine_request_carries_the_envelope_block(self):
         from backends.webui_backend import WebUIBackend
         from tests.test_webui_aux_propagation import ok, png_b64

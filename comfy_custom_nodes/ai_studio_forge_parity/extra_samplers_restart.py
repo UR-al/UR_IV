@@ -1,14 +1,15 @@
 """Extra Samplers for ComfyUI (pack 1.7.0): ``restart_flow`` — Restart sampling that keeps a flow model on its path.
 
-Restart sampling (Y. Xu, M. Deng, X. Cheng, Y. Tian, Z. Liu, T. Jaakkola, "Restart Sampling for Improving Generative
-Processes", NeurIPS 2023, arXiv:2306.14878, Algorithm 1) alternates a deterministic ODE solver with a few large
-forward jumps that add back noise: after the ODE reaches the low end of a restart interval it jumps to the high end
-by the forward process and solves the interval again, ``K`` times. sam-extra v0.33.0's "Restart (flow)" applies it
-to the schedule the sampler is given, in the ε-equivalent noise level ``s = σ/α`` (``α = 1 − σ`` on a
-rectified-flow model, ``α = 1`` otherwise), so on Anima the jump is the flow model's own forward transition instead
-of the VE one Forge's built-in Restart uses (which leaves a flow latent off its path). This module is the pack's own
-implementation, written from the paper and the rule below; the paper's reference code (unlicensed) was not used and
-sam-extra's (GPL-3.0) is only the test oracle.
+Restart sampling (Y. Xu, M. Deng, X. Cheng, Y. Tian, Z. Liu, T. Jaakkola, "Restart Sampling for Improving
+Generative Processes", NeurIPS 2023, arXiv:2306.14878, Algorithm 1) alternates a deterministic ODE solver with a
+few large forward jumps that add back noise: after the ODE reaches the low end of a restart interval it jumps to
+the high end by the forward process and solves the interval again, ``K`` times. sam-extra v0.33.0's "Restart
+(flow)" applies it to the schedule the sampler is given, in the ε-equivalent noise level ``s = σ/α`` (``α = 1 −
+σ`` on a rectified-flow model, ``α = 1`` otherwise), so on Anima the jump is the flow model's own forward
+transition instead of the VE one Forge's built-in Restart uses (which leaves a flow latent off its path). This
+module is sam-extra's implementation of the paper and the rule below (sam-extra's code, licensed to this pack
+under MIT by its author (THIRD_PARTY_NOTICES.md); the installed extension is also the test oracle); the paper's
+reference code (unlicensed) was not used.
 
 * **Plan** (``restart_plan``): ``n`` steps; fewer than ``RESTART_MIN_STEPS`` → no restart. ``lo`` = the grid index in
   ``1..n−1`` whose ``s`` is closest to ``RESTART_S_MIN``, ``hi`` = the index in ``0..lo−1`` whose ``s`` is closest

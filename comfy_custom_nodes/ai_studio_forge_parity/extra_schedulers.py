@@ -39,10 +39,10 @@ Forge computes for the same steps and sigma range:
   table without ever replacing another provider's entry; the node's optional ``owned_names`` COMBO
   reports which of them are the pack's (the app reads it from ``/object_info``).
 
-Behaviour mirrored from sam-extra v0.33.0 ``sam3ext/extra_schedulers/schedulers.py`` (same float
-operations, the same error classes and texts); the code is this pack's own — sam-extra (GPL-3.0) is
-not imported or copied. ``tests/test_comfy_extra_schedulers_parity.py`` compares the float32 results
-bit for bit with the installed extension.
+Behaviour mirrored from sam-extra v0.33.0 ``sam3ext/extra_schedulers/schedulers.py`` (same float operations, the
+same error classes and texts); much of the code is sam-extra's, licensed to this pack under MIT by its author
+(THIRD_PARTY_NOTICES.md); sam-extra is not imported. ``tests/test_comfy_extra_schedulers_parity.py`` compares
+the float32 results bit for bit with the installed extension.
 
 No torch or ComfyUI import at module level (the app imports the pack in its own tests).
 """

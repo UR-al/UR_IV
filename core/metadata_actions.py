@@ -119,6 +119,36 @@ def generation_parameters(info: Any) -> dict:
     return dict(parameters) if isinstance(parameters, dict) else {}
 
 
+def applied_sampling_parameters(params: Any, *, sampler: Any, scheduler: Any) -> dict:
+    """'이 설정으로 생성'(계획 A-R1)이 실제로 고른 샘플러·스케줄러만 남긴 생성 파라미터(복사본) — sam-extra 값 칸
+    (Extra Schedulers·Extra Samplers)은 이것을 보고 되살린다. 값은 그 값을 읽는 선택과 함께여야 같은 그림이 된다.
+
+    - Hires 칸('Hires sampler'·'Hires schedule type')은 뺀다 — 이 경로는 Hires 선택을 되살리지 않는다(``build_generation_item``
+      은 메인 샘플러·스케줄러만 싣는다). 이미지의 Hires 값이 지금 Hires 선택에 붙으면 출처가 다른 두 설정이 섞인다.
+    - 메인('Sampler'·'Schedule type')은 적용 뒤 콤보(``sampler``·``scheduler`` — 지금 선택 글자)가 그 항목일 때만 남긴다
+      (sam-extra 표기·ComfyUI 이름·별칭은 같은 항목으로 접어 비교 — core/extra_samplers.resolve_sampler·core/extra_schedulers.
+      resolve_scheduler). 목록에 없어 지금 선택을 둔 경우 그 값도 되살리지 않는다.
+    키 이름은 대소문자·앞뒤 공백을 무시해 본다. 나머지 키(값 키·Forge 'Eta' 등)는 그대로."""
+    from core.extra_samplers import resolve_sampler
+    from core.extra_schedulers import resolve_scheduler
+
+    def _fold(key: Any) -> str:
+        return " ".join(str(key).split()).casefold()
+
+    main = {"sampler": (sampler, resolve_sampler), "schedule type": (scheduler, resolve_scheduler)}
+    out: dict = {}
+    for key, value in (params.items() if isinstance(params, dict) else ()):
+        folded = _fold(key)
+        if folded in ("hires sampler", "hires schedule type"):
+            continue
+        if folded in main:
+            chosen, resolve = main[folded]
+            if resolve(chosen) != resolve(value):
+                continue
+        out[key] = value
+    return out
+
+
 def build_generation_item(info: dict, defaults: dict, *, preserve_seed: bool = False) -> Optional[dict]:
     """메타데이터 → 큐/즉시 생성 아이템.
 

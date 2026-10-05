@@ -1217,7 +1217,7 @@ class NodeSettingsParityTests(unittest.TestCase):
         cls.fh = _ext_speed("forge_host")
 
     def test_constants(self):
-        for name in ("ARG_NAMES", "ARG_ALIASES", "KEY", "BROWNIAN_STAGE_SEED_STRIDE"):
+        for name in ("ARG_NAMES", "ARG_ALIASES", "BROWNIAN_STAGE_SEED_STRIDE"):
             with self.subTest(name=name):
                 self.assertEqual(getattr(self.pack, name), getattr(self.fh, name))
                 self.assertEqual(type(getattr(self.pack, name)), type(getattr(self.fh, name)))

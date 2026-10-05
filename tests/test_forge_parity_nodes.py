@@ -301,6 +301,64 @@ class TestForgeParityPureBehavior(unittest.TestCase):
 
         self.assertIsNone(captured["segm_detector_opt"])
 
+    def test_adetailer_hands_impact_the_discard_of_the_pack_discard_samplers(self):
+        # Impact's own sigma builder keeps the penultimate sigma of dpmpp_4m_sde / dpmpp_3m_flow_ode; Forge drops
+        # it on the ADetailer pass too, so those two reach FaceDetailer with scheduler_func_opt.
+        class FakeMask:
+            def __gt__(self, _other):
+                return self
+
+            def any(self, **_kwargs):
+                return self
+
+            def sum(self):
+                return self
+
+            def item(self):
+                return 1
+
+        image = mock.Mock(shape=(1, 8, 8, 3), dtype="float32", device="cpu")
+        sentinel = object()
+
+        def select(sampler_name, scheduler):
+            selected.append((sampler_name, scheduler))
+            return sentinel if sampler_name in extra_samplers_register.DISCARD_PENULTIMATE_SIGMA else None
+
+        for label, sampler, scheduler, discards in (
+            ("DPM++ 4M SDE", "dpmpp_4m_sde", "exponential", True),
+            ("DPM++ 3M (flow ODE)", "dpmpp_3m_flow_ode", "normal", True),
+            ("Euler", "euler", "normal", False),
+            ("UniPC", "uni_pc", "normal", False),
+        ):
+            with self.subTest(sampler=label):
+                captured, selected = {}, []
+
+                def invoke(node_type, **kwargs):
+                    if node_type == "UltralyticsDetectorProvider":
+                        return object(), None
+                    if node_type == "FaceDetailer":
+                        captured.update(kwargs["kwargs"])
+                        return image, None, None, FakeMask()
+                    raise AssertionError(node_type)
+
+                settings = {"ad_model": "face_yolov8n.pt", "ad_use_sampler": True, "ad_sampler": label,
+                            "ad_scheduler": "Automatic"}
+                with (
+                    mock.patch.object(generation, "require_torch", return_value=object()),
+                    mock.patch.object(generation, "_image_tensor", return_value=image),
+                    mock.patch.object(generation, "invoke_provider", side_effect=invoke),
+                    mock.patch.object(generation, "impact_scheduler_func", side_effect=select),
+                ):
+                    generation.ForgeNeoADetailer().detail(
+                        image, object(), object(), object(), object(), object(), True, json.dumps(settings),
+                    )
+                self.assertEqual(selected, [(sampler, scheduler)])
+                self.assertEqual((captured["sampler_name"], captured["scheduler"]), (sampler, scheduler))
+                if discards:
+                    self.assertIs(captured["scheduler_func_opt"], sentinel)
+                else:
+                    self.assertNotIn("scheduler_func_opt", captured)
+
     def test_adetailer_fails_fast_for_unrepresentable_enabled_options(self):
         for settings, label in (
             ({"ad_x_offset": 4}, "offset"),

@@ -255,6 +255,68 @@ class RegistrationTests(unittest.TestCase):
                 reg.implementation("er_sde_ode")
 
 
+class ImpactDiscardSelectionTests(unittest.TestCase):
+    """Impact's FaceDetailer (ADetailer, SAM3 restore face) builds its sigmas with its own literal discard list
+    (``impact_sampling.calculate_sigmas``); the pack hands it ``scheduler_func_opt`` for its two discard samplers
+    once they are in ``KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS`` (no torch)."""
+
+    def test_only_the_registered_discard_samplers_get_a_scheduler_func(self):
+        modules = _fake_comfy()
+        with _with_comfy(modules):
+            for name in reg.DISCARD_PENULTIMATE_SIGMA:      # not registered (yet): Impact's own rule
+                self.assertIsNone(reg.impact_scheduler_func(name, "exponential"))
+            reg.install_extra_samplers()
+            for name in reg.DISCARD_PENULTIMATE_SIGMA:
+                with self.subTest(sampler=name):
+                    func = reg.impact_scheduler_func(name, "exponential")
+                    self.assertTrue(callable(func))
+                    self.assertEqual((func.sampler_name, func.scheduler), (name, "exponential"))
+            # Impact discards its own four itself; every other name keeps Impact's rule
+            for name in ("dpm_2", "dpm_2_ancestral", "uni_pc", "uni_pc_bh2", "euler", "dpmpp_3m_sde",
+                         "dpmpp_2m_flow_ode", "dpmpp_2m_heun_flow_ode", "er_sde_ode", "euler_dy", "restart_flow"):
+                with self.subTest(sampler=name):
+                    self.assertIsNone(reg.impact_scheduler_func(name, "normal"))
+        with _with_comfy(None):
+            self.assertIsNone(reg.impact_scheduler_func("dpmpp_4m_sde", "normal"))
+
+    def test_the_pack_nodes_pass_it_to_face_detailer(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import generation, sam3_nodes
+
+        self.assertIs(generation.impact_scheduler_func, reg.impact_scheduler_func)
+        self.assertIs(sam3_nodes.impact_scheduler_func, reg.impact_scheduler_func)
+
+
+@requires_torch
+class ImpactDiscardSigmasTests(unittest.TestCase):
+    """The function Impact calls: ``KSampler.calculate_sigmas``'s rule for the discard set (one step more, the
+    penultimate sigma dropped), on the MODEL's own ``model_sampling`` and the slot's scheduler."""
+
+    @classmethod
+    def setUpClass(cls):
+        bind_torch(globals())
+
+    def test_one_step_more_and_the_penultimate_sigma_dropped(self):
+        modules = _fake_comfy()
+        calls = []
+
+        def calculate_sigmas(model_sampling, scheduler_name, steps):
+            calls.append((model_sampling, scheduler_name, steps))
+            return torch.linspace(1.0, 0.0, steps + 1)
+
+        modules["comfy.samplers"].calculate_sigmas = calculate_sigmas
+        sampling = object()
+        model = types.SimpleNamespace(get_model_object=lambda name: {"model_sampling": sampling}[name])
+        with _with_comfy(modules):
+            reg.install_extra_samplers()
+            func = reg.impact_scheduler_func("dpmpp_3m_flow_ode", "laplace")
+        sigmas = func(model, "dpmpp_3m_flow_ode", 8)                # Impact: scheduler_func(model, sampler, steps)
+        self.assertEqual(calls, [(sampling, "laplace", 9)])
+        longer = torch.linspace(1.0, 0.0, 10)
+        self.assertTrue(torch.equal(sigmas, torch.cat([longer[:-2], longer[-1:]])))
+        self.assertEqual(len(sigmas), 9)                            # steps + 1, ending at 0
+        self.assertEqual(float(sigmas[-1]), 0.0)
+
+
 def _node_class():
     from comfy_custom_nodes.ai_studio_forge_parity import extra_samplers_nodes
 

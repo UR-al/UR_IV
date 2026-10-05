@@ -75,6 +75,21 @@ def _bits(tensor):
     return tensor.contiguous().view({torch.float32: torch.int32, torch.float64: torch.int64}[tensor.dtype])
 
 
+def _impact_sampling():
+    """Impact Pack's ``impact_sampling`` module from the ComfyUI install (read only, no bytecode, not registered)."""
+    path = os.path.join(_COMFY_ROOT, "custom_nodes", "ComfyUI-Impact-Pack", "modules", "impact", "impact_sampling.py")
+    if not os.path.isfile(path):
+        raise unittest.SkipTest("ComfyUI-Impact-Pack is not installed next to this ComfyUI")
+    spec = importlib.util.spec_from_file_location("_aistudio_impact_sampling", path)
+    module = importlib.util.module_from_spec(spec)
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
+
+
 class _ForgePredictor:
     """Forge's predictor surface over a ComfyUI model-sampling object: the same ``percent_to_sigma``."""
 
@@ -266,6 +281,43 @@ class ExtraSamplersOnRealComfyTests(unittest.TestCase):
                 self.assertNotEqual(self.reg.entry_owner(entry), reg.OWNER)
         again = reg.install_extra_samplers(required=True)
         self.assertEqual((again.owned, again.inserted), (reg.PACK_SAMPLERS, ()))
+
+    def test_impact_face_detailer_sigmas_drop_the_penultimate_sigma(self):
+        # ADetailer / SAM3 restore face run through Impact's FaceDetailer, whose impact_sampling.calculate_sigmas
+        # has its own literal discard list. With the pack's scheduler_func_opt, Impact's real separated_sample
+        # samples dpmpp_4m_sde / dpmpp_3m_flow_ode on KSampler's sigmas (Forge's discard_next_to_last_sigma).
+        impact = _impact_sampling()
+        sampling = self.sampling[True]
+        model = types.SimpleNamespace(get_model_object=lambda name: {"model_sampling": sampling}[name])
+        latent = {"samples": torch.zeros(1, 4, 8, 8)}
+
+        def run(name, scheduler, steps, denoise, scheduler_func):
+            captured = []
+
+            def sample(model, add_noise, seed, cfg, positive, negative, sampler, sigmas, latent_image, noise=None,
+                       callback=None):
+                captured.append((sampler, sigmas.clone()))
+                return latent_image, latent_image
+
+            with mock.patch.object(impact, "sample_with_custom_noise", side_effect=sample):
+                impact.ksampler_wrapper(model, 1, steps, 5.0, name, scheduler, "positive", "negative", latent,
+                                        denoise, scheduler_func=scheduler_func)
+            (entry,) = captured
+            return entry
+
+        for name in self.reg.DISCARD_PENULTIMATE_SIGMA:
+            for scheduler, steps, denoise in (("simple", 8, 1.0), ("exponential", 10, 0.4)):
+                with self.subTest(sampler=name, scheduler=scheduler, denoise=denoise):
+                    expected = self.samplers.KSampler(model, steps, "cpu", name, scheduler, denoise=denoise).sigmas
+                    sampler, sigmas = run(name, scheduler, steps, denoise,
+                                          self.reg.impact_scheduler_func(name, scheduler))
+                    self.assertTrue(torch.equal(_bits(sigmas), _bits(expected)))
+                    self.assertIs(sampler.sampler_function, self._entry(name))      # the pack's sampler runs
+                    _sampler, kept = run(name, scheduler, steps, denoise, None)     # Impact's own list keeps it
+                    self.assertEqual(kept.shape, expected.shape)
+                    self.assertFalse(torch.equal(kept, expected))
+        # Impact's own discard samplers stay with Impact (the pack hands it nothing for them)
+        self.assertIsNone(self.reg.impact_scheduler_func("uni_pc_bh2", "simple"))
 
     def test_a_foreign_function_is_never_replaced(self):
         def foreign(model, x, sigmas, extra_args=None, callback=None, disable=None):

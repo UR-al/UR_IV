@@ -520,13 +520,39 @@ class PlanTests(unittest.TestCase):
         self.assertEqual((used.reason, used.provenance, used.block), (xs.REASON_SEND_UNCONFIRMED, xs.PROVENANCE_USER,
                                                                       xs.as_block(user)))
 
-    def test_img2img_reads_the_img2img_list_and_aux_follows_t2i(self):
+    def test_img2img_reads_the_img2img_list(self):
         self.assertEqual(xs.plan(xs.APP_DEFAULTS, target="i2i", backend="webui", capabilities=self.I2I_ONLY).reason,
                          xs.REASON_SEND)
         self.assertEqual(xs.plan(xs.APP_DEFAULTS, target="t2i", backend="webui", capabilities=self.I2I_ONLY).reason,
                          xs.REASON_NOT_NEEDED)
-        self.assertEqual(xs.plan(xs.APP_DEFAULTS, target="aux", backend="webui", capabilities=self.I2I_ONLY).reason,
-                         xs.REASON_NOT_NEEDED)
+
+    def test_aux_envelope_carries_the_block_unless_confirmed_and_the_sender_decides(self):
+        """FIX-forge(codex:forge — Refine/AUX, 같은 규칙): 보조 요청의 스케줄러(Refine·SAM3·ADetailer 자기 스케줄러)는 T2I
+        패널 패스가 아니다 — 봉투는 확인 못 했어도 늘 싣고(REASON_SEND_AUX, 출처는 값대로) 요청 직전에 drop_unread 가
+        정한다. T2I 패스를 넘겨도·안 넘겨도 같다."""
+        for label, capabilities in (("unknown", None), ("absent", self.ABSENT), ("i2i only", self.I2I_ONLY)):
+            for settings, provenance in ((xs.APP_DEFAULTS, xs.PROVENANCE_APP_DEFAULT), (self.USER, xs.PROVENANCE_USER)):
+                for passes in ((), ("hires",)):
+                    with self.subTest(label, provenance=provenance, passes=passes):
+                        aux = xs.plan(settings, target="aux", backend="webui", capabilities=capabilities, passes=passes)
+                        self.assertEqual((aux.reason, aux.provenance, aux.block),
+                                         (xs.REASON_SEND_AUX, provenance, xs.as_block(settings)))
+        self.assertEqual(xs.plan(self.USER, target="aux", backend="webui", capabilities=self.CONFIRMED).reason,
+                         xs.REASON_SEND)
+        self.assertIsNone(xs.plan(self.USER, target="aux", backend="krea2").block)
+        self.assertEqual(xs.plan(self.USER, target="aux", backend="comfyui").reason, xs.REASON_COMFY)
+
+    def test_img2img_main_is_the_scheduler_the_request_carries(self):
+        """FIX-forge(claude:forge-block, 같은 규칙): 채팅 이미지 편집(i2i)은 T2I 스케줄러를 싣는다 — 그 값이 메인 패스다.
+        I2I·인페인트 요청은 싣지 않는다(None). Hires 는 img2img 에 없다. ADetailer 슬롯의 '같은 샘플러'는 그 메인을 따른다."""
+        widgets = {"scheduler_combo": "karras", "hires_options_group": True, "hires_scheduler_combo": "custom",
+                   "adetailer_group": True, "ad_slot1_group": True, "_ad_s1_use_sampler": False}
+        self.assertEqual(xs.passes_from_widgets(widgets, img2img=True), ())
+        self.assertEqual(xs.passes_from_widgets(widgets, img2img=True, img2img_main="Laplace"),
+                         (xs.PassUse("main", "laplace"), xs.PassUse("adetailer_1", "laplace")))
+        self.assertEqual(xs.passes_from_widgets(widgets, img2img=True, img2img_main="simple"), ())
+        self.assertEqual(xs.passes_from_widgets(widgets, img2img_main="laplace"),     # t2i 는 콤보(인자 무시)
+                         (xs.PassUse("hires", "custom"),))
 
     def test_script_confirmed_matches_the_propagation_gate(self):
         from core import alwayson_propagation as ap

@@ -9,9 +9,11 @@
 - ``contribute(host, ctx)``      ui/sampling_blocks.CONTRIBUTORS 의 한 줄(DeGrid 뒤 — 계획 R7). 지금 화면에서 laplace·
   custom·flow_cosmos_rho7·flow_cosmos_dynamic 을 쓰는 패스(``pass_values`` → ``core/extra_schedulers.passes_from_widgets``)를
   ``plan`` 에 넘긴다 — 스냅샷이
-  스크립트를 확인했으면 늘, 확인 못 했으면 그런 패스가 있을 때만 싣는다(계획 X5). 출처는 ``plan`` 이 값으로 정한다
-  (기본값이면 앱 기본값). 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다. aux(보조 패스 봉투)는 t2i 와 같은
-  블록이고 모든 보조 img2img 로 간다(확장 전역 상태가 요청마다 덮인다).
+  스크립트를 확인했으면 늘, 확인 못 했으면 그런 패스가 있을 때만 싣는다(계획 X5). i2i 의 메인 패스는 그 요청이 싣는
+  스케줄러다(``ctx.request_scheduler`` — 채팅 이미지 편집은 T2I 콤보 값, I2I·인페인트는 없음). 출처는 ``plan`` 이 값으로 정한다
+  (기본값이면 앱 기본값). 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다. aux(보조 패스 봉투)는 확인 못 했어도
+  블록을 싣고(보조 요청의 스케줄러는 보내는 곳만 안다 — 요청 직전에 ``drop_unread`` 가 그 요청의 패스로 정한다) 모든 보조
+  img2img 로 간다(확장 전역 상태가 요청마다 덮인다).
 - ``get_settings``/``set_settings``/``apply_saved_settings``  prompt_settings.json·생성 프리셋(``extra_schedulers_settings``).
   옛 설정 파일에 키가 없으면 앱 기본값 — 확장 기본값과 같아 동작이 바뀌지 않으므로 안내하지 않는다. v0.33.0 전에 저장한
   값(키 다섯)의 Flow Cosmos 셋도 앱 기본값이다(확장이 키 없는 옛 요청을 읽는 것과 같다).
@@ -218,15 +220,17 @@ def pass_values(host) -> dict:
     return values
 
 
-def passes_in_use(host, *, img2img: bool = False) -> tuple:
-    """지금 화면에서 값 스케줄러(``core/extra_schedulers.VALUE_SCHEDULERS``)를 쓰는 패스(``PassUse`` 튜플)."""
-    return xs.passes_from_widgets(pass_values(host), img2img=img2img)
+def passes_in_use(host, *, img2img: bool = False, img2img_main: Any = None) -> tuple:
+    """지금 화면에서 값 스케줄러(``core/extra_schedulers.VALUE_SCHEDULERS``)를 쓰는 패스(``PassUse`` 튜플).
+    ``img2img_main``: img2img 요청이 스스로 싣는 스케줄러(채팅 이미지 편집 — T2I 콤보 값), 없으면 None."""
+    return xs.passes_from_widgets(pass_values(host), img2img=img2img, img2img_main=img2img_main)
 
 
-def _invalid_text_notice(host, settings: xs.ExtraSchedulerSettings, *, img2img: bool) -> Any:
+def _invalid_text_notice(host, settings: xs.ExtraSchedulerSettings, *, img2img: bool, img2img_main: Any = None) -> Any:
     """생성 전 경고(계획 C7, 설계 XS §3.2): 어느 패스가 custom 을 쓰는데 그 방식의 글자를 쓸 수 없으면 — 요청은 그대로
     보낸다(Forge·ComfyUI 가 같은 영어 문구로 멈춘다). custom 을 쓰지 않거나 쓸 수 있으면 None."""
-    if not any(use.scheduler == xs.NAME_CUSTOM for use in passes_in_use(host, img2img=img2img)):
+    if not any(use.scheduler == xs.NAME_CUSTOM
+               for use in passes_in_use(host, img2img=img2img, img2img_main=img2img_main)):
         return None
     message = xs.check_settings(settings)
     if message is None:
@@ -242,20 +246,24 @@ def contribute(host, ctx) -> Any:
     """ui/sampling_blocks 기여자 — Extra Schedulers 블록 하나(또는 없음). 알림은 custom 식·목록을 쓸 수 없을 때의 생성 전
     경고 하나뿐이다(t2i·i2i — ``_invalid_text_notice``; 빠지면 게이트가, 다른 확장의 스케줄러가 돌았으면 결과 알림이 말한다).
 
-    ctx.target: 't2i'(T2I 계열 전부) · 'i2i'(I2I·인페인트·채팅 편집 — 그 요청은 스케줄러를 싣지 않아 메인 패스는 값을 읽지
-    않는다) · 'aux'(보조 패스 봉투 — t2i 와 같은 블록)."""
+    ctx.target: 't2i'(T2I 계열 전부) · 'i2i'(I2I·인페인트·채팅 편집 — 메인 패스는 그 요청이 싣는 스케줄러
+    ``ctx.request_scheduler``: I2I·인페인트는 싣지 않아 값을 읽지 않고, 채팅 편집은 T2I 콤보 값) · 'aux'(보조 패스 봉투 —
+    확인 못 했어도 싣는다, ``core/extra_schedulers.plan``)."""
     from ui.sampling_blocks import Contribution
 
     settings = current_settings(host)
     if settings is None:
         return Contribution()
-    passes = passes_in_use(host, img2img=ctx.target == xs.TARGET_I2I) if ctx.backend == xs.BACKEND_WEBUI else ()
+    img2img = ctx.target == xs.TARGET_I2I
+    main = getattr(ctx, "request_scheduler", None) if img2img else None
+    forge_request = ctx.backend == xs.BACKEND_WEBUI and ctx.target != xs.TARGET_AUX
+    passes = passes_in_use(host, img2img=img2img, img2img_main=main) if forge_request else ()
     result = xs.plan(settings, target=ctx.target, backend=ctx.backend, capabilities=ctx.capabilities, passes=passes)
     contribution = Contribution()
     if result.block is not None:
         contribution.add(xs.SCRIPT_NAME, result.block, provenance=result.provenance)
         if ctx.target != xs.TARGET_AUX:
-            notice = _invalid_text_notice(host, settings, img2img=ctx.target == xs.TARGET_I2I)
+            notice = _invalid_text_notice(host, settings, img2img=img2img, img2img_main=main)
             if notice is not None:
                 contribution.notices.append(notice)
         # 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다 — 여기서는 준비만 기록한다

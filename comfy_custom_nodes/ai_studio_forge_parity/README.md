@@ -71,10 +71,14 @@ remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 ## 1.7.0 changes
 
 Four features of the sam-extra Forge extension on ComfyUI: Extra Schedulers, Extra Samplers and
-Anima SPEED (sam-extra v0.33.0), Colorcraft (sam-extra v0.32.1). The pack's code is its own
-or comes from permissive upstreams (`THIRD_PARTY_NOTICES.md`); the GPL-3.0 extension is never
-copied or imported — it is only the test oracle the pack is compared with, bit for bit on CPU.
-Restart ComfyUI after the app installs this pack.
+Anima SPEED (sam-extra v0.33.0), Colorcraft (sam-extra v0.32.1). Much of the code is sam-extra's
+own: sam-extra (GPL-3.0-only) parts written by the same author (UR-al), licensed to this pack
+under the MIT License by that author (`LICENSES/sam-extra-MIT.txt`). The rest is the pack's own
+or comes from permissive upstreams; `THIRD_PARTY_NOTICES.md` names the reused functions and the
+upstreams. The pack never imports the extension. The installed extension is the test oracle the
+pack is compared with, bit for bit on CPU.
+The app installs the pack before its next ComfyUI generation and restarts a ComfyUI it started
+itself; restart a ComfyUI you started yourself.
 
 - **Extra Schedulers** (sam-extra v0.33.0 "Extra Schedulers (sam-extra)"): the nine schedulers sam-extra adds
   to Forge's "Schedule type" list are registered in ComfyUI's KSampler scheduler table under their Forge
@@ -112,7 +116,10 @@ Restart ComfyUI after the app installs this pack.
   node pack already provides is never replaced (e.g. Koishi-Star's own node registers `euler_dy`/`euler_smea_dy` with
   its always-churn rule): it is skipped, logged once and left out of the pack's `owned_names`, and the app refuses a
   graph that needs it. `dpmpp_4m_sde` and `dpmpp_3m_flow_ode` join `KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS`
-  (Forge's option of those entries).
+  (Forge's option of those entries). Impact's FaceDetailer (ADetailer, the SAM3 restore-face pass) builds its sigmas
+  with its own discard list, so for those two the pack hands it `scheduler_func_opt`
+  (`extra_samplers_register.impact_scheduler_func`): the same sigmas as KSampler's (one step more, the penultimate
+  dropped), as Forge discards on the ADetailer pass too.
 - New `ForgeNeoExtraSamplerSettings` (MODEL -> MODEL; inputs `max_stage`, `eta`, `noise_window`, `noise_start`,
   `noise_end` = the extension's block, plus the informational `owned_names` COMBO): the ER SDE values, carried in
   the MODEL's `model_options`, so every later sampler of that MODEL uses them; a Hires checkpoint/UNET override keeps
@@ -129,8 +136,9 @@ Restart ComfyUI after the app installs this pack.
   the early, noise-dominated steps of a pass run on a DCT-truncated coarse latent grid; at a
   transition sigma the coarse spectrum is embedded in the full grid, the new frequencies are filled
   with sigma-scaled noise and the state is rescaled by kappa. Computation modules (no torch at
-  import; written from the MIT upstreams howardhx/speed, aoleg/ComfyUI-SPEED and
-  sorryhyun/ComfyUI-Spectrum-KSampler — see THIRD_PARTY_NOTICES.md):
+  import; the MIT upstreams howardhx/speed, aoleg/ComfyUI-SPEED and
+  sorryhyun/ComfyUI-Spectrum-KSampler with sam-extra's code on them, under the author's MIT
+  grant — see THIRD_PARTY_NOTICES.md):
   - `speed_schedule.py` — presets (anima, flux, flux2, krea-2, krea-2-raw, z-image, wan21, custom),
     transition sigmas (delta tolerance, adaptive delta, neo_shift divisor, manual), the two plans
     (`transition`: official/aoleg, only the hand-off sigma is patched; `respace`: sorryhyun, the rest
@@ -155,8 +163,10 @@ Restart ComfyUI after the app installs this pack.
     `spectrum_A`, `spectrum_beta`, `seed` (-1 = image seeds), `pass_label` (base / img2img / hires),
     `image_seed` (the generation seed), `img2img_rescale`). Settings are read with sam-extra's rules and
     messages; invalid settings leave the MODEL unchanged with an `[AnimaSPEED] … invalid settings` console
-    line. The node registers a SAMPLER_SAMPLE wrapper placed ahead of Detail Daemon (CNS, applied by the
-    sampler node, stays outermost): runtime order CNS -> SPEED -> Detail Daemon -> sampler.
+    line. The node registers a SAMPLER_SAMPLE wrapper placed ahead of Detail Daemon and behind a CNS wrapper
+    already on the MODEL (the guidance suite's, which a stock KSampler/KSamplerAdvanced never re-asserts; the
+    pack's sampler nodes re-assert their own): runtime order CNS -> SPEED -> Detail Daemon -> sampler on every
+    sampler node.
   - Per sampling run (KSAMPLER only; UniPC / DPM fast / adaptive are skipped) the wrapper checks, like
     sam-extra: a 1-D sigma list, a 4-D/5-D latent, a flow-matching (`CONST`) model, sigma_max <= 1, no
     inpainting mask, no reference latents / `c_concat` / ControlNet / Anima ControlNet-LLLite, no ComfyUI
@@ -200,7 +210,9 @@ Restart ComfyUI after the app installs this pack.
     guidance suite, Skimmed CFG and Detail Daemon (Forge's order). One console line per run:
     `[AI Studio Colorcraft] base: krea2 (Wan21); mods I+II; 30 evals, 28 edited`.
   - A Hires checkpoint/UNET override keeps the hires pass's Colorcraft (`hires_carry`), prepared again for the
-    override model's latent format and with its VAE. Detailer passes (ADetailer/SAM3) are never graded.
+    override model's latent format and with its VAE. A Hires VAE-only override prepares it again with that VAE
+    on the pass's own model (`hires_carry.apply_vae_change`), as Forge, which reloads the model with the new VAE
+    for the Hires pass, encodes the anchors with it. Detailer passes (ADetailer/SAM3) are never graded.
 - Shared ground for the four sam-extra ports (`guidance_common.py`, `compat.py`, `hires_carry.py`):
   - sam-extra's coordination names, one definition each: `SUBSTEP_MARKER` (`sam_extra_substep`, Euler
     (SMEA) Dy CFG++'s extra evaluations, read by `is_extra_sampler_substep`), `STEP_OFFSET_KWARG`
@@ -212,10 +224,13 @@ Restart ComfyUI after the app installs this pack.
     optional `owned_names` COMBO (`(none)` when nothing), which the app reads from `/object_info`.
   - CNS's sampler function carries `_forge_neo_base` (the function it wraps), so SPEED can see whether
     the real `sample_*` declares the step-offset keyword. `compat.make_first` orders SAMPLER_SAMPLE
-    wrappers (CNS stays outermost: it re-asserts itself at every sampler node).
+    wrappers (CNS stays outermost: it re-asserts itself at the pack's sampler nodes, and the SPEED node keeps a
+    CNS already on the MODEL ahead of its own wrapper).
 - `ForgeNeoHiresFix`: after a checkpoint/UNET override (and its flow shift) the pack features re-apply
   their MODEL patches to the override model (`hires_carry.apply`, in registration order; a failing
   carry fails the pass). Detail Daemon and the guidance suite still do not reach an override model.
+  With only the VAE overridden, the features registered with `uses_vae` (Colorcraft) prepare their patch
+  again with that VAE (`hires_carry.apply_vae_change`, Shift 0 or not).
 - The pack's flow shift (`ForgeNeoModelSamplingShift`, `ForgeNeoHiresFix` with Shift > 0, Anima Tile &
   Repair) keeps the values features carry on `model_sampling` (registered attribute names) — before
   1.7.0 nothing carried any; with Extra Schedulers it keeps μ/β/custom and the Flow Cosmos values on every
@@ -228,7 +243,8 @@ Restart ComfyUI after the app installs this pack.
 
 The detail guidance of the sam-extra Forge extension v0.30.0, with its equations, defaults, clamps
 and order (`tests/test_comfy_detail_parity.py` runs the pack and the installed extension on the same
-tensors on CPU):
+tensors on CPU). Much of the code is sam-extra's, licensed to this pack under MIT by the author
+(`THIRD_PARTY_NOTICES.md`):
 
 - `ForgeNeoAnimaGuidanceSuite` reads the new suite keys:
   - **S²-Guidance** (`guid_slg_mode` "Stochastic (S²)", `guid_s2_*`, `guid_s2_seed`): SLG's weak row
@@ -258,7 +274,8 @@ tensors on CPU):
 - New `ForgeNeoAnimaVAEDeGrid`: the sam-extra Forge extension's "Anima VAE DeGrid
   (NAFNet)" step as a ComfyUI node (see "Anima VAE DeGrid"). It is a local
   implementation checked against numbers produced by the extension itself
-  (`tests/test_comfy_degrid_origin.py`); no extension code is included.
+  (`tests/test_comfy_degrid_origin.py`). Some of its functions are sam-extra's code, licensed to
+  this pack under MIT by the author (see `THIRD_PARTY_NOTICES.md`).
 - The pack registers a `degrid` model folder (`ComfyUI/models/degrid`, merged into
   an existing `degrid` entry from `extra_model_paths.yaml` or another pack).
 - Packs before 1.5.0 do not have the node; the app then leaves DeGrid out of the

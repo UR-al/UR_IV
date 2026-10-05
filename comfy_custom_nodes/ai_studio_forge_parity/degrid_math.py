@@ -1,11 +1,13 @@
 """VAE DeGrid (NAFNet residual) arithmetic for ``ForgeNeoAnimaVAEDeGrid``.
 
-Local implementation of the behaviour of the sam-extra Forge extension's
-"Anima VAE DeGrid (NAFNet)" script (forge_sam3_extension @ 395854b,
-``sam3ext/vae_degrid.py``). That extension is GPL-3.0; none of its code is
-copied here. What is shared are behavioural facts: the mode meanings, value
-ranges, tile/overlap sizes, padding multiple, the residual-guard thresholds
-(plain numbers) and the error *category* words the app's notices key on.
+The behaviour of the sam-extra Forge extension's "Anima VAE DeGrid (NAFNet)"
+script (forge_sam3_extension @ 395854b, ``sam3ext/vae_degrid.py``): the mode
+meanings, value ranges, tile/overlap sizes, padding multiple, the residual-guard
+thresholds (plain numbers) and the error *category* words the app's notices key
+on. sam-extra is GPL-3.0-only; the functions this module shares with it
+(``message_says_oom``, ``tiled_residual_with_oom_retry``, ``check_residual``)
+are sam-extra's code, licensed to this pack under MIT by its author
+(THIRD_PARTY_NOTICES.md).
 ``tests/test_comfy_degrid_origin.py`` checks this module against numbers
 produced by running the extension on CPU (``tests/fixtures/degrid_origin_golden.json``).
 

@@ -9,9 +9,11 @@
   끝 '0.8'). 초기값은 앱 기본값(``APP_DEFAULTS`` = 확장 기본값 — 블록이 없던 지금까지의 Forge 결과와 같다)
 - ``contribute(host, ctx)``      ui/sampling_blocks.CONTRIBUTORS 의 마지막 줄(Extra Schedulers 뒤 — 계획 R7). 지금 화면에서
   ER SDE (Reverse-time)·(ODE)·(Tunable) 을 쓰는 패스(``pass_values`` → ``core/extra_samplers.passes_from_widgets``)를 ``plan``
-  에 넘긴다 — 스냅샷이 스크립트를 확인했으면 늘, 확인 못 했으면 그런 패스가 있을 때만 싣는다(계획 X5). 출처는 ``plan`` 이
-  값으로 정한다(기본값이면 앱 기본값). 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다. aux(보조 패스 봉투)는 t2i 와
-  같은 블록이고 모든 보조 img2img 로 간다(블록 없는 요청은 확장 ui() 기본값으로 돈다). ComfyUI 는 늘 싣는다(계획 C6 —
+  에 넘긴다 — 스냅샷이 스크립트를 확인했으면 늘, 확인 못 했으면 그런 패스가 있을 때만 싣는다(계획 X5). i2i 의 메인 패스는
+  그 요청이 싣는 샘플러다(``ctx.request_sampler`` — 채팅 이미지 편집은 T2I 콤보 값, I2I·인페인트는 없음). 출처는 ``plan`` 이
+  값으로 정한다(기본값이면 앱 기본값). 보낼지는 뒤의 게이트(core/alwayson_propagation)가 정한다. aux(보조 패스 봉투)는 확인
+  못 했어도 블록을 싣고(보조 요청의 샘플러는 보내는 곳만 안다 — 요청 직전에 ``drop_unread`` 가 그 요청의 패스로 정한다)
+  모든 보조 img2img 로 간다(블록 없는 요청은 확장 ui() 기본값으로 돈다). ComfyUI 는 늘 싣는다(계획 C6 —
   컴파일러가 값이 기본값과 다를 때만 앱 노드 팩 1.7.0 의 노드를 넣는다, 기본값이면 그래프가 바이트 단위로 그대로). 블록은 늘 위치 인자 다섯이다
   (계획 X10 — 인자 2개인 0.31·0.32 는 뒤 셋을 버린다: 카드와 결과 알림이 말한다)
 - ``get_settings``/``set_settings``/``apply_saved_settings``  prompt_settings.json·생성 프리셋(``extra_samplers_settings``,
@@ -180,23 +182,28 @@ def pass_values(host) -> dict:
     return values
 
 
-def passes_in_use(host, *, img2img: bool = False) -> tuple:
-    """지금 화면에서 ER SDE 셋(``core/extra_samplers.ER_SDE_LABELS`` — 이 블록의 값을 읽는 샘플러)을 쓰는 패스."""
-    return xsa.passes_from_widgets(pass_values(host), img2img=img2img)
+def passes_in_use(host, *, img2img: bool = False, img2img_main: Any = None) -> tuple:
+    """지금 화면에서 ER SDE 셋(``core/extra_samplers.ER_SDE_LABELS`` — 이 블록의 값을 읽는 샘플러)을 쓰는 패스.
+    ``img2img_main``: img2img 요청이 스스로 싣는 샘플러(채팅 이미지 편집 — T2I 콤보 값), 없으면 None."""
+    return xsa.passes_from_widgets(pass_values(host), img2img=img2img, img2img_main=img2img_main)
 
 
 def contribute(host, ctx) -> Any:
     """ui/sampling_blocks 기여자 — Extra Samplers 블록 하나(또는 없음). 알림은 없다(빠지면 게이트가, 연결된 sam-extra 가
     잡음 구간을 버렸거나 Dy 보조 스텝을 건너뛰었으면 결과 알림이 말한다).
 
-    ctx.target: 't2i'(T2I 계열 전부) · 'i2i'(I2I·인페인트·채팅 편집 — 그 요청은 샘플러를 싣지 않아 메인 패스는 값을 읽지
-    않는다) · 'aux'(보조 패스 봉투 — t2i 와 같은 블록)."""
+    ctx.target: 't2i'(T2I 계열 전부) · 'i2i'(I2I·인페인트·채팅 편집 — 메인 패스는 그 요청이 싣는 샘플러
+    ``ctx.request_sampler``: I2I·인페인트는 싣지 않아 값을 읽지 않고, 채팅 편집은 T2I 콤보 값) · 'aux'(보조 패스 봉투 —
+    확인 못 했어도 싣는다, ``core/extra_samplers.plan``)."""
     from ui.sampling_blocks import Contribution
 
     settings = current_settings(host)
     if settings is None:
         return Contribution()
-    passes = passes_in_use(host, img2img=ctx.target == xsa.TARGET_I2I) if ctx.backend == xsa.BACKEND_WEBUI else ()
+    img2img = ctx.target == xsa.TARGET_I2I
+    main = getattr(ctx, "request_sampler", None) if img2img else None
+    forge_request = ctx.backend == xsa.BACKEND_WEBUI and ctx.target != xsa.TARGET_AUX
+    passes = passes_in_use(host, img2img=img2img, img2img_main=main) if forge_request else ()
     result = xsa.plan(settings, target=ctx.target, backend=ctx.backend, capabilities=ctx.capabilities, passes=passes)
     contribution = Contribution()
     if result.block is not None:

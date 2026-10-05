@@ -20,6 +20,7 @@ from core.comfy_node_pack import (
 from core.comfy_compatibility import bundle_fingerprint
 import comfy_custom_nodes.ai_studio_forge_parity as bundled_pack
 from comfy_custom_nodes.ai_studio_forge_parity import NODE_CLASS_MAPPINGS
+from tests._sam_extra_ext import EXT_ROOT, requires_extension
 
 
 # 손으로 적은 스냅숏이다. 노드가 실수로 추가/삭제되면 여기서 걸린다 —
@@ -457,6 +458,23 @@ class TestComfyBackendNodePackPreflight(unittest.TestCase):
 PACK_DIR = Path(bundled_pack.__file__).resolve().parent
 # Pack 1.7.0's sam-extra ports (THIRD_PARTY_NOTICES.md "sam-extra ports (pack 1.7.0)" table).
 SAM_EXTRA_PORT_PREFIXES = ("extra_schedulers", "extra_samplers", "speed_", "colorcraft_")
+# The author's grant for the code sam-extra (GPL-3.0-only) wrote and the pack reuses (user decision 2026-10-05).
+SAM_EXTRA_GRANT = ("sam-extra (GPL-3.0-only) parts written by the same author (UR-al), licensed to this pack under "
+                   "the MIT License by that author")
+# What the notices and the README said before the grant — the pack does contain sam-extra code.
+OLD_NOT_COPIED_CLAIMS = ("No sam-extra code is included", "Its code was not copied", "No extension code is included",
+                         "without copying its code", "neither copied nor imported", "used **only as a test oracle**",
+                         "test oracle only", "never copied or imported", "no extension code is included")
+
+
+def _section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    return text[start:text.index("\n## ", start + 1)]
+
+
+def _flat(text: str) -> str:
+    """``text`` with every run of whitespace (the line breaks of wrapped Markdown) as one space."""
+    return " ".join(text.split())
 
 
 class TestPackNotices(unittest.TestCase):
@@ -465,7 +483,7 @@ class TestPackNotices(unittest.TestCase):
 
     def test_every_license_file_is_named_in_the_notices_and_back(self):
         files = sorted(path.name for path in (PACK_DIR / "LICENSES").iterdir() if path.is_file())
-        self.assertEqual(len(files), 15)
+        self.assertEqual(len(files), 16)
         for name in files:
             with self.subTest(license=name):
                 self.assertIn(f"LICENSES/{name}", self.notices)
@@ -474,14 +492,69 @@ class TestPackNotices(unittest.TestCase):
             with self.subTest(named=name):
                 self.assertIn(name, files)
 
-    def test_every_sam_extra_port_module_is_in_the_test_oracle_table(self):
-        # sam-extra is GPL-3.0: where the pack re-implements what sam-extra implements, the notices say that the
-        # extension was used only as a test oracle. Every port module must be in that table.
-        start = self.notices.index("## sam-extra ports (pack 1.7.0)")
-        section = self.notices[start:self.notices.index("\n## ", start + 1)]
-        self.assertIn("only as a test oracle", section)
+    def test_the_sam_extra_mit_text_is_the_authors(self):
+        text = (PACK_DIR / "LICENSES" / "sam-extra-MIT.txt").read_text(encoding="utf-8")
+        mit = (PACK_DIR / "LICENSES" / "speed-MIT.txt").read_text(encoding="utf-8")
+        self.assertEqual(text, mit.replace("Copyright (c) 2026 Howard Xiao", "Copyright (c) 2026 UR-al"))
+        self.assertTrue(text.startswith("MIT License\n\nCopyright (c) 2026 UR-al\n"))
+
+    def test_the_notices_state_the_authors_mit_grant_instead_of_not_copied(self):
+        for claim in OLD_NOT_COPIED_CLAIMS:
+            with self.subTest(claim=claim):
+                self.assertNotIn(claim, _flat(self.notices))
+        shared = _section(self.notices, "## Code shared with the sam-extra Forge extension (MIT, by its author)")
+        self.assertIn(SAM_EXTRA_GRANT, _flat(shared))
+        self.assertIn("`LICENSES/sam-extra-MIT.txt`", shared)
+        self.assertIn("Formulas shared with GPL-3.0 hosts", shared)
+        readme = (PACK_DIR / "README.md").read_text(encoding="utf-8")
+        for claim in OLD_NOT_COPIED_CLAIMS:
+            with self.subTest(readme_claim=claim):
+                self.assertNotIn(claim, _flat(readme))
+        self.assertIn(SAM_EXTRA_GRANT, _flat(readme))
+
+    def test_every_sam_extra_port_module_is_in_the_mit_grant_table(self):
+        # The 1.7.0 ports reuse sam-extra's own code under its author's MIT grant; the installed extension is also
+        # the test oracle. Every port module must be in that section's table.
+        section = _section(self.notices, "## sam-extra ports (pack 1.7.0)")
+        self.assertIn(SAM_EXTRA_GRANT, _flat(section))
+        self.assertIn("test oracle", section)
         modules = sorted(path.name for path in PACK_DIR.glob("*.py") if path.name.startswith(SAM_EXTRA_PORT_PREFIXES))
         self.assertEqual(len(modules), 18)
         for name in modules:
             with self.subTest(module=name):
                 self.assertIn(f"`{name}`", section)
+
+
+@requires_extension
+class TestSamExtraSharedCodeIsListed(unittest.TestCase):
+    """Every pack function that is a near-copy of a function of the installed sam-extra (difflib token ratio of the
+    bodies >= 0.80, the review probe's measure: ``tests/_copy_similarity.py``) is named in THIRD_PARTY_NOTICES.md
+    next to its module — in a table row or paragraph that names the module — so the list of code shared with
+    sam-extra (the author's MIT grant, or a permissive upstream both copy) stays complete."""
+
+    def test_every_near_copy_is_named_next_to_its_module(self):
+        from tests import _copy_similarity as similarity
+
+        notices = (PACK_DIR / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        blocks = []
+        for paragraph in notices.split("\n\n"):
+            lines = paragraph.splitlines()
+            rows = [line for line in lines if line.startswith("|")]
+            blocks.extend(rows)
+            blocks.append("\n".join(line for line in lines if not line.startswith("|")))
+        pack = similarity.collect(PACK_DIR)
+        extension = {}
+        for sub in ("sam3ext", "scripts"):
+            extension.update(similarity.collect(EXT_ROOT / sub, sub + "/"))
+        for path in sorted(EXT_ROOT.glob("*.py")):
+            extension.update(similarity.function_tokens(path, path.name))
+        copies = similarity.near_copies(pack, extension)
+        self.assertGreaterEqual(len(copies), 80)                       # the probe found 86 on sam-extra v0.33.0
+        missing = []
+        for name, (ratio, match) in sorted(copies.items()):
+            module, qualname = name.split(":", 1)
+            names = {qualname} | {part for part in qualname.split(".") if not part.startswith("__")}
+            if not any(f"`{module}`" in block and any(f"`{candidate}`" in block for candidate in names)
+                       for block in blocks):
+                missing.append(f"{name} ({ratio:.2f} ~ {match})")
+        self.assertEqual(missing, [])

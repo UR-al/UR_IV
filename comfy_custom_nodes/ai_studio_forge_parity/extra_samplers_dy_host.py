@@ -19,9 +19,9 @@ sam-extra on Forge, which skips the sub-steps for Spectrum Integrated, Wan I2V `
 * ``REASON_REGIONAL`` — a cond ``mask`` (regional masks are resized once when sampling starts) or
   ``area`` (full-resolution coordinates).
 
-Each reason is logged once per ComfyUI session. The pack's own code (no third-party code); the rules
-follow sam-extra's ``substep_guard`` for what Forge has and ComfyUI's sampler structure for the rest. No
-torch or ComfyUI import at module level.
+Each reason is logged once per ComfyUI session. No third-party code; the rules follow sam-extra's
+``substep_guard`` (sam-extra's code, licensed to this pack under MIT by its author (THIRD_PARTY_NOTICES.md)) for
+what Forge has and ComfyUI's sampler structure for the rest. No torch or ComfyUI import at module level.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 {
-  "//": "Extra Samplers 골든 사례 — core/extra_samplers.py 가 만든 기대값(scratchpad impl/xsa4/gen_cases.py). tests/test_extra_samplers_panel_mirror.py(파이썬)와 utils/extraSamplers.test.ts(TS)가 같은 파일을 읽는다: 샘플러 이름 풀이(resolve — 표기·ComfyUI 이름·별칭 → 표기와 종류), ER SDE 셋을 쓰는 패스 판정(passes — 위젯 값 그대로: 체크는 'true'/'false' 문자열), 칸 값 정규화와 요약(settings — 위젯 글자 → parse_settings ↔ parseValues, describe ↔ describe, window_empty ↔ windowEmpty), 옛 sam-extra 의 잡음 구간 판정(window — 스냅샷 → window_supported·window_unsupported). 두 구현이 갈라지면 둘 중 한쪽 테스트가 실패한다.",
+  "//": "Extra Samplers 골든 사례 — core/extra_samplers.py 가 만든 기대값(scratchpad impl/xsa4/gen_cases.py). tests/test_extra_samplers_panel_mirror.py(파이썬)와 utils/extraSamplers.test.ts(TS)가 같은 파일을 읽는다: 샘플러 이름 풀이(resolve — 표기·ComfyUI 이름·별칭 → 표기와 종류), ER SDE 셋을 쓰는 패스 판정(passes — 위젯 값 그대로: 체크는 'true'/'false' 문자열), 칸 값 정규화와 요약(settings — 위젯 글자 → parse_settings ↔ parseValues, describe ↔ describe, window_empty ↔ windowEmpty), 옛 sam-extra 의 잡음 구간 판정(window — 스냅샷 → window_supported·window_unsupported, η 0 이면 경고 없음). 두 구현이 갈라지면 둘 중 한쪽 테스트가 실패한다.",
   "describe_samplers": {
     "all": null,
     "reverse_time": [
@@ -1525,7 +1525,8 @@
       },
       "supported": null,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "comfyui",
@@ -1536,7 +1537,8 @@
       },
       "supported": null,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "v0.33.0 five args",
@@ -1556,7 +1558,8 @@
       },
       "supported": true,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "newer seven args",
@@ -1576,7 +1579,8 @@
       },
       "supported": true,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "v0.32 two args",
@@ -1596,7 +1600,8 @@
       },
       "supported": false,
       "unsupported_when_on": true,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "four args",
@@ -1616,7 +1621,8 @@
       },
       "supported": false,
       "unsupported_when_on": true,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "script absent",
@@ -1636,7 +1642,8 @@
       },
       "supported": null,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "script missing from map",
@@ -1647,7 +1654,8 @@
       },
       "supported": null,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "not present but counted",
@@ -1667,7 +1675,8 @@
       },
       "supported": null,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     },
     {
       "name": "argc unknown",
@@ -1687,7 +1696,8 @@
       },
       "supported": null,
       "unsupported_when_on": false,
-      "unsupported_when_off": false
+      "unsupported_when_off": false,
+      "unsupported_when_on_eta0": false
     }
   ]
 }

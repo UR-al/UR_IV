@@ -618,7 +618,10 @@ class ComfyWorkflowCompiler:
         sam-extra Extra Samplers adds informational entries (``feature``
         ``"extra_samplers"``, ``cause`` None — the graph is unchanged): Euler
         (SMEA) Dy (CFG++) without sub-steps under ComfyUI Spectrum, a CFG++
-        sampler above CFG 2 (``_extra_samplers_warnings``).
+        sampler above CFG 2 (``_extra_samplers_warnings``); Anima SPEED and
+        Colorcraft add theirs when they leave their node out
+        (``_feature_warning``).  The backend turns the ones Forge also
+        reports into the same result notices (core/comfy_compile_notices).
         ``None`` builds the same graph and only logs.
         """
         normalized = {
@@ -2148,7 +2151,8 @@ class ComfyWorkflowCompiler:
     def _feature_warning(warnings: Optional[list], feature: str, code: str, reason: str) -> None:
         """A sam-extra feature left out of the graph on purpose (or a note about it): logged, and appended to the
         caller's ``warnings`` as ``{"code", "reason", "feature", "cause": None}`` (``feature_preflight`` shows the row
-        as skipped with the reason)."""
+        as skipped with the reason; after a generation the backend turns SPEED's into the Forge result notice —
+        core/comfy_compile_notices)."""
         _logger.warning("[%s] %s", feature, reason)
         if warnings is not None:
             warnings.append({"code": code, "reason": reason, "feature": feature, "cause": None})

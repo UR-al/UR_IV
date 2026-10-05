@@ -951,6 +951,17 @@ class ExtraSchedulersRegistryTests(unittest.TestCase):
                     "ui/image_metadata_actions.py:restore_sampling_values", "ui/extra_schedulers_ui.py:apply_infotext"):
             self.assertIn(ref, entry["app"])
 
+    def test_forge_500_scheduler_error_reaches_the_user_and_the_gap_is_gone(self):
+        """GPU 확인 F1: Forge 500 본문의 'Extra Schedulers: …' 가 생성 오류 문구가 된다 — 그 호출 지점이 행에 있고 '아직
+        붙지 않는다' 틈은 지웠다. 보조 패스 봉투의 다시 판정(drop_unread)도 행에 있다."""
+        from core import extra_schedulers as xs
+        entry = reg.SCRIPTS[xs.SCRIPT_NAME]
+        for ref in ("backends/webui_backend.py:_server_error_line", "backends/webui_backend.py:_scheduler_error_line",
+                    "core/sam_extra_notices.py:explain_scheduler_error", "core/alwayson_propagation.py:drop_unread"):
+            self.assertIn(ref, entry["app"])
+        self.assertFalse([gap for gap in entry["gaps"] if "explain_scheduler_error" in gap or "HTTP 500 본문" in gap],
+                         entry["gaps"])
+
     def test_pins_mirror_every_shared_app_constant(self):
         """앱이 확장 값을 하드코딩한 곳마다 핀이 있다 — 빠지면 확장이 바뀌어도 앱만 조용히 어긋난다."""
         pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("xsched_")}
@@ -1022,6 +1033,9 @@ class ExtraSamplersV033RegistryTests(unittest.TestCase):
         self.assertTrue(any('UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음' in gap for gap in entry["gaps"]), 'UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음')
         self.assertTrue(any('XSa-b' in gap for gap in entry["gaps"]), 'XSa-b')
         self.assertTrue(any('XSa-d' in gap for gap in entry["gaps"]), 'XSa-d')
+        # GPU part 2 O3 — ADetailer 만 ER SDE 인 생성의 값은 infotext 에 없어 되살릴 수 없다
+        self.assertTrue(any('ADetailer 만 ER SDE' in gap and '되살릴 수 없다' in gap for gap in entry["gaps"]), 'O3')
+        self.assertIn("core/alwayson_propagation.py:drop_unread", entry["app"])
         self.assertTrue(any(gap.startswith("P18") for gap in entry["gaps"]))
         rows = {f"{section}[{key}]": row for section, table in reg.classified_sections().items()
                 for key, row in table.items() if "extra_samplers" in key.lower() or "extra samplers" in key.lower()}
@@ -1273,6 +1287,26 @@ class ComfyPackMirrorPinTests(unittest.TestCase):
                           "extra_samplers_step_offset_kwarg"):
             self.assertNotIn(duplicate, pins)
 
+    def test_every_twin_guards_a_constant_the_pack_reads(self):
+        """쌍둥이가 지키는 팩 상수는 팩 어딘가가 실제로 읽어야 한다(정의·``__all__`` 문자열만 있으면 확장 값이 바뀔 때 핀이
+        죽은 상수를 고치게 보내고, 팩이 실제로 쓰는 하드코딩 문자열은 아무도 보지 않는다 — GC 검토: speed_nodes.KEY 는
+        읽는 곳이 없었다. 팩은 infotext 를 쓰지 않고 ComfyUI PNG 키는 앱 상수 핀 speed_infotext_key 가 지킨다)."""
+        pack_dir = REPO / "comfy_custom_nodes" / "ai_studio_forge_parity"
+        trees = [ast.parse(path.read_text(encoding="utf-8")) for path in sorted(pack_dir.rglob("*.py"))
+                 if "vendor" not in path.relative_to(pack_dir).parts]
+        read: set = set()
+        for tree in trees:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                    read.add(node.id)
+                elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                    read.add(node.attr)
+                elif isinstance(node, ast.ImportFrom):
+                    read.update(alias.name for alias in node.names)
+        unread = sorted(pin["app"] for pin in reg.SEMANTIC_PINS if pin["id"].endswith("_comfy")
+                        and pin["app"].split(":", 1)[1].split(".")[0] not in read)
+        self.assertEqual(unread, [], "팩이 읽지 않는 상수를 지키는 쌍둥이 — 상수를 지우고 쌍둥이도 빼거나 팩이 쓰게 하라")
+
     def test_pack_constants_that_mirror_the_extension_are_pinned(self):
         """팩이 확장 값을 그대로 하드코딩한 상수마다 쌍둥이 핀 — 빠지면 확장이 바뀌어도 팩만 조용히 어긋난다."""
         apps = {pin["app"] for pin in reg.SEMANTIC_PINS if pin["id"].endswith("_comfy")}
@@ -1295,7 +1329,7 @@ class ComfyPackMirrorPinTests(unittest.TestCase):
             "extra_samplers_restart": ("RESTART_S_MIN", "RESTART_S_MAX", "RESTART_MIN_STEPS", "RESTART_TIMES",
                                        "RESTART_TIMES_LONG", "RESTART_LONG_FROM"),
             "extra_samplers_dy": ("SMEA_SCALE", "RESIZE_MODE", "CHURN_MIN", "CHURN_MAX"),
-            "speed_nodes": ("ARG_NAMES", "DEFAULTS", "ARG_ALIASES", "KEY", "BROWNIAN_STAGE_SEED_STRIDE"),
+            "speed_nodes": ("ARG_NAMES", "DEFAULTS", "ARG_ALIASES", "BROWNIAN_STAGE_SEED_STRIDE"),
             "speed_schedule": ("MODES", "THRESHOLDS", "TRANSFORMS", "PRESET_NAMES", "PRESETS", "REFERENCE_LATENT",
                                "CUSTOM_DEFAULT_A", "CUSTOM_DEFAULT_BETA", "MAX_COARSE_FRACTION", "RESPACE_PATCH"),
             "speed_runner": ("EXPANSION_SEED_STRIDE", "RESPACE_SEED_OFFSET", "INIT_NOISE_SEED_OFFSET"),

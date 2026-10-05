@@ -9,6 +9,7 @@ import secrets
 from typing import Any
 
 from . import hires_carry
+from .extra_samplers_register import impact_scheduler_func
 from .compat import (
     clone_model,
     filename_choices,
@@ -530,7 +531,11 @@ class ForgeNeoHiresFix:
             active_vae = invoke_provider("VAELoader", method="load_vae", feature="hires VAE override", args=(vae_name,))[0]
         # A checkpoint/UNET override samples a fresh MODEL: the pack features re-apply their
         # patches to it below (hires_carry). Detail Daemon and the guidance suite do not (gap).
+        # A VAE-only override keeps the MODEL; the features that encode with the pass's VAE
+        # (Colorcraft's colour anchors) prepare their patch again with it (Forge reloads the
+        # model with the new VAE for the Hires pass).
         model_overridden = active_model is not model
+        vae_changed = active_vae is not base_vae
         clip_changed = active_clip is not base_clip
         if positive_text.strip() or negative_text.strip() or clip_changed:
             if active_clip is None:
@@ -545,6 +550,8 @@ class ForgeNeoHiresFix:
             active_model = _patch_flow_shift(active_model, float(shift))
         if model_overridden:
             active_model = hires_carry.apply(model, active_model, active_vae)
+        elif vae_changed:
+            active_model = hires_carry.apply_vae_change(model, active_model, active_vae)
         tensor = samples["samples"]
         ratio_method = getattr(active_vae, "spacial_compression_decode", None)
         try:
@@ -1162,9 +1169,14 @@ class ForgeNeoADetailer:
             if callable(getattr(segm_candidate, "detect", None))
             else None
         )
+        # Impact's own sigma builder skips the penultimate-sigma discard of dpmpp_4m_sde / dpmpp_3m_flow_ode
+        # (Forge discards it on the ADetailer pass too): those two get the discard through scheduler_func_opt.
+        scheduler_func = impact_scheduler_func(resolved["sampler_name"], resolved["scheduler"])
+        optional = {} if scheduler_func is None else {"scheduler_func_opt": scheduler_func}
         result = invoke_provider(
             "FaceDetailer", method="doit", feature="ADetailer",
             kwargs={
+                **optional,
                 "image": image, "model": model, "clip": clip, "vae": vae,
                 "guide_size": resolved["guide_size"],
                 "guide_size_for": resolved["guide_size_for"],

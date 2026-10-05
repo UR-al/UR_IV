@@ -1,9 +1,10 @@
 """Colorcraft on ComfyUI: the host rules of sam-extra v0.32.1's Forge hook, in ComfyUI terms.
 
 Pack 1.7.0 (``ForgeNeoColorcraft``). The per-evaluation maths is ``colorcraft_engine`` (the MIT upstream's
-modifier loop); this module decides what one sampling pass grades and with what. The rules are sam-extra's
-(``sam3ext/colorcraft/hook.py``, GPL-3.0): they are re-expressed here from their behaviour, no extension code
-is included, and ``tests/test_comfy_colorcraft_parity.py`` checks them against the installed extension on CPU.
+modifier loop); this module decides what one sampling pass grades and with what. The rules and much of the code
+are sam-extra's (``sam3ext/colorcraft/hook.py``; sam-extra is GPL-3.0-only, and this code is licensed to this
+pack under MIT by its author (THIRD_PARTY_NOTICES.md)), and ``tests/test_comfy_colorcraft_parity.py`` checks
+them against the installed extension on CPU.
 
 Part 1 — before sampling (the node runs before its sampler, as Forge's ``process_before_every_sampling``):
 
@@ -825,6 +826,31 @@ def apply_colorcraft(model, patch: ColorcraftPatch):
         remove(wrapper_type, WRAPPER_KEY)
     add(wrapper_type, WRAPPER_KEY, patch.wrapper)
     return patched
+
+
+def without_colorcraft(model):
+    """``model`` without this pack's Colorcraft: a clone with its post-CFG function, wrapper and patch entry removed
+    (every other post-CFG function and wrapper kept in order); ``model`` itself when it has none."""
+    options = getattr(model, "model_options", None) or {}
+    functions = options.get("sampler_post_cfg_function", [])
+    owned = isinstance(functions, (list, tuple)) and any(is_owned(fn) for fn in functions)
+    wrappers = getattr(model, "wrappers", None)
+    registered = wrappers.get(sampler_sample_wrapper_type()) if isinstance(wrappers, dict) else None
+    wrapped = isinstance(registered, dict) and bool(registered.get(WRAPPER_KEY))
+    if PATCH_KEY not in options and not owned and not wrapped:
+        return model
+    stripped = clone_model(model, "Colorcraft")
+    options = dict(getattr(stripped, "model_options", None) or {})
+    options.pop(PATCH_KEY, None)
+    if owned:
+        options["sampler_post_cfg_function"] = [fn for fn in functions if not is_owned(fn)]
+    stripped.model_options = options
+    remove = getattr(stripped, "remove_wrappers_with_key", None)
+    if wrapped:
+        if not callable(remove):
+            raise RuntimeError("Colorcraft needs a ComfyUI MODEL that supports sampler wrappers; update ComfyUI.")
+        remove(sampler_sample_wrapper_type(), WRAPPER_KEY)
+    return stripped
 
 
 def model_colorcraft_patch(model) -> ColorcraftPatch | None:

@@ -132,6 +132,11 @@ export const PASS_WIDGETS = {
 
 /** CFG 칸(파라미터 카드) — CFG++ 경고가 본다. */
 export const CFG_WIDGET = 'cfg_input'
+/** Hires CFG 칸(Hires 카드 'CFG (0=off)') — 0 이하·빈 값이면 앱이 hr_cfg 를 보내지 않는다(ui/generator_generation). */
+export const HIRES_CFG_WIDGET = 'hires_cfg_input'
+/** hr_cfg 가 없을 때 Forge 하이레스 패스의 CFG(파이썬 core/sam_extra_notices.FORGE_DEFAULT_HR_CFG — processing.py
+ *  hr_cfg = 1.0). ComfyUI 는 메인 CFG 다(컴파일러 hr_cfg → cfg_scale). */
+export const FORGE_DEFAULT_HR_CFG = 1
 
 const MASK_ONLY = 'mask only'   // core/sam3_args.MODE_MASK_ONLY 를 그 판정(strip·소문자)대로
 
@@ -319,9 +324,10 @@ export function windowSupported(caps: Caps | null | undefined): boolean | null {
   return argc >= ARG_COUNT
 }
 
-/** 구간을 켰는데 연결된 sam-extra 가 그 인자를 버린다(확실할 때만) — 파이썬 window_unsupported(계획 X10). */
+/** 구간을 켰는데 연결된 sam-extra 가 그 인자를 버린다(확실할 때만) — 파이썬 window_unsupported(계획 X10). η 0 이면 거짓 —
+ *  구간은 어느 판에서도 아무 일도 하지 않는다(확장 _er_sde_window: η ≤ 0 이면 구간 없음). */
 export function windowUnsupported(settings: SamplerSettings, caps: Caps | null | undefined): boolean {
-  return settings.noise_window && windowSupported(caps) === false
+  return settings.noise_window && settings.eta > 0 && windowSupported(caps) === false
 }
 
 /** 메인·Hires 의 샘플러(이 확장 것만, 표기) — 힌트가 본다. ADetailer·SAM3 는 보지 않는다(작은 영역). */
@@ -347,7 +353,11 @@ export const UD10_HINT = 'CFG++ UD10 AB: ComfyUI 가 Anima 용으로 만든 CFG+
   + 'Euler 와 같습니다.'
 export const FLOW_ODE_HINT = 'DPM++ 2M · 2M Heun · 3M (flow ODE): 잡음 없는 DPM-Solver++ — flow 의 λ 좌표에서 풉니다(Res '
   + 'Multistep 의 flow 판 비교용). Eta 를 쓰지 않습니다.'
-export const IPNDM_HINT = 'IPNDM: 같은 간격 격자용 — shift 된 격자에는 IPNDM_V 를 권장합니다.'
+/** 10-05 Anima 확인(GPU part 2 O2)에서 본 것만 — 권장하지 않는다(다른 스케줄·모델은 확인하지 않았다). */
+export const IPNDM_HINT = 'IPNDM · IPNDM_V · UniPC bh2: 10-05 Anima 확인(Linear Quadratic, 28 스텝)에서 IPNDM 은 정상이었고 '
+  + 'IPNDM_V(녹색 잡음)·UniPC bh2(무너짐)는 깨졌습니다 — 다른 스케줄은 확인하지 않았습니다.'
+/** 그 힌트를 보이는 샘플러(파이썬 LABEL_IPNDM·LABEL_IPNDM_V·LABEL_UNIPC_BH2). */
+export const IPNDM_HINT_LABELS: readonly string[] = ['IPNDM', 'IPNDM_V', 'UniPC bh2']
 export const RESTART_HINT = 'Restart (flow): 스케줄을 유지한 채 σ 0.09~0.67 구간을 한 번(36 스텝부터 두 번) 다시 밟습니다 — 모델 '
   + '호출이 Heun 의 약 1.4배(28 스텝).'
 /** CFG++ 샘플러인데 CFG 가 2 를 넘을 때(Forge 도 'CFG between 1.0 ~ 2.0 is recommended' 를 로그에 남긴다). */
@@ -355,9 +365,32 @@ export const CFG_PP_MAX = 2
 export function cfgWarning(cfg: number): string {
   return `CFG++ 샘플러는 CFG 1~2 를 권장합니다 (지금 ${widgetNumber(cfg)})`
 }
+/** Hires 패스의 CFG++ 샘플러 — 그 패스의 CFG(Hires CFG, 끔이면 Forge 1·ComfyUI 메인 CFG)로 본다. */
+export function hiresCfgWarning(cfg: number): string {
+  return `Hires 의 CFG++ 샘플러는 CFG 1~2 를 권장합니다 (Hires 패스 CFG 지금 ${widgetNumber(cfg)})`
+}
 
-/** Sampler 줄 아래 힌트 — v0.33.0 샘플러 설명과 CFG++ 의 CFG 경고. 해당 없으면 빈 배열. */
-export function samplerHints(widgets: Record<string, unknown>): string[] {
+/** 메인·Hires 패스의 CFG++ 경고 — 각 패스의 샘플러를 그 패스가 실제로 쓰는 CFG 와 대조한다. 메인은 CFG 칸, Hires 는
+ *  Hires CFG 칸(> 0 일 때만 앱이 hr_cfg 를 보낸다), 끔이면 Forge 기본 1(``FORGE_DEFAULT_HR_CFG``)·ComfyUI 는 메인 CFG.
+ *  Hires 샘플러가 'Use same' 이면 메인 샘플러다. */
+function cfgWarnings(widgets: Record<string, unknown>, comfy: boolean): string[] {
+  const w = widgets ?? {}
+  const cfg = readable(String(w[CFG_WIDGET] ?? ''))
+  const out: string[] = []
+  const over = (value: number | null): value is number => value !== null && value > CFG_PP_MAX
+  if (isCfgPp(w[PASS_WIDGETS.main]) && over(cfg)) out.push(cfgWarning(cfg))
+  if (flag(w[PASS_WIDGETS.hiresGroup])) {
+    const hiresSampler = usesSame(w[PASS_WIDGETS.hiresSampler]) ? w[PASS_WIDGETS.main] : w[PASS_WIDGETS.hiresSampler]
+    const hiresCfg = readable(String(w[HIRES_CFG_WIDGET] ?? ''))
+    const effective = hiresCfg !== null && hiresCfg > 0 ? hiresCfg : (comfy ? cfg : FORGE_DEFAULT_HR_CFG)
+    if (isCfgPp(hiresSampler) && over(effective)) out.push(hiresCfgWarning(effective))
+  }
+  return out
+}
+
+/** Sampler 줄 아래 힌트 — v0.33.0 샘플러 설명과 CFG++ 의 CFG 경고(패스마다 그 패스의 CFG). ``comfy``: ComfyUI 로 보낸다
+ *  (Hires CFG 가 끔이면 메인 CFG 로 돈다). 해당 없으면 빈 배열. */
+export function samplerHints(widgets: Record<string, unknown>, comfy = false): string[] {
   const labels = mainAndHires(widgets)
   const has = (label: string) => labels.includes(label)
   const hints: string[] = []
@@ -367,10 +400,9 @@ export function samplerHints(widgets: Record<string, unknown>): string[] {
   if (has('Euler Dy') || has('Euler SMEA Dy')) hints.push(DY_PLAIN_HINT)
   if (has('CFG++ UD10 AB')) hints.push(UD10_HINT)
   if (labels.some(label => FLOW_ODE_LABELS.includes(label))) hints.push(FLOW_ODE_HINT)
-  if (has('IPNDM')) hints.push(IPNDM_HINT)
+  if (labels.some(label => IPNDM_HINT_LABELS.includes(label))) hints.push(IPNDM_HINT)
   if (has('Restart (flow)')) hints.push(RESTART_HINT)
-  const cfg = readable(String((widgets ?? {})[CFG_WIDGET] ?? ''))
-  if (cfg !== null && cfg > CFG_PP_MAX && labels.some(label => CFG_PP_LABELS.includes(label))) hints.push(cfgWarning(cfg))
+  hints.push(...cfgWarnings(widgets, comfy))
   return hints
 }
 

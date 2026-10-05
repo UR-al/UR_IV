@@ -36,11 +36,14 @@ def _sampling_gate(snapshot, *, backend="webui", capabilities=None, provenance=N
     기능 스냅샷은 WebUI 것이라 Comfy 는 게이트하지 않는다. WebUI 는 스냅샷이 없어도(연결 직후·백엔드 전환 직후
     ``host.sam_extra_capabilities`` None·캐시 없음, 테스트 더블) 게이트한다 — 모를 때는 ``Rule.when_unknown`` × 출처로
     정한다(메인 빌더·Forge 보조 워커와 같음, P7 검토 R2-1). ``provenance`` 는 빌더가 적은 블록 출처(A2·A6).
+    값 블록(Extra Schedulers·Extra Samplers)은 게이트 전에 이 요청(스냅샷의 T2I 샘플러·스케줄러 — 손 재구성 몫의 블록만)이
+    값을 읽는지로 다시 판정한다(``drop_unread`` — 스냅샷이 확인 못 했으면 계획 X5, 보조 패스 봉투는 확인 전에도 싣는다).
     """
     from core import alwayson_propagation as ap
     blocks = ap.blocks_for(snapshot.get("alwayson_scripts", {}), ap.AUX_HAND, backend=backend)
     if backend != ap.BACKEND_WEBUI:
         return ap.GateResult(blocks)
+    blocks, _unread = ap.drop_unread(blocks, {**snapshot, "alwayson_scripts": blocks}, capabilities)
     return ap.gate(blocks, capabilities, img2img=True, provenance=provenance)
 
 
@@ -179,7 +182,7 @@ class HandReconstructionActionsMixin:
         capabilities = _hand_capabilities(self, backend) if kind == "webui" else None
         blocks = snapshot.get("alwayson_scripts", {})
         snapshot = {key: copy.deepcopy(snapshot[key]) for key in _GENERATION_KEYS if key in snapshot}
-        gated = _sampling_gate({"alwayson_scripts": blocks}, backend=kind, capabilities=capabilities,
+        gated = _sampling_gate({**snapshot, "alwayson_scripts": blocks}, backend=kind, capabilities=capabilities,
                                provenance=provenance)
         snapshot["alwayson_scripts"] = gated.kept
         snapshot.pop(ap.PROVENANCE_KEY, None)

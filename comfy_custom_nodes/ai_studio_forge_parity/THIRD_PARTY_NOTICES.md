@@ -20,6 +20,9 @@ license text is included at `LICENSES/Qwen3.5-Apache-2.0.txt`.
 
 The adjacent-generation LoRA mapping in `anima_lora.py` is locally authored
 from published model-layout metadata; it does not copy Forge's loader code.
+Its `_make_expansion_mapping` is the same code as the sam-extra extension's
+(same author, licensed to this pack under MIT; see "Code shared with the
+sam-extra Forge extension").
 The 28-to-40 insertion positions come from
 [`Gazingstars123/Anima-2.9B`](https://huggingface.co/Gazingstars123/Anima-2.9B/blob/9f9cb502dbae7a616c3cc5a530633427fe735665/expand_manifest.json).
 The 40-to-52 positions are read from the `insertion_positions` and
@@ -129,7 +132,9 @@ repeats the σ formula of `get_timesteps_sigmas` in
 initial-noise draw and control-image loading. sd-scripts is Copyright 2022
 kohya-ss and licensed under the Apache License, Version 2.0, the same license
 text as `LICENSES/ComfyUI-Anima-LLLite-Apache-2.0.txt`. No other sd-scripts
-code is copied. See
+code is copied. `read_safetensors_header` and `tile_repair_size` are the
+same code as the sam-extra extension's (same author, licensed to this pack under
+MIT; see "Code shared with the sam-extra Forge extension"). See
 `vendor/comfyui_anima_lllite/UPSTREAM.md` for the SHA-256 values, omitted
 upstream files, and the local integration boundary. No LLLite or other model
 weight is included. This notice does not replace or modify the upstream
@@ -138,13 +143,16 @@ license.
 ## Anima VAE DeGrid
 
 `degrid_math.py`, `degrid_files.py`, `degrid_runner.py` and `degrid_nodes.py`
-(`ForgeNeoAnimaVAEDeGrid`) are local implementation code. They reproduce the
-behaviour of the "Anima VAE DeGrid (NAFNet)" script of the user's sam-extra Forge
-extension (`forge_sam3_extension`, GPL-3.0) without copying its code: only
-behavioural facts are shared — mode meanings, value ranges, tile/overlap sizes,
-the padding multiple, residual-guard thresholds (plain numbers) and the leading
-error-category words. `tests/fixtures/degrid_origin_golden.json` holds only
-numbers and checksums produced by running that extension on CPU.
+(`ForgeNeoAnimaVAEDeGrid`) reproduce the "Anima VAE DeGrid (NAFNet)" script of the
+sam-extra Forge extension (`forge_sam3_extension`, GPL-3.0-only) on ComfyUI.
+Some of their functions are sam-extra's own code — the safetensors header and
+state-dict readers, the out-of-memory test and tile retry, the residual guard and
+the residual run. The author licenses that code to this pack under MIT (see
+"Code shared with the sam-extra Forge extension"). Besides that code, the mode
+meanings, value ranges, tile/overlap sizes, the padding multiple, the
+residual-guard thresholds and the leading error-category words follow the
+extension. `tests/fixtures/degrid_origin_golden.json` holds only numbers and
+checksums produced by running that extension on CPU.
 
 The NAFNet detection key list is the one spandrel (MIT) uses to recognise the
 architecture. spandrel itself (model loading), `comfy.utils.load_torch_file` and
@@ -159,14 +167,15 @@ subject to their own licenses.
 ## Detail guidance (pack 1.6.0)
 
 `guidance_detail.py`, `guidance_s2.py`, `guidance_optimal_scale.py` and the adaptive SMC step in
-`guidance_dcw.py` are local code that follows the sam-extra Forge extension v0.30.0 (by the author
-of AI Studio Pro). Their sources:
+`guidance_dcw.py` follow the sam-extra Forge extension v0.30.0 (by the author of AI Studio Pro).
+Much of their code is sam-extra's own code, licensed to this pack under MIT by the author. "Code shared
+with the sam-extra Forge extension" names the functions. Their sources:
 
 | Stage | Reference | License | Notes |
 | --- | --- | --- | --- |
-| HiFlow | [Bujiazi/HiFlow](https://github.com/Bujiazi/HiFlow) `flux_pipeline_hiflow.py` and `utils.py` at commit `31cc2b1c515195d8bfee002d3da58ac7c7773fef`; defaults from `run_hiflow.py` at commit `da351a8ef036384a42485744ba47bc9c1d882b94` | Apache-2.0 | The direction/acceleration alignment and the order-4 Butterworth mask follow the official code, rewritten as a per-evaluation x0 replacement for ComfyUI's post-CFG hook; the changes are listed in `guidance_detail.py`'s module docstring (Apache-2.0 section 4(b)). The upstream repository ships no NOTICE file. Full license text: `LICENSES/HiFlow-Apache-2.0.txt`. |
+| HiFlow | [Bujiazi/HiFlow](https://github.com/Bujiazi/HiFlow) `flux_pipeline_hiflow.py` and `utils.py` at commit `31cc2b1c515195d8bfee002d3da58ac7c7773fef`; defaults from `run_hiflow.py` at commit `da351a8ef036384a42485744ba47bc9c1d882b94` | Apache-2.0 | The direction/acceleration alignment and the order-4 Butterworth mask follow the official code, rewritten as a per-evaluation x0 replacement for ComfyUI's post-CFG hook. That rewrite is sam-extra's (`sam3ext/guidance/hiflow.py`, MIT for this pack by its author). The changes are listed in `guidance_detail.py`'s module docstring (Apache-2.0 section 4(b)). The upstream repository ships no NOTICE file. Full license text: `LICENSES/HiFlow-Apache-2.0.txt`. |
 | Adaptive SMC | [sorryhyun/anima_lora](https://github.com/sorryhyun/anima_lora) `library/inference/corrections/smc_cfg.py`; CFG-Ctrl, [arXiv:2603.03281](https://arxiv.org/abs/2603.03281) | MIT (Copyright (c) 2026 Seunghyun Ji) | Formula and defaults (alpha 0.2, lambda 5) only; no code is copied. |
-| TSR | Temporal Score Rescaling, [arXiv:2510.01184](https://arxiv.org/abs/2510.01184); ComfyUI's `TemporalScoreRescaling` node as the behavioural reference | — | Written from the paper's equation; no ComfyUI code is included. |
+| TSR | Temporal Score Rescaling, [arXiv:2510.01184](https://arxiv.org/abs/2510.01184); ComfyUI's `TemporalScoreRescaling` node (GPL-3.0), which sam-extra's `tsr.py` ports | — | sam-extra's per-row code (MIT for this pack by its author). Only the node's formula is shared with ComfyUI (see "Formulas shared with GPL-3.0 hosts"); the node's own code is not included. |
 | S²-Guidance | [arXiv:2508.12880](https://arxiv.org/abs/2508.12880) Eq. 4, Algorithm 1 | no official code | Paper reimplementation. |
 | Momentum Guidance | [arXiv:2602.20360](https://arxiv.org/abs/2602.20360) Eq. 12–13 | no official code | Paper reimplementation. |
 | HiGS | [arXiv:2509.22300](https://arxiv.org/abs/2509.22300) Eq. 6, 8, Algorithms 2–3 | paper code not used | Paper reimplementation. |
@@ -174,47 +183,112 @@ of AI Studio Pro). Their sources:
 
 This notice does not replace or modify the upstream licenses.
 
-## sam-extra ports (pack 1.7.0): re-implementations and the GPL test oracle
+## Code shared with the sam-extra Forge extension (MIT, by its author)
 
-Pack 1.7.0 brings four features of the sam-extra Forge extension (by the author of AI Studio Pro, GPL-3.0)
-to ComfyUI: Extra Schedulers, Extra Samplers and Anima SPEED (sam-extra v0.33.0), Colorcraft (sam-extra
-v0.32.1). No sam-extra code is included in this pack and no pack module imports the extension
-(`tests/test_comfy_pack_foundation.py` checks the imports of every pack file).
+The sam-extra Forge extension ([UR-al/sam-extra](https://github.com/UR-al/sam-extra), installed as
+`forge_sam3_extension`) is distributed under GPL-3.0-only. Several pack modules contain code that sam-extra itself
+wrote: functions copied from it, or written the same way statement for statement. **These are sam-extra
+(GPL-3.0-only) parts written by the same author (UR-al), licensed to this pack under the MIT License by that
+author.** The full text is in `LICENSES/sam-extra-MIT.txt`. The GPL-3.0-only terms of sam-extra do not apply to
+these parts in this pack.
 
-Where a formula or rule below was re-implemented here and sam-extra has its own (GPL-3.0) implementation of
-it, that implementation was used **only as a test oracle**: the pack's tests run the installed extension next
-to the pack on CPU and compare the results bit for bit. Its code was not copied into the pack.
+The grant covers only code that sam-extra itself wrote. In sam-extra's git history the listed functions come from
+the author's own commits (accounts UR_al, UR-al and UR-MJ), and sam-extra's file headers mark every third-party
+part. Third-party code inside those sam-extra files keeps its own license, and this pack keeps its notice: HiFlow
+(Apache-2.0), Koishi-Star's Euler (SMEA) Dy (Apache-2.0), Clybius' DPM++ 4M SDE (BSD-3-Clause), the SPEED and
+Colorcraft upstreams (MIT) and Detail Daemon (MIT); see the sections below. The pack takes no third-party GPL code
+from sam-extra. In a few places sam-extra evaluates a published formula the way a GPL-3.0 host (ComfyUI, Forge)
+writes it. There the pack shares only that formula, in the same floating-point operations, because its tests check
+bit-equal results. These formulas are listed below.
 
-| Pack module(s) | Re-implemented here, from | sam-extra implementation used only as the test oracle | Tests |
-| --- | --- | --- | --- |
-| `extra_schedulers.py`, `extra_schedulers_math.py` | The nine schedules (Cosine, CosineExponential blend, Phi, Laplace's spread rule, Karras Dynamic, React Cosinusoidal DynSF, Flow Cosmos rho7, Flow Cosmos Dynamic, Custom), the safe-expression language, the sigma-list format and the settings coercion — from the published formulas listed under "Extra Schedulers" and from sam-extra's documented behaviour (rules, ranges, error texts) | `sam3ext/extra_schedulers/` (`schedulers.py`, `expression.py`, `sigma_list.py`, `settings.py`, `registry.py`) | `test_comfy_extra_schedulers_parity.py`, `test_comfy_extra_schedulers_runtime.py` |
-| `extra_samplers_math.py` | The three ER SDE noise scalers (Cui et al., arXiv:2309.06169, and the η-scaled one of ComfyUI's `SamplerER_SDE`), the noise window (a per-step scaler and a gated noise sampler around ComfyUI's own `sample_er_sde`) and the coercion of the five values | `sam3ext/extra_samplers/er_sde.py`, `er_sde_window.py`, `params.py` | `test_comfy_extra_samplers_parity.py`, `test_comfy_extra_samplers_runtime.py` |
-| `extra_samplers_flow.py` | DPM++ 2M / 2M Heun / 3M (flow ODE) as calls of ComfyUI's own `sample_dpmpp_2m_sde` / `sample_dpmpp_3m_sde` at η = 0 | `sam3ext/extra_samplers/dpmpp_flow.py` | same |
-| `extra_samplers_restart.py` | Restart (flow) from the paper (Xu et al., arXiv:2306.14878, Algorithm 1) with sam-extra's window and step rules; its floating-point details were matched by comparing calls and outputs with the oracle, not by copying | `sam3ext/extra_samplers/restart_flow.py` | same |
-| `extra_samplers_dy.py`, `extra_samplers_dy_host.py` | Koishi-Star's Apache-2.0 Euler (SMEA) Dy (below) with sam-extra's CFG++ update, churn rule, sub-step placement and the reasons the sub-steps step aside, re-expressed from their behaviour | `sam3ext/extra_samplers/euler_dy.py`, `substep_guard.py` | same |
-| `extra_samplers_register.py`, `extra_samplers_nodes.py` | The twelve names, their order and the penultimate-σ discard set as sam-extra registers them, and the settings node reading the values with sam-extra's coercion; the registration and node code are this pack's own | `sam3ext/extra_samplers/registry.py`, `params.py` | `test_comfy_extra_samplers_pack.py`, `test_comfy_extra_samplers_runtime.py` |
-| `extra_samplers_dpmpp_4m.py` | Clybius' BSD-3-Clause 4M SDE (below) with sam-extra's choices (momentum 0, half-log-SNR flow handling) | `sam3ext/extra_samplers/dpmpp_4m_sde.py` | `test_comfy_extra_samplers_parity.py` |
-| `guidance.py`, `guidance_dcw.py`, `guidance_detail.py` (Dy sub-steps) | The guidance suite keeps its step state (APG momentum, ADG, SMC `e_prev`, RDC, HiFlow, Momentum Guidance, HiGS) through Euler (SMEA) Dy sub-steps — sam-extra's sub-step rule, re-expressed | `sam3ext/guidance/` | `test_comfy_detail_parity.py` |
-| `speed_schedule.py`, `speed_spectral.py`, `speed_runner.py`, `speed_nodes.py`, the Detail Daemon σ lookup in `guidance_dd.py` | From the three MIT upstreams under "Anima SPEED"; sam-extra's changes to them (refusals incl. custom A ≤ 0, seeds and noise streams, guards, status lines, Detail Daemon following the re-published σ list) re-expressed from their behaviour | `sam3ext/speed/` (`schedule.py`, `spectral.py`, `runner.py`, `forge_host.py`) | `test_comfy_speed_parity.py`, `test_comfy_speed_host.py`, `test_comfy_speed_runtime.py` |
-| `colorcraft_basis.py`, `colorcraft_engine.py`, `colorcraft_host.py`, `colorcraft_nodes.py` | From the MIT upstream and fork under "Colorcraft"; sam-extra's host rules (anchors, σ look-up, pre-Detail-Daemon σ, fp16/bf16, sub-step pass-through) re-expressed from their behaviour | `sam3ext/colorcraft/` (`engine.py`, `hook.py`, `basis.py`, `spec.py`) | `test_comfy_colorcraft_parity.py`, `test_comfy_colorcraft_runtime.py` |
-| `guidance_common.py`, `compat.py`, `hires_carry.py` | Only the values of sam-extra's coordination names (`sam_extra_substep`, `sam_extra_step_offset`, the re-published σ tag); the code is this pack's own | `sam3ext/extra_samplers/common.py`, `sam3ext/speed/runner.py`, `sam3ext/guidance/sigmas.py` | `test_comfy_pack_foundation.py` |
+The pack never imports the extension (`tests/test_comfy_pack_foundation.py` checks the imports of every pack
+file). The installed extension is also the test oracle: the pack's tests compare it with the pack, bit for bit on
+CPU.
+
+The table lists the shared code outside the 1.7.0 ports; the 1.7.0 ports are in the next section. Both tables name
+the functions that a token-similarity check of the pack against the installed sam-extra v0.33.0 finds at 0.80 or
+above (docstrings and comments ignored; `tests/test_comfy_node_pack.py` keeps the lists complete). The same grant
+covers other code of these modules that follows sam-extra's code more loosely. The same code may have been written
+for the pack first. Either way, the author wrote both copies.
+
+| Pack module | Pack function(s) | sam-extra source (installed v0.33.0) |
+| --- | --- | --- |
+| `anima_lora.py` | `_make_expansion_mapping` | `sam3ext/anima_lora_blocks.py` `_make_expansion_mapping` |
+| `anima_lllite.py` | `read_safetensors_header`, `tile_repair_size` | `sam3ext/sam3_cn_lllite.py` `read_safetensors_header`; `sam3ext/anima_core.py` `tile_repair_size` |
+| `mask_ops.py` | `split_prompt_groups` | `sam3ext/core.py` `_split_prompt_groups` |
+| `degrid_files.py`, `degrid_math.py`, `degrid_runner.py` | `safetensors_header`, `_unwrap_state`; `message_says_oom`, `tiled_residual_with_oom_retry`, `check_residual`; `residual` | `sam3ext/vae_degrid_models.py` `read_safetensors_header`, `_unwrap`; `sam3ext/vae_degrid.py` `is_oom_error`, `tiled_residual_with_oom_retry`, `check_residual`; `sam3ext/vae_degrid_runtime.py` `residual` |
+| `guidance_common.py` | `_pad_even`, `_haar_dwt`, `_haar_idwt`, `_sigma_norm` | `sam3ext/guidance/haar.py` `pad_even`, `haar_dwt2d`, `haar_idwt2d`, `sigma_norm` |
+| `guidance_dcw.py` | `_smc_adaptive_error` | `sam3ext/guidance/cwm_smc.py` `apply_smc_adaptive` |
+| `guidance_detail.py` | `first_float`; `tsr_factors`, `apply_tsr`; `step_role`, `apply_mg`, `_dct_matrix`, `dct_highpass`, `apply_higs`; `Trajectory.record`, `Trajectory.at`; `butterworth_mask`, `butterworth_lowpass`, `resize_latent`, `apply_hiflow` | `sam3ext/guidance/sigmas.py` `first_float`; `tsr.py` `rescale_factors`, `apply_tsr`; `history.py` (same names); `trajectory.py` `Trajectory`; `hiflow.py` (same names; sam-extra's modified port of HiFlow, Apache-2.0, see "Detail guidance") |
+| `guidance_optimal_scale.py` | `optimal_scale_residual`, `make_callback` (its `optimal_scale`) | `scripts/anima_cfg_optimal_scale.py` `_optimal_scale_residual`, `callback` |
+
+Formulas shared with GPL-3.0 hosts. Each item is the formula only: the code around it is sam-extra's or the pack's,
+and the bit-equal tests fix its floating-point operations.
+
+- **Laplace schedule** (`extra_schedulers._laplace_over_range`): the curve
+  `exp(μ − β·sign(0.5 − x)·log(1 − 2|0.5 − x| + 1e-5))` clamped to [σmin, σmax] (Hang et al., arXiv:2407.03297), as
+  ComfyUI's `get_sigmas_laplace` writes it, evaluated at other positions. The plain schedule is ComfyUI's own
+  function, called at run time.
+- **TSR** (`guidance_detail.tsr_factors`, `apply_tsr`): `r = (snr·v + 1)/(snr·v/k + 1)` (Xu et al.,
+  arXiv:2510.01184, eq. 6), `α = σ·e^λ` and `x0' = lerp(x/α, x0, r)`, as ComfyUI's `TemporalScoreRescaling` node
+  writes them; sam-extra's `tsr.py` ports that node. The pack's code is sam-extra's per-row version, not the node's
+  tensor code.
+- **DPM++ 4M SDE** (`extra_samplers_dpmpp_4m._sample`): the half-log-SNR form of the DPM-Solver++ SDE step. λ comes
+  from `sigma_to_half_log_snr` after `offset_first_sigma_for_snr`, `α_t = σ_t·e^{λ_t}`, the step is
+  `x ← (σ_t/σ_s)·e^{−hη}·x + α_t·(1 − e^{−h(1+η)})·x0` and the history terms are scaled by `α_t`. ComfyUI's
+  `sample_dpmpp_3m_sde` writes it this way on top of k-diffusion's MIT 3M SDE, and sam-extra applies it to Clybius'
+  BSD-3-Clause 4M SDE. The helpers are ComfyUI's own, called at run time.
+- **Euler (SMEA) Dy CFG++** (`extra_samplers_dy.cfg_pp_target`): the CFG++ Euler step at η = 0,
+  `x' = α_t·x0 + σ_t·(x − α_s·x0_uncond)/σ_s` through `to_d` and `get_ancestral_step` (Chung et al.,
+  arXiv:2406.08070), as ComfyUI's and Forge's `sample_euler_ancestral_cfg_pp` write it.
+- **ER SDE** (`extra_samplers_math.py`): the three noise scale functions h(λ) of ComfyUI's `SamplerER_SDE` node (Cui
+  et al., arXiv:2309.06169). The solver is ComfyUI's own `sample_er_sde`, called at run time.
+
+## sam-extra ports (pack 1.7.0): sam-extra code under the author's MIT grant, and the test oracle
+
+Pack 1.7.0 brings four features of the sam-extra Forge extension to ComfyUI: Extra Schedulers, Extra Samplers and
+Anima SPEED (sam-extra v0.33.0), and Colorcraft (sam-extra v0.32.1). sam-extra is GPL-3.0-only and is by the
+author of AI Studio Pro. Much of the pack's code for these features is sam-extra's own code: **sam-extra
+(GPL-3.0-only) parts written by the same author (UR-al), licensed to this pack under the MIT License by that
+author** (`LICENSES/sam-extra-MIT.txt`, previous section). The table names the reused functions. The upstreams
+inside sam-extra keep their own licenses and notices. The formulas shared with GPL-3.0 hosts are listed in the
+previous section. No pack module imports the extension (`tests/test_comfy_pack_foundation.py` checks the imports
+of every pack file).
+
+The installed extension is also the **test oracle**: the pack's tests run it next to the pack on CPU and compare
+the results bit for bit.
+
+| Pack module(s) | sam-extra code in the pack (MIT grant) | Third-party code inside it (own license, notice kept) | sam-extra source, also the test oracle | Tests |
+| --- | --- | --- | --- | --- |
+| `extra_schedulers.py`, `extra_schedulers_math.py` | `flow_cosmos_rho7`, `_refuse_karras_dynamic_rise` (sam-extra's `_check_karras_dynamic_falls`), `_laplace_over_range` (`_laplace_in_range`), `custom`; `coerce`, `evaluate`, `compile_expression`, `parse_sigma_list`, `sigmas_from_list`, `karras_dynamic_ramp` (`_karras_dynamic_values`), `flow_cosmos_rho7_times` (`_flow_cosmos_times`), `laplace_position` (`_laplace_position`), `sigmas_from_expression`; the rules, ranges and error texts of the nine schedules, the safe-expression language, the sigma-list format and the settings coercion | None. The Laplace curve is a formula shared with ComfyUI (previous section); the published formulas and credits are under "Extra Schedulers" | `sam3ext/extra_schedulers/` (`schedulers.py`, `expression.py`, `sigma_list.py`, `settings.py`, `registry.py`) | `test_comfy_extra_schedulers_parity.py`, `test_comfy_extra_schedulers_runtime.py` |
+| `extra_samplers_math.py` | The noise window (a per-step scaler and a gated noise sampler around ComfyUI's own `sample_er_sde`) and the coercion of the five values follow sam-extra's code | The three ER SDE noise scalers: formulas shared with ComfyUI's `SamplerER_SDE` (previous section) | `sam3ext/extra_samplers/er_sde.py`, `er_sde_window.py`, `params.py` | `test_comfy_extra_samplers_parity.py`, `test_comfy_extra_samplers_runtime.py` |
+| `extra_samplers_flow.py` | None: three calls of ComfyUI's own `sample_dpmpp_2m_sde` / `sample_dpmpp_3m_sde` at η = 0 | — | `sam3ext/extra_samplers/dpmpp_flow.py` | same |
+| `extra_samplers_restart.py` | `restart_kernel`, `_heun_step`; the restart window and step rules (Xu et al., arXiv:2306.14878, Algorithm 1) | The Heun step body is k-diffusion's `sample_heun` (MIT), as ComfyUI ships it | `sam3ext/extra_samplers/restart_flow.py` | same |
+| `extra_samplers_dy.py`, `extra_samplers_dy_host.py` | sam-extra's changes to the Dy port: `cfg_pp_target`, `churn`, `evaluate`, `dy_substep`, `smea_substep`, `euler_dy`, the entry functions (`_entry`'s `sampler`), `spatial_interpolate`, `SubstepInputs`, the uncond capture; the sub-step placement and the reasons the sub-steps step aside | Koishi-Star's Euler-Smea-Dyn-Sampler (Apache-2.0, below; notice in the file header). The CFG++ step is a formula shared with ComfyUI and Forge (previous section) | `sam3ext/extra_samplers/euler_dy.py`, `substep_guard.py` | same |
+| `extra_samplers_register.py`, `extra_samplers_nodes.py` | None. The registration and node code are this pack's own; the twelve names, their order and the penultimate-σ discard set are sam-extra's | — | `sam3ext/extra_samplers/registry.py`, `params.py` | `test_comfy_extra_samplers_pack.py`, `test_comfy_extra_samplers_runtime.py` |
+| `extra_samplers_dpmpp_4m.py` | `_sample`: sam-extra's port (momentum 0, half-log-SNR flow handling, the noise rule) | Clybius' DPM++ 4M SDE (BSD-3-Clause, below; notice in the file header). The flow form of the step is a formula shared with ComfyUI (previous section) | `sam3ext/extra_samplers/dpmpp_4m_sde.py` | `test_comfy_extra_samplers_parity.py` |
+| `guidance.py`, `guidance_dcw.py`, `guidance_detail.py` (Dy sub-steps) | sam-extra's sub-step rule: the guidance suite keeps its step state (APG momentum, ADG, SMC `e_prev`, RDC, HiFlow, Momentum Guidance, HiGS) through Euler (SMEA) Dy sub-steps | — | `sam3ext/guidance/` | `test_comfy_detail_parity.py` |
+| `speed_schedule.py`, `speed_spectral.py`, `speed_runner.py`, `speed_nodes.py`, the Detail Daemon σ lookup in `guidance_dd.py` | `validate_scales`, `parse_sigmas`, `_transition_hand_offs`; `dct_basis`, `dct_downscale`, `amplitude_resize`, `_target` (`_check_target`), `expand_dct`, `expand_fft`, `expand_haar`; `_expand`, `_init_coarse`, `_apply_transition`, `run_speed` with its `segment`; `plan_for` (`_plan_for`), `_flag` (Colorcraft `spec.py` `_truthy`). Also sam-extra's changes to the upstreams: refusals incl. custom A ≤ 0, seeds and noise streams, the img2img rescale, guards, status lines, and Detail Daemon following the re-published σ list | The three MIT upstreams under "Anima SPEED" | `sam3ext/speed/` (`schedule.py`, `spectral.py`, `runner.py`, `forge_host.py`) | `test_comfy_speed_parity.py`, `test_comfy_speed_host.py`, `test_comfy_speed_runtime.py` |
+| `colorcraft_basis.py`, `colorcraft_engine.py`, `colorcraft_host.py`, `colorcraft_nodes.py` | sam-extra's three substitutions in `apply_chain`; `encode_anchors`, `_anchor_cache_key` (`_anchor_key`), `AnchorCache.put` (`_remember_anchor`), `RunReport.render`, `grid_downscale`, the anchor look-up `get_color_latent`; sam-extra's host rules: anchors, σ look-up, pre-Detail-Daemon σ, fp16/bf16, sub-step pass-through | The MIT upstream and fork under "Colorcraft": `resolve_dev`, `sigma_to_value`, `build_entries` and the modifier loop are theirs | `sam3ext/colorcraft/` (`engine.py`, `hook.py`, `basis.py`, `spec.py`, `schedule.py`) | `test_comfy_colorcraft_parity.py`, `test_comfy_colorcraft_runtime.py` |
+| `guidance_common.py`, `compat.py`, `hires_carry.py` | None. Only the values of sam-extra's coordination names (`sam_extra_substep`, `sam_extra_step_offset`, the re-published σ tag) are sam-extra's; the code is this pack's own | — | `sam3ext/extra_samplers/common.py`, `sam3ext/speed/runner.py`, `sam3ext/guidance/sigmas.py` | `test_comfy_pack_foundation.py` |
 
 The sections below give each feature's upstreams and licenses. This notice does not replace or modify the
 upstream licenses.
 
 ## Extra Schedulers (pack 1.7.0)
 
-`extra_schedulers.py`, `extra_schedulers_math.py`: local implementation. No third-party source file is included and no third-party code is copied:
+`extra_schedulers.py`, `extra_schedulers_math.py`: no third-party source file is included and no third-party code is copied:
 
 - The scheduler rules, value ranges, the safe-expression language, the sigma-list format and the error
-  texts are those of the sam-extra Forge extension's "Extra Schedulers" (GPL-3.0), re-implemented here
-  from its documented behaviour; the extension is neither copied nor imported. The pack's tests run the
-  installed extension next to the pack only to compare results.
+  texts are those of the sam-extra Forge extension's "Extra Schedulers". Much of the code is sam-extra's own
+  code, licensed to this pack under MIT by its author (see "sam-extra ports (pack 1.7.0)"). The pack does
+  not import the extension. The pack's tests run the installed extension next to the pack to compare results.
 - Laplace: the plain schedule is ComfyUI's own `comfy.k_diffusion.sampling.get_sigmas_laplace`, called at
   run time inside ComfyUI (not copied). Where its clamp would repeat a sigma, the pack evaluates the same
   published curve — Hang et al., "Improved Noise Schedule for Diffusion Training", arXiv:2407.03297 — at
-  other positions, written with the same floating-point operations so the result matches sam-extra bit
-  for bit.
+  other positions, as sam-extra does. It uses the curve expression of ComfyUI's function, in the same
+  floating-point operations, so the result matches sam-extra bit for bit. This is a formula shared with
+  ComfyUI (see "Formulas shared with GPL-3.0 hosts").
 - The sigma list's log-linear interpolation is ComfyUI's own
   `comfy_extras.nodes_align_your_steps.loglinear_interp`, called at run time (not copied).
 - React Cosinusoidal DynSF is written here from its published one-line formula (yoinked-h; added to
@@ -227,13 +301,12 @@ upstream licenses.
   schedule from the formula: Karras et al., "Elucidating the Design Space of Diffusion-Based Generative
   Models", arXiv:2206.00364 (the ρ ramp, eq. 5), over a VE-equivalent noise range σ̃ — by default
   Cosmos-Predict2's EDM noise range 0.002–80 with ρ 7; the node's `flow_cosmos_rho` / `flow_cosmos_sigma_max` /
-  `flow_cosmos_sigma_min` values and their ranges, checks and texts follow sam-extra v0.33.0 (re-implemented, not
-  copied) — mapped to flow time t = s/(1 + s). On a model that is not a flow model it calls ComfyUI's own
+  `flow_cosmos_sigma_min` values and their ranges, checks and texts follow sam-extra v0.33.0 (sam-extra's code,
+  under the author's MIT grant) — mapped to flow time t = s/(1 + s). On a model that is not a flow model it calls ComfyUI's own
   `comfy.k_diffusion.sampling.get_sigmas_karras` with that ρ at run time (not copied).
 - Flow Cosmos Dynamic: sam-extra v0.33.0's own composition of its Karras Dynamic and Flow Cosmos rho7 (not taken
-  from another project) — re-implemented here from that documented behaviour (Karras Dynamic's per-step exponent
-  ρ + 2cos(2πi/n) on Flow Cosmos rho7's σ̃ range, the same flow-time map, the same three values, checks and
-  texts), not copied. On a model that is not a flow model it is the pack's own Karras Dynamic with that ρ.
+  from another project): Karras Dynamic's per-step exponent ρ + 2cos(2πi/n) on Flow Cosmos rho7's σ̃ range, the
+  same flow-time map, the same three values, checks and texts (sam-extra's code, under the author's MIT grant). On a model that is not a flow model it is the pack's own Karras Dynamic with that ρ.
 - Karras Dynamic uses the Karras/EDM ramp (Karras et al., arXiv:2206.00364) with a per-step exponent;
   CosineExponential blend uses k-diffusion's exponential schedule formula; Phi credits the idea of
   Extraltodeus's "Golden Scheduler" (github.com/Extraltodeus/sigmas_tools_and_the_golden_scheduler). These
@@ -243,22 +316,24 @@ upstream licenses.
 ## Extra Samplers (pack 1.7.0)
 
 The `extra_samplers_*.py` modules give ComfyUI the samplers the sam-extra Forge extension v0.33.0 (by the author of
-AI Studio Pro, GPL-3.0) adds to Forge's sampler list. No extension code is included: the installed extension is the
-test oracle only (`tests/test_comfy_extra_samplers_parity.py` runs it next to the pack on CPU) and is never imported
-by the pack. Two modules are ports of permissive upstreams, carrying their notices in the file header:
+AI Studio Pro, GPL-3.0-only) adds to Forge's sampler list. Much of their code is sam-extra's own code, licensed to
+this pack under MIT by its author (see "sam-extra ports (pack 1.7.0)"). The pack never imports the extension, and
+the installed extension is the test oracle (`tests/test_comfy_extra_samplers_parity.py` runs it next to the pack on
+CPU). Two modules are ports of permissive upstreams (in sam-extra's version), carrying their notices in the file
+header:
 
 | File | Upstream | Commit | License |
 | --- | --- | --- | --- |
 | `extra_samplers_dy.py` (Euler Dy / Euler SMEA Dy and their CFG++ entries) | [Koishi-Star/Euler-Smea-Dyn-Sampler](https://github.com/Koishi-Star/Euler-Smea-Dyn-Sampler) `smea_sampling.py` (`sample_euler_dy`, `sample_euler_smea_dy`, `dy_sampling_step`, `smea_sampling_step`, `_Rescaler`) | `d98a504c8419be5274068ad91ca6bbf2e13635a8` | Apache-2.0, Copyright 2024 KBlueLeaf — `LICENSES/Euler-Smea-Dyn-Sampler-Apache-2.0.txt`. Modified (Apache-2.0 §4(b)): every change is listed in the module docstring |
 | `extra_samplers_dpmpp_4m.py` (DPM++ 4M SDE) | [Clybius/ComfyUI-Extra-Samplers](https://github.com/Clybius/ComfyUI-Extra-Samplers) `extra_samplers.py` `sample_clyb_4m_sde_momentumized` | `52eac1b7c847d2727e0ca93ca26d9ffd77029daa` | BSD-3-Clause, Copyright (c) 2024, Clybius — `LICENSES/ComfyUI-Extra-Samplers-BSD-3-Clause.txt` |
 
-Local implementation (no third-party code copied):
+Other modules (no other third-party code copied):
 
 - `extra_samplers_math.py` — the five values' coercion and the three ER SDE samplers. The solver is ComfyUI's own
   `comfy.k_diffusion.sampling.sample_er_sde`, called at run time inside ComfyUI (not copied); the three noise scale
-  functions are written from their published formulas (Cui et al., "Elucidating the Solution Space of Extended
+  functions are the published formulas (Cui et al., "Elucidating the Solution Space of Extended
   Reverse-Time SDE for Diffusion Models", arXiv:2309.06169; the η-scaled ER-SDE scaler is the one ComfyUI's
-  `SamplerER_SDE` node uses since ComfyUI 40e46c71). The idea of restricting ER-SDE's noise to a window of the
+  `SamplerER_SDE` node uses since ComfyUI 40e46c71), as that node writes them (a formula shared with ComfyUI). The idea of restricting ER-SDE's noise to a window of the
   schedule is pamparamm/ComfyUI-ppm's `er_sde_scheduled` (AGPL-3.0); its code was not opened or copied — the pack
   wraps ComfyUI's solver with a per-step noise scaler and a gated noise sampler instead.
 - `extra_samplers_flow.py` — DPM++ 2M / 2M Heun / 3M (flow ODE): three calls of ComfyUI's own
@@ -269,11 +344,13 @@ Local implementation (no third-party code copied):
   Improving Generative Processes", NeurIPS 2023, arXiv:2306.14878 (Algorithm 1), with the restart window and step
   rules sam-extra uses. The paper's reference repository (Newbeeer/diffusion_restart_sampling) has no license and was
   not used; Forge's built-in Restart (A1111 code) was not used either. The Heun steps follow ComfyUI's own
-  `sample_heun` loop body (k-diffusion, MIT; `to_d` called at run time). sam-extra's GPL-3.0 implementation is the
-  test oracle only (bit-equal on CPU, `tests/test_comfy_extra_samplers_parity.py`), not copied.
-- `extra_samplers_dy_host.py` (when the Dy sub-steps step aside), `extra_samplers_register.py` (registration in
-  ComfyUI's sampler tables, never replacing another provider's name) and `extra_samplers_nodes.py`
-  (`ForgeNeoExtraSamplerSettings`) are this pack's own code.
+  `sample_heun` loop body (k-diffusion, MIT; `to_d` called at run time). The code is sam-extra's own
+  (`restart_flow.py`: `restart_kernel`, `_heun_step`), licensed to this pack under MIT by its author; the installed
+  extension is also the test oracle (bit-equal on CPU, `tests/test_comfy_extra_samplers_parity.py`).
+- `extra_samplers_dy_host.py` (when the Dy sub-steps step aside) follows sam-extra's sub-step guard (MIT grant);
+  `extra_samplers_register.py` (registration in ComfyUI's sampler tables, never replacing another provider's name,
+  and the penultimate-σ discard Impact's FaceDetailer gets through `scheduler_func_opt`) and
+  `extra_samplers_nodes.py` (`ForgeNeoExtraSamplerSettings`) are this pack's own code.
 - The 4M port's flow-model handling and the Dy port's CFG++ update use ComfyUI's own k-diffusion helpers
   (`sigma_to_half_log_snr`, `offset_first_sigma_for_snr`, `to_d`, `get_ancestral_step`,
   `set_model_options_post_cfg_function`, `BrownianTreeNoiseSampler`, `default_noise_sampler`), called at run time.
@@ -282,13 +359,13 @@ This notice does not replace or modify the upstream licenses.
 
 ## Anima SPEED (pack 1.7.0)
 
-`speed_schedule.py`, `speed_spectral.py`, `speed_runner.py` and `speed_nodes.py` are local code that reproduces
-the "Anima SPEED" sampler wrapper of the sam-extra Forge extension v0.33.0 (by the author of AI Studio Pro,
-GPL-3.0) on ComfyUI. No extension code is included: the pack's code is written from the three MIT
-upstreams below, and the extension's documented changes to them are re-expressed from their
-behaviour and checked against the installed extension on CPU (`tests/test_comfy_speed_parity.py`;
-the installed extension serves only as the test oracle and is never imported by the pack).
-The module docstrings list what each module derives from which upstream.
+`speed_schedule.py`, `speed_spectral.py`, `speed_runner.py` and `speed_nodes.py` reproduce the "Anima SPEED"
+sampler wrapper of the sam-extra Forge extension v0.33.0 (by the author of AI Studio Pro, GPL-3.0-only) on
+ComfyUI. They follow sam-extra's code: the three MIT upstreams below, which keep their notices, plus sam-extra's
+own changes to them. Those changes are sam-extra code, licensed to this pack under MIT by its author (see
+"sam-extra ports (pack 1.7.0)"). They are checked against the installed extension on CPU
+(`tests/test_comfy_speed_parity.py`; the pack never imports the extension). The module docstrings list what
+each module derives from which upstream.
 
 | Upstream | Commit | Used for | License |
 | --- | --- | --- | --- |
@@ -307,12 +384,12 @@ This notice does not replace or modify the upstream licenses.
 ## Colorcraft (pack 1.7.0)
 
 The Colorcraft port reproduces the "Colorcraft" sampling-time colour grading of the sam-extra Forge
-extension v0.32.1 (by the author of AI Studio Pro, GPL-3.0) on ComfyUI. No extension code is included:
-the vendored files are the MIT upstream's own, the pack's modules are written from the MIT upstream and
-fork below, and the extension's host rules (Base/Hires passes, sigma look-up, pre-Detail-Daemon sigma,
-anchors encoded before sampling, fp16/bf16 handling, sub-step pass-through) are re-expressed from their
-behaviour and checked against the installed extension on CPU (`tests/test_comfy_colorcraft_parity.py`;
-the installed extension serves only as the test oracle and is never imported by the pack).
+extension v0.32.1 (by the author of AI Studio Pro, GPL-3.0-only) on ComfyUI. The vendored files are the MIT
+upstream's own. The pack's modules follow the MIT upstream and fork below, and sam-extra's code on them. That
+code covers the three substitutions in the modifier loop and the host rules: Base/Hires passes, sigma look-up,
+pre-Detail-Daemon sigma, anchors encoded before sampling, fp16/bf16 handling and sub-step pass-through. It is
+licensed to this pack under MIT by its author (see "sam-extra ports (pack 1.7.0)") and checked against the
+installed extension on CPU (`tests/test_comfy_colorcraft_parity.py`; the pack never imports the extension).
 
 | Upstream | Commit | Used for | License |
 | --- | --- | --- | --- |

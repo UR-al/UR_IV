@@ -1051,6 +1051,27 @@ class SpeedNodeTests(unittest.TestCase):
         self.assertEqual(list(later_dd.wrappers["sampler_sample"]),
                          [speed_nodes.SPEED_WRAPPER_KEY, guidance_dd.DD_WRAPPER_KEY])
 
+    def test_speed_stays_behind_a_cns_already_on_the_model(self):
+        # A custom workflow's stock KSampler / KSamplerAdvanced never re-asserts the guidance suite's CNS, so the
+        # SPEED node itself keeps CNS ahead of it: CNS -> SPEED -> DD on every sampler (plan R9).
+        from unittest import mock
+
+        from comfy_custom_nodes.ai_studio_forge_parity import guidance_dd
+
+        with mock.patch.dict(sys.modules, _fake_comfy()):
+            suite = guidance_cns.apply_cns(_ModelPatcher())
+            dd_model = guidance_dd.ForgeNeoAnimaDetailDaemon().patch(suite, True, "{}")[0]
+            speed_model = speed_nodes.ForgeNeoAnimaSpeed().patch(dd_model, enabled=True)[0]
+            target = guidance_cns.apply_cns(_ModelPatcher())
+            target.add_wrapper_with_key("sampler_sample", "other", object())
+            carried = speed_nodes._carry_to_override(speed_model, target, None)
+        self.assertEqual(list(speed_model.wrappers["sampler_sample"]),
+                         [guidance_cns.CNS_WRAPPER_KEY, speed_nodes.SPEED_WRAPPER_KEY, guidance_dd.DD_WRAPPER_KEY])
+        self.assertIs(speed_model.wrappers["sampler_sample"][guidance_cns.CNS_WRAPPER_KEY][0],
+                      suite.wrappers["sampler_sample"][guidance_cns.CNS_WRAPPER_KEY][0])    # the suite's own CNS
+        self.assertEqual(list(carried.wrappers["sampler_sample"]),
+                         [guidance_cns.CNS_WRAPPER_KEY, speed_nodes.SPEED_WRAPPER_KEY, "other"])
+
     def test_hires_override_carries_the_patch(self):
         from comfy_custom_nodes.ai_studio_forge_parity import hires_carry
 

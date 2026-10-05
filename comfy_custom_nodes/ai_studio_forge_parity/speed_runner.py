@@ -8,17 +8,17 @@ hand-off (``speed_spectral``), the schedule is patched (``transition``: only the
 Host specifics (seeds, noise samplers, where the patched schedule is published) come through
 :class:`SpeedHost`, so the run itself needs no ComfyUI and is checked on the CPU.
 
-The behaviour is sam-extra's (``forge_sam3_extension`` ``sam3ext/speed/runner.py``): every random
-draw is per image seed (a batch image equals the same seed generated alone) — ``transition`` draws
-the expansion noise with numpy ``default_rng(seed + (k + 1) * 10000)`` per image in upstream's
-per-channel order, ``respace`` keeps one ``torch.Generator(seed + 10000)`` per image on the latent's
-device; coarse segments get coarse noise samplers from the host in place of the full-grid one; an
-img2img/hires start (``init_latent``, sigma0 < 1) is rescaled to the flow form ``(1 - s0) y + s0 eps``
-after truncation (``img2img_rescale``, sam-extra's option, default on) with per-seed top-up noise
-from a CPU generator at ``seed + 7919``; the patched schedule is published after every hand-off and
-restored after the run; a sampler that names ``STEP_OFFSET_KWARG`` learns where each segment starts
-in the pass; the run reports what it did for the status line. The code is the pack's own, written
-from the MIT upstreams (full notices in THIRD_PARTY_NOTICES.md, texts in LICENSES/):
+The behaviour is sam-extra's (``forge_sam3_extension`` ``sam3ext/speed/runner.py``): every random draw is per
+image seed (a batch image equals the same seed generated alone) — ``transition`` draws the expansion noise with
+numpy ``default_rng(seed + (k + 1) * 10000)`` per image in upstream's per-channel order, ``respace`` keeps one
+``torch.Generator(seed + 10000)`` per image on the latent's device; coarse segments get coarse noise samplers
+from the host in place of the full-grid one; an img2img/hires start (``init_latent``, sigma0 < 1) is rescaled to
+the flow form ``(1 - s0) y + s0 eps`` after truncation (``img2img_rescale``, sam-extra's option, default on)
+with per-seed top-up noise from a CPU generator at ``seed + 7919``; the patched schedule is published after
+every hand-off and restored after the run; a sampler that names ``STEP_OFFSET_KWARG`` learns where each segment
+starts in the pass; the run reports what it did for the status line. The code follows sam-extra's ``runner.py``:
+the MIT upstreams below (full notices in THIRD_PARTY_NOTICES.md, texts in LICENSES/) with sam-extra's changes to
+them, which are sam-extra's code, licensed to this pack under MIT by its author (THIRD_PARTY_NOTICES.md):
 
 * howardhx/speed@ca7801c9bdffe681742e9592345bcf4885959be5 ``comfyui/speed_sampler.py`` (the segmented
   run: segment callback, expansion seed ``seed + (k + 1) * 10000``, only the hand-off sigma patched)

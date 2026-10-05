@@ -256,6 +256,82 @@ class AuxPassTests(unittest.TestCase):
         snapshot = {"alwayson_scripts": {PAG: {"args": [1]}, XSA: block}}
         self.assertEqual(_sampling_scripts(snapshot, backend="webui", capabilities=PRESENT)[XSA], block)
 
+    def refine(self, host, refine_settings, request_caps):
+        from backends.webui_backend import WebUIBackend
+        from tests.test_webui_aux_propagation import ok, png_b64
+        from ui.aux_pass_snapshot import attach_sampling_snapshot
+
+        settings = attach_sampling_snapshot(host, refine_settings)
+        sent = []
+
+        def post(url, json=None, **_kw):
+            sent.append(copy.deepcopy(json))
+            return ok()
+
+        with mock.patch("core.sam_extra_probe.peek_capabilities", return_value=request_caps), \
+                mock.patch("core.forge_modules.resolve_sam3_checkpoint", side_effect=lambda name: name), \
+                mock.patch("backends.webui_backend.requests.post", side_effect=post):
+            WebUIBackend("http://127.0.0.1:7860").refine(png_b64(), settings)
+        return settings[ap.SETTINGS_KEY], sent[-1]
+
+    def test_unknown_snapshot_refine_with_its_own_er_sde_sampler_gets_the_values(self):
+        """FIX-forge(codex:forge): T2I 메인 Euler·Refine 샘플러 ER SDE — 스냅샷을 모르면(연결 직후·조회 실패) 예전에는
+        봉투에 블록이 없어 Refine 이 확장 기본값(η 1)으로 돌았다. 이제 봉투는 싣고 보내는 곳이 Refine 요청으로 판정한다."""
+        host = XsampHost(None, guidance={"guid_enabled": "false"}, eta="0.25", max_stage="2")
+        for refine_sampler in (TUN, RT):
+            with self.subTest(refine_sampler=refine_sampler):
+                envelope, request = self.refine(host, {"target": "face", "sampler": refine_sampler}, None)
+                self.assertEqual(envelope["blocks"][XSA], user_block(eta=0.25, max_stage=2))
+                self.assertEqual(request["sampler_name"], refine_sampler)
+                self.assertEqual(request["alwayson_scripts"][XSA], user_block(eta=0.25, max_stage=2))
+        # 스냅샷이 클릭 때는 몰랐고 보낼 때 확인했어도 같다
+        _envelope, request = self.refine(host, {"target": "face", "sampler": TUN}, PRESENT)
+        self.assertEqual(request["alwayson_scripts"][XSA], user_block(eta=0.25, max_stage=2))
+
+    def test_unknown_snapshot_refine_that_reads_no_values_carries_no_block(self):
+        """계획 X5 는 요청 직전에도 그대로 — Refine 샘플러·SAM3 샘플러가 ER SDE 가 아니면 모르는 Forge 에 싣지 않는다.
+        앱 기본값 블록은 모를 때 늘 보내지 않는다(게이트). 스크립트가 없다고 확인되면 사용자 값을 빼고 알린다."""
+        host = XsampHost(None, guidance={"guid_enabled": "false"}, eta="0.25")
+        for refine_settings in ({"target": "face"}, {"target": "face", "sampler": "Euler"},
+                                {"target": "face", "sampler": "Euler a", "sam3_sampler": "Use same sampler"}):
+            with self.subTest(refine_settings=refine_settings):
+                envelope, request = self.refine(host, refine_settings, None)
+                self.assertIn(XSA, envelope["blocks"])
+                self.assertNotIn(XSA, request["alwayson_scripts"])
+        quiet = XsampHost(None, guidance={"guid_enabled": "false"})                     # 앱 기본값
+        _envelope, request = self.refine(quiet, {"target": "face", "sampler": RT}, None)
+        self.assertNotIn(XSA, request["alwayson_scripts"])
+        _envelope, request = self.refine(host, {"target": "face", "sampler": RT}, WITHOUT_XSA)
+        self.assertNotIn(XSA, request["alwayson_scripts"])
+
+    def test_hand_repair_sends_the_values_only_when_its_t2i_sampler_reads_them(self):
+        """손 재구성은 T2I 샘플러로 도는 img2img — 스냅샷을 모르면 그 샘플러가 ER SDE 일 때만 싣는다(계획 X5)."""
+        from ui.hand_reconstruction_actions import _sampling_gate
+        block = user_block(eta=0.5)
+        for sampler, expected in ((RT, True), ("er_sde_ode", True), ("Euler", False)):
+            with self.subTest(sampler=sampler):
+                snapshot = {"sampler_name": sampler, "alwayson_scripts": {PAG: {"args": [1]}, XSA: block}}
+                gated = _sampling_gate(snapshot, backend="webui", capabilities=None)
+                self.assertIs(XSA in gated.kept, expected)
+                self.assertNotIn(XSA, gated.dropped)                              # 쓰지 않는 값 — 알리지 않는다
+        snapshot = {"sampler_name": "Euler", "alwayson_scripts": {XSA: block}}
+        self.assertIn(XSA, _sampling_gate(snapshot, backend="webui", capabilities=PRESENT).kept)
+        self.assertIn(XSA, _sampling_gate(snapshot, backend="comfyui", capabilities=None).kept)
+
+    def test_chat_image_edit_counts_the_t2i_sampler_it_carries(self):
+        """FIX-forge(claude:forge-block): 채팅 참조 이미지 편집(i2i)은 T2I 샘플러를 싣는다 — 스냅샷을 모를 때 그 샘플러가
+        ER SDE 면 값을 싣는다(예전에는 i2i 라 메인을 세지 않아 Forge 가 η 1 로 돌았다). I2I 탭은 그대로."""
+        host = XsampHost(None, sampler=RT, eta="0.5")
+        _model, snapshot = host._chat_generation_snapshot("a cat", target="i2i")
+        self.assertEqual(snapshot["sampler_name"], RT)
+        self.assertEqual(snapshot["alwayson_scripts"][XSA], user_block(eta=0.5))
+        euler = XsampHost(None, eta="0.5")                                                # 메인 'Euler'
+        _model, snapshot = euler._chat_generation_snapshot("a cat", target="i2i")
+        self.assertNotIn(XSA, snapshot["alwayson_scripts"])
+        self.assertNotIn(XSA, sb.build_sampling_blocks(host, ap.TARGET_I2I).blocks)       # I2I 탭(요청에 샘플러 없음)
+        self.assertNotIn(XSA, sb.build_sampling_blocks(host, ap.TARGET_I2I, request={"prompt": "x"}).blocks)
+        self.assertIn(XSA, sb.build_sampling_blocks(host, ap.TARGET_I2I, request={"sampler_name": TUN}).blocks)
+
     def test_forge_refine_request_carries_the_envelope_block(self):
         from backends.webui_backend import WebUIBackend
         from tests.test_webui_aux_propagation import ok, png_b64

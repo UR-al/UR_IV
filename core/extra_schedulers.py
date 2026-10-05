@@ -52,9 +52,11 @@ flow_cosmos_sigma_max, flow_cosmos_sigma_min]`` 또는 **dict 한 개** — sam3
 """
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import logging
 import math
+import os
+import sys
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, NamedTuple, Optional
@@ -371,20 +373,48 @@ def flow_cosmos_dynamic_rho_ok(settings: ExtraSchedulerSettings) -> bool:
 
 
 # ── custom 식·시그마 목록 미리 검사(계획 C7) ─────────────────────────────────────────
-# 계산기는 ComfyUI 팩의 순수 파이썬 모듈(torch·ComfyUI 없음 — ui/relight_actions 가 팩 relight 를 부르는 것과 같은 지연
-# import). 팩이 없거나 읽을 수 없으면 검사하지 않는다(None — 생성은 확장이 판정한다).
+# 계산기는 ComfyUI 팩의 순수 파이썬 모듈(표준 라이브러리만 — torch·ComfyUI 없음). 팩이 없거나 읽을 수 없으면 검사하지
+# 않는다(None — 생성은 확장이 판정한다).
 PACK_MATH_MODULE = "comfy_custom_nodes.ai_studio_forge_parity.extra_schedulers_math"
 ERROR_PROPERTY = "error"     # 칸 아래 오류 줄의 위젯 속성(frontend/src/utils/extraSchedulers.ts ERROR_PROPERTY)
 # 시그마 목록의 σ 와 무관한 검사만: 정규화 목록(1.0…0.0)은 어떤 양수 범위로 늘려도 모두 0 보다 크다
 _CHECK_SIGMA_RANGE = (1.0, 2.0)
+_PACK_MATH_LOADED: dict = {}   # PACK_MATH_MODULE → 파일에서 따로 불러온 모듈(한 번만)
+
+
+def _pack_math_path(dotted: str) -> str:
+    """``PACK_MATH_MODULE`` 의 소스 파일(이 저장소 루트 기준)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(root, *dotted.split(".")) + ".py"
 
 
 def _pack_math() -> Any:
+    """팩의 ``extra_schedulers_math`` — 패키지 ``__init__`` 을 거치지 않고 그 파일 하나만 불러온다.
+
+    ``import_module`` 은 패키지 ``__init__`` 이 노드 모듈 전부(asyncio 포함 40여 개)를 불러오고 설치 훅을 돌게 한다.
+    저장된 custom 식·목록이 기본값이 아니면 ``load_settings``(창 표시 전 — tests/test_startup_imports)가 이 검사를 부르므로
+    (GC 검토 c7), 같은 파일을 비공개 이름으로 따로 불러온다(표준 라이브러리만 쓰는 모듈 — 결과·오류 문구는 같다). 팩이
+    이미 import 돼 있으면(ComfyUI 컴파일 경로) 그것을 쓴다."""
+    name = PACK_MATH_MODULE
+    module = sys.modules.get(name) or _PACK_MATH_LOADED.get(name)
+    if module is not None:
+        return module
+    private = "_ai_studio_pack_extra_schedulers_math"
     try:
-        return importlib.import_module(PACK_MATH_MODULE)
+        spec = importlib.util.spec_from_file_location(private, _pack_math_path(name))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"no loader for {name}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[private] = module      # 모듈 안 클래스·주석이 자기 모듈을 찾을 수 있게(표준 방식)
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(private, None)
     except Exception as exc:   # 팩이 없는 배포·깨진 파일 — 미리 검사만 빠진다
-        logger.debug("Extra Schedulers 미리 검사 생략 — %s 를 불러오지 못했다: %s", PACK_MATH_MODULE, exc)
+        logger.debug("Extra Schedulers 미리 검사 생략 — %s 를 불러오지 못했다: %s", name, exc)
         return None
+    _PACK_MATH_LOADED[name] = module
+    return module
 
 
 def _no_interp(_values: Any, _count: int) -> Any:   # 스텝 0 이라 부르지 않는다
@@ -476,6 +506,9 @@ PROVENANCE_USER, PROVENANCE_APP_DEFAULT = "user", "app_default"     # core/alway
 REASON_SEND = "send"                    # 스냅샷이 스크립트를 확인했다 — 늘 싣는다
 REASON_SEND_UNCONFIRMED = "send_unconfirmed"   # 확인 못 했지만 어느 패스가 값 스케줄러 — 게이트가 정한다
 REASON_NOT_NEEDED = "not_needed"        # 확인 못 했고 값을 읽는 패스가 없다 — 싣지 않는다(알림 없음)
+# 보조 패스 봉투(aux) — 확인 못 했어도 싣는다. 보조 요청(Refine·SAM3·ADetailer 의 자기 스케줄러, 손 재구성)의 스케줄러는
+# 보내는 곳만 안다 — 요청 직전에 core/alwayson_propagation.drop_unread 가 그 요청의 패스(value_scheduler_passes)로 정한다(X5)
+REASON_SEND_AUX = "send_aux"
 REASON_COMFY = "comfy"                  # ComfyUI — 늘 싣는다(노드를 넣을지는 컴파일러가 정한다, 계획 C6)
 REASON_KREA2 = "krea2"
 
@@ -514,13 +547,16 @@ def plan(settings: ExtraSchedulerSettings, *, target: str, backend: str, capabil
       ``ForgeNeoExtraSchedulers`` 를 넣어 다른 그래프는 바이트 단위로 그대로 — 계획 C2a·C6)
     3 Forge 스냅샷이 스크립트를 확인 → 늘 블록(값은 VALUE_SCHEDULERS 패스만 읽어 결과가 같다 — XYZ
       Scheduler 축 칸·사용자 ui-config 기본값과 무관하게 같은 요청이 된다)
-    4 확인 못 함(모름·없음) → ``passes``(값 스케줄러를 쓰는 패스 — ``passes_from_widgets``)가 있을 때만 블록. 그
+    4 보조 패스 봉투(aux) → 늘 블록(``REASON_SEND_AUX``). 보조 요청의 스케줄러(Refine·SAM3·ADetailer 의 자기 스케줄러,
+      손 재구성의 T2I 스케줄러)는 T2I 패널의 패스가 아니라 보내는 곳만 안다 — 요청 직전에 core/alwayson_propagation
+      ``drop_unread`` 가 새 스냅샷과 그 요청의 패스(``value_scheduler_passes``)로 3·5 를 다시 판정하고 게이트가 출처로 정한다
+    5 확인 못 함(모름·없음) → ``passes``(값 스케줄러를 쓰는 패스 — ``passes_from_widgets``)가 있을 때만 블록. 그
       뒤는 core/alwayson_propagation 게이트가 출처로 정한다(모름: 사용자 값만 보냄, 없음: 빼고 사용자 값이면 알림)
-    5 그 밖 → 없음(알림 없음 — 쓰지 않는 값)
+    6 그 밖 → 없음(알림 없음 — 쓰지 않는 값)
 
     출처: 값이 확장 기본값과 같으면 앱 기본값(모를 때 보내지 않고 빠져도 알리지 않는다), 다르면 사용자 값. 보조 패스
-    봉투(aux)는 t2i 와 같은 블록이다(봉투 = 메인 체인, T15). i2i 는 스냅샷의 img2img 목록을 본다. 블록은 늘 키 8개다
-    (옛 sam-extra 는 Flow Cosmos 셋을 버리고, 그 판에는 그 값을 읽는 스케줄러도 없다 — 모듈 설명)."""
+    봉투(aux)는 스냅샷이 확인하면 t2i 와 같은 블록이다(봉투 = 메인 체인, T15). i2i 는 스냅샷의 img2img 목록을 본다.
+    블록은 늘 키 8개다(옛 sam-extra 는 Flow Cosmos 셋을 버리고, 그 판에는 그 값을 읽는 스케줄러도 없다 — 모듈 설명)."""
     if backend == BACKEND_KREA2:
         return ExtraSchedulersPlan(None, None, REASON_KREA2)
     provenance = PROVENANCE_APP_DEFAULT if is_default(settings) else PROVENANCE_USER
@@ -528,6 +564,8 @@ def plan(settings: ExtraSchedulerSettings, *, target: str, backend: str, capabil
         return ExtraSchedulersPlan(as_block(settings), None, REASON_COMFY, provenance)
     if script_confirmed(capabilities, img2img=target == TARGET_I2I) is True:
         return ExtraSchedulersPlan(as_block(settings), None, REASON_SEND, provenance)
+    if target == TARGET_AUX:
+        return ExtraSchedulersPlan(as_block(settings), None, REASON_SEND_AUX, provenance)
     if any(True for _ in passes or ()):
         return ExtraSchedulersPlan(as_block(settings), None, REASON_SEND_UNCONFIRMED, provenance)
     return ExtraSchedulersPlan(None, None, REASON_NOT_NEEDED, provenance)
@@ -657,7 +695,7 @@ def pass_widget_ids() -> tuple:
     return tuple(ids)
 
 
-def passes_from_widgets(values: Any, *, img2img: bool = False) -> tuple:
+def passes_from_widgets(values: Any, *, img2img: bool = False, img2img_main: Any = None) -> tuple:
     """화면 값(위젯 id → 값, 체크는 bool 또는 'true'/'false')에서 값 스케줄러(VALUE_SCHEDULERS)를 쓰는 패스 →
     ``PassUse`` 튜플.
 
@@ -666,10 +704,12 @@ def passes_from_widgets(values: Any, *, img2img: bool = False) -> tuple:
     'Mask only' 아님이면 '별도 스케줄러' 켬이고 값이 있을 때 그 값 아니면 메인. 카드(frontend passesUsing)와 기여자
     (스냅샷이 스크립트를 확인 못 했을 때 보낼지)가 쓴다.
 
-    ``img2img``: I2I·인페인트·채팅 편집 요청은 스케줄러·Hires 를 싣지 않는다(core/i2i_payload — Forge 기본 스케줄러로 돈다)
-    — 메인은 값을 읽지 않는 것으로 보고 Hires 는 없다. ADetailer·SAM3 는 그 요청 안에서도 자기 스케줄러로 돈다."""
+    ``img2img``: img2img 요청에는 Hires 가 없고 메인은 그 요청이 스스로 싣는 스케줄러(``img2img_main``)다 — I2I·인페인트
+    요청은 스케줄러를 싣지 않아(core/i2i_payload — Forge 기본 스케줄러로 돈다) None, 채팅 이미지 편집은 T2I 콤보 값을
+    싣는다(``_chat_generation_snapshot(target='i2i')`` — hr_* 만 뗀다). ADetailer·SAM3 는 그 요청 안에서도 자기 스케줄러
+    (또는 그 메인)로 돈다."""
     values = values if isinstance(values, Mapping) else {}
-    main = None if img2img else values.get(MAIN_SCHEDULER_WIDGET)
+    main = img2img_main if img2img else values.get(MAIN_SCHEDULER_WIDGET)
     entries: list = [(PASS_MAIN, main)]
     if not img2img and _truthy(values.get(HIRES_GROUP_WIDGET)):
         hires = values.get(HIRES_SCHEDULER_WIDGET)
@@ -828,7 +868,7 @@ __all__ = [
     "LAPLACE_BETA_DEFAULT", "LAPLACE_BETA_MAX", "LAPLACE_BETA_MIN", "LAPLACE_BETA_STEP", "LAPLACE_MU_DEFAULT",
     "LAPLACE_MU_MAX", "LAPLACE_MU_MIN", "LAPLACE_MU_STEP", "MAIN_SCHEDULER_WIDGET", "MODES", "MODE_EXPRESSION", "MODE_LABELS", "MODE_SIGMAS",
     "NAME_CUSTOM", "NAME_FLOW_COSMOS_DYNAMIC", "NAME_FLOW_COSMOS_RHO7", "NAME_LAPLACE", "NAME_REACT_DYNSF", "PACK_MATH_MODULE", "PASS_HIRES", "PASS_MAIN", "PASS_SAM3", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "README_LABELS",
-    "REACT_DYNSF_FACTOR", "REASON_COMFY", "REASON_KREA2", "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_UNCONFIRMED",
+    "REACT_DYNSF_FACTOR", "REASON_COMFY", "REASON_KREA2", "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_AUX", "REASON_SEND_UNCONFIRMED",
     "RESTORE_FIELDS", "PassUse", "SAM3_GROUP_WIDGET", "SAM3_MODE_WIDGET", "SAM3_SCHEDULER_WIDGET", "SAM3_USE_SCHEDULER_WIDGET",
     "SCHEDULER_LABELS", "SCHEDULER_NAMES", "SCRIPT_NAME", "SETTINGS_KEY", "TARGET_AUX", "TARGET_I2I", "TARGET_T2I",
     "USE_SAME_SCHEDULER", "VALUE_SCHEDULERS", "WIDGET_KEYS", "WIDGET_PREFIX", "adetailer_pass", "as_block", "check_settings", "check_text", "coerce", "coerce_args",

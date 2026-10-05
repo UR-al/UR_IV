@@ -822,7 +822,8 @@ class GenerationMixin:
             )
             if krea2 is None and target != 't2i':
                 krea2 = str(payload.get('_generation_family') or '').strip().lower() == 'krea2'
-            result = build_sampling_blocks(self, target, krea2=krea2)
+            # 요청이 싣는 샘플러·스케줄러(채팅 이미지 편집 i2i 는 T2I 값, I2I·인페인트는 없음)를 기여자가 본다
+            result = build_sampling_blocks(self, target, krea2=krea2, request=payload)
             merge_sampling_blocks(payload, result.blocks)
             # Forge 메인 요청이면 앱 기본값 블록 출처를 비공개로 — 백엔드가 떼어 422 재시도 알림에 쓴다(P10 검토 2)
             mark_request_provenance(payload, result)

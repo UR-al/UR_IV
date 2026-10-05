@@ -62,6 +62,30 @@ class StartupImportTests(unittest.TestCase):
             "import 하거나 utils.lazy_import.lazy_module 을 쓸 것",
         )
 
+    def test_restoring_a_saved_custom_expression_does_not_import_the_pack(self):
+        """창 생성자의 load_settings 가 Extra Schedulers 저장값을 칸에 쓰면 custom 식 미리 검사(계획 C7)가 돈다. 저장된 식이
+        기본값이 아니면 매 기동마다 그 검사가 팩 패키지(``__init__`` 이 노드 모듈 전부·asyncio·설치 훅)를 불러왔다(GC 검토
+        c7). 검사는 계산 파일 하나만 불러오고, 오류 줄은 그대로 나간다."""
+        tabs = "\n".join(f"import {name}" for name in _SETUP_UI_TABS)
+        loaded = _loaded_after(
+            f"import ui.generator_main\nimport ui.widget_proxies\n{tabs}\n"
+            "from ui import extra_schedulers_ui as xui\n"
+            "class _Bridge:\n"
+            "    def __init__(self): self.props = []\n"
+            "    def _register_proxy(self, *args): pass\n"
+            "    def pushWidgetValue(self, *args): pass\n"
+            "    def pushWidgetProperty(self, *args): self.props.append(args)\n"
+            "class _Host: pass\n"
+            "host, bridge = _Host(), _Bridge()\n"
+            "host.extra_schedulers_widgets = xui.init_extra_schedulers_proxies(bridge)\n"
+            "xui.apply_saved_settings(host, {'extra_schedulers_settings': {'custom_mode': 'expression', "
+            "'custom_expression': 'm + (M - m) * (1 - q) ** 3'}}, only_present=False)\n"
+            "assert any(\"unknown name 'q'\" in str(prop) for prop in bridge.props), bridge.props\n"
+            "xui.apply_saved_settings(host, {'extra_schedulers_settings': {'custom_mode': 'sigmas', "
+            "'custom_sigmas': '[1.0, 0.5, 0.0]'}}, only_present=False)\n")
+        self.assertFalse(loaded["comfy_custom_nodes.ai_studio_forge_parity"],
+                         "Extra Schedulers 미리 검사가 기동 경로에서 노드 팩 패키지를 불러왔다")
+
     def test_package_inits_do_not_reexport_submodules(self):
         loaded = _loaded_after("import workers.generation_worker\nimport ui.vue_bridge\nimport widgets.queue_manager\nimport core.file_naming")
         self.assertFalse(loaded["workers.search_worker"], "workers/__init__ 이 search_worker 를 재수출한다")

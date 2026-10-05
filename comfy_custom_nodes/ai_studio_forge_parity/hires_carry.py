@@ -16,6 +16,13 @@ Two ways a MODEL patch can be lost before the Hires pass samples, and what the p
   A failing carry fails the pass: an override that silently drops a feature makes a different
   image. Detail Daemon and the guidance suite do not register (a documented gap: the override
   MODEL samples without them, as before 1.7.0).
+* **A VAE-only override.** With only ``vae_name`` overridden the pass samples its own MODEL, but
+  Forge reloads the model with the new VAE for the Hires pass, so a feature that encodes with the
+  pass's VAE (Colorcraft's colour anchors) does it with the override VAE there. Such a feature
+  registers with ``uses_vae=True``; ``ForgeNeoHiresFix`` calls
+  ``apply_vae_change(model, active_model, active_vae)`` after its flow shift, which runs only those
+  carries — also when the MODEL to sample is the incoming one itself (Shift 0) — so each prepares
+  its patch again with the override VAE in place of the one the base VAE built.
 * **A new ``model_sampling``.** Some features carry values on the MODEL's ``model_sampling``
   object (Extra Schedulers: a scheduler handler receives nothing else). A node that installs a
   new ``model_sampling`` drops them. The pack's own flow shift (``generation._patch_flow_shift``:
@@ -38,32 +45,46 @@ from .compat import own_attribute
 Carry = Callable[[Any, Any, Any], Any]
 
 _CARRIES: dict[str, Carry] = {}
+_VAE_CARRIES: dict[str, None] = {}      # keys of the carries that encode with the pass's VAE
 _SAMPLING_ATTRS: dict[str, None] = {}
 _ABSENT = object()
 
 
-def register(carry: Carry, *, key: str | None = None) -> Carry:
+def register(carry: Carry, *, key: str | None = None, uses_vae: bool = False) -> Carry:
     """Register ``carry`` for Hires checkpoint overrides; returns it (usable as a decorator).
 
     ``key`` defaults to the function's module and qualified name. Registering a key again
     replaces its function in place (a re-imported module keeps its position in the order).
+    ``uses_vae``: the carry builds its patch with ``target_vae`` — ``apply_vae_change`` runs it
+    for a Hires pass whose only override is the VAE.
     """
 
     if not callable(carry):
         raise TypeError(f"hires_carry.register needs a callable, not {type(carry).__name__}")
     name = str(key or f"{carry.__module__}.{carry.__qualname__}")
     _CARRIES[name] = carry
+    if uses_vae:
+        _VAE_CARRIES[name] = None
+    else:
+        _VAE_CARRIES.pop(name, None)
     return carry
 
 
 def unregister(key: str) -> None:
     _CARRIES.pop(str(key), None)
+    _VAE_CARRIES.pop(str(key), None)
 
 
 def registered() -> tuple[str, ...]:
     """Registered carry keys in the order ``apply`` runs them."""
 
     return tuple(_CARRIES)
+
+
+def registered_vae() -> tuple[str, ...]:
+    """The keys ``apply_vae_change`` runs (registered with ``uses_vae``), in registration order."""
+
+    return tuple(key for key in _CARRIES if key in _VAE_CARRIES)
 
 
 def apply(source_model: Any, target_model: Any, target_vae: Any = None) -> Any:
@@ -75,14 +96,30 @@ def apply(source_model: Any, target_model: Any, target_vae: Any = None) -> Any:
 
     if target_model is source_model:
         return target_model
+    return _run(tuple(_CARRIES.items()), source_model, target_model, target_vae,
+                "Hi-res checkpoint override: could not carry {key!r} onto the override model - {exc}")
+
+
+def apply_vae_change(source_model: Any, target_model: Any, target_vae: Any) -> Any:
+    """A Hires pass whose only override is the VAE: the ``uses_vae`` carries prepare their patch again with it.
+
+    ``source_model`` is the MODEL the pass received (its patches were built with the base VAE);
+    ``target_model`` the MODEL it samples — ``source_model`` itself (Shift 0) or its flow-shifted
+    clone. Unlike ``apply`` this runs when the two are the same object. Returns the MODEL to sample.
+    """
+
+    carries = tuple((key, _CARRIES[key]) for key in registered_vae())
+    return _run(carries, source_model, target_model, target_vae,
+                "Hi-res VAE override: could not prepare {key!r} again with the override VAE - {exc}")
+
+
+def _run(carries, source_model: Any, target_model: Any, target_vae: Any, message: str) -> Any:
     current = target_model
-    for key, carry in tuple(_CARRIES.items()):
+    for key, carry in carries:
         try:
             result = carry(source_model, current, target_vae)
         except Exception as exc:
-            raise RuntimeError(
-                f"Hi-res checkpoint override: could not carry {key!r} onto the override model - {exc}"
-            ) from exc
+            raise RuntimeError(message.format(key=key, exc=exc)) from exc
         if result is not None:
             current = result
     return current

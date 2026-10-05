@@ -23,10 +23,11 @@ so the app's own Python can import it too:
   (``flow_cosmos_rho7_times``) and Flow Cosmos Dynamic's — Karras Dynamic's per-step-ρ ramp over the same
   σ̃ range, mapped the same way (``flow_cosmos_dynamic_times``).
 
-Behaviour mirrored from sam-extra v0.33.0. The code is this pack's own: sam-extra is not imported
-(it is GPL-3.0 and not installed next to ComfyUI) and none of its source is copied;
-``tests/test_comfy_extra_schedulers_parity.py`` runs both on the same inputs and requires the same
-results, error classes and messages.
+Behaviour mirrored from sam-extra v0.33.0, and much of the code is sam-extra's (``expression.py``,
+``sigma_list.py``, ``settings.py``, ``schedulers.py``), licensed to this pack under MIT by its author
+(THIRD_PARTY_NOTICES.md). sam-extra is not imported (it is not installed next to ComfyUI);
+``tests/test_comfy_extra_schedulers_parity.py`` runs both on the same inputs and requires the same results,
+error classes and messages.
 
 The expression language (for the user, in short): numbers; the variables ``m`` (sigma_min), ``M``
 (sigma_max), ``n`` (steps), ``s`` (this step, from 0) and ``x`` (``s / (n - 1)``, 0 for one step);
@@ -789,10 +790,11 @@ def flow_cosmos_dynamic_times(n: int, rho: float = FLOW_COSMOS_RHO, ve_sigma_min
     defaults are Flow Cosmos rho7's (ρ 7 on 0.002 … 80). Returns the times before the first step whose s is not
     finite and that step (None when every one is); the caller checks ρ above 2 and the σ̃ range first.
 
-    The composition is sam-extra v0.33.0's own (its "Flow Cosmos Dynamic"; Karras Dynamic's origin is unverified);
-    this is written from that description, not copied. Since ρᵢ = ρ only where cos(2πi/n) = 0, the list meets
-    Flow Cosmos rho7's (same ρ and range) at the first and the last step and, when 4 divides n, at steps n/4 and
-    3n/4; elsewhere its σ̃ is lower in the first and last quarter and higher in the middle half."""
+    The composition is sam-extra v0.33.0's own (its "Flow Cosmos Dynamic"; Karras Dynamic's origin is
+    unverified); this follows sam-extra's code (its author's MIT grant), not another project's. Since ρᵢ = ρ
+    only where cos(2πi/n) = 0, the list meets Flow Cosmos rho7's (same ρ and range) at the first and the last
+    step and, when 4 divides n, at steps n/4 and 3n/4; elsewhere its σ̃ is lower in the first and last quarter
+    and higher in the middle half."""
 
     levels, bad = karras_dynamic_ramp(n, ve_sigma_min, ve_sigma_max, rho)
     return [level / (1.0 + level) for level in levels], bad

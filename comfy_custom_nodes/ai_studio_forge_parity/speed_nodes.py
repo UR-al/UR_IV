@@ -28,8 +28,10 @@
   consumers read) tagged with ``guidance_common.mark_republished`` and put back afterwards.
 * **Sampler wrapper and node**: ``ForgeNeoAnimaSpeed`` (MODEL -> MODEL, explicit inputs) registers a
   ``SAMPLER_SAMPLE`` wrapper (:func:`speed_sampler_sample_wrapper`) moved to the front of the
-  MODEL's wrappers, so the runtime order is CNS (re-asserted outermost by the sampler nodes) ->
-  SPEED -> Detail Daemon -> sampler: Detail Daemon builds its schedule from the whole pass and
+  MODEL's wrappers, behind a CNS wrapper already there (the guidance suite's; the pack's sampler
+  nodes re-assert their own CNS outermost), so the runtime order is CNS -> SPEED -> Detail
+  Daemon -> sampler on every sampler node, a stock ``KSamplerAdvanced`` included: Detail Daemon
+  builds its schedule from the whole pass and
   SPEED segments inside it (``guidance_dd`` follows the re-published list). Per run the wrapper
   swaps the KSAMPLER's ``sampler_function`` for :func:`speed_sampler_function` (UniPC / DPM fast /
   adaptive and non-KSAMPLER samplers are skipped), which guards, plans and runs SPEED, falls back
@@ -44,7 +46,8 @@ largest aligned sigma then, so no query falls outside a tree; with every aligned
 pass range (txt2img, sigma0 = 1) the tail tree is exactly a plain run's.
 
 The behaviour is sam-extra's (``forge_sam3_extension`` ``sam3ext/speed/forge_host.py``,
-v0.33.0) where ComfyUI allows it; the code is the pack's own, written from the MIT upstream
+v0.33.0) where ComfyUI allows it, and so is much of the code (sam-extra's changes to the MIT upstream,
+licensed to this pack under MIT by its author (THIRD_PARTY_NOTICES.md)) on the MIT upstream
 aoleg/ComfyUI-SPEED@a8873591a27f2c1e086a2caf546f9b6aeec62b81 (``scripts/speed_forge.py``: the
 shape-safe coarse noise, the inpaint/reference guards, wrapping the sampler function) —
 Copyright (c) 2026 A. Izzuddin Al Faruq (the Forge Neo script is Oleg Afonin's work); notices in
@@ -65,6 +68,7 @@ from typing import Any, Callable
 from . import hires_carry, speed_schedule
 from .anima_lllite import LLLITE_MODEL_OPTION
 from .compat import clone_model, make_first, require_torch, sampler_sample_wrapper_type
+from .guidance_cns import CNS_WRAPPER_KEY
 from .guidance_common import (
     DY_SUBSTEPS_OFF_KEY,
     SAMPLER_BASE_ATTR,
@@ -82,7 +86,6 @@ __all__ = [
     "BROWNIAN_STAGE_SEED_STRIDE",
     "CARRY_KEY",
     "DEFAULTS",
-    "KEY",
     "LLLITE_MARKER",
     "LOG_PREFIX",
     "NODE_CLASS_MAPPINGS",
@@ -106,8 +109,8 @@ __all__ = [
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
 
-# sam-extra's infotext key; the app writes "Anima SPEED: <summary>" into ComfyUI PNGs itself.
-KEY = "Anima SPEED"
+# sam-extra's console prefix. The pack writes no infotext: the app writes "Anima SPEED: <summary>" into
+# ComfyUI PNGs itself (core/comfy_metadata, key core/anima_speed.INFOTEXT_KEY).
 LOG_PREFIX = "[AnimaSPEED]"
 # ModelPatcher.add_wrapper_with_key key of the node's SAMPLER_SAMPLE wrapper (one per MODEL).
 SPEED_WRAPPER_KEY = "ai_studio_forge_parity.speed"
@@ -874,9 +877,12 @@ def _install(patched: Any, wrappers: list) -> Any:
         remove(wrapper_type, SPEED_WRAPPER_KEY)
     for wrapper in wrappers:
         add(wrapper_type, SPEED_WRAPPER_KEY, wrapper)
-    # First among the wrappers present, ahead of Detail Daemon: DD builds its schedule from the
-    # whole pass and SPEED segments inside it. CNS, applied by the sampler node, goes ahead of SPEED.
+    # Ahead of Detail Daemon: DD builds its schedule from the whole pass and SPEED segments inside
+    # it. A CNS wrapper already on the MODEL (the guidance suite's, which a stock KSampler /
+    # KSamplerAdvanced does not re-assert) stays ahead of SPEED: CNS -> SPEED -> DD on every
+    # sampler; ForgeNeoKSamplerCNS / ForgeNeoHiresFix put their own CNS in front anyway.
     make_first(patched, wrapper_type, SPEED_WRAPPER_KEY)
+    make_first(patched, wrapper_type, CNS_WRAPPER_KEY)
     return patched
 
 

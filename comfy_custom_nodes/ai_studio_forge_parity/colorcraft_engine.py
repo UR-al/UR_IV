@@ -1,7 +1,8 @@
 """Colorcraft's modifier chain — what one model evaluation runs on the CFG-combined prediction.
 
-Pack 1.7.0, part of the ComfyUI port of sam-extra v0.32.1's Colorcraft (``ForgeNeoColorcraft``). Written
-from the MIT upstream node (no sam-extra code — the extension is GPL-3.0 and serves only as the test oracle,
+Pack 1.7.0, part of the ComfyUI port of sam-extra v0.32.1's Colorcraft (``ForgeNeoColorcraft``). Written from
+the MIT upstream node with sam-extra's three substitutions (sam-extra's code, licensed to this pack under MIT by
+its author (THIRD_PARTY_NOTICES.md); the installed extension is the test oracle,
 ``tests/test_comfy_colorcraft_parity.py``):
 
 origin: muerrilla/ComfyUI-Colorcraft@d28ac6a4e997d0f8a2f1a60b7361b561c4a15bbf:nodes.py

@@ -1,7 +1,7 @@
 """Colorcraft basis vectors: which family a model's latent format uses, its calibration, the vector files.
 
 Pack 1.7.0, part of the ComfyUI port of sam-extra v0.32.1's Colorcraft (``ForgeNeoColorcraft``). Written from
-two MIT sources (no sam-extra code — the extension is GPL-3.0 and serves only as the test oracle,
+two MIT sources, the ones sam-extra's ``basis.py`` follows (the installed extension is the test oracle,
 ``tests/test_comfy_colorcraft_parity.py``):
 
 * origin: muerrilla/ComfyUI-Colorcraft@d28ac6a4e997d0f8a2f1a60b7361b561c4a15bbf:lib_colorcraft/basis.py —

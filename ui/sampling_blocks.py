@@ -10,7 +10,9 @@
   제목별 규칙(``Rule.when_unknown``)과 그 출처로 정해진다 — P8(DoRA)·P9(Anima38)·VAE DeGrid 는 이 튜플에 한 줄씩만
   더했다(호출부는 그대로). DeGrid 는 최종 이미지 블록이라(전달 행 ``passes=()``) 봉투에는 실려도 보조 패스에는 가지 않는다.
   Extra Schedulers(값 블록 — 스냅샷이 확인하면 늘, 아니면 laplace·custom 패스가 있을 때만)는 DeGrid 뒤에 한 줄(계획 R7).
-  Extra Samplers(ER SDE 값 블록 — 같은 규칙, ER SDE 셋 패스)는 Extra Schedulers 뒤 맨 끝에 한 줄(계획 R7).
+  Extra Samplers(ER SDE 값 블록 — 같은 규칙, ER SDE 셋 패스)는 Extra Schedulers 뒤 맨 끝에 한 줄(계획 R7). 이 두 값 블록은
+  i2i 면 요청이 싣는 샘플러·스케줄러(``request`` — 채팅 이미지 편집)로 메인 패스를 보고, 보조 패스 봉투(aux)에는 확인 못
+  했어도 싣는다 — 보내는 곳이 그 보조 요청의 패스로 다시 판정한다(core/alwayson_propagation.drop_unread).
   Anima SPEED(메인 요청 전용 샘플러 래퍼 — 전달 행 ``passes=()``)는 Anima38 뒤에 한 줄(계획 R7, Forge 레인 순서).
   Colorcraft(메인 요청 전용 샘플링 중 색 보정 — 전달 행 ``passes=()``)는 가이던스 뒤·Anima38 앞에 한 줄(계획 R7 — Forge 에서
   Anima Optimal Scale 바로 아래).
@@ -61,6 +63,10 @@ class SamplingContext:
     capabilities: Any = None    # webui 일 때만: host.sam_extra_capabilities, 없으면 peek 캐시(네트워크 없음)
     model: str = ""             # T2I 콤보의 모델(보조 패스가 실제로 쓰는 모델과 다를 수 있다 — 백엔드가 대조한다, critic A7)
     host_backend: str = ap.BACKEND_WEBUI   # 연결된 백엔드 종류(Krea2 여부와 무관)
+    # i2i 요청이 스스로 싣는 샘플러·스케줄러(메인 체인의 요청 페이로드 'sampler_name'·'scheduler') — 채팅 이미지 편집은 T2I
+    # 콤보 값을 싣고 I2I·인페인트는 싣지 않는다(None — Forge 기본). 값 블록(Extra Schedulers·Samplers)이 메인 패스를 판정한다
+    request_sampler: Optional[str] = None
+    request_scheduler: Optional[str] = None
 
 
 @dataclass
@@ -121,7 +127,14 @@ def _model_name(host) -> str:
         return ''
 
 
-def sampling_context(host, target: str, *, krea2: Optional[bool] = None) -> SamplingContext:
+def _request_text(request: Any, key: str) -> Optional[str]:
+    value = request.get(key) if isinstance(request, Mapping) else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def sampling_context(host, target: str, *, krea2: Optional[bool] = None,
+                     request: Optional[Mapping] = None) -> SamplingContext:
+    """``request``: 이 블록을 실을 요청 페이로드(메인 체인) — i2i 면 그 요청이 싣는 샘플러·스케줄러를 문맥에 적는다."""
     if target not in ap.TARGETS:
         raise ValueError(f"모르는 샘플링 대상: {target!r}")
     if krea2 is None:
@@ -133,7 +146,10 @@ def sampling_context(host, target: str, *, krea2: Optional[bool] = None) -> Samp
     host_backend = _host_backend()
     backend = ap.BACKEND_KREA2 if krea2 else host_backend
     capabilities = current_capabilities(host) if backend == ap.BACKEND_WEBUI else None
-    return SamplingContext(target, backend, capabilities, _model_name(host), host_backend)
+    i2i = target == ap.TARGET_I2I
+    return SamplingContext(target, backend, capabilities, _model_name(host), host_backend,
+                           request_sampler=_request_text(request, "sampler_name") if i2i else None,
+                           request_scheduler=_request_text(request, "scheduler") if i2i else None)
 
 
 # ── 기여자 ──────────────────────────────────────────────────────────────────────
@@ -193,9 +209,11 @@ CONTRIBUTORS: tuple[Callable[[Any, SamplingContext], Contribution], ...] = (
     _extra_samplers)
 
 
-def build_sampling_blocks(host, target: str, *, krea2: Optional[bool] = None) -> SamplingBlocks:
-    """기여자 블록을 모으고(먼저 넣은 쪽이 이긴다) Forge 메인 요청이면 게이트한다. 알림은 띄우지 않는다."""
-    ctx = sampling_context(host, target, krea2=krea2)
+def build_sampling_blocks(host, target: str, *, krea2: Optional[bool] = None,
+                          request: Optional[Mapping] = None) -> SamplingBlocks:
+    """기여자 블록을 모으고(먼저 넣은 쪽이 이긴다) Forge 메인 요청이면 게이트한다. 알림은 띄우지 않는다.
+    ``request``: 블록을 실을 요청 페이로드(메인 체인 — ``sampling_context``). 읽기만 한다."""
+    ctx = sampling_context(host, target, krea2=krea2, request=request)
     blocks: dict = {}
     provenance: dict = {}
     notices: list = []

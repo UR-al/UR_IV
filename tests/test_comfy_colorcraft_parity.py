@@ -1858,6 +1858,91 @@ class HiresCarryTests(unittest.TestCase):
         with self.assertLogs("ai_studio_forge_parity", level="INFO"):
             self.assertIs(self.carry.apply(source, sdxl, None), sdxl)   # vector edits only: none on SDXL
 
+    # -- a Hires pass that overrides only the VAE (Forge: hr_additional_modules reloads the model with it) --------
+
+    def _vae_only_hires(self, model, override_vae, shift):
+        """``ForgeNeoHiresFix.run`` with only ``vae_name`` overridden; returns (sampled MODEL, decode VAE)."""
+        from tests.test_comfy_pack_foundation import _HiresHarness, _Providers
+
+        sampled, vae, _ = _HiresHarness(_Providers(vae=override_vae)).run(
+            model, shift=shift, vae_name="other_vae.safetensors",
+        )
+        return sampled, vae
+
+    def test_a_vae_only_override_encodes_the_anchors_again_with_it(self):
+        from comfy_custom_nodes.ai_studio_forge_parity import compat
+
+        colors = [(0.0, 0.0, 0.0, 0.0), (0.1, 0.0, -0.2, 0.0)]
+        for shift in (0.0, 3.0):
+            with self.subTest(shift=shift):
+                self.host.ANCHORS.clear()
+                fmt = _fake_latent_format("Flux", 16, 2)
+                base_vae, override_vae = _FakeVAE(16, 2), _FakeVAE(16, 2, seed=4)
+                settings = json.dumps(_settings(_basic(contrast=0.5, amount=0.3), _luma(), pass_name="hires"))
+                with mock.patch.object(self.host, "log_line"):
+                    source = self.nodes.ForgeNeoColorcraft().patch(_ShiftPatcher(latent_format=fmt), base_vae,
+                                                                   settings)[0]
+                    original = self.host.model_colorcraft_patch(source)
+                    encoded = base_vae.calls
+                    sampled, vae = self._vae_only_hires(source, override_vae, shift)
+                self.assertIs(vae, override_vae)
+                self.assertEqual(base_vae.calls, encoded)
+                self.assertEqual(override_vae.calls, 2)                      # both anchors, with the override VAE
+                patch = self.host.model_colorcraft_patch(sampled)
+                self.assertIsNot(patch, original)
+                self.assertEqual((patch.prepared.family, patch.prepared.pass_name), ("zimage", "hires"))
+                self.assertEqual(patch.settings, original.settings)
+                self.assertEqual(patch.prepared.pre_dd, original.prepared.pre_dd)
+                expected = self.host.encode_anchors(_FakeVAE(16, 2, seed=4), fmt, colors, device=torch.device("cpu"))
+                self.assertEqual(list(patch.prepared.anchors), list(expected))
+                for key in expected:
+                    self.assertTrue(torch.equal(patch.prepared.anchors[key], expected[key]))
+                # one Colorcraft on the sampled MODEL: the base-VAE patch replaced, not stacked
+                functions = sampled.model_options["sampler_post_cfg_function"]
+                self.assertEqual(sum(self.host.is_owned(fn) for fn in functions), 1)
+                self.assertIs(functions[-1], patch.post_cfg)
+                self.assertEqual(sampled.wrappers[compat.sampler_sample_wrapper_type()][self.host.WRAPPER_KEY],
+                                 [patch.wrapper])
+                # the MODEL the pass received keeps its own patch
+                self.assertIs(self.host.model_colorcraft_patch(source), original)
+
+    def test_a_vae_only_override_that_cannot_encode_drops_the_pass(self):
+        # Forge: the anchors fail with the pass's VAE, so without a basis (SDXL) nothing is attached on that pass.
+        from comfy_custom_nodes.ai_studio_forge_parity import compat
+
+        sdxl = _fake_latent_format("SDXL", 4, 2)
+        settings = json.dumps(_settings(_basic(contrast=0.5, amount=0.3), pass_name="hires"))
+        with mock.patch.object(self.host, "log_line"):
+            source = self.nodes.ForgeNeoColorcraft().patch(_ShiftPatcher(latent_format=sdxl), _FakeVAE(4, 2),
+                                                           settings)[0]
+            self.assertIsNotNone(self.host.model_colorcraft_patch(source))
+            sampled, _vae = self._vae_only_hires(source, _FakeVAE(4, 2, seed=4, fail=True), 0.0)
+        self.assertIsNone(self.host.model_colorcraft_patch(sampled))
+        self.assertFalse(any(self.host.is_owned(fn)
+                             for fn in sampled.model_options.get("sampler_post_cfg_function", [])))
+        self.assertNotIn(self.host.WRAPPER_KEY, sampled.wrappers.get(compat.sampler_sample_wrapper_type(), {}))
+        self.assertIsNotNone(self.host.model_colorcraft_patch(source))
+
+
+class _ShiftPatcher(_FakePatcher):
+    """``_FakePatcher`` with ModelPatcher's ``model_sampling`` object patch (``ForgeNeoHiresFix``'s flow shift)."""
+
+    def __init__(self, model_options=None, wrappers=None, latent_format=None, sampling=None):
+        super().__init__(model_options, wrappers, latent_format)
+        self.sampling = sampling if sampling is not None else SimpleNamespace(shift=1.0, multiplier=1.0)
+
+    def clone(self):
+        copied = super().clone()
+        return _ShiftPatcher(copied.model_options, copied.wrappers, self.latent_format, self.sampling)
+
+    def get_model_object(self, name):
+        return self.sampling if name == "model_sampling" else super().get_model_object(name)
+
+    def add_object_patch(self, name, value):
+        if name != "model_sampling":
+            raise AssertionError(name)
+        self.sampling = value
+
 
 if __name__ == "__main__":
     unittest.main()

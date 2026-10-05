@@ -15,8 +15,8 @@ given by hand (``manual``).
 
 The behaviour is sam-extra's (``forge_sam3_extension`` ``sam3ext/speed/schedule.py``): the same
 plan, the same refusals (:class:`PlanError` with the same ``reason``/``kind``) and the same notes, so
-a ComfyUI pass reports what a Forge pass reports. The code is the pack's own, written from the MIT
-upstreams (full notices in THIRD_PARTY_NOTICES.md, texts in LICENSES/):
+a ComfyUI pass reports what a Forge pass reports. The code follows sam-extra's ``schedule.py`` on the
+MIT upstreams (full notices in THIRD_PARTY_NOTICES.md, texts in LICENSES/):
 
 * howardhx/speed@ca7801c9bdffe681742e9592345bcf4885959be5 ``utils.py`` (``power_spectrum``,
   ``activation_time``, ``delta_optimal_transitions``, ``validate_scales``) — Copyright (c) 2026
@@ -30,16 +30,15 @@ upstreams (full notices in THIRD_PARTY_NOTICES.md, texts in LICENSES/):
   (``resolve_spd_schedule``'s one-sigma-per-hand-off rule, the respace loop's sigma arithmetic) —
   Copyright (c) 2026 sorryhyun.
 
-sam-extra's documented changes to those sources, re-expressed here from their behaviour and checked
-by ``tests/test_comfy_speed_parity.py`` against the extension (v0.33.0): the threshold maths and the
-step lookup are separate so both plans use the same thresholds; a threshold the divisor lifts to
->= 1 gets no reference-share cap; the respace loop is replayed on the sigmas alone so the plan is
-known before the first model call; stages whose hand-off fires at step 0 are dropped (not expanded);
-a plan whose last hand-off is never reached is refused; respace's last stage is the exact full grid;
-dwt is refused up front unless every hand-off doubles the grid; non-positive or non-finite custom
-spectra are settings errors (sam-extra 0.32.1); a zero denominator in the text (``1/0``) is a
-``ValueError`` naming the token, so the readers report it as a settings error (sam-extra 0.33.0);
-each transition carries the sigma it runs at and the aligned one.
+sam-extra's changes to those sources (sam-extra's code, licensed to this pack under MIT by its author
+(THIRD_PARTY_NOTICES.md)), checked by ``tests/test_comfy_speed_parity.py`` against the extension (v0.33.0): the
+threshold maths and the step lookup are separate so both plans use the same thresholds; a threshold the divisor
+lifts to >= 1 gets no reference-share cap; the respace loop is replayed on the sigmas alone so the plan is known
+before the first model call; stages whose hand-off fires at step 0 are dropped (not expanded); a plan whose last
+hand-off is never reached is refused; respace's last stage is the exact full grid; dwt is refused up front
+unless every hand-off doubles the grid; non-positive or non-finite custom spectra are settings errors (sam-extra
+0.32.1); a zero denominator in the text (``1/0``) is a ``ValueError`` naming the token, so the readers report it
+as a settings error (sam-extra 0.33.0); each transition carries the sigma it runs at and the aligned one.
 
 No torch at module level (the app imports the pack without it); only the respace replay and the
 hand-off replay need it.

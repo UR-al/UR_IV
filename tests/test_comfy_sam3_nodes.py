@@ -1465,6 +1465,48 @@ class TestComfySam3Nodes(unittest.TestCase):
         self.assertEqual(face_mask.sum().item(), 64)
         self.assertIs(calls[0]["bbox_detector"], detector)
         self.assertEqual(report["provider"], "Impact FaceDetailer")
+        self.assertNotIn("scheduler_func_opt", calls[0])
+
+    def test_restore_face_hands_impact_the_discard_of_the_pack_discard_samplers(self):
+        # Impact's own sigma builder keeps the penultimate sigma of dpmpp_4m_sde / dpmpp_3m_flow_ode (the SAM3
+        # pass itself, ComfyUI's KSampler, drops it): the restore-face FaceDetailer gets scheduler_func_opt.
+        from comfy_custom_nodes.ai_studio_forge_parity import extra_samplers_register
+
+        calls, selected, sentinel = [], [], object()
+
+        class FakeFaceDetailer:
+            FUNCTION = "doit"
+
+            @classmethod
+            def doit(cls, **kwargs):
+                calls.append(kwargs)
+                return kwargs["image"], [], [], torch.ones((1, 8, 8)), object(), []
+
+        def select(sampler_name, scheduler):
+            selected.append((sampler_name, scheduler))
+            return sentinel if sampler_name in extra_samplers_register.DISCARD_PENULTIMATE_SIGMA else None
+
+        for sampler, discards in (("dpmpp_4m_sde", True), ("dpmpp_3m_flow_ode", True), ("uni_pc_bh2", False),
+                                  ("euler", False)):
+            with self.subTest(sampler=sampler):
+                calls.clear()
+                selected.clear()
+                with (
+                    mock.patch.object(sam3_nodes, "_node_mappings", return_value={"FaceDetailer": FakeFaceDetailer}),
+                    mock.patch.object(sam3_nodes, "impact_scheduler_func", side_effect=select),
+                ):
+                    sam3_nodes._restore_faces(
+                        _image(height=8, width=8), model=object(), clip=object(), vae=object(),
+                        positive=object(), negative=object(), sampler_name=sampler,
+                        scheduler="exponential", seed=4, steps=8, cfg=5.0,
+                        settings_json=json.dumps(dict(sam3_nodes._RESTORE_FACE_DEFAULTS)), face_detector=object(),
+                    )
+                self.assertEqual(selected, [(sampler, "exponential")])
+                self.assertEqual(calls[0]["sampler_name"], sampler)
+                if discards:
+                    self.assertIs(calls[0]["scheduler_func_opt"], sentinel)
+                else:
+                    self.assertNotIn("scheduler_func_opt", calls[0])
 
     def test_detailer_reports_empty_detection_without_sampling(self):
         source = _image(height=8, width=8)

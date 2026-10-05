@@ -78,7 +78,8 @@ const storeWidgets = useWidgetStore().widgets as Record<string, any>
 const { capabilities } = useSamExtraCapabilities()
 
 const passes = computed(() => passesUsing(storeWidgets))
-const hints = computed(() => samplerHints(storeWidgets))
+// ComfyUI(스냅샷 'not_applicable' — paramsNote 와 같은 판정)는 Hires CFG 가 끔이면 메인 CFG 로 돈다(Forge 는 1)
+const hints = computed(() => samplerHints(storeWidgets, capabilities.value?.status === 'not_applicable'))
 const values = computed(() => readValues(storeWidgets))
 const settings = computed(() => parseValues(values.value))
 const stage = computed(() => String(settings.value.max_stage))

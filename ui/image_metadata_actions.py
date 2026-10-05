@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 
 from core.metadata_actions import (
     NO_GENERATION_INFO_MESSAGE,
+    applied_sampling_parameters,
     build_generation_item,
     generation_parameters,
     resolve_action_metadata,
@@ -48,15 +49,26 @@ def queue_item_from_metadata(host: Any, info: dict, *, preserve_seed: bool = Fal
     return build_generation_item(info, generation_defaults(host), preserve_seed=preserve_seed)
 
 
+def _combo_text(host: Any, name: str) -> str:
+    widget = getattr(host, name, None)
+    try:
+        return str(widget.currentText() or "") if widget is not None and hasattr(widget, "currentText") else ""
+    except Exception:
+        return ""
+
+
 def restore_sampling_values(host: Any, info: dict) -> None:
     """'이 설정으로 생성' — sam-extra Extra Schedulers·Extra Samplers 값을 그 스케줄러·샘플러와 함께 되살린다(계획
-    A-R1·X3b): 이미지의 메인·Hires 스케줄러가 custom·Laplace·Flow Cosmos 둘이면 그 칸(식·목록·μ/β·ρ/σ̃), 샘플러가 ER SDE
-    셋이면 차수(와 Reverse-time·Tunable 이면 η·잡음 구간 — Forge 'Eta' 대체 포함). 그 밖이면 칸을 건드리지 않는다. 카드
-    기능(Colorcraft·SPEED)은 여기서 되살리지 않는다(가져오기 버튼 — X3c)."""
+    A-R1·X3b): 이 경로가 **실제로 고른** 선택만 본다(``applied_sampling_parameters`` — ``_apply_payload_to_ui`` 가 콤보에
+    적용한 메인 샘플러·스케줄러. Hires 선택은 되살리지 않으므로 이미지의 Hires 값도 되살리지 않는다). 그 메인 스케줄러가
+    custom·Laplace·Flow Cosmos 둘이면 그 칸(식·목록·μ/β·ρ/σ̃), 샘플러가 ER SDE 셋이면 차수(와 Reverse-time·Tunable 이면
+    η·잡음 구간 — Forge 'Eta' 대체 포함). 그 밖이면 칸을 건드리지 않는다. 카드 기능(Colorcraft·SPEED)은 여기서 되살리지
+    않는다(가져오기 버튼 — X3c). 콤보를 적용한 뒤에 부른다."""
     from ui.extra_samplers_ui import restore_from_metadata as restore_samplers
     from ui.extra_schedulers_ui import restore_from_metadata as restore_schedulers
 
-    params = generation_parameters(info)
+    params = applied_sampling_parameters(generation_parameters(info), sampler=_combo_text(host, "sampler_combo"),
+                                         scheduler=_combo_text(host, "scheduler_combo"))
     restore_schedulers(host, params)
     restore_samplers(host, params)
 

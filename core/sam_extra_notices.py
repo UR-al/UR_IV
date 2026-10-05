@@ -33,7 +33,8 @@
                                             (0.31·0.32 — Forge 가 뒤 셋을 버린다, 계획 X10)라 구간 없이 돈 생성(경고)
 - Anima SPEED                               결과: 'Anima SPEED status' 의 패스마다 — 설정 오류·실패 뒤 순정 재샘플링(경고),
                                             건너뜀(정보, 이유 한 번), 보냈는데 'Anima SPEED' 기록 없음(옛 sam-extra·스크립트
-                                            오류). ``speed_static_skip_notice`` 는 생성 전에 앱이 아는 건너뜀(정보)
+                                            오류). ``speed_static_skip_notice`` 는 생성 전에 앱이 아는 건너뜀(정보 —
+                                            ComfyUI 는 컴파일러가 SPEED 를 뺀 이유도 같은 알림: core/comfy_compile_notices)
 - Colorcraft                                결과: 'SAM Extra Colorcraft status' — 거절('not applied: …', 앱 문자열이면 계약
                                             경보)·평가 오류/비유한 결과/붙이지 못함(경고), 색 벡터 없는 모델(정보), 보냈는데
                                             'SAM Extra Colorcraft' 기록 없음(옛 sam-extra — 'n/m장')
@@ -463,6 +464,7 @@ class RequestedFeatures:
     degrid: Optional[vae_degrid.DegridSettings] = None     # 블록을 보냈을 때만(확장 coerce_args 규칙)
     extra_schedulers: Optional[extra_schedulers.ExtraSchedulerSettings] = None   # 블록을 보냈을 때만(coerce_args 규칙)
     extra_samplers: Optional[extra_samplers.ExtraSamplersSettings] = None   # 블록을 보냈을 때만(settings_from_args 규칙 — 보낸 다섯)
+    extra_samplers_passes: tuple = ()        # 요청에서 ER SDE 셋을 쓰는 패스(core/extra_samplers.value_sampler_passes)
     speed: Optional[anima_speed.ScriptSettings] = None     # 블록을 보냈을 때만(확장 coerce_settings 규칙 — a/0 은 error)
     colorcraft: Optional[colorcraft.Config] = None         # 블록을 보냈고 첫 인자가 한 값 형식일 때만(확장 parse_own 규칙)
     cfg_scale: Optional[float] = None
@@ -576,6 +578,7 @@ def requested_features(payload: Any, *, live_pag_argc: Optional[int] = None) -> 
         degrid=vae_degrid.parse_script_block(_script_block(payload, vae_degrid.SCRIPT_NAME)),
         extra_schedulers=extra_schedulers.parse_script_block(_script_block(payload, extra_schedulers.SCRIPT_NAME)),
         extra_samplers=extra_samplers.parse_script_block(_script_block(payload, extra_samplers.SCRIPT_NAME)),
+        extra_samplers_passes=extra_samplers.value_sampler_passes(payload),
         speed=anima_speed.parse_script_block(_script_block(payload, anima_speed.SCRIPT_NAME)),
         colorcraft=_colorcraft_block(payload),
         cfg_scale=_number(payload.get("cfg_scale")),
@@ -1066,8 +1069,12 @@ def _xsamp_result_notices(request: RequestedFeatures, images: Sequence[Mapping],
       구간 부분을 잇는다). Dy 보조 스텝 건너뜀(Spectrum·Wan·PiD·extra_concat — 그 생성은 보조 스텝 없는 Euler 스텝)과 잡음
       구간 건너뜀(예측기에 percent_to_sigma 가 없다 — 구간 없이)은 정보 알림 한 번씩('n/m장'). 블록을 보냈는지와 무관하다
       (Dy 는 샘플러 이름만으로 돈다).
-    - 보낸 블록의 잡음 구간이 켜져 있고 기능 스냅샷이 인자 2개(0.31·0.32 — Forge API 가 뒤 셋을 버린다, 계획 X10)를
-      확인했는데 어느 장이 Reverse-time·Tunable 로 돌았으면 구간이 빠졌다(경고). 스냅샷을 모르면 말하지 않는다.
+    - 보낸 블록의 잡음 구간이 켜져 있고 η > 0 이고(η 0 이면 구간은 어느 판에서도 아무 일도 하지 않는다) 기능 스냅샷이
+      인자 2개(0.31·0.32 — Forge API 가 뒤 셋을 버린다, 계획 X10)를 확인했는데 Reverse-time·Tunable 패스가 돌았으면 —
+      어느 장의 메인·Hires('Sampler'·'Hires sampler'), 또는 요청의 ADetailer·SAM3 패스(``value_sampler_passes`` — 그
+      안쪽 패스도 같은 값을 읽는다) — 구간이 빠졌다(경고). 어느 장이든 'ER SDE noise window' 가 있으면 구간이 돌았으므로
+      (스냅샷이 낡았다 — sam-extra 를 올리고 Forge 를 다시 켰는데 앱이 다시 받지 않았다) 말하지 않는다. 스냅샷을 모르면
+      말하지 않는다.
     읽을 결과가 없으면 말하지 않는다."""
     if not images:
         return []
@@ -1101,8 +1108,11 @@ def _xsamp_result_notices(request: RequestedFeatures, images: Sequence[Mapping],
             f"없습니다(구간 없이 모든 스텝에 잡음을 넣었습니다). (결과 정보 '{xs.STATUS_KEY}')",
             feature="extra_samplers", detail=xs.WINDOW_SKIPPED_STATUS))
     sent = request.extra_samplers
+    inner_window_pass = any(use.sampler in xs.WINDOW_LABELS and use.pass_id not in (xs.PASS_MAIN, xs.PASS_HIRES)
+                            for use in request.extra_samplers_passes)
     if sent is not None and xs.window_unsupported(sent, capabilities) \
-            and any(_xsamp_ran(params, xs.WINDOW_LABELS) for params in images):
+            and not any(xs.KEY_NOISE_WINDOW in params for params in images) \
+            and (inner_window_pass or any(_xsamp_ran(params, xs.WINDOW_LABELS) for params in images)):
         argc = xs.live_argc(capabilities)
         out.append(Notice(
             CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, LEVEL_WARNING,
@@ -1240,7 +1250,8 @@ def speed_result_notices(payload: Any, params_list: Iterable[Any]) -> list[Notic
 
 def speed_static_skip_notice(reason: str) -> Notice:
     """생성 전: 앱이 아는 SPEED 건너뜀(``core/anima_speed.static_skip_reason`` 코드 — 인페인트·ControlNet·ComfyUI
-    Spectrum·해상도 비율 1.0 하나). 블록은 그대로 보낸다(Forge 가 같은 이유를 status 에 남긴다) — 정보."""
+    Spectrum·해상도 비율 1.0 하나). 블록은 그대로 보낸다(Forge 가 같은 이유를 status 에 남긴다) — 정보. ComfyUI 결과도
+    컴파일러가 같은 이유로 노드를 뺐으면 이 알림이다(core/comfy_compile_notices — 같은 key 라 한 번만 보인다)."""
     code = str(reason or "")
     text = anima_speed.SKIP_MESSAGES.get(code, code)
     return Notice(CODE_SPEED_SKIPPED, LEVEL_INFO,

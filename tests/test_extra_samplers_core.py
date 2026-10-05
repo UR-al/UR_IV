@@ -613,13 +613,43 @@ class PlanTests(unittest.TestCase):
                 self.assertEqual((used.reason, used.provenance), (xsa.REASON_SEND_UNCONFIRMED, xsa.PROVENANCE_USER))
                 self.assertEqual(used.block, xsa.as_block(self.USER))
 
-    def test_img2img_reads_the_img2img_list_and_aux_follows_t2i(self):
+    def test_img2img_reads_the_img2img_list(self):
         self.assertEqual(xsa.plan(xsa.APP_DEFAULTS, target="i2i", backend="webui", capabilities=self.I2I_ONLY).reason,
                          xsa.REASON_SEND)
         self.assertEqual(xsa.plan(xsa.APP_DEFAULTS, target="t2i", backend="webui", capabilities=self.I2I_ONLY).reason,
                          xsa.REASON_NOT_NEEDED)
-        self.assertEqual(xsa.plan(xsa.APP_DEFAULTS, target="aux", backend="webui", capabilities=self.I2I_ONLY).reason,
-                         xsa.REASON_NOT_NEEDED)
+
+    def test_aux_envelope_carries_the_block_unless_confirmed_and_the_sender_decides(self):
+        """FIX-forge(codex:forge — Refine/AUX): 보조 요청의 샘플러(Refine·SAM3·ADetailer 자기 샘플러)는 T2I 패널 패스가
+        아니다 — 봉투는 확인 못 했어도 늘 싣고(REASON_SEND_AUX, 출처는 값대로) 요청 직전에 drop_unread 가 정한다.
+        T2I 패스를 넘겨도·안 넘겨도 같다(봉투는 T2I 패스로 정하지 않는다)."""
+        for label, capabilities in (("unknown", None), ("absent", self.ABSENT), ("i2i only", self.I2I_ONLY)):
+            for settings, provenance in ((xsa.APP_DEFAULTS, xsa.PROVENANCE_APP_DEFAULT), (self.USER, xsa.PROVENANCE_USER)):
+                for passes in ((), (xsa.PassUse(PASS_HIRES, xsa.LABEL_ER_SDE_ODE),)):
+                    with self.subTest(label, provenance=provenance, passes=passes):
+                        aux = xsa.plan(settings, target="aux", backend="webui", capabilities=capabilities,
+                                       passes=passes)
+                        self.assertEqual((aux.reason, aux.provenance, aux.block),
+                                         (xsa.REASON_SEND_AUX, provenance, xsa.as_block(settings)))
+        self.assertEqual(xsa.plan(self.USER, target="aux", backend="webui", capabilities=self.CONFIRMED).reason,
+                         xsa.REASON_SEND)
+        self.assertEqual(xsa.plan(self.USER, target="aux", backend="krea2").block, None)
+        self.assertEqual(xsa.plan(self.USER, target="aux", backend="comfyui").reason, xsa.REASON_COMFY)
+
+    def test_img2img_main_is_the_sampler_the_request_carries(self):
+        """FIX-forge(claude:forge-block): 채팅 이미지 편집(i2i)은 T2I 샘플러를 싣는다 — 그 값이 메인 패스다. I2I·인페인트
+        요청은 싣지 않는다(None). Hires 는 img2img 에 없다. ADetailer 슬롯의 '같은 샘플러'는 그 메인을 따른다."""
+        widgets = {"sampler_combo": "Euler", "hires_options_group": True, "hires_sampler_combo": xsa.LABEL_ER_SDE_ODE,
+                   "adetailer_group": True, "ad_slot1_group": True, "_ad_s1_use_sampler": False}
+        self.assertEqual(xsa.passes_from_widgets(widgets, img2img=True), ())
+        rt = xsa.LABEL_ER_SDE_REVERSE_TIME
+        self.assertEqual(xsa.passes_from_widgets(widgets, img2img=True, img2img_main=rt),
+                         (xsa.PassUse(PASS_MAIN, rt), xsa.PassUse("adetailer_1", rt)))
+        self.assertEqual(xsa.passes_from_widgets(widgets, img2img=True, img2img_main="er_sde_tunable"),
+                         (xsa.PassUse(PASS_MAIN, xsa.LABEL_ER_SDE_TUNABLE),
+                          xsa.PassUse("adetailer_1", xsa.LABEL_ER_SDE_TUNABLE)))
+        self.assertEqual(xsa.passes_from_widgets(widgets, img2img_main=rt),    # t2i 는 콤보(인자 무시)
+                         (xsa.PassUse(PASS_HIRES, xsa.LABEL_ER_SDE_ODE),))
 
     def test_script_confirmed_matches_the_propagation_gate(self):
         from core import alwayson_propagation as ap
@@ -649,6 +679,14 @@ class PlanTests(unittest.TestCase):
                 self.assertIsNone(xsa.window_supported(capabilities))
                 self.assertFalse(xsa.window_unsupported(on, capabilities))
         self.assertIn(xsa.WINDOW_MIN_VERSION, xsa.WINDOW_UNSUPPORTED_TEXT)
+
+    def test_eta_zero_window_is_never_unsupported(self):
+        """FIX-forge(claude:forge-notices): η 0 이면 구간은 어느 판에서도 아무 일도 하지 않는다(확장 registry._er_sde_window
+        — 구간 끔이거나 η ≤ 0 이면 구간 없음) — 옛 sam-extra 여도 '업데이트하세요'가 아니다."""
+        two = _caps_with_argc(2)
+        self.assertTrue(xsa.window_unsupported(xsa.ExtraSamplersSettings(noise_window=True, eta=0.01), two))
+        self.assertFalse(xsa.window_unsupported(xsa.ExtraSamplersSettings(noise_window=True, eta=0.0), two))
+        self.assertFalse(xsa.window_unsupported(xsa.parse_settings({"noise_window": "1", "eta": "-3"}), two))
 
 
 class NameTests(unittest.TestCase):

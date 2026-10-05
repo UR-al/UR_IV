@@ -499,6 +499,9 @@ PROVENANCE_USER, PROVENANCE_APP_DEFAULT = "user", "app_default"     # core/alway
 REASON_SEND = "send"                    # 스냅샷이 스크립트를 확인했다 — 늘 싣는다
 REASON_SEND_UNCONFIRMED = "send_unconfirmed"   # 확인 못 했지만 어느 패스가 ER SDE — 게이트가 정한다
 REASON_NOT_NEEDED = "not_needed"        # 확인 못 했고 값을 읽는 패스가 없다 — 싣지 않는다(알림 없음)
+# 보조 패스 봉투(aux) — 확인 못 했어도 싣는다. 보조 요청(Refine·SAM3·ADetailer 의 자기 샘플러, 손 재구성)의 샘플러는 보내는
+# 곳만 안다 — 요청 직전에 core/alwayson_propagation.drop_unread 가 그 요청의 패스(value_sampler_passes)로 정한다(계획 X5)
+REASON_SEND_AUX = "send_aux"
 REASON_COMFY = "comfy"                  # ComfyUI — 늘 싣는다(노드를 넣을지는 컴파일러가 정한다, 계획 C6)
 REASON_KREA2 = "krea2"
 
@@ -553,8 +556,10 @@ def window_supported(capabilities: Any) -> Optional[bool]:
 
 
 def window_unsupported(settings: ExtraSamplersSettings, capabilities: Any) -> bool:
-    """구간을 켰는데 연결된 sam-extra 가 그 인자를 버린다(확실할 때만 참) — 카드·결과 알림 ``WINDOW_UNSUPPORTED_TEXT``."""
-    return bool(settings.noise_window) and window_supported(capabilities) is False
+    """구간을 켰는데 연결된 sam-extra 가 그 인자를 버린다(확실할 때만 참) — 카드·결과 알림 ``WINDOW_UNSUPPORTED_TEXT``.
+    η 0 이면 거짓 — 구간은 어느 판에서도 아무 일도 하지 않는다(확장 registry._er_sde_window: 구간 끔이거나 η ≤ 0 이면
+    구간 없음, params.record_infotext 도 η > 0 일 때만 'ER SDE noise window' 를 적는다)."""
+    return bool(settings.noise_window) and settings.eta > 0 and window_supported(capabilities) is False
 
 
 def plan(settings: ExtraSamplersSettings, *, target: str, backend: str, capabilities: Any = None,
@@ -565,12 +570,15 @@ def plan(settings: ExtraSamplersSettings, *, target: str, backend: str, capabili
       ``ForgeNeoExtraSamplerSettings`` 를 넣어 다른 그래프는 바이트 단위로 그대로 — 계획 R5·C3·C6)
     3 Forge 스냅샷이 스크립트를 확인 → 늘 블록(값은 ER SDE 패스만 읽어 결과가 같다 — XYZ Sampler 축 칸·사용자 ui-config
       기본값과 무관하게 같은 요청이 된다)
-    4 확인 못 함(모름·없음) → ``passes``(ER SDE 셋을 쓰는 패스 — ``passes_from_widgets``)가 있을 때만 블록. 그 뒤는
+    4 보조 패스 봉투(aux) → 늘 블록(``REASON_SEND_AUX``). 보조 요청의 샘플러(Refine·SAM3·ADetailer 의 자기 샘플러, 손
+      재구성의 T2I 샘플러)는 T2I 패널의 패스가 아니라 보내는 곳만 안다 — 요청 직전에 core/alwayson_propagation
+      ``drop_unread`` 가 새 스냅샷과 그 요청의 패스(``value_sampler_passes``)로 3·5 를 다시 판정하고 게이트가 출처로 정한다
+    5 확인 못 함(모름·없음) → ``passes``(ER SDE 셋을 쓰는 패스 — ``passes_from_widgets``)가 있을 때만 블록. 그 뒤는
       core/alwayson_propagation 게이트가 출처로 정한다
-    5 그 밖 → 없음(알림 없음 — 쓰지 않는 값)
+    6 그 밖 → 없음(알림 없음 — 쓰지 않는 값)
 
-    출처: 값이 확장 기본값과 같으면 앱 기본값, 다르면 사용자 값. 보조 패스 봉투(aux)는 t2i 와 같은 블록이다. i2i 는
-    스냅샷의 img2img 목록을 본다. 블록은 늘 인자 다섯이다(X10 — 옛 확장의 경고는 ``window_unsupported``)."""
+    출처: 값이 확장 기본값과 같으면 앱 기본값, 다르면 사용자 값. 보조 패스 봉투(aux)는 스냅샷이 확인하면 t2i 와 같은
+    블록이다. i2i 는 스냅샷의 img2img 목록을 본다. 블록은 늘 인자 다섯이다(X10 — 옛 확장의 경고는 ``window_unsupported``)."""
     if backend == BACKEND_KREA2:
         return ExtraSamplersPlan(None, None, REASON_KREA2)
     provenance = PROVENANCE_APP_DEFAULT if is_default(settings) else PROVENANCE_USER
@@ -578,6 +586,8 @@ def plan(settings: ExtraSamplersSettings, *, target: str, backend: str, capabili
         return ExtraSamplersPlan(as_block(settings), None, REASON_COMFY, provenance)
     if script_confirmed(capabilities, img2img=target == TARGET_I2I) is True:
         return ExtraSamplersPlan(as_block(settings), None, REASON_SEND, provenance)
+    if target == TARGET_AUX:
+        return ExtraSamplersPlan(as_block(settings), None, REASON_SEND_AUX, provenance)
     if any(True for _ in passes or ()):
         return ExtraSamplersPlan(as_block(settings), None, REASON_SEND_UNCONFIRMED, provenance)
     return ExtraSamplersPlan(None, None, REASON_NOT_NEEDED, provenance)
@@ -685,17 +695,19 @@ def pass_widget_ids() -> tuple:
     return tuple(ids)
 
 
-def passes_from_widgets(values: Any, *, img2img: bool = False) -> tuple:
+def passes_from_widgets(values: Any, *, img2img: bool = False, img2img_main: Any = None) -> tuple:
     """화면 값(위젯 id → 값, 체크는 bool 또는 'true'/'false')에서 ER SDE 셋을 쓰는 패스 → ``PassUse`` 튜플.
 
     다음 T2I 요청이 실제로 만드는 패스와 같은 규칙(ui/generator_generation 의 페이로드 조립): 메인; Hires 켬이고 샘플러가
     'Use same' 이 아니면 그 값; ADetailer 켬 + 슬롯 켬이면 '별도 샘플러' 켬일 때 슬롯 샘플러 아니면 메인; SAM3 켬 +
     'Mask only' 아님이면 '별도 샘플러' 켬이고 값이 있을 때 그 값 아니면 메인.
 
-    ``img2img``: I2I·인페인트·채팅 편집 요청은 샘플러·Hires 를 싣지 않는다(core/i2i_payload — Forge 기본 샘플러로 돈다)
-    — 메인은 값을 읽지 않는 것으로 보고 Hires 는 없다. ADetailer·SAM3 는 그 요청 안에서도 자기 샘플러로 돈다."""
+    ``img2img``: img2img 요청에는 Hires 가 없고 메인은 그 요청이 스스로 싣는 샘플러(``img2img_main``)다 — I2I·인페인트
+    요청은 샘플러를 싣지 않아(core/i2i_payload — Forge 기본 샘플러로 돈다) None, 채팅 이미지 편집은 T2I 콤보 값을 싣는다
+    (``_chat_generation_snapshot(target='i2i')`` — hr_* 만 뗀다). ADetailer·SAM3 는 그 요청 안에서도 자기 샘플러(또는 그
+    메인)로 돈다."""
     values = values if isinstance(values, Mapping) else {}
-    main = None if img2img else values.get(MAIN_SAMPLER_WIDGET)
+    main = img2img_main if img2img else values.get(MAIN_SAMPLER_WIDGET)
     entries: list = [(PASS_MAIN, main)]
     if not img2img and _truthy(values.get(HIRES_GROUP_WIDGET)):
         hires = values.get(HIRES_SAMPLER_WIDGET)
@@ -869,7 +881,7 @@ __all__ = [
     "LABEL_IPNDM_V", "LABEL_OF_COMFY", "LABEL_RESTART_FLOW", "LABEL_UNIPC_BH2", "MAIN_SAMPLER_WIDGET", "MAX_STAGE_MAX",
     "MAX_STAGE_MIN", "MAX_STAGE_STEP", "NOISE_PERCENT_MAX", "NOISE_PERCENT_MIN", "NOISE_PERCENT_STEP", "NOISE_WINDOW_OFF",
     "PACK_SAMPLERS", "PROVENANCE_APP_DEFAULT", "PROVENANCE_USER", "PassUse", "REASON_COMFY", "REASON_KREA2",
-    "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_UNCONFIRMED", "RESTART_LABELS", "RESTART_LONG_FROM",
+    "REASON_NOT_NEEDED", "REASON_SEND", "REASON_SEND_AUX", "REASON_SEND_UNCONFIRMED", "RESTART_LABELS", "RESTART_LONG_FROM",
     "RESTART_MIN_STEPS", "RESTART_S_MAX", "RESTART_S_MIN", "RESTART_TIMES", "RESTART_TIMES_LONG", "RESTORE_ETA_FIELDS",
     "RESTORE_STAGE_FIELDS", "SAM3_GROUP_WIDGET",
     "SAM3_MODE_WIDGET", "SAM3_SAMPLER_WIDGET", "SAM3_USE_SAMPLER_WIDGET", "SCRIPT_NAME", "SETTINGS_KEY", "SPEC_PREFIX",

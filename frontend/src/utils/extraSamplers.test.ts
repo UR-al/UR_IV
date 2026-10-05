@@ -4,7 +4,8 @@ import {
   ARG_COUNT, CFG_PP_LABELS, COMFY_PARAMS_NOTE, DEFAULTS, DEFAULT_SETTINGS, DY_CFGPP_HINT, DY_PLAIN_HINT, ER_SDE_LABELS,
   ETA_LABELS, ETA_RANGE, FLOW_ODE_HINT, FLOW_ODE_LABELS, IPNDM_HINT, KREA2_NOTE, NOISE_RANGE, OLD_FORGE_NOTE, PASS_WIDGETS,
   RESTART_HINT, SAMPLERS, SCRIPT_TITLE, SMEA_CFGPP_HINT, STAGE_OPTIONS, STAGE_RANGE, TUNABLE_HINT, UD10_HINT, WIDGET_IDS,
-  FORGE_PARAMS_NOTE, cardNote, cfgWarning, describe, hiddenNote, isCfgPp, isDefault, paramsNote, parseValues,
+  FORGE_DEFAULT_HR_CFG, FORGE_PARAMS_NOTE, cardNote, cfgWarning, describe, hiddenNote, hiresCfgWarning, isCfgPp, isDefault,
+  paramsNote, parseValues,
   passesUsing, readValues, resolveSampler, samplerHints, samplerKind, subtitle, usesEta, widgetNumber, windowEmpty, windowSummary, windowSupported,
   windowUnsupported, type XsampKey,
 } from './extraSamplers'
@@ -77,12 +78,15 @@ group('golden cases made by core/extra_samplers.py', () => {
 
   it('noise window support from the snapshot', () => {
     const on = parseValues({ ...DEFAULTS, noise_window: '1' })
+    const onEta0 = parseValues({ ...DEFAULTS, noise_window: '1', eta: '0' })
     for (const item of cases.window) {
       const caps = item.caps as never
       expect(windowSupported(caps), item.name).toBe(item.supported)
       expect(windowUnsupported(on, caps), item.name).toBe(item.unsupported_when_on)
       expect(windowUnsupported(DEFAULT_SETTINGS, caps), item.name).toBe(item.unsupported_when_off)
+      expect(windowUnsupported(onEta0, caps), item.name).toBe(item.unsupported_when_on_eta0)   // η 0 — 구간이 아무 일도 안 함
     }
+    expect(cases.window.some(item => item.unsupported_when_on && !item.unsupported_when_on_eta0)).toBe(true)
     expect(windowSupported(null)).toBeNull()
   })
 })
@@ -133,7 +137,13 @@ group('passes, hints and notes', () => {
     expect(samplerHints({ sampler_combo: 'Euler', hires_options_group: 'true', hires_sampler_combo: 'IPNDM' }))
       .toEqual([IPNDM_HINT])
     expect(samplerHints({ sampler_combo: 'Euler', hires_options_group: 'false', hires_sampler_combo: 'IPNDM' })).toEqual([])
-    expect(samplerHints({ sampler_combo: 'ipndm_v' })).toEqual([])
+    // GPU part 2 O2: 10-05 Anima 확인의 사실만 — IPNDM_V·UniPC bh2 를 골라도 같은 한 줄(권장 문구 없음)
+    expect(samplerHints({ sampler_combo: 'ipndm_v' })).toEqual([IPNDM_HINT])
+    expect(samplerHints({ sampler_combo: 'UniPC bh2', hires_options_group: 'true', hires_sampler_combo: 'IPNDM' }))
+      .toEqual([IPNDM_HINT])
+    expect(samplerHints({ sampler_combo: 'DEIS' })).toEqual([])
+    expect(IPNDM_HINT).not.toContain('권장')
+    expect(IPNDM_HINT).toContain('Linear Quadratic')
     expect(samplerHints({ sampler_combo: 'dpmpp_3m_flow_ode', hires_options_group: 'true',
       hires_sampler_combo: 'DPM++ 2M (flow ODE)' })).toEqual([FLOW_ODE_HINT])
     expect(samplerHints({ sampler_combo: 'Restart (flow)' })).toEqual([RESTART_HINT])
@@ -150,6 +160,25 @@ group('passes, hints and notes', () => {
     expect(samplerHints({ sampler_combo: 'Euler Dy', cfg_input: 7 })).toEqual([DY_PLAIN_HINT])
     expect(samplerHints({ sampler_combo: 'Euler SMEA Dy CFG++', cfg_input: 'x' })).toEqual([SMEA_CFGPP_HINT])
     expect(cfgWarning(2.5)).toBe('CFG++ 샘플러는 CFG 1~2 를 권장합니다 (지금 2.5)')
+  })
+
+  it('the Hires CFG++ sampler is checked against the Hires pass CFG, not the main CFG', () => {
+    // FIX-forge(codex:forge) 재현 두 조합: 메인 Euler·CFG 2 + Hires UD10·Hires CFG 7 → 경고, 메인 CFG 7 + Hires CFG 2 → 없음
+    const hires = { sampler_combo: 'Euler', hires_options_group: 'true', hires_sampler_combo: 'CFG++ UD10 AB' }
+    expect(samplerHints({ ...hires, cfg_input: 2, hires_cfg_input: 7 })).toEqual([UD10_HINT, hiresCfgWarning(7)])
+    expect(samplerHints({ ...hires, cfg_input: 7, hires_cfg_input: 2 })).toEqual([UD10_HINT])
+    // Hires CFG 끔(0·빈 값): Forge 하이레스 패스는 hr_cfg 기본값 1, ComfyUI 는 메인 CFG
+    expect(FORGE_DEFAULT_HR_CFG).toBe(1)
+    expect(samplerHints({ ...hires, cfg_input: 7, hires_cfg_input: 0 })).toEqual([UD10_HINT])
+    expect(samplerHints({ ...hires, cfg_input: 7, hires_cfg_input: '' }, true)).toEqual([UD10_HINT, hiresCfgWarning(7)])
+    expect(samplerHints({ ...hires, cfg_input: 7, hires_cfg_input: 3 }, true)).toEqual([UD10_HINT, hiresCfgWarning(3)])
+    // 'Use same sampler' 는 메인 샘플러 — 메인 CFG++ 는 두 패스를 각자 본다
+    const same = { sampler_combo: 'Euler Dy CFG++', hires_options_group: 'true', hires_sampler_combo: 'Use same sampler' }
+    expect(samplerHints({ ...same, cfg_input: 7 })).toEqual([DY_CFGPP_HINT, cfgWarning(7)])
+    expect(samplerHints({ ...same, cfg_input: 1.5, hires_cfg_input: 4 })).toEqual([DY_CFGPP_HINT, hiresCfgWarning(4)])
+    expect(samplerHints({ ...same, cfg_input: 7, hires_options_group: 'false', hires_cfg_input: 4 }))
+      .toEqual([DY_CFGPP_HINT, cfgWarning(7)])
+    expect(hiresCfgWarning(7)).toBe('Hires 의 CFG++ 샘플러는 CFG 1~2 를 권장합니다 (Hires 패스 CFG 지금 7)')
   })
 
   it('card note: Krea2, old Forge, otherwise none; ComfyUI gets the params note instead', () => {

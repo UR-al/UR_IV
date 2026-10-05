@@ -14,7 +14,9 @@ later format is a new choice, so an older pack refuses it at ComfyUI's input val
 
 No chain entries -> the input MODEL itself (no clone). A Hires checkpoint/UNET override keeps the hires pass's
 Colorcraft: ``hires_carry`` prepares it again on the override MODEL with the override VAE (Forge re-attaches it
-to the new UNet and encodes with that model's VAE).
+to the new UNet and encodes with that model's VAE). A Hires VAE-only override prepares it again with the
+override VAE on the pass's own MODEL (``hires_carry.apply_vae_change``; Forge reloads the model with that VAE
+for the pass), replacing the anchors the node encoded with the base VAE.
 
 No torch or ComfyUI import at module import (``colorcraft_host`` imports torch when a node runs).
 """
@@ -87,15 +89,20 @@ class ForgeNeoColorcraft:
 
 
 def _carry_to_override(source_model, target_model, target_vae):
-    """``hires_carry``: the override MODEL gets the hires pass's Colorcraft, prepared again with its VAE."""
+    """``hires_carry``: the hires pass's Colorcraft prepared again with ``target_vae`` on ``target_model`` — an
+    override MODEL (checkpoint/UNET), or with only a VAE override the pass's own MODEL, whose patch still holds the
+    anchors the base VAE encoded: that patch is replaced (removed when nothing applies with the new VAE)."""
     patch = colorcraft_host.model_colorcraft_patch(source_model)
     if patch is None or patch.settings is None:
         return None
-    carried = colorcraft_model(target_model, target_vae, patch.settings, patch.prepared.pre_dd)
+    base = colorcraft_host.without_colorcraft(target_model)
+    carried = colorcraft_model(base, target_vae, patch.settings, patch.prepared.pre_dd)
     return None if carried is target_model else carried
 
 
 NODE_CLASS_MAPPINGS = {NODE_ID: ForgeNeoColorcraft}
 NODE_DISPLAY_NAME_MAPPINGS = {NODE_ID: DISPLAY_NAME}
 
-hires_carry.register(_carry_to_override, key=CARRY_KEY)
+# uses_vae: a Hires pass that overrides only the VAE encodes the anchors again with it (as Forge, which reloads the
+# model with the new VAE for that pass).
+hires_carry.register(_carry_to_override, key=CARRY_KEY, uses_vae=True)

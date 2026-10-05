@@ -42,8 +42,9 @@ PACK_ID = "ai_studio_forge_parity"
 # ForgeNeoAnimaOptimalScale node. The suite's settings_json hides the new keys from the input
 # contract check, so the compiler refuses a graph that turns one on when /object_info lacks
 # ForgeNeoAnimaOptimalScale (``_DETAIL_SUITE_MARKER``) instead of letting a 1.5.0 pack ignore it.
-# 1.7.0: four sam-extra features (v0.33.0 samplers/schedulers/SPEED, v0.32.1 Colorcraft), re-implemented
-# and checked bit for bit against the extension on CPU (the GPL extension is a test oracle only):
+# 1.7.0: four sam-extra features (v0.33.0 samplers/schedulers/SPEED, v0.32.1 Colorcraft), much of it sam-extra's
+# own code under its author's MIT grant (THIRD_PARTY_NOTICES.md), checked bit for bit against the extension on
+# CPU (the installed extension is the test oracle; the pack never imports it):
 # Extra Schedulers: nine KSampler schedulers (cosine, cosine_exponential, phi, laplace,
 # karras_dynamic, custom, react_cosinusoidal_dynsf, flow_cosmos_rho7, flow_cosmos_dynamic) and ForgeNeoExtraSchedulers
 # (values on a model_sampling copy: custom, Laplace mu/beta and the rho / sigma~ max / sigma~ min Flow Cosmos rho7 and
@@ -61,7 +62,8 @@ PACK_ID = "ai_studio_forge_parity"
 # sampler's MODEL); the MIT upstream's library files and basis vectors are vendored under
 # vendor/comfyui_colorcraft*/ (".safetensors" now fingerprinted). Older packs lack the class ->
 # the compiler refuses the graph with the 1.7.0 hint.
-# Shared: ForgeNeoHiresFix re-applies the features to a checkpoint/UNET override (``hires_carry``),
+# Shared: ForgeNeoHiresFix re-applies the features to a checkpoint/UNET override (``hires_carry``) and
+# prepares Colorcraft again with a Hires VAE-only override (``hires_carry.apply_vae_change``),
 # the pack's flow shift keeps carried ``model_sampling`` values, and Euler (SMEA) Dy CFG++
 # sub-steps leave the guidance suite's step state alone.
 PACK_VERSION = "1.7.0"

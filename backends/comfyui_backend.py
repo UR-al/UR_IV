@@ -1424,7 +1424,7 @@ class ComfyUIBackend(AbstractBackend):
             else:
                 result = self._queue_and_wait(workflow, progress_callback, cancel_check)
             result = self._with_reported_seed(result, workflow, job_payload)
-            return self._with_degrid_notices(result, job_payload, compile_warnings)
+            return self._with_result_notices(result, job_payload, compile_warnings)
 
         except FileNotFoundError as e:
             _logger.error(f"워크플로우 파일 없음: {e}")
@@ -1461,20 +1461,24 @@ class ComfyUIBackend(AbstractBackend):
         return result
 
     @staticmethod
-    def _with_degrid_notices(result: GenerationResult, payload: Dict,
+    def _with_result_notices(result: GenerationResult, payload: Dict,
                              compile_warnings: List[dict]) -> GenerationResult:
-        """VAE DeGrid 결과를 Forge 결과처럼 알린다(info 의 sam-extra 알림 — UI 가 토스트로 띄운다).
+        """sam-extra 결과를 Forge 결과처럼 알린다(info 의 sam-extra 알림 — UI 가 토스트로 띄운다).
 
-        컴파일러가 노드를 뺐으면(팩 1.5.0 이전·모델 없음·사용자 워크플로에 자리 없음) 그 이유를, 노드가 돌았으면
-        이미지마다 리포트(``ui.ai_studio_degrid`` — 실패해도 이미지는 그대로 저장된다)를 Forge 와 같은 규칙으로
-        읽는다(core/comfy_degrid_report). 실패한 생성에는 붙이지 않는다(오류가 따로 보인다).
+        * VAE DeGrid — 컴파일러가 노드를 뺐으면(팩 1.5.0 이전·모델 없음·사용자 워크플로에 자리 없음) 그 이유를, 노드가
+          돌았으면 이미지마다 리포트(``ui.ai_studio_degrid`` — 실패해도 이미지는 그대로 저장된다)를 Forge 와 같은 규칙으로
+          읽는다(core/comfy_degrid_report).
+        * Anima SPEED·Extra Samplers — 컴파일러가 노드를 뺀 이유(SPEED 건너뜀·설정 오류)와 Spectrum 아래 Dy 보조 스텝
+          건너뜀을 Forge 결과와 같은 알림으로(core/comfy_compile_notices — Forge 도 알리지 않는 경고는 로그만).
+        실패한 생성에는 붙이지 않는다(오류가 따로 보인다).
         """
         if not isinstance(result, GenerationResult) or not result.success:
             return result
-        from core import comfy_degrid_report
+        from core import comfy_compile_notices, comfy_degrid_report
 
         info = result.info if isinstance(result.info, dict) else {}
-        notices = comfy_degrid_report.result_notices(payload, info.get('node_outputs'), compile_warnings)
+        notices = [*comfy_degrid_report.result_notices(payload, info.get('node_outputs'), compile_warnings),
+                   *comfy_compile_notices.compile_warning_notices(compile_warnings)]
         if notices:
             result.info = comfy_degrid_report.merge_into_info(info, notices)
         return result
@@ -1588,7 +1592,7 @@ class ComfyUIBackend(AbstractBackend):
             else:
                 result = self._queue_and_wait(workflow, progress_callback, cancel_check)
             result = self._with_reported_seed(result, workflow, job_payload)
-            return self._with_degrid_notices(result, job_payload, compile_warnings)
+            return self._with_result_notices(result, job_payload, compile_warnings)
 
         except RuntimeError as e:
             _logger.error(f"img2img 오류: {e}")

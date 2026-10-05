@@ -144,6 +144,7 @@ class ExtraSamplersPanelMirrorTests(unittest.TestCase):
                                  item["describe"])
         self.assertGreaterEqual(len(self.cases["settings"]), 40)
         on, off = xsa.parse_settings({"noise_window": "1"}), xsa.parse_settings({"noise_window": "0"})
+        on_eta0 = xsa.parse_settings({"noise_window": "1", "eta": "0"})
         for item in self.cases["window"]:
             with self.subTest(window=item["name"]):
                 caps = SamExtraCapabilities(status=item["caps"]["status"], scripts=item["caps"]["scripts"])
@@ -151,10 +152,25 @@ class ExtraSamplersPanelMirrorTests(unittest.TestCase):
                 self.assertIs(xsa.window_supported(caps), item["supported"])
                 self.assertIs(xsa.window_unsupported(on, caps), item["unsupported_when_on"])
                 self.assertIs(xsa.window_unsupported(off, caps), item["unsupported_when_off"])
+                self.assertIs(xsa.window_unsupported(on_eta0, caps), item["unsupported_when_on_eta0"])
         self.assertEqual({item["supported"] for item in self.cases["window"]}, {True, False, None})
+        # FIX-forge(claude:forge-notices): 구간을 버리는 옛 sam-extra 여도 η 0 이면 경고하지 않는다 — 그 차이가 사례에 있다
+        self.assertTrue(any(item["unsupported_when_on"] and not item["unsupported_when_on_eta0"]
+                            for item in self.cases["window"]))
 
     def test_texts_and_feature_flag_shared_with_python(self):
         self.assertIn(f"export const WINDOW_UNSUPPORTED_TEXT = '{xsa.WINDOW_UNSUPPORTED_TEXT}'\n", self.ts)
+        # Hires CFG++ 경고(FIX-forge, codex:forge): Hires CFG 칸이 끔이면 Forge 하이레스 패스는 hr_cfg 기본값으로 돈다
+        from core.sam_extra_notices import FORGE_DEFAULT_HR_CFG
+        self.assertIn(f"export const FORGE_DEFAULT_HR_CFG = {FORGE_DEFAULT_HR_CFG:g}\n", self.ts)
+        self.assertIn("export const HIRES_CFG_WIDGET = 'hires_cfg_input'\n", self.ts)
+        hires_card = (SRC / "components" / "params" / "HiresFixCard.vue").read_text(encoding="utf-8")
+        self.assertIn('v-model="storeWidgets.hires_cfg_input"', hires_card)
+        generation = (REPO / "ui" / "generator_generation.py").read_text(encoding="utf-8").replace("\r\n", "\n")
+        self.assertIn("hr_cfg = _widget_float(self.hires_cfg_input, 0.0)\n", generation)
+        self.assertIn('if hr_cfg > 0:\n                hr_payload["hr_cfg"] = hr_cfg', generation)
+        # IPNDM 힌트(GPU part 2 O2)를 보이는 표기는 파이썬 표기
+        self.assertEqual(_list(self.ts, "IPNDM_HINT_LABELS"), (xsa.LABEL_IPNDM, xsa.LABEL_IPNDM_V, xsa.LABEL_UNIPC_BH2))
         self.assertIn("extra_samplers", FEATURE_FLAGS)
         self.assertIn("caps.features?.extra_samplers !== true", self.ts)
 

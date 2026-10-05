@@ -1,9 +1,11 @@
 """'이 설정으로 생성'(ui/image_metadata_actions.start_generation_from_metadata, 계획 A-R1·X3b) — sam-extra Extra
 Schedulers·Extra Samplers 값을 그 스케줄러·샘플러와 **함께** 되살린다.
 
-규칙: 이미지의 메인('Schedule type'·'Sampler')·Hires('Hires schedule type'·'Hires sampler')가 그 값을 읽을 때만 —
+규칙: 이 경로가 실제로 고른 메인('Schedule type'·'Sampler' — 콤보가 그 항목이 됐을 때만)이 그 값을 읽을 때만 —
 custom(식·목록과 모드)·Laplace(μ/β)·Flow Cosmos rho7·Dynamic(ρ·σ̃ max·σ̃ min), ER SDE 셋(차수)과 Reverse-time·Tunable
 (η·잡음 구간 — Reverse-time 이미지의 Forge 'Eta' 대체 포함). 쓰지 않으면 키가 있어도 칸을 건드리지 않는다(글자도 그대로).
+Hires 선택('Hires sampler'·'Hires schedule type')은 이 경로가 되살리지 않으므로 그 값도 되살리지 않는다(FIX-forge, codex:forge
+— 이미지의 Hires 값이 지금 Hires 선택에 붙지 않게).
 값은 생성이 시작되기 전에 칸에 있다. 실제 PNG(PIL)·실제 메타데이터 파서·실제 액션 분기를 거친다. Qt·네트워크·GPU 없음.
 """
 from __future__ import annotations
@@ -18,6 +20,7 @@ from PIL import Image, PngImagePlugin
 
 from core import extra_samplers as xsa
 from core import extra_schedulers as xs
+from core.metadata_actions import applied_sampling_parameters
 from tests.test_apply_payload_combos import _Combo
 from tests.test_comfy_metadata_actions import _Harness
 from ui import extra_samplers_ui as xsamp_ui
@@ -146,18 +149,61 @@ class GenerateFromMetadataRestoreTests(unittest.TestCase):
                 self.assertEqual(started["xsched_text"]["laplace_mu"], "-1.0")
                 self.assert_untouched(host, started, xsched=False)
 
-    def test_hires_pass_values_and_the_forge_eta_fallback(self):
-        """메인은 값을 읽지 않고 Hires 가 읽는다 — Hires 칸은 이 경로가 되살리지 않지만 값은 이미지를 따른다(Forge 붙여 넣기와
-        같은 범위). Reverse-time Hires 이미지의 Forge 'Eta' 가 η 가 된다."""
+    def test_hires_only_values_are_not_restored_because_the_hires_selection_is_not(self):
+        """FIX-forge(codex:forge): 메인은 값을 읽지 않고 Hires 가 읽는 이미지 — 이 경로는 Hires 샘플러·스케줄러를 되살리지
+        않으므로 그 값도 되살리지 않는다(예전에는 이미지의 Hires 값이 지금 Hires 선택에 붙었다)."""
         host = _Host()
+        host.hires_sampler_combo = _Combo(["Use same sampler", *SAMPLERS], RT)                # 지금 Hires: Reverse-time
+        host.hires_scheduler_combo = _Combo(["Use same scheduler", *SCHEDULERS], "laplace")    # ·Laplace
         started = self.generate(host, (
             "Steps: 30, Sampler: Euler a, Schedule type: Karras, CFG scale: 4, Seed: 3, Size: 1024x1024, Eta: 0.4, "
-            "Hires sampler: ER SDE (Reverse-time), Hires schedule type: Flow Cosmos Dynamic, Flow Cosmos rho: 4.5, "
-            "Flow Cosmos sigma max: 80.0, Flow Cosmos sigma min: 0.002"))
+            "Hires sampler: ER SDE (Tunable), Hires schedule type: Flow Cosmos Dynamic, Flow Cosmos rho: 4.5, "
+            "Flow Cosmos sigma max: 80.0, Flow Cosmos sigma min: 0.002, ER SDE max stage: 2, ER SDE eta: 0.5"))
         self.assertEqual((started["sampler"], started["scheduler"]), ("Euler a", "karras"))
-        self.assertEqual((started["xsched"].flow_cosmos_rho, started["xsched"].flow_cosmos_sigma_max,
-                          started["xsched"].flow_cosmos_sigma_min), (4.5, 80.0, 0.002))
+        self.assertEqual((host.hires_sampler_combo.currentText(), host.hires_scheduler_combo.currentText()),
+                         (RT, "laplace"))                                                      # Hires 선택은 그대로
+        self.assert_untouched(host, started)                                                   # 값도 그대로
+
+    def test_main_reverse_time_reads_the_forge_eta_and_hires_keys_do_not_widen_the_fields(self):
+        """메인 Reverse-time 이미지의 Forge 'Eta' 가 η 가 된다. 이미지 Hires 가 Tunable·Flow Cosmos 여도 메인(ODE·Karras 가
+        아닌 Reverse-time·Karras)이 읽는 칸만 — Flow Cosmos 칸은 그대로."""
+        host = _Host()
+        started = self.generate(host, (
+            "Steps: 30, Sampler: ER SDE (Reverse-time), Schedule type: Karras, CFG scale: 4, Seed: 3, Size: 1024x1024, "
+            "Eta: 0.4, Hires sampler: ER SDE (Tunable), Hires schedule type: Flow Cosmos Dynamic, Flow Cosmos rho: 4.5"))
+        self.assertEqual((started["sampler"], started["scheduler"]), (RT, "karras"))
         self.assertEqual(started["xsamp"], xsa.ExtraSamplersSettings(eta=0.4))
+        self.assert_untouched(host, started, xsamp=False)
+
+    def test_values_follow_only_a_selection_the_combo_really_took(self):
+        """FIX-forge: 콤보 목록에 이미지의 샘플러·스케줄러가 없으면(그 sam-extra 가 없는 Forge) 지금 선택을 두고 알린다 — 그
+        값도 되살리지 않는다. 목록이 아직 비어 미뤄 둔 선택(setText — 그 글자로 생성한다)은 고른 것으로 본다."""
+        host = _Host()
+        host.sampler_combo = _Combo(["Euler", "Euler a"], "Euler")
+        host.scheduler_combo = _Combo(["automatic", "karras", "simple"], "simple")
+        started = self.generate(host, (
+            "Steps: 20, Sampler: ER SDE (Reverse-time), Schedule type: Laplace, CFG scale: 5, Seed: 1, Size: 512x512, "
+            "Laplace mu: 0.25, Laplace beta: 1.5, ER SDE max stage: 2, ER SDE eta: 0.5"))
+        self.assertEqual((started["sampler"], started["scheduler"]), ("Euler", "simple"))
+        self.assertEqual(len(host.vue_bridge.showNotification.calls), 1)                      # 목록에 없음 경고
+        self.assert_untouched(host, started)
+
+        host = _Host()
+        host.sampler_combo, host.scheduler_combo = _Combo([]), _Combo([])
+        started = self.generate(host, (
+            "Steps: 20, Sampler: ER SDE (Reverse-time), Schedule type: Laplace, CFG scale: 5, Seed: 1, Size: 512x512, "
+            "Laplace mu: 0.25, Laplace beta: 1.5, ER SDE max stage: 2, ER SDE eta: 0.5"))
+        self.assertEqual((started["xsched"].laplace_mu, started["xsamp"].max_stage, started["xsamp"].eta), (0.25, 2, 0.5))
+
+    def test_applied_parameters_keep_only_the_applied_selection(self):
+        params = {"Sampler": "er_sde_reverse_time", "Schedule type": "Laplace", "Hires sampler": TUN,
+                  " hires  SCHEDULE type": "custom", "Laplace mu": "0.25", "Eta": "0.4"}
+        self.assertEqual(applied_sampling_parameters(params, sampler=RT, scheduler="laplace"),
+                         {"Sampler": "er_sde_reverse_time", "Schedule type": "Laplace", "Laplace mu": "0.25", "Eta": "0.4"})
+        self.assertEqual(applied_sampling_parameters(params, sampler="Euler", scheduler="karras"),
+                         {"Laplace mu": "0.25", "Eta": "0.4"})
+        self.assertEqual(applied_sampling_parameters(None, sampler=RT, scheduler=""), {})
+        self.assertIn("Hires sampler", params)                                                  # 입력은 그대로
 
     def test_tunable_does_not_read_the_forge_eta_and_ode_reads_only_the_stage(self):
         host = _Host()

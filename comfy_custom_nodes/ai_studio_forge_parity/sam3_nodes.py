@@ -35,6 +35,7 @@ from .mask_ops import (
     union_masks,
 )
 from . import anima_lllite as _anima_lllite
+from .extra_samplers_register import impact_scheduler_func
 
 
 CATEGORY = "AI Studio/Forge parity/SAM3"
@@ -1429,9 +1430,14 @@ def _restore_faces(image: Any, *, model: Any, clip: Any, vae: Any,
     detailer = mappings.get("FaceDetailer")
     if detailer is None:
         raise RuntimeError("restore_face is enabled but Impact Pack FaceDetailer is unavailable.")
+    # Impact's own sigma builder skips the penultimate-sigma discard of dpmpp_4m_sde / dpmpp_3m_flow_ode;
+    # those two get it through scheduler_func_opt (as on the SAM3 pass itself, which runs ComfyUI's KSampler).
+    scheduler_func = impact_scheduler_func(sampler_name, scheduler)
+    optional = {} if scheduler_func is None else {"scheduler_func_opt": scheduler_func}
     output = _invoke_node(
         detailer,
         getattr(detailer, "FUNCTION", "doit"),
+        **optional,
         image=image,
         model=model,
         clip=clip,

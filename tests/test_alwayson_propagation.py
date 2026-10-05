@@ -41,6 +41,46 @@ def caps(present=(), img2img=None, *, status="ok"):
     return SamExtraCapabilities(status=status, installed=True, scripts=_freeze(scripts))
 
 
+class DropUnreadTests(unittest.TestCase):
+    """FIX-forge(codex:forge — Refine/AUX): 보조 요청의 값 블록은 그 요청의 스케줄러·샘플러로 다시 판정한다(계획 X5)."""
+
+    XS_BLOCK = {"args": [{"laplace_mu": 1.5}]}
+    XSA_BLOCK = {"args": [3, 0.25, False, 0.2, 0.8]}
+
+    def blocks(self):
+        return {PAG: {"args": [True]}, ap.TITLE_EXTRA_SCHEDULERS: self.XS_BLOCK, "extra samplers": self.XSA_BLOCK}
+
+    def test_unconfirmed_drops_value_blocks_no_pass_of_the_request_reads(self):
+        for capabilities in (None, caps(present=()), caps(present=(ap.TITLE_EXTRA_SAMPLERS, ap.TITLE_EXTRA_SCHEDULERS),
+                                                           img2img=())):
+            with self.subTest(capabilities=capabilities):
+                kept, dropped = ap.drop_unread(self.blocks(), {"sampler_name": "Euler", "scheduler": "karras"},
+                                               capabilities)
+                self.assertEqual(list(kept), [PAG])
+                self.assertEqual(dropped, (ap.TITLE_EXTRA_SCHEDULERS, "extra samplers"))
+
+    def test_a_pass_of_the_request_that_reads_the_values_keeps_them(self):
+        refine = {"sampler_name": "Euler", "alwayson_scripts": {"SAM3 Mask": {"args": [
+            {"sam3_enable": True, "sam3_mode": "Inpaint", "sam3_sampler": "ER SDE (Tunable)",
+             "sam3_scheduler": "Laplace"}]}}}
+        kept, dropped = ap.drop_unread(self.blocks(), refine, None)
+        self.assertEqual((list(kept), dropped), ([PAG, ap.TITLE_EXTRA_SCHEDULERS, "extra samplers"], ()))
+        main_only = {"sampler_name": "er_sde_ode", "scheduler": "simple"}
+        kept, dropped = ap.drop_unread(self.blocks(), main_only, None)
+        self.assertEqual((list(kept), dropped), ([PAG, "extra samplers"], (ap.TITLE_EXTRA_SCHEDULERS,)))
+        self.assertIs(kept["extra samplers"], self.XSA_BLOCK)                   # 입력 블록 그대로(복사·변경 없음)
+
+    def test_img2img_confirmed_keeps_them_whatever_the_request(self):
+        confirmed = caps(present=(), img2img=(ap.TITLE_EXTRA_SAMPLERS, ap.TITLE_EXTRA_SCHEDULERS))
+        kept, dropped = ap.drop_unread(self.blocks(), {"sampler_name": "Euler"}, confirmed)
+        self.assertEqual((list(kept), dropped), ([PAG, ap.TITLE_EXTRA_SCHEDULERS, "extra samplers"], ()))
+        self.assertEqual(ap.drop_unread({}, None, None), ({}, ()))
+
+    def test_only_value_rows_have_value_passes(self):
+        self.assertEqual(sorted(title for title, rule in ap.PROPAGATION.items() if rule.value_passes is not None),
+                         sorted((ap.TITLE_EXTRA_SAMPLERS, ap.TITLE_EXTRA_SCHEDULERS)))
+
+
 class ClassificationTests(unittest.TestCase):
     def test_t1_every_registry_script_and_negpip_is_classified_exactly_once(self):
         titles = set(reg.SCRIPTS) | {NEGPIP, "ADetailer"}   # 앱이 내는 확장 밖 제목

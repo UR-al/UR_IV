@@ -32,10 +32,11 @@ for that step, and the noise sampler draws only for an in-window step (zeros, wi
 elsewhere). ``start ≥ end`` is an empty window (no step gets noise). The idea of a σ window for
 ER-SDE's noise is pamparamm/ComfyUI-ppm's (AGPL-3.0); nothing of it was opened or copied.
 
-Behaviour mirrored from sam-extra v0.33.0 ``sam3ext/extra_samplers`` (``params``, ``er_sde``,
-``er_sde_window``: same coercion, the same scalers, the same window rule); the code is this pack's
-own — sam-extra (GPL-3.0) is not imported or copied. ``tests/test_comfy_extra_samplers_parity.py``
-runs both on Forge's k-diffusion module and compares the latents bit for bit.
+Behaviour mirrored from sam-extra v0.33.0 ``sam3ext/extra_samplers`` (``params``, ``er_sde``, ``er_sde_window``:
+same coercion, the same scalers, the same window rule); the code follows sam-extra's (licensed to this pack
+under MIT by its author (THIRD_PARTY_NOTICES.md)); sam-extra is not imported.
+``tests/test_comfy_extra_samplers_parity.py`` runs both on Forge's k-diffusion module and compares the latents
+bit for bit.
 
 Each sampler takes ``kd`` (the k-diffusion module; default ``comfy.k_diffusion.sampling``, resolved
 at call time) so the parity tests can hand it Forge's module. No torch or ComfyUI import at module

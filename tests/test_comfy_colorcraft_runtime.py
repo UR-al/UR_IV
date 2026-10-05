@@ -301,6 +301,51 @@ class ColorcraftOnRealComfyTests(unittest.TestCase):
         self._compare_reports(patch, run)
         self.assertGreater(patch.last_report.edited, 5)
 
+    def test_hires_vae_only_override_grades_with_the_override_vae(self):
+        # Forge reloads the model with the Hires VAE (hr_additional_modules) and the hook encodes the colour
+        # anchors with it; ForgeNeoHiresFix with only vae_name overridden must grade like that (Shift 0 and 3).
+        from comfy_extras.nodes_model_advanced import ModelSamplingSD3
+
+        from comfy_custom_nodes.ai_studio_forge_parity import generation
+
+        config = self._config()
+        fmt = self.latent_formats.Flux()
+        for shift in (0.0, 3.0):
+            with self.subTest(shift=shift):
+                self.setUp()
+                base_vae, override_vae = self.parity._FakeVAE(16, 2), self.parity._FakeVAE(16, 2, seed=9)
+                source = self.nodes.ForgeNeoColorcraft().patch(self._patcher(fmt), base_vae,
+                                                               self._settings_json(config, hires=True))[0]
+                captured = []
+
+                def provider(name, *, method, feature, args=(), kwargs=None):
+                    if name == "VAELoader":
+                        return (override_vae,)
+                    if name == "ModelSamplingSD3":
+                        return ModelSamplingSD3().patch(*args)
+                    raise AssertionError(f"unexpected provider {name}")
+
+                with (
+                    mock.patch.object(generation, "invoke_provider", side_effect=provider),
+                    mock.patch.object(generation, "_common_sample",
+                                      side_effect=lambda m, *a, **k: (captured.append(m) or {"samples": a[7]},)),
+                ):
+                    _output, vae = generation.ForgeNeoHiresFix().run(
+                        source, "positive", "negative", {"samples": torch.zeros(1, 16, 8, 8)}, seed=3, enabled=True,
+                        steps=4, shift=shift, upscale_method="latent:nearest-exact", base_vae=base_vae,
+                        vae_name="other_vae.safetensors",
+                    )
+                (sampled,) = captured
+                self.assertIs(vae, override_vae)
+                self.assertGreater(override_vae.calls, 0)          # anchors encoded again with the override VAE
+                patch = self.host.model_colorcraft_patch(sampled)
+                self.assertIsNot(patch, self.host.model_colorcraft_patch(source))
+                log = self._record(sampled)
+                self._sample(sampled, "euler", five_d=False)
+                run = self._replay(log, config, fmt, hires=True, vae_seed=9)
+                self._compare_reports(patch, run)
+                self.assertGreater(patch.last_report.edited, 5)
+
     def test_nothing_to_grade_returns_the_model_itself(self):
         plain = self._patcher(self.latent_formats.Flux())
         empty = json.dumps(self.parity._settings())

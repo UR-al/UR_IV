@@ -14,7 +14,8 @@ way ``compat.install_forge_scheduler_support`` adds ``beta57``, so every pass th
   ``noise_sampler`` parameter;
 * the name is appended to ``KSAMPLER_NAMES``, ``SAMPLER_NAMES`` and ``KSampler.SAMPLERS`` (each distinct
   list once), and ``dpmpp_4m_sde`` / ``dpmpp_3m_flow_ode`` to ``KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS``
-  (Forge's ``discard_next_to_last_sigma`` option of those two entries);
+  (Forge's ``discard_next_to_last_sigma`` option of those two entries); Impact's ``FaceDetailer`` (ADetailer,
+  SAM3 restore face) keeps its own literal discard list, so those passes hand it ``impact_scheduler_func``;
 * a name another provider already registered is never overwritten (``compat.register_names``): it is
   left alone, logged once and not reported as the pack's — the app refuses a graph that would run a
   different algorithm under it (e.g. Koishi-Star's own ComfyUI node registers ``euler_dy`` /
@@ -157,6 +158,42 @@ def _install(required: bool) -> NameRegistration:
     if registration.published and isinstance(discard, set):
         discard.update(name for name in DISCARD_PENULTIMATE_SIGMA if name in registration.owned)
     return registration
+
+
+def impact_scheduler_func(sampler_name: Any, scheduler: Any) -> Callable[..., Any] | None:
+    """Impact Pack's ``scheduler_func_opt`` (``SCHEDULER_FUNC``) for a pack sampler that drops the penultimate sigma.
+
+    ADetailer and the SAM3 restore-face pass run through Impact's ``FaceDetailer``, whose sigmas come from
+    ``impact_sampling.calculate_sigmas``: its discard list is a literal (``dpm_2``, ``dpm_2_ancestral``,
+    ``uni_pc``, ``uni_pc_bh2``) that never reads ``KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS``. For
+    ``DISCARD_PENULTIMATE_SIGMA`` names in that set (the pack registered them) this returns the function
+    ``separated_sample`` calls instead — ``scheduler_func(model, sampler_name, steps)``: the sigmas
+    ``comfy.samplers.KSampler.calculate_sigmas`` gives for that set (the MODEL's ``model_sampling``, so the
+    Extra Schedulers values count; one step more; the penultimate sigma dropped), as Forge's
+    ``discard_next_to_last_sigma`` does on every pass, the ADetailer one included. Impact slices the denoise
+    window from them as it does for its own discard samplers. Any other sampler -> None (Impact's own rule).
+    """
+
+    name = str(sampler_name)
+    if name not in DISCARD_PENULTIMATE_SIGMA:
+        return None
+    modules = _comfy_modules()
+    if modules is None:
+        return None
+    comfy_samplers = modules[0]
+    discard = getattr(getattr(comfy_samplers, "KSampler", None), "DISCARD_PENULTIMATE_SIGMA_SAMPLERS", None)
+    if not isinstance(discard, (set, frozenset)) or name not in discard:
+        return None
+    scheduler_name = str(scheduler)
+
+    def discard_penultimate_sigmas(model: Any, _sampler_name: Any, steps: Any) -> Any:
+        torch = importlib.import_module("torch")
+        sigmas = comfy_samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler_name,
+                                                 int(steps) + 1)
+        return torch.cat([sigmas[:-2], sigmas[-1:]])
+
+    discard_penultimate_sigmas.sampler_name, discard_penultimate_sigmas.scheduler = name, scheduler_name
+    return discard_penultimate_sigmas
 
 
 def owned_names() -> tuple[str, ...]:

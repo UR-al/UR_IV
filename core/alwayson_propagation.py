@@ -21,6 +21,12 @@ Forge **메인** 요청은 앱 기본값 블록의 출처를 비공개 키 ``PRO
 메인 체인·동결 재게이트·손 재구성). ``WebUIBackend._generate`` 가 요청 전에 떼어(``take_provenance``) Forge 가 DoRA·
 Anima38 블록을 422 로 거절했을 때 알림 수준을 정한다: 앱 기본값 = 정보, 사용자 값·출처 모름 = 경고(P10 검토 2, A2·A6).
 
+**값 블록**(``Rule.value_passes`` — Extra Schedulers·Extra Samplers): 그 값을 읽는 스케줄러·샘플러를 쓰는 패스가 있을
+때만 의미가 있다(계획 X5). 보조 패스 봉투는 스냅샷이 확인하지 못했어도 이 블록을 싣는다 — 보조 요청의 스케줄러·샘플러
+(Refine·SAM3·ADetailer 의 자기 것, 손 재구성의 T2I 것)는 T2I 패널이 아니라 보내는 곳만 안다. 보내는 곳(``WebUIBackend.
+_propagate``·손 재구성 ``_sampling_gate``)이 요청 직전에 ``drop_unread`` 로 그 요청의 패스를 보고, 새 스냅샷이 img2img 에서
+스크립트를 확인하지 못했는데 값을 읽는 패스도 없으면 뺀다(알림 없음 — 쓰지 않는 값). 남은 블록은 게이트가 출처로 정한다.
+
 **모델에 묶인 블록**(``Rule.model_bound`` — Anima38): 블록 내용을 T2I 콤보 모델의 종류로 정했으므로(core/anima38.plan)
 보조 패스는 실제로 쓰는 모델이 봉투의 모델과 같을 때만 보낸다(``drop_model_bound``, critic A7). Forge 보조 요청은
 체크포인트를 지정하지 않아 Forge 에 지금 걸린 체크포인트로 돌고, Comfy 단독 후처리는 저장된 문맥의 모델로 돈다.
@@ -129,6 +135,8 @@ class Rule:
                    설정에 맞춰 스스로 넣는 블록(DoRA·Anima38)만. 사용자가 패널에서 켠 가이던스는 지금처럼 실패·설명한다.
                    알림 수준은 요청의 블록 출처(``PROVENANCE_KEY``)로 정한다 — 앱 기본값 = 정보, 그 밖 = 경고(P10 검토 2)
     model_bound    블록 내용이 T2I 모델 종류로 정해진다(Anima38) — 보조 패스는 실제 모델이 봉투 모델과 같을 때만(A7)
+    value_passes   값 블록(Extra Schedulers·Extra Samplers): 요청 페이로드 → 그 값을 읽는 패스 튜플. 보조 요청은 스냅샷이
+                   img2img 에서 확인하지 못했으면 이것이 빌 때 싣지 않는다(``drop_unread`` — 계획 X5)
     """
 
     passes: frozenset
@@ -141,6 +149,7 @@ class Rule:
     pass_backends: Mapping[str, frozenset] = field(default_factory=lambda: MappingProxyType({}))
     main_retry: bool = False
     model_bound: bool = False
+    value_passes: Optional[Callable[[Any], tuple]] = None
 
     def allows(self, aux: str, backend: str) -> bool:
         if aux not in self.passes:
@@ -202,22 +211,26 @@ PROPAGATION: Mapping[str, Rule] = MappingProxyType({
     TITLE_EXTRA_SCHEDULERS: Rule(
         passes=frozenset(AUX_PASSES), backends=_ALL_BACKENDS, feature="extra_schedulers",
         when_unknown=_unknown(user=SEND, app_default=SKIP), main_retry=True,
+        value_passes=extra_schedulers.value_scheduler_passes,
         reason="process() 가 요청마다 전역 상태를 덮는다(sam3ext/extra_schedulers/settings.py set_active) — 블록 없는 보조 "
                "img2img 는 기본값으로 돌아가 Laplace μ/β·custom 식·Flow Cosmos ρ/σ̃ 가 메인과 달라진다. 값은 그 패스가 "
                "custom·Laplace·Flow Cosmos rho7·Dynamic 일 때만 "
                "쓰이므로 늘 보내도 결과가 같다. 스냅샷이 확인하면 값이 기본값이어도 앱이 스스로 싣는 블록이라(core/"
                "extra_schedulers.plan, 계획 X5) 모르는 Forge 의 422 는 빼고 한 번 더(main_retry). 앱 기본값 블록은 확인 "
-               "전에는 보내지 않는다(Forge 도 블록 없이 같은 기본값으로 돈다)"),
+               "전에는 보내지 않는다(Forge 도 블록 없이 같은 기본값으로 돈다). 봉투는 확인 전에도 싣고 보조 요청은 그 요청의 "
+               "스케줄러가 값을 읽을 때만(drop_unread — Refine·SAM3·ADetailer 는 자기 스케줄러로 돈다)"),
     TITLE_EXTRA_SAMPLERS: Rule(
         passes=frozenset(AUX_PASSES), backends=_ALL_BACKENDS, feature="extra_samplers",
         when_unknown=_unknown(user=SEND, app_default=SKIP), main_retry=True,
+        value_passes=extra_samplers.value_sampler_passes,
         reason="요청 단위 값 — process() 가 요청에 ER SDE 값을 붙이고(블록 없는 요청은 ui() 기본값, scripts/"
                "anima_extra_samplers.py) 그 요청의 모든 패스가 읽는다. 블록 없는 보조 img2img 는 기본값(차수 3·η 1·구간 끔)"
                "으로 돌아 ER SDE 셋의 샘플링이 메인과 달라진다(ADetailer 안쪽 패스만 직전 요청 값 _ACTIVE). 값은 그 패스가 "
                "ER SDE (Reverse-time)·(ODE)·(Tunable) 일 때만 쓰이므로 늘 보내도 결과가 같다. 스냅샷이 확인하면 값이 "
                "기본값이어도 앱이 스스로 싣는 블록이라(core/extra_samplers.plan, 계획 X5 — Extra Schedulers 와 같은 규칙) "
                "모르는 Forge 의 422 는 빼고 한 번 더(main_retry). 앱 기본값 블록은 확인 전에는 보내지 않는다(Forge 도 블록 "
-               "없이 같은 기본값으로 돈다)"),
+               "없이 같은 기본값으로 돈다). 봉투는 확인 전에도 싣고 보조 요청은 그 요청의 샘플러가 값을 읽을 때만"
+               "(drop_unread — Refine·SAM3·ADetailer 는 자기 샘플러로 돈다)"),
     TITLE_SPEED: Rule(
         passes=frozenset(), backends=_ALL_BACKENDS, feature="speed",
         when_unknown=_unknown(user=SEND, app_default=SKIP),   # main_retry 기본 False — Rule 문서의 규칙(사용자가 켠 블록)
@@ -445,6 +458,28 @@ def drop_model_bound(blocks: Mapping, *, envelope_model: Any, actual_model: Any)
     return kept, tuple(dropped)
 
 
+def drop_unread(blocks: Mapping, payload: Any, capabilities: Any) -> tuple:
+    """보조 img2img 요청(Forge 보조 패스·손 재구성)의 값 블록(``Rule.value_passes`` — Extra Schedulers·Extra Samplers)을
+    계획 X5 로 다시 판정한다 → (남긴 블록, 뺀 제목). 스냅샷이 그 스크립트를 img2img 에서 확인했으면 남기고(값이 기본값이어도
+    — 사용자 ui-config 기본값과 무관하게 같은 요청), 아니면(모름·없음) 이 요청의 어느 패스도 값을 읽지 않을 때 뺀다(알림
+    없음 — 쓰지 않는 값). 남은 블록은 게이트가 출처로 정한다(모름: 사용자 값만, 없음: 빼고 사용자 값이면 알림).
+
+    ``payload`` 는 보낼 요청 — 그 요청의 샘플러·스케줄러와 ADetailer·SAM3 블록(전달 블록을 넣기 전이어도 된다). 입력은
+    바꾸지 않는다."""
+    kept: dict = {}
+    dropped = []
+    for title, block in (blocks or {}).items():
+        canonical = canonical_title(title)
+        rule = PROPAGATION.get(canonical) if canonical else None
+        if (rule is not None and rule.value_passes is not None
+                and script_available(capabilities, canonical, img2img=True) is not True
+                and not rule.value_passes(payload)):
+            dropped.append(title)
+            continue
+        kept[title] = block
+    return kept, tuple(dropped)
+
+
 def has_model_bound(blocks: Mapping) -> bool:
     """모델에 묶인 블록이 있나 — 있을 때만 백엔드가 실제 모델을 알아본다(Forge 는 GET 한 번)."""
     for title in (blocks or {}):
@@ -533,7 +568,7 @@ __all__ = [
     "TARGET_AUX", "TARGET_I2I", "TARGET_T2I", "TITLE_COLORCRAFT", "TITLE_DEGRID", "TITLE_DORA", "TITLE_EXTRA_SAMPLERS",
     "TITLE_EXTRA_SCHEDULERS",
     "TITLE_NEGPIP", "TITLE_SPEED", "apply", "aux_label",
-    "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "envelope", "envelope_provenance",
+    "blocks_for", "canonical_title", "drop_missing", "drop_model_bound", "drop_unread", "envelope", "envelope_provenance",
     "final_image_titles", "gate",
     "gate_notices", "has_model_bound", "is_envelope", "main_only_titles", "main_retry_titles", "mark_provenance", "provenance_of", "script_available",
     "take_envelope", "take_provenance",

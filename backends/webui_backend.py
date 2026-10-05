@@ -172,6 +172,35 @@ def _read_retryable(response, parts=None) -> tuple:
     return None, None
 
 
+# Forge 500 본문(JSON)에서 오류 문구가 있는 칸 — modules/api/api.py api_middleware 의 handle_exception 은
+# {"error", "detail", "body", "errors"}, GPU 확인(테스트 Forge 7862, REPORT F1)의 본문은 "errors" 대신 "message". 앞에서부터
+# 처음 맞는 것.
+_ERROR_TEXT_KEYS = ("message", "detail", "errors", "error", "body")
+
+
+def _scheduler_error_line(body) -> Optional[str]:
+    """Forge 거절 본문에 확장 스케줄러 오류('Extra Schedulers: …' — 커스텀 식·시그마 목록을 쓸 수 없다)가 있으면 그 한 줄
+    (core/sam_extra_notices.explain_scheduler_error — 한국어 머리 + 원문), 없으면 None. JSON 이면 오류 문구 칸을 하나씩,
+    아니면 본문 글자를 본다."""
+    from core.sam_extra_notices import explain_scheduler_error
+    texts = [body.get(key) for key in _ERROR_TEXT_KEYS] if isinstance(body, dict) else [body]
+    for text in texts:
+        if isinstance(text, str):
+            line = explain_scheduler_error(text)
+            if line:
+                return line
+    return None
+
+
+def _server_error_line(response) -> Optional[str]:
+    """HTTP 5xx 면 본문을 한 번 읽고(응답을 닫는다 — ``_read_error_body``) 확장 스케줄러 오류 한 줄을 돌려준다. 그 밖·5xx 가
+    아니면 None — 5xx 응답은 본문을 읽었어도 ``raise_for_status`` 가 지금과 같은 오류를 낸다(상태·URL 만 본다)."""
+    status = getattr(response, "status_code", None)
+    if not isinstance(status, int) or status < 500:
+        return None
+    return _scheduler_error_line(_read_error_body(response))
+
+
 def _cancelled(cancel_check: Optional[Callable[[], bool]]) -> bool:
     """중지 요청이 왔나 — ``cancel_check`` 가 없으면 False."""
     return cancel_check is not None and bool(cancel_check())
@@ -344,6 +373,11 @@ class WebUIBackend(AbstractBackend):
                 json=payload, headers=_HEADERS, timeout=600
             )
             status, body = _read_retryable(response, parts)
+            # 확장 스케줄러 오류(500 — 'Extra Schedulers: …')는 그 문구로 실패한다 — 다시 보내도 같다(재시도 없음)
+            line = _scheduler_error_line(body) if status is not None else _server_error_line(response)
+            if line is not None:
+                logger.warning("img2img 후처리 실패(Forge 500): %s", line)
+                raise RuntimeError(line)
             if status is not None:
                 retry = plan_retry(status, body, payload, parts) if attempt < attempts else None
                 self._remember_frozen(retry)
@@ -444,8 +478,9 @@ class WebUIBackend(AbstractBackend):
         """메인 생성의 샘플링 블록 봉투를 이 보조 요청에 싣는다 → (OptionalParts, 알림).
 
         봉투는 클릭한 순간의 T2I 패널(ui/aux_pass_snapshot). 여기서 패스·백엔드 규칙과 조건(DD Hires Pass,
-        SAM3 Mask only)을 적용하고, 요청 직전의 스냅샷(peek — 캐시만)으로 게이트한 뒤 setdefault 로 넣는다 —
-        보조 경로 자신의 SAM3 Mask·ADetailer 는 덮지 않는다. 봉투 키는 요청 JSON 에 들어가지 않는다.
+        SAM3 Mask only)을 적용하고, 값 블록(Extra Schedulers·Extra Samplers)은 이 요청의 스케줄러·샘플러가 값을 읽는지로
+        다시 판정한 뒤(``drop_unread`` — 스냅샷이 확인 못 했으면 계획 X5), 요청 직전의 스냅샷(peek — 캐시만)으로 게이트하고
+        setdefault 로 넣는다 — 보조 경로 자신의 SAM3 Mask·ADetailer 는 덮지 않는다. 봉투 키는 요청 JSON 에 들어가지 않는다.
         """
         from core import alwayson_propagation as ap
         from core.forge_optional_parts import OptionalParts
@@ -459,7 +494,12 @@ class WebUIBackend(AbstractBackend):
                 logger.info("%s: 실제 모델(%s)이 메인 생성 모델(%s)과 같다고 확인하지 못해 전달하지 않음 — %s",
                             ap.aux_label(aux), actual or "모름", envelope.get("model") or "모름", ", ".join(dropped))
         provenance = ap.envelope_provenance(envelope)
-        result = ap.gate(blocks, self._sam_extra_snapshot(), img2img=True, provenance=provenance)
+        snapshot = self._sam_extra_snapshot()
+        # 보조 요청의 스케줄러·샘플러(Refine·SAM3·ADetailer 의 자기 것)는 봉투(T2I 패널)가 모른다 — 이 요청으로 판정한다
+        blocks, unread = ap.drop_unread(blocks, payload, snapshot)
+        if unread:
+            logger.debug("%s: 이 요청의 패스가 읽지 않는 값 블록은 싣지 않음 — %s", ap.aux_label(aux), ", ".join(unread))
+        result = ap.gate(blocks, snapshot, img2img=True, provenance=provenance)
         inserted = ap.apply(payload, result.kept)
         if inserted:
             logger.info("%s: 메인 생성 설정 전달 — %s", ap.aux_label(aux), ", ".join(inserted))
@@ -949,6 +989,10 @@ class WebUIBackend(AbstractBackend):
                 if rejection is None:
                     return result
                 status, body, response = rejection
+                line = _scheduler_error_line(body) if status >= 500 else None
+                if line is not None:   # 확장 스케줄러 오류 — 앱 옵션을 빼고 다시 보내도 같다(재시도 없음)
+                    logger.warning("WebUI 생성 실패(Forge %s): %s", status, line)
+                    return GenerationResult(success=False, error=line)
                 retry = plan_retry(status, body, request_base, parts) if attempt < attempts else None
                 self._remember_frozen(retry)
                 if retry is None:
@@ -1020,6 +1064,12 @@ class WebUIBackend(AbstractBackend):
             status, body = _read_retryable(response, parts)   # 422 → 설명·재시도 판정, 앱 옵션의 500 → 재시도 판정
             if status is not None:
                 return None, (status, body, response)
+            # 그 밖의 5xx 는 본문을 한 번 읽는다 — 확장 스케줄러 오류('Extra Schedulers: …')면 그 문구로 실패(재시도 없음,
+            # GPU 확인 F1: 예전에는 'API 요청 실패: 500 Server Error' 만 보였다)
+            line = _server_error_line(response)
+            if line is not None:
+                logger.warning("WebUI 생성 실패(Forge %s): %s", response.status_code, line)
+                return GenerationResult(success=False, error=line), None
             response.raise_for_status()
         finally:
             with self._generation_state_lock:

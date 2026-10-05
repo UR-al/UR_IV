@@ -1492,6 +1492,52 @@ class ExtraSamplersNoticeTests(_QuietAssumption):
         self.assertEqual([n.code for n in notices],
                          [sn.CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED, sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED])
 
+    def test_window_warning_counts_adetailer_and_sam3_passes_of_the_request(self):
+        """FIX-forge(claude:forge-notices): ADetailer·SAM3 패스만 Reverse-time·Tunable 을 써도 그 안쪽 패스가 같은 값을
+        읽는다 — 0.31·0.32 는 구간을 버리므로 경고한다(메인·Hires 는 결과 infotext 로 본다). ODE 만이면 조용하다."""
+        two = _caps_with_xsamp_argc(2)
+        info = info_of(xsamp_infotext("Euler", keys="ADetailer sampler: ER SDE (Reverse-time), "))
+
+        def payload(**scripts):
+            out = xsamp_payload(eta=1.0, noise_window=True)
+            out["sampler_name"] = "Euler"
+            out["alwayson_scripts"].update(scripts)
+            return out
+
+        adetailer = {"ADetailer": {"args": [True, False, {"ad_model": "face_yolov8n.pt", "ad_use_sampler": True,
+                                                          "ad_sampler": "ER SDE (Reverse-time)"}]}}
+        sam3 = {"SAM3 Mask": {"args": [{"sam3_enable": True, "sam3_mode": "Inpaint", "sam3_sampler": "er_sde_tunable"}]}}
+        for scripts in (adetailer, sam3):
+            with self.subTest(scripts=list(scripts)):
+                [notice] = self._xsamp(info, payload(**scripts), two)
+                self.assertEqual((notice.code, notice.level), (sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED, sn.LEVEL_WARNING))
+        ode = {"ADetailer": {"args": [True, False, {"ad_model": "face_yolov8n.pt", "ad_use_sampler": True,
+                                                    "ad_sampler": LABEL_ODE}]}}
+        mask_only = {"SAM3 Mask": {"args": [{"sam3_enable": True, "sam3_mode": "Mask only",
+                                             "sam3_sampler": "er_sde_tunable"}]}}
+        for scripts in (ode, mask_only, {}):
+            with self.subTest(quiet=list(scripts)):
+                self.assertEqual(self._xsamp(info, payload(**scripts), two), [])
+        self.assertEqual(self._xsamp(info, payload(**adetailer), _caps_with_xsamp_argc(5)), [])
+
+    def test_window_warning_is_quiet_at_eta_zero(self):
+        """FIX-forge(claude:forge-notices): η 0 이면 구간은 어느 판에서도 아무 일도 하지 않는다 — 업데이트 경고 없음."""
+        two = _caps_with_xsamp_argc(2)
+        info = info_of(xsamp_infotext())
+        self.assertEqual(self._xsamp(info, xsamp_payload(eta=0.0, noise_window=True), two), [])
+        [notice] = self._xsamp(info, xsamp_payload(eta=0.01, noise_window=True), two)
+        self.assertEqual(notice.code, sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED)
+
+    def test_window_warning_is_quiet_when_a_result_carries_the_window_key(self):
+        """FIX-forge(claude:forge-notices): 낡은 스냅샷(인자 2개)인데 결과에 'ER SDE noise window' 가 있으면 구간이 돌았다 —
+        '기록 없음'이라고 말하지 않는다(어느 장이든 하나라도)."""
+        two = _caps_with_xsamp_argc(2)
+        window = xsamp_payload(eta=0.5, noise_window=True)
+        self.assertEqual(self._xsamp(info_of(XSAMP_OK), window, two), [])
+        self.assertEqual(self._xsamp(info_of(XSAMP_NO_WINDOW_KEY, XSAMP_OK), window, two), [])
+        [notice] = self._xsamp(info_of(XSAMP_NO_WINDOW_KEY, XSAMP_NO_WINDOW_KEY), window, two)
+        self.assertEqual(notice.code, sn.CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED)
+
     def test_requested_features_read_the_block_like_the_extension(self):
         from core import extra_samplers
         request = sn.requested_features(xsamp_payload(max_stage=2, eta=0.5, noise_window=True))

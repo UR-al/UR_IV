@@ -585,7 +585,8 @@ SCRIPTS = MappingProxyType({
                  "로 미리 알린다). Krea2 는 보내지 않는다. 계산은 Forge 에서 확장이, ComfyUI 에서는 팩 1.7.0 "
                  "ForgeNeoAnimaSpeed 가 한다(같은 블록 — 컴파일러가 메인 패스(base·img2img, 블록의 hires 면 Hires)마다 Detail "
                  "Daemon 뒤에 넣고 디테일러에는 넣지 않는다. 설정 오류·생성 전에 아는 건너뜀(인페인트·마스크·ControlNet·ComfyUI "
-                 "Spectrum — D6·SP-f, 비율 하나)이면 경고와 함께 노드를 뺀다. 런너는 CNS → SPEED → DD 순서로 감싸고 "
+                 "Spectrum — D6·SP-f, 비율 하나)이면 노드를 빼고 그 이유를 Forge 결과와 같은 알림으로 싣는다"
+                 "(core/comfy_compile_notices — speed_skipped·speed_invalid). 런너는 CNS → SPEED → DD 순서로 감싸고 "
                  "Hires 체크포인트·UNET 교체는 팩이 다시 싣는다(hires_carry))",
             comfy=("comfy_custom_nodes/ai_studio_forge_parity/speed_nodes.py:ForgeNeoAnimaSpeed", "comfy_custom_nodes/ai_studio_forge_parity/speed_nodes.py:apply_speed",
                    "comfy_custom_nodes/ai_studio_forge_parity/speed_runner.py:run_speed", "comfy_custom_nodes/ai_studio_forge_parity/speed_schedule.py:build_plan",
@@ -593,6 +594,7 @@ SCRIPTS = MappingProxyType({
                    "core/anima_speed.py:COMFY_NODE_CLASS", "core/comfy_workflow_compiler.py:_speed_state",
                    "core/comfy_workflow_compiler.py:_speed_plan", "core/comfy_workflow_compiler.py:_add_speed",
                    "core/spectrum_settings.py:skips_anima_speed", "core/comfy_metadata.py:_speed_parameters",
+                   "core/comfy_compile_notices.py:compile_warning_notices",
                    "core/comfy_workflow_controls.py:feature_preflight", "core/comfy_compatibility.py:RECIPES",
                    "frontend/src/utils/animaSpeed.ts:COMFY_NOTE"),
             gaps=("P18: XYZ [Anima SPEED] 6축은 앱 XYZ 에 없다",
@@ -647,6 +649,11 @@ SCRIPTS = MappingProxyType({
             "ui/image_metadata_actions.py:restore_sampling_values",
             # 결과 'Schedule type' 이 Laplace·custom·Flow Cosmos 인데 값 기록 없음(다른 확장의 같은 이름 스케줄러) → 알림(P4 규칙)
             "core/sam_extra_notices.py:CODE_XSCHED_NOT_APPLIED", "core/sam_extra_notices.py:explain_scheduler_error",
+            # Forge HTTP 500 본문의 'Extra Schedulers: …'(쓸 수 없는 식·목록·평평한 스케줄)을 생성·보조 패스 오류 문구로 —
+            # 본문을 한 번 읽고 재시도 없이 그 한 줄로 실패한다(GPU 확인 F1)
+            "backends/webui_backend.py:_server_error_line", "backends/webui_backend.py:_scheduler_error_line",
+            # 보조 패스 봉투는 확인 전에도 싣고 보조 요청의 스케줄러로 다시 판정(계획 X5 — Refine·SAM3·ADetailer 자기 스케줄러)
+            "core/alwayson_propagation.py:drop_unread",
             # 결과 infotext 7키를 확장 그룹으로(PNG Info·갤러리·히스토리 — 'laplace'·'custom scheduler'·'flow cosmos')
             "core/image_metadata.py:_EXTENSION_MARKERS",
             # 파라미터 카드 Sampler/Scheduler 줄 아래 값 칸 — 값 스케줄러(laplace·custom·Flow Cosmos 둘)를 쓰는 패스가 있을 때만
@@ -665,7 +672,9 @@ SCRIPTS = MappingProxyType({
                  "X5), 확인 못 했으면 어느 패스가 값 스케줄러(laplace·custom·Flow Cosmos rho7·Dynamic)를 쓸 때만(모르면 사용자 "
                  "값만, 없다고 하면 빼고 알림). "
                  "앱 기본값 = 확장 기본값. 메인 요청과 모든 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같은 블록 — "
-                 "확장 전역 상태가 요청마다 덮이므로. 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). "
+                 "확장 전역 상태가 요청마다 덮이므로(보조 요청은 스냅샷이 확인 못 했으면 그 요청의 스케줄러가 값을 읽을 때만 — "
+                 "drop_unread; 채팅 이미지 편집 i2i 는 싣는 T2I 스케줄러로 판정). 앱이 스스로 싣는 블록이라 메인 422 는 빼고 "
+                 "한 번 더(main_retry). "
                  "Krea2 는 보내지 않는다. 결과에 이 확장의 값 키가 없으면 다른 확장의 같은 이름 스케줄러가 돈 것 — 알림. "
                  "ComfyUI: 팩 1.7.0 이 아홉 이름을 같은 이름으로 KSampler 스케줄러 목록에 등록하고(남의 이름은 덮지 않는다 — "
                  "다른 팩이 먼저 가진 이름이면 컴파일러가 owned_names 로 거절), 블록은 늘 싣는다(REASON_COMFY). 컴파일러는 "
@@ -692,9 +701,7 @@ SCRIPTS = MappingProxyType({
                   "Comfy: SamplerCustom·BasicScheduler 경로는 앱이 만들지 않는다(CUSTOM_SAMPLER_NODES 거절과 같다). Flow "
                   "Cosmos 의 eps/v 안내 줄은 ComfyUI 로그(INFO)로 간다",
                   "custom 식·목록의 미리 검사(check_text)는 σ·스텝 수와 무관한 것만 — 값이 유한·양수인지·평평한 스텝·보간은 "
-                  "생성할 때 Forge('Extra Schedulers: …', HTTP 500)·ComfyUI(노드 오류)가 같은 영어 문구로 멈춘다",
-                  "Forge HTTP 500 본문은 앱 옵션 재시도 때만 읽는다 — 스케줄러 오류 원문(explain_scheduler_error)은 아직 "
-                  "생성 오류 문구에 붙지 않는다"))),
+                  "생성할 때 Forge('Extra Schedulers: …', HTTP 500)·ComfyUI(노드 오류)가 같은 영어 문구로 멈춘다"))),
     # 2026-10-05 앱 노출(보류 → mapped, 계획 A-XSa2): 위치 인자 다섯 블록·정규화·붙여 넣기·infotext·상태 줄 거울(core/
     # extra_samplers), 모든 보조 패스 전달 행(main_retry — 계획 X5), 결과 알림(Dy 보조 스텝·잡음 구간 건너뜀·옛 sam-extra 의
     # 구간 미지원 — X10). 상수 계약은 SEMANTIC_PINS extra_samplers_*. 2026-10-05 ComfyUI 연결(계획 C1·C3·C6): 팩 1.7.0 의
@@ -738,8 +745,10 @@ SCRIPTS = MappingProxyType({
             # time·Tunable 이면 η·잡음 구간 — Forge 'Eta' 대체 포함)을 함께 되살린다
             "core/extra_samplers.py:restore_from_infotext", "ui/extra_samplers_ui.py:restore_from_metadata",
             "ui/image_metadata_actions.py:restore_sampling_values",
-            # 보조 패스 전달(모든 보조 img2img — 값은 요청마다 process() 가 정한다)·기능 스냅샷(인자 수 → 잡음 구간 지원)
+            # 보조 패스 전달(모든 보조 img2img — 값은 요청마다 process() 가 정한다)·기능 스냅샷(인자 수 → 잡음 구간 지원).
+            # 봉투는 확인 전에도 싣고 보조 요청의 샘플러로 다시 판정(계획 X5 — Refine·SAM3·ADetailer 자기 샘플러)
             "core/alwayson_propagation.py:TITLE_EXTRA_SAMPLERS", "core/alwayson_propagation.py:PROPAGATION",
+            "core/alwayson_propagation.py:drop_unread",
             "core/sam_extra_capabilities.py:TITLE_EXTRA_SAMPLERS", "core/sam_extra_capabilities.py:POSITIONAL_SPECS",
             # 결과 'Extra Samplers status'(Dy 보조 스텝·잡음 구간 건너뜀 — 정보)·옛 sam-extra 의 잡음 구간 미지원(X10) → 알림
             "core/sam_extra_notices.py:CODE_EXTRA_SAMPLERS_SUBSTEPS_SKIPPED",
@@ -757,12 +766,15 @@ SCRIPTS = MappingProxyType({
                  "기본값과 무관하게 같은 요청 — 계획 X5, Extra Schedulers 와 같은 규칙), 확인 못 했으면 어느 패스가 ER SDE 셋 "
                  "중 하나를 쓸 때만(모르면 사용자 값만, 없다고 하면 빼고 알림). 앱 기본값 = 확장 기본값(3·1.0·구간 끔). 메인 "
                  "요청과 모든 보조 img2img(Refine·SAM3·ADetailer·손 재구성)에 같은 블록 — 블록 없는 요청은 ui() 기본값으로 "
-                 "돌므로. 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). Krea2 는 보내지 않는다. 연결된 "
-                 "sam-extra 가 인자 2개(0.31·0.32)이고 잡음 구간을 켰으면 결과 알림이 구간이 빠졌다고 말한다. ComfyUI 는 블록을 늘 "
+                 "돌므로(보조 요청은 스냅샷이 확인 못 했으면 그 요청의 샘플러가 값을 읽을 때만 — drop_unread; 채팅 이미지 편집 "
+                 "i2i 는 싣는 T2I 샘플러로 판정). 앱이 스스로 싣는 블록이라 메인 422 는 빼고 한 번 더(main_retry). Krea2 는 "
+                 "보내지 않는다. 연결된 sam-extra 가 인자 2개(0.31·0.32)이고 잡음 구간을 켰고 η > 0 이면 결과 알림이 구간이 "
+                 "빠졌다고 말한다(메인·Hires·ADetailer·SAM3 패스, 결과에 'ER SDE noise window' 가 없을 때). ComfyUI 는 블록을 늘 "
                  "싣고(REASON_COMFY) 컴파일러가 값이 기본값과 다를 때만 ForgeNeoExtraSamplerSettings(입력 5개)를 패스들이 "
                  "쓰는 모델 스택의 가이던스 앞에 넣는다(기본 그래프·ADetailer/SAM3 LoRA 분기·사용자 워크플로 — R9). DPM++ "
                  "4M SDE 의 Automatic 은 exponential(U4), 4M SDE·3M flow ODE 는 끝에서 두 번째 σ 를 버린다. Spectrum 과 "
-                 "Euler (SMEA) Dy (CFG++), CFG++ 샘플러의 CFG > 2 는 컴파일 경고(정보). Hires 체크포인트 교체는 팩이 값을 "
+                 "Euler (SMEA) Dy (CFG++)는 컴파일 경고 → Forge 와 같은 결과 알림(정보 — core/comfy_compile_notices), "
+                 "CFG++ 샘플러의 CFG > 2 는 로그만(Forge 도 콘솔만 — Sampler 줄 힌트가 생성 전에 보인다). Hires 체크포인트 교체는 팩이 값을 "
                  "다시 싣는다(hires_carry). PNG 에는 Forge 와 같은 ER SDE 키(메인·Hires 만)",
             comfy=("comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_nodes.py:ForgeNeoExtraSamplerSettings",
                    "comfy_custom_nodes/ai_studio_forge_parity/extra_samplers_register.py:install_extra_samplers",
@@ -776,6 +788,7 @@ SCRIPTS = MappingProxyType({
                    "core/comfy_workflow_compiler.py:_check_pack_sampler_names",
                    "core/comfy_workflow_compiler.py:_check_pack_owner",
                    "core/comfy_workflow_compiler.py:_extra_samplers_warnings",
+                   "core/comfy_compile_notices.py:compile_warning_notices",
                    "core/comfy_metadata.py:_extra_samplers_parameters", "core/comfy_workflow_controls.py:feature_preflight",
                    "frontend/src/utils/extraSamplers.ts:COMFY_PARAMS_NOTE"),
             gaps=("P18: XYZ [Extra Samplers] 세 축(max stage·η·잡음 구간)은 앱 XYZ 에 없다(Sampler 축은 있다)",
@@ -787,7 +800,10 @@ SCRIPTS = MappingProxyType({
                   "extra_concat·Spectrum). 마스크 패스는 ComfyUI KSamplerX0Inpaint 규칙으로 섞인다",
                   "Restart (flow): Forge 는 재시작 구간에서 프롬프트 편집 스텝 카운터를 되감는다 — ComfyUI 에는 카운터가 "
                   "없다(같은 결과, 표시만 다름)",
-                  "UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음(UniPC 와 같음)"))),
+                  "UniPC bh2: 같은 알고리즘, 비트 동일은 주장하지 않음(UniPC 와 같음)",
+                  "ADetailer 만 ER SDE 를 쓰는 생성(메인·Hires 는 다른 샘플러): 확장이 ER SDE 값(차수·η·잡음 구간)을 "
+                  "infotext 에 적지 않는다 — 값은 ADetailer 안쪽 패스에 닿지만(10-05 GPU 확인 O3) 'ER SDE …' 키가 없어 "
+                  "'이 설정으로 생성'·붙여 넣기가 되살릴 수 없다(메인·Hires 샘플러만 본다)"))),
     "SAM Extra Anima sparse LoRA": _script(
         file="scripts/anima_lora_blocks.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
         classification=ignored("N7 — 인자 0개인 자동 훅이라 페이로드가 필요 없다. 옵션은 OPTIONS 의 "
@@ -2057,7 +2073,6 @@ _COMFY_TWIN_ROWS = (
     ("speed_arg_names", "speed_nodes:ARG_NAMES", "ForgeNeoAnimaSpeed 설정 이름"),
     ("speed_defaults", "speed_nodes:DEFAULTS", "ForgeNeoAnimaSpeed 기본값"),
     ("speed_aliases", "speed_nodes:ARG_ALIASES", "ForgeNeoAnimaSpeed 설정 별칭"),
-    ("speed_infotext_key", "speed_nodes:KEY", "콘솔·status 머리"),
     *((f"speed_{name.lower()}", f"speed_schedule:{name}", "speed_schedule.build_plan")
       for name in ("MODES", "THRESHOLDS", "TRANSFORMS", "PRESET_NAMES", "PRESETS", "REFERENCE_LATENT")),
     ("speed_custom_default_a", "speed_schedule:CUSTOM_DEFAULT_A", "speed_schedule.build_plan"),

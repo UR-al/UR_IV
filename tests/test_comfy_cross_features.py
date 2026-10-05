@@ -614,6 +614,29 @@ class CrossFeaturesOnRealComfyTests(unittest.TestCase):
                         1e-06, 1.0 - schedule[handoff.step].item() * 0.1 * 3.0)
                     self.assertTrue(torch.equal(first_full["t"][:1], expected.reshape(1)))
 
+    def test_stock_sampler_keeps_the_suites_cns_ahead_of_speed(self):
+        # A custom workflow's KSampler/KSamplerAdvanced does not re-assert CNS (only ForgeNeoKSamplerCNS and
+        # ForgeNeoHiresFix do), so the guidance suite's CNS, applied before Detail Daemon and SPEED, must stay
+        # outermost by itself: CNS -> SPEED -> DD, the same image as the default graph's sampler node gives.
+        dd_json = json.dumps(DD_VALUES)
+        for sampler_name in ("dpmpp_2m_sde", "dpmpp_sde", "euler_ancestral"):
+            with self.subTest(sampler=sampler_name):
+                self.setUp()
+                suite = self.cns.apply_cns(self._patcher(), 1.0, 0.5, 2.0)
+                stock = self._speed(self.dd.ForgeNeoAnimaDetailDaemon().patch(suite, True, dd_json)[0])
+                self.assertEqual(list(stock.wrappers[self.sampler_sample]),
+                                 [self.cns.CNS_WRAPPER_KEY, self.speed.SPEED_WRAPPER_KEY, self.dd.DD_WRAPPER_KEY])
+                node = self.cns.apply_cns(stock, 1.0, 0.5, 2.0)          # ForgeNeoKSamplerCNS re-asserting it
+                plain = self._speed(self.dd.ForgeNeoAnimaDetailDaemon().patch(self._patcher(), True, dd_json)[0])
+                sigmas = self._sigmas(stock)
+                out_stock, _, _ = self._sample(stock, sampler_name, sigmas)
+                self.assertTrue(self._speed_status(stock).startswith("applied (transition)"),
+                                self._speed_status(stock))
+                out_node, _, _ = self._sample(node, sampler_name, sigmas)
+                out_plain, _, _ = self._sample(plain, sampler_name, sigmas)
+                self.assertTrue(torch.equal(out_stock, out_node))
+                self.assertFalse(torch.equal(out_stock, out_plain))      # CNS coloured the noise
+
 
 if __name__ == "__main__":
     unittest.main()
