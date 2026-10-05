@@ -27,7 +27,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
 
 - 5번 메시지 계약 중 `wire_tipo` 입력 순서, `MODES`/`LENGTHS`, `REFERENCE_ARG_KEYS` (P19·P20 이 Gradio 방식을 고를 때 추가). `_BRIDGE_JS` 의 `sam3-add-lora` 메시지 모양은 의미 핀 `lora_bridge_message` 가 본다.
 - 6번 앱 내부 커버리지: 모든 `SAM3_KEYS` 가 `_build_sam3_settings` 에서 읽히고, 프록시가 있고, 저장·복원되고, `Sam3MaskCard.vue` 나 `Sam3ControlNetPanel.vue` 에 바인딩되는지. 위치 spec 키가 `components/guidance/*Section.vue`(P0-B 분할 뒤 칸이 있는 곳, `AnimaGuidancePanel.vue` 는 섹션을 놓는 틀) 에 모두 바인딩되는지. 지금 레지스트리는 섹션마다 켜기 키 하나만 참조로 본다.
-- 7번 Comfy: mapped 제목마다 `comfy_workflow_compiler` 가 블록을 쓰거나 unsupported 로 선언하는지. 지금 `comfy=` 참조는 파일과 심볼이 있는지만 본다. `SEMANTIC_PINS` 의 Comfy 미러는 핀마다 손으로 건다(`dd_sigma_scale_comfy`, `degrid_*_comfy` — 팩 상수를 `app` 으로 보는 두 번째 핀). 미러가 빠진 핀을 자동으로 찾지는 않는다.
+- 7번 Comfy: mapped 제목마다 `comfy_workflow_compiler` 가 블록을 쓰거나 unsupported 로 선언하는지. 지금 `comfy=` 참조는 파일과 심볼이 있는지만 본다. `SEMANTIC_PINS` 의 Comfy 미러는 핀마다 손으로 건다(`<id>_comfy` — 팩 상수를 `app` 으로 보는 두 번째 핀. `dd_sigma_scale_comfy`, `degrid_*_comfy`, 2026-10-05 부터 네 기능의 `xsched_*`·`extra_samplers_*`·`speed_*`·`colorcraft_*` 와 공유 표시 `shared_*`). `ComfyPackMirrorPinTests` 는 쌍둥이마다 짝 핀이 있고 같은 대상을 보는지, 공유 표시 셋이 팩에 한 번만 있는지, 손으로 적은 팩 상수 목록(모듈별)에 모두 쌍둥이가 있는지 본다. 그 목록에 없는 새 팩 상수를 자동으로 찾지는 않는다.
 - `UI_ONLY_FEATURES` 는 등록된 함수가 그 파일에 있는지만 보는 한 방향 검사다. 새 Gradio 이름 엔드포인트는 잡지 않는다.
 
 ### 분류 규칙
@@ -42,7 +42,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
 ## 체크리스트: 확장이 업데이트되면
 
 1. **무엇이 바뀌었는지 본다.**
-   - `git -C C:\sd-webui-forge-classic\extensions\forge_sam3_extension log --oneline 818b8fe..HEAD`
+   - `git -C C:\sd-webui-forge-classic\extensions\forge_sam3_extension log --oneline <EXT_COMMIT_AUDITED>..HEAD` (앞 커밋은 `core/sam_extra_contract.EXT_COMMIT_AUDITED` — 2026-10-05 에 `d05afd9`)
    - `git -C <확장> status` (작업 트리가 dirty 이면 커밋 해시가 실제 코드를 대표하지 못한다)
    - `CHANGELOG.md` 맨 위 항목과 `sam3ext/__version__.py`
    - 확장 저장소는 사용자 것이다. 앱 작업 중에는 확장 파일을 고치거나 git 상태를 바꾸지 않는다.
@@ -65,8 +65,13 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
    ```
    확장이 다른 곳에 있으면 `$env:AISTUDIO_FORGE_EXTENSION_DIR = '<확장 루트>'` 로 지정한다. 지정하면 그 경로만 본다. 경로가 틀리면 다른 설치로 대신하지 않고 skip 한다(강제 모드면 실패). skip 이유에 지정한 경로가 나온다.
 
+   Colorcraft·Anima SPEED·Extra Schedulers·Extra Samplers 는 앱 코어 테스트(`tests.test_colorcraft_spec_parity`, `tests.test_anima_speed`, `tests.test_extra_schedulers_core`, `tests.test_extra_samplers_core`)와 노드 팩 패리티 테스트(`tests.test_comfy_colorcraft_parity`, `tests.test_comfy_speed_parity`, `tests.test_comfy_extra_schedulers_parity`, `tests.test_comfy_extra_samplers_parity` — torch, CPU)가 설치된 확장 코드를 불러 같은 입력의 값과 오류 문구를 비교한다. 확장의 계산이나 문구가 바뀌면 이 테스트가 먼저 깨진다. 6번 전체 실행에 들어 있다.
+
 4. **실패 항목을 하나씩 처리한다.** 메시지의 `+` 는 새 항목, `-` 는 사라진 항목이다.
    - **새 항목**(스크립트, 인자, 라우트, 옵션, 축, 파일, 플래그): 레지스트리에 mapped, ignored(사유), deferred(패키지와 사유) 중 하나로 적는다. mapped 로 적는다면 앱 spec, 카드 UI, 페이로드, Comfy 미러까지 함께 고친다. alwayson 스크립트면 `core/alwayson_propagation.py` 의 `PROPAGATION`(보조 패스에 보냄 — 패스·백엔드·모를 때 규칙과 사유)이나 `NEVER`(보내지 않음 — 사유) 중 한 곳에 분류한다(`tests/test_alwayson_propagation.py` 가 빠진 제목을 잡는다). 샘플링 블록은 `ui/sampling_blocks.py` 의 기여자로 만든다. Forge 옵션이면 요청 중에 읽는 옵션인지(체크박스 = bool, 라디오 = 선택지 값 문자열) 보고, 앱이 요청마다 덮어쓸 것이면 `core/forge_override_settings.SPECS`·`frontend/src/utils/forgeOptionOverrides.ts` 에 한 줄씩 더하고(기본은 'Forge 설정 따름' — 키를 보내지 않는다. 라디오는 `choices` 에 확장 순서대로 (값, 앱 라벨)을 적는다) 읽는 쪽 상수를 `SEMANTIC_PINS` 에 건다. `test_p10_option_specs_match_installed_source` 가 기본값·infotext·컴포넌트(Checkbox/Radio)·라디오 선택지 값(순서까지)·onchange 를 소스와 맞대 본다. 확장 OptionInfo 에 `infotext=` 가 없으면 스펙도 `''` 다(런타임이 직접 쓰는 infotext 키와 헷갈리지 않는다 — VAE DeGrid 정밀도). 라디오 값은 앱 상수에서 가져오고 그 상수를 핀으로 건다(`degrid_device_*`·`degrid_precision_*`).
+   - **샘플러·스케줄러 이름이 늘거나 바뀜**(`sam3ext/extra_samplers/registry.py`, `sam3ext/extra_schedulers/registry.py`): Forge 콤보는 라이브 목록이라 새 이름이 저절로 보이지만, 그 이름이 읽는 값과 ComfyUI 이름은 앱 표에 있다. 앱 코어 표(`core/extra_samplers.py` 의 `LABEL_*`·`ALIASES`·`COMFY_NAMES`·`PACK_SAMPLERS`/`CORE_SAMPLERS`·종류 표, `core/extra_schedulers.py` 의 이름·라벨·값 스케줄러 표), TS 거울(`frontend/src/utils/extraSamplers.ts`·`extraSchedulers.ts` — 미러 테스트가 맞대 본다), 컴파일러 별칭 표(`_FORGE_SAMPLER_ALIASES`·`_FORGE_SCHEDULER_ALIASES`)와 팩 `generation._AD_SAMPLER_ALIASES`·`_AD_SCHEDULER_ALIASES`(`tests/test_comfy_sampler_aliases.py` 가 둘을 같게 묶는다)를 함께 고친다. ComfyUI 코어에 같은 계산이 있으면 별칭 행만 더하고, 없으면 팩이 등록한다(아래 'ComfyUI 동등성(샘플링 중 기능)' 1번). 끝에서 두 번째 σ 를 버리는 샘플러면 컴파일러 `_PENULTIMATE_SIGMA_DISCARD_SAMPLERS` 와 `core/extra_samplers.COMFY_DISCARD_PENULTIMATE`(팩이 KSampler 의 버림 집합에 더한다)에도 넣는다.
+   - **위치 인자가 뒤에 붙음 · dict 블록의 키가 늘어남**(0.33.0: Extra Samplers 인자 2 → 5, Extra Schedulers 키 5 → 8): 아래 '블록 모양과 확장 버전'을 따른다. 앱은 새 수를 늘 보내므로, 옛 확장이 받으면 무엇이 버려지는지와 새 확장이 옛 블록을 받으면 빠진 칸이 예전 동작과 같은 기본값인지를 먼저 확인한다. 위치 인자면 `core/sam_extra_capabilities.POSITIONAL_SPECS` 에 앱 순서를 적어 두어 인자가 적은 Forge 에 'args_fewer' 경고('무시될 기능: …' — 접두가 다른 칸의 묶음 이름은 `_KEY_GROUPS`)가 나가게 한다.
+   - **팩 쌍둥이 핀이 깨짐**(`<id>_comfy`): 앱 노드 팩이 확장 값을 그대로 적어 둔 상수가 확장과 달라졌다. 팩 상수를 고치고 그 기능의 팩 패리티 테스트를 돌린다. 팩 파일이 바뀌면 다음 ComfyUI 생성에서 다시 설치되고 ComfyUI 재시작이 필요하다(아래 '노드 팩 설치'). 계산이 바뀌었으면 팩 버전도 올린다.
    - **사라진 항목**: 앱 UI, 페이로드, 저장된 설정값에서 쓰는 곳을 정리한다. 옛 저장값을 어떻게 옮길지 정한 뒤 레지스트리에서 지운다.
    - **기본값, 범위, 선택지, 라벨이 바뀜**(`test_arg_shapes`, 스펙 비교 테스트): CHANGELOG 와 코드로 **의미**가 바뀌었는지 먼저 확인한다. 그다음 앱 spec 을 고치거나, 일부러 다르게 두는 것이면 `KNOWN_DIFFS` 에 사유와 함께 적는다. 확인이 끝나면 메시지가 알려 준 새 해시로 `shape` 를 바꾼다.
    - **`KNOWN_DIFFS` 에 있는데 더는 차이가 없음**: 작업 패키지가 고쳤다는 뜻이다. 그 항목을 지운다.
@@ -90,32 +95,106 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
    cd frontend; npm run test; npm run test:node; npm run type-check; npm run build
    ```
 
-7. **결과 픽셀이 바뀌는 항목은 GPU 로 확인한다.** 기본값, 배율, 인자 의미가 바뀐 기능(가이던스, SAM3 인페인트, Anima 3.8B, DoRA 등)은 같은 시드로 Forge UI 결과와 앱 결과를 비교해야 한다. 이 PC 의 GPU 는 학습 작업으로 바쁜 경우가 많다. **실행하기 전에 사용자에게 묻고, 쓸 VRAM 을 먼저 밝힌다.** 실행 중인 학습 프로세스는 건드리지 않는다.
+7. **결과 픽셀이 바뀌는 항목은 GPU 로 확인한다.** 기본값, 배율, 인자 의미가 바뀐 기능(가이던스, SAM3 인페인트, Anima 3.8B, DoRA 등)은 같은 시드로 Forge UI 결과와 앱 결과를 비교해야 한다. 이 PC 의 GPU 는 학습 작업으로 바쁜 경우가 많다. **실행하기 전에 사용자에게 묻고, 쓸 VRAM 을 먼저 밝힌다.** 실행 중인 학습 프로세스는 건드리지 않는다. 사용자 Forge(7860)는 쓰지 않고(VRAM 이 모자라면 그 모델을 내릴지 사용자에게 묻는다), 별도 포트(7862)에 자기 `--ui-settings-file`·`--ui-config-file` 을 준 테스트 Forge 를 띄운다. 설치 폴더가 같아 Forge 루트의 `params.txt` 를 덮으므로 먼저 백업하고 끝나면 되돌린다. 멈출 때는 우리가 띄운 PID 의 프로세스 트리만 멈춘다(트리를 걸을 때 이미 본 PID 를 기억한다 — Windows 는 PID 를 다시 써서 고리가 생길 수 있다). 2026-10-05 의 기준 결과는 아래 'GPU 대조 결과'에 있다.
 
 8. **커밋한다.** `/ship` 으로 한국어 conventional 메시지를 쓴다. 예: `feat: sam-extra 0.31.0 동기화 — …`. 픽스처, 레지스트리, 앱 수정을 같은 커밋에 넣어 기준 버전이 어긋나지 않게 한다.
 
 ## 새 always-on 스크립트를 앱에 노출할 때
 
-VAE DeGrid(2026-10-01, 보류 → mapped)를 예로 든다. 같은 순서를 따르면 Forge 와 ComfyUI 가 같은 결과를 낸다.
+VAE DeGrid(2026-10-01, 보류 → mapped)를 예로 든다. 같은 순서를 따르면 Forge 와 ComfyUI 가 같은 결과를 낸다. 2026-10-05 의 네 기능(Colorcraft·Anima SPEED·Extra Schedulers·Extra Samplers, 앱 노드 팩 1.7.0)이 더한 모양은 '블록 모양과 확장 버전'부터 그 아래 절에 있다.
 
 ### 샘플링 블록과 전달 규칙
 
 - 블록은 `ui/sampling_blocks.py` 의 기여자(`CONTRIBUTORS`)로 만든다. 메인 체인(T2I·I2I·인페인트·채팅·만화 컷·XYZ·시드 탐색·대기열)과 보조 패스 봉투가 같은 빌더를 쓴다.
 - 제목은 `core/alwayson_propagation.py` 의 `PROPAGATION` 이나 `NEVER` 에 둔다. 제목 문자열은 앱 상수 하나에서만 나오게 한다(`core.vae_degrid.SCRIPT_NAME` — 기능 스냅샷·알림 표·컴파일러는 그 상수를 쓰고, AST 테스트가 리터럴 사본을 잡는다).
-- **`PROPAGATION` 의 `passes=frozenset()` = 최종 이미지 블록.** 확장이 저장 직전에 이미지마다 한 번 도는 후처리(`postprocess_image_after_composite`)라 메인 요청에만 싣는다. 보조 패스(Refine·단독/배치 SAM3·ADetailer·손 재구성)는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸린다. `blocks_for` 는 어느 보조 패스에도 주지 않고, `final_image_titles()` 가 이 제목들을 돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때). 그래도 `PROPAGATION` 행이라 메인 게이트·동결 재게이트·봉투 모양(T15 — 메인 체인과 같은 봉투)은 다른 샘플링 블록과 같다. 기여자는 보조 봉투용 호출에도 메인과 같은 블록을 알림 없이 돌려준다.
+- **`PROPAGATION` 의 `passes=frozenset()` = 메인 요청 전용 블록.** 두 가지가 있다. VAE DeGrid 는 최종 이미지 블록이다 — 확장이 저장 직전에 이미지마다 한 번 도는 후처리(`postprocess_image_after_composite`)다. Anima SPEED(샘플러 래퍼 — 메인 요청의 base·img2img 패스와, 블록의 `hires` 가 켜졌으면 Hires 패스)와 Colorcraft(샘플링 중 색 보정 — 확장도 SAM3·ADetailer 내부 패스에서는 붙지 않는다)는 메인 생성의 샘플링에만 거는 블록이다. 보조 패스(Refine·단독/배치 SAM3·ADetailer·손 재구성)는 각자 새 요청이라 넣으면 이미 처리된 이미지에 한 번 더 걸리거나 메인 생성과 다른 샘플링이 된다. `blocks_for` 는 어느 보조 패스에도 주지 않고, `main_only_titles()`(옛 이름 `final_image_titles` 는 별칭)가 이 제목들을 돌려준다(Comfy 단독 후처리가 저장된 문맥에서 뗄 때). 그래도 `PROPAGATION` 행이라 메인 게이트·동결 재게이트·봉투 모양(T15 — 메인 체인과 같은 봉투)은 다른 샘플링 블록과 같다. 기여자는 보조 봉투용 호출에도 메인과 같은 블록을 알림 없이 돌려준다. SPEED·Colorcraft 를 I2I 에도 걸지는 카드 토글(기본 끔)이 정한다. ComfyUI 그래프도 같은 모양이다(아래 'ComfyUI 동등성(샘플링 중 기능)' 6번).
 - 사용자가 켠 블록은 문서화된 규칙을 따른다: 기능 스냅샷이 '없다'고 하면 게이트가 빼고 `block_not_sent` 알림, 모르면 보낸다(`when_unknown user=SEND`, `main_retry=False` — 없는 Forge 는 422 설명). 앱 기본값으로 넣는 블록만 모를 때 빼고 422 재시도(`main_retry`)를 쓴다(DoRA·Anima38).
+- **값 블록**(Extra Schedulers·Extra Samplers — 계획 X5): 특정 스케줄러·샘플러가 읽는 값만 담는 블록이다. 확장 `process()` 가 요청마다 값을 정하고(블록 없는 요청은 `ui()` 기본값) 그 요청의 모든 패스가 읽으므로, 메인 요청과 모든 보조 패스에 보낸다(`passes=AUX_PASSES`). 값은 그 이름을 쓰는 패스만 읽으므로 늘 보내도 결과가 같다. 기능 스냅샷이 스크립트를 확인하면 값이 기본값이어도 늘 싣는다 — XYZ 의 Sampler·Scheduler 칸이 그 이름으로 바꾸거나 사용자 `ui-config.json` 이 슬라이더 기본값을 바꿔도 같은 요청이 된다. 확인하지 못했으면 어느 패스가 그 값을 읽는 이름을 쓸 때만 싣고(`passes_from_widgets`·`value_scheduler_passes`), 값이 확장 기본값과 같으면 출처가 앱 기본값이라 게이트가 뺀다(`when_unknown user=SEND, app_default=SKIP`). 앱이 스스로 싣는 블록이므로 `main_retry=True` 다. ComfyUI 에서는 `plan()` 이 늘 블록을 주고 노드는 컴파일러가 필요할 때만 넣는다(아래 'ComfyUI 동등성(샘플링 중 기능)' 6번). 2026-10-05 GPU 2부에서 앱이 늘 보내는 기본값 블록 `[3, 1.0, false, 0.2, 0.8]` 의 이미지는 블록 없는 이미지와 md5 가 같았다.
 - 실패가 HTTP 오류가 아니라 infotext 에만 남는 기능은 이미지마다 결과 알림을 만든다(`core/sam_extra_notices.py` — `n/m 장`, 오류 종류별로 묶음). 결과 infotext 키는 `core/image_metadata._EXTENSION_MARKERS` 로 확장 그룹에 넣는다.
+
+### 블록 모양과 확장 버전
+
+앱은 확장이 받는 형식 하나를 골라 늘 같은 모양으로 보낸다. 형식마다 옛 확장이나 새 확장이 받았을 때 일어나는 일이 다르다. 칸이 새로 생기면 두 가지를 먼저 본다 — 옛 확장이 그 칸을 버릴 때 결과가 달라지는가, 새 확장이 옛 블록을 받을 때 빠진 칸의 기본값이 예전 동작인가.
+
+- **위치 인자, 뒤에 늘어남**(Extra Samplers — 0.33.0 에서 2 → 5, 계획 X10): 앱은 늘 다섯을 보낸다(`core/extra_samplers.as_block`). Forge API 는 설치된 스크립트가 가진 수만큼만 넘기므로(`modules/api/api.py` 의 `min(args_to − args_from, len(args))`) 0.31·0.32 는 뒤 셋(잡음 구간)을 오류 없이 버린다. 결과가 달라지는 칸이라 알린다: 스냅샷의 `live_argc` 가 다섯보다 적고 구간이 켜져 있으면(`window_unsupported`) 카드 줄과 결과 알림(`CODE_EXTRA_SAMPLERS_WINDOW_UNSUPPORTED`)이 '잡음 구간은 sam-extra 0.33.0 이상에서만 적용됩니다'(`WINDOW_UNSUPPORTED_TEXT`)라고 말한다. 반대로 0.33.0 이 옛 두 개 블록을 받으면 뒤 셋은 `ui()` 기본값(구간 끔)이라 결과가 그대로다. ComfyUI 노드 `ForgeNeoExtraSamplerSettings` 도 값 입력이 다섯이고, 컴파일러는 옛 프리셋·기록의 두 개 블록을 구간 기본값으로 읽는다(`parse_script_block`).
+- **dict 한 개, 키가 늘어남**(Extra Schedulers — 0.33.0 에서 키 5 → 8, Flow Cosmos ρ·σ̃ max·σ̃ min): 앱은 늘 키 여덟을 보낸다(`core/extra_schedulers.as_block`). 키 이름으로 보내므로 Forge 가 캐시한 위치 기본값이나 사용자 `ui-config.json` 과 무관하게 같은 뜻이다. Forge API 는 원소 하나짜리 목록을 스크립트 인자 수와 상관없이 넘기고, 0.31·0.32 의 `settings.coerce` 는 아는 키 다섯만 읽어(`raw.get`) 나머지 셋을 **알림 없이** 버린다. 알림을 두지 않은 이유: 그 값을 읽는 스케줄러(Flow Cosmos rho7·Dynamic)가 같은 0.33.0 에 들어와 옛 판에는 없다. 앱의 Forge 스케줄러 콤보는 라이브 목록이고, 붙여 넣은 'Flow Cosmos rho7' 은 그런 콤보에서 고르지 못해 지금 값을 두고 경고한다(`core/preset_choice.match_scheduler`). 0.33.0 이 옛 블록(키 다섯·위치 인자 다섯 이하·블록 없음)을 받으면 셋은 기본값 ρ 7 · σ̃ 0.002~80 이고 0.33.0 의 고정 목록과 비트까지 같다(`tests/test_extra_schedulers_core.FlowCosmosOracleTests`). 새 키를 옛 판의 무언가가 읽는다면 이 규칙은 맞지 않는다 — 위치 인자처럼 스냅샷으로 알린다. ComfyUI 노드 `ForgeNeoExtraSchedulers` 는 여덟 칸이 모두 필수 입력이다. ComfyUI 는 빠진 필수 입력과 범위 밖 값을 거절하므로 컴파일러가 앱에서 자른 값 여덟을 다 보낸다. 1.7.0 이 처음 내놓는 노드라 필수로 둘 수 있었다 — 이미 나간 노드에 입력을 더할 때는 저장된 옛 그래프를 먼저 생각한다.
+- **dict 한 개, 키 전부**(Anima SPEED — 14키, `core/anima_speed.as_block`): 위와 같은 이유로 위치 대신 키 이름으로 보낸다.
+- **첫 인자 하나에 확장 자신의 문자열**(Colorcraft — 67인자 스크립트): 앱은 `{"args": [to_infotext(config)]}` 를 보낸다 — 확장이 이미지에 적고 붙여 넣을 때 읽는 `v1;mods=…` 문자열 그대로다. 첫 인자가 이 형식(또는 dict)이면 확장은 나머지 인자를 모두 무시하므로(Forge 는 `ui()` 기본값으로 채운다) 사용자의 Forge 패널 기본값이 섞이지 않고, 패널 형식의 칸 수를 따라갈 필요도 없다 — 인자가 579 → 67 로 바뀐 0.31·0.32 가 같은 문자열을 읽어 버전 확인이 따로 없다. 같은 문자열이 요청·Forge infotext·ComfyUI 노드 `settings_json`·앱 복원에 쓰인다. dict 형식은 출발점이 다르다: 문자열은 모든 탭 꺼짐에서, dict 는 수정자 I 가 켜진 패널 기본값에서 시작한다 — 앱이 dict 를 보내면서 `I.active` 를 빠뜨리면 수정자 I 가 켜진다. 문자열에는 앱이 아는 칸만 있으므로 확장이 새 칸을 더해도 그 칸은 확장 기본값이다. 컴파일러는 손으로 쓴 dict 블록도 읽고, 읽을 수 없는 블록은 조용히 버리지 않고 오류(`colorcraft.BlockError`)로 낸다.
+
+### 붙여 넣기와 '이 설정으로 생성'
+
+- **값 기능은 이름과 함께 되살린다**(Extra Schedulers·Extra Samplers — 계획 X3b): '이 설정으로 생성'(`ui/image_metadata_actions.restore_sampling_values`)은 이미지의 메인·Hires 스케줄러가 custom·Laplace·Flow Cosmos 둘이면 그 값(식·목록·μ/β·ρ/σ̃)을, 샘플러가 ER SDE 셋이면 차수(와 Reverse-time·Tunable 이면 η·잡음 구간 — η 가 Forge 의 `Eta` 로 적힌 경우 포함)를 함께 되살린다. 이름만 되살리고 값을 그대로 두면 다른 이미지가 된다. 그 밖의 이름이면 칸을 건드리지 않는다. 스케줄러·샘플러 표기(`Karras`·`Laplace` 같은 Forge 라벨)는 이름 콤보에서 `core/preset_choice` 로 고른다(정확히 → 접어서 → 별칭, 없으면 지금 값을 두고 경고).
+- **카드 기능은 '가져오기'로만**(Colorcraft·Anima SPEED — 계획 X3c): 브리지 액션 하나 `sam_extra_import {text, only?}`(`ui/sam_extra_import.py`)가 카드의 가져오기 칸과 PNG Info·갤러리의 가져오기 단추를 받는다. 글은 infotext 전체·`Key: value` 줄·맨 값 모두 되고, 글에 그 기능의 키가 있는 카드만 바꾼다. 디버그 값은 가져오지 않는다(확장도 붙여 넣지 않는다). 다음 카드 기능은 액션을 새로 만들지 않고 `FEATURES`·`FEATURE_KEYS` 에 한 줄을 더해 그 기능의 `from_infotext` 를 부른다 — 브리지 계약(`tests/test_bridge_contract.py`, `types/bridge.d.ts` 의 `ActionPayloads`)은 그대로다.
 
 ### ComfyUI 동등성(이미지 후처리)
 
-1. 노드는 앱 팩 `comfy_custom_nodes/ai_studio_forge_parity` 에 직접 쓴다(확장 코드 복사 금지 — GPL). 모듈 최상위에서 torch·comfy·spandrel·folder_paths 를 import 하지 않는다(`tests/test_comfy_node_pack.py` 가 앱 venv 에서 팩을 import 한다). 입력 이름·순서는 앱 상수(`core/vae_degrid.COMFY_INPUTS`)와 같게 둔다.
+1. 노드는 앱 팩 `comfy_custom_nodes/ai_studio_forge_parity` 에 쓴다. 확장 안의 제3자 코드는 옮기지 않는다 — sam-extra 가 직접 쓴 코드는 2026-10-05 결정으로 팩에서 MIT 로 다시 쓸 수 있다(아래 '라이선스'). 모듈 최상위에서 torch·comfy·spandrel·folder_paths 를 import 하지 않는다(`tests/test_comfy_node_pack.py` 가 앱 venv 에서 팩을 import 한다). 입력 이름·순서는 앱 상수(`core/vae_degrid.COMFY_INPUTS`)와 같게 둔다.
 2. 컴파일러는 노드를 `_add_image_extensions` 가 돌려준 뒤, Save/Preview 바로 앞에 **한 번** 넣는다(그 안에 넣으면 SAM3 추가 패스마다 반복된다). 사용자 워크플로는 출력 연결을 다시 잇되, VAE 링크가 필요 없는 후처리는 `_has_image_scripts` 에 넣지 않는다(`needs_vae`·`compile_postprocess` 조건이 바뀐다).
 3. 노드 클래스가 없거나(옛 팩) 입력 계약이 다르거나 모델이 없으면 **노드를 빼고 생성한다** — `compile(..., warnings=list)` 경고 → 백엔드가 Forge 결과 알림과 같은 문구로 바꾼다(`core/comfy_degrid_report.py`). 기능 사전 점검(`feature_preflight`)은 '건너뜀(생성은 진행)'으로 보인다. 경고마다 원인(`cause` — `vae_degrid.COMFY_OMIT_*`)이 붙는다. 캐시한 `/object_info` 로 뺐고 새 스키마가 바꿀 수 있는 원인(`COMFY_SCHEMA_FIXABLE` — 노드 없음·입력 다름·모델 없음)이면 새로 받아 한 번 더 컴파일한다. 같은 원인은 URL 마다 한 번만 다시 받는다(옛 팩이면 생성마다 수 MB 를 받게 된다). 사용자 워크플로에 넣을 자리가 없는 경고는 다시 받지 않는다. 카드 ↻ 는 ComfyUI 면 `/object_info` 를 다시 받아 `comfyModels` 를 다시 보낸다(`ui/vae_degrid_ui.refresh_comfy_models`, 같은 액션).
 4. Forge 전용 설정(P10 옵션)은 ComfyUI 에 해당 없다 — 노드는 확장 기본값과 같은 계산을 하고(`COMFY_OPTIONS`), 카드가 그렇다고 말한다.
 5. 결과 동등성은 확장 코드를 CPU 로 실행해 만든 골든으로 본다(`tests/fixtures/degrid_origin_golden.json`, 숫자·체크섬·오류 종류만 — 확장 문구는 담지 않는다). 생성기는 Forge venv 에서 `CUDA_VISIBLE_DEVICES=-1` 로 돌리고 Forge 프로세스는 띄우지 않는다. 실제 ComfyUI 런타임 대조는 `AISTUDIO_COMFY_TEST_ROOT` 를 준 포터블 python 으로 CPU 에서 돈다(`tests/test_comfy_degrid_origin.py` 맨 위 설명).
-6. 노드를 더하면 `core/comfy_node_pack.PACK_VERSION` 과 팩 `__version__` 을 함께 올리고(`tests/test_comfy_node_pack.py`), 팩 README 의 변경 기록과 `THIRD_PARTY_NOTICES.md` 를 적는다. 사용자는 팩을 다시 설치하고 ComfyUI 를 재시작해야 한다(관리형 ComfyUI 는 앱이 처음 생성할 때 복사한다).
+6. 노드를 더하면 `core/comfy_node_pack.PACK_VERSION` 과 팩 `__version__` 을 함께 올리고(`tests/test_comfy_node_pack.py`), 팩 README 의 변경 기록과 `THIRD_PARTY_NOTICES.md` 를 적는다. 앱이 다음 ComfyUI 생성에서 팩을 다시 깔고, 앱이 띄운 ComfyUI 는 다시 띄운다. 사용자가 띄운 ComfyUI 는 사용자가 재시작한다(아래 '노드 팩 설치').
 7. 모델 폴더 카테고리가 새로 필요하면 `core/backend_runtime.MODEL_PATH_CATEGORIES` 한 곳에 더한다(두 경로 표가 같은 튜플을 쓴다 — 따로 적으면 `_combined_model_paths` 가 KeyError).
 8. ComfyUI PNG 메타데이터(`core/comfy_metadata.py`)는 그래프의 요청 값을 Forge infotext 키로 적는다. 노드가 실행 중 건너뛴 것은 메타데이터에 남지 않고 알림으로만 보인다(레지스트리 gaps 에 적는다).
+
+### ComfyUI 동등성(샘플링 중 기능 — 노드 팩 1.7.0)
+
+샘플링 중에 도는 기능은 ComfyUI 의 이름 표·`model_sampling`·샘플러 래퍼에 닿아 이미지 후처리보다 갈림길이 많다. 약속은 '같은 입력이면 같은 단계별 계산'이다(CPU 에서 설치된 확장과 비트 대조). 같은 시드라도 이미지는 다르다 — 두 호스트가 잡음을 다르게 뽑는다(ComfyUI 의 시드 생성기·Brownian tree 와 Forge 의 이미지별 흐름).
+
+1. **이름 — 코어 이름과 팩 이름**(계획 X11·X12·R6). sam-extra 가 Forge 목록에 더하는 샘플러·스케줄러는 ComfyUI 에서도 같은 이름이어야 기본 KSampler·`ForgeNeoHiresFix`·Impact FaceDetailer·SAM3·사용자 워크플로가 모두 같은 계산을 한다.
+   - ComfyUI 코어에 같은 계산이 이미 있는 이름(`core/extra_samplers.CORE_SAMPLERS`: `dpmpp_2m_sde_heun`·`uni_pc_bh2`·`cfgpp_ud10_ab`·`ipndm`·`ipndm_v`·`deis`)은 컴파일러 별칭 행만 더한다. 코어 것이므로 주인 검사를 하지 않는다. `cfgpp_ud10_ab` 은 ComfyUI v0.35.0 부터 있어, 그보다 옛 ComfyUI 의 '지원하지 않는 값' 오류에 버전 안내가 붙는다. 같다는 근거: `cfgpp_ud10_ab`·`ipndm`·`ipndm_v`·`deis` 는 sam-extra 쪽 구현과 ComfyUI 함수가 비트까지 같고(`tests/test_comfy_extra_samplers_runtime.py`), `dpmpp_2m_sde_heun` 은 두 호스트의 함수 본문이 같다. `uni_pc_bh2` 는 같은 알고리즘(Forge 의 `uni_pc.py` 는 ComfyUI 사본)이지만 비트 동일은 주장하지 않는다(`UniPC` ↔ `uni_pc` 와 같은 처지).
+   - 코어에 없는 이름은 팩이 ComfyUI 표에 등록한다 — 샘플러 12개(`PACK_SAMPLERS`), 스케줄러 9개(`core/extra_schedulers.SCHEDULER_NAMES`). `compat.register_names` 는 다른 노드 팩이 먼저 가진 이름을 덮지 않는다(콘솔 한 줄). 등록 순서는 팩 `__init__.py` 에 고정돼 있다(beta57 → 스케줄러 → 샘플러, 실패해도 예외를 내지 않는다). 팩 노드(`ForgeNeoExtraSchedulers`·`ForgeNeoExtraSamplerSettings`)의 선택 입력 `owned_names` 가 팩이 가진 이름을 `/object_info` 로 알려 주고, 컴파일러는 모든 패스(base·Hires·ADetailer·SAM3·사용자 워크플로)가 지나는 `_runtime_sampler_values` 한 곳에서 이를 본다(`_check_pack_owner`). 그 노드가 없거나(1.7.0 전 팩, 갱신 뒤 재시작 전) 이름이 목록에 없으면(다른 팩이 먼저 등록) 생성하지 않는다 — 같은 이름이 다른 계산을 하기 때문이다. 예: Koishi-Star 의 ComfyUI 노드가 깔려 있으면 그 노드의 `euler_dy`·`euler_smea_dy`(늘 churn 하는 규칙)가 먼저라 거절된다.
+   - 새 이름은 이렇게 정한다: ComfyUI 코어(필요한 최소 버전까지)에 비트까지 같은 함수가 있으면 별칭만, 아니면 팩 등록 + `PACK_SAMPLERS`(스케줄러는 `SCHEDULER_NAMES`) + 팩 버전 올림.
+2. **값을 `model_sampling` 에 싣는다**(Extra Schedulers — 계획 XS-b). ComfyUI 스케줄러 함수는 `model_sampling` 과 스텝 수만 받는다(KSampler 는 `model_options` 를 넣기 전에 σ 를 만들고, Impact 는 모듈 함수 `calculate_sigmas` 를 부른다). 그래서 `ForgeNeoExtraSchedulers` 가 MODEL 의 `model_sampling` 을 얕게 복사해(같은 클래스 — `CONST` 판정이 그대로다) 값을 속성으로 싣고 object patch 로 건다. 그 MODEL 을 쓰는 모든 샘플러(팩 노드·기본 KSampler·KSamplerAdvanced·Impact·BasicScheduler)가 같은 값으로 σ 를 만든다 — Forge 의 '요청마다 상태 하나'와 같은 뜻이다. Extra Samplers 값은 샘플러 함수가 실행 중에 읽으므로 `model_options["ai_studio_extra_samplers"]` 에 싣는다.
+3. **flow shift 가 실린 값을 지킨다**(계획 R2b). `model_sampling` 을 새로 거는 노드는 실린 값을 잃는다. 팩 자신의 flow shift(`generation._patch_flow_shift` — `ForgeNeoModelSamplingShift`, Shift > 0 인 **모든** `ForgeNeoHiresFix` 패스, Anima Tile & Repair)는 `hires_carry.register_sampling_attr` 로 등록된 속성 이름을 새 `model_sampling` 으로 옮긴다(`hires_carry.copy_sampling_attrs`). 이것이 없으면 Shift > 0 인 Hires 패스마다(컴파일러는 Hires shift 로 `distilled_cfg_scale` 을 보낸다) μ/β·식·Flow Cosmos 값이 조용히 기본값이 된다. 다른 팩의 `ModelSampling*` 노드는 이렇게 고칠 수 없으므로 컴파일러가 값 노드를 flow shift 바로 뒤(LoRA 앞)에 두고, `_check_extra_schedulers_reach` 가 값 스케줄러를 쓰는 모든 샘플러 노드에서 MODEL 사슬을 거슬러 올라가 값 노드와의 사이에 `ModelSampling*`·`ForgeNeoModelSamplingShift` 가 없는지 본다(있으면 생성하지 않는다). `model_sampling` 에 값을 싣는 새 기능은 `register_sampling_attr` 로 등록하고 같은 검사를 둔다.
+4. **Hires 체크포인트 덮어쓰기 — carry 등록표**(계획 X4). `ForgeNeoHiresFix` 가 Hires 체크포인트·UNET 을 바꾸면 새 MODEL 을 불러 앞의 패치가 모두 사라진다. Forge 는 생성의 always-on 상태를 그 패스에도 두므로, MODEL 을 패치하는 팩 기능은 `hires_carry.register(carry, key=…)` 로 '새 MODEL 에 다시 거는 법'을 등록한다. HiresFix 는 덮어쓰기와 그 flow shift 뒤에 `hires_carry.apply(model, active_model, active_vae)` 로 등록 순서대로 부른다. 순서는 `__init__.py` 의 import 순서다(Extra Schedulers → Extra Samplers → Anima SPEED → Colorcraft — Colorcraft 의 post-CFG 함수가 맨 끝). Colorcraft 는 덮어쓴 모델의 latent 형식과 그 패스의 VAE 로 색 기준점을 다시 만든다. carry 가 실패하면 그 패스가 실패한다 — 기능이 조용히 빠지면 다른 이미지가 되기 때문이다. Detail Daemon 과 가이던스 묶음은 등록하지 않았다(알려진 빈틈 — 덮어쓴 MODEL 은 1.7.0 전처럼 그것들 없이 샘플링한다).
+5. **샘플러 래퍼와 다시 내놓은 σ**(Anima SPEED — 계획 R3·R4·R9). SPEED 는 패스 하나를 몇 구간으로 나눠 샘플러를 여러 번 부르고, 바꾼 σ 목록을 그 패스의 σ 목록 자리에 다시 내놓는다(Forge `sampling_sigmas`, ComfyUI `transformer_options["sample_sigmas"]` — 끝나면 되돌린다). 그 목록을 읽는 다른 기능(Detail Daemon·Colorcraft 의 σ 조회)이 바뀐 목록을 따라가야 Forge 와 같다. 확장과 팩은 협조 이름 셋을 같은 값으로 쓰고, 팩은 `guidance_common.py` 에 한 번만 둔다(쌍둥이 핀 `shared_substep_marker`·`shared_step_offset_kwarg`·`shared_republished_attr`):
+   - `REPUBLISHED_FROM`(`_sam_extra_republished_from`): 다시 내놓은 목록에 붙여 원래 목록을 가리킨다(`mark_republished`·`republished_from`).
+   - `STEP_OFFSET_KWARG`(`sam_extra_step_offset`): 구간이 패스의 몇 번째 스텝에서 시작하는지. 그 이름을 인자로 가진 샘플러 함수에만 넘긴다(`declares_keyword` — `**kwargs` 로는 넘기지 않는다). Euler (SMEA) Dy 가 보조 스텝 자리를 이것으로 정한다.
+   - `SUBSTEP_MARKER`(`sam_extra_substep`): Euler (SMEA) Dy CFG++ 의 추가 평가에 붙는 표시. 스텝마다 쌓는 상태(APG 모멘텀, SMC `e_prev`, HiGS 이력 등)는 그 평가를 건너뛴다(`is_extra_sampler_substep`).
+
+   ComfyUI 실행 순서는 CNS(샘플러 노드마다 맨 바깥을 다시 차지) → SPEED → Detail Daemon → 샘플러다 — `compat.make_first` 가 SPEED 의 SAMPLER_SAMPLE 래퍼를 앞으로 옮긴다. Detail Daemon 은 패스 전체로 스케줄을 만들고 SPEED 가 그 안에서 구간을 나눈다. Colorcraft 의 post-CFG 함수는 목록의 맨 끝이다. sam-extra 는 SPEED 아래에서도 Dy 보조 스텝을 지키므로, 팩의 `ai_studio_dy_substeps_off` 표시는 ComfyUI Spectrum 과 옛 `speed_enabled` 경로에서만 켜고 팩의 SPEED 노드는 켜지 않는다. 기능이 겹친 경우는 `tests/test_comfy_cross_features.py` 가 본다.
+6. **노드를 넣는 조건 — 꺼진 기능은 그래프를 바꾸지 않는다**(계획 R5·R9). `plan()` 은 ComfyUI 에서도 블록을 준다(값 블록 둘은 늘, SPEED·Colorcraft 는 Forge 규칙). 컴파일러가 노드를 넣는 조건과 자리는 이렇다. `ForgeNeoExtraSchedulers` — 어느 패스가 값 스케줄러(laplace·custom·flow_cosmos_rho7·flow_cosmos_dynamic)를 쓸 때, flow shift 바로 뒤. `ForgeNeoExtraSamplerSettings` — 값이 기본값과 다를 때, 모든 패스가 쓰는 MODEL 의 가이던스 앞(ADetailer·SAM3 LoRA 갈래와 사용자 워크플로도). `ForgeNeoAnimaSpeed` → `ForgeNeoColorcraft` — 메인 패스마다 Detail Daemon 뒤(SPEED 의 Hires 는 블록의 `hires` 가 켜졌을 때만, Colorcraft 는 그 패스에 바뀌는 값이 있을 때만). 디테일러 패스는 그 앞 MODEL 을 써서 둘 다 받지 않는다 — Forge 와 같다. 노드가 필요 없는 요청의 그래프는 기능 이전과 바이트 단위로 같아야 한다(2026-10-05 ComfyUI 연결 때 기능 이전에 저장해 둔 그래프·Forge 페이로드와 비교했다).
+   컴파일러가 노드를 뺀 이유(SPEED 건너뜀 — 인페인트·마스크·ControlNet·ComfyUI Spectrum·비율 하나, SPEED 설정 오류)와 Spectrum 아래 Euler (SMEA) Dy 의 보조 스텝 건너뜀은 컴파일 경고로 남고, 백엔드가 Forge 결과와 같은 알림(같은 code·feature·detail — 생성 전 알림과 겹치면 한 번만 보인다)으로 바꿔 생성 결과에 싣는다(`core/comfy_compile_notices.py`, `ComfyUIBackend._with_result_notices`). Forge 도 알리지 않는 경고는 로그만 남긴다 — CFG++ 샘플러의 CFG > 2(Forge 도 콘솔만, Sampler 줄 힌트가 생성 전에 보인다), Colorcraft 에 이 생성에서 도는 항목이 없음(Forge 도 붙일 것이 없으면 말하지 않는다). 새 기능이 노드를 뺄 때도 같은 규칙으로 알림을 정한다.
+7. **런타임 계층**: 실제 ComfyUI 코드로 도는 테스트(`tests/test_comfy_*_runtime.py` 등 — 모듈 맨 위 설명)는 포터블 python 으로 CPU 에서 돈다: `AISTUDIO_COMFY_TEST_ROOT=C:\ComfyUI_windows_portable\ComfyUI`, `CUDA_VISIBLE_DEVICES=-1`, 앱 루트를 `sys.path` 맨 앞에, `-B`(바이트코드를 쓰지 않는다). 명령줄에는 런타임 모듈을 먼저 적는다 — 팩을 import 하는 다른 모듈이 먼저 오면 `--cpu` 가 걸리기 전에 ComfyUI `model_management` 가 초기화된다. ComfyUI 폴더에는 아무것도 쓰지 않는다.
+
+### 노드 팩 설치
+
+앱은 ComfyUI 로 생성할 때마다 컴파일러를 만들기 전에 번들 팩을 설정된 로컬 ComfyUI 의 `custom_nodes` 에 맞춘다(`ComfyUIBackend._preflight_bundled_node_pack` → `core/comfy_node_pack.install_bundled_node_pack`, 백엔드마다 한 번).
+
+- **설치하는 때**: API 주소가 loopback 이고, 설정된 ComfyUI 런타임 주소와 같고, 설정에서 확장 폴더 쓰기를 승인했을 때(`extensionWritable`). 아니면 건너뛰고 로그만 남긴다 — 이미 깔린 팩은 그대로 쓴다.
+- **지문**: 팩 파일(`.py`·`.json`·`.md`·`.txt`·`.safetensors` — 1.7.0 에서 Colorcraft 기저 벡터 때문에 `.safetensors` 를 더했다)의 내용 지문이 설치된 것과 같으면 아무것도 하지 않는다. 다르면 임시 폴더에 복사한 뒤 바꿔 끼운다. 앱 소유 표시(`.aistudio-owned.json`)가 없는 같은 이름 폴더는 덮지 않는다(오류).
+- **재시작**: 실행 파일(`.py`·`.json`·`.safetensors`)이 바뀌었으면 ComfyUI 가 새 노드를 읽도록 재시작해야 한다. 앱이 띄운 ComfyUI 는 앱이 멈추고 다시 띄운다. 사용자가 띄운 ComfyUI 는 멈추지 않고 그 생성을 오류로 끝낸다('외부 ComfyUI 를 한 번 재시작한 뒤 다시 생성하세요'). 문서·라이선스만 바뀌었으면 파일만 바꾸고 재시작하지 않는다. 설치 뒤에는 `/object_info` 캐시를 버린다.
+- **옛 팩·재시작 전**: 1.7.0 노드 클래스가 없으면 그 기능을 켠 그래프는 컴파일러가 1.7.0 안내와 함께 거절하고, 팩 이름(샘플러·스케줄러)은 위 1번의 주인 검사가 거절한다. 기능을 켜지 않은 그래프는 옛 팩에서도 그대로 돈다.
+- **앱이 팩 코드를 직접 부를 때**: 앱 본체가 팩의 순수 모듈을 쓰면(Extra Schedulers custom 식·시그마 목록 미리 검사 — `core/extra_schedulers.check_text` 가 `extra_schedulers_math`) 패키지 `__init__` 을 거치지 않고 그 파일 하나만 불러온다. `__init__` 은 노드 모듈 전부(asyncio 포함)를 불러오고 설치 훅을 돌리는데, 저장값 복원(`load_settings`)은 창 표시 전에 돈다(`tests/test_startup_imports.py` 가 저장된 식으로 기동 경로를 본다).
+- **개발 트리**: 팩 파일이 바뀐 트리로 띄운 앱은 커밋 여부와 상관없이 다음 ComfyUI 생성에서 그 팩을 사용자 ComfyUI 에 깐다. 그래서 1.7.0 은 워크트리에서 다 만든 뒤 본 트리에 한 번에 합쳤다. 팩의 계산이나 노드가 바뀌면 `PACK_VERSION`·`__version__` 을 함께 올린다(1.7.0 이 나간 뒤의 추가는 1.7.1).
+
+### 라이선스 — sam-extra 코드를 팩에서 다시 쓰기(2026-10-05 결정)
+
+sam-extra 는 GPL-3.0-only 이고, 앱 노드 팩은 MIT 로 사용자 ComfyUI 에 복사된다. 팩 1.7.0 은 '확장 코드는 옮기지 않고 다시 구현해 CPU 비트 대조로 증명한다'를 원칙으로 만들었지만, 2026-10-05 초기 검토에서 몇 함수가 sam-extra 코드와 거의 같은 것이 드러났다(`speed_runner` 의 `_init_coarse`·`run_speed` — MIT SPEED 업스트림 위의 sam-extra 수정, `extra_schedulers._refuse_karras_dynamic_rise`, `extra_schedulers_math` 의 `compile_expression`·`laplace_position`). sam-extra 작성자(이 앱의 작성자)가 정했다: **sam-extra 가 직접 쓴 코드는 팩에서 MIT 로 다시 쓸 수 있다.**
+
+- 다시 쓸 수 있는 것은 sam-extra 자신이 쓴 부분뿐이다. 파일 머리와 함수 출처를 보고 정한다. sam-extra 안에 든 제3자 GPL·AGPL 코드(Forge 등에서 온 부분, 그 위에 sam-extra 가 고친 부분 포함)는 여전히 옮기지 않는다. MIT·Apache·BSD 업스트림에서 온 부분은 그 업스트림의 고지를 함께 싣는다.
+- 팩의 `THIRD_PARTY_NOTICES.md` 에 어느 모듈이 sam-extra 코드를 다시 썼는지와 작성자의 MIT 허락을 적는다 — '옮기지 않았다'고 쓰지 않는다. 팩 README 의 1.7.0 문단, 모듈 docstring, `core/comfy_node_pack.py` 의 이력 주석, 레지스트리 머리 주석도 같은 말을 해야 한다.
+- 대조는 그대로다. 설치된 확장이 패리티 테스트의 기준이고, 팩 모듈은 sam-extra 를 import 하지 않는다(`tests/test_comfy_pack_foundation.PackNeverImportsSamExtraTests`).
+- 앱 본체의 거울(`core/extra_schedulers.py` 같은 순수 모듈)은 규칙을 다시 구현해 설치된 확장과 비교한다. 이 결정은 팩에 관한 것이다.
+
+### GPU 대조 결과(2026-10-05, Forge)
+
+사용자 허락을 받아 테스트 Forge(7862)에서 돌렸다(사용자 Forge 7860 은 허락을 받아 모델만 내렸고 그 뒤로 요청을 보내지 않았다). Anima-3.8B-v1.1, 832×1216, 28 스텝, sam-extra 0.33.0. 같은 설정을 두 형식으로 보내 결과를 비교했다: `e_` = 확장이 문서화한 방식(Colorcraft 는 확장이 만든 67인자 패널 형식, SPEED·Extra Schedulers 는 위치 인자와 dict, 스케줄러는 Forge 표기), `a_` = 앱 경로(`build_sampling_blocks` → 병합·출처 → P10 덮어쓰기 → `WebUIBackend`, 스케줄러는 이름). 모든 요청을 두 번 보냈다(두 번째는 거꾸로). 통과 기준은 짝마다 픽셀과 PNG 파일 md5 가 같은 것이다.
+
+- **1부**(앱 `3dcba53`): 112건·224요청, 이미지 214장과 예상한 오류 10. 모든 `e_`/`a_` 짝이 픽셀·PNG md5 까지 같았고 두 번째 실행도 같았다. NaN·검은 이미지는 없었다. 기능 없는 기본 이미지와 Laplace + Res Multistep·Laplace + Euler 는 10-03 의 md5 를 다시 냈다.
+  - Colorcraft: 사례 1–7 같음. SDXL 사례는 이 PC 에 SDXL 체크포인트가 없어 돌리지 않았다.
+  - Anima SPEED: F0–F12 와 v0.33.0 두 행, 15건 모두 위치 형식 = dict 형식 = 앱. 상태 줄도 형식마다 같았다. Hires 적용 끔 → `hires: not applied - Apply to Hires pass is off`. 잘못된 설정(`0.5`, `0.5,1/0`)은 순정 이미지와 같았고 앱은 `speed_invalid` 로 알렸다. 데운 순정 대비 속도는 F1 1.10배, F3 1.81배.
+  - Extra Schedulers: 8건 같음. 오류 사례(custom 목록이 같은 σ 를 반복)는 확장 두 형식 모두 HTTP 500 `CustomSchedulerError` 였고 앱도 실패했지만, 그때 앱은 Forge 본문의 'Extra Schedulers: …' 원문 대신 'API 요청 실패: 500 …' 만 보였다(`core/sam_extra_notices.explain_scheduler_error` 를 부르는 곳이 없었다). 지금은 고쳤다 — 앱은 HTTP 500 본문을 한 번 읽어 'Extra Schedulers: …' 원문을 한국어 머리와 함께 보이고 다시 시도하지 않는다(`backends/webui_backend._scheduler_error_line` — 메인 요청, 옵션을 덮어쓴 요청의 500, 보조 패스).
+  - Flow Cosmos: rho7 기본값 = A/B custom 식(6형식), ρ 5 · σ̃ 0.006–240 = 그 숫자를 넣은 식(5형식), Dynamic 은 NaN 없이 끝났다. Forge 가 실제로 밟은 σ 목록 = 설치된 확장 = 팩 계산(셋 모두)이고, CPU float32 목록도 비트까지 같았다.
+  - 그 밖: `SAM Extra Colorcraft pre-DD sigma` 는 Detail Daemon 이 σ 를 바꾼 패스마다 적힌다(기본 True, P10 덮어쓰기로 끄면 False). SPEED 의 아주 큰 정수 규칙은 API 로 볼 수 없다(Forge JSON 인코더가 500 — 앱은 그런 값을 보내지 않는다). PAG 4 + HiGS 1.75 + Optimal Scale 0.25(CFG 5) 조합은 Colorcraft 와 상관없이 두 경로 모두 깨진 이미지였다(네 기능 밖, 동등성은 그대로).
+- **2부 — Extra Samplers**(앱 `486db7d`): 75건 × 2 = 150요청, 오류 0. 앱·확장 31묶음 모두 픽셀·PNG md5 같음, 두 실행 같음, NaN·검은 이미지 없음(SDXL 묶음은 체크포인트가 없어 생략).
+  - 18개 샘플러를 기본값으로: 앱이 늘 보내는 `[3, 1.0, false, 0.2, 0.8]` = 블록 없음.
+  - 관계: ER SDE (Tunable) `[3, 1.0, 끔]` = 내장 ER SDE. 잡음 구간 [0, 1] = 끔(Reverse-time·Tunable). 빈 구간 = ODE. Reverse-time η 0 = ODE, ODE 는 η 를 무시한다. DPM++ 3M (flow ODE) = DPM++ 3M SDE(Eta 0), 2M·2M Heun (flow ODE) = 2M SDE·2M SDE Heun(Eta 0). 구간 0.2–0.8 은 짝끼리 같고 끔과는 다르다.
+  - Hires ER SDE `[2, 0.5]` 의 infotext 키가 있고 ADetailer 칸 값이 안쪽 패스에 닿았다. Euler Dy CFG++ + Spectrum → `Extra Samplers status: dy sub-steps skipped (Spectrum)` 와 앱 알림. infotext 키 = 앱 `infotext_items`. Restart (flow) 의 모델 호출은 28 스텝 65, 40 스텝 111 — 로그의 σ 로 계산한 확장의 재시작 계획과 같다.
+  - 앱 결함이 아닌 관찰: Forge 진행 막대는 Restart (flow) 가 다시 밟는 스텝을 세지 않는다. IPNDM_V·UniPC bh2(덜하게 DEIS·DPM++ 4M SDE·2M SDE Heun)는 Linear Quadratic 28 스텝·CFG 5 에서 두 경로 모두 같은 망가진 이미지다. ADetailer 안쪽 패스만 쓴 ER SDE 값은 저장된 infotext 에 남지 않는다(확장·ADetailer 동작 — 레지스트리 Extra Samplers gaps 에 적었다). 앱의 IPNDM 힌트는 이 관찰을 그대로 적는다: IPNDM 은 괜찮았고 IPNDM_V(녹색 잡음)·UniPC bh2(무너짐)가 깨졌으며 다른 스케줄은 확인하지 않았다(IPNDM·IPNDM_V·UniPC bh2 를 고르면 보인다).
+- **VRAM**: 전체 GPU 최고 23,657 MiB(1부 SPEED Hires 1.5배), 기본 요청 20.9–22.0 GB. 2부 최고 22,227 MiB. Windows(WDDM)에서는 PID 별 사용량이 `[N/A]` 다.
+- ComfyUI 쪽 GPU 대조는 이 결과에 없다. ComfyUI 동등성의 근거는 위의 CPU 비트 대조와 런타임 계층이다.
 
 ## 참고
 

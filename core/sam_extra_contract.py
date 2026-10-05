@@ -22,8 +22,9 @@ AST 로 읽는 것과 못 읽는 것: 설치된 확장 소스에서 ui() 컴포�
 gap matrix 5-(a) 가운데 아직 없는 검사: 5번 중 ``wire_tipo`` 입력 순서·``MODES``/``LENGTHS``·
 ``REFERENCE_ARG_KEYS``(P19·P20 이 Gradio 방식을 고를 때), 6번 앱 내부 커버리지(SAM3_KEYS → 설정·프록시·저장·
 Vue 바인딩, 위치 spec 키 → components/guidance/*Section.vue), 7번 Comfy 검사(mapped 제목마다 컴파일러가 쓰거나 unsupported
-선언). SEMANTIC_PINS 의 Comfy 미러는 핀마다 손으로 건다(``*_comfy`` — 팩 상수를 ``app`` 으로 보는 두 번째 핀, DD·DeGrid) — 빠진
-미러를 자동으로 찾지는 않는다. Comfy 참조(``comfy=``)는 파일·심볼이 있는지만 본다. UI_ONLY_FEATURES 는
+선언). SEMANTIC_PINS 의 Comfy 미러는 핀마다 손으로 건다(``<id>_comfy`` — 팩 상수를 ``app`` 으로 보는 두 번째 핀, DD·DeGrid·
+네 기능·공유 표시). ComfyPackMirrorPinTests 가 손으로 적은 팩 상수 목록의 쌍둥이와 쌍둥이가 지키는 상수를 팩이 실제로 읽는지를
+보지만, 그 목록에 없는 새 팩 상수를 자동으로 찾지는 않는다. Comfy 참조(``comfy=``)는 파일·심볼이 있는지만 본다. UI_ONLY_FEATURES 는
 등록된 함수가 그 파일에 있는지만 보는 한 방향 검사다(새 Gradio 이름 엔드포인트는 잡지 않는다).
 """
 from __future__ import annotations
@@ -102,13 +103,18 @@ EXT_VERSION_AUDITED = "0.33.0"
 # 2026-10-05 Extra Samplers 앱 노출(확장은 그대로 d05afd9): SCRIPTS·MODULES 둘을 HOLD → mapped(위치 인자 다섯 블록 — 메인
 # 요청과 모든 보조 패스, main_retry), XYZ [Extra Samplers] 세 축은 P18(앱 XYZ 의 Sampler 축은 이미 있다), 상수 계약은 SEMANTIC_PINS
 # extra_samplers_*(+ 결과 알림이 읽는 Dy 상태 줄 머리·이유 넷, 팩 거울 '_comfy').
-# 2026-10-05 sam-extra 네 기능의 ComfyUI 연결(확장은 그대로 d05afd9 — 계획 C0–C8, 앱 노드 팩 1.7.0): 팩이 네 계산을 다시
-# 구현하고(GPL 코드는 옮기지 않는다 — 설치된 확장과 CPU 비트 대조) Extra Samplers 12개·Extra Schedulers 9개 이름을 ComfyUI
-# KSampler 목록에 같은 이름으로 등록하며(남의 이름은 덮지 않고, 다른 팩이 먼저 가진 이름은 컴파일러가 거절 — owned_names),
+# 2026-10-05 sam-extra 네 기능의 ComfyUI 연결(확장은 그대로 d05afd9 — 계획 C0–C8, 앱 노드 팩 1.7.0): 팩이 네 계산을 하고
+# (sam-extra 가 직접 쓴 코드는 작성자 UR-al 의 허락으로 MIT 로 다시 쓴다 — 2026-10-05 결정, 팩 LICENSES/sam-extra-MIT.txt·
+# THIRD_PARTY_NOTICES.md; 제3자 GPL 코드는 옮기지 않는다 — GPL 호스트(ComfyUI·Forge)와 같은 식 다섯은 비트 대조 때문에 같은
+# 부동소수 연산으로 쓰고 NOTICES 에 적었다. 확장은 import 하지 않고 설치된 확장과 CPU 비트 대조) Extra Samplers
+# 12개·Extra Schedulers 9개 이름을 ComfyUI KSampler 목록에 같은 이름으로 등록하며(남의 이름은 덮지 않고, 다른 팩이 먼저
+# 가진 이름은 컴파일러가 거절 — owned_names),
 # 컴파일러가 ForgeNeoExtraSchedulers(flow shift 바로 뒤)·ForgeNeoExtraSamplerSettings(가이던스 앞)·ForgeNeoAnimaSpeed·
 # ForgeNeoColorcraft(메인 패스마다 Detail Daemon 뒤 — R9)를 넣는다. 네 plan() 은 ComfyUI 에도 블록을 싣는다(comfy_pending 없음 —
 # 값 블록 둘은 늘, SPEED·Colorcraft 는 Forge 규칙). SCRIPTS·MODULES 행에 comfy 참조, 팩 상수는 SEMANTIC_PINS '<id>_comfy'
 # 쌍둥이(공유 표시 R4 셋 포함). 기능이 꺼진 요청의 ComfyUI 그래프·Forge 페이로드는 P0.1 기준과 바이트 단위로 같다.
+# 2026-10-05 GPU 대조(테스트 Forge 7862, Anima 3.8B): 네 기능의 확장 형식과 앱 형식 요청의 PNG md5 가 모두 같다
+# (docs/sam_extra_sync.md 'GPU 대조 결과').
 EXT_COMMIT_AUDITED = "d05afd9"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
@@ -1917,8 +1923,9 @@ _COLORCRAFT_PINS = (
 )
 
 # ── ComfyUI 팩 거울 '<id>_comfy'(계획 C0 — 팩 1.7.0 이 본 트리에 들어온 뒤) ──────────────────────────────
-# 팩(comfy_custom_nodes/ai_studio_forge_parity — 1.7.0 의 sam-extra 네 기능)은 확장 계산을 다시 구현하며(GPL 코드는 옮기지
-# 않는다) 같은 상수를 하드코딩한다. 위 핀(확장 값)마다 그 값을 쓰는 팩 상수 하나를 '<id>_comfy' 쌍둥이로 묶어(같은 source·
+# 팩(comfy_custom_nodes/ai_studio_forge_parity — 1.7.0 의 sam-extra 네 기능)은 sam-extra 코드(저자 UR-al 이 이 팩에 MIT 로
+# 허락 — LICENSES/sam-extra-MIT.txt, THIRD_PARTY_NOTICES.md)와 허용 라이선스 상류로 네 계산을 하고(확장은 import 하지 않는다)
+# 같은 상수를 하드코딩한다. 위 핀(확장 값)마다 그 값을 쓰는 팩 상수 하나를 '<id>_comfy' 쌍둥이로 묶어(같은 source·
 # file·name·expected 또는 script·index·field — app 만 팩), 확장이 값을 바꾸면 앱 상수와 팩 상수가 함께 실패하게 한다
 # (_degrid_pins 와 같은 규칙). 앱 상수가 없는 값(공유 표시 R4, 팩만 쓰는 계산 상수)은 앱 없는 확장 핀을 두고 그 쌍둥이를 단다.
 # 리터럴로 안 풀리는 값(Dy 의 _CHURN_LIMIT = 2 ** 0.5 - 1, 식 계산기 상수표)·팩이 ComfyUI 몫을 더한 표(SPEED
