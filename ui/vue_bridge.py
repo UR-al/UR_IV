@@ -171,6 +171,8 @@ class VueBridge(QObject):
     comfyCompatibilityResult = pyqtSignal(str)
     relightEvent = pyqtSignal(str)
     tileRepairResult = pyqtSignal(str)   # JSON {action, requestId, ok, ...} — ui/tile_repair_actions.py
+    # 연관 태그 — JSON {action: related_tags_query|related_tags_build, requestId, state, ...} — ui/related_tags_actions.py
+    relatedTagsEvent = pyqtSignal(str)
     handReconstructionEvent = pyqtSignal(str)
     eventImportResults = pyqtSignal(str)      # JSON event list
 

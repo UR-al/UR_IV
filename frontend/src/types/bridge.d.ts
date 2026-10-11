@@ -60,6 +60,7 @@ export type ActionName =
   | 'comfy_quality_preset' | 'comfy_feature_preflight'
   | 'relight_preview' | 'relight_export' | 'relight_cancel'
   | 'tile_repair_options' | 'tile_repair_run' | 'tile_repair_cancel'
+  | 'related_tags_query' | 'related_tags_build' | 'related_tags_cancel'
   | 'hand_reconstruction_generate' | 'hand_reconstruction_export' | 'hand_reconstruction_cancel'
   | 'native_tab_switch' | 'vue_tab_switch'
   | 'probe_backend' | 'select_backend' | 'pick_comfy_workflow'
@@ -88,6 +89,7 @@ export type BackendEvent =
   | 'xyzCapabilitiesReceived' | 'xyzPlotEvent'
   | 'comfyWorkflowEvent' | 'comfyCompatibilityResult' | 'relightEvent' | 'handReconstructionEvent'
   | 'tileRepairResult'
+  | 'relatedTagsEvent'
   | 'batchFilesSelected' | 'batchJobState' | 'adetailerResult' | 'adetailerProgress' | 'sam3Result' | 'sam3Progress'
   | 'captionFilesSelected' | 'captionProgress' | 'captionDone' | 'captionOutDirSelected'
   | 'captionModelDirSelected' | 'captionRuntimeReady'
@@ -498,6 +500,9 @@ export interface ActionPayloads {
   tile_repair_options: TileRepairRequestPayload
   tile_repair_run: TileRepairRunPayload
   tile_repair_cancel: TileRepairRequestPayload
+  related_tags_query: RelatedTagsQueryPayload
+  related_tags_build: RelatedTagsBuildPayload
+  related_tags_cancel: RelatedTagsCancelPayload
   sam_extra_import: SamExtraImportPayload
 }
 
@@ -577,6 +582,102 @@ export interface TileRepairResultEvent {
   /** cancel: Forge 에서 멈춘 작업이 있었나 */
   stopped?: boolean
 }
+
+// ── 연관 태그 (프롬프트 패널 · ui/related_tags_actions.py → core/related_tags_service.py) ──
+// 로컬 Danbooru parquet 으로 만든 동시 출현 표(cache/related_tags)에서 지금 프롬프트의 태그와 자주 함께 쓰인
+// 태그를 고른다. 등급은 Python 이 등급 필터(set_rating_filter)로 정한다. 답은 모두 relatedTagsEvent 하나로 온다.
+
+export type RelatedTagsShard = 'g' | 's' | 'q' | 'e'
+
+/** 프롬프트 칸 원문 — 키는 utils/relatedTags.ts RELATED_TAG_FIELDS 가 위젯 id 로 잇는다. */
+export interface RelatedTagsFields {
+  main: string
+  character: string
+  copyright: string
+  count: string
+  prefix: string
+  suffix: string
+}
+
+/** related_tags_query — negative 의 태그·제외 규칙(exclude)에 걸리는 태그는 추천하지 않는다. limit 1..32(기본 16). */
+export interface RelatedTagsQueryPayload {
+  requestId: string
+  fields: RelatedTagsFields
+  negative: string
+  exclude: string
+  limit?: number
+}
+
+/** related_tags_build — 표를 만들 등급(비지 않은 부분집합). 이미 돌고 있으면 그 진행으로 답한다. */
+export interface RelatedTagsBuildPayload {
+  requestId: string
+  shards: RelatedTagsShard[]
+}
+
+/** related_tags_cancel — 멈출 build 의 requestId. 따로 답하지 않는다(build 가 canceled 로 끝난다). */
+export interface RelatedTagsCancelPayload {
+  requestId: string
+}
+
+export interface RelatedTagSuggestion {
+  /** Danbooru 표기(밑줄) */
+  tag: string
+  /** 한국어 이름 — 없으면 '' */
+  ko: string
+  /** 고른 등급의 게시물 수 */
+  count: number
+  /** 이 태그와 함께 쓰인 기준 태그(최대 3) */
+  via: string[]
+}
+
+/** 표 만들기 진행 — progress 는 지금 등급, overall 은 전체(0..1). index 는 0부터. */
+export interface RelatedTagsBuildProgress {
+  shard: RelatedTagsShard
+  index: number
+  count: number
+  progress: number
+  overall: number
+}
+
+/** 질의 답의 build — 도는 표 만들기(그 requestId 로 취소한다). */
+export interface RelatedTagsBuildStatus extends RelatedTagsBuildProgress {
+  requestId: string
+}
+
+/** ready = 고른 등급 중 하나 이상의 표를 썼다(missing 이 남아 있을 수 있다 — 일부만 반영).
+ *  missing·building = 쓸 표가 아직 없다. unavailable = 데이터도 표도 없다. */
+export type RelatedTagsQueryState = 'ready' | 'missing' | 'unavailable' | 'building' | 'error'
+
+export interface RelatedTagsQueryEvent {
+  action: 'related_tags_query'
+  requestId: string
+  state: RelatedTagsQueryState
+  tags: RelatedTagSuggestion[]
+  /** 실제로 쓴 기준 태그(흔한 태그는 빠진다) */
+  context: string[]
+  ratings: RelatedTagsShard[]
+  missing: RelatedTagsShard[]
+  /** 표는 썼지만 Danbooru 데이터가 바뀌었다 — 다시 만들면 더 정확하다 */
+  stale: RelatedTagsShard[]
+  /** 데이터가 없어 만들 수도 없는 등급 */
+  unavailable: RelatedTagsShard[]
+  /** missing 을 만드는 대략 시간(초) */
+  estimateSec: number
+  build: RelatedTagsBuildStatus | null
+  error?: string
+}
+
+/** 방송된다 — 어느 창이 시작했든 모든 패널이 진행을 본다. done·canceled 의 shards 는 이번에 만든 등급. */
+export interface RelatedTagsBuildEvent {
+  action: 'related_tags_build'
+  requestId: string
+  state: 'building' | 'done' | 'canceled' | 'error'
+  progress?: RelatedTagsBuildProgress
+  shards?: RelatedTagsShard[]
+  error?: string
+}
+
+export type RelatedTagsEvent = RelatedTagsQueryEvent | RelatedTagsBuildEvent
 
 // ── 메모장 (우하단 도크 · Forge sam-extra Notebook 메모와 공유) ──
 // 앱은 user_data/memos.json 에 저장하고, 메모 라우트가 있는 Forge(GET /sam3-notebook/memos 200)에

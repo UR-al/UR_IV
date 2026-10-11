@@ -1,5 +1,8 @@
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
+
+/** Python 에 등급 필터를 보낼 때마다 1씩 — 등급을 따르는 다른 패널(연관 태그)이 다시 묻는 신호. */
+export const ratingFilterRevision = ref(0)
 
 /**
  * 등급(rating) 필터 g/s/q/e — 검색 덱에 어떤 등급을 포함할지 (App.vue 분할 ④).
@@ -25,6 +28,7 @@ export function useRatingFilter({ saveUiPrefs }) {
 
   function pushRatingFilter() {
     requestAction('set_rating_filter', { ratings: ratingFilters.filter(r => r.on).map(r => r.key) })
+    ratingFilterRevision.value += 1
   }
 
   function saveRatingFilter() {

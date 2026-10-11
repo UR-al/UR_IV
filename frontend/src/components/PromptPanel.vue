@@ -207,6 +207,7 @@
         </div>
       </div>
       <CompositionControl :model-value="widgets.main_prompt_text || ''" :other-prompts="compositionOtherPrompts" @append="appendComposition" />
+      <RelatedTagsControl :model-value="widgets.main_prompt_text || ''" :other-prompts="compositionOtherPrompts" :block-mode="tagBlockMode" @append="appendComposition" />
       <div class="input-group">
         <label>접두 <span v-if="sectionTokens.prefix" class="tk-badge" :class="tokenBadgeClass(sectionTokens.prefix)">{{ sectionTokens.prefix }}t</span></label>
         <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.prefix_prompt_text" :color-fn="blockColorClass" placeholder="선행 추가..." @open-wildcard="forwardWildcard" />
@@ -320,6 +321,7 @@ import { syncFieldToTotal, totalTags } from '../utils/totalBlockSync'
 import CustomSelect from './CustomSelect.vue'
 import TagBlockField from './TagBlockField.vue'
 import CompositionControl from './CompositionControl.vue'
+import RelatedTagsControl from './RelatedTagsControl.vue'
 
 // 타입 문법 — 배열 문법은 emit 배선 가드(tests/test_component_emit_contract.py)가 읽지 못해
 // 아무도 안 쏘는 'toggle-extend' 선언과 App 의 죽은 리스너가 남아 있었다.

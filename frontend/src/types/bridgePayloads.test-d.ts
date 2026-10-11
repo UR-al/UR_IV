@@ -68,6 +68,18 @@ export function actionPayloadContractCases(): void {
   // @ts-expect-error cancel 은 멈출 run 의 requestId 가 필요하다
   requestAction('tile_repair_cancel', {})
 
+  const relatedFields = { main: 'armor', character: '', copyright: '', count: '1girl', prefix: '', suffix: '' }
+  requestAction('related_tags_query', { requestId: 'rtq-1', fields: relatedFields, negative: '', exclude: '' })
+  requestAction('related_tags_query', { requestId: 'rtq-1', fields: relatedFields, negative: '', exclude: '', limit: 8 })
+  // @ts-expect-error 프롬프트 칸(fields)이 빠지면 Python 이 거절한다
+  requestAction('related_tags_query', { requestId: 'rtq-1', negative: '', exclude: '' })
+  // @ts-expect-error 칸은 여섯 개 모두 보낸다(빈 칸은 '')
+  requestAction('related_tags_query', { requestId: 'rtq-1', fields: { main: 'armor' }, negative: '', exclude: '' })
+  requestAction('related_tags_build', { requestId: 'rtb-1', shards: ['g', 's'] })
+  // @ts-expect-error 등급은 g · s · q · e 뿐
+  requestAction('related_tags_build', { requestId: 'rtb-1', shards: ['x'] })
+  requestAction('related_tags_cancel', { requestId: 'rtb-1' })
+
   // 맵에 없는 액션은 여전히 느슨하다(object) — 페이로드 없이도 부를 수 있다.
   requestAction('generate')
   requestAction('save_ui_prefs', { anyKey: 1 })

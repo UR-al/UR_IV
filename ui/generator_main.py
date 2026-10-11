@@ -44,6 +44,7 @@ from ui.comfy_workflow_actions import ComfyWorkflowActionsMixin
 from ui.comfy_compatibility_actions import ComfyCompatibilityActionsMixin
 from ui.relight_actions import RelightActionsMixin
 from ui.tile_repair_actions import TileRepairActionsMixin
+from ui.related_tags_actions import RelatedTagsActionsMixin
 from ui.hand_reconstruction_actions import HandReconstructionActionsMixin
 from ui.event_search_actions import EventSearchActionsMixin
 from ui.sam_extra_capabilities_actions import SamExtraCapabilitiesActionsMixin
@@ -85,6 +86,7 @@ class GeneratorMainUI(
     WebUIMixin,
     CreatorActionsMixin, ChatActionsMixin, ModelDownloadActionsMixin, XYZActionsMixin,
     ComfyWorkflowActionsMixin, ComfyCompatibilityActionsMixin, RelightActionsMixin, TileRepairActionsMixin,
+    RelatedTagsActionsMixin,
     SamExtraCapabilitiesActionsMixin,
     HandReconstructionActionsMixin, EventSearchActionsMixin, MemoActionsMixin,
 ):
@@ -237,6 +239,8 @@ class GeneratorMainUI(
         if RelightActionsMixin._handle_relight_action(self, action, payload):
             return
         if TileRepairActionsMixin._handle_tile_repair_action(self, action, payload):
+            return
+        if RelatedTagsActionsMixin._handle_related_tags_action(self, action, payload):
             return
         if HandReconstructionActionsMixin._handle_hand_reconstruction_action(self, action, payload):
             return
@@ -2862,7 +2866,7 @@ class GeneratorMainUI(
         for stop in (self._shutdown_model_downloads, self._chat_stop,
                      self._shutdown_comfy_compatibility, self._shutdown_comfy_workflow_controls,
                      self._shutdown_relight, self._shutdown_tile_repair, self._shutdown_hand_reconstruction,
-                     self._shutdown_memo_sync):
+                     self._shutdown_memo_sync, self._shutdown_related_tags):
             try:
                 stop()
             except Exception as exc:

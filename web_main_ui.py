@@ -266,6 +266,8 @@ _WEB_SIGNALS = frozenset({
     "statusMessage",
     # 비동기 조회 결과(request* 짝) — 빠지면 웹 모드에서 LoRA 매니저·danbooru·GIF 가 '불러오는 중'에 멈춘다.
     "lorasReady", "characterTagsOnlineReady", "compareGifReady",
+    # 연관 태그 추천·표 만들기 진행(related_tags_* 짝) — 빠지면 웹 모드에서 패널이 '불러오는 중'에 멈춘다.
+    "relatedTagsEvent",
 })
 
 
