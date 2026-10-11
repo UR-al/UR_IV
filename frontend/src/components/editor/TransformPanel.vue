@@ -67,12 +67,32 @@
         </div>
       </template>
     </PanelSection>
+
+    <PanelSection title="격자 변형" storage-key="meshWarp" :default-open="false">
+      <template v-if="!meshActive">
+        <button class="action-btn" @click="$emit('mesh-start')"
+          title="3×3 격자 점을 끌어 일부를 부드럽게 늘이거나 줄입니다">
+          <Icon name="grid" /> 격자 점 맞추기 시작
+        </button>
+      </template>
+      <template v-else>
+        <p class="persp-hint">점을 끌어 모양을 다듬은 뒤 적용하세요. Ctrl+Z 는 마지막 점 이동 되돌리기</p>
+        <div class="btn-row">
+          <button class="action-btn primary" @click="$emit('mesh-confirm')">적용</button>
+          <button class="action-btn" @click="$emit('mesh-reset')">초기화</button>
+          <button class="action-btn" @click="$emit('mesh-cancel')">취소</button>
+        </div>
+      </template>
+      <label class="resize-lock" title="켜면 테두리는 그대로 두고 안쪽 점 4개만 움직입니다">
+        <input type="checkbox" :checked="meshPinEdges" @change="onPinEdgesChange" /> 가장자리 고정
+      </label>
+    </PanelSection>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * 변형 탭 — 회전·뒤집기·자르기·크기 변경·원근 보정.
+ * 변형 탭 — 회전·뒤집기·자르기·크기 변경·원근 보정·격자 변형.
  *
  * `MosaicPanel` 의 Transform 섹션이 갈라져 나왔다. 이것들은 선택 영역이나 이미지
  * 전체에 **한 번 적용하고 끝나는** 작업이라, 상시 모드인 도구(툴바)와 성질이 다르다.
@@ -89,7 +109,14 @@ const props = withDefaults(defineProps<{
   perspectiveActive?: boolean
   /** 캔버스에 선택 영역이 잡혀 있는지 — 자르기는 이게 없으면 할 일이 없다 */
   hasSelection?: boolean
-}>(), { imgWidth: 0, imgHeight: 0, cropPending: '', perspectiveActive: false, hasSelection: false })
+  /** 격자 변형(3×3) 진행 중 — 적용·초기화·취소 버튼이 뜬다 */
+  meshActive?: boolean
+  /** '가장자리 고정' — 켜면 테두리 12점은 그대로, 안쪽 4점만 움직인다 */
+  meshPinEdges?: boolean
+}>(), {
+  imgWidth: 0, imgHeight: 0, cropPending: '', perspectiveActive: false, hasSelection: false,
+  meshActive: false, meshPinEdges: true,
+})
 
 const emit = defineEmits<{
   crop: []
@@ -99,9 +126,18 @@ const emit = defineEmits<{
   'perspective-start': []
   'perspective-confirm': []
   'perspective-cancel': []
+  'mesh-start': []
+  'mesh-confirm': []
+  'mesh-cancel': []
+  'mesh-reset': []
+  'mesh-pin-edges': [on: boolean]
   rotate: [dir: string]
   flip: [dir: string]
 }>()
+
+function onPinEdgesChange(e: Event) {
+  emit('mesh-pin-edges', (e.target as HTMLInputElement).checked)
+}
 
 const keepRatio = ref(true)
 const resizeW = ref(0)

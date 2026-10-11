@@ -118,6 +118,7 @@ class TestFilters(unittest.TestCase):
         expected = {
             'grayscale', 'sepia', 'sharpen', 'warm', 'cool', 'soft',
             'invert', 'emboss', 'sketch', 'posterize', 'vignette', 'denoise',
+            'pixelart',
         }
         self.assertEqual(set(editor_ops.FILTER_NAMES), expected)
 

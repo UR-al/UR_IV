@@ -217,6 +217,12 @@ def _f_denoise(bgr):
     return cv2.fastNlMeansDenoisingColored(bgr, None, 7, 7, 7, 21)
 
 
+def _f_pixelart(bgr, *, alpha=None, pixel_scale=1.0, pixel_size=8, colors=16):
+    """픽셀아트 — 블록 평균 + 최근접 확대 + (선택) median cut 팔레트. 본체는 core.editor_pixel_art."""
+    from core.editor_pixel_art import pixel_art
+    return pixel_art(bgr, pixel_size=pixel_size, colors=colors, alpha=alpha, pixel_scale=pixel_scale)
+
+
 # ColorPanel.vue의 presets[].name 과 1:1 (이름이 어긋나면 필터가 조용히 죽는다)
 FILTERS = {
     'grayscale': _f_grayscale,
@@ -231,19 +237,51 @@ FILTERS = {
     'posterize': _f_posterize,
     'vignette': _f_vignette,
     'denoise': _f_denoise,
+    'pixelart': _f_pixelart,
 }
 
 FILTER_NAMES = tuple(FILTERS)
 
+# 옵션을 받는 필터 — {옵션: (기본값, 최솟값, 최댓값)} 정수. ColorPanel 의 슬라이더 범위와 같다.
+# 여기 있는 필터는 알파(가중 평균용)와 프리뷰 축소 배율(pixel_scale)도 함께 받는다.
+FILTER_OPTIONS = {
+    'pixelart': {'pixel_size': (8, 2, 64), 'colors': (16, 0, 64)},
+}
 
-def apply_filter(img: np.ndarray, name: str, strength: float = 1.0) -> np.ndarray:
-    """필터 프리셋 적용. 모르는 이름이면 ValueError (조용히 무시하지 않는다)."""
+
+def _filter_options(name: str, raw) -> dict:
+    """필터 옵션을 정수로 고르고 범위로 자른다. 모르는 키·잘못된 값·dict 가 아닌 입력은 기본값."""
+    spec = FILTER_OPTIONS.get(name, {})
+    given = raw if isinstance(raw, dict) else {}
+    out = {}
+    for key, (default, lo, hi) in spec.items():
+        value = given.get(key, default)
+        try:
+            if isinstance(value, bool):
+                raise TypeError
+            number = int(round(float(value)))
+        except (TypeError, ValueError, OverflowError):
+            number = default
+        out[key] = max(lo, min(hi, number))
+    return out
+
+
+def apply_filter(img: np.ndarray, name: str, strength: float = 1.0, options=None,
+                 pixel_scale: float = 1.0) -> np.ndarray:
+    """필터 프리셋 적용. 모르는 이름이면 ValueError (조용히 무시하지 않는다).
+
+    options: 옵션 필터(FILTER_OPTIONS)의 값. pixel_scale: 프리뷰 축소 배율(축소본 px / 원본 px).
+    """
     key = str(name or '').strip().lower()
     fn = FILTERS.get(key)
     if fn is None:
         raise ValueError(f"알 수 없는 필터: {name!r} (가능: {', '.join(FILTER_NAMES)})")
     bgr, alpha = split_alpha(img)
-    return merge_alpha(_blend(bgr, fn(bgr), strength), alpha)
+    if key in FILTER_OPTIONS:
+        filtered = fn(bgr, alpha=alpha, pixel_scale=pixel_scale, **_filter_options(key, options))
+    else:
+        filtered = fn(bgr)
+    return merge_alpha(_blend(bgr, filtered, strength), alpha)
 
 
 # ── 마스크 영역 이동 (MovePanel) ────────────────────────────────────────────

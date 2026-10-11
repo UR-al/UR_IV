@@ -246,7 +246,7 @@ _WEB_SIGNALS = frozenset({
     "refineResult", "loraManagerUrlReady",
     # sam-extra 기능 스냅샷 — 서버 주소는 싣지 않는다(core/sam_extra_capabilities.to_dict)
     "samExtraCapabilities",
-    "editorWatermarkImageLoaded",
+    "editorWatermarkImageLoaded", "editorColorReferenceLoaded",
     # 에디터 저장 결과 — 빠지면 웹 모드에서 저장이 끝나도 '저장 중'에서 풀리지 않는다.
     "editorSaveResult",
     # 자동저장(크래시 복구본) 결과 — requestEditorAutoSave 짝.

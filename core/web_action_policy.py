@@ -57,6 +57,7 @@ HOST_DIALOG_MESSAGE = (
 DESKTOP_DIALOG_ACTIONS: frozenset[str] = frozenset({
     # 에디터
     "editor_open_file", "editor_save_as", "editor_load_watermark_image", "editor_add_yolo_model",
+    "editor_load_color_reference",
     # 배치·업스케일·ADetailer
     "open_batch_files", "open_upscale_files", "open_ad_files", "open_ad_folder",
     # 캡션

@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useDrawLayer, type DrawParams } from '../../composables/useDrawLayer'
+import { useMeshWarpHandles } from '../../composables/useMeshWarpHandles'
 import { isDrawTool } from '../../utils/drawTools'
 import { downscaleMaskNearest, previewDims, shouldDeferPreviewHide } from '../../utils/editorPreview'
 import { buildMoveBackground, composeMoveFrame, holeColorFor, type PixelRect } from '../../utils/movePreview'
@@ -101,6 +102,8 @@ const emit = defineEmits<{
   'restore-ready': []
   // 스포이트가 집은 색 — 부모가 DrawPanel 의 현재 색으로 되돌려 준다
   'color-picked': [hex: string]
+  // 격자 변형 점이 움직였다 — 정규화 좌표 [[u, v] × 16], 부모가 디바운스 프리뷰를 건다
+  'mesh-changed': [dst: number[][]]
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -199,7 +202,7 @@ const PERSPECTIVE_LABELS = ['1', '2', '3', '4']
 const canvasStyle = computed(() => {
   let cursor = 'crosshair'
   if (panning) cursor = 'grabbing'
-  else if (props.tool === 'perspective') cursor = 'move'
+  else if (props.tool === 'perspective' || props.tool === 'mesh_warp') cursor = 'move'
   else if (props.tool === 'brush' || props.tool === 'eraser' || props.tool === 'stamp') {
     const rawSize = Math.round(props.brushSize * zoom.value * 2)
     if (rawSize <= 120) {
@@ -230,6 +233,15 @@ const drawLayer = useDrawLayer({
   onColorPicked: (hex) => emit('color-picked', hex),
 })
 const { textAnchor } = drawLayer
+
+// ── 격자 변형 손잡이 ── (점 계산·그리기는 composables/useMeshWarpHandles — 원근 보정 블록 뒤에 한 줄씩)
+const meshHandles = useMeshWarpHandles({
+  imageSize: () => (sourceImg ? { w: sourceImg.naturalWidth, h: sourceImg.naturalHeight } : null),
+  imagePerScreenPx: () => imagePerScreenPx(),
+  redraw: () => markGuideDirty(),
+  redrawAll: () => { markDirtyAll(); flushMaskOverlay() },
+  onChange: (dst) => emit('mesh-changed', dst),
+})
 
 const drawLayerStyle = computed(() => ({
   ...canvasStyle.value,
@@ -675,6 +687,7 @@ function imagePerScreenPx(): number {
 function drawTransientOverlay() {
   if (!maskCtx) return
   if (perspectiveActive) { drawPerspectiveGuide(); return }
+  if (meshHandles.isActive()) { meshHandles.draw(maskCtx); return }
   if (drawing && props.tool === 'box') {
     strokeDashRect(startX, startY, lastBrushX - startX, lastBrushY - startY, '#E2B340')
   } else if (drawing && props.tool === 'eraser' && props.eraserMode === 'box') {
@@ -962,6 +975,8 @@ function onMouseDown(e: PointerEvent) {
     if (drawing) { markGuideDirty(); scheduleOverlay() }
     return
   }
+  // 격자 변형 모드 — 손잡이만 잡는다
+  if (meshHandles.isActive()) { meshHandles.pointerDown(getImagePos(e)); return }
 
   initMask()
   const pos = getImagePos(e)
@@ -1059,6 +1074,7 @@ function onMouseMove(e: PointerEvent) {
     }
     return
   }
+  if (meshHandles.isActive()) { meshHandles.pointerMove(getImagePos(e)); return }
   if (moveActive && drawing) {
     const pos = getImagePos(e)
     moveDX = pos.x - moveStartX
@@ -1128,6 +1144,7 @@ function onMouseUp(e: PointerEvent) {
     markGuideDirty(); scheduleOverlay()
     return
   }
+  if (meshHandles.isActive()) { meshHandles.pointerUp(); return }
   if (!drawing) return
   drawing = false
   if (moveActive) return   // 이동 미리보기는 확정/취소 때 정리한다
@@ -1513,6 +1530,13 @@ defineExpose({
   beginMove, endMove, cancelMove,
   // 원근 보정
   beginPerspective, endPerspective, cancelPerspective,
+  // 격자 변형 — 점은 정규화 좌표 [[u, v] × 16] 로 돌려준다
+  beginMeshWarp: meshHandles.begin,
+  endMeshWarp: meshHandles.end,
+  cancelMeshWarp: meshHandles.cancel,
+  resetMeshWarp: meshHandles.reset,
+  undoMeshStep: meshHandles.undoStep,
+  setMeshPinEdges: meshHandles.setPinEdges,
   // 드로잉 레이어 — 병합·복원 브러시·되돌리기
   getDrawOverlayBase64: drawLayer.getOverlayBase64,
   getHealMaskBase64: drawLayer.getHealMaskBase64,

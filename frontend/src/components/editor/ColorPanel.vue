@@ -43,6 +43,20 @@
       </button>
     </div>
 
+    <!-- 픽셀아트 옵션 — 고른 동안에만. 값은 localStorage(utils/pixelArt)에 남는다 -->
+    <template v-if="activeFilter === 'pixelart'">
+      <div class="slider-group">
+        <label class="slider-label">픽셀 크기</label>
+        <input type="range" :min="PIXEL_SIZE_MIN" :max="PIXEL_SIZE_MAX" v-model.number="pixelSize" class="slider" />
+        <span class="slider-value">{{ pixelSizeLabel(pixelSize) }}</span>
+      </div>
+      <div class="slider-group">
+        <label class="slider-label">색 수</label>
+        <input type="range" :min="COLORS_MIN" :max="COLORS_MAX" v-model.number="pixelColors" class="slider" />
+        <span class="slider-value">{{ colorsLabel(pixelColors) }}</span>
+      </div>
+    </template>
+
     <!-- Filter Strength -->
     <div class="slider-group">
       <label class="slider-label">필터 강도 %</label>
@@ -60,6 +74,10 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import {
+  COLORS_MAX, COLORS_MIN, PIXEL_SIZE_MAX, PIXEL_SIZE_MIN, colorsLabel, loadPixelArtPrefs, pixelSizeLabel,
+  savePixelArtPrefs, type PixelArtOptions,
+} from '../../utils/pixelArt'
 
 interface Adjustment {
   brightness: number
@@ -70,6 +88,8 @@ interface Adjustment {
 interface FilterPayload {
   filter: string
   strength: number
+  /** 옵션이 있는 필터(픽셀아트)만 — 백엔드 editor_ops.FILTER_OPTIONS */
+  options?: PixelArtOptions
 }
 
 interface Preset {
@@ -106,7 +126,19 @@ const presets: Preset[] = [
   { label: '포스터', name: 'posterize' },
   { label: '비네트', name: 'vignette' },
   { label: '노이즈 제거', name: 'denoise' },
+  { label: '픽셀아트', name: 'pixelart' },
 ]
+
+const savedPixelArt = loadPixelArtPrefs()
+const pixelSize = ref(savedPixelArt.pixel_size)
+const pixelColors = ref(savedPixelArt.colors)
+
+/** 필터 페이로드 — 픽셀아트면 옵션을 함께 싣는다 */
+function filterPayload(name: string): FilterPayload {
+  const payload: FilterPayload = { filter: name, strength: filterStrength.value }
+  if (name === 'pixelart') payload.options = { pixel_size: pixelSize.value, colors: pixelColors.value }
+  return payload
+}
 
 // Live preview on slider change
 watch([brightness, contrast, saturation], () => {
@@ -117,10 +149,15 @@ watch([brightness, contrast, saturation], () => {
   })
 })
 
-watch(filterStrength, (val) => {
+watch(filterStrength, () => {
   if (activeFilter.value) {
-    emit('filter-preview', { filter: activeFilter.value, strength: val })
+    emit('filter-preview', filterPayload(activeFilter.value))
   }
+})
+
+watch([pixelSize, pixelColors], () => {
+  savePixelArtPrefs({ pixel_size: pixelSize.value, colors: pixelColors.value })
+  if (activeFilter.value === 'pixelart') emit('filter-preview', filterPayload('pixelart'))
 })
 
 function onApply() {
@@ -150,12 +187,12 @@ function onFilterSelect(name: string) {
     return
   }
   activeFilter.value = name
-  emit('filter-preview', { filter: name, strength: filterStrength.value })
+  emit('filter-preview', filterPayload(name))
 }
 
 function onFilterApply() {
   if (!activeFilter.value) return
-  emit('filter-apply', { filter: activeFilter.value, strength: filterStrength.value })
+  emit('filter-apply', filterPayload(activeFilter.value))
   clearFilterSelection()
 }
 

@@ -93,6 +93,13 @@
                   @preview="previewAdvAdj" @apply="applyAdvAdj" @reset="resetAdj"
                 />
               </PanelSection>
+              <PanelSection title="참조 색 맞추기" storage-key="colorMatch" :default-open="false">
+                <ColorMatchPanel
+                  :reference-path="colorReferencePath" :has-mask="hasSelection"
+                  @load-reference="loadColorReference" @preview="previewColorMatch"
+                  @apply="applyColorMatch" @cancel="clearPreview"
+                />
+              </PanelSection>
             </div>
 
             <!-- 효과 -->
@@ -138,6 +145,9 @@
                 @perspective-start="onStartPerspective"
                 @perspective-confirm="onConfirmPerspective"
                 @perspective-cancel="onCancelPerspective"
+                :mesh-active="meshActive" :mesh-pin-edges="meshPinEdges"
+                @mesh-start="startMesh" @mesh-confirm="confirmMesh" @mesh-cancel="cancelMesh"
+                @mesh-reset="resetMesh" @mesh-pin-edges="setMeshPinEdges"
                 @rotate="op => doOp('rotate_' + op)"
                 @flip="op => doOp('flip_' + (op === 'horizontal' ? 'h' : 'v'))"
               />
@@ -183,6 +193,7 @@
           @selection-changed="onSelectionChanged"
           @restore-ready="commitRestore"
           @color-picked="onEyedropperColor"
+          @mesh-changed="onMeshChanged"
         />
       </div>
     </template>
@@ -234,6 +245,7 @@ import EditorCanvas from '../components/editor/EditorCanvas.vue'
 import ColorPanel from '../components/editor/ColorPanel.vue'
 import AdvancedColorPanel from '../components/editor/AdvancedColorPanel.vue'
 import WatermarkPanel from '../components/editor/WatermarkPanel.vue'
+import ColorMatchPanel from '../components/editor/ColorMatchPanel.vue'
 import DrawPanel from '../components/editor/DrawPanel.vue'
 import MovePanel from '../components/editor/MovePanel.vue'
 import MaskToolOptions from '../components/editor/MaskToolOptions.vue'
@@ -252,7 +264,9 @@ import { PREVIEW_MAX_EDGE, PreviewGate } from '../utils/editorPreview'
 import { acceptsTextPaste, pasteClipboardImage } from '../utils/clipboardImage'
 import { EdgeMapCache } from '../utils/edgeMap'
 import { createLatestRequest, wasAbandoned } from '../utils/bridgeRequest'
-import type { EditorAutoSaveReadyPayload } from '../types/bridge'
+import { useColorMatch } from '../composables/useColorMatch'
+import { useEditorMeshWarp } from '../composables/useEditorMeshWarp'
+import type { EditorAutoSaveReadyPayload, ShowToastPayload } from '../types/bridge'
 
 const isDragging = ref(false)
 const imagePath = ref('')
@@ -890,6 +904,7 @@ function cancelCrop() { cropSel.value = null }
 const perspectiveActive = ref(false)
 function onStartPerspective() {
   if (!imagePath.value) return
+  cancelMesh()     // 격자 변형과 원근 보정은 같은 캔버스 손잡이를 쓴다 — 하나만
   clearPreview()   // 프리뷰가 떠 있으면 원본 캔버스가 가려져 꼭짓점을 맞출 그림이 안 보인다
   perspectiveActive.value = true
   currentTool.value = 'perspective'
@@ -913,6 +928,45 @@ function onCancelPerspective() {
   perspectiveActive.value = false
   currentTool.value = 'box'
 }
+
+// ── 격자 변형 (3×3) ── 모드·프리뷰·적용·단축키는 composables/useEditorMeshWarp,
+// 캔버스 손잡이는 EditorCanvas 의 useMeshWarpHandles. 적용 결과는 다른 변형처럼 undo 스택에 들어간다.
+function showToast(type: ShowToastPayload['type'], msg: string) { requestAction('show_toast', { type, msg }) }
+/** 캔버스를 잡는 다른 모드(원근 보정·영역 이동)를 끝낸다 — 격자 변형을 시작할 때 */
+function cancelCanvasModes() {
+  if (perspectiveActive.value) onCancelPerspective()
+  if (currentTool.value === 'move') {
+    onCancelMove()
+    movePanelRef.value?.setMovingState?.(false)
+  }
+}
+const {
+  meshActive, meshPinEdges, startMesh, confirmMesh, cancelMesh, resetMesh, setMeshPinEdges, onMeshChanged,
+  handleMeshKey,
+} = useEditorMeshWarp({
+  canvas: () => canvasRef.value,
+  hasImage: () => !!imagePath.value,
+  currentTool,
+  imagePath,
+  clearPreview,
+  schedulePreview,
+  doOp,
+  cancelOtherModes: cancelCanvasModes,
+  toast: showToast,
+})
+
+// ── 참조 색 맞추기 ── 경로·프리뷰·적용은 composables/useColorMatch, 패널은 ColorMatchPanel
+const {
+  referencePath: colorReferencePath, loadReference: loadColorReference, previewColorMatch, applyColorMatch,
+} = useColorMatch({
+  hasMask: () => !!canvasRef.value?.getSelection?.(),
+  schedulePreview,
+  scheduleMaskPreview,
+  doOp,
+  doOpWithMask,
+  clearPreview,
+  toast: showToast,
+})
 function doResize(params?: any) { doOp('resize', params) }
 function applyAdj(adj: any) { doOp('color_adjust', adj) }
 // ── 실시간 프리뷰 ────────────────────────────────────────────────────────
@@ -996,7 +1050,11 @@ function resetAdj() { clearPreview() }
 // 원본을 그대로 재저장했다 (= 필터 프리셋 전부 무반응).
 function applyFilter(payload: any) {
   if (!payload?.filter) return
-  doOp('filter', { filter: payload.filter, strength: payload.strength ?? 100 })
+  // 픽셀아트처럼 옵션이 있는 필터는 options 를 함께 보낸다(프리뷰는 payload 를 그대로 보낸다)
+  doOp('filter', {
+    filter: payload.filter, strength: payload.strength ?? 100,
+    ...(payload.options ? { options: payload.options } : {}),
+  })
 }
 function applyAdvAdj(adj: any) { doOp('adv_color', adj) }
 
@@ -1036,6 +1094,7 @@ function onStartMove(payload: any) {
     movePanelRef.value?.setMovingState?.(false)
     return
   }
+  cancelMesh()     // 격자 변형 손잡이와 영역 이동 드래그는 같은 캔버스 포인터를 쓴다
   // 프리뷰가 떠 있으면 원본 캔버스가 가려져 이동 미리보기가 보이지 않는다
   clearPreview()
   moveFillColor.value = payload?.fillColor || 'black'
@@ -1350,6 +1409,8 @@ onDeactivated(() => { _editorActive = false })
 
 function onEditorKeyDown(e: KeyboardEvent) {
   if (!_editorActive) return   // 에디터 탭이 아닐 땐 단축키 가로채지 않음
+  // 격자 변형 중: Ctrl+Z = 마지막 점 이동 되돌리기, Esc = 취소, Enter = 적용
+  if (handleMeshKey(e)) return
   // ── Ctrl 단독 두 번 빠르게 → 변환 reset (모자이크/그리기는 유지)
   // (다른 Ctrl 조합은 _lastCtrlTime 갱신 안 함 — Ctrl+Z 등과 충돌 회피)
   if (e.key === 'Control' && !e.altKey && !e.shiftKey) {
@@ -1407,8 +1468,8 @@ function onEditorKeyDown(e: KeyboardEvent) {
   // — 프롬프트나 텍스트 도구에 'b' 를 치는 순간 도구가 바뀌면 못 쓴다.
   const el = document.activeElement as HTMLElement | null
   const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
-  // 원근 보정·영역 이동 중에는 도구를 갈아타면 진행 중인 조작이 날아간다
-  if (!typing && !perspectiveActive.value && currentTool.value !== 'move') {
+  // 원근 보정·격자 변형·영역 이동 중에는 도구를 갈아타면 진행 중인 조작이 날아간다
+  if (!typing && !perspectiveActive.value && !meshActive.value && currentTool.value !== 'move') {
     const tool = toolByKey(e.key, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey })
     if (tool) {
       e.preventDefault()

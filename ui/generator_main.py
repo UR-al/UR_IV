@@ -721,6 +721,12 @@ class GeneratorMainUI(
                     if hasattr(self, 'vue_bridge'):
                         self.vue_bridge.editorWatermarkImageLoaded.emit(path.replace('\\', '/'))
 
+            # 13-1. 에디터 참조 색 맞추기 이미지 로드 — 경로만 Vue 로 돌려준다(통계는 color_match 가 계산)
+            elif action == 'editor_load_color_reference':
+                path, _ = QFileDialog.getOpenFileName(self, "참조 이미지 선택", "", "Images (*.png *.jpg *.jpeg *.webp)")
+                if path and hasattr(self, 'vue_bridge'):
+                    self.vue_bridge.editorColorReferenceLoaded.emit(path.replace('\\', '/'))
+
             # 15. Search parquet 저장/불러오기
             elif action == 'export_search_results':
                 # Vue에서 필터링된 결과를 직접 받아서 저장

@@ -82,6 +82,7 @@ class VueBridge(QObject):
 
     editorImageLoaded = pyqtSignal(str)   # file path
     editorWatermarkImageLoaded = pyqtSignal(str)   # 워터마크로 쓸 이미지 파일 경로
+    editorColorReferenceLoaded = pyqtSignal(str)   # 참조 색 맞추기에 쓸 이미지 파일 경로
     captionFilesSelected = pyqtSignal(str)  # JSON [path] — 캡션 대상 이미지
     captionProgress = pyqtSignal(str)       # JSON {clientToken,jobId,index,total,path,caption,error}
     captionDone = pyqtSignal(str)           # JSON {clientToken,jobId,total,ok,failed,skipped}
@@ -889,10 +890,12 @@ class VueBridge(QObject):
                 )
 
             elif operation == 'filter':
+                # 픽셀아트처럼 옵션이 있는 필터는 options 를 받고, 프리뷰는 블록 크기에 축소 배율을 곱한다
                 from core.editor_ops import apply_filter
                 try:
                     img = apply_filter(img, params.get('filter'),
-                                       float(params.get('strength', 100)) / 100.0)
+                                       float(params.get('strength', 100)) / 100.0,
+                                       options=params.get('options'), pixel_scale=preview_scale)
                 except ValueError as fe:
                     return json.dumps({'error': str(fe)})
 
@@ -918,6 +921,23 @@ class VueBridge(QObject):
                                        width=params.get('width'), height=params.get('height'))
                 except ValueError as pe:
                     return json.dumps({'error': str(pe)})
+
+            elif operation == 'color_match':
+                # 참조 색 맞추기(Reinhard Lab 평균·표준편차) — 본체는 core.editor_color_match.
+                # 참조 통계는 원본 해상도에서 한 번 계산해 캐시한다(프리뷰·확정이 같은 통계).
+                from core.editor_color_match import ColorMatchError, run_color_match
+                try:
+                    img = run_color_match(img, params, mask, pixel_scale=preview_scale)
+                except ColorMatchError as ce:
+                    return json.dumps({'error': str(ce)})
+
+            elif operation == 'mesh_warp':
+                # 3×3 격자 변형(TPS) — 좌표가 정규화돼 있어 프리뷰·확정이 같은 페이로드를 쓴다.
+                from core.editor_mesh_warp import MeshWarpError, run_mesh_warp
+                try:
+                    img = run_mesh_warp(img, params)
+                except MeshWarpError as me:
+                    return json.dumps({'error': str(me)})
 
             elif operation == 'restore':
                 # 모자이크 지우개 — 효과 적용 '전' 이미지에서 마스크 영역 픽셀을 되가져온다.
