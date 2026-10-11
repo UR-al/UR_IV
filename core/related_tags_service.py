@@ -1,8 +1,11 @@
 # core/related_tags_service.py
 """연관 태그 — 질의·표 만들기 조율(Qt 없음, 의존성 주입). ui/related_tags_actions.py 가 브리지에 잇는다.
 
-질의(related_tags_query): 워커 스레드 하나가 가장 새 요청만 처리한다(입력 중 쌓인 옛 요청은 버린다).
+질의(related_tags_query): 워커 스레드 하나가 화면(client)마다 가장 새 요청만 처리한다(입력 중 쌓인 그 화면의
+  옛 요청은 버린다 — 웹 모드의 다른 탭 요청은 버리지 않는다). 기다리는 화면이 여럿이면 먼저 온 순서로.
   표·어휘는 처음 쓸 때 읽고 등급 조합마다 기억한다(표를 새로 만들면 잊는다).
+  어휘의 원본(자동완성 카탈로그·별칭·함의 파일)이 바뀌었으면 쓸 수 있는 표도 stale 로 알려, '다시 만들기'가
+  어휘부터 새로 만든다.
 표 만들기(related_tags_build): 한 번에 하나, 백그라운드 스레드. 사용자가 버튼을 눌렀을 때만 돈다.
   샤드마다 원자적으로 저장하므로 끊겨도 다음에 남은 샤드부터 만든다. 배치 사이에서 취소할 수 있다.
   진행은 0.5초에 한 번만 보낸다.
@@ -27,13 +30,14 @@ from core.related_tags import (
     select_context,
 )
 from core.related_tags_store import (
-    MISSING, STALE, UNAVAILABLE, USABLE_STATES, LoadedTables, artifact_identity, cache_paths,
+    MISSING, READY, STALE, UNAVAILABLE, USABLE_STATES, LoadedTables, artifact_identity, build_params, cache_paths,
     estimate_seconds, shard_artifact, shard_states,
 )
 
 QUERY_ACTION = "related_tags_query"
 BUILD_ACTION = "related_tags_build"
 PROGRESS_INTERVAL = 0.5
+MAX_PENDING_CLIENTS = 16   # 기다리는 질의를 둘 화면 수 — 넘으면 가장 오래 기다린 것을 버린다
 NO_DATA_MESSAGE = "Danbooru 데이터가 없어 표를 만들 수 없습니다. 데이터를 받은 뒤 다시 시도하세요."
 
 
@@ -41,6 +45,11 @@ def _user_message(exc: BaseException) -> str:
     from core.error_handler import sanitize_for_ui
 
     return sanitize_for_ui(str(exc) or type(exc).__name__, 300)
+
+
+def _same_source(stored: object, current: dict) -> bool:
+    """어휘에 적힌 원본과 지금 원본이 같은가 — 지금 쪽의 키가 하나라도 다르거나 없으면 다르다."""
+    return isinstance(stored, dict) and all(stored.get(key) == value for key, value in current.items())
 
 
 def _file_sha256(path: Path) -> str:
@@ -73,12 +82,15 @@ class RelatedTagsService:
         self._vocab_key = None
         self._vocab_maps = None
         self._loaded: dict[tuple[str, ...], LoadedTables | None] = {}
+        # 등급 표는 한 번만 읽어 조합끼리 나눠 쓴다 — 표 하나가 수십 MB 라 조합마다 따로 읽으면 메모리가 겹친다
+        self._shard_tables: dict[str, object] = {}
         self._build: dict | None = None
         self._closed = False
-        # 질의 워커 — 가장 새 요청 하나만 기다린다
+        # 질의 워커 — 화면(client)마다 가장 새 요청 하나만 기다린다(먼저 온 화면부터)
         self._query_wake = threading.Condition(self._lock)
-        self._query_next: tuple[QueryRequest, tuple[str, ...]] | None = None
+        self._query_pending: dict[str, tuple[QueryRequest, tuple[str, ...]]] = {}
         self._query_worker = False
+        self._sha_cache: dict[str, tuple[tuple[int, int], str]] = {}
 
     @staticmethod
     def _default_start(work: Callable[[], None], name: str) -> None:
@@ -123,6 +135,7 @@ class RelatedTagsService:
     def _invalidate(self) -> None:
         with self._lock:
             self._loaded.clear()
+            self._shard_tables.clear()
             self._vocab = None
             self._vocab_key = None
             self._vocab_maps = None
@@ -143,12 +156,14 @@ class RelatedTagsService:
             if key is None:
                 self._vocab, self._vocab_key, self._vocab_maps = None, None, None
                 self._loaded.clear()
+                self._shard_tables.clear()
                 return None, None
             if key != self._vocab_key:
                 self._vocab = load_vocab(path)
                 self._vocab_key = key
                 self._vocab_maps = None
                 self._loaded.clear()
+                self._shard_tables.clear()
             if self._vocab is not None and self._vocab_maps is None:
                 self._vocab_maps = (self._vocab.index(), self._vocab.aliases(), self._vocab.implications())
             return self._vocab, self._vocab_maps
@@ -161,21 +176,31 @@ class RelatedTagsService:
                 return self._loaded[shards]
             tables = []
             for shard in shards:
-                table = load_shard(self.paths().shards[shard])
-                if table is not None and len(table.occ) == len(vocab.names):
-                    tables.append(table)
+                if shard not in self._shard_tables:
+                    table = load_shard(self.paths().shards[shard])
+                    usable = table is not None and len(table.occ) == len(vocab.names)
+                    self._shard_tables[shard] = table if usable else None
+                if self._shard_tables[shard] is not None:
+                    tables.append(self._shard_tables[shard])
             loaded = LoadedTables(tables) if tables else None
             self._loaded[shards] = loaded
             return loaded
 
     # ── 질의 ──
     def submit_query(self, request: QueryRequest, ratings: Iterable[str] | None) -> None:
-        """질의를 워커에 맡긴다 — 워커가 바쁘면 이 요청이 기다리던 옛 요청을 대신한다."""
+        """질의를 워커에 맡긴다 — 워커가 바쁘면 이 요청이 같은 화면(client)에서 기다리던 옛 요청을 대신한다.
+
+        다른 화면의 요청은 남긴다 — 웹 모드는 탭마다 자기 마지막 requestId 만 기다리므로, 한 슬롯을 모두가
+        나눠 쓰면 다른 탭이 보낸 질의에 밀려 답을 못 받고 20초 뒤 '응답이 없습니다'가 떴다."""
         shards = rating_shards(ratings)
         with self._lock:
             if self._closed:
                 return
-            self._query_next = (request, shards)
+            pending = self._query_pending
+            pending.pop(request.client, None)
+            pending[request.client] = (request, shards)
+            while len(pending) > MAX_PENDING_CLIENTS:
+                pending.pop(next(iter(pending)))
             self._query_wake.notify_all()
             if self._query_worker:
                 return
@@ -190,17 +215,16 @@ class RelatedTagsService:
     def _query_loop(self) -> None:
         while True:
             with self._lock:
-                while self._query_next is None and not self._closed:
+                while not self._query_pending and not self._closed:
                     self._query_wake.wait(self._idle_seconds)
-                    if self._query_next is None:
+                    if not self._query_pending:
                         # 한동안 할 일이 없으면 스레드를 끝낸다(다음 요청이 다시 띄운다)
                         self._query_worker = False
                         return
                 if self._closed:
                     self._query_worker = False
                     return
-                request, shards = self._query_next
-                self._query_next = None
+                request, shards = self._query_pending.pop(next(iter(self._query_pending)))
             try:
                 event = self.query(request, shards)
             except Exception as exc:
@@ -222,6 +246,9 @@ class RelatedTagsService:
         manifest = read_manifest(self._data_dir)
         vocab, maps = self._current_vocab()
         states = shard_states(manifest, self._data_dir, self.paths(), vocab.fingerprint if vocab else None, shards)
+        if vocab is not None and not self._vocab_is_current(vocab):
+            # 데이터 갱신으로 카탈로그·별칭·함의가 바뀌었다 — '다시 만들기'가 어휘부터 새로 만들게 알린다
+            states = {s: (STALE if state == READY else state) for s, state in states.items()}
         usable = tuple(s for s in shards if states[s] in USABLE_STATES)
         missing = [s for s in shards if states[s] == MISSING]
         stale = [s for s in shards if states[s] == STALE]
@@ -339,7 +366,7 @@ class RelatedTagsService:
             self._closed = True
             if self._build is not None:
                 self._build["cancel"].set()
-            self._query_next = None
+            self._query_pending.clear()
             self._query_wake.notify_all()
 
     def _set_progress(self, job: dict, shard: str, index: int, count: int, fraction: float,
@@ -357,13 +384,56 @@ class RelatedTagsService:
         self._emit({"action": BUILD_ACTION, "requestId": job["requestId"], "state": "building",
                     "progress": progress})
 
+    def _sha256(self, path: Path) -> str:
+        """파일 sha256 — 크기·수정 시각이 같으면 앞서 잰 값을 쓴다(질의마다 다시 읽지 않게)."""
+        stat = path.stat()
+        key = (stat.st_size, stat.st_mtime_ns)
+        with self._lock:
+            cached = self._sha_cache.get(str(path))
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        digest = _file_sha256(path)
+        with self._lock:
+            self._sha_cache[str(path)] = (key, digest)
+        return digest
+
+    def _vocab_source(self) -> dict:
+        """어휘를 만드는 원본의 지금 모습 — 자동완성 카탈로그(이름·크기·sha256)와 별칭·함의 파일(크기·sha256).
+
+        카탈로그가 없으면 OSError. 별칭·함의 파일을 못 읽으면 그 값은 None(만들 때도 빼고 만든다)."""
+        from core.tag_database import TagAsset
+
+        database = self._database()
+        catalog = Path(database.path(TagAsset.AUTOCOMPLETE_CATALOG))
+        source: dict = {"catalog": catalog.name, "catalog_size": catalog.stat().st_size,
+                        "catalog_sha256": self._sha256(catalog)}
+        for key, asset in (("aliases", TagAsset.TAG_ALIASES), ("implications", TagAsset.TAG_IMPLICATIONS)):
+            try:
+                path = Path(database.path(asset))
+                source[f"{key}_size"] = path.stat().st_size
+                source[f"{key}_sha256"] = self._sha256(path)
+            except Exception:
+                source[f"{key}_size"] = None
+                source[f"{key}_sha256"] = None
+        return source
+
+    def _vocab_is_current(self, vocab) -> bool:
+        """캐시 어휘가 지금 원본으로 만든 것인가. 원본을 볼 수 없으면(카탈로그 없음 등) 참으로 둔다."""
+        try:
+            return _same_source(vocab.source, self._vocab_source())
+        except Exception:
+            return True
+
     def _ensure_vocab(self):
         from core.related_tags_build import load_vocab, read_catalog_rows, save_vocab, select_vocab
 
         path = self.paths().vocab
+        source = self._vocab_source()
         vocab = load_vocab(path)
-        if vocab is not None:
+        if vocab is not None and _same_source(vocab.source, source):
             return vocab
+        if vocab is not None:
+            self._log("[RelatedTags] 어휘 원본(자동완성 카탈로그·별칭·함의)이 바뀌어 어휘를 다시 만든다")
         from core.tag_database import TagAsset
 
         database = self._database()
@@ -377,8 +447,6 @@ class RelatedTagsService:
             implications = database.load_active_implications()
         except Exception as exc:
             self._log(f"[RelatedTags] 함의 표를 읽지 못해 빼고 만든다: {exc}")
-        source = {"catalog": catalog.name, "catalog_size": catalog.stat().st_size,
-                  "catalog_sha256": _file_sha256(catalog)}
         vocab = select_vocab(read_catalog_rows(catalog), aliases=aliases, implications=implications, source=source)
         save_vocab(path, vocab)
         self._invalidate()
@@ -387,7 +455,7 @@ class RelatedTagsService:
 
     def _run_build(self, job: dict) -> None:
         from core.related_tags_build import BuildCanceled, build_shard_table, save_shard, vocab_params
-        from core.related_tags import BATCH_ROWS, MAX_TAGS_PER_POST, MIN_PAIR_BUILD, TOP_K
+        from core.related_tags import BATCH_ROWS
 
         final: dict = {"state": "error", "error": "표를 만들지 못했습니다."}
         written: list[str] = []
@@ -418,8 +486,7 @@ class RelatedTagsService:
                 table.meta.update({
                     "format": FORMAT_VERSION, "shard": shard, "vocab": vocab.fingerprint, "artifact": relpath,
                     **artifact_identity(artifact),
-                    "params": {**vocab_params(), "batch_rows": BATCH_ROWS, "max_tags": MAX_TAGS_PER_POST,
-                               "min_pair": MIN_PAIR_BUILD, "top_k": TOP_K},
+                    "params": {**vocab_params(), "batch_rows": BATCH_ROWS, **build_params()},
                 })
                 target = self.paths().shards[shard]
                 save_shard(target, table)

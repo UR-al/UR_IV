@@ -10,6 +10,7 @@ import type {
   RelatedTagsQueryEvent, RelatedTagsQueryPayload, RelatedTagsQueryState, RelatedTagsShard, RelatedTagSuggestion,
 } from '../types/bridge'
 import { planCompositionAppend } from './compositionPrompt'
+import { underscoresToSpaces } from './promptComments'
 
 /** 페이로드 칸 → 위젯 id(Python 프록시와 같은 이름). */
 export const RELATED_TAG_FIELDS: Readonly<Record<keyof RelatedTagsFields, string>> = Object.freeze({
@@ -52,9 +53,12 @@ export function querySignature(payload: RelatedTagsQueryPayload): string {
   return JSON.stringify(rest)
 }
 
-/** 넣을 글자 — 블록 모드는 공백, 텍스트 모드는 밑줄(각 모드의 자동완성과 같다). 괄호는 그대로(생성 때 이스케이프). */
+/**
+ * 넣을 글자 — 블록 모드는 공백, 텍스트 모드는 밑줄(각 모드의 자동완성과 같다). 괄호도 자동완성처럼 그대로 넣는다
+ * (이스케이프는 정리 설정 '괄호 이스케이프'를 따른다). 밑줄→공백이 주석을 여는 태그(`a_//_b`)는 밑줄 그대로.
+ */
 export function relatedInsertText(tag: string, blockMode: boolean): string {
-  return blockMode ? tag.replace(/_/g, ' ') : tag
+  return blockMode ? underscoresToSpaces(tag) : tag
 }
 
 /** 메인 태그 끝에 붙인 결과. 이미 어느 칸에 있으면 added=false(원문 그대로). */

@@ -29,6 +29,19 @@ class ExtractPromptTagsTests(unittest.TestCase):
         # 이스케이프한 괄호 안의 :숫자 는 가중치가 아니라 글자다
         self.assertEqual(rt.extract_prompt_tags(r"\(foo:2\)"), [("(foo:2)", 1.0)])
 
+    def test_qualifier_parentheses_inside_a_tag_are_part_of_the_tag(self):
+        # 자동완성·연관 태그는 'ganyu (genshin impact)' · 'bow_(weapon)' 처럼 이스케이프 없이 넣는다 — 괄호를 지우면
+        # 캐릭터·작품 기준이 사라지고, 이미 넣은 괄호 태그가 계속 추천됐다
+        for text in ("ganyu (genshin impact)", "ganyu_(genshin_impact)", r"ganyu \(genshin impact\)"):
+            with self.subTest(text=text):
+                self.assertEqual(self.names(text), ["ganyu_(genshin_impact)"])
+        self.assertEqual(rt.extract_prompt_tags("(ganyu (genshin impact):1.2)"), [("ganyu_(genshin_impact)", 1.2)])
+        self.assertEqual(self.names("1girl, archery, arrow (projectile), ((bow (weapon))), >:("),
+                         ["1girl", "archery", "arrow_(projectile)", "bow_(weapon)", ">:("])
+        # 조각 전체를 감싼 괄호만 가중치·강조 문법이다
+        self.assertEqual(rt.extract_prompt_tags("((smile)), [blush], {hat}, (armor, cape:0.9)"),
+                         [("smile", 1.0), ("blush", 1.0), ("hat", 1.0), ("armor", 1.0), ("cape", 0.9)])
+
     def test_prompt_editing_body_survives_and_bad_input_is_empty(self):
         self.assertEqual(self.names("[cat:dog:0.5], [a|b]"), ["cat:dog", "a", "b"])
         self.assertEqual(rt.extract_prompt_tags(""), [])

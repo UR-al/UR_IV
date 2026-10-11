@@ -26,7 +26,7 @@ function fixture() {
   const store = createRelatedTags({
     onBackendEvent: (name, cb) => { handlers.set(name, cb); return () => handlers.delete(name) },
     requestAction, widgets, persistUiPrefs, debounceMs: 500, timers: debounce,
-    newId: () => `rtb-${++id}`, now: () => clock, ratingRevision: revision,
+    newId: () => `rtb-${++id}`, now: () => clock, ratingRevision: revision, clientId: 'tab-a',
     request: { setTimer: timeout.set, clearTimer: timeout.clear, randomSuffix: () => 'x' },
   })
   const emit = (event: object) => handlers.get('relatedTagsEvent')!(JSON.stringify(event))
@@ -54,7 +54,7 @@ describe('createRelatedTags', () => {
     expect(f.requestAction).not.toHaveBeenCalled()
     f.store.setOpen(true)
     expect(f.persistUiPrefs).toHaveBeenCalledWith({ relatedTagsOpen: true })
-    expect(f.lastQuery()![1]).toMatchObject({ fields: { main: 'armor, sword' }, limit: 16 })
+    expect(f.lastQuery()![1]).toMatchObject({ fields: { main: 'armor, sword' }, limit: 16, client: 'tab-a' })
     expect(f.store.loading.value).toBe(true)
     f.reply({ tags: [SUGGESTION], context: ['armor'] })
     await flush()

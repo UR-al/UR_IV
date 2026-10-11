@@ -104,6 +104,8 @@ const emit = defineEmits<{
   'color-picked': [hex: string]
   // 격자 변형 점이 움직였다 — 정규화 좌표 [[u, v] × 16], 부모가 디바운스 프리뷰를 건다
   'mesh-changed': [dst: number[][]]
+  // 격자 변형 되돌리기가 '가장자리 고정'도 되돌렸다 — 부모가 체크를 맞춘다
+  'mesh-pin-restored': [on: boolean]
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -241,6 +243,7 @@ const meshHandles = useMeshWarpHandles({
   redraw: () => markGuideDirty(),
   redrawAll: () => { markDirtyAll(); flushMaskOverlay() },
   onChange: (dst) => emit('mesh-changed', dst),
+  onPinEdgesRestored: (on) => emit('mesh-pin-restored', on),
 })
 
 const drawLayerStyle = computed(() => ({

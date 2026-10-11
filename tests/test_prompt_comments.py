@@ -19,6 +19,7 @@ from core.prompt_comments import (
     ADETAILER_PROMPT_KEYS, GUARDED_KEYS, PROMPT_KEYS, SAM3_PROMPT_KEYS,
     append_prompt_text, comment_code, comment_spans, ends_in_line_comment,
     filter_tokens_keep_comments, has_prompt_comment, strip_prompt_comments, strip_request_comments,
+    underscores_to_spaces,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +49,15 @@ class SharedGoldenCasesTests(unittest.TestCase):
             with self.subTest(text=case["text"]):
                 self.assertIs(ends_in_line_comment(case["text"]), case["ends"])
 
+    def test_underscores_to_spaces(self):
+        self.assertGreater(len(CASES["underscoresToSpaces"]), 4)
+        for case in CASES["underscoresToSpaces"]:
+            with self.subTest(text=case["text"]):
+                out = underscores_to_spaces(case["text"])
+                self.assertEqual(out, case["out"])
+                # 바꾼 글자가 새 주석을 만들지 않는다
+                self.assertEqual(has_prompt_comment(out), has_prompt_comment(case["text"]))
+
     def test_literal_slashes_never_start_a_comment(self):
         for text in ("http://e.com/a, red", "a//b", ">//<", "__x/*__", "~/x/~", "<lora:d/n:1>", "file:///p"):
             with self.subTest(text=text):
@@ -75,6 +85,22 @@ class PropertyTests(unittest.TestCase):
         out = strip_prompt_comments(text)
         self.assertEqual(out, "masterpiece,  best quality\n\t1girl ,solo\nBREAK\nscenery")
 
+    def test_line_comment_ends_the_tag_like_the_block_view(self):
+        # 블록 칸(split_tags·splitPromptBlocks)은 줄 주석 뒤 줄바꿈을 태그 경계로 본다 — 보내는 글자도 같게
+        from utils.condition_block import split_tags
+        for text in ("1girl // 주인공\nsolo, smile", "1girl, solo // 메모\r\nsmile", "a /* open\nb, c",
+                     "1girl // a\n// b\n\n/* c */ solo"):
+            with self.subTest(text=text):
+                sent = strip_prompt_comments(text)
+                blocks = [strip_prompt_comments(t).strip() for t in split_tags(text)]
+                self.assertEqual([t.strip() for t in sent.split(",")], [b for b in blocks if b])
+        # 이미 쉼표가 있거나, 괄호 안이거나, 다음 내용이 없거나, BREAK 줄이면 그대로
+        self.assertEqual(strip_prompt_comments("a, // x\nb"), "a,\nb")
+        self.assertEqual(strip_prompt_comments("(a, b // x\n:1.2), c"), "(a, b\n:1.2), c")
+        self.assertEqual(strip_prompt_comments("a // x\n// y"), "a")
+        self.assertEqual(strip_prompt_comments("a // x\n, b"), "a\n, b")
+        self.assertEqual(strip_prompt_comments("solo\nBREAK // x\nscenery"), "solo\nBREAK\nscenery")
+
     def test_large_text_is_linear(self):
         text = "\n".join(f"tag{i}, // note {i}" for i in range(2000))
         out = strip_prompt_comments(text)
@@ -91,8 +117,8 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(append_prompt_text("", "b"), "b")
         self.assertEqual(append_prompt_text("a", ""), "a")
         self.assertEqual(append_prompt_text("a", "b", sep=" "), "a b")
-        # 붙인 글자는 주석에 먹히지 않는다
-        self.assertEqual(strip_prompt_comments(append_prompt_text("a // note", "b")), "a\nb")
+        # 붙인 글자는 주석에 먹히지 않고, 줄 주석이 끝낸 태그와 쉼표로 갈린다(블록 칸 경계와 같게)
+        self.assertEqual(strip_prompt_comments(append_prompt_text("a // note", "b")), "a,\nb")
 
     def test_comment_code_and_filter(self):
         self.assertEqual(comment_code("  // only "), "")

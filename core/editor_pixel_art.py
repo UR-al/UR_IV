@@ -6,7 +6,8 @@
 * 블록은 **좌상단 기준**이다. 오른쪽·아래 가장자리는 복제 패딩으로 블록을 채운 뒤 잘라 내므로
   가장자리 블록이 일부만 보여도 블록 하나는 늘 한 색이다.
 * 알파는 바꾸지 않는다(``FILTERS`` 규약 — 투명도는 호출자가 다시 붙인다). 대신 블록 색은
-  **알파 가중 평균**이라 투명한 곳에 숨은 RGB 가 테두리 블록으로 번지지 않는다.
+  **알파 가중 평균**이라 투명한 곳에 숨은 RGB 가 테두리 블록으로 번지지 않는다. 팔레트도 실제로 보이는
+  블록(알파 덮임 > 0.5)에서만 고른다 — 배경을 지운 이미지의 숨은 검정이 색 하나를 차지하지 않게.
 * 프리뷰는 긴 변 1024 로 줄인 소스에서 돈다 — ``pixel_scale``(축소본 px / 원본 px)을 블록 크기에
   곱해야 확정 결과와 같은 굵기로 보인다. 작은 블록은 프리뷰에서 1 이 되어 팔레트만 보일 수 있다.
 * 팔레트는 결정적이다(난수 없음, 디더 끔): ≤256² 로 성기게 뽑은 표본에서 median cut 팔레트를 만들고
@@ -24,6 +25,7 @@ PIXEL_SIZE_MAX = 64
 COLORS_DEFAULT = 16
 COLORS_MAX = 64          # 2 미만이면 팔레트를 끈다(UI '끔' = 0)
 PALETTE_SAMPLE_EDGE = 256
+PALETTE_COVERAGE_MIN = 0.5   # 팔레트 표본으로 쓰는 블록의 알파 덮임 하한
 
 
 def _value_scale(dtype: np.dtype, data: np.ndarray) -> float:
@@ -41,8 +43,14 @@ def _cast_like(values: np.ndarray, dtype: np.dtype) -> np.ndarray:
     return values.astype(dtype)
 
 
-def _block_means(bgr: np.ndarray, s: int, alpha: Optional[np.ndarray]) -> np.ndarray:
-    """``s``×``s`` 블록 평균(실수). 알파가 있으면 알파 가중 평균, 블록이 전부 투명하면 단순 평균."""
+def _alpha_unit(alpha: np.ndarray) -> np.ndarray:
+    """알파 → 0~1 실수."""
+    return alpha.astype(np.float32) / float(_value_scale(alpha.dtype, alpha))
+
+
+def _block_means(bgr: np.ndarray, s: int, alpha: Optional[np.ndarray]) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    """``(블록 평균(실수), 블록 알파 덮임 0~1 또는 None)``. 알파가 있으면 알파 가중 평균, 블록이 전부 투명하면
+    단순 평균."""
     import cv2
     h, w = bgr.shape[:2]
     ph, pw = -(-h // s) * s, -(-w // s) * s
@@ -52,8 +60,8 @@ def _block_means(bgr: np.ndarray, s: int, alpha: Optional[np.ndarray]) -> np.nda
     size = (pw // s, ph // s)
     plain = cv2.resize(work, size, interpolation=cv2.INTER_AREA)
     if alpha is None:
-        return plain
-    a = alpha.astype(np.float32) / float(_value_scale(alpha.dtype, alpha))
+        return plain, None
+    a = _alpha_unit(alpha)
     if ph != h or pw != w:
         a = cv2.copyMakeBorder(a, 0, ph - h, 0, pw - w, cv2.BORDER_REPLICATE)
     num = cv2.resize(work * a[:, :, None], size, interpolation=cv2.INTER_AREA)
@@ -61,7 +69,7 @@ def _block_means(bgr: np.ndarray, s: int, alpha: Optional[np.ndarray]) -> np.nda
     covered = den > 1e-6
     out = plain.copy()
     out[covered] = num[covered] / den[covered][:, None]
-    return out
+    return out, den
 
 
 def _to_rgb8(small: np.ndarray, scale: float) -> np.ndarray:
@@ -73,14 +81,23 @@ def _to_rgb8(small: np.ndarray, scale: float) -> np.ndarray:
     return np.ascontiguousarray(bgr8[:, :, ::-1])
 
 
-def _quantize_median_cut(small: np.ndarray, k: int, scale: float) -> np.ndarray:
-    """``small``(실수 BGR, 0~scale)의 색을 median cut 팔레트 ``k`` 색으로 줄인다. 같은 범위로 돌려준다."""
+def _quantize_median_cut(small: np.ndarray, k: int, scale: float,
+                         visible: Optional[np.ndarray] = None) -> np.ndarray:
+    """``small``(실수 BGR, 0~scale)의 색을 median cut 팔레트 ``k`` 색으로 줄인다. 같은 범위로 돌려준다.
+
+    visible: 팔레트 표본으로 쓸 칸(불리언, ``small`` 과 같은 모양). 없거나 하나도 없으면 전부.
+    """
     from PIL import Image
     rgb8 = _to_rgb8(small, scale)
     h, w = rgb8.shape[:2]
-    sy = max(1, -(-h // PALETTE_SAMPLE_EDGE))
-    sx = max(1, -(-w // PALETTE_SAMPLE_EDGE))
-    sample = Image.fromarray(np.ascontiguousarray(rgb8[::sy, ::sx]), 'RGB')
+    if visible is not None and visible.shape == (h, w) and visible.any() and not visible.all():
+        pixels = rgb8[visible]
+        step = max(1, -(-len(pixels) // (PALETTE_SAMPLE_EDGE * PALETTE_SAMPLE_EDGE)))
+        sample = Image.fromarray(np.ascontiguousarray(pixels[::step][None, :, :]), 'RGB')
+    else:
+        sy = max(1, -(-h // PALETTE_SAMPLE_EDGE))
+        sx = max(1, -(-w // PALETTE_SAMPLE_EDGE))
+        sample = Image.fromarray(np.ascontiguousarray(rgb8[::sy, ::sx]), 'RGB')
     palette = sample.quantize(colors=int(k), method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     mapped = Image.fromarray(rgb8, 'RGB').quantize(palette=palette, dither=Image.Dither.NONE)
     out8 = np.asarray(mapped.convert('RGB'))[:, :, ::-1].astype(np.float32)
@@ -113,9 +130,13 @@ def pixel_art(bgr: np.ndarray, *, pixel_size: int = PIXEL_SIZE_DEFAULT, colors: 
     s = max(1, int(round(int(pixel_size) * ratio)))
     if alpha is not None and alpha.shape[:2] != (h, w):
         alpha = None
-    small = _block_means(bgr, s, alpha) if s > 1 else bgr.astype(np.float32)
+    if s > 1:
+        small, coverage = _block_means(bgr, s, alpha)
+    else:
+        small, coverage = bgr.astype(np.float32), (_alpha_unit(alpha) if alpha is not None else None)
     if int(colors) >= 2:
-        small = _quantize_median_cut(small, int(colors), scale)
+        visible = coverage > PALETTE_COVERAGE_MIN if coverage is not None else None
+        small = _quantize_median_cut(small, int(colors), scale, visible)
     if s > 1:
         small = np.repeat(np.repeat(small, s, axis=0), s, axis=1)[:h, :w]
     return _cast_like(small, dtype)

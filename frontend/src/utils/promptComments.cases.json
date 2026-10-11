@@ -1,5 +1,5 @@
 {
-  "//": "프롬프트 주석 문법 골든 사례 — core/prompt_comments.py(tests/test_prompt_comments.py)와 utils/promptComments.ts(promptComments.test.ts)가 같은 파일을 읽는다. spans = [시작, 끝(미포함), 종류] (BMP 글자만 — JS 는 UTF-16 단위로 센다). stripped = 주석을 뗀 결과. endsInLineComment = 끝이 줄 주석·닫히지 않은 /* 인가.",
+  "//": "프롬프트 주석 문법 골든 사례 — core/prompt_comments.py(tests/test_prompt_comments.py)와 utils/promptComments.ts(promptComments.test.ts)가 같은 파일을 읽는다. spans = [시작, 끝(미포함), 종류] (BMP 글자만 — JS 는 UTF-16 단위로 센다). stripped = 주석을 뗀 결과. endsInLineComment = 끝이 줄 주석·닫히지 않은 /* 인가. underscoresToSpaces = 밑줄→공백(새 주석 시작을 만드는 태그는 그대로).",
   "strip": [
     {
       "text": "masterpiece, // quality tags\nbest quality",
@@ -98,7 +98,7 @@
     },
     {
       "text": "a /* open\nb",
-      "stripped": "a\nb",
+      "stripped": "a,\nb",
       "spans": [
         [
           2,
@@ -109,7 +109,7 @@
     },
     {
       "text": "a /* x *///y\nb",
-      "stripped": "a\nb",
+      "stripped": "a,\nb",
       "spans": [
         [
           2,
@@ -152,7 +152,7 @@
     },
     {
       "text": "a // x\r\nb",
-      "stripped": "a\r\nb",
+      "stripped": "a,\r\nb",
       "spans": [
         [
           2,
@@ -316,7 +316,7 @@
     },
     {
       "text": "a /* x\n\ny",
-      "stripped": "a\n\ny",
+      "stripped": "a,\n\ny",
       "spans": [
         [
           2,
@@ -423,6 +423,126 @@
           "block"
         ]
       ]
+    },
+    {
+      "text": "1girl // 주인공\nsolo, smile",
+      "stripped": "1girl,\nsolo, smile",
+      "spans": [
+        [
+          6,
+          12,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a // x\n// y\n\nb",
+      "stripped": "a,\n\nb",
+      "spans": [
+        [
+          2,
+          6,
+          "line"
+        ],
+        [
+          7,
+          11,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a // x\n, b",
+      "stripped": "a\n, b",
+      "spans": [
+        [
+          2,
+          6,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a // x\n   \n",
+      "stripped": "a\n   \n",
+      "spans": [
+        [
+          2,
+          6,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "1girl // a\n/* b */ solo",
+      "stripped": "1girl,\nsolo",
+      "spans": [
+        [
+          6,
+          10,
+          "line"
+        ],
+        [
+          11,
+          18,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "x AND // y\nz",
+      "stripped": "x AND\nz",
+      "spans": [
+        [
+          6,
+          10,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "(a // x\n), b",
+      "stripped": "(a\n), b",
+      "spans": [
+        [
+          3,
+          7,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "{a|b // x\n|c}",
+      "stripped": "{a|b\n|c}",
+      "spans": [
+        [
+          5,
+          9,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "ike \\(fire\\) // x\nsolo",
+      "stripped": "ike \\(fire\\),\nsolo",
+      "spans": [
+        [
+          13,
+          17,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a \\( // x\nb",
+      "stripped": "a \\(,\nb",
+      "spans": [
+        [
+          5,
+          9,
+          "line"
+        ]
+      ]
     }
   ],
   "endsInLineComment": [
@@ -457,6 +577,36 @@
     {
       "text": "a // x\r",
       "ends": false
+    }
+  ],
+  "underscoresToSpaces": [
+    {
+      "text": "black_hair",
+      "out": "black hair"
+    },
+    {
+      "text": "z.a.t.o._//_i_love_the_world_and_everything_in_it",
+      "out": "z.a.t.o._//_i_love_the_world_and_everything_in_it"
+    },
+    {
+      "text": "a_/*b_c",
+      "out": "a_/*b_c"
+    },
+    {
+      "text": "a_/b_c",
+      "out": "a /b c"
+    },
+    {
+      "text": "a//_b",
+      "out": "a// b"
+    },
+    {
+      "text": "plain",
+      "out": "plain"
+    },
+    {
+      "text": "",
+      "out": ""
     }
   ]
 }

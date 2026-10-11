@@ -194,6 +194,7 @@
           @restore-ready="commitRestore"
           @color-picked="onEyedropperColor"
           @mesh-changed="onMeshChanged"
+          @mesh-pin-restored="onMeshPinRestored"
         />
       </div>
     </template>
@@ -942,7 +943,7 @@ function cancelCanvasModes() {
 }
 const {
   meshActive, meshPinEdges, startMesh, confirmMesh, cancelMesh, resetMesh, setMeshPinEdges, onMeshChanged,
-  handleMeshKey,
+  onMeshPinRestored, handleMeshKey,
 } = useEditorMeshWarp({
   canvas: () => canvasRef.value,
   hasImage: () => !!imagePath.value,

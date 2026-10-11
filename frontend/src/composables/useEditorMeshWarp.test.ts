@@ -123,6 +123,19 @@ describe('useEditorMeshWarp', () => {
     expect(api.meshActive.value).toBe(false)
   })
 
+  it('an undo that restored the pin only updates the checkbox (the canvas already has it)', () => {
+    const { api, log, previews } = setup()
+    api.setMeshPinEdges(true)
+    api.startMesh()
+    log.length = 0
+    api.onMeshPinRestored(false)
+    expect(api.meshPinEdges.value).toBe(false)
+    expect(log).toEqual([])                       // 캔버스에 다시 보내 테두리를 되돌리지 않는다
+    api.onMeshChanged(moved())
+    expect(last(previews)?.[1].pin_edges).toBe(false)
+    api.setMeshPinEdges(true)
+  })
+
   it('pin-edges is passed to the canvas and the payload', () => {
     const { api, log, previews } = setup()
     api.setMeshPinEdges(false)

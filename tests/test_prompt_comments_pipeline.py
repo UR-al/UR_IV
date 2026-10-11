@@ -63,11 +63,63 @@ class RealtimeCleanerTests(unittest.TestCase):
         self.cleaner.remove_duplicates = True
         cleaned = self.cleaner.clean("a // same\nb, c // same\nd")
         self.assertEqual(cleaned.count("// same"), 2)
-        self.assertEqual(_sent(cleaned), "a\nb, c\nd")
+        self.assertEqual(_sent(cleaned), "a,\nb, c,\nd")
 
     def test_crlf_and_trailing_comment(self):
         self.assertEqual(self.cleaner.clean("a_b\r\n// x\r\nc_d"), "a b\r\n// x\r\nc d")
         self.assertEqual(self.cleaner.clean("blue_eyes // why_x"), "blue eyes // why_x")
+
+    def test_underscore_before_slashes_never_opens_a_comment(self):
+        # Danbooru 저작권 태그 — 밑줄→공백이 '//' 앞을 공백으로 만들어 그 뒤(solo 까지)가 주석이 됐다
+        text = "1girl, z.a.t.o._//_i_love_the_world_and_everything_in_it, solo"
+        cleaned = self.cleaner.clean(text)
+        self.assertEqual(cleaned, text)
+        self.assertEqual(_sent(cleaned), text)
+        self.assertEqual(self.cleaner.clean("a_b, x_/*y_z, c_d"), "a b, x_/*y_z, c d")
+        # 빈 괄호를 지워 '//' 가 맨 앞에 오는 경우도 주석을 만들지 않는다
+        self.assertFalse(has_prompt_comment(self.cleaner.clean("()// n_x")))
+
+    def test_preserve_list_ignores_neighbouring_comments(self):
+        # 주석 자리표시자가 옆 태그에 붙어 score_9 · source_anime 가 보존 목록에서 빠지던 문제
+        for text in ("score_9, score_8_up, // pony 품질\nsource_anime, 1girl", "score_9 // 품질\nsource_anime",
+                     "// x\nsource_anime", "score_9 // x", "score_9, /* 메모 */ source_anime"):
+            with self.subTest(text=text):
+                self.assertEqual(self.cleaner.clean(text), text)
+        self.assertEqual(_sent(self.cleaner.clean("score_9 // 품질\nsource_anime")), "score_9,\nsource_anime")
+
+    def test_dedupe_compares_tags_without_comments_and_keeps_the_comments(self):
+        self.cleaner.remove_duplicates = True
+        self.assertEqual(self.cleaner.clean("1girl, solo, // 메모\n1girl, smile"), "1girl, solo, // 메모\nsmile")
+        self.assertEqual(self.cleaner.clean("1girl, solo, /* x */ 1girl, smile"), "1girl, solo, /* x */ smile")
+        self.assertEqual(self.cleaner.clean("1girl, solo, 1girl /* x */"), "1girl, solo /* x */")
+
+    def test_escape_sees_weights_next_to_comments(self):
+        self.cleaner.auto_escape = True
+        self.assertEqual(self.cleaner.clean("// 메모\n(red hair:1.2), ike (fire emblem)"),
+                         "// 메모\n(red hair:1.2), ike \\(fire emblem\\)")
+        self.assertEqual(self.cleaner.clean("(red hair:1.2) // 메모\nike (fire emblem)"),
+                         "(red hair:1.2) // 메모\nike \\(fire emblem\\)")
+
+    def test_cleaning_with_comments_sends_what_cleaning_without_them_sends(self):
+        # 주석을 단 글을 정리해 보낸 태그 = 주석을 뗀 글을 정리한 태그(줄바꿈은 CLIP 에서 공백)
+        from core.prompt_comments import comment_spans
+
+        def tags(text):
+            return [" ".join(t.split()) for t in text.split(",") if t.strip()]
+
+        def comments(text):
+            return [text[start:end] for start, end, _kind in comment_spans(text)]
+
+        rng = random.Random(11)
+        parts = ["a_b", "score_9", "solo", "solo", ", ", ",", " ", "\n", "// n_x", "/* c_d, e */", "(", ")", "()",
+                 "__wc__", "x_/", "/y", "_//", "_/*", "(t:1.2)", "source_anime"]
+        self.cleaner.remove_duplicates = True
+        for _ in range(3000):
+            text = "".join(rng.choice(parts) for _ in range(rng.randint(1, 9)))
+            with self.subTest(text=text):
+                cleaned = self.cleaner.clean(text)
+                self.assertEqual(comments(cleaned), comments(text))   # 주석 글자는 그대로, 새 주석도 없다
+                self.assertEqual(tags(_sent(cleaned)), tags(self.cleaner.clean(_sent(text))))
 
 
 class ConditionRuleTests(unittest.TestCase):
@@ -90,7 +142,7 @@ class ConditionRuleTests(unittest.TestCase):
             host, [_rule("armpits", "armpit hair")], [_rule("armpits", "bad hands", location="neg")])
         self.assertEqual(host.main_prompt_text.value, "armpits // 메모\narmpit hair")
         self.assertEqual(host.neg_prompt_text.value, "lowres // n\nbad hands")
-        self.assertEqual(_sent(host.main_prompt_text.value), "armpits\narmpit hair")
+        self.assertEqual(_sent(host.main_prompt_text.value), "armpits,\narmpit hair")
 
     def test_conditions_ignore_text_inside_comments(self):
         from tests.test_cond_rules_widgets import _Host, _rule
@@ -153,7 +205,7 @@ class LoraStackTests(unittest.TestCase):
         from core.lora_stack import append_lora_stack_to_prompt
         out = append_lora_stack_to_prompt("1girl // 메모", self.ENTRIES)
         self.assertEqual(out, "1girl // 메모\n<lora:style:0.70>")
-        self.assertEqual(_sent(out), "1girl\n<lora:style:0.70>")
+        self.assertEqual(_sent(out), "1girl,\n<lora:style:0.70>")
         self.assertEqual(append_lora_stack_to_prompt("1girl", self.ENTRIES), "1girl, <lora:style:0.70>")
 
     def test_a_commented_out_lora_does_not_suppress_the_stack(self):
@@ -176,6 +228,19 @@ class WildcardTests(unittest.TestCase):
             self.assertEqual(tree["hair"]["tags"], ["blue hair", "white hair, pink hair"])
             self.assertIn("// 끝", tree["hair"]["lines"])   # 편집용 원문은 그대로
 
+    def test_file_wildcards_split_lines_like_reading_a_file(self):
+        # str.splitlines 는 U+2028·\\f 에서도 줄을 나눠 주석 없는 파일의 그룹이 바뀌었다
+        from utils.file_wildcard import FileWildcardManager
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "pose.txt").write_text(
+                "standing, sitting\u2028kneeling\nlying, running\x0cjumping\r\nsquatting // 메모\n", encoding="utf-8")
+            mgr = FileWildcardManager(tmp)
+            self.assertEqual(mgr.load_wildcard("pose"), [["standing", "sitting\u2028kneeling"],
+                                                         ["lying", "running\x0cjumping"], ["squatting"]])
+            tree = {item["name"]: item for item in mgr.get_wildcard_tree()}
+            self.assertEqual(tree["pose"]["tags"],
+                             ["standing, sitting\u2028kneeling", "lying, running\x0cjumping", "squatting"])
+
     def test_instant_wildcards_never_pick_comment_text(self):
         from core.instant_wildcards import InstantWildcards
         with tempfile.TemporaryDirectory() as tmp:
@@ -194,7 +259,7 @@ class AuxPromptTests(unittest.TestCase):
         out = build_refine_prompts(main_prompt="1girl, // 메모\nshirt, smile", main_negative="bad // n\nworst",
                                    target="shirt // t", replacement="dress /* r */", negative="// only")
         self.assertEqual(out["prompt"], "1girl, dress, smile")
-        self.assertEqual(out["negative_prompt"], "bad worst")
+        self.assertEqual(out["negative_prompt"], "bad, worst")
         self.assertEqual(out["detect_tokens"], ["shirt"])
 
     def test_sam3_state_treats_comment_only_as_empty(self):
@@ -223,7 +288,7 @@ class AuxPromptTests(unittest.TestCase):
         image = self._data_url()
         i2i = build_i2i_request({"image": image, "prompt": "// 메모", "negative_prompt": "blur // n"},
                                 main_prompt="1girl // m\nsolo", main_negative="lowres")
-        self.assertEqual((i2i.payload["prompt"], i2i.payload["negative_prompt"]), ("1girl\nsolo", "blur"))
+        self.assertEqual((i2i.payload["prompt"], i2i.payload["negative_prompt"]), ("1girl,\nsolo", "blur"))
         inpaint = build_inpaint_request({"image": image, "mask": self._data_url(), "prompt": "/* off */"},
                                         main_prompt="cat // m", main_negative="// n")
         self.assertEqual((inpaint.payload["prompt"], inpaint.payload["negative_prompt"]), ("cat", ""))
@@ -234,6 +299,18 @@ class AuxPromptTests(unittest.TestCase):
                          "tiles")
         with self.assertRaises(ValueError):
             normalize_settings({"prompt": "// only"})
+
+
+class SearchApplyTests(unittest.TestCase):
+    def test_space_split_search_tags_never_open_a_comment(self):
+        # 검색 데이터(공백 구분·밑줄)를 프롬프트로 넣을 때 밑줄→공백이 '_//' 를 주석으로 만들지 않는다
+        from tests.test_apply_prompt_exclude_rules import _apply
+        harness = _apply("", general="1girl z.a.t.o._//_i_love_the_world_and_everything_in_it solo long_hair")
+        main = harness.main_prompt_text.toPlainText()
+        self.assertIn("z.a.t.o._//_i_love_the_world_and_everything_in_it", main)
+        self.assertIn("long hair", main)
+        self.assertFalse(has_prompt_comment(main))
+        self.assertIn("solo", _sent(main))
 
 
 class AutoNlTests(unittest.TestCase):

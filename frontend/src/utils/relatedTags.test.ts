@@ -43,6 +43,9 @@ describe('relatedTags insertion', () => {
     expect(relatedInsertText('holding_sword', true)).toBe('holding sword')
     expect(relatedInsertText('holding_sword', false)).toBe('holding_sword')
     expect(relatedInsertText('star_(sky)', true)).toBe('star (sky)')
+    // 밑줄→공백이 '//' 를 주석으로 만드는 태그는 블록 모드에서도 밑줄 그대로
+    const zato = 'z.a.t.o._//_i_love_the_world_and_everything_in_it'
+    expect(relatedInsertText(zato, true)).toBe(zato)
   })
 
   it('appends to the end without rewriting the prompt and skips tags already anywhere', () => {

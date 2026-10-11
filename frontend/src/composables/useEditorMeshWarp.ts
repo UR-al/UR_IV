@@ -100,6 +100,12 @@ export function useEditorMeshWarp(deps: EditorMeshWarpDeps) {
     deps.canvas()?.setMeshPinEdges?.(meshPinEdges.value)
   }
 
+  /** 캔버스의 mesh-pin-restored — 되돌리기가 고정 상태도 되돌렸다. 체크만 맞춘다(캔버스는 이미 그 상태). */
+  function onMeshPinRestored(on: boolean) {
+    meshPinEdges.value = !!on
+    saveMeshPinEdges(meshPinEdges.value)
+  }
+
   /** 캔버스의 mesh-changed — 점이 처음 자리면 프리뷰를 걷고, 아니면 디바운스 프리뷰. */
   function onMeshChanged(dst: number[][]) {
     if (!meshActive.value) return
@@ -135,6 +141,6 @@ export function useEditorMeshWarp(deps: EditorMeshWarpDeps) {
 
   return {
     meshActive, meshPinEdges, startMesh, confirmMesh, cancelMesh, resetMesh, setMeshPinEdges, onMeshChanged,
-    handleMeshKey,
+    onMeshPinRestored, handleMeshKey,
   }
 }

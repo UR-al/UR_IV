@@ -5,13 +5,14 @@ import { useMeshWarpHandles } from './useMeshWarpHandles'
 const last = <T>(arr: readonly T[]): T | undefined => arr[arr.length - 1]
 
 function setup(size: { w: number; h: number } | null = { w: 300, h: 300 }) {
-  const calls = { redraw: 0, redrawAll: 0, changes: [] as number[][][] }
+  const calls = { redraw: 0, redrawAll: 0, changes: [] as number[][][], pins: [] as boolean[] }
   const handles = useMeshWarpHandles({
     imageSize: () => size,
     imagePerScreenPx: () => 1,
     redraw: () => { calls.redraw++ },
     redrawAll: () => { calls.redrawAll++ },
     onChange: (dst) => { calls.changes.push(dst) },
+    onPinEdgesRestored: (on) => { calls.pins.push(on) },
   })
   return { handles, calls }
 }
@@ -79,6 +80,21 @@ describe('useMeshWarpHandles', () => {
     handles.pointerUp()
     handles.setPinEdges(true)
     expect(last(calls.changes)?.[1]).toEqual([0.33333, 0])
+  })
+
+  it('undo that also restores the pin tells the parent so the checkbox follows', () => {
+    const { handles, calls } = setup()
+    handles.begin(false)
+    expect(handles.pointerDown({ x: 100, y: 0 })).toBe(true)     // 테두리 점 1
+    handles.pointerMove({ x: 120, y: 30 })
+    handles.pointerUp()
+    handles.setPinEdges(true)
+    expect(last(calls.changes)?.[1]).toEqual([0.33333, 0])
+    expect(handles.undoStep()).toBe(true)
+    expect(calls.pins).toEqual([false])
+    expect(last(calls.changes)?.[1]).toEqual([0.4, 0.1])
+    expect(handles.undoStep()).toBe(true)                          // 점 이동만 되돌린 칸 — 고정은 그대로
+    expect(calls.pins).toEqual([false])
   })
 
   it('draws the grid while active only', () => {

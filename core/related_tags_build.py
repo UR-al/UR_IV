@@ -5,8 +5,12 @@
 캐릭터 N_CHARACTER, 작품 N_COPYRIGHT 개. 작가·메타 태그는 쓰지 않는다. 별칭(alias → 원래 태그)과
 함의(거듭 따라간 결과 중 어휘 안 쌍)도 함께 적어 두어, 질의 때 pandas 없이 쓴다.
 
-표(샤드마다): 게시물 하나의 어휘 안 태그 쌍 중 한쪽이 후보인 쌍을 세고, 태그마다 '더한 값'
-P(g|c) − P(g) > 0 이고 횟수 ≥ MIN_PAIR_BUILD 인 후보 이웃을 더한 값 순으로 TOP_K 개만 CSR 로 남긴다.
+표(샤드마다): 게시물 하나의 어휘 안 태그 쌍 중 한쪽이 후보인 쌍을 세고, 태그마다 횟수 ≥ MIN_PAIR_BUILD 인
+후보 이웃을 그 등급의 '더한 값' P(g|c) − P(g) 순으로 모두 CSR 로 남긴다(top_k 를 주면 그 수만 — 테스트용).
+더한 값 > 0 은 표에서 거르지 않는다 — 질의가 여러 등급을 합친 횟수로 판단한다(core/related_tags 모듈 설명).
+예전처럼 등급마다 상위 128개로 자르거나 그 등급에서 더한 값 ≤ 0 인 쌍을 버리면, 합친 횟수가 모자라
+coverage 가 줄어 순위가 틀어졌다(실측: 다섯 프롬프트 모두 16개 중 4–8개가 달랐다 → 이제 0개).
+표 크기는 실측 G 51 MB · S 54 MB(쌍 약 850만·900만 개, 질의 8 ms 안팎).
 세는 방법은 이 앱을 위해 새로 짰다(원본 저장소 코드 없음).
 
 파일은 ``*.tmp`` 에 쓴 뒤 ``os.replace`` 로 바꾼다 — 중간에 끊겨도 반쪽 표가 남지 않는다.
@@ -290,7 +294,8 @@ def load_shard(path: Path | str) -> ShardTable | None:
 # ── 세기 ────────────────────────────────────────────────────────────────────
 
 def build_shard_table(parquet_path: Path | str, vocab: Vocab, *, batch_rows: int = BATCH_ROWS,
-                      max_tags: int = MAX_TAGS_PER_POST, min_pair: int = MIN_PAIR_BUILD, top_k: int = TOP_K,
+                      max_tags: int = MAX_TAGS_PER_POST, min_pair: int = MIN_PAIR_BUILD,
+                      top_k: int | None = TOP_K,
                       progress: Callable[[float], None] | None = None,
                       should_stop: Callable[[], bool] | None = None) -> ShardTable:
     """parquet 하나 → 샤드 표. should_stop() 이 참이면 배치 사이에서 BuildCanceled."""
@@ -385,8 +390,8 @@ def build_shard_table(parquet_path: Path | str, vocab: Vocab, *, batch_rows: int
                       meta={"posts": int(posts), "skipped": int(skipped), "entries": int(len(nbr))})
 
 
-def _prune(acc, occ, posts: int, nc: int, *, min_pair: int, top_k: int, progress, stop):
-    """acc[S, F] → 태그마다 후보 이웃(더한 값 > 0, 횟수 ≥ min_pair) 상위 top_k 의 CSR."""
+def _prune(acc, occ, posts: int, nc: int, *, min_pair: int, top_k: int | None, progress, stop):
+    """acc[S, F] → 태그마다 후보 이웃(횟수 ≥ min_pair)의 CSR — 그 등급의 더한 값 순, top_k 가 있으면 그만큼."""
     import numpy as np
 
     V = acc.shape[0]
@@ -407,13 +412,13 @@ def _prune(acc, occ, posts: int, nc: int, *, min_pair: int, top_k: int, progress
         base = occ[begin:end].astype(np.float64)
         with np.errstate(divide="ignore", invalid="ignore"):
             added = rows / base[:, None] - prior[None, :]
-        ok = (rows >= min_pair) & (added > 0) & (base[:, None] > 0)
+        ok = (rows >= min_pair) & (base[:, None] > 0)
         for r in range(end - begin):
             chosen = np.flatnonzero(ok[r])
-            if chosen.size > top_k:
-                chosen = chosen[np.argsort(-added[r, chosen], kind="stable")[:top_k]]
-            elif chosen.size:
+            if chosen.size:
                 chosen = chosen[np.argsort(-added[r, chosen], kind="stable")]
+                if top_k is not None and chosen.size > top_k:
+                    chosen = chosen[:top_k]
             sizes[begin + r] = chosen.size
             nbr_parts.append(chosen.astype(np.uint16))
             cnt_parts.append(rows[r, chosen].astype(np.uint32))

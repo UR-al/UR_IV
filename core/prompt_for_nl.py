@@ -13,6 +13,8 @@ LLM에는 '묘사할 내용'만 보내야 정확하다. 다음은 묘사 대상�
 """
 import re
 
+from core.prompt_comments import strip_prompt_comments
+
 # 묘사 대상이 아닌 품질/메타 태그 (정확히 일치 시 제거, 소문자 비교)
 _META_EXACT = {
     'masterpiece', 'best quality', 'high quality', 'normal quality', 'low quality',
@@ -35,7 +37,9 @@ def clean_tags_for_nl(prompt: str) -> str:
     """nl_caption LLM 입력용으로 태그 문자열 정리. 인물수/캐릭터/작품/메인만 남긴다."""
     if not prompt:
         return ''
-    s = prompt
+    # 주석(// 줄 끝까지, /* 블록 */)은 생성에 보내지 않는다 — LLM 에도 보내지 않아야 꺼 둔 태그가
+    # 자연어 캡션으로 되살아나지 않는다. 결과를 덧붙일 칸 글(base)은 주석째 그대로 둔다(호출자 몫).
+    s = strip_prompt_comments(prompt)
     s = _RE_LORA.sub('', s)
     # 네거티브 그룹 제거 — 중첩( ((tag:-1.2)) )에서 안쪽이 먼저 지워지고 바깥
     # 빈 괄호가 남으므로, 변화가 없을 때까지 반복.

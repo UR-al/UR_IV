@@ -34,12 +34,14 @@ GRID = 4                        # 한 변의 점 수 (3×3 칸)
 EDGE_ANCHORS_PER_SIDE = 24      # 테두리 앵커 간격 1/24 — 격자점(8/24 의 배수)은 건너뛴다
 COARSE_MAX = 513                # 휘는 부분을 계산하는 성긴 격자의 한 변 최대 점 수
 COARSE_STEP_PX = 8              # 성긴 격자 간격 목표(px)
-MIN_POINT_GAP = 1e-4            # 정규화 좌표에서 이보다 가까운 두 점은 겹친 것으로 본다
+MIN_POINT_GAP = 1e-4            # 정규화 좌표에서 이보다 가까운 두 점(앵커 포함)은 겹친 것으로 본다
+MIN_GRID_GAP = 0.01             # 격자점 16개 사이 최소 거리(정규화) — 프론트는 0.02 로 막는다
 IDENTITY_ATOL = 1e-6
 EVAL_CHUNK = 8192
 
 MSG_NEED_POINTS = '격자 변형: 점 16개가 필요합니다'
 MSG_OVERLAP = '격자 점이 서로 겹쳤습니다 — 조금 떼어 놓으세요'
+MSG_FOLDED = '격자가 접혔습니다 — 점을 조금 되돌려 주세요'
 
 
 class MeshWarpError(ValueError):
@@ -229,11 +231,42 @@ def control_points(dst_uv: np.ndarray, pin_edges: bool = True) -> tuple[np.ndarr
             np.vstack([dst, anchor_points(dst)]))
 
 
-def _check_gaps(pts: np.ndarray) -> None:
+def _check_gaps(pts: np.ndarray, min_gap: float = MIN_POINT_GAP) -> None:
     d2 = ((pts[:, None, :] - pts[None, :, :]) ** 2).sum(-1)
     np.fill_diagonal(d2, np.inf)
-    if float(d2.min()) < MIN_POINT_GAP ** 2:
+    if float(d2.min()) < min_gap ** 2:
         raise MeshWarpError(MSG_OVERLAP)
+
+
+def grid_cells(n: int = GRID) -> list[tuple[int, int, int, int]]:
+    """칸마다 꼭짓점 인덱스(왼쪽 위 → 오른쪽 위 → 오른쪽 아래 → 왼쪽 아래)."""
+    return [(r * n + c, r * n + c + 1, (r + 1) * n + c + 1, (r + 1) * n + c)
+            for r in range(n - 1) for c in range(n - 1)]
+
+
+def cell_is_convex(quad) -> bool:
+    """칸이 볼록한가 — 네 꼭짓점 모두 처음 격자와 같은 방향으로 돈다(뒤집힘·꼬임·오목을 모두 거른다).
+
+    프론트(utils/meshWarp.meshCellConvex)는 꼭짓점 각 sin > 0.05 로 조금 더 엄격하다(반올림 여유)."""
+    q = [tuple(map(float, p)) for p in quad]
+    for k in range(4):
+        p, c, n = q[k - 1], q[k], q[(k + 1) % 4]
+        if (n[0] - c[0]) * (p[1] - c[1]) - (n[1] - c[1]) * (p[0] - c[0]) <= 0:
+            return False
+    return True
+
+
+def check_grid(grid_pts: np.ndarray) -> None:
+    """옮긴 격자 16점 검사 — 너무 가까운 점(MSG_OVERLAP)·볼록하지 않은 칸(MSG_FOLDED)이면 MeshWarpError.
+
+    접히거나 오목한 칸은 TPS 가 출력 일부를 뒤집어(이미지 밖 BORDER_REPLICATE 번짐까지) 프리뷰·적용이 망가진다.
+    볼록한 칸이어도 아주 크게 끌면 TPS 가 조금 접힐 수 있다(실측: 점마다 ±0.3 무작위 끌기에서 13%, 볼록 검사
+    전 36%) — 그건 프리뷰로 보인다."""
+    pts = np.asarray(grid_pts, dtype=np.float64).reshape(GRID * GRID, 2)
+    _check_gaps(pts, MIN_GRID_GAP)
+    for cell in grid_cells(GRID):
+        if not cell_is_convex(pts[list(cell)]):
+            raise MeshWarpError(MSG_FOLDED)
 
 
 def is_identity(dst_uv, pin_edges: bool = True) -> bool:
@@ -250,6 +283,7 @@ def mesh_warp(img: np.ndarray, dst_uv, *, pin_edges: bool = True) -> np.ndarray:
     src, dst = control_points(dst_uv, pin_edges)
     if np.allclose(dst[:GRID * GRID], src[:GRID * GRID], atol=IDENTITY_ATOL, rtol=0.0):
         return img.copy()
+    check_grid(dst[:GRID * GRID])
     _check_gaps(dst)
     h, w = img.shape[:2]
     map_x, map_y = warp_maps(w, h, uv_to_px(src, w, h), uv_to_px(dst, w, h))

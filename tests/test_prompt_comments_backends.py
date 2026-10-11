@@ -286,7 +286,8 @@ class Krea2AndChatTests(_CommentFree, unittest.TestCase):
         result = run_krea2_generation(backend, "t2i", {"prompt": "portrait // 메모\nstudio light", "seed": 1,
                                                        "width": 1024, "height": 1024})
         self.assertTrue(result.success, result.error)
-        self.assertEqual(backend.workflow["4"]["inputs"]["text"], "portrait\nstudio light")
+        # 줄 주석이 끝낸 태그 뒤 쉼표 — Krea 정리(쉼표 뒤 공백 → ', ')를 거친 모양
+        self.assertEqual(backend.workflow["4"]["inputs"]["text"], "portrait, studio light")
 
     def test_chat_deferred_hooks_see_and_return_stripped_text(self):
         from core.chat_generation import prepare_prompt_payload

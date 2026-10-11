@@ -19,9 +19,11 @@ import numpy as np
 from core.cv_io import imread_unicode, imwrite_unicode
 from core.editor_mesh_warp import (
     GRID,
+    MSG_FOLDED,
     MSG_NEED_POINTS,
     MSG_OVERLAP,
     MeshWarpError,
+    check_grid,
     anchor_points,
     control_points,
     edge_anchor_uv,
@@ -173,6 +175,33 @@ class MeshWarpTests(unittest.TestCase):
         with self.assertRaises(MeshWarpError) as ctx:
             mesh_warp(_textured(), dst)
         self.assertEqual(str(ctx.exception), MSG_OVERLAP)
+
+    # 리뷰 사례(1024×1024, 가장자리 고정) — 이웃 클램프만으로는 대각선으로 엇갈린 격자가 통과했다
+    FOLDED = [[0, 0], [0.33333, 0], [0.66667, 0], [1, 0], [0, 0.33333], [0.6, 0.6], [0.9, 0.05], [1, 0.33333],
+              [0, 0.66667], [0.05, 0.9], [0.4, 0.4], [1, 0.66667], [0, 1], [0.33333, 1], [0.66667, 1], [1, 1]]
+
+    def test_folded_grid_is_refused(self):
+        # 점 5 가 점 10 의 오른쪽 아래 — 칸이 뒤집혀 출력 21% 가 거울처럼 접혔다
+        with self.assertRaises(MeshWarpError) as ctx:
+            mesh_warp(_textured(), np.array(self.FOLDED))
+        self.assertEqual(str(ctx.exception), MSG_FOLDED)
+
+    def test_points_a_pixel_apart_are_refused(self):
+        # 1px(정규화 0.001) — 예전 간격 하한 1e-4 는 통과해 출력 86% 가 이미지 밖에서 번졌다
+        near = [list(p) for p in self.FOLDED]
+        near[10] = [0.60098, 0.6]
+        with self.assertRaises(MeshWarpError) as ctx:
+            mesh_warp(_textured(), np.array(near))
+        self.assertEqual(str(ctx.exception), MSG_OVERLAP)
+
+    def test_concave_cell_is_refused_and_convex_moves_pass(self):
+        dst = grid_uv()
+        dst[5] = (0.62, 0.62)          # 점 10(2/3, 2/3) 쪽 칸이 오목해진다
+        with self.assertRaises(MeshWarpError) as ctx:
+            check_grid(dst)
+        self.assertEqual(str(ctx.exception), MSG_FOLDED)
+        check_grid(_moved(5, 0.1, 0.08))              # 보통 끌기는 그대로 통과
+        check_grid(_moved(10, -0.12, 0.05))
 
 
 class ParamTests(unittest.TestCase):

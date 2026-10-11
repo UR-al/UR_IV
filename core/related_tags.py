@@ -7,7 +7,10 @@
 
 순위(원본의 '횟수 합' 순위는 이 데이터에서 프롬프트와 상관없이 늘 같은 일반 태그를 냈다 — 실측):
   1. 기준 태그(context) 중 몇 개와 '함께 쓰였나'(coverage) — 큰 것 먼저.
-     '함께 쓰였다' = 합친 쌍 횟수 ≥ min_pair 이고 더한 값 P(g|c) − P(g) > 0.
+     '함께 쓰였다' = 합친 쌍 횟수 ≥ min_pair 이고 (합친 횟수로 잰) 더한 값 P(g|c) − P(g) > 0.
+     표는 태그마다 이웃 수를 자르지도, 등급마다 더한 값으로 거르지도 않는다(core/related_tags_build) — 예전에는
+     어디서나 흔한 태그 쪽으로 coverage 가 기울어 16개 중 4–8개가 달랐다(실측). 남은 근사는 하나다: 등급(샤드)
+     표마다 그 등급의 쌍 횟수가 MIN_PAIR_BUILD 미만이면 남기지 않으므로, 여러 등급을 합칠 때 그 몫은 합에서 빠진다.
   2. 더한 값의 합 — 큰 것 먼저.
   3. 전체 게시물 수 — 큰 것 먼저. 4. 이름 — 사전 순.
 기준 태그: 프롬프트의 어휘 안 태그 중 게시물 비율 GENERIC_SHARE 이상(1girl·solo·long_hair …)은 더 구체적인
@@ -27,7 +30,7 @@ N_CANDIDATES = 4096       # 추천 후보 = 일반 태그 상위 4096(약 5.7k �
 N_GENERAL = 8192          # 기준 태그로 쓰는 일반 태그(후보 포함)
 N_CHARACTER = 3072
 N_COPYRIGHT = 1024
-TOP_K = 128               # 표에 남기는 태그마다의 이웃 수
+TOP_K: int | None = None  # 표에 남기는 태그마다의 이웃 수 상한 — 없음(coverage 가 모든 이웃을 센다)
 MIN_PAIR_BUILD = 20       # 샤드 표에 남기는 쌍 횟수 하한
 MIN_PAIR_QUERY = 30       # 합친 표에서 '함께 쓰였다'로 치는 하한
 MAX_CONTEXT = 16
@@ -61,6 +64,10 @@ _PERSON_WORDS = frozenset({
 })
 # 이스케이프한 글자는 괄호 제거·가중치 해석을 피하려고 잠시 사용자 영역 문자로 바꿔 둔다.
 _PLACEHOLDER_BASE = 0xE000
+_PLACEHOLDER_MAX = 4096   # 자리표시 문자 수 한도(사용자 영역 E000–F8FF 안)
+_OPENERS = {"(": ")", "[": "]", "{": "}"}
+_CLOSERS = frozenset(_OPENERS.values())
+_SEPARATORS = frozenset(",\n|")
 
 
 def normalize_tag(text: str) -> str:
@@ -68,11 +75,67 @@ def normalize_tag(text: str) -> str:
     return _SPACES.sub("_", str(text or "").strip().lower())
 
 
+def _split_top_level(text: str) -> list[str]:
+    """괄호(()[]{}) 밖의 쉼표·줄바꿈·``|`` 에서 나눈다 — 나눈 글자도 따로 한 칸(다시 이으면 원문)."""
+    out: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if ch in _OPENERS:
+            depth += 1
+        elif ch in _CLOSERS:
+            depth = max(0, depth - 1)
+        elif ch in _SEPARATORS and depth == 0:
+            out.append(text[start:i])
+            out.append(ch)
+            start = i + 1
+    out.append(text[start:])
+    return out
+
+
+def _wraps_whole(piece: str) -> bool:
+    """``piece`` 전체가 괄호 한 쌍으로 감싸였나 — ``(tag:1.2)`` · ``((tag))`` · ``[tag]`` · ``{tag}``."""
+    if len(piece) < 2 or piece[0] not in _OPENERS:
+        return False
+    opener, closer = piece[0], _OPENERS[piece[0]]
+    depth = 0
+    for i, ch in enumerate(piece):
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return i == len(piece) - 1
+    return False
+
+
+def _literal_parens(text: str, hide: Callable[[str], str]) -> str:
+    """쉼표 조각마다 — 조각 전체를 감싼 괄호(가중치·강조)만 문법으로 두고, 나머지 ``(`` ``)`` 는 글자로 숨긴다.
+
+    자동완성·연관 태그가 넣는 ``ganyu (genshin impact)`` · ``bow_(weapon)`` 의 괄호는 태그의 일부다
+    (utils/prompt_cleaner 의 괄호 이스케이프와 같은 판단). 감싼 괄호 안은 다시 같은 규칙으로 본다.
+    """
+    out: list[str] = []
+    for part in _split_top_level(text):
+        core = part.strip()
+        if _wraps_whole(core):
+            lead = part[:len(part) - len(part.lstrip())]
+            tail = part[len(part.rstrip()):]
+            out.append(lead + core[0] + _literal_parens(core[1:-1], hide) + core[-1] + tail)
+        elif "(" in part or ")" in part:
+            out.append("".join(hide(ch) if ch in "()" else ch for ch in part))
+        else:
+            out.append(part)
+    return "".join(out)
+
+
 def extract_prompt_tags(text: object) -> list[tuple[str, float]]:
     """프롬프트 → [(정규화한 태그, 가중치)] (나온 순서, 중복 포함).
 
-    <…>(LoRA·임베딩), __와일드카드__, {a|b} 선택지, BREAK·AND 는 버린다. ``\\(`` ``\\)`` 는 글자 괄호로 남기고
-    이스케이프 안 된 ()[]{} 는 지운다. 끝의 ``:숫자`` 는 태그 본문 뒤일 때만 가중치로 읽는다(``:3`` · ``:d`` 는 태그).
+    <…>(LoRA·임베딩), __와일드카드__, {a|b} 선택지, BREAK·AND 는 버린다. ``\\(`` ``\\)`` 는 글자 괄호로 남긴다.
+    이스케이프 안 된 괄호는 쉼표 조각 전체를 감쌀 때만(``(tag:1.2)`` · ``((tag))``) 문법으로 지우고, 조각 안의
+    ``(`` ``)`` 는 태그 글자로 본다(``ganyu (genshin impact)`` · ``bow_(weapon)`` — 자동완성이 넣는 모양).
+    끝의 ``:숫자`` 는 태그 본문 뒤일 때만 가중치로 읽는다(``:3`` · ``:d`` 는 태그).
     프롬프트 주석(// · /* */)은 생성에 보내지 않으므로 먼저 뗀다(core/prompt_comments) — 주석 속 태그는 기준
     태그도, '이미 있는 태그'도 아니다.
     """
@@ -81,11 +144,14 @@ def extract_prompt_tags(text: object) -> list[tuple[str, float]]:
     source = strip_prompt_comments(text[:MAX_FIELD_CHARS])
     literals: list[str] = []
 
-    def hide(match: re.Match) -> str:
-        literals.append(match.group(1))
+    def stash(value: str) -> str:
+        literals.append(value)
         return chr(_PLACEHOLDER_BASE + len(literals) - 1)
 
-    if len(re.findall(r"\\", source)) > 4096:      # 비정상 입력 — 자리표시 문자가 모자라지 않게
+    def hide(match: re.Match) -> str:
+        return stash(match.group(1))
+
+    if len(re.findall(r"\\", source)) > _PLACEHOLDER_MAX:      # 비정상 입력 — 자리표시 문자가 모자라지 않게
         source = source.replace("\\", "")
     source = _ESCAPED.sub(hide, source)
     source = _ANGLE.sub(",", source)
@@ -95,6 +161,8 @@ def extract_prompt_tags(text: object) -> list[tuple[str, float]]:
         previous = source
         source = _ALTERNATIVES.sub(",", source)
     source = _KEYWORDS.sub(",", source)
+    if len(literals) + source.count("(") + source.count(")") <= _PLACEHOLDER_MAX:
+        source = _literal_parens(source, stash)
     source = _BRACKETS.sub("", source)
 
     def reveal(value: str) -> str:
@@ -226,6 +294,7 @@ class QueryRequest:
     negative: str
     exclude: str
     limit: int
+    client: str = ""                      # 보낸 화면(웹 모드 탭마다 다르다) — 기다리는 질의는 화면마다 하나
 
 
 @dataclass(frozen=True)
@@ -257,11 +326,14 @@ def parse_query_payload(payload: object) -> QueryRequest:
     limit = payload.get("limit", DEFAULT_LIMIT)
     if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit):
         limit = DEFAULT_LIMIT
+    client = payload.get("client", "")
+    if not isinstance(client, str) or not _REQUEST_ID.fullmatch(client):
+        client = ""
     return QueryRequest(
         request_id=request_id, fields=texts,
         negative=_text(payload.get("negative", ""), "negative"),
         exclude=_text(payload.get("exclude", ""), "exclude"),
-        limit=max(1, min(MAX_LIMIT, int(limit))),
+        limit=max(1, min(MAX_LIMIT, int(limit))), client=client,
     )
 
 

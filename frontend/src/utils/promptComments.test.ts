@@ -11,6 +11,7 @@ import {
   joinPromptBlocks,
   splitPromptBlocks,
   stripPromptComments,
+  underscoresToSpaces,
 } from './promptComments'
 
 /**
@@ -31,6 +32,15 @@ describe('골든 사례 — 파이썬과 같은 결과', () => {
 
   it('줄 주석으로 끝나는가', () => {
     for (const c of cases.endsInLineComment) expect(endsInLineComment(c.text), JSON.stringify(c.text)).toBe(c.ends)
+  })
+
+  it('밑줄 → 공백 — 새 주석 시작을 만드는 태그는 그대로', () => {
+    expect(cases.underscoresToSpaces.length).toBeGreaterThan(4)
+    for (const c of cases.underscoresToSpaces) {
+      const out = underscoresToSpaces(c.text)
+      expect(out, JSON.stringify(c.text)).toBe(c.out)
+      expect(hasPromptComment(out), JSON.stringify(c.text)).toBe(hasPromptComment(c.text))
+    }
   })
 })
 
@@ -97,7 +107,7 @@ describe('편집기 도우미', () => {
     expect(appendPromptText('a', '')).toBe('a')
     expect(appendPromptText('a // note', 'b')).toBe('a // note\nb')
     expect(appendPromptText('a // note, ', 'b')).toBe('a // note\nb')   // 쉼표가 주석 안에 있었다
-    expect(stripPromptComments(appendPromptText('a // note', 'b'))).toBe('a\nb')
+    expect(stripPromptComments(appendPromptText('a // note', 'b'))).toBe('a,\nb')   // 줄 주석이 끝낸 태그 뒤 쉼표
   })
 })
 
@@ -124,6 +134,17 @@ describe('블록 나누기·잇기', () => {
     const blocks = splitPromptBlocks('a // first\nb, c // third\nd')
     expect(blocks).toEqual(['a // first', 'b', 'c // third', 'd'])
     const moved = [blocks[2]!, blocks[0]!, blocks[3]!]
-    expect(stripPromptComments(joinPromptBlocks(moved))).toBe('c\na\nd')
+    expect(stripPromptComments(joinPromptBlocks(moved))).toBe('c,\na,\nd')
+  })
+
+  it('블록에 메모를 달아도 보내는 글자의 태그 경계는 블록과 같다', () => {
+    // 예전: ['1girl // 주인공', 'solo', 'smile'] → '1girl\nsolo, smile' (CLIP 에서 '1girl solo' 한 태그)
+    const blocks = ['1girl // 주인공', 'solo', 'smile']
+    const sent = stripPromptComments(joinPromptBlocks(blocks))
+    expect(sent).toBe('1girl,\nsolo, smile')
+    expect(splitPromptBlocks(sent)).toEqual(['1girl', 'solo', 'smile'])
+    // 괄호 안 줄 주석은 경계가 아니다 — 가중치 묶음이 갈라지지 않는다
+    expect(stripPromptComments('(a, b // x\n:1.2), c')).toBe('(a, b\n:1.2), c')
+    expect(stripPromptComments('solo\nBREAK // x\nscenery')).toBe('solo\nBREAK\nscenery')
   })
 })

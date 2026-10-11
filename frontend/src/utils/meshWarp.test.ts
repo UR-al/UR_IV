@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  MESH_HISTORY_MAX, MESH_PIN_STORAGE_KEY, MeshSession, clampMeshPoint, hitMeshHandle, isEdgeIndex,
-  isIdentityMesh, isIdentityNormalized, loadMeshPinEdges, meshGrid, saveMeshPinEdges, snapEdgesToGrid,
-  toNormalized,
+  MESH_HISTORY_MAX, MESH_MIN_GAP, MESH_PIN_STORAGE_KEY, MeshSession, clampMeshPoint, hitMeshHandle, isEdgeIndex,
+  isIdentityMesh, isIdentityNormalized, loadMeshPinEdges, meshCellConvex, meshGrid, saveMeshPinEdges,
+  snapEdgesToGrid, toNormalized,
 } from './meshWarp'
 
 function memoryStorage(init: Record<string, string> = {}) {
@@ -58,6 +58,37 @@ describe('clampMeshPoint', () => {
     expect(clampMeshPoint(g, 5, { x: 260, y: 100 }, w, h)).toEqual({ x: 194, y: 100 })
     // 위 이웃(0) 쪽으로 끌면 0 + 6
     expect(clampMeshPoint(g, 5, { x: 100, y: -50 }, w, h)).toEqual({ x: 100, y: 6 })
+  })
+
+  it('stops before a cell would fold or two points would touch (diagonal neighbours too)', () => {
+    // 리뷰 사례: 같은 행·열 이웃만 보던 클램프는 점 5 를 점 10 의 오른쪽 아래로, 이어 1px 옆까지 보냈다
+    const W = 1024, H = 1024
+    const s = new MeshSession()
+    s.begin(W, H, true)
+    const drag = (i: number, x: number, y: number) => { s.startDrag(i); s.dragTo({ x, y }); s.endDrag() }
+    drag(6, 0.9 * W, 0.05 * H)
+    drag(9, 0.05 * W, 0.9 * H)
+    drag(5, 0.6 * W, 0.6 * H)
+    drag(10, 0.4 * W, 0.4 * H)
+    drag(10, 0.6 * W + 1, 0.6 * H)
+    const uv = s.normalized().map(([x, y]) => ({ x, y }))
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const tl = r * 4 + c
+        expect(meshCellConvex([uv[tl], uv[tl + 1], uv[tl + 5], uv[tl + 4]], 0), `cell ${r},${c}`).toBe(true)
+      }
+    }
+    for (let i = 0; i < 16; i++) {
+      for (let j = i + 1; j < 16; j++) {
+        expect(Math.hypot(uv[i].x - uv[j].x, uv[i].y - uv[j].y), `${i}-${j}`).toBeGreaterThan(MESH_MIN_GAP - 1e-4)
+      }
+    }
+    // 보통 끌기는 그대로 간다
+    const t = new MeshSession()
+    t.begin(W, H, true)
+    t.startDrag(5)
+    expect(t.dragTo({ x: 400, y: 380 })).toBe(true)
+    expect(t.points[5]).toEqual({ x: 400, y: 380 })
   })
 
   it('keeps the current coordinate when the neighbours leave no room', () => {
@@ -146,6 +177,22 @@ describe('MeshSession', () => {
     expect(s.points[1]).toEqual({ x: 100, y: 0 })
     expect(s.undo()).toBe(true)
     expect(s.points[1]).toEqual({ x: 120, y: 30 })
+    // 고정도 함께 풀린다 — 예전엔 고정이 켜진 채 옮긴 테두리만 되살아나 잡을 수도 없고 결과에도 안 나왔다
+    expect(s.pinEdges).toBe(false)
+    expect(hitMeshHandle(s.points, 120, 30, 5, s.pinEdges)).toBe(1)
+    expect(s.normalized()[1]).toEqual([0.4, 0.1])
+  })
+
+  it('undo keeps pinned borders on the grid', () => {
+    const s = new MeshSession()
+    s.begin(300, 300, false)
+    s.startDrag(1); s.dragTo({ x: 120, y: 30 }); s.endDrag()
+    s.setPinEdges(true)
+    s.startDrag(5); s.dragTo({ x: 130, y: 110 }); s.endDrag()
+    expect(s.undo()).toBe(true)          // 점 5 만 돌아가고 고정·테두리는 그대로
+    expect(s.pinEdges).toBe(true)
+    expect(s.points[1]).toEqual({ x: 100, y: 0 })
+    expect(s.points[5]).toEqual({ x: 100, y: 100 })
   })
 
   it('keeps at most MESH_HISTORY_MAX steps', () => {

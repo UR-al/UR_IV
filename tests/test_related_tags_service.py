@@ -82,9 +82,17 @@ class StoreTests(_Harness):
     def test_state_of_a_table_follows_its_meta(self):
         manifest = self.data["manifest"]
         artifact = store.shard_artifact(manifest, "g")[1]
-        meta = {"format": 1, "shard": "g", "vocab": "fp", **store.artifact_identity(artifact)}
+        meta = {"format": 1, "shard": "g", "vocab": "fp", **store.artifact_identity(artifact),
+                "params": {"n_candidates": 4096, "batch_rows": 16384, **store.build_params()}}
         data_dir = self.data["data_dir"]
         self.assertEqual(store.shard_state(meta, manifest, data_dir, "g", "fp"), "ready")
+        # 표 내용을 바꾸는 설정이 다르면(예전 표: 이웃 상위 128개만) 다시 만들기 — 설정이 없는 표도
+        self.assertEqual(store.shard_state({**meta, "params": {**meta["params"], "top_k": 128}},
+                                           manifest, data_dir, "g", "fp"), "stale")
+        self.assertEqual(store.shard_state({k: v for k, v in meta.items() if k != "params"},
+                                           manifest, data_dir, "g", "fp"), "stale")
+        self.assertEqual(store.shard_state({**meta, "params": {**meta["params"], "batch_rows": 1}},
+                                           manifest, data_dir, "g", "fp"), "ready")   # 세는 단위는 결과와 무관
         self.assertEqual(store.shard_state(meta, manifest, data_dir, "g", "other"), "missing")
         self.assertEqual(store.shard_state({**meta, "format": 2}, manifest, data_dir, "g", "fp"), "missing")
         self.assertEqual(store.shard_state({**meta, "sha256": "old"}, manifest, data_dir, "g", "fp"), "stale")
@@ -147,6 +155,29 @@ class QueryTests(_Harness):
             ("twintails", "트윈테일", ["hatsune_miku", "vocaloid"]),
         ])
 
+    def test_a_data_release_that_changes_the_vocabulary_sources_rebuilds_the_vocabulary(self):
+        # 카탈로그(·별칭·함의)가 바뀌면 쓸 수 있던 표도 stale — '다시 만들기'가 어휘부터 새로 만든다
+        import hashlib
+
+        self.build(("g", "s"))
+        new_g = fx.G_POSTS + [(100, "1girl solo armor sword fresh_new_tag", "", "")]
+        rows = fx.write_shard(self.data["data_dir"] / "danbooru_2026_07_g.parquet", new_g)
+        blob = (self.data["data_dir"] / "danbooru_2026_07_g.parquet").read_bytes()
+        manifest = json.loads(json.dumps(self.data["manifest"]))
+        for artifact in manifest["artifacts"]:
+            if artifact["rating_shard"] == "g":
+                artifact.update(rows=rows, size_bytes=len(blob), sha256=hashlib.sha256(blob).hexdigest())
+        fx.write_manifest(self.data["data_dir"], manifest)
+        with open(self.data["catalog"], "a", encoding="utf-8") as handle:
+            handle.write('fresh_new_tag,0,100,""\n')
+        event = self.service.query(request(main="1girl, armor"), {"g", "s"})
+        self.assertEqual((event["state"], event["stale"]), ("ready", ["g", "s"]))
+        self.assertEqual(self.build(tuple(event["stale"]))["state"], "done")
+        event = self.service.query(request(main="1girl, fresh_new_tag"), {"g", "s"})
+        self.assertEqual((event["stale"], event["missing"]), ([], []))
+        self.assertEqual(event["context"], ["fresh_new_tag"])
+        self.assertTrue(any("어휘를 다시 만든다" in line for line in self.logs))
+
     def test_partial_stale_and_corrupt_tables(self):
         self.build(("g",))
         event = self.service.query(request(main="armor"), {"g", "q"})
@@ -190,6 +221,28 @@ class QueryTests(_Harness):
         service.submit_query(request("rtq-4"), {"g"})
         self.assertEqual(len(started), 2)
         self.assertEqual([e["requestId"] for e in self.events], ["rtq-2"])
+
+    def test_each_client_keeps_its_newest_request(self):
+        # 웹 모드 — 탭마다 자기 마지막 requestId 만 기다린다. 다른 탭의 질의가 내 질의를 밀어내면 안 된다.
+        started = []
+        service = self.make_service(start_thread=lambda work, name: started.append(work))
+
+        def ask(request_id, client):
+            payload_fields = {key: "" for key in QUERY_FIELDS}
+            payload_fields["main"] = "armor"
+            service.submit_query(parse_query_payload({"requestId": request_id, "fields": payload_fields,
+                                                      "client": client}), {"g"})
+
+        ask("rtq-a1", "tab-a")
+        ask("rtq-a2", "tab-a")      # 같은 탭 — 앞 요청을 대신한다
+        ask("rtq-b1", "tab-b")      # 다른 탭 — 둘 다 답을 받는다
+        ask("rtq-a3", "tab-a")
+        self.assertEqual(len(started), 1)
+        started[0]()
+        self.assertEqual([e["requestId"] for e in self.events], ["rtq-b1", "rtq-a3"])
+        # client 가 없거나 형식이 틀리면 한 슬롯(예전 동작)
+        bad = parse_query_payload({"requestId": "x", "fields": {key: "" for key in QUERY_FIELDS}, "client": "bad id!"})
+        self.assertEqual(bad.client, "")
 
     def test_query_errors_become_error_events(self):
         service = self.make_service()

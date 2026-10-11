@@ -7,8 +7,12 @@
  * 같은 페이로드를 쓰려고. 점은 왼쪽 위부터 행 우선, 4×4 = 16개(3×3 칸).
  *
  * 클램프: 점은 이미지 안에, 같은 행의 왼쪽·오른쪽 이웃 사이(x)와 같은 열의 위·아래 이웃 사이(y)에
- * 이미지 크기의 2% 이상 떨어져 머문다 — 격자가 접히거나 두 점이 겹치지 않게(백엔드도 다시 확인한다).
- * '가장자리 고정'이면 테두리 12점은 잡히지 않고 안쪽 4점만 움직인다.
+ * 이미지 크기의 2% 이상 떨어져 머문다. 그것만으로는 대각선으로 엇갈려 칸이 뒤집힐 수 있어서, 이 점에 붙은
+ * 칸(최대 4개)이 볼록하게(뒤집히거나 꼬이거나 오목해지지 않게) 남고 다른 모든 점(대각선 이웃 포함)과 2% 이상
+ * 떨어진 곳까지만 간다. 오목한 칸도 얇은 판 스플라인이 크게 접어 버려서(실측) 볼록까지 요구한다
+ * (백엔드 core/editor_mesh_warp.check_grid 도 다시 확인한다 — 반올림 여유로 백엔드 쪽 기준이 조금 느슨하다).
+ * '가장자리 고정'이면 테두리 12점은 잡히지 않고 안쪽 4점만 움직이고, 테두리는 늘 처음 자리다.
+ * 고정을 켜며 테두리를 되돌린 것도 되돌리기 한 칸이고, 그 칸을 되돌리면 고정도 함께 꺼진다(체크도 따라간다).
  */
 
 export const MESH_N = 4
@@ -53,9 +57,61 @@ export function hitMeshHandle(points: readonly MeshPoint[], x: number, y: number
   return best
 }
 
+/** 점 i 가 꼭짓점인 칸들 — 칸마다 [왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래] 인덱스. */
+export function meshCellsAround(i: number): number[][] {
+  const r = Math.floor(i / MESH_N), c = i % MESH_N
+  const cells: number[][] = []
+  for (const r0 of [r - 1, r]) {
+    for (const c0 of [c - 1, c]) {
+      if (r0 < 0 || c0 < 0 || r0 >= MESH_N - 1 || c0 >= MESH_N - 1) continue
+      const tl = r0 * MESH_N + c0
+      cells.push([tl, tl + 1, tl + MESH_N + 1, tl + MESH_N])
+    }
+  }
+  return cells
+}
+
+/** 칸 꼭짓점 각의 sin 하한 — 백엔드(0)보다 조금 엄격해 반올림한 페이로드가 거절되지 않는다 */
+export const MESH_CONVEX_MARGIN = 0.05
+
+/**
+ * 칸이 볼록한가 — 네 꼭짓점 모두 처음 격자와 같은 방향으로 돌고, 꼭짓점 각의 sin 이 `margin` 보다 크다.
+ * 네 꼭짓점이 모두 같은 방향이면 뒤집힘·꼬임(나비꼴)·오목이 모두 걸러진다. q 는 [왼쪽 위, 오른쪽 위, 오른쪽 아래, 왼쪽 아래].
+ */
+export function meshCellConvex(q: readonly MeshPoint[], margin = MESH_CONVEX_MARGIN): boolean {
+  for (let k = 0; k < 4; k++) {
+    const p = q[(k + 3) % 4], c = q[k], n = q[(k + 1) % 4]
+    const ax = n.x - c.x, ay = n.y - c.y, bx = p.x - c.x, by = p.y - c.y
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by)
+    if (la === 0 || lb === 0 || (ax * by - ay * bx) / (la * lb) <= margin) return false
+  }
+  return true
+}
+
+/**
+ * 점 i 를 p 에 두어도 격자가 온전한가 — i 에 붙은 칸이 모두 볼록하고, 다른 모든 점(대각선 이웃 포함)과
+ * 정규화 거리 `minGap` 이상 떨어져 있다. 비교는 정규화 좌표(x/w, y/h)로 한다(백엔드와 같은 공간).
+ */
+export function meshMoveSound(points: readonly MeshPoint[], i: number, p: MeshPoint, w: number, h: number,
+  minGap = MESH_MIN_GAP): boolean {
+  const sx = w > 0 ? 1 / w : 0, sy = h > 0 ? 1 / h : 0
+  for (let j = 0; j < points.length; j++) {
+    if (j === i) continue
+    const dx = (p.x - points[j].x) * sx, dy = (p.y - points[j].y) * sy
+    if (dx * dx + dy * dy < minGap * minGap) return false
+  }
+  return meshCellsAround(i).every(cell =>
+    meshCellConvex(cell.map(j => (j === i ? { x: p.x * sx, y: p.y * sy } : { x: points[j].x * sx, y: points[j].y * sy }))))
+}
+
+/** 같은 자리로 보는 이분 탐색 횟수 — 2^-20 이면 4K 에서도 1px 의 1/200 */
+const SETTLE_STEPS = 20
+
 /**
  * 점 i 를 p 로 옮길 때 실제로 놓일 자리 — 이미지 안, 그리고 이웃(같은 행 좌우·같은 열 위아래)과
  * `minGap` 비율 이상 떨어진 곳. 이웃이 이미 너무 가까우면 그 축은 지금 자리를 지킨다.
+ * 그 자리에서 칸이 볼록하지 않거나 다른 점에 너무 붙으면(meshMoveSound), 지금 자리에서 그쪽으로
+ * 갈 수 있는 데까지만 간다. 지금 자리부터 이미 어긋나 있으면(밖에서 만든 점) 축 클램프만 쓴다 — 백엔드가 거른다.
  */
 export function clampMeshPoint(points: readonly MeshPoint[], i: number, p: MeshPoint, w: number, h: number,
   minGap = MESH_MIN_GAP): MeshPoint {
@@ -67,7 +123,18 @@ export function clampMeshPoint(points: readonly MeshPoint[], i: number, p: MeshP
   const hiY = r < MESH_N - 1 ? points[i + MESH_N].y - gy : h
   const x = loX <= hiX ? clamp(p.x, Math.max(0, loX), Math.min(w, hiX)) : points[i].x
   const y = loY <= hiY ? clamp(p.y, Math.max(0, loY), Math.min(h, hiY)) : points[i].y
-  return { x, y }
+  const target = { x, y }
+  if (meshMoveSound(points, i, target, w, h, minGap)) return target
+  const cur = points[i]
+  if (!meshMoveSound(points, i, cur, w, h, minGap)) return target
+  let lo = 0, hi = 1
+  for (let k = 0; k < SETTLE_STEPS; k++) {
+    const mid = (lo + hi) / 2
+    const q = { x: cur.x + (target.x - cur.x) * mid, y: cur.y + (target.y - cur.y) * mid }
+    if (meshMoveSound(points, i, q, w, h, minGap)) lo = mid
+    else hi = mid
+  }
+  return lo > 0 ? { x: cur.x + (target.x - cur.x) * lo, y: cur.y + (target.y - cur.y) * lo } : { x: cur.x, y: cur.y }
 }
 
 /** 백엔드 페이로드 `dst` — [[u, v] × 16], 0~1, 1e-5 로 반올림. */
@@ -98,6 +165,9 @@ export function snapEdgesToGrid(points: readonly MeshPoint[], w: number, h: numb
 }
 
 const copy = (pts: readonly MeshPoint[]): MeshPoint[] => pts.map(p => ({ x: p.x, y: p.y }))
+
+/** 되돌리기 한 칸 — 점들과, 고정을 켜며 테두리를 되돌린 칸이면 그 전의 고정 상태 */
+interface MeshHistoryEntry { points: MeshPoint[]; pinEdges?: boolean }
 const samePoints = (a: readonly MeshPoint[], b: readonly MeshPoint[]) =>
   a.length === b.length && a.every((p, i) => p.x === b[i].x && p.y === b[i].y)
 
@@ -108,7 +178,7 @@ export class MeshSession {
   pinEdges = true
   private w = 0
   private h = 0
-  private history: MeshPoint[][] = []
+  private history: MeshHistoryEntry[] = []
   private dragStart: MeshPoint[] | null = null
 
   get active(): boolean { return this.points.length === MESH_POINTS }
@@ -158,10 +228,15 @@ export class MeshSession {
     return true
   }
 
+  /**
+   * 마지막 한 칸을 되돌린다. 고정을 켜며 테두리를 되돌린 칸이면 고정도 그 전 상태로 돌린다(부르는 쪽이
+   * pinEdges 를 보고 체크를 맞춘다). 고정이 켜져 있으면 테두리는 늘 처음 자리 — 손잡이·프리뷰·결과가 같게.
+   */
   undo(): boolean {
     const prev = this.history.pop()
     if (!prev) return false
-    this.points = prev
+    if (prev.pinEdges !== undefined) this.pinEdges = prev.pinEdges
+    this.points = this.pinEdges ? snapEdgesToGrid(prev.points, this.w, this.h) : prev.points
     this.dragIdx = -1
     this.dragStart = null
     return true
@@ -177,13 +252,18 @@ export class MeshSession {
     return true
   }
 
-  /** '가장자리 고정' 전환. 켤 때 옮겨 둔 테두리 점이 있으면 제자리로 돌린다(되돌리기 한 칸). */
+  /**
+   * '가장자리 고정' 전환. 켤 때 옮겨 둔 테두리 점이 있으면 제자리로 돌린다(되돌리기 한 칸 — 그 칸에는 고정을
+   * 켜기 전 상태도 적어, 되돌리면 테두리와 함께 고정도 꺼진다. 예전엔 고정이 켜진 채 옮긴 테두리만 되살아나
+   * 손잡이(잡을 수 없음)·프리뷰(테두리 고정)·적용(변화 없음)이 서로 달랐다).
+   */
   setPinEdges(on: boolean): boolean {
+    const before = this.pinEdges
     this.pinEdges = on
     if (!on || !this.active) return false
     const snapped = snapEdgesToGrid(this.points, this.w, this.h)
     if (samePoints(snapped, this.points)) return false
-    this.pushHistory(copy(this.points))
+    this.pushHistory(copy(this.points), before)
     this.points = snapped
     return true
   }
@@ -192,8 +272,8 @@ export class MeshSession {
 
   isIdentity(): boolean { return isIdentityMesh(this.points, this.w, this.h) }
 
-  private pushHistory(pts: MeshPoint[]): void {
-    this.history.push(pts)
+  private pushHistory(pts: MeshPoint[], pinEdges?: boolean): void {
+    this.history.push(pinEdges === undefined ? { points: pts } : { points: pts, pinEdges })
     while (this.history.length > MESH_HISTORY_MAX) this.history.shift()
   }
 }

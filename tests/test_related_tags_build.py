@@ -104,6 +104,15 @@ class BuildShardTests(unittest.TestCase):
         return {self.vocab.names[g]: int(n) for g, n in zip(table.nbr[begin:end].tolist(),
                                                               table.cnt[begin:end].tolist())}
 
+    def ranked(self, table, *context):
+        from core.related_tags import MIN_PAIR_QUERY, rank_related
+        from core.related_tags_store import LoadedTables
+
+        tables = LoadedTables([table])
+        out = rank_related([self.index[c] for c in context], tables.neighbors, tables.occ, tables.total_posts,
+                           self.vocab.names, min_pair=MIN_PAIR_QUERY)
+        return [self.vocab.names[r.id] for r in out]
+
     def test_counts_occurrences_and_positive_association_only(self):
         seen = []
         table = rb.build_shard_table(self.g_path, self.vocab, batch_rows=50, progress=seen.append)
@@ -113,17 +122,45 @@ class BuildShardTests(unittest.TestCase):
         self.assertEqual(occ["armor"], 100)
         self.assertEqual(occ["hatsune_miku"], 50)
         self.assertEqual(occ["cape"], 0)
+        # 표는 횟수 ≥ min_pair 인 후보 이웃을 모두 남긴다 — 더한 값 > 0 은 등급을 합친 질의가 판단한다
+        # (등급마다 버리면 합친 횟수가 모자라 coverage 가 줄었다)
         self.assertEqual(self.neighbors(table, "armor"),
-                         {"sword": 100, "holding_sword": 100, "weapon": 100, "shoulder_armor": 100})
-        # 모든 게시물에 있는 태그는 무엇을 더해 주지도, 더해지지도 않는다
-        self.assertEqual(self.neighbors(table, "solo"), {})
-        self.assertNotIn("solo", self.neighbors(table, "sword"))
+                         {"sword": 100, "holding_sword": 100, "weapon": 100, "shoulder_armor": 100,
+                          "1girl": 100, "solo": 100})
+        # 모든 게시물에 있는 태그는 무엇을 더해 주지도, 더해지지도 않는다 — 순위에 나오지 않는다
+        self.assertEqual(self.ranked(table, "armor"), ["holding_sword", "shoulder_armor", "sword", "weapon"])
+        self.assertEqual(self.ranked(table, "solo"), [])
+        self.assertNotIn("solo", self.ranked(table, "sword"))
         # 캐릭터·작품(후보 아님)도 기준으로서 후보 이웃을 갖는다
         self.assertEqual(self.neighbors(table, "hatsune_miku"),
-                         {"twintails": 50, "aqua_hair": 50, "necktie": 50})
-        self.assertEqual(self.neighbors(table, "hat"), {"smile": 120, "long_hair": 80, "nurse_cap": 40})
+                         {"twintails": 50, "aqua_hair": 50, "necktie": 50, "1girl": 50, "solo": 50})
+        self.assertEqual(self.ranked(table, "hatsune_miku"), ["aqua_hair", "necktie", "twintails"])
+        self.assertEqual(self.ranked(table, "hat"), ["smile", "long_hair", "nurse_cap"])
+        # 이웃은 그 등급의 더한 값 순 — 더해 주지 않는 1girl·solo 는 뒤에
+        self.assertEqual(list(self.neighbors(table, "hat"))[-2:], ["1girl", "solo"])
         self.assertEqual(seen, sorted(seen))
         self.assertEqual(seen[-1], 1.0)
+
+    def test_negative_pairs_in_one_rating_still_count_when_ratings_are_merged(self):
+        # G 에서는 흔한 짝(더한 값 ≤ 0)이지만 S 와 합치면 더해 주는 태그 — 등급마다 버리면 coverage 에서 빠졌다
+        from core.related_tags import rank_related
+        from core.related_tags_store import LoadedTables
+
+        g_path, s_path = self.root / "merge_g.parquet", self.root / "merge_s.parquet"
+        # G: P(sword)=0.8 인데 armor 게시물의 sword 는 0.375 — G 만 보면 더해 주지 않는다
+        fx.write_shard(g_path, [(60, "armor sword", "", ""), (100, "armor", "", ""), (340, "sword", "", "")])
+        # S: sword 는 armor 와만 — 합치면 P(sword|armor)=120/220 > P(sword)=460/1500
+        fx.write_shard(s_path, [(60, "armor sword", "", ""), (940, "1girl", "", "")])
+        vocab = rb.select_vocab([("armor", 0, 220), ("sword", 0, 460), ("1girl", 0, 940)])
+        index = vocab.index()
+        tables = [rb.build_shard_table(p, vocab) for p in (g_path, s_path)]
+        g_only = {vocab.names[g]: int(n) for g, n in zip(tables[0].nbr.tolist(), tables[0].cnt.tolist())}
+        self.assertEqual(g_only.get("sword"), 60)    # G 에서 더해 주지 않는 쌍도 남아 있어야 합칠 수 있다
+        merged = LoadedTables(tables)
+        out = rank_related([index["armor"]], merged.neighbors, merged.occ, merged.total_posts, vocab.names,
+                           min_pair=30)
+        self.assertEqual([vocab.names[r.id] for r in out], ["sword"])
+        self.assertEqual(merged.neighbors(index["armor"])[index["sword"]], 120)
 
     def test_candidates_limit_neighbors_and_min_pair_and_top_k(self):
         vocab = rb.select_vocab(rb.read_catalog_rows(self.data["catalog"]), n_candidates=5)
@@ -137,6 +174,32 @@ class BuildShardTests(unittest.TestCase):
         self.assertEqual([vocab.names[g] for g in table.nbr[begin:end].tolist()], ["sword"])
         nurse = vocab.index()["nurse_cap"]   # smile 과 40번 — min_pair 60 미만
         self.assertEqual(int(table.indptr[nurse + 1] - table.indptr[nurse]), 0)
+
+    def test_neighbors_are_not_truncated_so_coverage_counts_every_context(self):
+        # 예전 표는 태그마다 이웃을 상위 128개(더한 값 순)로 잘라, 모든 기준 태그와 함께 쓰인 후보가 어느 한
+        # 기준의 상위 목록 밖이면 coverage 가 줄어 순위에서 밀렸다. 이제 기본은 자르지 않는다.
+        from core.related_tags import rank_related
+        from core.related_tags_store import LoadedTables
+
+        path = self.root / "coverage.parquet"
+        # sword 의 이웃: armor·cape 는 sword 와 늘 같이(더한 값 큼), shield 는 sword·armor 둘 다와 쓰이지만
+        # sword 쪽 더한 값이 가장 작다 → top_k=2 로 자르면 sword 의 목록에서 빠진다
+        fx.write_shard(path, [(40, "sword armor cape", "", ""), (40, "sword armor shield", "", ""),
+                              (40, "armor shield", "", ""), (40, "shield", "", ""), (400, "1girl", "", "")])
+        vocab = rb.select_vocab([("sword", 0, 120), ("armor", 0, 120), ("cape", 0, 40), ("shield", 0, 160),
+                                 ("1girl", 0, 400)])
+        index = vocab.index()
+        context = [index["sword"], index["armor"]]
+
+        def ranked(table):
+            tables = LoadedTables([table])
+            out = rank_related(context, tables.neighbors, tables.occ, tables.total_posts, vocab.names, min_pair=1)
+            return {vocab.names[r.id]: r.coverage for r in out}
+
+        full = rb.build_shard_table(path, vocab, min_pair=1)
+        cut = rb.build_shard_table(path, vocab, min_pair=1, top_k=2)
+        self.assertEqual(ranked(full)["shield"], 2)        # sword·armor 둘 다와 함께 쓰였다
+        self.assertEqual(ranked(cut).get("shield", 0), 1)  # 자르면 sword 쪽이 빠져 1
 
     def test_posts_with_too_many_tags_are_skipped_entirely(self):
         table = rb.build_shard_table(self.g_path, self.vocab, max_tags=5)
@@ -153,9 +216,11 @@ class BuildShardTests(unittest.TestCase):
         table = rb.build_shard_table(path, self.vocab, min_pair=1)
         self.assertEqual(int(table.occ[self.index["armor"]]), 40)
         self.assertEqual(int(table.occ[self.index["sword"]]), 30)
-        self.assertEqual(self.neighbors(table, "armor"), {"sword": 30})
-        # 1girl 은 sword 와는 늘 같이(1.0 > 0.9), armor 와는 덜(0.75 < 0.9) — 더한 값이 양수인 쪽만
+        self.assertEqual(self.neighbors(table, "armor"), {"sword": 30, "1girl": 30})
         self.assertEqual(self.neighbors(table, "sword"), {"armor": 30, "1girl": 30})
+        # 1girl 은 sword 와는 늘 같이(1.0 > 0.9), armor 와는 덜(0.75 < 0.9) — 순위에는 더한 값이 양수인 쪽만
+        self.assertIn("1girl", self.ranked(table, "sword"))
+        self.assertNotIn("1girl", self.ranked(table, "armor"))
 
     def test_cancel_between_batches_and_missing_columns(self):
         calls = []

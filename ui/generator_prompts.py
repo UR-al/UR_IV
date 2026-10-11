@@ -78,7 +78,9 @@ class PromptHandlingMixin:
                 return []
             if comma_only or ',' in text:
                 return [t.strip() for t in text.split(',') if t.strip()]
-            return [t.strip().replace('_', ' ') for t in text.split() if t.strip()]
+            # 밑줄→공백이 주석(// · /*)을 여는 태그는 밑줄 그대로 — 뒤 태그가 주석에 먹히지 않게
+            from core.prompt_comments import underscores_to_spaces
+            return [underscores_to_spaces(t.strip()) for t in text.split() if t.strip()]
 
         # 2. 기본 리스트 생성
         artist_list = to_list(artist_str.replace('artist:', '')) if artist_str else []

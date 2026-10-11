@@ -49,13 +49,23 @@ def _clip8(arr) -> np.ndarray:
 
 
 def _blend(original: np.ndarray, filtered: np.ndarray, strength: float) -> np.ndarray:
-    """strength(0~1)로 원본과 결과를 선형 보간. 필터 프리셋 세기 슬라이더용."""
+    """strength(0~1)로 원본과 결과를 선형 보간. 필터 프리셋 세기 슬라이더용.
+
+    원본 dtype 을 지킨다 — 16비트 PNG 를 uint8 로 자르면(예전 _clip8) 세기 100% 미만에서 값이 255 로
+    눌려 거의 흰색(알파가 있으면 거의 검정)이 됐다."""
     s = max(0.0, min(1.0, float(strength)))
     if s >= 1.0:
         return filtered
     if s <= 0.0:
         return original
-    return _clip8(original.astype(np.float32) * (1 - s) + filtered.astype(np.float32) * s)
+    mixed = original.astype(np.float32) * (1 - s) + filtered.astype(np.float32) * s
+    dtype = original.dtype
+    if dtype == np.uint8:
+        return _clip8(mixed)
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        return np.clip(mixed, info.min, info.max).astype(dtype)
+    return mixed.astype(dtype)
 
 
 # ── 자동 보정 ───────────────────────────────────────────────────────────────

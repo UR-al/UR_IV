@@ -18,6 +18,8 @@ export interface MeshWarpHandleDeps {
   /** 오버레이 전체를 다시 그린다(시작·끝 — 가이드가 남지 않게) */
   redrawAll: () => void
   onChange: (dst: number[][]) => void
+  /** 되돌리기가 '가장자리 고정'도 되돌렸다 — 부모가 체크를 맞춘다 */
+  onPinEdgesRestored?: (on: boolean) => void
 }
 
 /** 히트 반경 배율 — 원근 보정 손잡이와 같이 넉넉하게 */
@@ -95,9 +97,11 @@ export function useMeshWarpHandles(deps: MeshWarpHandleDeps) {
     return true
   }
 
-  /** 마지막 점 이동 되돌리기(Ctrl+Z). 되돌릴 게 없으면 false. */
+  /** 마지막 점 이동 되돌리기(Ctrl+Z). 되돌릴 게 없으면 false. 고정 상태도 돌아갔으면 부모에 알린다. */
   function undoStep(): boolean {
+    const pinBefore = session.pinEdges
     if (!active || !session.undo()) return false
+    if (session.pinEdges !== pinBefore) deps.onPinEdgesRestored?.(session.pinEdges)
     deps.redraw()
     emitChange()
     return true

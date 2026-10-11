@@ -14,12 +14,15 @@ import { rewriteExcludeRules, splitExcludeRules } from '../utils/excludeRules'
  * join 이 없는 다른 칸(프롬프트 태그)은 예전처럼 ', ' 로 잇는다.
  */
 
-// 자동완성(브리지)은 이 테스트의 관심사가 아니다 — 후보 없음 대역(요청한 질의만 적어 둔다)
+// 자동완성(브리지)은 대부분 이 테스트의 관심사가 아니다 — 기본은 후보 없음 대역(요청한 질의만 적어 둔다).
+// 후보 수락 표기를 볼 때만 suggestions 에 후보를 넣는다(테스트가 끝나면 비운다).
 const requested: string[] = []
+const suggestions: { tag: string }[] = []
 const autocomplete = {
   useTagAutocomplete: () => ({
-    items: ref([]), index: ref(-1), queryHangul: ref(false),
-    close: () => {}, request: (query: string) => { requested.push(query) }, move: () => {}, selected: () => undefined,
+    items: ref([...suggestions]), index: ref(0), queryHangul: ref(false),
+    close: () => {}, request: (query: string) => { requested.push(query) }, move: () => {},
+    selected: () => suggestions[0],
   }),
 }
 
@@ -84,7 +87,7 @@ function fire(node: Node, prop: string, e: unknown) {
 }
 
 let app: App | undefined
-afterEach(() => { app?.unmount(); app = undefined })
+afterEach(() => { app?.unmount(); app = undefined; suggestions.length = 0 })
 
 const event = (extra: Record<string, unknown> = {}) => ({
   preventDefault() {}, stopPropagation() {}, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...extra,
@@ -187,12 +190,29 @@ describe('TagBlockField 프롬프트 주석', () => {
     expect(classes[3]).not.toContain('comment')   // 주석이 섞였을 뿐 태그가 있다
   })
 
+  it('자동완성 수락 — 밑줄→공백이 주석을 여는 태그는 밑줄 그대로', async () => {
+    const zato = 'z.a.t.o._//_i_love_the_world_and_everything_in_it'
+    suggestions.push({ tag: zato })
+    const { model, root } = mount('1girl', false, false)
+    const [add] = findAll(root, hasClass('tbf-add'))
+    fire(add, 'onKeydown', event({ key: 'Tab' }))
+    await nextTick()
+    expect(model.value).toBe(`1girl, ${zato}`)
+    expect(promptComments.hasPromptComment(model.value)).toBe(false)
+    app?.unmount(); app = undefined
+    suggestions.splice(0, 1, { tag: 'long_hair' })
+    const second = mount('1girl', false, false)
+    fire(findAll(second.root, hasClass('tbf-add'))[0]!, 'onKeydown', event({ key: 'Tab' }))
+    await nextTick()
+    expect(second.model.value).toBe('1girl, long hair')   // 보통 태그는 예전처럼 공백
+  })
+
   it('블록 삭제 — 다음 블록이 줄 주석에 먹히지 않는다', async () => {
     const { model, blocks } = mount('a // first\nb, c', false, false)
     blocks()[1].props.onContextmenu(event())
     await nextTick()
     expect(model.value).toBe('a // first\nc')
-    expect(promptComments.stripPromptComments(model.value)).toBe('a\nc')
+    expect(promptComments.stripPromptComments(model.value)).toBe('a,\nc')   // 블록 경계 = 보내는 쉼표
   })
 
   it('블록 편집·추가 — 줄 주석으로 끝나는 블록 뒤는 줄바꿈', async () => {

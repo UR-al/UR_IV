@@ -56,7 +56,7 @@ import { ref, nextTick, watch, onUnmounted } from 'vue'
 import { useTagAutocomplete } from '../composables/useTagAutocomplete'
 import { isImeComposing } from '../utils/imeComposition'
 import {
-  commentSegments, isCaretInComment, joinPromptBlocks, splitPromptBlocks, stripPromptComments,
+  commentSegments, isCaretInComment, joinPromptBlocks, splitPromptBlocks, stripPromptComments, underscoresToSpaces,
   type CommentSegment,
 } from '../utils/promptComments'
 
@@ -220,7 +220,7 @@ function onAddKey(e: KeyboardEvent) {
 function acceptSuggestion(tag: string | undefined) {
   ac.close()
   if (!tag) return
-  newTag.value = tag.replace(/_/g, ' ')  // 표시는 공백으로
+  newTag.value = underscoresToSpaces(tag)  // 표시는 공백으로(밑줄→공백이 주석을 여는 태그는 그대로)
   addBlock()
   // IME 조합 중(클릭 수락)이면 v-model 이 DOM 을 비우지 않는다 — 조합 확정 때 옛 글자가 되살아나지 않게 직접 비운다
   const el = addInputRef.value as (HTMLInputElement & { composing?: boolean }) | null

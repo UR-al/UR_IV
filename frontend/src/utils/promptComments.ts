@@ -7,6 +7,9 @@
  * - `//`·`/*` 는 맨 앞, 공백 문자 뒤, ASCII 쉼표 뒤, 블록 주석이 끝난 바로 그 자리에서만 주석을 시작한다.
  *   그래서 `http://`·`a//b`·`__x/*__`·`~/x/~`·`<lora:dir/name:1>` 은 글자 그대로다.
  * - `//` 는 줄 끝(`\n`·`\r`) 앞까지, `/*` 는 처음 만나는 `*\/` 까지. 닫히지 않으면(open) 그 줄 끝까지만.
+ * - 줄 주석은 태그를 끝낸다 — 블록 칸이 `a // 메모\nb` 를 두 블록으로 보므로, 뗀 글자도 괄호 밖 줄 주석 왼쪽
+ *   내용 뒤에 쉼표를 하나 둔다(`a,\nb`). 왼쪽이 이미 쉼표로 끝나거나, 다음 줄에 내용이 없거나 쉼표로 시작하거나,
+ *   왼쪽 끝 낱말이 `BREAK`·`AND` 이면 두지 않는다.
  */
 
 export type CommentKind = 'line' | 'block' | 'open'
@@ -79,8 +82,38 @@ function eolLength(text: string, at: number): number {
   return isEol(text[at]) ? 1 : 0
 }
 
+/** 줄 주석이 태그 경계인지 볼 때 세는 괄호 — `\` 뒤 글자는 세지 않는다(파이썬 _bracket_depth 와 같다) */
+const DEPTH_OPEN = '([{'
+const DEPTH_CLOSE = ')]}'
+/** 줄 주석 왼쪽이 이 낱말로 끝나면 쉼표를 두지 않는다 — 줄 단위 문법(Forge BREAK·AND) */
+const LINE_KEYWORD_TAIL = /(?:^|[ \t\n\r\f\v\u00a0\u3000,])(?:BREAK|AND)$/
+
+function bracketDepth(text: string, start: number, end: number, depth: number): number {
+  let i = start
+  while (i < end) {
+    const ch = text[i]!
+    if (ch === '\\') { i += 2; continue }
+    if (DEPTH_OPEN.includes(ch)) depth++
+    else if (DEPTH_CLOSE.includes(ch)) depth = Math.max(0, depth - 1)
+    i++
+  }
+  return depth
+}
+
+/** `pos` 뒤에 (공백·줄 끝·이어지는 주석을 건너뛰고) 쉼표가 아닌 내용이 오는가 */
+function contentFollows(text: string, spans: CommentSpan[], index: number, pos: number): boolean {
+  let k = index + 1
+  while (pos < text.length) {
+    if (WS.has(text[pos]!)) { pos++; continue }
+    if (k < spans.length && spans[k]!.start === pos) { pos = spans[k]!.end; k++; continue }
+    return text[pos] !== ','
+  }
+  return false
+}
+
 /**
  * 주석을 뗀 텍스트 — 주석만 있던 줄은 줄째로 없애고, 내용 뒤 줄바꿈은 남긴다(BREAK 줄 유지).
+ * 괄호 밖 줄 주석이 내용 뒤에서 줄을 끝내면 그 내용 뒤에 쉼표 하나(블록 경계와 같게).
  * 주석이 없는 줄은 손대지 않고, 결과는 멱등이다. 파이썬 strip_prompt_comments 와 같은 결과.
  */
 export function stripPromptComments(text: string): string {
@@ -89,8 +122,11 @@ export function stripPromptComments(text: string): string {
   const n = text.length
   let out = ''
   let pos = 0
-  for (const { start, end } of spans) {
+  let depth = 0
+  for (let index = 0; index < spans.length; index++) {
+    const { start, end, kind } = spans[index]!
     if (start < pos) continue
+    if (start > pos) depth = bracketDepth(text, pos, start, depth)
     out += text.slice(pos, start)
     pos = end
     // (b) 왼쪽이 가로 공백·줄 처음이면 오른쪽 가로 공백은 버린다
@@ -108,10 +144,24 @@ export function stripPromptComments(text: string): string {
       if (tail === undefined || isEol(tail)) {
         if (eol) pos += eol
         else if (out) out = out.slice(0, out.endsWith('\r\n') ? -2 : -1)
+      } else if (eol && kind !== 'block' && depth === 0 && tail !== ','
+        && !LINE_KEYWORD_TAIL.test(out.slice(-6)) && contentFollows(text, spans, index, pos)) {
+        // (d) 괄호 밖 줄 주석이 내용 뒤에서 줄을 끝내면 태그 경계 — 다음 줄 내용과 붙지 않게 쉼표 하나
+        out += ','
       }
     }
   }
   return out + text.slice(pos)
+}
+
+/**
+ * 태그 밑줄 → 공백(블록 칸·자동완성이 넣는 모양). 밑줄 뒤에 `//`·`/*` 가 오는 태그(Danbooru
+ * `z.a.t.o._//_i_love_the_world_and_everything_in_it`)는 바꾸면 그 자리부터 주석이 되어 뒤가 잘리므로 그대로 둔다.
+ * 파이썬 underscores_to_spaces 와 같다.
+ */
+export function underscoresToSpaces(tag: string): string {
+  if (!tag || !tag.includes('_') || /_(?=\/[/*])/.test(tag)) return tag
+  return tag.replace(/_/g, ' ')
 }
 
 /** 끝이 줄 주석(또는 닫히지 않은 `/*`)인가 — 뒤에 이어 붙인 글자가 주석에 먹힌다 */

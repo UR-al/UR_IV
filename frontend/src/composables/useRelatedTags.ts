@@ -18,6 +18,8 @@ import { ratingFilterRevision } from './useRatingFilter.js'
  * 브리지(tests/test_bridge_contract.py 가 이름을 지킨다): related_tags_query · related_tags_build ·
  * related_tags_cancel, 시그널 relatedTagsEvent(ui/related_tags_actions.py). 질의는 requestId 로 마지막 것만
  * 받고(createLatestRequest), 표 만들기 진행은 방송이라 어느 id 든 받는다. 표는 사용자가 버튼을 눌러야 만든다.
+ * 질의에는 이 화면의 client 를 싣는다 — Python 워커는 화면마다 마지막 질의 하나를 기다리게 둬, 웹 모드에서 다른
+ * 탭의 질의가 이 탭의 질의를 밀어내지 않는다.
  * 열림 상태는 ui_prefs.relatedTagsOpen 에 저장한다(기본 닫힘).
  */
 export interface RelatedTagsDeps {
@@ -28,6 +30,8 @@ export interface RelatedTagsDeps {
   persistUiPrefs: (payload: Record<string, unknown>) => void
   /** 테스트용 build id 생성기 */
   newId?: () => string
+  /** 이 화면의 질의 묶음 id(기본: 페이지마다 한 번 만든 무작위 값) */
+  clientId?: string
   debounceMs?: number
   timers?: TimerApi
   /** 질의 응답 대기(테스트용 타이머 포함) */
@@ -43,6 +47,9 @@ export const RELATED_TAGS_TIMEOUT_MESSAGE = '연관 태그 응답이 없습니�
 /** 진행 이벤트(0.5초마다)가 이만큼 끊긴 뒤에야 '진행 없음' 질의 답이 진행 표시를 지운다. */
 export const BUILD_QUIET_MS = 3000
 
+/** 이 페이지(탭)의 질의 묶음 id — 웹 모드는 탭마다 다르다 */
+const PAGE_CLIENT_ID = `rtc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+
 let counter = 0
 function defaultId(): string {
   counter += 1
@@ -51,6 +58,7 @@ function defaultId(): string {
 
 export function createRelatedTags(deps: RelatedTagsDeps) {
   const newId = deps.newId ?? defaultId
+  const clientId = deps.clientId ?? PAGE_CLIENT_ID
   const now = deps.now ?? (() => Date.now())
   const ratingRevision = deps.ratingRevision ?? ref(0)
   const open = ref(false)
@@ -102,7 +110,7 @@ export function createRelatedTags(deps: RelatedTagsDeps) {
     lastSignature = signature
     const ticket = latest.begin()
     loading.value = true
-    deps.requestAction('related_tags_query', { ...payload, requestId: ticket.id })
+    deps.requestAction('related_tags_query', { ...payload, requestId: ticket.id, client: clientId })
     const reply = await ticket.done
     if (disposed) return
     if (reply) {

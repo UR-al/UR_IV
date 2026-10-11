@@ -21,6 +21,94 @@ from utils.file_wildcard import DUNDER_WILDCARD_PATTERN, FILE_WILDCARD_PATTERN
 _WC_OPEN = ''
 _WC_CLOSE = ''
 _WC_SLOT = re.compile(_WC_OPEN + r'(\d+)' + _WC_CLOSE)
+# 주석 자리표시자는 와일드카드와 다른 글자다 — 태그 단위 규칙(밑줄 보존 목록·중복 제거·빈 괄호·이스케이프)이
+# 앞뒤 태그에 붙은 주석 자리표시자만 골라 빼고 비교할 수 있게. 원문 목록(saved)은 모두 함께 쓴다.
+# 블록 주석과 줄 주석(닫히지 않은 /* 포함)은 글자가 다르다 — 줄 주석은 태그를 끝낸다(core/prompt_comments:
+# 보내는 글자에서 줄 주석 왼쪽 내용 뒤에 쉼표가 붙는다). 그래서 태그 단위 규칙도 줄 주석 자리에서 태그를 나눈다.
+_CM_OPEN = '\ue002'
+_CM_CLOSE = '\ue003'
+_LINE_OPEN = '\ue004'
+_LINE_CLOSE = '\ue005'
+_CM_SLOT = re.compile('[' + _CM_OPEN + _LINE_OPEN + r']\d+[' + _CM_CLOSE + _LINE_CLOSE + ']')
+_LINE_SLOT = re.compile(_LINE_OPEN + r'\d+' + _LINE_CLOSE)
+_ANY_SLOT = re.compile('[' + _WC_OPEN + _CM_OPEN + _LINE_OPEN + r'](\d+)['
+                       + _WC_CLOSE + _CM_CLOSE + _LINE_CLOSE + ']')
+_MARKS = (_WC_OPEN, _WC_CLOSE, _CM_OPEN, _CM_CLOSE, _LINE_OPEN, _LINE_CLOSE)
+_CM_LEAD = re.compile(r'(?:\s*' + _CM_SLOT.pattern + r')+\s*')
+_CM_TRAIL = re.compile(r'\s*(?:' + _CM_SLOT.pattern + r'\s*)+\Z')
+# 중복 제거가 나누는 자리 — 쉼표와 줄 주석 자리표시자(나눈 자리도 결과에 남긴다)
+_DEDUPE_SPLIT = re.compile('(,|' + _LINE_SLOT.pattern + ')')
+# 밑줄 뒤에 // · /* 가 오면 밑줄→공백이 새 주석 시작을 만든다(Danbooru 'z.a.t.o._//_i_love_…')
+_UNDERSCORE_OPENS_COMMENT = re.compile(r'(?<!\\)_(?=/[/*])')
+# 빈 괄호 — 안에 주석 자리표시자만 있어도 빈 괄호다(주석은 남긴다). 바로 뒤에 // · /* 가 오면 두는데,
+# 지우면 그 자리가 새 주석 시작이 될 수 있어서다('()// x' → '// x').
+_EMPTY_PARENS = tuple(
+    re.compile(re.escape(o) + r'(?:\s|' + _CM_SLOT.pattern + r')*,?(?:\s|' + _CM_SLOT.pattern + r')*'
+               + re.escape(c) + r'(?!/[/*])')
+    for o, c in ('()', '[]', '{}'))
+
+
+def _comment_free(tag: str) -> str:
+    """태그에서 주석 자리표시자를 뺀 비교용 글자(앞뒤 공백 정리). 주석이 없으면 ``strip()`` 그대로."""
+    if _CM_OPEN not in tag and _LINE_OPEN not in tag:
+        return tag.strip()
+    return ' '.join(_CM_SLOT.sub(' ', tag).split())
+
+
+def _split_comment_edges(tag: str) -> Tuple[str, str, str]:
+    """``(앞 주석, 가운데, 뒤 주석)`` — 앞뒤 주석 자리표시자(와 둘레 공백)를 떼어 낸다. 없으면 ``''``."""
+    lead = _CM_LEAD.match(tag)
+    head = lead.group(0) if lead else ''
+    rest = tag[len(head):]
+    trail = _CM_TRAIL.search(rest) if rest else None
+    tail = trail.group(0) if trail else ''
+    return head, rest[:len(rest) - len(tail)], tail
+
+
+def _split_at_line_comments(tag: str) -> List[str]:
+    """괄호 밖 줄 주석 자리표시자에서 태그를 나눈다 → ``[글, 자리표시자, 글, …]`` (짝수 칸이 글).
+
+    괄호 깊이는 :meth:`PromptCleaner._split_by_top_level_commas` 와 같게 센다(``\\(`` 는 세지 않는다).
+    """
+    if _LINE_OPEN not in tag:
+        return [tag]
+    out: List[str] = []
+    depth = 0
+    start = i = 0
+    n = len(tag)
+    while i < n:
+        ch = tag[i]
+        if ch == '\\' and i + 1 < n and tag[i + 1] in '()':
+            i += 2
+            continue
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+        elif ch == _LINE_OPEN and depth <= 0:
+            m = _LINE_SLOT.match(tag, i)
+            if m:
+                out.append(tag[start:i])
+                out.append(m.group(0))
+                start = i = m.end()
+                continue
+        i += 1
+    out.append(tag[start:])
+    return out
+
+
+def _map_tag_pieces(tag: str, fn) -> str:
+    """줄 주석 자리에서 나눈 글 조각마다 ``fn`` 을 쓰고 자리표시자는 그대로 둔 채 다시 잇는다."""
+    pieces = _split_at_line_comments(tag)
+    if len(pieces) == 1:
+        return fn(tag)
+
+    def keep_trailing_space(piece: str) -> str:
+        # 조각 끝 공백은 그대로 — 줄 주석 앞 공백이 사라지면 '//' 가 더는 주석이 아니다
+        core = piece.rstrip()
+        return fn(core) + piece[len(core):] if core else piece
+
+    return ''.join(piece if k % 2 else keep_trailing_space(piece) for k, piece in enumerate(pieces))
 
 
 def _mask_comment_spans(text: str, saved: List[str]) -> str:
@@ -29,19 +117,33 @@ def _mask_comment_spans(text: str, saved: List[str]) -> str:
     정리 규칙(줄바꿈→공백·밑줄→공백·이스케이프·중복 제거)이 주석에 닿으면 안 된다: 줄바꿈이 공백이 되면
     다음 줄이 줄 주석 안으로 들어가 조용히 사라진다. 그래서 줄 주석·닫히지 않은 블록의 자리표시자는 뒤따르는
     줄 끝까지 품고, 줄 처음에서 시작하면 앞 줄 끝도 품는다(주석 줄이 앞 줄에 붙지 않게). 주석은 **나올 때마다
-    다른** 자리표시자를 쓴다 — 중복 제거가 같은 글자의 두 번째 주석을 지우지 않게.
+    다른** 자리표시자를 쓴다 — 중복 제거가 같은 글자의 두 번째 주석을 지우지 않게. 같은 줄의 내용 뒤에서 줄을
+    끝내는 줄 주석(core/prompt_comments 가 쉼표를 두는 자리)만 줄 주석 자리표시자(태그 경계)이고, 주석만 있는
+    줄·블록 주석은 블록 자리표시자다.
     """
     spans = comment_spans_through_eol(text)
     if not spans:
         return text
     out: List[str] = []
     pos = 0
+    line_has_content = False   # 지금 줄에 (주석이 아닌) 내용이 있었나
     for start, end, kind in spans:
+        gap = text[pos:start]
+        cut = max(gap.rfind('\n'), gap.rfind('\r'))
+        if cut >= 0:
+            line_has_content = bool(gap[cut + 1:].strip())
+        elif gap.strip():
+            line_has_content = True
         if kind != 'block' and start > pos and text[start - 1] in '\r\n':
             start -= 2 if start - 2 >= pos and text.startswith('\r\n', start - 2) else 1
         out.append(text[pos:start])
         saved.append(text[start:end])
-        out.append(f'{_WC_OPEN}{len(saved) - 1}{_WC_CLOSE}')
+        if kind != 'block' and line_has_content:
+            out.append(f'{_LINE_OPEN}{len(saved) - 1}{_LINE_CLOSE}')
+        else:
+            out.append(f'{_CM_OPEN}{len(saved) - 1}{_CM_CLOSE}')
+        if kind != 'block':
+            line_has_content = False   # 줄 주석 자리표시자는 줄 끝까지 품는다
         pos = end
     out.append(text[pos:])
     return ''.join(out)
@@ -54,7 +156,7 @@ def _mask_wildcard_tokens(text: str) -> Tuple[str, List[str]]:
     같은 와일드카드 토큰은 같은 자리표시자를 쓴다(중복 제거가 같은 글자를 같은 태그로 보던 규칙 유지).
     자리표시자 문자가 이미 들어 있는 드문 입력은 가리지 않는다(되돌릴 때 섞이지 않게).
     """
-    if not text or _WC_OPEN in text or _WC_CLOSE in text:
+    if not text or any(mark in text for mark in _MARKS):
         return text, []
     saved: List[str] = []
     text = _mask_comment_spans(text, saved)
@@ -79,7 +181,7 @@ def _unmask_wildcard_tokens(text: str, saved: List[str]) -> str:
     if not saved:
         return text
     for _ in range(len(saved) + 1):
-        restored = _WC_SLOT.sub(lambda m: saved[int(m.group(1))], text)
+        restored = _ANY_SLOT.sub(lambda m: saved[int(m.group(1))], text)
         if restored == text:
             break
         text = restored
@@ -160,10 +262,12 @@ class PromptCleaner:
     
     def _remove_empty_parentheses(self, text: str) -> str:
         """빈 괄호 제거"""
-        # (), ( ), (,), ( , ) 등 제거
-        text = re.sub(r'\(\s*,?\s*\)', '', text)
-        text = re.sub(r'\[\s*,?\s*\]', '', text)
-        text = re.sub(r'\{\s*,?\s*\}', '', text)
+        # (), ( ), (,), ( , ) 등 제거 — 안에 주석만 있으면 괄호만 지우고 주석은 남긴다
+        def _keep_comments(m):
+            # 앞에 공백을 둔다 — 주석은 공백·쉼표 뒤에서만 시작하므로 앞 글자에 붙으면 평문이 된다
+            return ''.join(' ' + slot.group(0) for slot in _CM_SLOT.finditer(m.group(0)))
+        for pattern in _EMPTY_PARENS:
+            text = pattern.sub(_keep_comments, text)
         # 정리 후 연속 공백/쉼표 처리
         text = re.sub(r',\s*,', ',', text)
         text = re.sub(r'\s+', ' ', text)
@@ -177,31 +281,35 @@ class PromptCleaner:
 
         이스케이프된 밑줄(``\\_``)은 항상 ``_``로 환원 (기존 동작 유지).
         """
-        # 태그 단위로 split → 각 태그가 예외 리스트인지 확인 → 변환 결정
+        # 태그 단위로 split → 각 태그가 예외 리스트인지 확인 → 변환 결정. 줄 주석도 태그를 끝낸다.
         preserve = self._get_underscore_preserve_set()
-        tags = self._split_by_top_level_commas(text) if hasattr(self, '_split_by_top_level_commas') else text.split(',')
-        out_tags: list[str] = []
-        for raw_tag in tags:
-            stripped = raw_tag.strip()
-            # 정확 일치 (대소문자 무시)
-            if stripped.lower() in preserve:
-                out_tags.append(raw_tag)  # 원본 그대로 (밑줄 유지)
-                continue
-            # 일반 변환 (이스케이프 처리 포함)
-            converted = []
-            i = 0
-            while i < len(raw_tag):
-                if raw_tag[i] == '\\' and i + 1 < len(raw_tag) and raw_tag[i + 1] == '_':
-                    converted.append('_')
-                    i += 2
-                elif raw_tag[i] == '_':
-                    converted.append(' ')
-                    i += 1
-                else:
-                    converted.append(raw_tag[i])
-                    i += 1
-            out_tags.append(''.join(converted))
-        return ','.join(out_tags)
+        tags = self._split_by_top_level_commas(text)
+        return ','.join(_map_tag_pieces(raw_tag, lambda piece: self._convert_tag_underscores(piece, preserve))
+                        for raw_tag in tags)
+
+    @staticmethod
+    def _convert_tag_underscores(raw_tag: str, preserve) -> str:
+        """태그 하나의 밑줄 → 공백(예외 목록·주석을 여는 태그는 그대로, ``\\_`` 는 ``_`` 로)."""
+        # 정확 일치 (대소문자 무시) — 앞뒤에 붙은 주석 자리표시자는 빼고 비교
+        if _comment_free(raw_tag).lower() in preserve:
+            return raw_tag  # 원본 그대로 (밑줄 유지)
+        # '_//' · '_/*' — 밑줄이 공백이 되면 뒤가 주석이 되어 태그가 잘린다 → 그 태그는 그대로
+        if _UNDERSCORE_OPENS_COMMENT.search(raw_tag):
+            return raw_tag
+        # 일반 변환 (이스케이프 처리 포함)
+        converted = []
+        i = 0
+        while i < len(raw_tag):
+            if raw_tag[i] == '\\' and i + 1 < len(raw_tag) and raw_tag[i + 1] == '_':
+                converted.append('_')
+                i += 2
+            elif raw_tag[i] == '_':
+                converted.append(' ')
+                i += 1
+            else:
+                converted.append(raw_tag[i])
+                i += 1
+        return ''.join(converted)
 
     def _underscore_preserve_load(self) -> None:
         """기본값 + ``config/underscore_preserve.txt`` 로딩 (한 줄당 한 태그).
@@ -238,19 +346,56 @@ class PromptCleaner:
         return self.underscore_preserve_set
     
     def _remove_duplicate_tags(self, text: str) -> str:
-        """중복 태그 제거"""
-        tags = [t.strip() for t in text.split(',')]
+        """중복 태그 제거.
+
+        주석이 있으면 쉼표와 줄 주석 자리에서 태그를 나누고(줄 주석은 태그 경계), 주석 자리표시자를 뺀 글자로
+        비교한다(``1girl, // 메모\\n1girl`` 의 두 번째 1girl 도 중복). 겹쳐 지운 태그의 주석은 버리지 않는다.
+        """
+        if _CM_OPEN not in text and _LINE_OPEN not in text:
+            tags = [t.strip() for t in text.split(',')]
+            seen = set()
+            unique_tags = []
+
+            for tag in tags:
+                tag_lower = tag.lower()
+                if tag_lower and tag_lower not in seen:
+                    seen.add(tag_lower)
+                    unique_tags.append(tag)
+
+            return ', '.join(unique_tags)
+
+        parts = _DEDUPE_SPLIT.split(text)
         seen = set()
-        unique_tags = []
-        
-        for tag in tags:
-            tag_lower = tag.lower()
-            if tag_lower and tag_lower not in seen:
-                seen.add(tag_lower)
-                unique_tags.append(tag)
-        
-        return ', '.join(unique_tags)
-    
+        out = ''
+        carry = ''   # 겹쳐 지운 태그에 붙어 있던 주석 자리표시자 — 다음 태그 앞에 붙인다
+        for k in range(0, len(parts), 2):
+            tag = parts[k]
+            sep = parts[k + 1] if k + 1 < len(parts) else None
+            key = _comment_free(tag).lower()
+            kept = tag.strip()
+            if key and key in seen:
+                slots = ' '.join(slot.group(0) for slot in _CM_SLOT.finditer(tag))
+                if sep in (',', None):
+                    carry += slots + ' ' if slots else ''
+                    continue
+                kept = slots
+            elif key:
+                seen.add(key)
+            if not kept and sep in (',', None):
+                continue   # 빈 태그(와 그 쉼표)는 버린다 — 주석 없는 글과 같은 규칙
+            if carry:
+                kept = carry + kept if kept else carry.rstrip()
+                carry = ''
+            out += kept
+            if sep == ',':
+                out += ', '
+            elif sep:   # 줄 주석 앞 공백은 원문에 있던 만큼만(없던 공백을 넣지 않는다)
+                out += (' ' if kept and tag[-1:].isspace() else '') + sep
+        out = out[:-2] if out.endswith(', ') else out
+        if carry:
+            out = f'{out} {carry.rstrip()}' if out else carry.rstrip()
+        return out
+
     def _escape_parentheses(self, text: str) -> str:
         """
         괄호 이스케이프 (쉼표 구분 태그 단위로 판단):
@@ -262,7 +407,7 @@ class PromptCleaner:
               kafka (honkai: star rail) (cosplay) → kafka \(honkai: star rail\) \(cosplay\)
         """
         tags = self._split_by_top_level_commas(text)
-        escaped = [self._escape_tag(t) for t in tags]
+        escaped = [_map_tag_pieces(t, self._escape_tag) for t in tags]   # 줄 주석도 태그를 끝낸다
         return ','.join(escaped)
 
     def _escape_tag(self, tag: str) -> str:
@@ -270,6 +415,9 @@ class PromptCleaner:
         stripped = tag.strip()
         if not stripped:
             return tag
+        head, core, tail = _split_comment_edges(tag)
+        if head or tail:   # 앞뒤에 붙은 주석 자리표시자는 떼고 가운데만 판단
+            return head + self._escape_tag(core) + tail
 
         # 태그 전체가 (...)로 감싸진 경우 → SD 구문, 바깥 유지
         if stripped.startswith('(') and stripped.endswith(')'):

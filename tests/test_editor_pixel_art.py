@@ -136,11 +136,49 @@ class PaletteTests(unittest.TestCase):
         self.assertTrue(np.all(out % 257 == 0), '16비트 팔레트 색은 8비트 값 ×257 이어야 한다')
         self.assertLessEqual(len(np.unique(out.reshape(-1, 3), axis=0)), 4)
 
+    def test_palette_ignores_hidden_rgb_under_full_transparency(self):
+        # 배경을 지운 이미지 — 투명한 곳의 숨은 검정이 팔레트 한 칸을 차지해 보이는 색이 colors-1 개가 됐다
+        h = w = 64
+        x = np.linspace(0, 1, w)
+        bgr = np.zeros((h, w, 3), np.uint8)
+        bgr[..., 2] = 230
+        bgr[..., 1] = (40 + 180 * x[None, :]).astype(np.uint8)
+        bgr[..., 0] = 30
+        yy, xx = np.mgrid[:h, :w]
+        disc = (yy - 32) ** 2 + (xx - 32) ** 2 < 18 ** 2
+        bgr[~disc] = 0
+        img = np.dstack([bgr, np.where(disc, 255, 0).astype(np.uint8)])
+        for k in (2, 3, 4):
+            with self.subTest(colors=k):
+                out = editor_ops.apply_filter(img, 'pixelart', 1.0, options={'pixel_size': 4, 'colors': k})
+                visible = out[..., :3][out[..., 3] == 255]
+                self.assertEqual(len(np.unique(visible, axis=0)), k)
+        # 알파가 없거나 전부 보이면 예전과 같다
+        np.testing.assert_array_equal(pixel_art(bgr, pixel_size=4, colors=4, alpha=np.full((h, w), 255, np.uint8)),
+                                      pixel_art(bgr, pixel_size=4, colors=4))
+
     def test_uint16_without_palette_stays_16bit(self):
         img = np.array([[[1000, 2000, 3000], [3000, 2000, 1001]]], dtype=np.uint16)
         out = pixel_art(img, pixel_size=2, colors=0)
         self.assertEqual(out.dtype, np.uint16)
         np.testing.assert_array_equal(out[0, 0], [2000, 2000, 2000])
+
+
+class StrengthBlendDtypeTests(unittest.TestCase):
+    def test_16bit_strength_below_100_keeps_16bit_values(self):
+        # 예전 _blend 는 uint8 로 잘라 16비트 PNG 가 세기 50% 에서 거의 흰색(BGRA 는 거의 검정)이 됐다
+        rng = np.random.RandomState(9)
+        img8 = rng.randint(0, 256, (32, 32, 3)).astype(np.uint8)
+        img16 = img8.astype(np.uint16) * 257
+        half8 = editor_ops.apply_filter(img8, 'pixelart', 0.5, options={'pixel_size': 4, 'colors': 0})
+        half16 = editor_ops.apply_filter(img16, 'pixelart', 0.5, options={'pixel_size': 4, 'colors': 0})
+        self.assertEqual(half16.dtype, np.uint16)
+        self.assertLess(np.abs(half16.astype(np.float64) / 257 - half8).max(), 1.01)
+        bgra16 = np.dstack([img16, np.full((32, 32), 65535, np.uint16)])
+        out = editor_ops.apply_filter(bgra16, 'pixelart', 0.5, options={'pixel_size': 4, 'colors': 0})
+        self.assertEqual(out.dtype, np.uint16)
+        np.testing.assert_array_equal(out[..., :3], half16)
+        self.assertTrue(np.all(out[..., 3] == 65535))
 
 
 class FilterOptionTests(unittest.TestCase):

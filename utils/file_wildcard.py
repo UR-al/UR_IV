@@ -28,6 +28,20 @@ DUNDER_WILDCARD_PATTERN = re.compile(r'__(?![\s_])([^,\n]+?)(?<![\s_])__')
 OR_PATTERN = re.compile(r'\[([^\[\]]+?\|[^\[\]]+?)\]')
 
 
+_NEWLINE = re.compile(r'\r\n|\r|\n')
+
+
+def content_lines(content: str) -> List[str]:
+    """줄 목록 — 파일을 줄 단위로 읽을 때(``for line in f``)처럼 ``\\r\\n``·``\\r``·``\\n`` 에서만 나눈다.
+
+    ``str.splitlines`` 는 ``\\f``·``\\x1c``·U+2028 등에서도 나눠, 그런 글자가 든 줄이 그룹 여럿으로 갈렸다.
+    """
+    lines = _NEWLINE.split(content or '')
+    if lines and lines[-1] == '':
+        lines.pop()
+    return lines
+
+
 def is_comment_line(line: str) -> bool:
     """해석에서 빠지는 줄인가 — 빈 줄 또는 (앞 공백을 무시하고) '#' 로 시작하는 줄."""
     s = (line or '').strip()
@@ -163,8 +177,9 @@ class FileWildcardManager:
         with open(filepath, 'r', encoding='utf-8') as f:
             # 프롬프트 주석(// · /* */ — 여러 줄 블록 포함, core/prompt_comments)은 줄로 나누기 전에 뗀다.
             # 그대로 두면 'blue hair // 메모' 가 옵션이 되어 끼워 넣은 자리 뒤의 태그를 삼킨다.
-            content = strip_prompt_comments(f.read())
-            for line in content.splitlines():
+            # 줄 하나가 그룹이므로 줄 주석 뒤에 쉼표를 두지 않는다(tag_breaks=False).
+            content = strip_prompt_comments(f.read(), tag_breaks=False)
+            for line in content_lines(content):
                 if is_comment_line(line):
                     continue
                 # 쉼표로 옵션 분리
@@ -263,15 +278,16 @@ class FileWildcardManager:
         tree = []
         for name in self.get_wildcard_names():
             try:
-                raw_lines = self.get_wildcard_content(name).splitlines()
+                content = self.get_wildcard_content(name)
             except (OSError, UnicodeDecodeError):
                 continue
+            raw_lines = content.splitlines()
             while raw_lines and not raw_lines[-1].strip():
                 raw_lines.pop()
             tree.append({
                 'name': name,
                 'file': f'{name}.txt',
-                'tags': [ln.strip() for ln in strip_prompt_comments('\n'.join(raw_lines)).splitlines()
+                'tags': [ln.strip() for ln in content_lines(strip_prompt_comments(content, tag_breaks=False))
                          if not is_comment_line(ln)],
                 'lines': raw_lines,
             })

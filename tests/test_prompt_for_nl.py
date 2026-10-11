@@ -77,6 +77,34 @@ class TestCleanTagsForNl(unittest.TestCase):
         self.assertEqual(clean_tags_for_nl(''), '')
         self.assertEqual(clean_tags_for_nl(None), '')
 
+    def test_strips_prompt_comments(self):
+        # 주석으로 꺼 둔 태그·메모가 LLM 입력에 들어가면 자연어 캡션으로 되살아난다
+        s = "1girl, solo, /* red dress, cat ears */ blue dress // TODO: try wings later"
+        self.assertEqual(self._tags(s), ['1girl', 'solo', 'blue dress'])
+        self.assertEqual(self._tags("// 메모만\n1boy, /* off */"), ['1boy'])
+
+    def test_enhance_nl_caption_user_message_has_no_commented_tags(self):
+        # AutoNL(Vue·자동화)·nl_caption 버튼이 모두 지나는 OllamaClient.enhance 입구
+        from unittest import mock
+        from core.ollama_client import OllamaClient
+        sent = []
+
+        def fake_post(self, endpoint, body, *, plan, answer_of, timeout):
+            sent.append(body)
+            return {"message": {"content": "A girl wearing a blue dress."}}
+
+        main = "1girl, solo, /* red dress, cat ears */ blue dress // TODO: try wings later"
+        client = OllamaClient("http://127.0.0.1:1", "m")
+        with mock.patch.object(OllamaClient, "_post_json", fake_post), \
+                mock.patch.object(OllamaClient, "thinking_mode", lambda self: "off"):
+            client.enhance(main, "nl_caption", instruction_feature="auto_nl")
+        users = [m["content"] for b in sent for m in b.get("messages", []) if m["role"] == "user"]
+        self.assertTrue(users)
+        for msg in users:
+            self.assertIn("blue dress", msg)
+            for hidden in ("red dress", "cat ears", "wings", "TODO", "/*", "//"):
+                self.assertNotIn(hidden, msg)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from core.dataset_artifacts import manifest_artifacts, stale_artifacts
-from core.related_tags import FORMAT_VERSION, SEC_PER_MILLION_POSTS, SHARDS
+from core.related_tags import (
+    FORMAT_VERSION, MAX_TAGS_PER_POST, MIN_PAIR_BUILD, SEC_PER_MILLION_POSTS, SHARDS, TOP_K,
+)
 
 READY, STALE, MISSING, UNAVAILABLE = "ready", "stale", "missing", "unavailable"
 USABLE_STATES = frozenset({READY, STALE})
@@ -56,6 +58,22 @@ def artifact_identity(artifact: Mapping[str, object]) -> dict:
             "rows": artifact.get("rows")}
 
 
+#: 표에 남기는 쌍의 규칙 판 — 2: 등급마다 더한 값으로 거르지 않고 횟수 ≥ min_pair 인 쌍을 모두 남긴다
+TABLE_RULE = 2
+
+
+def build_params() -> dict:
+    """표 내용을 바꾸는 만들기 설정 — meta 의 params 와 다르면 그 표는 stale(다시 만들기).
+
+    예: 예전 표(규칙 판 없음)는 태그마다 이웃을 상위 128개(top_k)로 자르고 그 등급에서 더해 주지 않는 쌍을
+    버려 coverage 를 덜 셌다."""
+    return {"max_tags": MAX_TAGS_PER_POST, "min_pair": MIN_PAIR_BUILD, "top_k": TOP_K, "table_rule": TABLE_RULE}
+
+
+def _same_params(params: object) -> bool:
+    return isinstance(params, Mapping) and all(params.get(key) == value for key, value in build_params().items())
+
+
 def shard_state(meta: Mapping[str, object] | None, manifest: dict | None, data_dir: Path | str,
                 shard: str, vocab_fingerprint: str | None) -> str:
     found = shard_artifact(manifest, shard)
@@ -67,7 +85,7 @@ def shard_state(meta: Mapping[str, object] | None, manifest: dict | None, data_d
             return STALE
         identity = artifact_identity(found[1])
         same = all(meta.get(key) == identity[key] for key in ("sha256", "size_bytes"))
-        return READY if same else STALE
+        return READY if same and _same_params(meta.get("params")) else STALE
     if found is None or found[0] in stale_artifacts(manifest, data_dir, kind="search"):
         return UNAVAILABLE
     return MISSING
@@ -126,5 +144,6 @@ class LoadedTables:
 __all__ = [
     "MISSING", "READY", "STALE", "UNAVAILABLE", "USABLE_STATES",
     "CachePaths", "LoadedTables",
-    "artifact_identity", "cache_paths", "estimate_seconds", "shard_artifact", "shard_state", "shard_states",
+    "artifact_identity", "build_params", "cache_paths", "estimate_seconds", "shard_artifact", "shard_state",
+    "shard_states",
 ]

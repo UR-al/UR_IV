@@ -16,6 +16,9 @@
 
 떼어 낸 뒤 정리(:func:`strip_prompt_comments`) — 주석만 있던 줄은 줄째로 없애고, 내용 뒤의 줄바꿈은
 남겨 BREAK 같은 줄 단위 문법이 그대로다. 주석이 없는 줄은 손대지 않는다. 결과는 멱등이다.
+줄 주석은 태그를 끝낸다 — 블록 칸·태그 도구(``split_tags``)가 ``a // 메모\\nb`` 를 두 태그로 보므로, 보내는
+글자도 같게 괄호 밖 줄 주석 왼쪽 내용 뒤에 쉼표를 하나 둔다(``a,\\nb``). 왼쪽이 이미 쉼표로 끝나거나, 다음 줄에
+내용이 없거나 쉼표로 시작하거나, 왼쪽 끝 낱말이 ``BREAK``·``AND`` 이면 두지 않는다.
 
 프론트(``frontend/src/utils/promptComments.ts``)가 같은 문법을 블록 칸 흐리게 표시·자동완성 끄기에
 쓴다 — 두 구현은 ``frontend/src/utils/promptComments.cases.json`` 골든 사례로 묶여 있다.
@@ -33,6 +36,13 @@ _EOL_CHARS = "\r\n"
 _EOL = re.compile(r"[\r\n]")
 #: 줄 끝을 뺀 공백(가로 공백) — 떼어 낸 자리 양옆을 정리할 때 쓴다
 _HWS = "".join(sorted(_WS - set(_EOL_CHARS)))
+#: 줄 주석이 태그 경계인지 볼 때 세는 괄호(블록 칸 splitPromptBlocks 와 같다). ``\\`` 뒤 글자는 세지 않는다
+_OPEN_BRACKETS = "([{"
+_CLOSE_BRACKETS = ")]}"
+#: 줄 주석 왼쪽이 이 낱말로 끝나면 쉼표를 두지 않는다 — 줄 단위 문법(Forge BREAK·AND)
+_LINE_KEYWORD_TAIL = re.compile("(?:^|[" + re.escape("".join(sorted(_WS))) + r",])(?:BREAK|AND)\Z")
+#: 밑줄 뒤 ``//``·``/*`` — 밑줄을 공백으로 바꾸면 그 자리가 주석 시작이 된다
+_UNDERSCORE_OPENS_COMMENT = re.compile(r"_(?=/[/*])")
 
 LINE, BLOCK, OPEN = "line", "block", "open"
 
@@ -108,6 +118,48 @@ def _last_char(chunks: list[str]) -> str:
     return ""
 
 
+def _tail(chunks: list[str], size: int) -> str:
+    """조각 목록 끝 ``size`` 글자."""
+    tail = ""
+    for chunk in reversed(chunks):
+        tail = chunk + tail
+        if len(tail) >= size:
+            break
+    return tail[-size:]
+
+
+def _bracket_depth(text: str, start: int, end: int, depth: int) -> int:
+    """``text[start:end]`` 을 지난 뒤 괄호 깊이(``\\`` 뒤 글자는 건너뛴다, 0 아래로 내려가지 않는다)."""
+    i = start
+    while i < end:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch in _OPEN_BRACKETS:
+            depth += 1
+        elif ch in _CLOSE_BRACKETS:
+            depth = max(0, depth - 1)
+        i += 1
+    return depth
+
+
+def _content_follows(text: str, spans: list[tuple[int, int, str]], index: int, pos: int) -> bool:
+    """``pos`` 뒤에 (공백·줄 끝·이어지는 주석을 건너뛰고) 쉼표가 아닌 내용이 오는가."""
+    n = len(text)
+    k = index + 1
+    while pos < n:
+        if text[pos] in _WS:
+            pos += 1
+            continue
+        if k < len(spans) and spans[k][0] == pos:
+            pos = spans[k][1]
+            k += 1
+            continue
+        return text[pos] != ","
+    return False
+
+
 def _rstrip_chunks(chunks: list[str]) -> None:
     """조각 목록 끝의 가로 공백을 지운다(제자리)."""
     while chunks:
@@ -118,16 +170,18 @@ def _rstrip_chunks(chunks: list[str]) -> None:
         chunks.pop()
 
 
-def _strip_spans(text: str, spans: list[tuple[int, int, str]]) -> str:
+def _strip_spans(text: str, spans: list[tuple[int, int, str]], tag_breaks: bool = True) -> str:
     # 지금까지의 출력(L)은 조각 목록으로 들고 끝자리만 본다 — 주석이 많은 긴 글도 한 번 훑기.
     out: list[str] = []
     pos = 0
     n = len(text)
-    for start, end, _kind in spans:
+    depth = 0
+    for index, (start, end, kind) in enumerate(spans):
         if start < pos:          # 앞 정리에서 이미 지난 자리(겹침 없음 — 방어)
             continue
         if start > pos:
             out.append(text[pos:start])
+            depth = _bracket_depth(text, pos, start, depth)
         pos = end
         # (b) 왼쪽이 가로 공백·줄 처음이면 오른쪽 가로 공백은 버린다 — 'a /* x */ b' → 'a b',
         #     '/* x */ b' → 'b'
@@ -149,18 +203,26 @@ def _strip_spans(text: str, spans: list[tuple[int, int, str]]) -> str:
                 elif out:
                     tail = out[-1]
                     out[-1] = tail[:-2] if tail.endswith("\r\n") else tail[:-1]
+            # (d) 괄호 밖 줄 주석이 내용 뒤에서 줄을 끝내면 태그 경계 — 다음 줄 내용과 붙지 않게 쉼표 하나
+            elif (tag_breaks and eol and kind != BLOCK and depth == 0 and last != ","
+                  and not _LINE_KEYWORD_TAIL.search(_tail(out, 6))
+                  and _content_follows(text, spans, index, pos)):
+                out.append(",")
     out.append(text[pos:])
     return "".join(out)
 
 
-def strip_prompt_comments(text: str) -> str:
-    """주석을 뗀 텍스트. 주석이 없으면 **같은 객체**를 돌려준다."""
+def strip_prompt_comments(text: str, *, tag_breaks: bool = True) -> str:
+    """주석을 뗀 텍스트. 주석이 없으면 **같은 객체**를 돌려준다.
+
+    ``tag_breaks=False`` — 줄 하나가 항목인 글(와일드카드 파일)은 줄 주석 뒤에 쉼표를 두지 않는다.
+    """
     if not isinstance(text, str):
         return text
     spans = comment_spans(text)
     if not spans:
         return text
-    return _strip_spans(text, spans)
+    return _strip_spans(text, spans, tag_breaks)
 
 
 def ends_in_line_comment(text: str) -> bool:
@@ -180,6 +242,15 @@ def append_prompt_text(base: str, add: str, sep: str = ", ") -> str:
     if ends_in_line_comment(base):
         return f"{base}\n{add}"
     return f"{base}{sep}{add}"
+
+
+def underscores_to_spaces(tag: str) -> str:
+    """태그 밑줄 → 공백(블록 칸·자동완성이 넣는 모양). 밑줄 뒤에 ``//``·``/*`` 가 오는 태그(Danbooru
+    ``z.a.t.o._//_i_love_the_world_and_everything_in_it``)는 바꾸면 그 자리부터 주석이 되어 뒤가 잘리므로
+    그대로 둔다."""
+    if not tag or "_" not in tag or _UNDERSCORE_OPENS_COMMENT.search(tag):
+        return tag
+    return tag.replace("_", " ")
 
 
 def comment_code(token: str) -> str:

@@ -606,6 +606,8 @@ export interface RelatedTagsQueryPayload {
   negative: string
   exclude: string
   limit?: number
+  /** 보낸 화면(웹 모드 탭마다 다르다) — Python 워커는 화면마다 마지막 질의 하나를 기다리게 둔다 */
+  client?: string
 }
 
 /** related_tags_build — 표를 만들 등급(비지 않은 부분집합). 이미 돌고 있으면 그 진행으로 답한다. */
