@@ -19,6 +19,8 @@ import math
 import re
 from typing import Any, Iterable
 
+from core.prompt_comments import append_prompt_text, strip_prompt_comments
+
 UNIT_PERCENT = "percent"
 UNIT_MULTIPLIER = "multiplier"
 UNIT_AUTO = "auto"
@@ -120,9 +122,11 @@ def append_lora_stack_to_prompt(prompt: str | None, entries: Iterable | None,
 
     프롬프트에 같은 이름의 ``<lora:...>`` 가 이미 있으면(큐 항목의 EXIF LoRA 등) 스택의 그
     LoRA 는 빼서 이중 적용을 막는다. 스택이 비었거나 전부 꺼져 있으면 프롬프트 그대로.
+    주석(``// <lora:x:1>`` — core/prompt_comments) 안의 LoRA 는 들어 있는 것으로 치지 않고, 프롬프트가
+    줄 주석으로 끝나면 줄바꿈으로 잇는다(쉼표로 이으면 스택 LoRA 가 주석에 먹힌다).
     """
     base = prompt or ""
-    text = _format(normalize_lora_entries(entries, unit=unit), prompt_lora_names(base))
+    text = _format(normalize_lora_entries(entries, unit=unit), prompt_lora_names(strip_prompt_comments(base)))
     if not text:
         return base
-    return f"{base}, {text}" if base else text
+    return append_prompt_text(base, text)

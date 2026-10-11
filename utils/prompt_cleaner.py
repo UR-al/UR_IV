@@ -10,6 +10,7 @@ import re
 from typing import Tuple, List, Optional
 
 from core.instant_wildcards import INSTANT_WILDCARD_PATTERN
+from core.prompt_comments import comment_spans_through_eol
 from utils.file_wildcard import DUNDER_WILDCARD_PATTERN, FILE_WILDCARD_PATTERN
 
 # 와일드카드 토큰(__이름__ · ~/이름/~ · 즉석 $$이름$$)은 정리 규칙을 건너뛴다 — 밑줄→공백이
@@ -22,15 +23,41 @@ _WC_CLOSE = ''
 _WC_SLOT = re.compile(_WC_OPEN + r'(\d+)' + _WC_CLOSE)
 
 
-def _mask_wildcard_tokens(text: str) -> Tuple[str, List[str]]:
-    """와일드카드 토큰을 자리표시자로 바꾼다 → (가린 텍스트, 원문 토큰 목록).
+def _mask_comment_spans(text: str, saved: List[str]) -> str:
+    """프롬프트 주석(// · /* */, core/prompt_comments)을 자리표시자로 가린다 — 원문은 ``saved`` 에 쌓는다.
 
-    같은 토큰은 같은 자리표시자를 쓴다(중복 제거가 같은 글자를 같은 태그로 보던 규칙 유지).
+    정리 규칙(줄바꿈→공백·밑줄→공백·이스케이프·중복 제거)이 주석에 닿으면 안 된다: 줄바꿈이 공백이 되면
+    다음 줄이 줄 주석 안으로 들어가 조용히 사라진다. 그래서 줄 주석·닫히지 않은 블록의 자리표시자는 뒤따르는
+    줄 끝까지 품고, 줄 처음에서 시작하면 앞 줄 끝도 품는다(주석 줄이 앞 줄에 붙지 않게). 주석은 **나올 때마다
+    다른** 자리표시자를 쓴다 — 중복 제거가 같은 글자의 두 번째 주석을 지우지 않게.
+    """
+    spans = comment_spans_through_eol(text)
+    if not spans:
+        return text
+    out: List[str] = []
+    pos = 0
+    for start, end, kind in spans:
+        if kind != 'block' and start > pos and text[start - 1] in '\r\n':
+            start -= 2 if start - 2 >= pos and text.startswith('\r\n', start - 2) else 1
+        out.append(text[pos:start])
+        saved.append(text[start:end])
+        out.append(f'{_WC_OPEN}{len(saved) - 1}{_WC_CLOSE}')
+        pos = end
+    out.append(text[pos:])
+    return ''.join(out)
+
+
+def _mask_wildcard_tokens(text: str) -> Tuple[str, List[str]]:
+    """프롬프트 주석과 와일드카드 토큰을 자리표시자로 바꾼다 → (가린 텍스트, 원문 목록).
+
+    주석을 먼저 가린다(:func:`_mask_comment_spans` — 주석 안의 ``__x__`` 는 주석의 일부다).
+    같은 와일드카드 토큰은 같은 자리표시자를 쓴다(중복 제거가 같은 글자를 같은 태그로 보던 규칙 유지).
     자리표시자 문자가 이미 들어 있는 드문 입력은 가리지 않는다(되돌릴 때 섞이지 않게).
     """
     if not text or _WC_OPEN in text or _WC_CLOSE in text:
         return text, []
     saved: List[str] = []
+    text = _mask_comment_spans(text, saved)
 
     def _keep(m):
         token = m.group(0)
@@ -80,7 +107,7 @@ class PromptCleaner:
         if not text:
             return ""
 
-        # 와일드카드 토큰(__이름__ · ~/이름/~ · $$이름$$)은 글자 그대로 둔다 — 끝에서 되돌린다
+        # 프롬프트 주석(// · /* */)과 와일드카드 토큰(__이름__ · ~/이름/~ · $$이름$$)은 글자 그대로 둔다 — 끝에서 되돌린다
         result, wildcard_tokens = _mask_wildcard_tokens(text)
 
         # 1. 공백 정리

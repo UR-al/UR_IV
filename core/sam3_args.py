@@ -127,6 +127,9 @@ SAM3_SPEC = (
 
 SAM3_KEYS = tuple(key for key, _k, _d, _e in SAM3_SPEC)
 
+# 프롬프트 글자 칸 — 주석(core/prompt_comments)을 떼는 대상(core.prompt_comments.SAM3_PROMPT_KEYS 와 같다)
+_PROMPT_TEXT_KEYS = ('sam3_prompt', 'sam3_exclude_prompt', 'sam3_inpaint_prompt', 'sam3_negative_prompt')
+
 MODE_MASK_ONLY = 'Mask only'
 
 
@@ -184,6 +187,13 @@ def build_state(settings=None, *, prompt: str = '', negative_prompt: str = '',
     settings = settings if isinstance(settings, dict) else {}
     state = {key: _coerce(kind, settings.get(key), default, extra)
              for key, kind, default, extra in SAM3_SPEC}
+    # 프롬프트 주석(// · /* */, core/prompt_comments)은 확장에 보내지 않는다 — 아래 '비면 face·부모 프롬프트'
+    # 판정도 주석을 뗀 글자로 한다(주석만 있는 칸 = 빈 칸). Forge·ComfyUI 모두 이 state 를 쓴다.
+    from core.prompt_comments import strip_prompt_comments
+    for key in _PROMPT_TEXT_KEYS:
+        state[key] = strip_prompt_comments(state[key])
+    prompt = strip_prompt_comments(prompt or '')
+    negative_prompt = strip_prompt_comments(negative_prompt or '')
 
     from core.sam3_cn_names import guard_lllite_module, normalize_state as _normalize_cn_names
     _normalize_cn_names(state, capabilities)

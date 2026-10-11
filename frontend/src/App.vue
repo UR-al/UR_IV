@@ -336,6 +336,7 @@ import {
   type AutomationKey,
 } from './utils/automationSettings'
 import { mirrorPrefsToStorage } from './utils/uiPrefMirror'
+import { endsInLineComment } from './utils/promptComments'
 import { persistUiPrefs, restoreUiFlagsFromPrefs } from './composables/uiPrefs'
 import { useSessionRestore } from './composables/useSessionRestore'
 import { createPendingRequest } from './utils/pendingRequest'
@@ -688,7 +689,8 @@ async function doGenerate() {
     if (tags && tags !== _lastAutoNl.value) {
       const nl = await _convertTagsToNl(tags)
       if (nl && nl.trim()) {
-        const combined = tags + ', ' + nl.trim()   // 태그 뒤에 자연어 추가 ('main에 넣기'와 동일)
+        // 태그 뒤에 자연어 추가 ('main에 넣기'와 동일) — 태그가 줄 주석(// 메모)으로 끝나면 줄바꿈으로 잇는다
+        const combined = tags + (endsInLineComment(tags) ? '\n' : ', ') + nl.trim()
         storeWidgets.main_prompt_text = combined
         _lastAutoNl.value = combined
         await nextTick()

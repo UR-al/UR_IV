@@ -38,13 +38,15 @@ class PromptHandlingMixin:
             from core.prompt_order import compose_prompt
             final = compose_prompt(section_texts)
         except Exception:
-            # 보수적 폴백 — config 로드 실패 시 기본 순서로
-            final = ", ".join(s.strip() for s in [
+            # 보수적 폴백 — config 로드 실패 시 기본 순서로(compose_prompt 처럼 칸마다 프롬프트 주석을 뗀다)
+            from core.prompt_comments import strip_prompt_comments
+            texts = [strip_prompt_comments(s).strip() for s in [
                 section_texts["char_count"], section_texts["character"],
                 section_texts["copyright"], section_texts["artist"],
                 section_texts["prefix"], section_texts["main"],
                 section_texts["suffix"],
-            ] if s.strip())
+            ]]
+            final = ", ".join(s for s in texts if s)
 
         self.total_prompt_display.setPlainText(final)
     
@@ -218,8 +220,9 @@ class PromptHandlingMixin:
         if preserve_locked:
             # 당겨오기: 작가 칸도 중복 제거 대상에 포함 (작가 칸과 겹치는 태그는 안 당겨옴)
             _fixed_srcs.append(self.artist_input.toPlainText())
+        from core.prompt_comments import strip_prompt_comments
         for src in _fixed_srcs:
-            for t in src.split(','):
+            for t in strip_prompt_comments(src).split(','):   # 주석(// · /* */)은 태그가 아니다
                 nt = _norm(t)
                 if nt:
                     fixed_tags.add(nt)
@@ -346,13 +349,14 @@ class PromptHandlingMixin:
         if hasattr(self, 'combo_char_feature_mode'):
             core_only = self.combo_char_feature_mode.currentIndex() == 0
 
-        # 기존 태그 수집
+        # 기존 태그 수집 — 주석(// · /* */)은 태그가 아니다
+        from core.prompt_comments import strip_prompt_comments
         all_existing: set[str] = set()
         for src in (self.main_prompt_text.toPlainText(),
                     self.prefix_prompt_text.toPlainText(),
                     self.suffix_prompt_text.toPlainText(),
                     self.character_input.text()):
-            for t in src.split(","):
+            for t in strip_prompt_comments(src).split(","):
                 n = t.strip().lower().replace("_", " ")
                 if n:
                     all_existing.add(n)
@@ -459,15 +463,21 @@ class PromptHandlingMixin:
         if removals:
             self.is_programmatic_change = True
             kept = []
-            for t in self.main_prompt_text.toPlainText().split(","):
+            main_text = self.main_prompt_text.toPlainText()
+            # 주석(// · /* */)이 있으면 주석을 태그에 붙인 채로 나누고(줄 주석 뒤 줄바꿈 = 경계) 줄바꿈으로 다시 잇는다
+            from core.prompt_comments import has_prompt_comment
+            from utils.condition_block import join_tags, split_tags
+            commented = has_prompt_comment(main_text)
+            for t in (split_tags(main_text) if commented else main_text.split(",")):
                 ts = t.strip()
                 if not ts:
                     continue
-                tnorm = ts.lower().replace("_", " ").replace(r"\(", "(").replace(r"\)", ")")
-                if tnorm in removals:
+                code = strip_prompt_comments(ts).strip() if commented else ts
+                tnorm = code.lower().replace("_", " ").replace(r"\(", "(").replace(r"\)", ")")
+                if tnorm and tnorm in removals:
                     continue
                 kept.append(ts)
-            self.main_prompt_text.setPlainText(", ".join(kept))
+            self.main_prompt_text.setPlainText(join_tags(kept) if commented else ", ".join(kept))
             self.is_programmatic_change = False
 
         if new_tags:
@@ -516,7 +526,7 @@ class PromptHandlingMixin:
           앵커만 지운다(``_replace_neg`` 는 네거티브 칸에서).
         """
         from utils.condition_block import (
-            add_to_tags, remove_from_tags, replace_across, split_tags,
+            add_to_tags, join_tags, remove_from_tags, replace_across, split_tags,
         )
         pos_widgets = {
             "character": self.character_input,
@@ -569,7 +579,7 @@ class PromptHandlingMixin:
         try:
             for key, widget in all_widgets.items():
                 if tags[key] != before[key]:
-                    text = ", ".join(tags[key])
+                    text = join_tags(tags[key])   # 줄 주석 뒤는 줄바꿈(다음 태그가 주석에 먹히지 않게)
                     (widget.setText if hasattr(widget, 'text') else widget.setPlainText)(text)
         finally:
             self.is_programmatic_change = prev

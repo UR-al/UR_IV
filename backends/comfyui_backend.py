@@ -33,6 +33,7 @@ from core.comfy_workflow_format import (
     WEB_WORKFLOW_MESSAGE, is_web_workflow, require_api_workflow,
 )
 from core.lenient_numbers import finite_float as _float_or, lenient_int as _int_or
+from core.prompt_comments import strip_request_comments
 
 import config
 from utils.app_logger import get_logger
@@ -1224,6 +1225,8 @@ class ComfyUIBackend(AbstractBackend):
         ``result.info['seed']``; prompt LoRAs the target lacks are skipped
         like Forge and listed in ``result.info['warnings']``.
         """
+        # 프롬프트 주석(// · /* */)은 보내지 않는다 — Forge 입구와 같은 방어선(core/prompt_comments)
+        payload = strip_request_comments(payload)
         mode_aliases = {
             'txt2img': 'txt2img',
             't2i': 'txt2img',
@@ -1391,6 +1394,8 @@ class ComfyUIBackend(AbstractBackend):
                 progress_callback: Optional[ProgressCallback] = None,
                 cancel_check: Optional[Callable[[], bool]] = None) -> GenerationResult:
         """텍스트→이미지 생성 (설정 workflow 또는 앱 소유 기본 graph)."""
+        # 프롬프트 주석(// · /* */)은 그래프·저장 문맥(_last_generation_context)에 넣지 않는다 — Forge 와 같은 방어선
+        payload = strip_request_comments(payload)
         try:
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다.")
@@ -1541,6 +1546,7 @@ class ComfyUIBackend(AbstractBackend):
                 progress_callback: Optional[ProgressCallback] = None,
                 cancel_check: Optional[Callable[[], bool]] = None) -> GenerationResult:
         """이미지→이미지/인페인트 생성 (custom workflow가 없어도 동작)."""
+        payload = strip_request_comments(payload)   # 프롬프트 주석은 보내지 않는다(txt2img 와 같다)
         try:
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다.")
@@ -1795,6 +1801,8 @@ class ComfyUIBackend(AbstractBackend):
                 negative_prompt=str(payload.get('negative_prompt') or ''),
             )
             payload['alwayson_scripts'][sam3_args.SCRIPT_SAM3] = {'args': [state]}
+        # 프롬프트 주석(// · /* */)은 보내지 않는다 — Forge 단독 패스(_run_img2img_postprocess)와 같은 방어선
+        payload = strip_request_comments(payload)
         # One seed for every ADetailer/SAM3 pass of this job (-1 → drawn once),
         # stable across the compile retry below.
         payload = with_concrete_seed(payload)
@@ -1827,9 +1835,9 @@ class ComfyUIBackend(AbstractBackend):
             from core import sam3_args
 
             state = sam3_args.build_state(settings)
-            payload = {
+            payload = strip_request_comments({
                 'alwayson_scripts': {sam3_args.SCRIPT_SAM3: {'args': [state]}},
-            }
+            })
             uploaded = self._upload_image(image_b64)
             workflow = self._compile_graph(lambda compiler: compiler.compile_sam3_mask_only(
                 payload, uploaded_image=uploaded,

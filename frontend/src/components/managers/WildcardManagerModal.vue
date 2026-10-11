@@ -27,7 +27,7 @@
               <!-- 파일명 인라인 편집 -->
               <h4 v-if="!wcRenaming" @dblclick="beginRename">{{ selectedWc }}</h4>
               <input v-else v-model="wcNewName" class="wc-rename-input" @blur="finishWcRename" @keydown.enter="finishWcRename" ref="wcRenameRef" />
-              <span class="wc-syntax" title="표기가 둘이면 같은 뜻 — 한 줄마다 쉼표 후보 중 하나를 뽑는다. # 으로 시작하는 줄은 주석">문법: <template v-for="(form, fi) in wildcardSyntaxForms(selectedWc)" :key="form"><template v-if="fi"> 또는 </template><code>{{ form }}</code></template></span>
+              <span class="wc-syntax" title="표기가 둘이면 같은 뜻 — 한 줄마다 쉼표 후보 중 하나를 뽑는다. # 으로 시작하는 줄과 // · /* */ 주석은 뺀다">문법: <template v-for="(form, fi) in wildcardSyntaxForms(selectedWc)" :key="form"><template v-if="fi"> 또는 </template><code>{{ form }}</code></template></span>
             </div>
             <!-- 블록 편집 -->
             <div class="wc-blocks">

@@ -9,6 +9,7 @@ import random
 import json
 
 from config import OUTPUT_DIR
+from core.prompt_comments import strip_prompt_comments
 from workers.generation_worker import GenerationFlowWorker
 from utils.file_wildcard import resolve_file_wildcards, wildcards_enabled
 from utils.wildcard import process_wildcards
@@ -270,10 +271,13 @@ class GenerationMixin:
             print(f"[HighRes] base {_bw}x{_bh} (hr={hr_factor}, auto={_auto_res}) "
                   f"→ {width}x{height} (Anima Guard {_guard_desc})")
         
-        combined_neg_prompt = self.neg_prompt_text.toPlainText().strip()
+        # 프롬프트 주석(// · /* */)은 와일드카드·파이프라인보다 먼저 뗀다 — 파이프라인이 쉼표로 다시 이으면
+        # 줄 주석이 다음 태그를 삼킨다. 보낸 요청(=infotext·Comfy 그래프·기록)에는 주석이 없다(core/prompt_comments).
+        combined_neg_prompt = strip_prompt_comments(self.neg_prompt_text.toPlainText().strip()).strip()
 
         # 와일드카드 치환
         final_prompt = self.total_prompt_display.toPlainText() if prompt_override is None else str(prompt_override)
+        final_prompt = strip_prompt_comments(final_prompt)
         wc_enabled = wildcards_enabled(self)
         if wc_enabled and not snapshot:
             final_prompt = resolve_file_wildcards(final_prompt)
@@ -291,6 +295,9 @@ class GenerationMixin:
                 combined_neg_prompt = run_pipeline_on_text(combined_neg_prompt)
         except Exception as e:
             _logger.warning(f"pipeline 실행 실패 (원본 유지): {e}")
+        # 와일드카드·훅이 넣은 글자에 주석이 섞였어도 LoRA 를 붙이기 전에 한 번 더 뗀다
+        final_prompt = strip_prompt_comments(final_prompt)
+        combined_neg_prompt = strip_prompt_comments(combined_neg_prompt)
 
         # LoRA 합침 — 단일 소스 _vue_lora_entries(배율 단위, Vue set_lora_stack·부팅 복원·프로파일
         # 적용이 갱신)에서 매번 파생한다. 스택이 비었거나 전부 꺼져 있으면 아무것도 붙이지 않는다.
@@ -370,11 +377,11 @@ class GenerationMixin:
             if hr_scheduler and hr_scheduler != "Use same scheduler":
                 hr_payload["hr_scheduler"] = hr_scheduler
 
-            # Hires Prompt / Negative Prompt
-            hr_prompt = self.hires_prompt_text.toPlainText().strip()
+            # Hires Prompt / Negative Prompt — 주석만 있으면 빈 칸(키를 보내지 않아 메인 프롬프트를 쓴다)
+            hr_prompt = strip_prompt_comments(self.hires_prompt_text.toPlainText()).strip()
             if hr_prompt:
                 hr_payload["hr_prompt"] = hr_prompt
-            hr_neg = self.hires_neg_prompt_text.toPlainText().strip()
+            hr_neg = strip_prompt_comments(self.hires_neg_prompt_text.toPlainText()).strip()
             if hr_neg:
                 hr_payload["hr_negative_prompt"] = hr_neg
 
@@ -624,11 +631,7 @@ class GenerationMixin:
 
             # 프롬프트 히스토리 기록
             try:
-                from utils.prompt_history import add_entry
-                add_entry(
-                    self.total_prompt_display.toPlainText(),
-                    self.neg_prompt_text.toPlainText()
-                )
+                self._record_prompt_history()
             except Exception:
                 pass
 
@@ -686,6 +689,14 @@ class GenerationMixin:
         else:
             # 설정 '생성 후 모델 언로드' — 연속 작업의 마지막 장 뒤에만 (core/post_generation)
             self._maybe_unload_models_after_generation()
+
+    def _record_prompt_history(self):
+        """프롬프트 히스토리 기록 — 보낸 것과 같게 프롬프트 주석(// · /* */, core/prompt_comments)은 뺀다."""
+        from utils.prompt_history import add_entry
+        add_entry(
+            strip_prompt_comments(self.total_prompt_display.toPlainText()),
+            strip_prompt_comments(self.neg_prompt_text.toPlainText())
+        )
 
     def _maybe_unload_models_after_generation(self):
         """ui_prefs.unloadModelsAfterGen 이 켜져 있고 자동화/대기열이 끝났으면 백엔드 모델을 내린다.

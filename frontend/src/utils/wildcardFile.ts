@@ -7,6 +7,8 @@
  * - 프롬프트 문법은 `__이름__` 과 `~/이름/~` 가 같은 뜻이다(해석기는 둘 다 푼다). 단 `__이름__` 으로
  *   못 가리키는 이름(밑줄·공백으로 시작/끝, 쉼표, 가운데 `__`)은 `~/이름/~` 만 쓴다(dunderWildcardOk).
  */
+import { appendPromptText } from './promptComments'
+
 export interface WildcardEntry {
   name: string
   file: string
@@ -116,8 +118,9 @@ export function wildcardFailureMessage(json: string, base: string): string {
 /**
  * 관리자의 '사용' — 프롬프트 칸 끝에 문법을 붙인 결과. 끝의 쉼표·공백을 하나로 정리한 뒤
  * `, 문법, ` 을 붙인다(빈 칸이면 `문법, `). 생성 경로(resolve_file_wildcards)가 이 모양을 푼다
- * (tests/test_file_wildcard.py · test_prompt_cleaner_wildcards.py).
+ * (tests/test_file_wildcard.py · test_prompt_cleaner_wildcards.py). 칸이 줄 주석(// 메모)으로 끝나면 줄바꿈으로
+ * 잇는다(utils/promptComments.appendPromptText — 쉼표로 이으면 문법이 주석에 먹힌다).
  */
 export function insertWildcardSyntax(current: string, syntax: string): string {
-  return current ? current.replace(/,?\s*$/, '') + ', ' + syntax + ', ' : syntax + ', '
+  return appendPromptText(current, syntax) + ', '
 }

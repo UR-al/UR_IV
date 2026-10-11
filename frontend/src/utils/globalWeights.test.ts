@@ -50,6 +50,16 @@ describe('applyGlobalWeights (#109)', () => {
   })
 })
 
+describe('applyGlobalWeights — 프롬프트 주석', () => {
+  it('weights the tag next to a comment and never touches comment text', () => {
+    const weights = [w('smile', 120), w('hat', 80)]
+    expect(applyGlobalWeights('smile // smile, hat 메모\nhat', weights)).toBe('(smile:1.20) // smile, hat 메모\n(hat:0.80)')
+    expect(applyGlobalWeights('/* smile */ hat, solo', weights)).toBe('/* smile */ (hat:0.80), solo')
+    expect(applyGlobalWeights('(a, b // (\n:1.1), smile', weights)).toBe('(a, b // (\n:1.1), (smile:1.20)')
+    expect(applyGlobalWeights('a /* x */ smile', weights)).toBe('a /* x */ smile')   // 주석이 태그 가운데면 그대로
+  })
+})
+
 describe('createRowKeyer', () => {
   it('gives each row object a stable key regardless of its tag text', () => {
     const key = createRowKeyer()

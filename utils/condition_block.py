@@ -8,6 +8,9 @@ import re
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
+from core.prompt_comments import BLOCK as COMMENT_BLOCK
+from core.prompt_comments import comment_spans, ends_in_line_comment, strip_prompt_comments
+
 
 @dataclass
 class ConditionRule:
@@ -244,13 +247,17 @@ _CLOSE_BRACKETS = ")]}>"
 
 
 def norm_tag(t: str) -> str:
-    """태그 정규화 — trim + lowercase + 언더스코어→공백 + ``\\(``·``\\)`` 이스케이프 해제.
+    """태그 정규화 — 주석 떼기 + trim + lowercase + 언더스코어→공백 + ``\\(``·``\\)`` 이스케이프 해제.
 
     프롬프트 칸의 캐릭터명은 ``hatsune miku \\(append\\)`` 처럼 이스케이프돼 있고, 사람이 쓰는
-    조건은 ``hatsune miku (append)`` 라 둘을 같은 태그로 본다.
+    조건은 ``hatsune miku (append)`` 라 둘을 같은 태그로 본다. 프롬프트 주석(``1girl // 메모``,
+    core/prompt_comments)은 태그가 아니다 — 주석만 있는 조각은 빈 문자열이 된다.
     """
+    t = t or ""
+    if "/" in t:
+        t = strip_prompt_comments(t)
     return (
-        (t or "").strip().lower().replace("_", " ")
+        t.strip().lower().replace("_", " ")
         .replace("\\(", "(").replace("\\)", ")")
     )
 
@@ -260,14 +267,29 @@ def split_tags(text: str) -> list[str]:
 
     괄호·꺾쇠 안의 쉼표(``(a, b:1.2)``, ``<lora:x:1>``)와 ``\\(`` 같은 이스케이프 문자는
     구분자/괄호로 보지 않는다 — 가중치 묶음을 반으로 쪼개 망가뜨리지 않는다.
+    프롬프트 주석(core/prompt_comments)은 앞 태그에 붙은 채로 둔다 — 주석 안의 쉼표·괄호는 세지 않고,
+    괄호 밖 줄 주석 뒤의 줄바꿈은 태그 경계다(``a // 메모\\nb`` → ``['a // 메모', 'b']``).
+    다시 이을 때는 :func:`join_tags` 를 쓴다(줄 주석 뒤는 줄바꿈).
     """
     out: list[str] = []
     cur: list[str] = []
     depth = 0
     s = text or ""
+    spans = {start: (end, kind) for start, end, kind in comment_spans(s)} if "/" in s else {}
     i = 0
     n = len(s)
     while i < n:
+        if spans and i in spans:
+            end, kind = spans[i]
+            cur.append(s[i:end])
+            i = end
+            if kind != COMMENT_BLOCK and depth == 0 and i < n:
+                tag = "".join(cur).strip()
+                if tag:
+                    out.append(tag)
+                cur = []
+                i += 2 if s.startswith("\r\n", i) else 1
+            continue
         ch = s[i]
         if ch == "\\" and i + 1 < n:
             cur.append(s[i:i + 2])
@@ -289,6 +311,19 @@ def split_tags(text: str) -> list[str]:
     if tag:
         out.append(tag)
     return out
+
+
+def join_tags(tags) -> str:
+    """:func:`split_tags` 의 반대 — ``", "`` 로 잇되, 줄 주석으로 끝나는 태그 뒤는 줄바꿈으로 잇는다
+    (쉼표로 이으면 다음 태그가 주석에 먹힌다). 주석이 없으면 ``", ".join`` 과 같다."""
+    parts: list[str] = []
+    prev = None
+    for tag in tags:
+        if prev is not None:
+            parts.append("\n" if ends_in_line_comment(prev) else ", ")
+        parts.append(tag)
+        prev = tag
+    return "".join(parts)
 
 
 def condition_terms(condition: str) -> list[str]:

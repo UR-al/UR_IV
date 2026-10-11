@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Iterable, Optional, Union
 
+from core.prompt_comments import comment_code, has_prompt_comment, strip_prompt_comments
+
 _CONFLICT_GROUPS: tuple[tuple[tuple[str, ...], str], ...] = (
     (('black_hair', 'blonde_hair', 'brown_hair', 'red_hair', 'blue_hair', 'green_hair', 'white_hair',
       'pink_hair', 'purple_hair', 'silver_hair', 'orange_hair', 'grey_hair'), '머리색'),
@@ -40,18 +42,32 @@ def split_tags(text: object) -> list[str]:
 
 
 def _context_tags(context: Union[None, str, Iterable[object]]) -> list[str]:
+    # 다른 칸의 프롬프트 주석(// · /* */)은 태그가 아니다 — 떼고 나눈다(주석이 없으면 그대로)
     if context is None:
         return []
     if isinstance(context, str):
-        return split_tags(context)
+        return split_tags(strip_prompt_comments(context))
     out: list[str] = []
     try:
         for part in context:
             if isinstance(part, str):
-                out.extend(split_tags(part))
+                out.extend(split_tags(strip_prompt_comments(part)))
     except TypeError:
         return []
     return out
+
+
+def _main_tags(prompt: object) -> tuple[list[str], list[str], bool]:
+    """메인 칸 → (토큰, 비교 키, 주석 있음). 주석이 있으면 주석을 앞 태그에 붙인 채로 나누고
+    (utils.condition_block.split_tags — 줄 주석 뒤 줄바꿈이 경계) 키는 주석을 뗀 글자로 만든다.
+    주석만 있는 토큰의 키는 ``''`` — 중복으로 지우지 않고 '나머지' 자리에 원래 순서대로 남는다."""
+    text = str(prompt or '')
+    if not has_prompt_comment(text):
+        tags = split_tags(text)
+        return tags, [tag_key(t) for t in tags], False
+    from utils.condition_block import split_tags as split_commented
+    tags = split_commented(text)
+    return tags, [tag_key(comment_code(t)) for t in tags], True
 
 
 def deep_clean_prompt(prompt: object, context: Union[None, str, Iterable[object]] = None) -> dict:
@@ -64,23 +80,25 @@ def deep_clean_prompt(prompt: object, context: Union[None, str, Iterable[object]
       - conflicts: [{group, tags}] — 메인 ∪ context 기준
       - tag_count: optimized 의 태그 수
     """
-    tags = split_tags(prompt)
+    tags, keys, commented = _main_tags(prompt)
     ctx = _context_tags(context)
     ctx_keys = {tag_key(t) for t in ctx}
 
     seen: set[str] = set(ctx_keys)
-    unique: list[str] = []
+    unique: list[tuple[str, str]] = []
     from_context = 0
-    for tag in tags:
-        key = tag_key(tag)
+    for tag, key in zip(tags, keys):
+        if not key:                     # 주석만 있는 토큰 — 같은 주석이 둘이어도 지우지 않는다
+            unique.append((tag, key))
+            continue
         if key in seen:
             if key in ctx_keys:
                 from_context += 1
             continue
         seen.add(key)
-        unique.append(tag)
+        unique.append((tag, key))
 
-    present = {tag_key(t) for t in unique} | ctx_keys
+    present = {key for _tag, key in unique if key} | ctx_keys
     conflicts = []
     for group, label in _CONFLICT_GROUPS:
         found = [t for t in group if t in present]
@@ -89,8 +107,7 @@ def deep_clean_prompt(prompt: object, context: Union[None, str, Iterable[object]
 
     # 순서 재배치: 인물수 → 품질 → 나머지(원래 순서 유지)
     count, quality, other = [], [], []
-    for tag in unique:
-        key = tag_key(tag)
+    for tag, key in unique:
         if key in _QUALITY_TAGS:
             quality.append(tag)
         elif key in _COUNT_TAGS:
@@ -98,12 +115,17 @@ def deep_clean_prompt(prompt: object, context: Union[None, str, Iterable[object]
         else:
             other.append(tag)
     optimized = count + quality + other
+    if commented:
+        from utils.condition_block import join_tags
+        joined = join_tags(optimized)   # 줄 주석으로 끝나는 태그 뒤는 줄바꿈
+    else:
+        joined = ', '.join(optimized)
     return {
-        'optimized': ', '.join(optimized),
+        'optimized': joined,
         'removed': len(tags) - len(unique),
         'removed_from_context': from_context,
         'conflicts': conflicts,
-        'tag_count': len(optimized),
+        'tag_count': sum(1 for _tag, key in unique if key),
     }
 
 

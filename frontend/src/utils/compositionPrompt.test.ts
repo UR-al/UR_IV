@@ -54,6 +54,13 @@ describe('independent composition prompt steering', () => {
     const result = planCompositionAppend('(from above, blue sky:1.1)', ['from above'])
     expect(result.text).toBe('(from above, blue sky:1.1), from above')
   })
+  it('ignores tags inside prompt comments and never appends into a line comment', () => {
+    const result = planCompositionAppend('forest, // from above', ['from above'])
+    expect(result.additions).toEqual(['from above'])
+    expect(result.text).toBe('forest, // from above\nfrom above')
+    expect(planCompositionAppend('forest /* full body */', ['full body']).text).toBe('forest /* full body */, full body')
+    expect(planCompositionAppend('forest', ['from above'], '/* from above */').additions).toEqual(['from above'])
+  })
   it('is idempotent on repeated apply including a trailing comma', () => {
     const tags = compositionTags({ ...DEFAULT_COMPOSITION })
     const first = planCompositionAppend('forest,', tags)

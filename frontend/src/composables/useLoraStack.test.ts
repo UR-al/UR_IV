@@ -162,3 +162,14 @@ it('a ui_prefs restore drops a pending save of the pre-restore stack (file wins)
     vi.useRealTimers()
   }
 })
+
+it('trigger words: text inside prompt comments is not "already there", and a trailing line comment gets a new line', () => {
+  const storeWidgets: Record<string, string> = { main_prompt_text: '1girl // tw memo' }
+  const api = useLoraStack({ storeWidgets, addToast: () => {}, saveUiPrefs: vi.fn() })
+  api.insertTriggerWord('tw')
+  expect(storeWidgets.main_prompt_text).toBe('1girl // tw memo\ntw, ')
+  storeWidgets.main_prompt_text = 'solo /* tw2 */'
+  api.loraStack.splice(0, api.loraStack.length, { name: 'x', weight: 100, enabled: true, triggerWords: ['tw2', 'solo'] })
+  api.insertAllTriggers()
+  expect(storeWidgets.main_prompt_text).toBe('solo /* tw2 */, tw2')
+})

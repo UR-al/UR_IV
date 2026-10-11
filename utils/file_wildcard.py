@@ -6,6 +6,7 @@
 - 문법: ~/이름:n/~ · __이름:n__ → n개 그룹에서 각각 1개씩 뽑기
 - 각 줄이 하나의 그룹, 쉼표로 구분된 옵션 중 하나를 랜덤 선택
 - '#' 로 시작하는 줄(앞 공백 무시)과 빈 줄은 주석 — 해석에서 빠지지만 파일에는 그대로 남는다
+- 프롬프트 주석(// 줄 끝까지 · /* 블록 */, core/prompt_comments)도 해석에서 빠진다(파일에는 남는다)
 - 중첩 와일드카드 지원: 와일드카드 내에서 다른 ~/이름/~ · __이름__ 참조
 - [A|B] 문법 지원 (OR 선택)
 - 파일 이름은 core.file_naming.sanitize_filename 규칙 하나로 정한다(저장·읽기·해석 공통) —
@@ -15,6 +16,8 @@ import os
 import re
 import random
 from typing import Dict, List, Optional
+
+from core.prompt_comments import strip_prompt_comments
 
 # 와일드카드 패턴: ~/이름/~ 또는 ~/이름:n/~
 FILE_WILDCARD_PATTERN = re.compile(r'~/([^/]+?)/~')
@@ -158,7 +161,10 @@ class FileWildcardManager:
 
         groups = []
         with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f:
+            # 프롬프트 주석(// · /* */ — 여러 줄 블록 포함, core/prompt_comments)은 줄로 나누기 전에 뗀다.
+            # 그대로 두면 'blue hair // 메모' 가 옵션이 되어 끼워 넣은 자리 뒤의 태그를 삼킨다.
+            content = strip_prompt_comments(f.read())
+            for line in content.splitlines():
                 if is_comment_line(line):
                     continue
                 # 쉼표로 옵션 분리
@@ -251,7 +257,8 @@ class FileWildcardManager:
 
         - ``lines``: 파일의 원문 줄(주석·빈 줄 포함, 끝의 빈 줄만 제외) — 편집·저장용이라
           Vue 에서 저장해도 주석이 사라지지 않는다.
-        - ``tags``: 해석에 쓰이는 줄(주석·빈 줄 제외) — 개수 표시용(예전 계약 유지).
+        - ``tags``: 해석에 쓰이는 줄(주석·빈 줄 제외) — 개수 표시용(예전 계약 유지). 해석(load_wildcard)과
+          같게 프롬프트 주석(// · /* */)을 뗀 줄이다.
         """
         tree = []
         for name in self.get_wildcard_names():
@@ -264,7 +271,8 @@ class FileWildcardManager:
             tree.append({
                 'name': name,
                 'file': f'{name}.txt',
-                'tags': [ln.strip() for ln in raw_lines if not is_comment_line(ln)],
+                'tags': [ln.strip() for ln in strip_prompt_comments('\n'.join(raw_lines)).splitlines()
+                         if not is_comment_line(ln)],
                 'lines': raw_lines,
             })
         return tree

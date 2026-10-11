@@ -78,14 +78,16 @@ def prepare_prompt_payload(payload: dict) -> dict:
     params = copy.deepcopy(payload)
     recipe = params.pop('_chat_deferred_prompt', None)
     if recipe is not None:
+        from core.prompt_comments import strip_prompt_comments
         from core.standard_hooks import run_pipeline_on_text
         from utils.file_wildcard import resolve_file_wildcards
         from utils.wildcard import process_wildcards
         for key in ('prompt', 'negative_prompt'):
-            text = str(params.get(key) or '')
+            # 프롬프트 주석(// · /* */)은 훅 앞뒤로 뗀다 — 훅이 쉼표로 다시 이으면 줄 주석이 다음 태그를 삼킨다
+            text = strip_prompt_comments(str(params.get(key) or ''))
             if recipe.get('wildcards'):
                 text = process_wildcards(resolve_file_wildcards(text))
-            params[key] = run_pipeline_on_text(text)
+            params[key] = strip_prompt_comments(run_pipeline_on_text(text))
     return params
 
 

@@ -105,4 +105,9 @@ describe('insertWildcardSyntax', () => {
     // 쉼표는 하나만 정리한다 — 사용자가 남긴 빈 태그 자리는 건드리지 않는다
     expect(insertWildcardSyntax('1girl,, ', '__a__')).toBe('1girl,, __a__, ')
   })
+
+  it('starts a new line after a trailing line comment so the syntax is not commented out', () => {
+    expect(insertWildcardSyntax('1girl // 메모', '__hair__')).toBe('1girl // 메모\n__hair__, ')
+    expect(insertWildcardSyntax('1girl /* x */', '__hair__')).toBe('1girl /* x */, __hair__, ')
+  })
 })

@@ -1930,7 +1930,7 @@ class GeneratorMainUI(
           다음 프롬프트까지 따라가지 않게 한다.
         """
         try:
-            from utils.condition_block import apply_prompt_rules, split_tags
+            from utils.condition_block import apply_prompt_rules, join_tags, split_tags
 
             widgets = {
                 'character': self.character_input,
@@ -1954,7 +1954,8 @@ class GeneratorMainUI(
             self.is_programmatic_change = True
             try:
                 for key in changed:
-                    _set(widgets[key], ', '.join(after[key]))
+                    # join_tags: 줄 주석(// 메모)으로 끝나는 태그 뒤는 줄바꿈 — 쉼표면 다음 태그가 주석에 먹힌다
+                    _set(widgets[key], join_tags(after[key]))
             finally:
                 self.is_programmatic_change = prev
         except Exception as e:

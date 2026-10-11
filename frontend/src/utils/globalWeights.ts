@@ -12,6 +12,7 @@
  * - 이미 `(tag:1.2)` 면 숫자만 바꾸고, 맨 태그면 원문 철자 그대로 감싼다.
  * - `<lora:…>` · `BREAK` · `AND` 와 가중치 1.00 은 손대지 않는다.
  */
+import { commentSpans } from './promptComments'
 
 export interface GlobalWeight {
   tag: string
@@ -144,20 +145,48 @@ function applyToCore(core: string, map: Map<string, string>): string {
   return w ? `(${wrapBody(core)}:${w})` : core
 }
 
-/** 프롬프트 ``text`` 에 글로벌 가중치를 적용한 새 텍스트. 던지지 않는다. */
+// 프롬프트 주석(utils/promptComments)을 가리는 자리표시자 — 주석 안 쉼표·괄호를 세지 않고 주석 글자는 바꾸지 않는다
+const MASK_OPEN = '\uE000'
+const MASK_CLOSE = '\uE001'
+const MASK_SLOT = /\uE000(\d+)\uE001/g
+const MASKED_LEAD = /^(?:\s|\uE000\d+\uE001)*/
+const MASKED_TRAIL = /(?:\s|\uE000\d+\uE001)*$/
+
+function applySegments(src: string, map: Map<string, string>, lead: RegExp, trail: RegExp): string {
+  const segments = splitTopLevel(src) ?? splitFlat(src)
+  let out = ''
+  for (const seg of segments) {
+    const head = seg.text.match(lead)?.[0] ?? ''
+    const tail = seg.text.slice(head.length).match(trail)?.[0] ?? ''
+    const core = seg.text.slice(head.length, seg.text.length - tail.length)
+    out += head + applyToCore(core, map) + tail + seg.sep
+  }
+  return out
+}
+
+/**
+ * 프롬프트 ``text`` 에 글로벌 가중치를 적용한 새 텍스트. 던지지 않는다.
+ * 프롬프트 주석(`// 메모` · `/* 끈 태그 *\/`)은 글자 그대로 두고, 태그 앞뒤에 붙은 주석은 건너뛰고 태그만 본다
+ * (`smile // 메모` → `(smile:1.20) // 메모`).
+ */
 export function applyGlobalWeights(text: string, weights: readonly GlobalWeight[] | null | undefined): string {
   const src = String(text ?? '')
   const map = weightMap(weights)
   if (!src || map.size === 0) return src
-  const segments = splitTopLevel(src) ?? splitFlat(src)
-  let out = ''
-  for (const seg of segments) {
-    const lead = seg.text.match(/^\s*/)?.[0] ?? ''
-    const trail = seg.text.slice(lead.length).match(/\s*$/)?.[0] ?? ''
-    const core = seg.text.slice(lead.length, seg.text.length - trail.length)
-    out += lead + applyToCore(core, map) + trail + seg.sep
+  const spans = commentSpans(src)
+  if (!spans.length || src.includes(MASK_OPEN) || src.includes(MASK_CLOSE)) {
+    return applySegments(src, map, /^\s*/, /\s*$/)
   }
-  return out
+  const saved: string[] = []
+  let masked = ''
+  let pos = 0
+  for (const { start, end } of spans) {
+    masked += src.slice(pos, start) + MASK_OPEN + saved.length + MASK_CLOSE
+    saved.push(src.slice(start, end))
+    pos = end
+  }
+  masked += src.slice(pos)
+  return applySegments(masked, map, MASKED_LEAD, MASKED_TRAIL).replace(MASK_SLOT, (_m, i: string) => saved[Number(i)]!)
 }
 
 /**

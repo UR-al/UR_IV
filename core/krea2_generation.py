@@ -24,6 +24,7 @@ from core.comfy_choice_resolver import check_required_nodes, resolve_choices
 from core.comfy_upload_names import upload_content as upload_named_content
 from core.creator_workflows import build
 from core.generation_family import KREA2_SEED_MAX
+from core.prompt_comments import strip_request_comments
 
 
 KREA2_FAMILY = "krea2"
@@ -75,7 +76,8 @@ def run_krea2_generation(
 
         ensure_not_cancelled()
         _require_comfy_adapter(backend, operation)
-        values = dict(payload or {})
+        # 프롬프트 주석(// · /* */)은 보내지 않는다 — Forge·ComfyUI 백엔드 입구와 같은 방어선
+        values = dict(strip_request_comments(payload or {}))
         mode = str(operation or "").strip().lower()
         if mode not in {"t2i", "i2i"}:
             raise ValueError("operation은 't2i' 또는 'i2i'여야 합니다")

@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from core.prompt_comments import strip_prompt_comments
 from utils.app_logger import get_logger
 
 _logger = get_logger("instant_wildcards")
@@ -171,8 +172,17 @@ class InstantWildcards:
             values: list[str] = []
             for ln in lines:
                 w, v = parse_weighted_line(ln)
+                # 프롬프트 주석(// · /* */, core/prompt_comments)은 후보 글자가 아니다 — 주석만 있는 줄은 후보에서 뺀다
+                code = strip_prompt_comments(v)
+                if code is not v:
+                    code = code.strip()
+                    if not code:
+                        continue
+                    v = code
                 weights.append(w)
                 values.append(v)
+            if not values:
+                return f"$${name}$$"
             idx = self._rng.choices(range(len(values)), weights=weights, k=1)[0]
             return values[idx]
 

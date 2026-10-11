@@ -3,6 +3,7 @@ import { onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
 import { fromBridgeLoraEntries, toBridgeLoraEntries } from '../utils/loraUnits'
 import { createTrailingDebounce, flushOnPageHide } from '../utils/trailingDebounce'
+import { appendPromptText, stripPromptComments } from '../utils/promptComments'
 
 /** 가중치 슬라이더 드래그 중 ui_prefs.json 저장을 모으는 간격(ms) — Python 동기화는 즉시 (감사 #130) */
 export const LORA_SAVE_DEBOUNCE_MS = 300
@@ -72,10 +73,11 @@ export function useLoraStack({ storeWidgets, addToast, saveUiPrefs }) {
     syncLoraStack()
   }, { deep: true })
 
+  // 프롬프트 주석(// · /* */) 안의 글자는 '이미 있음'이 아니고, 줄 주석으로 끝나면 줄바꿈으로 잇는다(utils/promptComments)
   function insertTriggerWord(tw) {
     const cur = storeWidgets.main_prompt_text || ''
-    if (!cur.toLowerCase().includes(tw.toLowerCase())) {
-      storeWidgets.main_prompt_text = cur ? cur.replace(/,?\s*$/, '') + ', ' + tw + ', ' : tw + ', '
+    if (!stripPromptComments(cur).toLowerCase().includes(tw.toLowerCase())) {
+      storeWidgets.main_prompt_text = appendPromptText(cur, tw) + ', '
       addToast('info', `트리거 워드 삽입: ${tw}`)
     } else {
       addToast('info', `이미 포함된 태그: ${tw}`)
@@ -93,10 +95,10 @@ export function useLoraStack({ storeWidgets, addToast, saveUiPrefs }) {
     }
     if (!tws.length) { addToast('info', '활성 LoRA의 트리거 워드가 없습니다'); return }
     const cur = (storeWidgets.main_prompt_text || '').trim()
-    const lower = cur.toLowerCase()
+    const lower = stripPromptComments(cur).toLowerCase()
     const add = tws.filter(tw => !lower.includes(tw.toLowerCase()))
     if (!add.length) { addToast('info', '트리거가 이미 모두 포함됨'); return }
-    storeWidgets.main_prompt_text = cur ? (cur.replace(/,?\s*$/, '') + ', ' + add.join(', ')) : add.join(', ')
+    storeWidgets.main_prompt_text = appendPromptText(cur, add.join(', '))
     addToast('success', `트리거 ${add.length}개 삽입`)
   }
 

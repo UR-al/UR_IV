@@ -46,6 +46,7 @@ from core.image_payload import (
     resolve_target_size,
     strip_data_url,
 )
+from core.prompt_comments import strip_prompt_comments
 from core.request_numbers import DEFAULT_SEED, SeedRangeError, clamped_float, clamped_int, parse_seed_checked
 
 LABEL = "I2I"
@@ -244,8 +245,11 @@ def build_i2i_request(
     width = width or min(probe.width, MAX_TARGET_DIMENSION)
     height = height or min(probe.height, MAX_TARGET_DIMENSION)
 
-    prompt = str(data.get("prompt") or "").strip() or str(main_prompt or "")
-    negative = str(data.get("negative_prompt") or "").strip() or str(main_negative or "")
+    # 프롬프트 주석(// · /* */)은 떼고 본다 — 주석만 있는 칸은 빈 칸이라 T2I 값을 쓴다(core/prompt_comments)
+    prompt = (strip_prompt_comments(str(data.get("prompt") or "")).strip()
+              or strip_prompt_comments(str(main_prompt or "")))
+    negative = (strip_prompt_comments(str(data.get("negative_prompt") or "")).strip()
+                or strip_prompt_comments(str(main_negative or "")))
 
     payload = {
         "init_images": init_images,

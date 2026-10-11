@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.prompt_comments import strip_prompt_comments
 from utils.app_logger import get_logger
 from utils.atomic_json import atomic_write_json
 
@@ -106,12 +107,17 @@ def compose_prompt(section_texts: dict[str, str], order: list[str] | None = None
     :param section_texts: ``{"char_count": "1girl", ...}`` — strip된 텍스트
     :param order: 사용할 순서. None이면 load_order() 결과.
     :return: 빈 섹션은 건너뛴 ", "-join 문자열
+
+    섹션마다 프롬프트 주석(``//`` · ``/* */``, core/prompt_comments)을 먼저 뗀다 — 칸 끝의 줄 주석이
+    ``", "`` 로 이은 다음 칸을 통째로 주석으로 만들지 않게. 주석만 있는 칸은 빈 칸이다.
     """
     if order is None:
         order = load_order()
     parts: list[str] = []
     for key in order:
         v = section_texts.get(key, "")
+        if isinstance(v, str):
+            v = strip_prompt_comments(v)
         if isinstance(v, str) and v.strip():
             parts.append(v.strip())
     return ", ".join(parts)

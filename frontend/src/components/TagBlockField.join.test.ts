@@ -5,6 +5,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import source from './TagBlockField.vue?raw'
 import * as imeComposition from '../utils/imeComposition'
+import * as promptComments from '../utils/promptComments'
 import { rewriteExcludeRules, splitExcludeRules } from '../utils/excludeRules'
 
 /**
@@ -13,11 +14,12 @@ import { rewriteExcludeRules, splitExcludeRules } from '../utils/excludeRules'
  * join 이 없는 다른 칸(프롬프트 태그)은 예전처럼 ', ' 로 잇는다.
  */
 
-// 자동완성(브리지)은 이 테스트의 관심사가 아니다 — 후보 없음 대역
+// 자동완성(브리지)은 이 테스트의 관심사가 아니다 — 후보 없음 대역(요청한 질의만 적어 둔다)
+const requested: string[] = []
 const autocomplete = {
   useTagAutocomplete: () => ({
     items: ref([]), index: ref(-1), queryHangul: ref(false),
-    close: () => {}, request: () => {}, move: () => {}, selected: () => undefined,
+    close: () => {}, request: (query: string) => { requested.push(query) }, move: () => {}, selected: () => undefined,
   }),
 }
 
@@ -30,6 +32,7 @@ new Function('require', 'exports', code)((name: string) => {
   if (name === 'vue') return Vue
   if (name === '../composables/useTagAutocomplete') return autocomplete
   if (name === '../utils/imeComposition') return imeComposition
+  if (name === '../utils/promptComments') return promptComments
   throw Error(`Unexpected component dependency: ${name}`)
 }, compiled)
 
@@ -88,15 +91,15 @@ const event = (extra: Record<string, unknown> = {}) => ({
 })
 const enter = () => event({ key: 'Enter', keyCode: 13, isComposing: false })
 
-function mount(initial: string, withJoin = true) {
+function mount(initial: string, withJoin = true, excludeField = true) {
   const model = ref(initial)
   const root = new Node('root')
   app = renderer.createApp({
     setup: () => () => h(compiled.default, {
       modelValue: model.value,
       'onUpdate:modelValue': (value: string) => { model.value = value },
-      split: splitExcludeRules,
-      join: withJoin ? rewriteExcludeRules : undefined,
+      split: excludeField ? splitExcludeRules : undefined,
+      join: excludeField && withJoin ? rewriteExcludeRules : undefined,
     }),
   })
   app.component('Icon', { render: () => h('span') })
@@ -165,5 +168,77 @@ describe('TagBlockField join prop (제외 규칙 칸)', () => {
     blocks()[2].props.onContextmenu(event())
     await nextTick()
     expect(model.value).toBe('watermark, *qr code, *2koma')
+  })
+})
+
+/**
+ * 프롬프트 칸(split·join 없음)의 주석(utils/promptComments) — 블록을 지우고·고치고·더하고·옮겨도 줄 주석 뒤
+ * 줄바꿈이 남아 다음 블록이 주석에 먹히지 않는다. 주석만 있는 블록은 흐리게(comment), 닫히지 않은 /* 는 open.
+ */
+describe('TagBlockField 프롬프트 주석', () => {
+  const COMMENTED = 'masterpiece, // quality\nbest quality, 1girl /* a, b */ solo'
+
+  it('줄 주석 뒤 줄바꿈이 블록 경계이고, 주석 안 쉼표로 나누지 않는다', () => {
+    const { texts, blocks } = mount(COMMENTED, false, false)
+    expect(texts()).toEqual(['masterpiece', '// quality', 'best quality', '1girl /* a, b */ solo'])
+    const classes = blocks().map(b => String(b.props.class))
+    expect(classes[1]).toContain('comment')
+    expect(classes[0]).not.toContain('comment')
+    expect(classes[3]).not.toContain('comment')   // 주석이 섞였을 뿐 태그가 있다
+  })
+
+  it('블록 삭제 — 다음 블록이 줄 주석에 먹히지 않는다', async () => {
+    const { model, blocks } = mount('a // first\nb, c', false, false)
+    blocks()[1].props.onContextmenu(event())
+    await nextTick()
+    expect(model.value).toBe('a // first\nc')
+    expect(promptComments.stripPromptComments(model.value)).toBe('a\nc')
+  })
+
+  it('블록 편집·추가 — 줄 주석으로 끝나는 블록 뒤는 줄바꿈', async () => {
+    const { model, root, blocks, typeInto } = mount('a, b', false, false)
+    blocks()[1].props.onClick(event())
+    await nextTick()
+    const [edit] = findAll(root, hasClass('tbf-edit'))
+    typeInto(edit, 'b // 메모')
+    fire(edit, 'onKeydown', enter())
+    await nextTick()
+    expect(model.value).toBe('a, b // 메모')
+    const [add] = findAll(root, hasClass('tbf-add'))
+    typeInto(add, 'c')
+    fire(add, 'onKeydown', enter())
+    await nextTick()
+    expect(model.value).toBe('a, b // 메모\nc')
+  })
+
+  it('끌어 옮기기 — 주석 블록을 끝으로 옮겨도 태그를 삼키지 않는다', async () => {
+    const { model, root, blocks } = mount('x // note\ny, z', false, false)
+    const [area] = findAll(root, hasClass('tbf-blocks'))
+    const rects = [0, 1, 2].map(i => ({ getBoundingClientRect: () => ({ top: 0, bottom: 20, left: i * 100, width: 100 }) }))
+    blocks()[0].props.onDragstart(event())
+    area.props.onDragover(event({ currentTarget: { querySelectorAll: () => rects }, clientX: 290, clientY: 10 }))
+    area.props.onDrop(event())
+    await nextTick()
+    expect(model.value).toBe('y, z, x // note')
+  })
+
+  it('닫히지 않은 /* 는 open 표시, 주석을 쓰는 중에는 자동완성을 요청하지 않는다', () => {
+    const { blocks, root } = mount('a /* open', false, false)
+    expect(String(blocks()[0].props.class)).toContain('open')
+    const [add] = findAll(root, hasClass('tbf-add'))
+    requested.length = 0
+    add.props.onInput(event({ target: { value: 'blue // why' } }))
+    add.props.onInput(event({ target: { value: 'blue' } }))
+    expect(requested).toEqual(['blue'])
+  })
+
+  it('제외 규칙 칸(split 있음)은 주석 문법이 없다', () => {
+    const { texts, blocks, root } = mount('a, // b', true, true)
+    expect(texts()).toEqual(['a', '// b'])
+    expect(String(blocks()[1].props.class)).not.toContain('comment')
+    const [add] = findAll(root, hasClass('tbf-add'))
+    requested.length = 0
+    add.props.onInput(event({ target: { value: '// x' } }))
+    expect(requested).toEqual(['// x'])
   })
 })

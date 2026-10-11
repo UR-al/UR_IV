@@ -1,0 +1,462 @@
+{
+  "//": "프롬프트 주석 문법 골든 사례 — core/prompt_comments.py(tests/test_prompt_comments.py)와 utils/promptComments.ts(promptComments.test.ts)가 같은 파일을 읽는다. spans = [시작, 끝(미포함), 종류] (BMP 글자만 — JS 는 UTF-16 단위로 센다). stripped = 주석을 뗀 결과. endsInLineComment = 끝이 줄 주석·닫히지 않은 /* 인가.",
+  "strip": [
+    {
+      "text": "masterpiece, // quality tags\nbest quality",
+      "stripped": "masterpiece,\nbest quality",
+      "spans": [
+        [
+          13,
+          28,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "// whole line\n1girl",
+      "stripped": "1girl",
+      "spans": [
+        [
+          0,
+          13,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "1girl // main char",
+      "stripped": "1girl",
+      "spans": [
+        [
+          6,
+          18,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "http://e.com/a, red",
+      "stripped": "http://e.com/a, red",
+      "spans": []
+    },
+    {
+      "text": "file:///x/y.png, a",
+      "stripped": "file:///x/y.png, a",
+      "spans": []
+    },
+    {
+      "text": "a//b, c",
+      "stripped": "a//b, c",
+      "spans": []
+    },
+    {
+      "text": ">//<, blush",
+      "stripped": ">//<, blush",
+      "spans": []
+    },
+    {
+      "text": "__hair/*__, a",
+      "stripped": "__hair/*__, a",
+      "spans": []
+    },
+    {
+      "text": "~/hair/~, a",
+      "stripped": "~/hair/~, a",
+      "spans": []
+    },
+    {
+      "text": "$$hair//x$$, a",
+      "stripped": "$$hair//x$$, a",
+      "spans": []
+    },
+    {
+      "text": "<lora:style/v2:0.8>, a",
+      "stripped": "<lora:style/v2:0.8>, a",
+      "spans": []
+    },
+    {
+      "text": "a, /* off: red hair, */ blue eyes",
+      "stripped": "a, blue eyes",
+      "spans": [
+        [
+          3,
+          23,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a\n/* x\ny */\nb",
+      "stripped": "a\nb",
+      "spans": [
+        [
+          2,
+          11,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a /* open\nb",
+      "stripped": "a\nb",
+      "spans": [
+        [
+          2,
+          9,
+          "open"
+        ]
+      ]
+    },
+    {
+      "text": "a /* x *///y\nb",
+      "stripped": "a\nb",
+      "spans": [
+        [
+          2,
+          9,
+          "block"
+        ],
+        [
+          9,
+          12,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a */ b",
+      "stripped": "a */ b",
+      "spans": []
+    },
+    {
+      "text": "a,// x\nb",
+      "stripped": "a,\nb",
+      "spans": [
+        [
+          2,
+          6,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "masterpiece,/* x */best",
+      "stripped": "masterpiece,best",
+      "spans": [
+        [
+          12,
+          19,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a // x\r\nb",
+      "stripped": "a\r\nb",
+      "spans": [
+        [
+          2,
+          6,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a\r\n// x\r\nb",
+      "stripped": "a\r\nb",
+      "spans": [
+        [
+          3,
+          7,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "BREAK // x\nscenery",
+      "stripped": "BREAK\nscenery",
+      "spans": [
+        [
+          6,
+          10,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "1girl\n// a\n// b\nsolo",
+      "stripped": "1girl\nsolo",
+      "spans": [
+        [
+          6,
+          10,
+          "line"
+        ],
+        [
+          11,
+          15,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a\n\n// x\nb",
+      "stripped": "a\n\nb",
+      "spans": [
+        [
+          3,
+          7,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a\n// end",
+      "stripped": "a",
+      "spans": [
+        [
+          2,
+          8,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "// only",
+      "stripped": "",
+      "spans": [
+        [
+          0,
+          7,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a\u3000// x",
+      "stripped": "a",
+      "spans": [
+        [
+          2,
+          6,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a\u00a0/* x */\u00a0b",
+      "stripped": "a\u00a0b",
+      "spans": [
+        [
+          2,
+          9,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a\t// x",
+      "stripped": "a",
+      "spans": [
+        [
+          2,
+          6,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a /* b */ /* c */ d",
+      "stripped": "a d",
+      "spans": [
+        [
+          2,
+          9,
+          "block"
+        ],
+        [
+          10,
+          17,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "x /*/ y",
+      "stripped": "x",
+      "spans": [
+        [
+          2,
+          7,
+          "open"
+        ]
+      ]
+    },
+    {
+      "text": "a /**/b",
+      "stripped": "a b",
+      "spans": [
+        [
+          2,
+          6,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a /* x */\nb",
+      "stripped": "a\nb",
+      "spans": [
+        [
+          2,
+          9,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a /* x\n\ny",
+      "stripped": "a\n\ny",
+      "spans": [
+        [
+          2,
+          6,
+          "open"
+        ]
+      ]
+    },
+    {
+      "text": "(red:1.2), \\(x\\) // n",
+      "stripped": "(red:1.2), \\(x\\)",
+      "spans": [
+        [
+          17,
+          21,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "score_9, // ok\n__wc__, ~/hair/~",
+      "stripped": "score_9,\n__wc__, ~/hair/~",
+      "spans": [
+        [
+          9,
+          14,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "(a, b // note\n:1.2)",
+      "stripped": "(a, b\n:1.2)",
+      "spans": [
+        [
+          6,
+          13,
+          "line"
+        ]
+      ]
+    },
+    {
+      "text": "a\n/* only block */",
+      "stripped": "a",
+      "spans": [
+        [
+          2,
+          18,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "/* a */ b",
+      "stripped": "b",
+      "spans": [
+        [
+          0,
+          7,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "/* a */b",
+      "stripped": "b",
+      "spans": [
+        [
+          0,
+          7,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "lowres /* x */, bad hands",
+      "stripped": "lowres, bad hands",
+      "spans": [
+        [
+          7,
+          14,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a, /* x */, b",
+      "stripped": "a,, b",
+      "spans": [
+        [
+          3,
+          10,
+          "block"
+        ]
+      ]
+    },
+    {
+      "text": "a /* x */ , b",
+      "stripped": "a, b",
+      "spans": [
+        [
+          2,
+          9,
+          "block"
+        ]
+      ]
+    }
+  ],
+  "endsInLineComment": [
+    {
+      "text": "a // x",
+      "ends": true
+    },
+    {
+      "text": "a // x\n",
+      "ends": false
+    },
+    {
+      "text": "a /* x */",
+      "ends": false
+    },
+    {
+      "text": "a /* open",
+      "ends": true
+    },
+    {
+      "text": "http://x",
+      "ends": false
+    },
+    {
+      "text": "",
+      "ends": false
+    },
+    {
+      "text": "a, //",
+      "ends": true
+    },
+    {
+      "text": "a // x\r",
+      "ends": false
+    }
+  ]
+}

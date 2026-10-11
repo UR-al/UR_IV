@@ -681,7 +681,9 @@ class ActionsMixin:
             nl = (d.get('tags') or '').strip()
             base = getattr(self, '_auto_nl_base', '') or ''
             if nl:
-                combined = (base + ', ' + nl) if base else nl
+                # 태그 칸이 줄 주석(// 메모)으로 끝나면 줄바꿈으로 잇는다 — 쉼표면 자연어가 주석에 먹힌다
+                from core.prompt_comments import append_prompt_text
+                combined = append_prompt_text(base, nl)
                 self._auto_nl_last_output = combined
                 self.main_prompt_text.setPlainText(combined)
                 if hasattr(self, 'update_total_prompt_display'):

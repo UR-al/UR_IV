@@ -469,6 +469,7 @@ import { vHostDialog } from '../utils/hostDialogs'
 import { useViewMode } from '../composables/useViewMode'
 import { storedOllamaUrl } from '../utils/ollamaPrefs'
 import { droppedImagePaths, newPaths } from '../utils/dropPaths'
+import { appendPromptText } from '../utils/promptComments'
 import { jobPercent, jobProgressText, parseBatchJobState } from '../utils/batchJobState'
 import { sam3CnDefaults, sam3CnSettings } from '../utils/sam3ControlNet'
 import { createExifWarningNotice } from '../utils/exifWarningNotice'
@@ -1208,7 +1209,7 @@ function sendCaptionToT2I(item: CaptionItem) {
   const cap = (item.caption || '').trim()
   if (!cap) { requestAction('show_toast', { type: 'warning', msg: '캡션이 비어있습니다' }); return }
   const cur = ((widgets as any).main_prompt_text || '').trim().replace(/[,\s]+$/, '')
-  ;(widgets as any).main_prompt_text = cur ? (cur + ', ' + cap) : cap
+  ;(widgets as any).main_prompt_text = appendPromptText(cur, cap)   // 줄 주석(// 메모)으로 끝나면 줄바꿈으로
   router.push('/')   // T2I 탭 (path '/')
   requestAction('show_toast', { type: 'success', msg: 'T2I 프롬프트에 추가했습니다' })
 }

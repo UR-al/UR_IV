@@ -27,6 +27,7 @@ from core.image_payload import (
     image_size_from_bytes,
     strip_data_url,
 )
+from core.prompt_comments import strip_prompt_comments
 # 숫자 칸 규칙은 I2I(core/i2i_payload)와 한 벌 — parse_seed·MAX_SEED 는 이 모듈 이름으로도 남긴다.
 from core.request_numbers import (  # noqa: F401  (parse_seed·MAX_SEED 재노출)
     MAX_SEED,
@@ -101,8 +102,11 @@ def build_inpaint_request(
     # 마스크가 실제 이미지인지 먼저 확인 — 깨진 마스크로 백엔드 왕복을 하지 않는다.
     image_size_from_bytes(decode_base64_image(mask, label="Inpaint 마스크"), label="Inpaint 마스크")
 
-    prompt = str(data.get("prompt") or "").strip() or str(main_prompt or "")
-    negative = str(data.get("negative_prompt") or "").strip() or str(main_negative or "")
+    # 프롬프트 주석(// · /* */)은 떼고 본다 — 주석만 있는 칸은 빈 칸이라 T2I 값을 쓴다(core/prompt_comments)
+    prompt = (strip_prompt_comments(str(data.get("prompt") or "")).strip()
+              or strip_prompt_comments(str(main_prompt or "")))
+    negative = (strip_prompt_comments(str(data.get("negative_prompt") or "")).strip()
+                or strip_prompt_comments(str(main_negative or "")))
 
     mask_content = _clamped_int(data.get("mask_content", DEFAULT_MASK_CONTENT),
                                 DEFAULT_MASK_CONTENT, 0, MASK_CONTENT_COUNT - 1)

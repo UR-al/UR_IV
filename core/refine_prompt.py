@@ -111,11 +111,16 @@ def build_refine_prompts(*, main_prompt: str = '', main_negative: str = '',
     네거티브는 Replacement를 넣지 않는다(새 주제를 anti-prompt에 흘리면 안 됨).
 
     반환: {'prompt', 'negative_prompt', 'detect_tokens', 'changed'}
+
+    다섯 입력 모두 프롬프트 주석(``//`` · ``/* */``, core/prompt_comments)을 먼저 뗀다 — 아래 정규화가
+    줄바꿈을 공백으로 바꾸면 줄 주석이 다음 태그를 삼킨다. ``changed`` 는 주석을 뗀 뒤 기준이다.
     """
-    main_prompt = main_prompt or ''
-    main_negative = main_negative or ''
-    replacement = (replacement or '').strip()
-    negative = (negative or '').strip()
+    from core.prompt_comments import strip_prompt_comments
+    main_prompt = strip_prompt_comments(main_prompt or '')
+    main_negative = strip_prompt_comments(main_negative or '')
+    target = strip_prompt_comments(target or '')
+    replacement = strip_prompt_comments(replacement or '').strip()
+    negative = strip_prompt_comments(negative or '').strip()
 
     detect_tokens = parse_detect_tokens(target)
 

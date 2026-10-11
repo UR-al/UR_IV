@@ -724,12 +724,13 @@ class UISetupMixin:
         # 특징 태그 삽입 (중복 제거)
         tags = tags or []
         if tags:
+            from core.prompt_comments import strip_prompt_comments
             all_existing: set[str] = set()
             for src in (self.main_prompt_text.toPlainText(),
                         self.prefix_prompt_text.toPlainText(),
                         self.suffix_prompt_text.toPlainText(),
                         self.character_input.text()):
-                for t in src.split(","):
+                for t in strip_prompt_comments(src).split(","):   # 주석(// · /* */)은 태그가 아니다
                     n = t.strip().lower().replace("_", " ")
                     if n:
                         all_existing.add(n)

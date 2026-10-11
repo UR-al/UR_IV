@@ -2201,6 +2201,7 @@ class VueBridge(QObject):
         out: set = set()
         if not gen:
             return out
+        from core.prompt_comments import strip_prompt_comments
         for attr in ('main_prompt_text', 'prefix_prompt_text',
                      'suffix_prompt_text', 'character_input'):
             w = getattr(gen, attr, None)
@@ -2212,7 +2213,7 @@ class VueBridge(QObject):
                 src = w.text()
             else:
                 continue
-            for t in src.split(","):
+            for t in strip_prompt_comments(src).split(","):   # 주석(// · /* */)은 태그가 아니다
                 n = t.strip().lower().replace("_", " ")
                 if n:
                     out.add(n)
@@ -2370,13 +2371,24 @@ class VueBridge(QObject):
         Returns {rest:'...', groups:{cat:[...]}, counts:{cat:n}}.
         (rest = 어떤 대상 카테고리에도 속하지 않은 태그 = 카테고리 제거 결과)"""
         try:
+            from core.prompt_comments import comment_code, filter_tokens_keep_comments, has_prompt_comment
             from core.tag_intelligence import get_tag_intelligence
             cats = json.loads(categories_json) if categories_json else []
-            tags = [t.strip() for t in (prompt or "").split(",") if t.strip()]
-            res = get_tag_intelligence().split_by_categories(tags, cats)
+            if has_prompt_comment(prompt or ""):
+                # 프롬프트 주석(// · /* */)은 분류하지 않는다 — 주석을 뗀 글자로 분류하고, 주석만 있는
+                # 토큰은 rest 에 그대로 남긴다(줄 주석 뒤는 줄바꿈으로 다시 잇는다)
+                from utils.condition_block import join_tags, split_tags
+                tokens = split_tags(prompt)
+                codes = [code for code in (comment_code(t) for t in tokens) if code]
+                res = get_tag_intelligence().split_by_categories(codes, cats)
+                rest = join_tags(filter_tokens_keep_comments(tokens, set(res["rest"])))
+            else:
+                tags = [t.strip() for t in (prompt or "").split(",") if t.strip()]
+                res = get_tag_intelligence().split_by_categories(tags, cats)
+                rest = ", ".join(res["rest"])
             counts = {c: len(v) for c, v in res["groups"].items()}
             return json.dumps({
-                "rest": ", ".join(res["rest"]),
+                "rest": rest,
                 "groups": res["groups"],
                 "counts": counts,
             }, ensure_ascii=False)

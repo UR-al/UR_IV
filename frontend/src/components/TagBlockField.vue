@@ -18,13 +18,19 @@
         <!-- 블록 — 클릭: 편집(와일드카드는 관리자 열기) · 우클릭: 삭제 · 끌기: 순서 변경.
              (옛 '더블클릭 비활성화'는 일반 더블클릭으로 닿지 않고 수식키+더블클릭이면 태그가
               지워지는 상태라 제거했다.) -->
+        <!-- 프롬프트 주석(// · /* */, utils/promptComments)은 생성에 보내지 않는다 — 흐리게 표시하고,
+             색·와일드카드 판정은 주석을 뗀 글자로 한다. 주석이 없는 블록은 예전 그대로. -->
         <button v-else class="tbf-block" draggable="true"
-          :class="[colorClass(tb.text), { wildcard: isWc(tb.text) }]"
+          :class="[tb.commentOnly ? '' : colorClass(tb.code), { wildcard: isWc(tb.code), comment: tb.commentOnly, open: tb.open }]"
+          :title="tb.open ? OPEN_COMMENT_TITLE : tb.commentOnly ? COMMENT_TITLE : undefined"
           @click.exact="startEdit(ti)"
           @contextmenu.prevent="removeBlock(ti)"
           @dragstart="onDragStart(ti)" @dragend="draggingFrom = -1">
-          <span class="wc-ico" v-if="isWc(tb.text)"><Icon name="dice" /></span>
-          <span class="tbf-text">{{ tb.text }}</span>
+          <span class="wc-ico" v-if="isWc(tb.code)"><Icon name="dice" /></span>
+          <span v-if="!tb.segs" class="tbf-text">{{ tb.text }}</span>
+          <span v-else class="tbf-text-c"><span v-for="(seg, si) in tb.segs" :key="si"
+            :class="seg.comment ? ['tbf-cmt', { open: seg.open }] : undefined"
+            :title="seg.comment && !tb.commentOnly && !tb.open ? COMMENT_TITLE : undefined">{{ seg.text }}</span></span>
         </button>
       </template>
       <!-- 끝에 드롭 -->
@@ -49,10 +55,24 @@
 import { ref, nextTick, watch, onUnmounted } from 'vue'
 import { useTagAutocomplete } from '../composables/useTagAutocomplete'
 import { isImeComposing } from '../utils/imeComposition'
+import {
+  commentSegments, isCaretInComment, joinPromptBlocks, splitPromptBlocks, stripPromptComments,
+  type CommentSegment,
+} from '../utils/promptComments'
 
 interface TagBlock {
   text: string
+  /** 주석을 뗀 글자 — 색·와일드카드 판정용(주석이 없으면 text 그대로) */
+  code: string
+  /** 주석이 든 블록의 표시 조각(만들 때 한 번 계산). 주석이 없으면 null — 예전 그대로 그린다 */
+  segs: CommentSegment[] | null
+  commentOnly: boolean
+  /** 닫히지 않은 /* 가 있다 */
+  open: boolean
 }
+
+const COMMENT_TITLE = '주석 — 생성에 보내지 않음'
+const OPEN_COMMENT_TITLE = '닫히지 않은 /* — 이 줄 끝까지만 주석'
 
 const props = withDefaults(defineProps<{
   modelValue?: string
@@ -85,24 +105,27 @@ const editInputRef = ref<HTMLInputElement[] | null>(null)
 const draggingFrom = ref(-1)
 const dropIdx = ref(-1)
 
-// 초기화 + 동기화
+// 블록 하나 — 프롬프트 칸(split 없음)이면 주석 표시 조각을 여기서 한 번 계산한다(그릴 때마다 다시 훑지 않게).
+// 제외 규칙 칸(split 있음)은 주석 문법이 없다.
+function makeBlock(text: string): TagBlock {
+  if (props.split || text.indexOf('/') < 0) return { text, code: text, segs: null, commentOnly: false, open: false }
+  const segs = commentSegments(text)
+  if (!segs.some(s => s.comment)) return { text, code: text, segs: null, commentOnly: false, open: false }
+  const code = stripPromptComments(text).trim()
+  return { text, code, segs, commentOnly: !code, open: segs.some(s => s.open) }
+}
+
+// 초기화 + 동기화 — 프롬프트 칸은 utils/promptComments.splitPromptBlocks(괄호·와일드카드 안 쉼표 보호,
+// 줄 주석 뒤 줄바꿈 = 블록 경계)로 나누고 joinPromptBlocks(줄 주석 뒤는 줄바꿈)로 잇는다.
 function parseText(text: string): TagBlock[] {
   if (!text) return []
-  if (props.split) return props.split(text).map(t => ({ text: t }))
-  let depth = 0; let p = ''
-  for (const ch of text) {
-    if ('([{'.includes(ch)) depth++
-    else if (')]}'.includes(ch)) depth = Math.max(0, depth - 1)
-    p += (ch === ',' && depth > 0) ? '\x01' : ch
-  }
-  p = p.replace(/__([^_]+)__/g, m => m.replace(/,/g, '\x01'))
-  return p.split(',').map(t => t.trim().replace(/\x01/g, ',')).filter(Boolean).map(t => ({ text: t }))
+  return (props.split ? props.split(text) : splitPromptBlocks(text)).map(makeBlock)
 }
 
 function syncToModel() {
   const parts = blocks.value.map(b => b.text)
   // 블록은 modelValue 에서 나눠 만들었고 부모가 아직 새 값을 내려주기 전이다 — modelValue 가 이전 텍스트
-  emit('update:modelValue', props.join ? props.join(props.modelValue || '', parts) : parts.join(', '))
+  emit('update:modelValue', props.join ? props.join(props.modelValue || '', parts) : joinPromptBlocks(parts))
 }
 
 watch(() => props.modelValue, (v: string) => {
@@ -130,11 +153,12 @@ function addBlock() {
   // 추가 뒤 250ms 에 이전 입력의 후보가 빈 칸 아래 되살아나지 않게 — 대기 중 요청까지 무효화
   ac.close()
   const tag = newTag.value.trim()
-  if (tag) { blocks.value.push({ text: tag }); newTag.value = ''; syncToModel() }
+  if (tag) { blocks.value.push(makeBlock(tag)); newTag.value = ''; syncToModel() }
 }
 
 function startEdit(idx: number) {
-  if (isWc(blocks.value[idx].text)) { emit('open-wildcard', blocks.value[idx].text.match(/__(.+?)__/)?.[1]); return }
+  const code = blocks.value[idx].code
+  if (isWc(code)) { emit('open-wildcard', code.match(/__(.+?)__/)?.[1]); return }
   editIdx.value = idx
   editText.value = blocks.value[idx].text
   nextTick(() => { if (editInputRef.value?.[0]) editInputRef.value[0].focus() })
@@ -149,7 +173,7 @@ function onEditEnter(e: KeyboardEvent, idx: number) {
 function finishEdit(idx: number) {
   if (editIdx.value !== idx) return
   const t = editText.value.trim()
-  if (t) blocks.value[idx].text = t
+  if (t) blocks.value[idx] = makeBlock(t)
   else blocks.value.splice(idx, 1)
   editIdx.value = -1
   syncToModel()
@@ -167,7 +191,10 @@ onUnmounted(() => ac.close())
 function onAddInput(e: Event) {
   // v-model(newTag)은 IME 조합 중 갱신되지 않는다 — '장' 한 음절만 쳐도 검색되도록 요소 값을 읽는다
   const el = e.target as HTMLInputElement | null
-  ac.request(el ? el.value : newTag.value)
+  const value = el ? el.value : newTag.value
+  // 프롬프트 주석(// · /* */)을 쓰는 중에는 태그 후보를 띄우지 않는다(제외 규칙 칸은 주석 문법이 없다)
+  if (!props.split && isCaretInComment(value, value.length)) { ac.close(); return }
+  ac.request(value)
 }
 
 function onAddKey(e: KeyboardEvent) {
@@ -387,4 +414,9 @@ function isWc(text: string) { return /__.+__/.test(text) }
 .ac-popup-block .ac-item.selected .ac-ko { color: inherit; opacity: .8; }
 /* neg */
 .neg .tbf-block { border-color: rgba(248,113,113,0.2); color: var(--state-alert-fg); font-size: var(--fs-label); }
+/* 프롬프트 주석 — 생성에 보내지 않는 글자. 이웃 블록의 흐린 글자색(--text-muted)으로, 새 색 없음(네거티브 칸에서도).
+   닫히지 않은 /* 는 그 조각에 경고색 물결 밑줄(이 줄 끝까지만 주석). */
+.tbf-block.comment { color: var(--text-muted); border-style: dashed; font-style: italic; }
+.tbf-cmt { color: var(--text-muted); font-style: italic; }
+.tbf-cmt.open { text-decoration: underline wavy var(--state-warn-fg); }
 </style>

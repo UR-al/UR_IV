@@ -1,3 +1,5 @@
+import { endsInLineComment, stripPromptComments } from './promptComments'
+
 /** Independent prompt steering, not a geometric camera or conditioning model. */
 export interface CompositionState {
   azimuth: number
@@ -99,7 +101,9 @@ const CONTRAST_GROUPS = [
 ]
 
 export function planCompositionAppend(current: string, tags: readonly string[], otherSections = '') {
-  const keys = new Set(splitCompositionPrompt(`${current}, ${otherSections}`).map(tagKey))
+  // 프롬프트 주석(// · /* */) 안의 글자는 '이미 있는 태그'가 아니다 — 주석을 뗀 글자로 본다
+  const present = `${stripPromptComments(current)}, ${stripPromptComments(otherSections)}`
+  const keys = new Set(splitCompositionPrompt(present).map(tagKey))
   const generated = new Set(tags.map(tagKey))
   const additions = tags.filter(tag => {
     const key = tagKey(tag)
@@ -108,13 +112,15 @@ export function planCompositionAppend(current: string, tags: readonly string[], 
     return true
   })
   const conflicts: string[] = []
-  const original = new Set(splitCompositionPrompt(`${current}, ${otherSections}`).map(tagKey))
+  const original = new Set(splitCompositionPrompt(present).map(tagKey))
   for (const group of CONTRAST_GROUPS) {
     const incoming = group.filter(tag => generated.has(tag))
     const previous = group.filter(tag => original.has(tag) && !generated.has(tag))
     if (incoming.length && previous.length) conflicts.push(`${previous.join(' / ')} ↔ ${incoming.join(' / ')}`)
   }
-  const separator = !current.trim() ? '' : /,\s*$/.test(current) ? (/\s$/.test(current) ? '' : ' ') : ', '
+  // 줄 주석으로 끝나면 줄바꿈으로 잇는다 — 쉼표로 이으면 붙인 태그가 주석에 먹힌다
+  const separator = !current.trim() ? '' : endsInLineComment(current) ? '\n'
+    : /,\s*$/.test(current) ? (/\s$/.test(current) ? '' : ' ') : ', '
   return {
     additions, conflicts,
     // No reserialization: preserve the user's original prompt, syntax and spacing.

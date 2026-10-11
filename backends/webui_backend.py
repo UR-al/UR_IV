@@ -360,6 +360,9 @@ class WebUIBackend(AbstractBackend):
         ``extra_notices``: 요청 전에 생긴 알림(전달하지 않은 블록 등). ``context``: 알림 문구의 작업 이름(보조 패스 id).
         """
         from core.forge_optional_parts import OptionalParts, max_attempts, plan_retry
+        from core.prompt_comments import strip_request_comments
+        # 프롬프트 주석(// · /* */)은 보내지 않는다 — ADetailer·SAM3·Refine 프롬프트까지(ComfyUI 와 같은 방어선)
+        payload = strip_request_comments(payload)
         parts = parts if parts is not None else OptionalParts()
         notices = list(extra_notices or ())
         payload, option_keys, option_notices = self._forge_option_parts(payload)
@@ -966,7 +969,10 @@ class WebUIBackend(AbstractBackend):
         """
         try:
             from core.alwayson_propagation import take_provenance
+            from core.prompt_comments import strip_request_comments
             payload, provenance = take_provenance(payload)
+            # 프롬프트 주석(// · /* */)은 보내지 않는다 — 생성 API·대기열·자동화 어느 길로 와도(ComfyUI 와 같은 방어선)
+            payload = strip_request_comments(payload)
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
             self._switch_model_if_needed(model_name, payload.get('forge_additional_modules'))

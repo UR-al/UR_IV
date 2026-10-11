@@ -7,7 +7,7 @@
     <!-- id 는 세로 레일 서랍의 스크롤 대상이다 — `utils/navSections.ts` 와 글자 그대로
          같아야 하고, tests/test_nav_rail_contract.py 가 그걸 지킨다. -->
     <div id="sec-prompt" class="glass-card highlight">
-      <div class="card-header">
+      <div class="card-header" title="// 줄 주석 · /* 블록 주석 */ 은 보내지 않습니다 (앞이 공백·쉼표·줄 처음일 때)">
         최종 프롬프트
         <span class="token-info">토큰 {{ tokenCount }}</span>
       </div>
@@ -315,6 +315,8 @@ import { storedOllamaModel, storedOllamaUrl } from '../utils/ollamaPrefs'
 import {
   isOptimizePreviewStale, optimizeContextPayload, snapshotOptimizeInputs, type OptimizeInputs,
 } from '../utils/optimizePreview'
+import { appendPromptText, isCaretInComment, stripPromptComments } from '../utils/promptComments'
+import { syncFieldToTotal, totalTags } from '../utils/totalBlockSync'
 import CustomSelect from './CustomSelect.vue'
 import TagBlockField from './TagBlockField.vue'
 import CompositionControl from './CompositionControl.vue'
@@ -497,10 +499,11 @@ function removeTeFile(name: string) {
   _serializeTe(teSelectedList.value.filter((f: string) => f !== name))
 }
 // 토큰 카운트 헬퍼 — SD/CLIP 근사 (실제 토크나이저보다 약간 보수적)
-// 규칙: 각 태그(쉼표 구분) → 단어 수 합산 + 쉼표 수
+// 규칙: 각 태그(쉼표 구분) → 단어 수 합산 + 쉼표 수. 프롬프트 주석(// · /* */)은 보내지 않으므로 세지 않는다.
 function approxTokens(text: string) {
-  if (!text || !String(text).trim()) return 0
-  const chunks = String(text).split(',').map(s => s.trim()).filter(Boolean)
+  const sent = stripPromptComments(String(text || ''))
+  if (!sent.trim()) return 0
+  const chunks = sent.split(',').map(s => s.trim()).filter(Boolean)
   let total = 0
   for (const c of chunks) {
     const words = c.split(/\s+/).filter(Boolean)
@@ -680,21 +683,15 @@ function toggleException(tag: string) {
 
 // 최종 프롬프트 블록 변경 시 → 원본 필드에서 태그 제거
 function onTotalBlockChange(newVal: string) {
-  // FINAL 블록의 새 순서 — 태그(소문자) → 위치 인덱스
-  const order = newVal.split(',').map((t: string) => t.trim()).filter(Boolean)
-  const orderIdx = new Map<string, number>()
-  order.forEach((t: string, i: number) => { const k = t.toLowerCase(); if (!orderIdx.has(k)) orderIdx.set(k, i) })
-  const newTags = new Set(order.map((t: string) => t.toLowerCase()))
   // 각 필드: (1) FINAL에서 사라진 태그 제거 (FINAL에서 지우면 인물수 칸 등에 남던 버그 수정)
   //          (2) 남은 태그를 FINAL 순서로 재정렬 → FINAL에서 블록을 옮기면 해당 필드 내부 순서가 따라감.
   //   (필드 순서 자체는 구조상 고정이므로 필드 경계를 넘는 이동은 각 필드 영역 내 재정렬로만 반영됨)
+  // 규칙은 utils/totalBlockSync — FINAL 은 주석을 뗀 합본이라, 주석이 든 칸은 주석·주석 붙은 태그를 지키고 순서를 두고 쓴다.
+  const total = totalTags(newVal)
   for (const key of ['char_count_input', 'character_input', 'copyright_input', 'artist_input',
                      'main_prompt_text', 'prefix_prompt_text', 'suffix_prompt_text']) {
-    const cur = widgets[key] || ''
-    const kept = cur.split(',').map((t: string) => t.trim()).filter((t: string) => t && newTags.has(t.toLowerCase()))
-    kept.sort((a: string, b: string) => (orderIdx.get(a.toLowerCase()) ?? 0) - (orderIdx.get(b.toLowerCase()) ?? 0))
-    const result = kept.join(', ')
-    if (result !== cur.trim()) widgets[key] = result
+    const result = syncFieldToTotal(widgets[key] || '', total)
+    if (result !== null) widgets[key] = result
   }
 }
 
@@ -714,7 +711,7 @@ function blockColorClass(text: string) {
 async function classifyVisibleTags() {
   const allTags = new Set<string>()
   for (const key of ['main_prompt_text', 'prefix_prompt_text', 'suffix_prompt_text', 'total_prompt_display']) {
-    const text: string = widgets[key] || ''
+    const text: string = stripPromptComments(widgets[key] || '')   // 주석(// · /* */)은 태그가 아니다
     for (const t of text.split(',')) {
       let tag = t.trim().replace(/ /g, '_').replace(/^\(+/, '').replace(/[\):.\d]+$/, '').trim()
       if (tag && !countPattern.test(tag.toLowerCase()) && !blockColorCache.value[tag.toLowerCase()] && !/__(.+?)__/.test(tag)) allTags.add(tag)
@@ -865,7 +862,8 @@ async function loadCharTags() {
 }
 function insertCharTag(tag: string) {
   const cur = widgets.main_prompt_text || ''
-  if (!cur.toLowerCase().includes(tag.toLowerCase())) widgets.main_prompt_text = cur ? cur.replace(/,?\s*$/, '') + ', ' + tag + ', ' : tag + ', '
+  // 주석 안의 글자는 '이미 있음'이 아니다. 줄 주석으로 끝나면 줄바꿈으로 잇는다(utils/promptComments.appendPromptText)
+  if (!stripPromptComments(cur).toLowerCase().includes(tag.toLowerCase())) widgets.main_prompt_text = appendPromptText(cur, tag) + ', '
 }
 function applyOfficialTags() { if (charInsight.value.raw) { widgets.main_prompt_text = charInsight.value.raw; nextTick(() => { if (mainRef.value) autoGrow(mainRef.value) }) } }
 
@@ -964,9 +962,9 @@ function useNlAsMain() {
   if (firstBlock) add = firstBlock
   // 앞의 태그는 override하지 않고 맨 뒤에 추가.
   // 앞에 내용(태그)이 있으면 ', '로 구분해서 자연어를 이어붙임.
-  // 예: "muscular" 뒤에 자연어 → "muscular, A muscular man ..."
+  // 예: "muscular" 뒤에 자연어 → "muscular, A muscular man ..." (줄 주석으로 끝나면 줄바꿈으로)
   const cur = (widgets.main_prompt_text || '').trim().replace(/[,\s]+$/, '')
-  widgets.main_prompt_text = cur ? (cur + ', ' + add) : add
+  widgets.main_prompt_text = appendPromptText(cur, add)
   nlResult.value = ''
   nlRes.value = null
   nextTick(() => { if (mainRef.value) autoGrow(mainRef.value) })
@@ -1008,6 +1006,8 @@ function onFieldInput(e: Event, fieldId: string) {
   const text = el.value
   if (acAcceptedText !== null && text === acAcceptedText) { acAcceptedText = null; return }
   acAcceptedText = null
+  // 프롬프트 주석(// · /* */) 안을 쓰는 중에는 태그 후보를 띄우지 않는다
+  if (isCaretInComment(text, el.selectionStart ?? text.length)) { closeFieldAc(); return }
   const query = tagQueryAt(text, el.selectionStart)
   acField = { fieldId, el, query }
   ac.request(query.query, fieldId)
@@ -1099,7 +1099,7 @@ onMounted(() => {
           requestAction('show_toast', { type: 'success', msg: `AI ${label} 완료` })
         } else if (d.mode === 'negative') {
           const existing = (widgets.neg_prompt_text || '').trim()
-          widgets.neg_prompt_text = existing ? existing.replace(/,?\s*$/, '') + ', ' + d.tags : d.tags
+          widgets.neg_prompt_text = appendPromptText(existing, d.tags)   // 줄 주석으로 끝나면 줄바꿈으로
           requestAction('show_toast', { type: 'success', msg: 'AI 네거티브 생성 완료' })
         } else {
           widgets.main_prompt_text = d.tags

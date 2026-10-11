@@ -30,6 +30,7 @@ from typing import Any, Mapping
 from PIL import Image
 
 from core.local_image_io import decode_image_data_url, open_still_raster
+from core.prompt_comments import strip_prompt_comments
 
 # 확장 패널 프롬프트 기본값(sam3ext/ui_anima.py build_anima_panel 의 positive) = 라우트 기본값.
 DEFAULT_PROMPT = (
@@ -102,11 +103,12 @@ def normalize_settings(settings: Any) -> dict:
     """Vue 설정 → 라우트 본문(이미지 제외). 범위를 벗어나면 ValueError(사용자에게 보여도 되는 문구)."""
     settings = settings if isinstance(settings, Mapping) else {}
     body: dict = {key: _number(settings, key) for key in RANGES}
-    prompt = _text(settings, "prompt")
+    # 프롬프트 주석(// · /* */)은 보내지 않는다 — 주석만 있으면 빈 프롬프트(core/prompt_comments)
+    prompt = strip_prompt_comments(_text(settings, "prompt"))
     if not prompt.strip():
         raise ValueError("Tile & Repair: 프롬프트가 비어 있습니다")
     body["prompt"] = prompt
-    body["negative_prompt"] = _text(settings, "negative_prompt")
+    body["negative_prompt"] = strip_prompt_comments(_text(settings, "negative_prompt"))
     seed = settings.get("seed", DEFAULTS["seed"])
     if isinstance(seed, float) and seed.is_integer():
         seed = int(seed)

@@ -29,6 +29,20 @@ describe('TagBlockField split prop', () => {
     expect(await blockTexts({ modelValue: 'a\nb, c' })).toEqual(['a\nb', 'c'])
   })
 
+  it('prompt comments: comment pieces dimmed, comment-free blocks render as before', async () => {
+    const app = createSSRApp(TagBlockField, { modelValue: 'a, smile // why\nb, // only\nc /* x' })
+    app.component('Icon', { render: () => null })
+    const html = await renderToString(app)
+    expect(await blockTexts({ modelValue: 'a, smile // why\nb' })).toEqual(['a', 'b'])
+    // 태그에 붙은 주석 조각만 흐리게(tbf-cmt) — 태그 글자는 그대로
+    expect(html).toMatch(/<span[^>]*>smile <\/span><span class="tbf-cmt" title="주석 — 생성에 보내지 않음"[^>]*>\/\/ why<\/span>/)
+    // 주석만 있는 블록은 블록째 흐리게(comment)
+    expect(html).toMatch(/class="comment tbf-block" title="주석 — 생성에 보내지 않음"[^>]*><!---->[^]*?\/\/ only/)
+    // 닫히지 않은 /* 는 open 표시와 안내
+    expect(html).toMatch(/class="open tbf-block" title="닫히지 않은 \/\* — 이 줄 끝까지만 주석"/)
+    expect(html).toMatch(/<span class="tbf-cmt open"[^>]*>\/\* x<\/span>/)
+  })
+
   it('with the exclude splitter: same blocks as the applied rules', async () => {
     const text = '_short\n~_tank_top, long hair,, *blue_hair'
     const blocks = await blockTexts({ modelValue: text, split: splitExcludeRules })
