@@ -14,6 +14,10 @@
  * 얼굴 검출 모델 목록은 Python 이 ADetailer 모델 목록에서 확장 드롭다운과 같은 규칙으로 골라
  * `_sam3_face_crop_model` 의 items 로 보낸다(core/sam3_face_crop.model_choices). 확장은 아무것도 받지 않으므로 목록
  * 밖 이름도 그대로 보낸다(없는 파일이면 결과 알림이 'FaceDetectorUnavailable' 을 알린다).
+ *
+ * ComfyUI 는 앱 노드 팩 1.8.0 의 ForgeNeoSAM3Mask 가 같은 계산을 한다(sam-extra 얼굴 crop + 0.34.1 crop 키우기). 얼굴 검출은
+ * ultralytics 라 ComfyUI 의 Python 에 있어야 한다 — Python 이 연결 때 /object_info 로 판단해(core/sam3_face_crop.comfy_support)
+ * `_sam3_face_crop` 의 `comfySupport` 속성으로 보낸다. 검출기가 없거나 팩이 옛것이면 카드가 켜기를 막고 이유를 보인다.
  */
 
 export type Sam3FaceCropKind = 'bool' | 'number' | 'text'
@@ -92,8 +96,19 @@ export function faceCropModelOptions(items: unknown, current: unknown): string[]
   return options
 }
 
-/** 연결된 백엔드에서 이 기능을 쓸 수 있나 — 'unknown' 은 판단 재료가 없을 때(연결 전·확인 실패·SAM3 스크립트 없음). */
+/** `_sam3_face_crop` 위젯 속성 — Python core/sam3_face_crop.COMFY_SUPPORT_PROPERTY */
+export const COMFY_SUPPORT_PROPERTY = 'comfySupport'
+/** Python core/sam3_face_crop.comfy_support 의 값 — 팩 1.8.0 + ultralytics · ultralytics 없음 · 1.8.0 전 팩 */
+export type ComfyFaceCropSupport = 'ready' | 'no_detector' | 'old_pack'
+/** ComfyUI 에서 얼굴 crop 이 처음 들어온 앱 노드 팩 — Python core/sam3_face_crop.COMFY_MIN_PACK_VERSION */
+export const COMFY_MIN_PACK_VERSION = '1.8.0'
+
+/**
+ * 연결된 백엔드에서 이 기능을 쓸 수 있나 — 'unknown' 은 판단 재료가 없을 때(연결 전·확인 실패·SAM3 스크립트 없음).
+ * ComfyUI 는 'comfy_*'(연결 때 받은 노드 정보), 그 정보가 없으면 'comfy'.
+ */
 export type FaceCropSupport = 'unknown' | 'supported' | 'unsupported' | 'comfy'
+  | 'comfy_ready' | 'comfy_no_detector' | 'comfy_old_pack'
 
 /** 스냅샷에서 읽는 부분만 — readonly 스냅샷(useSamExtraCapabilities)도 받는다. */
 export interface FaceCropCapabilitiesLike {
@@ -104,14 +119,38 @@ export interface FaceCropCapabilitiesLike {
 }
 
 /**
- * 기능 스냅샷 → 지원 여부. ComfyUI(status 'not_applicable')는 팩에 아직 없어 'comfy'(컴파일러가 거절한다). Forge 는
+ * 기능 스냅샷 → 지원 여부. ComfyUI(status 'not_applicable')는 연결 때 받은 노드 정보(`comfy` — `comfySupport` 속성)로
+ * 'comfy_ready' · 'comfy_no_detector' · 'comfy_old_pack', 정보가 없으면 'comfy'(컴파일러가 생성 때 다시 판단한다). Forge 는
  * script-info SAM3 state 에 'sam3_face_crop' 이 없으면(sam-extra ≤ 0.33.x — 키를 조용히 버리고 전체 이미지에서 찾는다)
  * 'unsupported'. 파이썬 core/sam_extra_capabilities 가 이 키를 연결 경고에서는 뺀다(켤 때만 보내는 키).
  */
-export function faceCropSupport(caps: FaceCropCapabilitiesLike | null | undefined): FaceCropSupport {
+export function faceCropSupport(caps: FaceCropCapabilitiesLike | null | undefined, comfy?: unknown): FaceCropSupport {
   if (!caps) return 'unknown'
-  if (caps.status === 'not_applicable') return 'comfy'
+  if (caps.status === 'not_applicable') {
+    if (comfy === 'ready') return 'comfy_ready'
+    if (comfy === 'no_detector') return 'comfy_no_detector'
+    if (comfy === 'old_pack') return 'comfy_old_pack'
+    return 'comfy'
+  }
   if (!caps.known || !caps.features?.sam3) return 'unknown'
   const missing = caps.sam3_keys?.missing_in_extension
   return Array.isArray(missing) && missing.includes(sam3FaceCropSettingKey('face_crop')) ? 'unsupported' : 'supported'
+}
+
+/** 이 백엔드에서 켤 수 없음 — 카드가 켜기를 막는다(이미 켜진 설정은 끌 수 있고, 켠 채 생성하면 컴파일러가 멈춘다). */
+export function faceCropBlocked(support: FaceCropSupport): boolean {
+  return support === 'comfy_no_detector' || support === 'comfy_old_pack'
+}
+
+/** ComfyUI 에서 쓸 수 없는 이유(카드의 경고 줄) — 쓸 수 있거나 Forge 면 ''. */
+export function faceCropBlockedReason(support: FaceCropSupport): string {
+  if (support === 'comfy_no_detector') {
+    return '연결된 ComfyUI 의 Python 에 얼굴 검출기(ultralytics)가 없어 켤 수 없습니다 — ComfyUI 의 Python 에 ultralytics 를 '
+      + '설치하고 재시작하거나 Forge(sam-extra)에서 쓰세요.'
+  }
+  if (support === 'comfy_old_pack') {
+    return `ComfyUI 의 앱 노드 팩이 ${COMFY_MIN_PACK_VERSION} 보다 오래돼 켤 수 없습니다 — 번들 노드 팩을 갱신하고 ComfyUI 를 `
+      + '재시작하세요.'
+  }
+  return ''
 }

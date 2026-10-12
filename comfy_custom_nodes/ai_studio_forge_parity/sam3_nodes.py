@@ -13,6 +13,7 @@ import gc
 import inspect
 import json
 import logging
+import math
 import os
 import threading
 from pathlib import Path
@@ -35,6 +36,7 @@ from .mask_ops import (
     union_masks,
 )
 from . import anima_lllite as _anima_lllite
+from . import sam3_face_detect as _face_detect
 from .extra_samplers_register import impact_scheduler_func
 
 
@@ -528,6 +530,36 @@ def _flatten_scores(value: Any) -> list[float]:
     return [float(value)] if isinstance(value, (int, float)) else []
 
 
+def _segmentation_values(provider: Any, model: Any, image: Any, token: str,
+                         threshold: float, detection_limit: int) -> tuple[Any, ...]:
+    """One Easy-SAM3 text-prompt run on a B=1 IMAGE: its outputs (masks, images, obj_masks, boxes, scores)."""
+    function_name = getattr(provider, "FUNCTION", "execute")
+    # New-style Comfy nodes advertise EXECUTE_NORMALIZED but keep their public
+    # classmethod ``execute``. Prefer the latter because it accepts ordinary
+    # Python values and returns io.NodeOutput directly.
+    if hasattr(provider, "execute"):
+        function_name = "execute"
+    output = _invoke_node(
+        provider,
+        function_name,
+        sam3_model=model,
+        images=image,
+        prompt=token,
+        threshold=float(threshold),
+        keep_model_loaded=True,
+        add_background="none",
+        detection_limit=int(detection_limit),
+        coordinates_positive=None,
+        coordinates_negative=None,
+        bboxes=None,
+        mask=None,
+    )
+    values = _result_tuple(output)
+    if len(values) < 1:
+        raise RuntimeError(f"Easy SAM3 returned no mask output for prompt {token!r}.")
+    return values
+
+
 def _detect_token(provider: Any, model: Any, image: Any, token: str,
                   threshold: float, detection_limit: int):
     image_value = ensure_image(image)
@@ -539,31 +571,11 @@ def _detect_token(provider: Any, model: Any, image: Any, token: str,
     # raises when two images contain different object counts, which is the
     # normal case for an IMAGE batch.  Invoke it with B=1 and concatenate only
     # its stable combined-mask output ourselves.
-    function_name = getattr(provider, "FUNCTION", "execute")
-    # New-style Comfy nodes advertise EXECUTE_NORMALIZED but keep their public
-    # classmethod ``execute``. Prefer the latter because it accepts ordinary
-    # Python values and returns io.NodeOutput directly.
-    if hasattr(provider, "execute"):
-        function_name = "execute"
     for batch_index in range(image_value.shape[0]):
-        output = _invoke_node(
-            provider,
-            function_name,
-            sam3_model=model,
-            images=image_value[batch_index:batch_index + 1],
-            prompt=token,
-            threshold=float(threshold),
-            keep_model_loaded=True,
-            add_background="none",
-            detection_limit=int(detection_limit),
-            coordinates_positive=None,
-            coordinates_negative=None,
-            bboxes=None,
-            mask=None,
+        values = _segmentation_values(
+            provider, model, image_value[batch_index:batch_index + 1], token,
+            threshold, detection_limit,
         )
-        values = _result_tuple(output)
-        if len(values) < 1:
-            raise RuntimeError(f"Easy SAM3 returned no mask output for prompt {token!r}.")
         detected = ensure_mask(
             values[0], height=image_value.shape[1], width=image_value.shape[2], batch=1,
         ).to(image_value.device)
@@ -574,6 +586,102 @@ def _detect_token(provider: Any, model: Any, image: Any, token: str,
             boxes.extend(_flatten_boxes(values[3] if len(values) > 3 else None))
             scores.extend(_flatten_scores(values[4] if len(values) > 4 else None))
     return _torch().cat(masks, dim=0), boxes, scores
+
+
+def _detect_token_instances(provider: Any, model: Any, image: Any, token: str,
+                            threshold: float, detection_limit: int):
+    """SAM3 on one B=1 IMAGE (a face crop) like sam-extra's ``_run_prompt``: the object pieces cut to their boxes
+    (``sam3_face_crop_run.clean_pieces``), the boxes and the scores, all in that image's coordinates.
+
+    Face crop needs each object (an owner face per piece), so this reads Easy SAM3's ``obj_masks`` output instead of
+    its combined mask. Easy SAM3's no-detection sentinel (an empty mask, box [0, 0, 0, 0], score 0) is no detection.
+    """
+    from .sam3_face_crop_run import clean_pieces
+
+    image_value = ensure_image(image)
+    values = _segmentation_values(provider, model, image_value, token, threshold, detection_limit)
+    if len(values) < 3:
+        raise RuntimeError(
+            f"Easy SAM3 returned no object masks for prompt {token!r}; SAM3 face crop needs them."
+        )
+    boxes = _flatten_boxes(values[3] if len(values) > 3 else None)
+    scores = _flatten_scores(values[4] if len(values) > 4 else None)
+    pieces = clean_pieces(values[2], boxes, int(image_value.shape[1]), int(image_value.shape[2]))
+    if not pieces and boxes in ([], [[0.0, 0.0, 0.0, 0.0]]) and scores in ([], [0.0]):
+        return [], [], []
+    return pieces, boxes, scores
+
+
+def _face_crop_options(model: Any, confidence: Any) -> tuple[str, float]:
+    """sam-extra's ``face_crop_kwargs``: an empty model is the default model; the confidence is cut to 0-1 and a
+    value that is not a finite number is the default."""
+    name = str(model or "").strip() or _face_detect.DEFAULT_MODEL
+    try:
+        value = float(confidence)
+    except (TypeError, ValueError):
+        value = _face_detect.DEFAULT_CONFIDENCE
+    if not math.isfinite(value):
+        value = _face_detect.DEFAULT_CONFIDENCE
+    return name, min(1.0, max(0.0, value))
+
+
+def _log_face_crop(line: str) -> None:
+    logging.getLogger(__name__).info("[-] SAM3: %s", line)
+
+
+def _face_detector_image(image: Any):
+    """One B=1 IMAGE -> the RGB picture the detector sees: the bytes Easy SAM3 makes of it (x255, clamp, truncate)."""
+    from PIL import Image
+
+    pixels = image[0].detach().cpu().float()
+    if pixels.shape[-1] == 1:
+        pixels = pixels.expand(-1, -1, 3)
+    array = (pixels[..., :3] * 255.0).clamp(0.0, 255.0).byte().contiguous().numpy()
+    return Image.fromarray(array)
+
+
+def _plan_face_crops(image: Any, model: str, confidence: float, device: Any) -> list[Any]:
+    """Detect faces in every image of the batch (one detector load) -> each image's crop plan, logged like sam-extra."""
+    from .sam3_face_crop import plan_face_crops
+
+    pictures = [_face_detector_image(image[index:index + 1]) for index in range(int(image.shape[0]))]
+    detections = _face_detect.detect_faces_many(pictures, model, confidence, device)
+    plans = []
+    for picture, detection in zip(pictures, detections):
+        plan = plan_face_crops(
+            detection.boxes, detection.scores, picture.size,
+            model=Path(detection.model_path).name if detection.model_path else str(model),
+            confidence=float(confidence),
+        )
+        _log_face_crop(plan.status())
+        plans.append(plan)
+    return plans
+
+
+def _refine_face_mask(mask: Any, image: Any, use_convex_hull: bool, outline_pixels: int,
+                      dilation_pixels: int):
+    """Convex Hull -> Outline -> Dilation (``refine_generated_mask``) on one image-sized bool mask."""
+    import numpy as np
+
+    tensor = _torch().from_numpy(np.asarray(mask, dtype=np.float32)).unsqueeze(0).to(image.device)
+    refined = refine_generated_mask(
+        tensor, image,
+        use_convex_hull=bool(use_convex_hull),
+        outline_pixels=int(outline_pixels),
+        dilation_pixels=int(dilation_pixels),
+    )
+    return refined[0].detach().cpu().numpy() > 0.5
+
+
+def _face_crop_overlay_regions(plans: Sequence[Any] | None):
+    """sam-extra's overlay frames for a single image: each face crop (2 px, 'face <score>'), then each grown crop
+    (1 px). None for a batch (like the boxes, the preview draws them for one image only)."""
+    if not plans or len(plans) != 1:
+        return None
+    info = plans[0]
+    regions = [(crop.as_tuple(), 2, f"face {float(score):.2f}") for crop, score in zip(info.crops, info.scores)]
+    regions.extend((crop.as_tuple(), 1, None) for crop in dict.fromkeys(g.crop for g in info.growth))
+    return regions
 
 
 def _default_artifact_directory() -> Path:
@@ -624,6 +732,25 @@ class ForgeNeoSAM3Mask:
                 # The app compiler sets it from its "keep SAM3 in RAM"
                 # setting; ComfyUI's unload-all-models (/free) also frees it.
                 "cache_model": ("BOOLEAN", {"default": True}),
+                # SAM3 "search inside faces only" (sam-extra 0.34.0 face crop with the 0.34.1 crop growth; pack
+                # 1.8.0): ultralytics face boxes -> SAM3 on each widened square crop (sam3_face_crop_run). Off, or
+                # left out, is the run without it. The app sends the three only when the feature is on.
+                "face_crop": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Search Detect/Exclude only inside each face crop (face detector boxes widened to "
+                               "squares); Individual gives one mask per group and face. Needs ultralytics.",
+                }),
+                "face_crop_model": ("STRING", {
+                    "default": _face_detect.DEFAULT_MODEL,
+                    "tooltip": "ultralytics YOLO box model: an absolute path, or a file name in "
+                               "models/ultralytics/bbox, models/ultralytics or models/adetailer. Never downloaded.",
+                }),
+                "face_crop_confidence": ("FLOAT", {
+                    "default": _face_detect.DEFAULT_CONFIDENCE, "min": 0.0, "max": 1.0, "step": 0.01,
+                }),
+                # Informational (like owned_names): whether this ComfyUI can import ultralytics. The app reads it
+                # from /object_info and refuses a face-crop graph without it; nothing sets it.
+                _face_detect.DETECTOR_INPUT: _face_detect.detector_input(),
             },
         }
 
@@ -661,6 +788,10 @@ class ForgeNeoSAM3Mask:
         sam3_model=None,
         manual_mask=None,
         cache_model=True,
+        face_crop=False,
+        face_crop_model=_face_detect.DEFAULT_MODEL,
+        face_crop_confidence=_face_detect.DEFAULT_CONFIDENCE,
+        face_crop_detector=None,
     ):
         image_value = ensure_image(image)
         mode = str(mask_mode).strip().casefold()
@@ -689,6 +820,21 @@ class ForgeNeoSAM3Mask:
         if needs_main_detection and not groups_spec:
             raise ValueError("A non-empty SAM3 prompt is required for generated masks.")
 
+        # Face crop (sam-extra run_sam3_on_pil): the faces are planned before SAM3 loads, and without a face in any
+        # image the bundle is never loaded (every image ends like a run that found nothing).
+        face_plans = None
+        if bool(face_crop) and needs_provider:
+            face_model, face_confidence = _face_crop_options(face_crop_model, face_crop_confidence)
+            if isinstance(sam3_model, dict):
+                detector_device = sam3_model.get("device", "cpu")
+            elif sam3_model is not None:
+                detector_device = device
+            else:
+                detector_device = _resolve_sam3_request(checkpoint, device, precision)[0]
+            face_plans = _plan_face_crops(image_value, face_model, face_confidence, detector_device)
+            if not any(plan.crops for plan in face_plans):
+                needs_provider = False
+
         loaded_here = False
         cache_state = "not_loaded"
         resolved_device = str(device)
@@ -711,44 +857,72 @@ class ForgeNeoSAM3Mask:
         try:
             if needs_provider:
                 provider = _resolve_easy_node(_EASY_SEGMENTATION_KEYS, "image segmentation")
-            if needs_main_detection:
-                for tokens in groups_spec:
-                    token_masks = []
-                    for token in tokens:
-                        detected, boxes, scores = _detect_token(
-                            provider, model_bundle, image_value, token,
-                            float(threshold), int(detection_limit),
-                        )
-                        token_masks.append(detected)
-                        all_boxes.extend(boxes)
-                        all_scores.extend(scores)
-                    group = union_masks(token_masks, reference=image_value)
-                    if bool((group > 0.0).any()):
-                        generated.append(refine_generated_mask(
-                            group,
-                            image_value,
-                            use_convex_hull=bool(convex_hull),
-                            outline_pixels=int(mask_outline_px),
-                            dilation_pixels=int(mask_dilation),
-                        ))
+            if face_plans is not None:
+                from .sam3_face_crop_run import segment_batch
 
-            selected_groups = select_mask_groups(
-                generated, manual_mask, source, reference=image_value
-            )
-            # Forge applies the hand-drawn intersection before subtracting
-            # protected objects. This prevents the safe manual fallback from
-            # accidentally restoring an excluded face/hand region.
-            if exclusion_groups and selected_groups:
-                exclusion_masks = []
-                for tokens in exclusion_groups:
-                    for token in tokens:
-                        detected, _, _ = _detect_token(
-                            provider, model_bundle, image_value, token,
-                            float(threshold), int(detection_limit),
-                        )
-                        exclusion_masks.append(detected)
-                exclusion = union_masks(exclusion_masks, reference=image_value)
-                selected_groups = subtract_exclusion(selected_groups, exclusion)
+                def _segment_crop(index, token, crop):
+                    return _detect_token_instances(
+                        provider, model_bundle,
+                        image_value[index:index + 1, crop.y0:crop.y1, crop.x0:crop.x1, :], token,
+                        float(threshold), int(detection_limit),
+                    )
+
+                faces = segment_batch(
+                    image_value, face_plans,
+                    groups=groups_spec if needs_main_detection else [],
+                    exclude_tokens=[token for tokens in exclusion_groups for token in tokens],
+                    segment_image=_segment_crop,
+                    refine=lambda mask, index: _refine_face_mask(
+                        mask, image_value[index:index + 1], bool(convex_hull),
+                        int(mask_outline_px), int(mask_dilation),
+                    ),
+                    manual_mask=manual_mask,
+                    source=source,
+                    margin=max(0, int(mask_outline_px)) + max(0, int(mask_dilation)),
+                    log=_log_face_crop,
+                )
+                selected_groups = faces.groups
+                all_boxes.extend(faces.boxes)
+                all_scores.extend(faces.scores)
+            else:
+                if needs_main_detection:
+                    for tokens in groups_spec:
+                        token_masks = []
+                        for token in tokens:
+                            detected, boxes, scores = _detect_token(
+                                provider, model_bundle, image_value, token,
+                                float(threshold), int(detection_limit),
+                            )
+                            token_masks.append(detected)
+                            all_boxes.extend(boxes)
+                            all_scores.extend(scores)
+                        group = union_masks(token_masks, reference=image_value)
+                        if bool((group > 0.0).any()):
+                            generated.append(refine_generated_mask(
+                                group,
+                                image_value,
+                                use_convex_hull=bool(convex_hull),
+                                outline_pixels=int(mask_outline_px),
+                                dilation_pixels=int(mask_dilation),
+                            ))
+
+                selected_groups = select_mask_groups(
+                    generated, manual_mask, source, reference=image_value
+                )
+                # Forge applies the hand-drawn intersection before subtracting
+                # protected objects. This prevents the safe manual fallback from
+                # accidentally restoring an excluded face/hand region.
+                if exclusion_groups and selected_groups:
+                    exclusion_masks = []
+                    for tokens in exclusion_groups:
+                        for token in tokens:
+                            detected, _, _ = _detect_token(
+                                provider, model_bundle, image_value, token,
+                                float(threshold), int(detection_limit),
+                            )
+                            exclusion_masks.append(detected)
+                    exclusion = union_masks(exclusion_masks, reference=image_value)
+                    selected_groups = subtract_exclusion(selected_groups, exclusion)
             combined, individuals = finish_masks(
                 selected_groups, image_value,
                 blur_pixels=int(mask_blur), invert=bool(invert),
@@ -762,7 +936,9 @@ class ForgeNeoSAM3Mask:
                 _offload_sam3(model_bundle)
 
         selected = combined if mode == "combined" else individuals
-        overlay = make_overlay(image_value, combined, all_boxes, all_scores)
+        overlay = make_overlay(
+            image_value, combined, all_boxes, all_scores, regions=_face_crop_overlay_regions(face_plans),
+        )
         report: dict[str, Any] = {
             "enabled": True,
             "status": "ok" if bool((combined > 0.0).any()) else "no_detection",
@@ -779,6 +955,12 @@ class ForgeNeoSAM3Mask:
             "boxes": all_boxes,
             "scores": all_scores,
         }
+        if face_plans is not None:
+            # sam-extra's artifact meta 'face_crop' and its console line (a list per image for a batch)
+            metas = [plan.as_meta() for plan in face_plans]
+            lines = [plan.status() for plan in face_plans]
+            report["face_crop"] = metas[0] if len(metas) == 1 else metas
+            report["face_crop_status"] = lines[0] if len(lines) == 1 else lines
         if save_artifacts:
             target = Path(artifact_directory) if str(artifact_directory).strip() else _default_artifact_directory()
             report["artifacts"] = save_mask_artifacts(

@@ -49,7 +49,7 @@ from .colorcraft_nodes import (
 )
 
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside

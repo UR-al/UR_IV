@@ -37,6 +37,7 @@ class WebUIInfoWorker(QThread):
                 'checkpoints': info.checkpoints,
                 'anima38_adapters': getattr(info, 'anima38_adapters', None),
                 'degrid_models': getattr(info, 'degrid_models', None),
+                'sam3_face_crop_comfy': getattr(info, 'sam3_face_crop_comfy', None),
             })
         except Exception as e:
             logger.exception("WebUIInfoWorker failed")

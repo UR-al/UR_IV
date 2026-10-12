@@ -21,6 +21,9 @@ class BackendInfo:
     # ComfyUI: VAE DeGrid 카드의 모델 선택지(core.vae_degrid.comfy_model_choices — Forge 식 이름). Forge·모름·옛 팩
     # (노드 없음) = None (Forge 는 sam-extra 기능 스냅샷 choices.degrid_models 를 쓴다)
     degrid_models: Optional[List[str]] = None
+    # ComfyUI: SAM3 '얼굴 안에서만 찾기'를 쓸 수 있나(core.sam3_face_crop.comfy_support — 'ready'·'no_detector'·'old_pack').
+    # Forge·모름 = None (Forge 는 sam-extra 기능 스냅샷의 SAM3 state 키로 판단한다)
+    sam3_face_crop_comfy: Optional[str] = None
 
 
 @dataclass

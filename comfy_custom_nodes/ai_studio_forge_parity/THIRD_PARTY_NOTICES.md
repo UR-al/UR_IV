@@ -233,6 +233,9 @@ for the pack first. Either way, the author wrote both copies.
 | `guidance_dcw.py` | `_smc_adaptive_error` | `sam3ext/guidance/cwm_smc.py` `apply_smc_adaptive` |
 | `guidance_detail.py` | `first_float`; `tsr_factors`, `apply_tsr`; `step_role`, `apply_mg`, `_dct_matrix`, `dct_highpass`, `apply_higs`; `Trajectory.record`, `Trajectory.at`; `butterworth_mask`, `butterworth_lowpass`, `resize_latent`, `apply_hiflow` | `sam3ext/guidance/sigmas.py` `first_float`; `tsr.py` `rescale_factors`, `apply_tsr`; `history.py` (same names); `trajectory.py` `Trajectory`; `hiflow.py` (same names; sam-extra's modified port of HiFlow, Apache-2.0, see "Detail guidance") |
 | `guidance_optimal_scale.py` | `optimal_scale_residual`, `make_callback` (its `optimal_scale`) | `scripts/anima_cfg_optimal_scale.py` `_optimal_scale_residual`, `callback` |
+| `sam3_face_crop.py` (pack 1.8.0) | All of it: `CropBox`, `_finite_box`, `clip_box`, `expand_box`, `_fit_axis`, `square_crop`, `face_crop_box`, `grow_crop`, `box_to_image`, `box_to_crop`, `paste_mask`, `mask_centroid`, `assign_owner` (its `score`), `_spread`, `edge_contact`, `assign_owners`, `touching_sides`, `_grow_axis`, `grow_toward`, `enclosing_crop`, `growth_requests`, `order_faces`, `CropGrowth`, `_crop_text`, `FaceCropInfo`, `box_iou`, `_centre_inside`, `same_face`, `dedupe_faces`, `plan_face_crops` | `sam3ext/face_crop.py` (same names; installed v0.34.0, and the crop growth — `touching_sides`, `_grow_axis`, `grow_toward`, `enclosing_crop`, `growth_requests`, `CropGrowth` — from the v0.34.1 fix, sam-extra commit `959e5d6`) |
+| `sam3_face_crop_run.py` (pack 1.8.0) | `run_face_crop` (the face-crop branch of `run_sam3_on_pil`, with the v0.34.1 crop growth), `_split_masks`, `_mask_bbox`, `_intersection_area`, `_restrict_mask_to_box`, `_clean_split_masks` | `sam3ext/core.py` `run_sam3_on_pil` and the helpers of the same names |
+| `sam3_face_detect.py` (pack 1.8.0) | `FaceDetectorUnavailable`, `FaceDetection`, `_is_box_model`, `_scan`, `resolve_face_model`, `missing_model_message`, `_guard_no_download`, `ultralytics_device`, `_to_list`, `detect_faces` (`detect_faces_many`, `_detection`) | `sam3ext/face_detect.py` (same names; the pack looks in ComfyUI's model folders instead of Forge's `models/adetailer`) |
 
 Formulas shared with GPL-3.0 hosts. Each item is the formula only: the code around it is sam-extra's or the pack's,
 and the bit-equal tests fix its floating-point operations.
@@ -420,3 +423,20 @@ The pack's own modules `colorcraft_basis.py`, `colorcraft_engine.py`, `colorcraf
 `LICENSES/` texts are the upstream and fork `LICENSE` files at the pinned commits, unchanged.
 
 This notice does not replace or modify the upstream licenses.
+
+## SAM3 face crop (pack 1.8.0)
+
+`sam3_face_crop.py`, `sam3_face_crop_run.py` and `sam3_face_detect.py` bring the "search inside faces only" option
+of the sam-extra Forge extension's SAM3 Mask (v0.34.0, with the crop growth of the v0.34.1 fix, sam-extra commit
+`959e5d6`) to `ForgeNeoSAM3Mask`. Their code is sam-extra's own code: **sam-extra (GPL-3.0-only) parts written by
+the same author (UR-al), licensed to this pack under the MIT License by that author** (`LICENSES/sam-extra-MIT.txt`;
+the functions are named in "Code shared with the sam-extra Forge extension"). sam-extra's face crop contains no
+third-party code. The installed extension is also the test oracle (`tests/test_comfy_sam3_face_crop.py` runs both
+on CPU with the same fake SAM3 and face detector; the pack never imports the extension).
+
+Face detection calls [ultralytics](https://github.com/ultralytics/ultralytics) at run time, as sam-extra, ADetailer
+and Impact Subpack do: `YOLO(<model file>)` and its prediction. ultralytics (AGPL-3.0) is not included and is not a
+dependency of this pack; the node imports it only when face crop is on and the user installed it in ComfyUI's
+Python. No detector model is included: the YOLO box model (for example `face_yolov8n.pt`) is the user's file, by
+absolute path (the app sends its Forge `models/adetailer` file) or from ComfyUI's `models/ultralytics/bbox`,
+`models/ultralytics` or `models/adetailer`, and keeps its own license.

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  FACE_CROP_DEFAULT_CONFIDENCE, FACE_CROP_DEFAULT_MODEL, SAM3_FACE_CROP_FIELDS,
-  faceCropModelOptions, faceCropSupport, sam3FaceCropDefaults, sam3FaceCropId, sam3FaceCropSettings,
+  COMFY_MIN_PACK_VERSION, COMFY_SUPPORT_PROPERTY, FACE_CROP_DEFAULT_CONFIDENCE, FACE_CROP_DEFAULT_MODEL,
+  SAM3_FACE_CROP_FIELDS, faceCropBlocked, faceCropBlockedReason, faceCropModelOptions, faceCropSupport,
+  sam3FaceCropDefaults, sam3FaceCropId, sam3FaceCropSettings,
 } from './sam3FaceCrop'
 
 describe('sam3FaceCrop table', () => {
@@ -59,5 +60,26 @@ describe('faceCropSupport', () => {
     expect(faceCropSupport({ status: 'unknown', known: false })).toBe('unknown')
     expect(faceCropSupport(forge(['sam3_face_crop'], false))).toBe('unknown')
     expect(faceCropSupport({ status: 'not_applicable', known: false })).toBe('comfy')
+  })
+  it('reads the ComfyUI node info (pack 1.8.0, ultralytics) only on ComfyUI', () => {
+    const comfy = { status: 'not_applicable', known: false }
+    expect(faceCropSupport(comfy, 'ready')).toBe('comfy_ready')
+    expect(faceCropSupport(comfy, 'no_detector')).toBe('comfy_no_detector')
+    expect(faceCropSupport(comfy, 'old_pack')).toBe('comfy_old_pack')
+    expect(faceCropSupport(comfy, null)).toBe('comfy')
+    expect(faceCropSupport(comfy, 'weird')).toBe('comfy')
+    expect(faceCropSupport(forge([]), 'no_detector')).toBe('supported')
+    expect(COMFY_SUPPORT_PROPERTY).toBe('comfySupport')
+    expect(COMFY_MIN_PACK_VERSION).toBe('1.8.0')
+  })
+  it('blocks switching on only for a ComfyUI that cannot run it, with the reason', () => {
+    for (const support of ['unknown', 'supported', 'unsupported', 'comfy', 'comfy_ready'] as const) {
+      expect(faceCropBlocked(support)).toBe(false)
+      expect(faceCropBlockedReason(support)).toBe('')
+    }
+    expect(faceCropBlocked('comfy_no_detector')).toBe(true)
+    expect(faceCropBlockedReason('comfy_no_detector')).toContain('ultralytics')
+    expect(faceCropBlocked('comfy_old_pack')).toBe(true)
+    expect(faceCropBlockedReason('comfy_old_pack')).toContain('1.8.0')
   })
 })

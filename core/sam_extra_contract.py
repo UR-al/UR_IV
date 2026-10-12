@@ -141,7 +141,9 @@ EXT_VERSION_AUDITED = "0.34.0"
 #     sam3_face_crop_confidence(0.3, 0–1). 앱은 SAM3_SPEC 에 더하고 **켤 때만** 보낸다(core/sam3_args.apply_face_crop — 끈 요청은
 #     예전과 바이트 단위로 같다, SAM3_OPT_IN_KEYS). UI 는 T2I SAM3 카드·Refine·배치 SAM3 의 한 줄(core/sam3_face_crop ·
 #     components/Sam3FaceCropFields.vue), 결과 알림 'SAM3 Face Crop' 없음·'SAM3 Face Crop Faces: 0'·FaceDetectorUnavailable
-#     (core/sam_extra_notices). ComfyUI 팩에는 아직 없어 컴파일러가 거절한다(_reject_sam3_face_crop). script-info SAM3 state 는
+#     (core/sam_extra_notices). ComfyUI 는 앱 노드 팩 1.8.0 의 ForgeNeoSAM3Mask 가 같은 계산을 한다(sam-extra 얼굴 crop + v0.34.1
+#     crop 키우기, 팩 sam3_face_crop*.py — sam-extra 자체 코드, MIT 허락; ultralytics 가 없는 ComfyUI·옛 팩은 카드가 막고 컴파일러가
+#     이유와 함께 멈춘다 — core/comfy_workflow_compiler._sam3_face_crop_inputs). script-info SAM3 state 는
 #     50 → 53키. Refine 패널 입력 40 → 43 은 앱이 부르지 않는 Gradio 버튼(UI_ONLY_FEATURES)이다.
 # (2) 태그 자동완성 내장(sd-webui-tagcomplete-neo 편입) — 옵션 tac_* 57개·sam3_* 셋·/tacapi/v1/* 15개·모듈 셋은 Forge 화면
 #     전용이라 ignored(앱은 자기 자동완성 utils/tag_completer 를 쓴다). 스캐너가 dict 리터럴을 도는 add_option 루프와
@@ -241,7 +243,12 @@ SCRIPTS = MappingProxyType({
             comfy=("core/comfy_workflow_compiler.py:compile_sam3_mask_only",
                    "core/comfy_workflow_compiler.py:_sam3_pass_stack",
                    "core/comfy_workflow_compiler.py:_postprocess_stack_loras",
-                   "comfy_custom_nodes/ai_studio_forge_parity/sam3_nodes.py:ForgeNeoSAM3Detailer"),
+                   "comfy_custom_nodes/ai_studio_forge_parity/sam3_nodes.py:ForgeNeoSAM3Detailer",
+                   # 얼굴 안에서만 찾기(팩 1.8.0) — 켠 요청만 노드 입력 셋, 옛 팩·ultralytics 없음은 이유와 함께 멈춤
+                   "core/comfy_workflow_compiler.py:_sam3_face_crop_inputs",
+                   "core/sam3_face_crop.py:comfy_support", "core/sam3_face_crop.py:resolve_model_path",
+                   "comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop_run.py:run_face_crop",
+                   "comfy_custom_nodes/ai_studio_forge_parity/sam3_nodes.py:ForgeNeoSAM3Mask"),
             note="LoRA: 확장 p2 는 process_images 라 자기 인페인트 프롬프트(생성 안에서 비면 메인 프롬프트 — "
                  "copy_prompt)의 LoRA 만 걸고 메인 LoRA 는 따라오지 않는다. Comfy 도 같은 목록이면 메인 스택을, "
                  "다르면 LoRA 앞에서 가른 분기(LoRA→NegPiP→조건→가이던스→DD)를 SAM3 노드에 준다(ADetailer 슬롯도 "
@@ -253,9 +260,11 @@ SCRIPTS = MappingProxyType({
                  "태그는 Forge 가 파싱하지 않아 글자 그대로 인코딩된다 — 노드 negative_prompt 도 그대로. 강도는 "
                  "Forge 순서다: <lora:이름:TE:UNet>·te=/unet= (_lora_spec)",
             gaps=("P14: BatchView SAM3 필드·inpaint W/H 폴백 1024",
-                  "ComfyUI: '얼굴 안에서만 찾기'는 팩에 없다 — 켠 요청은 컴파일러가 거절한다(_reject_sam3_face_crop). 팩 "
-                  "ForgeNeoSAM3Mask 에 얼굴 crop(face_crop 순수 기하 + Impact Subpack UltralyticsDetectorProvider 의 "
-                  "bbox/face_yolov8*.pt)을 더하는 것은 다음 단계"))),
+                  "ComfyUI '얼굴 안에서만 찾기'(팩 1.8.0)는 얼굴 검출에 ComfyUI Python 의 ultralytics 가 있어야 한다(ComfyUI "
+                  "의존성이 아니다 — 없으면 카드가 켜기를 막고 컴파일러가 이유와 함께 멈춘다). 팩은 v0.34.1 crop 키우기까지 "
+                  "하므로 Forge 에 v0.34.0 이 깔린 동안은 crop 가장자리에 닿은 머리카락 결과가 Forge 와 다를 수 있다",
+                  "ComfyUI 결과에는 'SAM3 Face Crop Faces' 같은 infotext 가 없다 — 얼굴 수·crop 은 노드 리포트(face_crop·"
+                  "face_crop_status)와 ComfyUI 콘솔에만 있고 앱은 얼굴을 못 찾은 장을 알리지 않는다"))),
     "Anima Perturbation Guidance": _script(
         # shape: Attn Scale 최대 15→100(원본 scale 0~100 — wave B PAG-F), DCW·CWM·RDC·CNS 기본값·범위와 숨은
         # RDC 스위치 True(원본 입력 — wave C DCW-F·CNS-F). 픽스처는 둘 다 Forge 정지 중 소스 AST 로 맞췄다.
@@ -1517,14 +1526,23 @@ MODULES = MappingProxyType({
         "core/sam3_args.py:FACE_CROP_KEYS",
         note="얼굴 crop 순수 기하(넓히기 20/40 %·정사각·밀어 넣기·주인 얼굴·잘린 조각·Exclude 영역)와 키워드 변환 — 앱은 키·기본값만 "
              "보내고 계산은 Forge 에서 확장이 한다",
-        gaps=("ComfyUI: 팩에 없다(SCRIPTS['SAM3 Mask'] gaps) — 이 모듈은 sam-extra 자체 코드라 MIT 로 팩에 다시 쓸 수 있다"
-              "(2026-10-05 결정)",)),
+        comfy=("comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop.py:plan_face_crops",
+               "comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop.py:growth_requests",
+               "comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop_run.py:run_face_crop"),
+        gaps=("ComfyUI: 팩 1.8.0 이 이 모듈을 그대로 옮겼다(sam-extra 자체 코드 — 2026-10-05 결정, 팩 THIRD_PARTY_NOTICES). 팩은 "
+              "v0.34.1 의 crop 키우기(touching_sides·grow_toward·growth_requests, 확장 959e5d6)까지 들고 있다 — "
+              "tests/test_comfy_sam3_face_crop.py 가 설치된 확장(키우기 없음은 GROW_ROUNDS 0)과 대조한다",)),
     "sam3ext/face_detect.py": mapped(
         "core/sam3_args.py:FACE_CROP_DEFAULT_MODEL", "core/sam3_args.py:FACE_CROP_DEFAULT_CONFIDENCE",
         "core/sam3_face_crop.py:model_choices", "core/sam_extra_notices.py:FACE_DETECTOR_ERROR",
         note="얼굴 검출(models/adetailer 의 ultralytics YOLO, 받지 않음) — 앱은 기본값(SEMANTIC_PINS sam3_face_crop_default_*)·"
              "드롭다운 규칙(.pt·YOLO-World 제외·기본 → face_* → 그 밖, tests/test_sam3_face_crop.py 가 설치된 find_face_models 와 "
-             "대조)·FaceDetectorUnavailable 문구 → 힌트만 안다"),
+             "대조)·FaceDetectorUnavailable 문구 → 힌트만 안다",
+        comfy=("comfy_custom_nodes/ai_studio_forge_parity/sam3_face_detect.py:detect_faces",
+               "comfy_custom_nodes/ai_studio_forge_parity/sam3_face_detect.py:detector_status",
+               "core/sam3_face_crop.py:resolve_model_path"),
+        gaps=("ComfyUI: 팩 sam3_face_detect 가 같은 호출·장치 규칙으로 검출한다. 모델은 앱 Forge models/adetailer 의 절대 경로"
+              "(없으면 ComfyUI models/ultralytics·adetailer 에서 이름으로), ultralytics 는 ComfyUI Python 에 사용자가 깔아야 한다",)),
     "sam3ext/forge_batching.py": ignored(
         "Forge 2.30 Batch Cond/Uncond 판정(shared.batch_cond_uncond) — Anima 3.8B VRAM 여유·Adaptive Guidance 내부. 인자·"
         "infotext·옵션 계약 없음(ADG 의 'ADG inactive (Batch Cond/Uncond off)' 상태 글은 기존 status 키)"),

@@ -926,6 +926,13 @@ class WebUIMixin:
             push_comfy_models(self, info.get('degrid_models'))
         except Exception as exc:
             print(f"[Models] VAE DeGrid 모델 선택지 전달 실패: {exc}")
+        # ComfyUI 의 SAM3 얼굴 crop 상태(팩 1.8.0·ultralytics) — Forge 는 None 이라 카드가 기능 스냅샷 규칙으로
+        try:
+            from core.sam3_face_crop import push_comfy_support
+
+            push_comfy_support(self, info.get('sam3_face_crop_comfy'))
+        except Exception as exc:
+            print(f"[Models] SAM3 얼굴 crop 상태 전달 실패: {exc}")
 
         # 샘플러
         samplers = info.get('samplers', [])
@@ -1131,6 +1138,12 @@ class WebUIMixin:
             from ui.vae_degrid_ui import push_comfy_models
 
             push_comfy_models(self, None)   # 끊긴 ComfyUI 의 DeGrid 모델 목록도 지운다
+        except Exception:
+            pass
+        try:
+            from core.sam3_face_crop import push_comfy_support
+
+            push_comfy_support(self, None)   # 끊긴 ComfyUI 의 SAM3 얼굴 crop 상태도 지운다
         except Exception:
             pass
 

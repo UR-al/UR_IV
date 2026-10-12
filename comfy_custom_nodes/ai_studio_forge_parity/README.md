@@ -68,6 +68,44 @@ model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
 
+## 1.8.0 changes
+
+SAM3 "search inside faces only" (face crop) of the sam-extra Forge extension (v0.34.0, with the crop growth of
+the v0.34.1 fix) in `ForgeNeoSAM3Mask`. The code is sam-extra's own: sam-extra (GPL-3.0-only) parts written by the
+same author (UR-al), licensed to this pack under the MIT License by that author (`LICENSES/sam-extra-MIT.txt`,
+`THIRD_PARTY_NOTICES.md` "SAM3 face crop (pack 1.8.0)"). The pack never imports the extension; the installed
+extension is the test oracle on CPU (`tests/test_comfy_sam3_face_crop.py`).
+
+- New optional inputs `face_crop` (default off), `face_crop_model` (default `face_yolov8n.pt`) and
+  `face_crop_confidence` (default 0.3, 0–1) — the extension's three SAM3 Mask settings. Off (or left out) is the
+  node's run without them, unchanged.
+- On: an ultralytics YOLO box model finds the faces (`sam3_face_detect.py`: the extension's call
+  `YOLO(file)(image, conf=…, device=…)`, `"cpu"` when SAM3 runs on the CPU, otherwise ultralytics' current CUDA
+  device; nothing is downloaded). Each face box is widened (20 % sides and bottom, 40 % top), made square and pushed
+  inside the image, and SAM3 runs only in those crops, every Detect token and then the Exclude tokens in the crop
+  widened by Outline + Dilation. Pieces are pasted back at image coordinates and each gets an owner face (pieces cut
+  at a crop edge are grouped with their continuation in a neighbouring crop). A token whose own pieces reach an
+  inner crop edge (hair) runs again on a crop grown toward that side, at most two more times; a grown crop that
+  finds nothing keeps the earlier result. Individual gives one mask per group and face (left to right), Combined
+  their union; Convex Hull, Outline, Dilation, the hand-drawn mask and Exclude follow in the extension's order
+  (`sam3_face_crop.py`, `sam3_face_crop_run.py`). Without a face in any image SAM3 is not loaded and the mask is
+  empty, like a run that found nothing. SAM3's object masks come from Easy SAM3's `obj_masks` output, each cut to
+  its box like the extension's `_clean_split_masks`.
+- The model is an absolute path (the app sends its Forge `models/adetailer` file, like the SAM3 checkpoint) or a
+  file name found in ComfyUI's `ultralytics_bbox`/`ultralytics` folders (Impact Subpack), `models/ultralytics/bbox`,
+  `models/ultralytics` or `models/adetailer`.
+- ultralytics is not a ComfyUI dependency. The informational `face_crop_detector` COMBO publishes whether this
+  ComfyUI can import it (`ultralytics` or `(ultralytics not installed)`; nothing sets it). The app reads it from
+  `/object_info`: its SAM3 card refuses to switch face crop on without it, and the compiler refuses a face-crop graph
+  for a pack before 1.8.0 or a ComfyUI without ultralytics, with the reason. The app sends the three inputs only
+  for a request with face crop on, so other graphs are byte-identical to 1.7.0's.
+- The report JSON gains `face_crop` (the extension's artifact meta: model, confidence, faces with box, score,
+  crop and the grown crops) and `face_crop_status` (its console line), a list per image for a batch; the overlay
+  draws the face crops (orange, 2 px with the face score) and grown crops (1 px) before the SAM3 boxes. The
+  console shows the extension's `[-] SAM3: face crop …` lines.
+- An IMAGE batch runs per image with that image's faces; Individual pass k holds every image's k-th mask (empty
+  where an image has fewer).
+
 ## 1.7.0 changes
 
 Four features of the sam-extra Forge extension on ComfyUI: Extra Schedulers, Extra Samplers and
@@ -415,7 +453,8 @@ after the updated pack is installed.
   before queueing.
 - SAM3: text/manual mask composition, mask-only output, sequential inpaint,
   independent-result Refine, Comfy masked-region repair, ControlNet hand-off,
-  face restore, overlays, and artifacts.
+  face restore, overlays, artifacts, and search inside faces only (face crop,
+  pack 1.8.0+; needs ultralytics in ComfyUI's Python).
 - Anima 3.8B: Qwen3.5 4B loading, progressive-cross v1 conditioning,
   bundled Semantic Connector v2 loading and timestep-aware conditioning. The
   28/40/52-block LoRA adapter is shared by normal, model-only Character

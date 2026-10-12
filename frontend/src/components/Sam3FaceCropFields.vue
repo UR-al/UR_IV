@@ -1,9 +1,10 @@
 <template>
   <div class="fc-fields">
-    <label class="ext-check-row" :title="toggleTitle">
+    <label class="ext-check-row" :class="{ 'fc-blocked': blocked && !enabled }" :title="toggleTitle">
       <ToggleSwitch :model-value="enabled" @update:model-value="setEnabled" size="sm" />
       <span>얼굴 안에서만 찾기 (face_yolov8 얼굴 crop 마다 SAM3)</span>
     </label>
+    <p v-if="blocked" class="fc-warn">{{ blockedReason }}</p>
     <template v-if="enabled">
       <div class="ext-row">
         <div class="ext-field"><label>얼굴 검출 모델 (models/adetailer)</label>
@@ -16,8 +17,10 @@
         그대로 둡니다.</p>
       <p v-if="support === 'unsupported'" class="fc-warn">연결된 Forge 의 sam-extra 가 이 기능을 모릅니다(0.34.0 이상,
         업데이트 뒤 Forge 재시작) — 켜도 전체 이미지에서 찾습니다.</p>
-      <p v-else-if="support === 'comfy'" class="fc-warn">ComfyUI 에서는 아직 쓸 수 없습니다 — 켠 채로 생성하면 멈춥니다
-        (Forge sam-extra 전용).</p>
+      <p v-else-if="support === 'comfy'" class="fc-warn">ComfyUI 는 앱 노드 팩 {{ COMFY_MIN_PACK_VERSION }} 과 얼굴 검출기
+        (ultralytics)가 있어야 합니다 — 아직 확인하지 못했습니다(없으면 생성 때 이유와 함께 멈춥니다).</p>
+      <p v-else-if="support === 'comfy_ready'" class="fc-note">ComfyUI: 앱 노드 팩이 sam-extra 와 같은 방식(crop 가장자리에
+        잘린 머리카락은 crop 을 키워 다시 찾기 포함)으로 찾습니다. 모델은 Forge models/adetailer 의 파일을 넘깁니다.</p>
     </template>
   </div>
 </template>
@@ -35,7 +38,8 @@ import CustomSelect from './CustomSelect.vue'
 import { getProperty } from '../stores/widgetStore.js'
 import { useSamExtraCapabilities } from '../composables/useSamExtraCapabilities'
 import {
-  FACE_CROP_DEFAULT_MODEL, faceCropModelOptions, faceCropSupport, sam3FaceCropId,
+  COMFY_MIN_PACK_VERSION, COMFY_SUPPORT_PROPERTY, FACE_CROP_DEFAULT_MODEL, faceCropBlocked, faceCropBlockedReason,
+  faceCropModelOptions, faceCropSupport, sam3FaceCropId,
 } from '../utils/sam3FaceCrop'
 
 const props = defineProps<{ widgets: Record<string, any> }>()
@@ -49,13 +53,18 @@ const toggleTitle = 'ADetailer 의 얼굴 모델(models/adetailer)로 얼굴 상
 
 const enabled = computed(() => String(w[ENABLE_ID] ?? '').trim().toLowerCase() === 'true' || w[ENABLE_ID] === true)
 function setEnabled(value: boolean) {
+  // 이 백엔드에서 쓸 수 없으면(ComfyUI 에 ultralytics 없음·옛 팩) 켜지 않는다 — 이미 켜진 것은 끌 수 있다
+  if (value && blocked.value) return
   w[ENABLE_ID] = value ? 'true' : 'false'
 }
 
 // 추천 목록은 Python 이 ADetailer 모델 목록에서 골라 `_sam3_face_crop_model` items 로 보낸다(T2I·Refine·배치 공용)
 const modelOptions = computed(() => faceCropModelOptions(getProperty(MODEL_ID, 'items'), w[MODEL_ID]))
 const { capabilities } = useSamExtraCapabilities()
-const support = computed(() => faceCropSupport(capabilities.value))
+// ComfyUI 의 노드 정보(연결 때 Python 이 _sam3_face_crop 의 comfySupport 속성으로 보낸다 — core/sam3_face_crop.comfy_support)
+const support = computed(() => faceCropSupport(capabilities.value, getProperty(ENABLE_ID, COMFY_SUPPORT_PROPERTY)))
+const blocked = computed(() => faceCropBlocked(support.value))
+const blockedReason = computed(() => faceCropBlockedReason(support.value))
 </script>
 
 <style scoped>
@@ -66,6 +75,7 @@ const support = computed(() => faceCropSupport(capabilities.value))
   font-size: var(--fs-label); color: var(--text-secondary);
 }
 .ext-check-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-check-row.fc-blocked { opacity: .55; cursor: not-allowed; }
 .ext-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ext-field { margin-bottom: 8px; min-width: 0; }
 .ext-field label {

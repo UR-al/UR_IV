@@ -24,6 +24,7 @@ from core import colorcraft
 from core import extra_samplers
 from core import extra_schedulers
 from core import sam3_args
+from core import sam3_face_crop
 from core import vae_degrid
 from core.comfy_node_classes import (
     CHECKPOINT_LOADER_NODES,
@@ -968,7 +969,6 @@ class ComfyWorkflowCompiler:
         state = self._sam3_state(payload)
         if state is None:
             raise WorkflowCompileError("활성화된 SAM3 Mask 설정이 없습니다.")
-        self._reject_sam3_face_crop(state)
         local_payload = copy.deepcopy(dict(payload))
         local_scripts = copy.deepcopy(dict(local_payload.get("alwayson_scripts") or {}))
         for name in list(local_scripts):
@@ -2531,7 +2531,6 @@ class ComfyWorkflowCompiler:
 
         sam_state = self._sam3_state(payload)
         if sam_state is not None:
-            self._reject_sam3_face_crop(sam_state)
             state = dict(sam_state)
             # Forge SAM3: its own seed only with "use seed" on (-1 = random);
             # otherwise the image's seed.  One value for mask metadata and
@@ -2568,6 +2567,7 @@ class ComfyWorkflowCompiler:
                 "seed": sam_seed,
                 "enabled": True,
                 "cache_model": self._sam3_cache_model(state),
+                **self._sam3_face_crop_inputs(state),
             }, "SAM3 mask")
             if str(state.get("sam3_mode") or "Inpaint").casefold() == "mask only":
                 if _bool(state.get("sam3_preview_overlay")):
@@ -4614,18 +4614,36 @@ class ComfyWorkflowCompiler:
         enabled = state.get("sam3_enable", state.get("enabled", True))
         return state if _bool(enabled, True) else None
 
-    @staticmethod
-    def _reject_sam3_face_crop(state: Mapping[str, Any]) -> None:
-        """SAM3 '얼굴 안에서만 찾기'(sam-extra 0.34.0 — face_yolov8 얼굴 crop 안에서만 SAM3)는 아직 팩 노드에 없다.
+    def _sam3_face_crop_inputs(self, state: Mapping[str, Any]) -> dict:
+        """SAM3 '얼굴 안에서만 찾기'(sam-extra 0.34.0 + 0.34.1 crop 키우기) → ``ForgeNeoSAM3Mask`` 의 선택 입력 셋(팩 1.8.0).
 
-        조용히 빼면 SAM3 가 전체 이미지에서 찾아 얼굴 밖의 같은 대상까지 인페인트한다 — ADetailer 의 표현할 수 없는 설정
-        (_validate_adetailer_slot)처럼 컴파일을 멈춘다. 끈 요청은 state 에 키가 없다(core/sam3_args.apply_face_crop).
+        끈 요청은 state 에 키가 없어(core/sam3_args.apply_face_crop) 빈 dict — 그래프가 1.8.0 전과 바이트 단위로 같고 옛 팩에도
+        그대로 돈다. 켠 요청은 ``/object_info`` 로 판단한다(core/sam3_face_crop.comfy_support): 옛 팩(입력 없음)이나 얼굴
+        검출기(ultralytics)가 없는 ComfyUI 면 이유와 함께 멈춘다 — 조용히 빼면 SAM3 가 전체 이미지에서 찾아 얼굴 밖의 같은
+        대상까지 인페인트한다(ADetailer 의 표현할 수 없는 설정처럼, _validate_adetailer_slot). 문서가 없거나 클래스 이름만 알리는
+        탐색이면 그대로 넣는다(노드가 실행 중에 알린다). 모델은 앱 Forge models/adetailer 의 절대 경로(SAM3 체크포인트처럼).
         """
-        if _bool(state.get(sam3_args.FACE_CROP_KEY)):
+        if not _bool(state.get(sam3_args.FACE_CROP_KEY)):
+            return {}
+        support = sam3_face_crop.comfy_support(self.object_info)
+        if support == sam3_face_crop.COMFY_OLD_PACK:
             raise WorkflowCompileError(
-                "SAM3 '얼굴 안에서만 찾기'(face crop)는 아직 ComfyUI 노드로 표현할 수 없습니다 — SAM3 설정에서 끄거나 "
-                "Forge(sam-extra 0.34.0 이상)에서 생성하세요."
+                "SAM3 '얼굴 안에서만 찾기'에는 AI Studio Forge Parity 노드 팩 "
+                f"{sam3_face_crop.COMFY_MIN_PACK_VERSION} 이상이 필요한데 ComfyUI 의 {sam3_face_crop.COMFY_NODE_CLASS} 에 "
+                "face_crop 입력이 없습니다 — 번들 노드 팩을 갱신하고 ComfyUI 를 재시작하거나, SAM3 설정에서 끄세요."
             )
+        if support == sam3_face_crop.COMFY_NO_DETECTOR:
+            raise WorkflowCompileError(
+                "SAM3 '얼굴 안에서만 찾기'는 얼굴 검출기(ultralytics YOLO — Forge 의 ADetailer 가 쓰는 것)가 있어야 하는데 "
+                "연결된 ComfyUI 의 Python 에 ultralytics 가 없습니다 — ComfyUI 의 Python 에 ultralytics 를 설치하고 "
+                "재시작하거나, SAM3 설정에서 끄거나, Forge(sam-extra)에서 생성하세요."
+            )
+        confidence = _float(state.get(sam3_args.FACE_CROP_CONFIDENCE_KEY), sam3_args.FACE_CROP_DEFAULT_CONFIDENCE)
+        return {
+            "face_crop": True,
+            "face_crop_model": sam3_face_crop.resolve_model_path(state.get(sam3_args.FACE_CROP_MODEL_KEY)),
+            "face_crop_confidence": min(1.0, max(0.0, confidence)),
+        }
 
     def _sam3_cache_model(self, state: Mapping[str, Any]) -> bool:
         """``ForgeNeoSAM3Mask.cache_model`` with Forge's bundle-keeping rules.

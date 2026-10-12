@@ -369,9 +369,18 @@ def finish_masks(groups: Sequence[Any], image: Any, *, blur_pixels: int, invert:
     return combined, individual
 
 
+# sam-extra's face-crop frame colour (RGB): orange, apart from the blue SAM3 boxes.
+FACE_CROP_OVERLAY_COLOR = (255, 190, 40)
+
+
 def make_overlay(image: Any, mask: Any, boxes: Sequence[Sequence[float]] | None = None,
-                 scores: Sequence[float] | None = None):
-    """Return Forge-style cyan mask preview with boxes/scores for one image."""
+                 scores: Sequence[float] | None = None,
+                 regions: Sequence[tuple[Sequence[int], int, str | None]] | None = None):
+    """Return Forge-style cyan mask preview with boxes/scores for one image.
+
+    ``regions`` are sam-extra's face-crop frames ``((x0, y0, x1, y1), thickness, label or None)``, drawn before the
+    boxes in ``FACE_CROP_OVERLAY_COLOR`` (one image only, like the boxes). Without them the preview is unchanged.
+    """
 
     torch = _torch()
     image_value = ensure_image(image)[..., :3]
@@ -386,7 +395,8 @@ def make_overlay(image: Any, mask: Any, boxes: Sequence[Sequence[float]] | None 
     # multi-image batch the association is not retained by that provider, so
     # drawing the same boxes on every image would be incorrect; keep the
     # accurate cyan masks and expose boxes separately in that case.
-    if boxes is not None and len(boxes) > 0 and overlay.shape[0] == 1:
+    frames = list(regions or ())
+    if ((boxes is not None and len(boxes) > 0) or frames) and overlay.shape[0] == 1:
         cv2, np = _opencv()
         # The IMAGE from VAEDecode is a movedim(1, -1) view, and the blend
         # above keeps its channels-first strides, so this array is not
@@ -396,8 +406,16 @@ def make_overlay(image: Any, mask: Any, boxes: Sequence[Sequence[float]] | None 
         array = np.ascontiguousarray(
             (overlay[0].detach().cpu().numpy() * 255.0).round().astype(np.uint8)
         )
+        for (x0, y0, x1, y1), thickness, label in frames:
+            cv2.rectangle(array, (int(x0), int(y0)), (int(x1) - 1, int(y1) - 1), FACE_CROP_OVERLAY_COLOR,
+                          int(thickness))
+            if label:
+                cv2.putText(
+                    array, str(label), (int(x0) + 4, min(int(y1) - 6, int(y0) + 18)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, FACE_CROP_OVERLAY_COLOR, 1, cv2.LINE_AA,
+                )
         score_values = list(scores or [])
-        for index, box in enumerate(boxes):
+        for index, box in enumerate(boxes or ()):
             if len(box) != 4:
                 continue
             x1, y1, x2, y2 = [int(round(float(value))) for value in box]

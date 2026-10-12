@@ -18,7 +18,7 @@ Windows용 AI 이미지 생성 데스크톱 앱입니다. PyQt6 창 안의 `QWeb
 
 ## ✨ 핵심 기능
 
-- **생성**: T2I에는 Hires.fix와 LoRA 스택을 붙일 수 있고, ADetailer(2슬롯)·SAM3 Mask(ControlNet·얼굴 안에서만 찾기 포함)·ANIMA 가이던스는 I2I·Inpaint에도 적용됩니다.
+- **생성**: T2I에는 Hires.fix와 LoRA 스택을 붙일 수 있고, ADetailer(2슬롯)·SAM3 Mask(ControlNet·얼굴 안에서만 찾기 포함 — ComfyUI 는 앱 노드 팩 1.8.0 과 ComfyUI 의 ultralytics 가 필요)·ANIMA 가이던스는 I2I·Inpaint에도 적용됩니다.
   생성 엔진은 Standard와 Krea2(ComfyUI 전용) 중에서 고르며, 시드 탐색(3×3)과 XYZ Plot도 지원합니다.
 - **백엔드**: WebUI(A1111/Forge)나 ComfyUI 중 하나에 연결합니다. 앱이 설치·실행하는 관리형 런타임을 쓰거나 이미 설치해 둔 백엔드를 연결할 수 있습니다.
   ComfyUI는 동봉 노드 팩만 설치돼 있으면 일반 작업에 워크플로 JSON이 필요 없습니다.

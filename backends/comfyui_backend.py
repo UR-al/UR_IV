@@ -449,6 +449,9 @@ class ComfyUIBackend(AbstractBackend):
         # 이전) None 이라 카드가 '팩 업데이트 필요' 를 보이고, 컴파일러는 DeGrid 를 빼고 알린다
         from core.vae_degrid import comfy_model_choices
         info.degrid_models = comfy_model_choices(obj_info)
+        # SAM3 '얼굴 안에서만 찾기' — 팩 1.8.0 의 face_crop 입력과 얼굴 검출기(ultralytics) 여부. 카드가 켜기를 막고 이유를 보인다
+        from core.sam3_face_crop import comfy_support
+        info.sam3_face_crop_comfy = comfy_support(obj_info)
 
         return info
 

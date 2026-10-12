@@ -3,7 +3,9 @@
 확장은 Sam3Args 맨 뒤에 sam3_face_crop(False)·sam3_face_crop_model('face_yolov8n.pt')·sam3_face_crop_confidence(0.3)를
 더했다. 앱은 켤 때만 세 키를 보낸다(core/sam3_args.apply_face_crop — tests/test_sam3_args.py 가 요청 모양을 본다). 여기서는
 T2I 프록시 3개(generator_ui_setup)·저장/복원(_get/_set_sam3_settings)·전송(_build_sam3_settings)·TS 거울(utils/sam3FaceCrop.ts)·
-얼굴 모델 추천 목록(설치된 확장 face_detect.find_face_models 와 대조)·ComfyUI 컴파일러 거절을 본다.
+얼굴 모델 추천 목록(설치된 확장 face_detect.find_face_models 와 대조)·ComfyUI(앱 노드 팩 1.8.0 — 켠 요청만 노드 입력 셋, 옛 팩·
+ultralytics 없는 ComfyUI 는 이유와 함께 멈춤, 모델 절대 경로, 연결 때 카드로 보내는 상태)를 본다. 팩 자체의 계산은
+tests/test_comfy_sam3_face_crop.py 가 sam-extra 와 대조한다.
 """
 from __future__ import annotations
 
@@ -210,24 +212,158 @@ class InstalledExtensionTests(unittest.TestCase):
                 self.assertEqual(fc.model_choices(case), expected)
 
 
-class ComfyCompilerTests(unittest.TestCase):
-    """ComfyUI 팩에는 얼굴 crop 이 아직 없다 — 켠 요청은 조용히 전체 이미지에서 찾지 않고 컴파일에서 멈춘다."""
+def _mask_node(graph) -> dict:
+    nodes = [node for node in graph.values() if node.get('class_type') == fc.COMFY_NODE_CLASS]
+    assert len(nodes) == 1, nodes
+    return nodes[0]['inputs']
 
-    def test_face_crop_on_is_rejected_and_off_compiles(self):
+
+def _pack_schema(detector: bool = True) -> dict:
+    """The real pack node's /object_info entry (JSON round trip of INPUT_TYPES), ultralytics found or not."""
+    import json
+    from unittest import mock
+    from comfy_custom_nodes.ai_studio_forge_parity import sam3_face_detect, sam3_nodes
+
+    with mock.patch.object(sam3_face_detect.importlib.util, 'find_spec', return_value=object() if detector else None):
+        return {'input': json.loads(json.dumps(sam3_nodes.ForgeNeoSAM3Mask.INPUT_TYPES()))}
+
+
+class ComfySupportTests(unittest.TestCase):
+    """core/sam3_face_crop.comfy_support — /object_info → ready · no_detector · old_pack · 모름(None)."""
+
+    def test_states_from_the_node_schema(self):
+        self.assertIsNone(fc.comfy_support(None))
+        self.assertIsNone(fc.comfy_support({fc.COMFY_NODE_CLASS: {'input': {'required': {}}}}), '클래스 이름만')
+        self.assertEqual(fc.comfy_support({}), fc.COMFY_OLD_PACK, '노드 없음')
+        self.assertEqual(fc.comfy_support({fc.COMFY_NODE_CLASS: _pack_schema()}), fc.COMFY_READY)
+        self.assertEqual(fc.comfy_support({fc.COMFY_NODE_CLASS: _pack_schema(detector=False)}), fc.COMFY_NO_DETECTOR)
+        old = _pack_schema()
+        for key in (*fc.COMFY_INPUTS, fc.COMFY_DETECTOR_INPUT):
+            old['input']['optional'].pop(key)
+        self.assertEqual(fc.comfy_support({fc.COMFY_NODE_CLASS: old}), fc.COMFY_OLD_PACK, '1.7.0 팩')
+        new_style = _pack_schema()
+        new_style['input']['optional'][fc.COMFY_DETECTOR_INPUT] = ['COMBO', {'options': ['ultralytics']}]
+        self.assertEqual(fc.comfy_support({fc.COMFY_NODE_CLASS: new_style}), fc.COMFY_READY)
+
+    def test_inputs_and_detector_names_are_the_packs(self):
+        optional = _pack_schema()['input']['optional']
+        self.assertTrue(set(fc.COMFY_INPUTS) <= set(optional))
+        self.assertEqual(optional[fc.COMFY_DETECTOR_INPUT][0], [fc.COMFY_DETECTOR_READY])
+        self.assertEqual(tuple(fc.spec_key(key) for key in fc.COMFY_INPUTS), sam3_args.FACE_CROP_KEYS)
+
+    def test_pack_version_is_at_least_the_feature_pack(self):
+        from core.comfy_node_pack import PACK_VERSION
+
+        def as_tuple(text):
+            return tuple(int(part) for part in text.split('.'))
+
+        self.assertGreaterEqual(as_tuple(PACK_VERSION), as_tuple(fc.COMFY_MIN_PACK_VERSION))
+
+    def test_model_path_from_forge_adetailer(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'adetailer' / 'sub').mkdir(parents=True)
+            direct = root / 'adetailer' / 'face_yolov8n.pt'
+            direct.write_bytes(b'')
+            nested = root / 'adetailer' / 'sub' / 'Face_YOLOv8s.pt'
+            nested.write_bytes(b'')
+            (root / 'adetailer' / 'yolov8x-worldv2.pt').write_bytes(b'')
+            self.assertEqual(fc.resolve_model_path('face_yolov8n.pt', root), str(direct.resolve()))
+            self.assertEqual(fc.resolve_model_path('', root), str(direct.resolve()), '빈 값 = 기본 모델')
+            self.assertEqual(fc.resolve_model_path('face_yolov8s.pt', root), str(nested.resolve()))
+            self.assertEqual(fc.resolve_model_path('yolov8x-worldv2.pt', root), 'yolov8x-worldv2.pt', 'YOLO-World 제외')
+            self.assertEqual(fc.resolve_model_path('missing.pt', root), 'missing.pt', '못 찾으면 이름 그대로')
+            absolute = str(Path(folder) / 'elsewhere.pt')
+            self.assertEqual(fc.resolve_model_path(absolute, root), absolute)
+
+    def test_push_to_the_card(self):
+        bridge = _Bridge()
+        host = SimpleNamespace(vue_bridge=bridge)
+        fc.push_comfy_support(host, fc.COMFY_NO_DETECTOR)
+        self.assertEqual(bridge.properties[('_sam3_face_crop', 'comfySupport')], 'no_detector')
+        fc.push_comfy_support(host, None)
+        self.assertIsNone(bridge.properties[('_sam3_face_crop', 'comfySupport')])
+        fc.push_comfy_support(SimpleNamespace(), 'ready')       # 브리지 없음 — 조용히
+
+    def test_ts_mirror_names(self):
+        text = TS_FILE.read_text(encoding='utf-8')
+        self.assertIn(f"COMFY_SUPPORT_PROPERTY = '{fc.COMFY_SUPPORT_PROPERTY}'", text)
+        self.assertIn(f"COMFY_MIN_PACK_VERSION = '{fc.COMFY_MIN_PACK_VERSION}'", text)
+        self.assertIn(f"'{fc.COMFY_READY}' | '{fc.COMFY_NO_DETECTOR}' | '{fc.COMFY_OLD_PACK}'", text)
+
+    def test_backend_info_and_connection_wiring(self):
+        from backends.base import BackendInfo
+        self.assertIsNone(BackendInfo().sam3_face_crop_comfy)
+        backend = (ROOT / 'backends' / 'comfyui_backend.py').read_text(encoding='utf-8')
+        self.assertIn('info.sam3_face_crop_comfy = comfy_support(obj_info)', backend)
+        worker = (ROOT / 'workers' / 'generation_worker.py').read_text(encoding='utf-8')
+        self.assertIn("'sam3_face_crop_comfy': getattr(info, 'sam3_face_crop_comfy', None)", worker)
+        webui = (ROOT / 'ui' / 'generator_webui.py').read_text(encoding='utf-8')
+        self.assertIn("push_comfy_support(self, info.get('sam3_face_crop_comfy'))", webui)
+        self.assertIn('push_comfy_support(self, None)', webui)
+
+
+class ComfyCompilerTests(unittest.TestCase):
+    """앱 노드 팩 1.8.0: 켠 요청만 ForgeNeoSAM3Mask 에 face_crop 입력 셋(모델은 Forge models/adetailer 의 절대 경로), 끈 요청
+    그래프는 그대로, 옛 팩·ultralytics 없는 ComfyUI 는 조용히 전체 이미지에서 찾지 않고 이유와 함께 멈춘다."""
+
+    def _payloads(self, settings):
+        off = {'prompt': 'portrait', 'seed': 1234, 'alwayson_scripts': sam3_args.build_alwayson(settings)}
+        on = {'prompt': 'portrait', 'seed': 1234, 'alwayson_scripts': sam3_args.build_alwayson(
+            {**settings, 'sam3_face_crop': True, 'sam3_face_crop_model': 'face_yolov8s.pt',
+             'sam3_face_crop_confidence': 0.45})}
+        return off, on
+
+    def _compile(self, compiler, payload, mode):
+        if mode == 'Mask only':
+            return compiler.compile_sam3_mask_only(payload, uploaded_image='source.png')
+        return compiler.compile('txt2img', 'checkpoint.safetensors', payload)
+
+    def test_off_is_unchanged_and_on_adds_the_three_inputs(self):
+        from unittest import mock
+        from core.comfy_workflow_compiler import ComfyWorkflowCompiler
+        from tests.test_comfy_workflow_compiler import _capabilities
+
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'adetailer').mkdir()
+            model = Path(folder) / 'adetailer' / 'face_yolov8s.pt'
+            model.write_bytes(b'')
+            for schema in (None, _pack_schema()):
+                capabilities = _capabilities()
+                if schema is not None:
+                    capabilities[fc.COMFY_NODE_CLASS] = schema
+                compiler = ComfyWorkflowCompiler(capabilities)
+                for mode in ('Inpaint', 'Mask only'):
+                    with self.subTest(schema=schema is not None, mode=mode), \
+                            mock.patch('core.forge_modules.get_forge_root', return_value=Path(folder)):
+                        off, on = self._payloads({'sam3_mode': mode})
+                        off_inputs = _mask_node(self._compile(compiler, off, mode))
+                        self.assertFalse({*fc.COMFY_INPUTS, fc.COMFY_DETECTOR_INPUT} & set(off_inputs))
+                        on_inputs = _mask_node(self._compile(compiler, on, mode))
+                        self.assertEqual({key: on_inputs[key] for key in fc.COMFY_INPUTS},
+                                         {'face_crop': True, 'face_crop_model': str(model.resolve()),
+                                          'face_crop_confidence': 0.45})
+                        self.assertNotIn(fc.COMFY_DETECTOR_INPUT, on_inputs, '정보용 COMBO 는 보내지 않는다')
+                        self.assertEqual({k: v for k, v in on_inputs.items() if k not in fc.COMFY_INPUTS}, off_inputs)
+
+    def test_old_pack_or_no_detector_stops_with_the_reason(self):
         from core.comfy_workflow_compiler import ComfyWorkflowCompiler, WorkflowCompileError
         from tests.test_comfy_workflow_compiler import _capabilities
-        compiler = ComfyWorkflowCompiler(_capabilities())
-        for settings in ({'sam3_mode': 'Inpaint'}, {'sam3_mode': 'Mask only'}):
-            with self.subTest(settings=settings):
-                off = {'prompt': 'portrait', 'alwayson_scripts': sam3_args.build_alwayson(settings)}
-                on = {'prompt': 'portrait', 'alwayson_scripts': sam3_args.build_alwayson(
-                    {**settings, 'sam3_face_crop': True})}
-                compiler.compile('txt2img', 'checkpoint.safetensors', off)
-                compiler.compile_sam3_mask_only(off, uploaded_image='source.png')
-                with self.assertRaisesRegex(WorkflowCompileError, '얼굴 안에서만 찾기'):
-                    compiler.compile('txt2img', 'checkpoint.safetensors', on)
-                with self.assertRaisesRegex(WorkflowCompileError, '얼굴 안에서만 찾기'):
-                    compiler.compile_sam3_mask_only(on, uploaded_image='source.png')
+
+        old = _pack_schema()
+        for key in (*fc.COMFY_INPUTS, fc.COMFY_DETECTOR_INPUT):
+            old['input']['optional'].pop(key)
+        cases = ((old, '1.8.0 이상'), (_pack_schema(detector=False), 'ultralytics'))
+        for schema, reason in cases:
+            capabilities = _capabilities()
+            capabilities[fc.COMFY_NODE_CLASS] = schema
+            compiler = ComfyWorkflowCompiler(capabilities)
+            for mode in ('Inpaint', 'Mask only'):
+                with self.subTest(reason=reason, mode=mode):
+                    off, on = self._payloads({'sam3_mode': mode})
+                    self._compile(compiler, off, mode)
+                    with self.assertRaisesRegex(WorkflowCompileError, f"얼굴 안에서만 찾기.*{reason}"):
+                        self._compile(compiler, on, mode)
 
 
 if __name__ == '__main__':
