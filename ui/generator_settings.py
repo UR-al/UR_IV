@@ -502,7 +502,14 @@ class SettingsMixin:
             "restore_face": widgets['restore_face'].isChecked(),
             # ControlNet 13필드 (cn_enable … cn_threshold_b) — core/sam3_controlnet 표 한 벌
             **self._get_sam3_cn_settings(widgets),
+            # 얼굴 안에서만 찾기 3필드 (face_crop·face_crop_model·face_crop_confidence) — core/sam3_face_crop 표
+            **self._get_sam3_face_crop_settings(widgets),
         }
+
+    @staticmethod
+    def _get_sam3_face_crop_settings(widgets) -> dict:
+        from core.sam3_face_crop import read_settings
+        return read_settings(widgets)
 
     @staticmethod
     def _get_sam3_cn_settings(widgets) -> dict:
@@ -674,6 +681,9 @@ class SettingsMixin:
         # ControlNet 13필드 — 예전 저장 파일엔 키가 없으니 확장 기본값으로 채운다.
         from core.sam3_controlnet import apply_settings as _apply_sam3_cn
         _apply_sam3_cn(widgets, settings)
+        # 얼굴 안에서만 찾기 — 0.34.0 전 저장 파일·프리셋엔 키가 없으니 확장 기본값(꺼짐)으로 채운다.
+        from core.sam3_face_crop import apply_settings as _apply_sam3_face_crop
+        _apply_sam3_face_crop(widgets, settings)
         return misses
 
     # ── 백엔드 설정 헬퍼 ──

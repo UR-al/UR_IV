@@ -1407,7 +1407,14 @@ class GuardWordingParityTests(unittest.TestCase):
         ext_spectrum = self._ext(spectrum=True)
         pack_spectrum = self._pack(extra={"model_options": {"transformer_options": {
             self.common.DY_SUBSTEPS_OFF_KEY: "Spectrum"}}})
-        self.assertEqual(pack_spectrum.split(" - ", 1)[1], ext_spectrum.split(" - ", 1)[1])
+        # sam-extra 0.34.0 은 Forge 판마다 이유를 나눠 적는다(2.29.2 는 저해상도 텐서를 예측할 수 있고 2.30 은 모델을 다시
+        # 돌려 예측 기록을 새로 시작한다 — CHANGELOG 'Forge 2.30 호환'). ComfyUI 의 DiTSpectrumPatch 는 Forge 판이 아니라
+        # 팩 문구는 그대로 두었다: 앞부분(스텝 수로 정하는 캐시 멈춤 지점)은 같고, 크기 변화 설명은 확장의 2.29.2 쪽 문장과 같다.
+        ext_reason, pack_reason = ext_spectrum.split(" - ", 1)[1], pack_spectrum.split(" - ", 1)[1]
+        head = "SPEED steps aside (its stop-caching point comes from the step count"
+        self.assertTrue(ext_reason.startswith(head) and pack_reason.startswith(head), (ext_reason, pack_reason))
+        self.assertIn("it can forecast a coarse-sized tensor", ext_reason)
+        self.assertIn("it can forecast a coarse-sized tensor", pack_reason)
 
 
 def _flow_tensor():

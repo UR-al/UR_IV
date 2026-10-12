@@ -374,6 +374,22 @@ class VariantTests(unittest.TestCase):
         self.assertIn("sam3_keys_unknown_to_extension", _codes(caps))
         self.assertIn("sam3_keys_unknown_to_app", _codes(caps))
 
+    def test_face_crop_keys_missing_on_an_old_extension_are_not_a_connection_warning(self):
+        """켤 때만 보내는 키(얼굴 안에서만 찾기, sam-extra 0.34.0)는 끈 요청에 실리지 않는다 — 0.33.x 에 연결해도 경고하지
+        않고, missing_in_extension 에만 남아 카드가 켤 때 안내한다(utils/sam3FaceCrop.ts faceCropSupport)."""
+        bodies = live_bodies()
+        state = _script(bodies, "sam3 mask")["args"][1]["value"]
+        for key in sam3_args.FACE_CROP_KEYS:
+            state.pop(key, None)
+        caps, _ = build(bodies)
+        self.assertEqual(caps.sam3_keys["missing_in_extension"], tuple(sorted(sam3_args.FACE_CROP_KEYS)))
+        self.assertNotIn("sam3_keys_unknown_to_extension", _codes(caps))
+        state.pop("sam3_seed")
+        caps, _ = build(bodies)
+        warning = next(w for w in caps.warnings if w["code"] == "sam3_keys_unknown_to_extension")
+        self.assertIn("sam3_seed", warning["message"])
+        self.assertNotIn("sam3_face_crop", warning["message"])
+
     def test_partial_install_reports_missing_script(self):
         bodies = live_bodies()
         bodies[EP_SCRIPTS]["txt2img"].remove("dora inference mode")

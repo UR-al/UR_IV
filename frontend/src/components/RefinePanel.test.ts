@@ -10,6 +10,7 @@ import * as widgetStore from '../stores/widgetStore.js'
 import * as media from '../utils/media.js'
 import * as sam3ControlNet from '../utils/sam3ControlNet'
 import { SAM3_CN_FIELDS } from '../utils/sam3ControlNet'
+import * as sam3FaceCrop from '../utils/sam3FaceCrop'
 
 // 구독 목록을 bridge.js 처럼 흉내 낸다 — onBackendEvent 는 해제 함수를 돌려준다.
 const host = vi.hoisted(() => ({ subscribers: new Set<(raw: string) => void>(), action: vi.fn() }))
@@ -35,7 +36,9 @@ new Function('require', 'exports', code)((name: string) => {
   if (name === '../stores/widgetStore.js') return widgetStore
   if (name === '../utils/media.js') return media
   if (name === '../utils/sam3ControlNet') return sam3ControlNet
-  if (name === './CustomSelect.vue' || name === './ToggleSwitch.vue' || name === './Sam3ControlNetPanel.vue') return stub
+  if (name === '../utils/sam3FaceCrop') return sam3FaceCrop
+  if (name === './CustomSelect.vue' || name === './ToggleSwitch.vue' || name === './Sam3ControlNetPanel.vue'
+      || name === './Sam3FaceCropFields.vue') return stub
   throw Error(`Unexpected component dependency: ${name}`)
 }, compiled)
 
@@ -116,6 +119,18 @@ it('run_refine sends all 13 SAM3 ControlNet fields with extension defaults', asy
   expect(payload.settings.sam3_cn_threshold_a).toBe(-1)
   expect(payload.settings.sam3_cn_threshold_b).toBe(-1)
   expect(payload.settings.sam3_cn_module).toBe('inpaint_only')
+  // 얼굴 안에서만 찾기 — 기본 꺼짐·확장 기본값(백엔드 build_state 가 끈 키를 빼고 보낸다)
+  expect(payload.settings.sam3_face_crop).toBe(false)
+  expect(payload.settings.sam3_face_crop_model).toBe('face_yolov8n.pt')
+  expect(payload.settings.sam3_face_crop_confidence).toBe(0.3)
+})
+
+it('RefinePanel puts the face-crop row under Convex Hull, like the extension Refine panel', () => {
+  const hull = source.indexOf('Convex Hull')
+  const faceCrop = source.indexOf('<Sam3FaceCropFields :widgets="faceCrop" />')
+  expect(hull).toBeGreaterThan(0)
+  expect(faceCrop).toBeGreaterThan(hull)
+  expect(faceCrop).toBeLessThan(source.indexOf('Mask Mode'))
 })
 
 it('RefinePanel no longer carries its own copy of the ControlNet module list', () => {

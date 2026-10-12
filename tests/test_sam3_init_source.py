@@ -75,7 +75,8 @@ class WithInitSourceTests(unittest.TestCase):
         self.assertNotIn(KEY, block["args"][0])
         payload = sam3_args.apply_to_payload({"prompt": "1girl", "init_images": ["x"]}, {"sam3_prompt": "face"})
         self.assertNotIn(KEY, sam3_state(payload))
-        self.assertEqual(set(sam3_state(payload)), {*sam3_args.SAM3_KEYS, "sam3_enable", "enabled"},
+        self.assertEqual(set(sam3_state(payload)),
+                         {*sam3_args.SAM3_KEYS, "sam3_enable", "enabled"} - set(sam3_args.FACE_CROP_KEYS),
                          "생성 안 SAM3 state 의 키 집합은 예전과 같다")
 
 

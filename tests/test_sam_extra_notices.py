@@ -999,6 +999,39 @@ class ExtensionSourceTests(unittest.TestCase):
         self.assertIn("_cfg_base_skip_reason", names)
         self.assertIn("_disable_perturbation_after_oom", names)
 
+    def test_face_crop_infotext_keys_and_detector_messages(self):
+        """얼굴 안에서만 찾기 — 인자 infotext 'SAM3 Face Crop…'(sam3ext/args.py ALL_ARGS)·결과 기록 상수·검출기 오류 문구가
+        알림이 기대는 그대로인가. FaceDetectorUnavailable 문구는 모두 얼굴 검출기 힌트로 간다(SAM3 패키지·체크포인트로 읽지 않음)."""
+        with open(os.path.join(EXT_ROOT, "sam3ext", "args.py"), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        arg_names = {node.args[1].value for node in ast.walk(tree)
+                     if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Arg" and len(node.args) == 2
+                     and isinstance(node.args[1], ast.Constant)}
+        for key in (sn.KEY_SAM3_FACE_CROP, sn.KEY_SAM3_FACE_CROP_MODEL, sn.KEY_SAM3_FACE_CROP_CONFIDENCE):
+            self.assertIn(key, arg_names)
+        from core.sam_extra_scan import ExtensionSource
+        src = ExtensionSource(EXT_ROOT)
+        self.assertEqual(src.module_constant("scripts/!sam3.py", "INFOTEXT_FACE_CROP_FACES"), sn.KEY_SAM3_FACE_CROP_FACES)
+        with open(os.path.join(EXT_ROOT, "sam3ext", "face_detect.py"), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        self.assertIn(sn.FACE_DETECTOR_ERROR, {node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)})
+        messages = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.JoinedStr, ast.Constant)) and isinstance(getattr(node, "value", None), str) \
+                    and str(node.value).startswith("face crop:"):
+                messages.append(node.value)
+            elif isinstance(node, ast.JoinedStr):
+                text = "".join(str(v.value) if isinstance(v, ast.Constant) else "x.pt" for v in node.values)
+                if text.startswith("face crop:"):
+                    messages.append(text)
+        self.assertGreaterEqual(len(messages), 3, messages)
+        generic = sn.sam3_error_hint("RuntimeError: ???")
+        for message in messages:
+            with self.subTest(message=message[:50]):
+                hint = sn.sam3_error_hint(f"{sn.FACE_DETECTOR_ERROR}: {message}")
+                self.assertNotEqual(hint, generic)
+                self.assertIn("얼굴" if "ultralytics" not in message or "rename" in message else "ultralytics", hint)
+
     def test_constants(self):
         from core.sam_extra_scan import ExtensionSource
         src = ExtensionSource(EXT_ROOT)
@@ -1036,6 +1069,70 @@ class ExtensionSourceTests(unittest.TestCase):
                 self.assertIn("어댑터", hint, message)
             else:
                 self.assertIn("qwen35_4b", hint, message)
+
+
+# ── 얼굴 안에서만 찾기 (sam-extra 0.34.0) ─────────────────────────────────────────
+_FACE_ON = ("SAM3 Face Crop: True, SAM3 Face Crop Model: face_yolov8n.pt, SAM3 Face Crop Confidence: 0.3, ")
+# 확장 sam3ext/face_detect.py 의 FaceDetectorUnavailable 문구 그대로(ExtensionSourceTests 가 설치된 확장과 다시 본다)
+EXT_FACE_MODEL_MISSING = ("face crop: face detector model 'face_yolov8n.pt' not found — put it in "
+                          "C:\\sd\\models\\adetailer (the same folder ADetailer uses; it is never downloaded automatically).")
+EXT_FACE_NO_ULTRALYTICS = ("face crop: the 'ultralytics' package is not installed in the Forge venv — install ADetailer "
+                           "(it brings ultralytics) or `pip install ultralytics` in the Forge venv.")
+
+
+def face_infotext(faces=None, *, on=True):
+    keys = _FACE_ON if on else ""
+    if faces is not None:
+        keys += f"SAM3 Face Crop Faces: {faces}, "
+    return _HEAD + "SAM3 Enable: True, " + _SAM3_PARAMS + keys + "SAM3 Version: 0.34.0, " + _TAIL
+
+
+def face_error(message):
+    return _HEAD + _SAM3_PARAMS + _FACE_ON + "SAM3 Version: 0.34.0, SAM3 Error: " + json.dumps(
+        "FaceDetectorUnavailable: " + message) + ", " + _TAIL
+
+
+class FaceCropNoticeTests(_QuietAssumption):
+    def test_request_reads_the_face_crop_switch(self):
+        self.assertTrue(sn.requested_features(sam3_payload(sam3_face_crop=True)).sam3_face_crop)
+        self.assertFalse(sn.requested_features(sam3_payload(sam3_face_crop=False)).sam3_face_crop)
+        # 앱 build_state 는 끈 요청에 키를 싣지 않는다
+        payload = {"alwayson_scripts": sam3_args.build_alwayson({})}
+        self.assertFalse(sn.requested_features(payload).sam3_face_crop)
+
+    def test_faces_found_or_face_crop_off_is_quiet(self):
+        on = sam3_payload(sam3_face_crop=True)
+        self.assertEqual(sn.result_notices(info_of(face_infotext(2)), on), [])
+        self.assertEqual(sn.result_notices(info_of(face_infotext(on=False)), sam3_payload()), [])
+
+    def test_old_extension_without_face_crop_record_warns(self):
+        notices = sn.result_notices(info_of(SAM3_OK), sam3_payload(sam3_face_crop=True))
+        self.assertEqual(codes(notices), [sn.CODE_SAM3_FACE_CROP_UNSUPPORTED])
+        self.assertIn("0.34.0", notices[0].message)
+        self.assertIn("전체 이미지", notices[0].message)
+
+    def test_no_faces_warns_with_model_confidence_and_scope(self):
+        payload = sam3_payload(sam3_face_crop=True, sam3_face_crop_confidence=0.5)
+        notices = sn.result_notices(info_of(face_infotext(0)), payload)
+        self.assertEqual(codes(notices), [sn.CODE_SAM3_FACE_CROP_NO_FACES])
+        self.assertIn("face_yolov8n.pt", notices[0].message)
+        self.assertIn("0.3", notices[0].message)          # 그 장의 기록(0.3)이 보낸 값보다 먼저
+        batch = sn.result_notices(info_of(face_infotext(0), face_infotext(3), face_infotext(0)), payload)
+        self.assertIn("2/3장", batch[0].message)
+        self.assertNotIn(sn.CODE_SAM3_FACE_CROP_NO_FACES, sn.SAM3_FAILURE_CODES, "얼굴 없음은 '검출 없음' 처리 — 실패가 아니다")
+
+    def test_face_detector_errors_get_their_own_hint_and_stop_a_batch(self):
+        cases = ((EXT_FACE_MODEL_MISSING, "models/adetailer"), (EXT_FACE_NO_ULTRALYTICS, "ultralytics"))
+        for message, needle in cases:
+            with self.subTest(message=message[:40]):
+                notices = sn.result_notices(info_of(face_error(message)), sam3_payload(sam3_face_crop=True))
+                self.assertEqual(codes(notices), [sn.CODE_SAM3_ERROR])
+                self.assertIn(needle, notices[0].hint)
+                self.assertTrue(sn.sam3_failure_repeats(notices[0]), "설치 문제 — 같은 설정의 다음 장도 실패한다")
+        # 'package is not installed' 를 SAM3 패키지로 읽지 않는다
+        self.assertNotIn("install.py", sn.sam3_error_hint("FaceDetectorUnavailable: " + EXT_FACE_NO_ULTRALYTICS))
+        self.assertIn("my_face.pt", sn.sam3_error_hint("FaceDetectorUnavailable: " + EXT_FACE_MODEL_MISSING,
+                                                       {"sam3_face_crop_model": "my_face.pt"}))
 
 
 # ── 샘플링 블록 게이트·보조 패스 전달 알림 (P7, T17) ─────────────────────────────

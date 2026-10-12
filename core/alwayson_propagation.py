@@ -257,6 +257,9 @@ NEVER: Mapping[str, str] = MappingProxyType({
     "Anima Reference PoC (shape logger)": "디버그용(N9) — 앱이 만들지 않는다",
     "SAM Extra Anima sparse LoRA": "인자 0개 자동 훅(N7) — 페이로드에 나오지 않는다",
     "SAM3 LoRA Manager bridge": "인자 0개 숨은 Gradio 브리지(N8) — 페이로드에 나오지 않는다",
+    # sam-extra 0.34.0 — 둘 다 인자 0개이고 앱이 만들지 않는다
+    "XYZ Text Encoder (sam-extra)": "인자 0개 Forge XYZ 칸 훅(ui() None) — 앱 XYZ 는 칸마다 따로 생성해 할 일이 없다",
+    "SAM Extra unload models (reload for hires fix)": "인자 0개 txt2img 훅 — '모델 내리기' 뒤 갤러리 ✨ 만 돕는다(앱은 쓰지 않음)",
 })
 
 _CANONICAL = {title.casefold(): title for title in (*PROPAGATION, *NEVER)}

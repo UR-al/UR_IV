@@ -66,7 +66,7 @@ class _Host(GenerationMixin, XYZActionsMixin):
         self._xyz_lock = threading.RLock()
         self._xyz_seen_requests = set()
         self._xyz_capabilities = {
-            "backend": backend, "context": {"hires": False, "family": "standard"},
+            "backend": backend, "context": {"hires": False, "family": "standard", "text_encoders": ()},
             "data": {"capabilityId": "cap", "axes": [
                 {"id": "steps", "label": "Steps", "type": "integer", "min": 1, "max": 150},
             ]},

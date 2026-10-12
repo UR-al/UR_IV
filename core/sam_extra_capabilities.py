@@ -598,10 +598,13 @@ def build_capabilities(responses: Mapping[str, HttpResult], *,
         app_keys = set(sam3_args.SAM3_KEYS)
         sam3_keys = {"missing_in_extension": tuple(sorted(app_keys - live_keys)),
                      "unknown_to_app": tuple(sorted(live_keys - app_keys))}
-        if sam3_keys["missing_in_extension"]:
+        # 켤 때만 보내는 키('얼굴 안에서만 찾기' — sam3_args.FACE_CROP_KEYS)는 끈 요청에 실리지 않으므로 연결 때 경고하지
+        # 않는다. 모르는 sam-extra(0.33.x 이하)는 missing_in_extension 에 남아 Vue 카드가 켤 때 안내하고
+        # (frontend/src/utils/sam3FaceCrop.ts faceCropSupport), 결과 알림이 'SAM3 Face Crop' 기록 없음을 알린다.
+        dropped = [key for key in sam3_keys["missing_in_extension"] if key not in sam3_args.FACE_CROP_KEYS]
+        if dropped:
             warnings.append(_warning("sam3_keys_unknown_to_extension", "sam3",
-                                     "확장이 모르는 SAM3 설정은 조용히 버려집니다: "
-                                     + ", ".join(sam3_keys["missing_in_extension"])))
+                                     "확장이 모르는 SAM3 설정은 조용히 버려집니다: " + ", ".join(dropped)))
         if sam3_keys["unknown_to_app"]:
             warnings.append(_warning("sam3_keys_unknown_to_app", "sam3",
                                      "앱이 아직 모르는 SAM3 설정이 있습니다(확장 기본값으로 동작): "

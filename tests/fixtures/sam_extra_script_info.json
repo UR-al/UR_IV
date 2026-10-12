@@ -1,16 +1,10 @@
 {
  "schema": 1,
- "source": "GET /sdapi/v1/script-info (tools/refresh_sam_extra_fixture.py)",
- "captured_at": "2026-10-05T07:02:28+00:00",
- "api_url": "http://127.0.0.1:7862",
- "ext_version": "0.33.1",
- "extension": {
-  "name": "forge_sam3_extension",
-  "branch": "feat/anima-character-reference",
-  "commit_hash": "b04ff89676cf3a8ba33096e8ad50df501b036c2c",
-  "commit_date": 1791181815,
-  "version": "b04ff896"
- },
+ "source": "저장된 GET /sdapi/v1/script-info 응답 script_info.json (받은 시각 2026-10-11T16:27:19+00:00, tools/refresh_sam_extra_fixture.py --from-file)",
+ "captured_at": "2026-10-12T12:37:43+00:00",
+ "api_url": "http://127.0.0.1:7861",
+ "ext_version": "0.34.0",
+ "extension": null,
  "scripts": [
   {
    "name": "anima 3.8b (qwen3.5 / v2)",
@@ -2477,7 +2471,9 @@
       "Qwen2D-Anime-dense_epoch_1.safetensors",
       "minimax_h3_audio_vae_fp32.safetensors",
       "minimax_h3_video_vae_fp16.safetensors",
-      "qwen_image_vae.safetensors"
+      "qwen_image_vae.safetensors",
+      "qwen_image_vae_2dHDR_fp32.safetensors",
+      "qwen_image_vae_HDR_fp32.safetensors"
      ]
     },
     {
@@ -2534,7 +2530,9 @@
       "Qwen2D-Anime-dense_epoch_1.safetensors",
       "minimax_h3_audio_vae_fp32.safetensors",
       "minimax_h3_video_vae_fp16.safetensors",
-      "qwen_image_vae.safetensors"
+      "qwen_image_vae.safetensors",
+      "qwen_image_vae_2dHDR_fp32.safetensors",
+      "qwen_image_vae_HDR_fp32.safetensors"
      ]
     },
     {
@@ -4322,6 +4320,12 @@
    "name": "sam extra anima sparse lora",
    "is_alwayson": true,
    "is_img2img": true,
+   "args": []
+  },
+  {
+   "name": "sam extra unload models (reload for hires fix)",
+   "is_alwayson": true,
+   "is_img2img": false,
    "args": []
   },
   {
@@ -4401,7 +4405,10 @@
       "sam3_cn_resize_mode": "Crop and Resize",
       "sam3_cn_processor_res": 512,
       "sam3_cn_threshold_a": -1,
-      "sam3_cn_threshold_b": -1
+      "sam3_cn_threshold_b": -1,
+      "sam3_face_crop": false,
+      "sam3_face_crop_model": "face_yolov8n.pt",
+      "sam3_face_crop_confidence": 0.3
      },
      "minimum": null,
      "maximum": null,
@@ -4475,7 +4482,10 @@
       "sam3_cn_resize_mode": "Crop and Resize",
       "sam3_cn_processor_res": 512,
       "sam3_cn_threshold_a": -1,
-      "sam3_cn_threshold_b": -1
+      "sam3_cn_threshold_b": -1,
+      "sam3_face_crop": false,
+      "sam3_face_crop_model": "face_yolov8n.pt",
+      "sam3_face_crop_confidence": 0.3
      },
      "minimum": null,
      "maximum": null,

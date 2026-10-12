@@ -2997,6 +2997,13 @@ class VueBridge(QObject):
             proxy = self._proxies.get(wid)
             if proxy and hasattr(proxy, 'addItems'):
                 proxy.addItems(models)
+        # SAM3 '얼굴 안에서만 찾기' 의 얼굴 검출 모델 추천 — 확장 드롭다운과 같은 규칙(YOLO 상자 .pt, 기본 → face_* → 그 밖).
+        # T2I 카드·Refine·배치 SAM3 가 getProperty('_sam3_face_crop_model', 'items') 로 읽는다.
+        try:
+            from core.sam3_face_crop import push_model_items
+            push_model_items(self._proxies.get('_sam3_face_crop_model'), models if isinstance(models, list) else ())
+        except Exception as exc:
+            logger.debug("face crop model items: %s", exc)
 
     @pyqtSlot()
     def requestADetailerModels(self):

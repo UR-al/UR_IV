@@ -66,7 +66,7 @@
             <div class="toggle-grid">
               <div class="toggle-row">
                 <span>생성 후 모델 언로드
-                  <small class="hint-inline">메인 생성(T2I·I2I·XYZ·대기열·자동화)이 끝나면 Forge(unload-checkpoint) / ComfyUI(/free) 에 모델을 내리게 요청합니다. 연속 작업은 마지막 장 뒤에만 내립니다. Creator Studio 는 해당 없음.</small>
+                  <small class="hint-inline">메인 생성(T2I·I2I·XYZ·대기열·자동화)이 끝나면 Forge(unload-checkpoint) / ComfyUI(/free) 에 모델을 내리게 요청합니다. 연속 작업은 마지막 장 뒤에만 내립니다. Creator Studio 는 해당 없음. Forge 는 체크포인트만 내립니다 — sam-extra 가 쥔 모델(SAM3·Anima 3.8B 등)까지 비우려면 Forge 화면의 '모델 내리기' 버튼(sam-extra 0.34.0)을 쓰세요.</small>
                 </span>
                 <ToggleSwitch :model-value="unloadModelsAfterGen"
                   @update:model-value="unloadModelsAfterGen = $event; saveUnloadModelsAfterGen()" />

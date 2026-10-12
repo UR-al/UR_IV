@@ -13,6 +13,9 @@ import os
 import unittest
 
 from core.sam3_args import (
+    FACE_CROP_DEFAULT_CONFIDENCE,
+    FACE_CROP_DEFAULT_MODEL,
+    FACE_CROP_KEYS,
     SAM3_KEYS,
     SAM3_SPEC,
     SCRIPT_SAM3,
@@ -31,7 +34,9 @@ _ACTIVATION_ONLY = {'sam3_enable', 'enabled'}
 
 class TestSpec(unittest.TestCase):
     def test_field_count(self):
-        self.assertEqual(len(SAM3_SPEC), 49)
+        # 49 + 얼굴 안에서만 찾기 셋(sam-extra 0.34.0, 맨 뒤)
+        self.assertEqual(len(SAM3_SPEC), 52)
+        self.assertEqual(SAM3_KEYS[-3:], FACE_CROP_KEYS)
 
     def test_keys_unique(self):
         self.assertEqual(len(SAM3_KEYS), len(set(SAM3_KEYS)))
@@ -57,7 +62,37 @@ class TestBuildState(unittest.TestCase):
         self.assertIs(state['enabled'], True)
 
     def test_state_keys_are_spec_plus_activation(self):
-        self.assertEqual(set(build_state({})), set(SAM3_KEYS) | _ACTIVATION_ONLY)
+        # 얼굴 안에서만 찾기 세 키는 켤 때만 — 끈 요청은 0.34.0 전과 같다
+        self.assertEqual(set(build_state({})), (set(SAM3_KEYS) - set(FACE_CROP_KEYS)) | _ACTIVATION_ONLY)
+        self.assertEqual(set(build_state({'sam3_face_crop': True})), set(SAM3_KEYS) | _ACTIVATION_ONLY)
+
+    def test_face_crop_off_payload_is_unchanged(self):
+        """끈 state 는 0.34.0 전 앱이 보내던 키·순서 그대로(얼굴 키 없음) — 꺼짐을 명시로 보내도, 다른 값을 보내도."""
+        legacy = build_state({})
+        self.assertEqual(list(legacy)[-3:], ['sam3_cn_threshold_b', 'sam3_enable', 'enabled'])
+        for settings in ({'sam3_face_crop': False}, {'sam3_face_crop': 'false', 'sam3_face_crop_model': 'x.pt',
+                                                      'sam3_face_crop_confidence': 0.9}):
+            with self.subTest(settings=settings):
+                self.assertEqual(build_state(settings), legacy)
+
+    def test_face_crop_on_sends_three_keys_with_extension_rules(self):
+        state = build_state({'sam3_face_crop': 'true', 'sam3_face_crop_model': '  face_yolov8s.pt ',
+                             'sam3_face_crop_confidence': '0.45'})
+        self.assertEqual([state[key] for key in FACE_CROP_KEYS], [True, 'face_yolov8s.pt', 0.45])
+        # 키 순서: 확장 ALL_ARGS 처럼 SAM3 키의 맨 뒤(활성화 플래그 앞)
+        self.assertEqual(list(state)[-5:], [*FACE_CROP_KEYS, 'sam3_enable', 'enabled'])
+        # 빈 모델 → 기본 모델(확장 _normalise_face_crop_model), 신뢰도 0–1 로 잘림(_NUMERIC_BOUNDS)
+        state = build_state({'sam3_face_crop': True, 'sam3_face_crop_model': ' ', 'sam3_face_crop_confidence': 3})
+        self.assertEqual(state['sam3_face_crop_model'], FACE_CROP_DEFAULT_MODEL)
+        self.assertEqual(state['sam3_face_crop_confidence'], 1.0)
+        state = build_state({'sam3_face_crop': True, 'sam3_face_crop_confidence': 'nan'})
+        self.assertEqual(state['sam3_face_crop_confidence'], FACE_CROP_DEFAULT_CONFIDENCE)
+
+    def test_face_crop_defaults(self):
+        d = default_settings()
+        self.assertIs(d['sam3_face_crop'], False)
+        self.assertEqual(d['sam3_face_crop_model'], 'face_yolov8n.pt')
+        self.assertEqual(d['sam3_face_crop_confidence'], 0.3)
 
     def test_unknown_keys_are_dropped(self):
         # extra=forbid 대응 — 우리가 모르는 키가 밖으로 새면 안 된다

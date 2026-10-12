@@ -18,7 +18,7 @@ Windows용 AI 이미지 생성 데스크톱 앱입니다. PyQt6 창 안의 `QWeb
 
 ## ✨ 핵심 기능
 
-- **생성**: T2I에는 Hires.fix와 LoRA 스택을 붙일 수 있고, ADetailer(2슬롯)·SAM3 Mask(ControlNet 포함)·ANIMA 가이던스는 I2I·Inpaint에도 적용됩니다.
+- **생성**: T2I에는 Hires.fix와 LoRA 스택을 붙일 수 있고, ADetailer(2슬롯)·SAM3 Mask(ControlNet·얼굴 안에서만 찾기 포함)·ANIMA 가이던스는 I2I·Inpaint에도 적용됩니다.
   생성 엔진은 Standard와 Krea2(ComfyUI 전용) 중에서 고르며, 시드 탐색(3×3)과 XYZ Plot도 지원합니다.
 - **백엔드**: WebUI(A1111/Forge)나 ComfyUI 중 하나에 연결합니다. 앱이 설치·실행하는 관리형 런타임을 쓰거나 이미 설치해 둔 백엔드를 연결할 수 있습니다.
   ComfyUI는 동봉 노드 팩만 설치돼 있으면 일반 작업에 워크플로 JSON이 필요 없습니다.
@@ -252,7 +252,7 @@ Python 코드를 고쳤다면 앱을 재시작해야 반영됩니다. 자세한 
 | **Inpaint** | 마스크 편집기<br>도구: 사각 선택(M), 올가미(L, 자유/자석), 마스크 브러시(B), 지우개(E, 브러시/박스/올가미 모양)<br>브러시 크기, denoise, 프롬프트 덮어쓰기, 마스크 blur·padding, 고급 설정, 마스크 Undo/Redo<br>기본으로 꺼져 있는 [실험 · 손 형태 재구성](docs/experimental-hand-reconstruction.md) 패널 포함 |
 | **Event Gen** | 캐릭터·작품·일반 태그·작가·제외 태그·스텝 수·등급으로 이벤트 검색<br>결과: 이벤트 목록과 단계별 시퀀스<br>외모/의상/배경 유지, 단계별로 T2I에 보내기, 반복 횟수, `큐에 추가`, 지금 생성, `.parquet` 가져오기/내보내기 |
 | **Search** | 캐릭터/작품/일반 태그/작가 필드로 Danbooru 데이터셋 검색(필드마다 제외 입력)<br>등급 칩, 50만 건 상한 또는 무제한, AND/OR, `.parquet` 가져오기/내보내기, 필터 관리, 정밀 검색<br>단일 보기: `프롬프트로 사용`/`대기열에 추가`<br>목록 보기: 정렬과 페이지(50개) |
-| **XYZ Plot** | 연결된 백엔드에서 불러온 축 사용(`축 새로고침`)<br>축 값 입력: 선택, S/R, 범위(`20-40:5`)<br>최대 256 조합, CSV 내보내기<br>앱이 실행하지 않는 확장 축은 따로 표시<br>Krea2 미지원 |
+| **XYZ Plot** | 연결된 백엔드에서 불러온 축 사용(`축 새로고침`)<br>축 값 입력: 선택, S/R, 범위(`20-40:5`)<br>`Text Encoder` 축: 칸마다 앱의 TE 선택을 바꿈(VAE 그대로, TE 하나일 때)<br>최대 256 조합, CSV 내보내기<br>앱이 실행하지 않는 확장 축은 따로 표시<br>Krea2 미지원 |
 | **Creator** | `영상`: MiniMax H3 T2V/I2V/V2V, 24 FPS 고정, 오디오 유지·생성<br>`만화`: AI 스토리보드, 최대 6컷, Auto/Grid/Vertical/Strip/Hero 레이아웃, 말풍선, PNG/WebP 또는 리빙 코믹(영상)으로 내보내기<br>`Krea2`: 원본과 참조를 이용한 아이덴티티 편집<br>영상과 Krea2는 ComfyUI 필요 |
 | **대화** | Ollama·LM Studio 로컬 LLM과 대화<br>스레드(새 스레드 `Ctrl+N`), 지침 프리셋, JSON Schema 구조화 출력, 모델별 옵션, 이미지·텍스트 첨부, Markdown 내보내기<br>요청 모드: 자동/대화만/이미지 생성/영상(H3) |
 

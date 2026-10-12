@@ -49,7 +49,29 @@ class XYZActionsMixin:
         hires = getattr(self, "hires_options_group", None)
         family_check = getattr(self, "_is_krea2_generation", None)
         return {"hires": bool(hires and hires.isChecked()),
-                "family": "krea2" if family_check and family_check() else "standard"}
+                "family": "krea2" if family_check and family_check() else "standard",
+                "text_encoders": self._xyz_text_encoder_choices()}
+
+    def _xyz_text_encoder_choices(self):
+        """Text Encoder 축 값 — Vue 가 지금 보여 주는 TE 칩 선택지(``te_main_input.items``, 연결 때 채운다). 모르면 ()."""
+        getter = getattr(getattr(self, "vue_bridge", None), "last_widget_property", None)
+        if not callable(getter):
+            return ()
+        try:
+            items = getter("te_main_input", "items")
+        except Exception:
+            return ()
+        return tuple(str(item) for item in items if str(item or "").strip()) if isinstance(items, list) else ()
+
+    def _xyz_text_encoder_selection(self):
+        """지금 TE 선택(TE 칩 값 — forge_additional_modules 의 TE 칸, ui/generator_generation._build_vae_te_override 와 같다)."""
+        widget = getattr(self, "te_main_input", None)
+        try:
+            text = widget.text() if widget is not None and hasattr(widget, "text") else ""
+        except Exception:
+            text = ""
+        from core.main_module_choices import split_te_selection
+        return split_te_selection(text)
 
     def _xyz_request_capabilities(self, payload):
         from backends import get_backend, get_backend_type
@@ -108,7 +130,8 @@ class XYZActionsMixin:
             # sampling blocks the build gate dropped (ui/sampling_blocks).
             from ui.sampling_blocks import freeze_sampling_payload, show_sampling_notice_list
             notices = freeze_sampling_payload(self, base)
-            jobs = build_jobs(base, self.model_combo.currentText(), payload.get("axes"), cached["data"])
+            jobs = build_jobs(base, self.model_combo.currentText(), payload.get("axes"), cached["data"],
+                              text_encoders=self._xyz_text_encoder_selection())
             kind = get_backend_type().value
             for index, job in enumerate(jobs):
                 job["_xyz_backend_id"] = backend_identity(kind, backend)

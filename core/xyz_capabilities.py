@@ -15,7 +15,20 @@ from core.comfy_node_classes import SAMPLER_NODES
 LABELS = {"steps": "Steps", "cfg_scale": "CFG Scale", "seed": "Seed", "width": "Width",
           "height": "Height", "sampler_name": "Sampler", "scheduler": "Scheduler", "model": "Model",
           "prompt_sr": "Prompt S/R", "negative_sr": "Negative S/R", "distilled_cfg_scale": "Shift",
-          "denoising_strength": "Hires denoising"}
+          "denoising_strength": "Hires denoising", "text_encoder": "Text Encoder"}
+
+# ── Text Encoder 축 (sam-extra 0.34.0 의 Forge XYZ '[Modules] Text Encoder' 축과 같은 뜻) ─────────────────────────────
+# 칸마다 앱의 TE 선택(TE 칩 — forge_additional_modules 의 TE 칸)을 그 파일로 바꾼다. VAE·그 밖의 모듈은 그대로다. 앱 XYZ 는 칸마다
+# 따로 생성하는 대기열이라 Forge·ComfyUI 모두 보통 생성과 같은 길로 간다: Forge 는 모듈이 바뀐 칸에서 /sdapi/v1/options 로
+# 모듈을 바꿔 모델을 다시 불러오고(드롭다운에서 고를 때와 같음 — backends/webui_backend._switch_model_if_needed), ComfyUI 는
+# 컴파일러가 그 파일을 CLIP 로더에 넣는다. 그래서 Forge XYZ 의 기본 'VAE' 축이 형식이 다른 VAE 를 덮어써 검은 칸이 나던 문제
+# (sam-extra 0.34.0 이 고침)는 앱 XYZ 에 없다 — 앱은 Forge XYZ 스크립트를 부르지 않는다.
+TEXT_ENCODER = "text_encoder"
+TEXT_ENCODER_CURRENT = "Use current"   # 칸에서 TE 를 바꾸지 않는다(지금 TE 칩 그대로) — 확장의 'Use Forge current'
+# 확장이 Forge XYZ 에 더한 축 라벨 — 앱 Text Encoder 축이 같은 일을 하므로 '실행하지 않는 확장 축' 목록에 넣지 않는다
+FORGE_TEXT_ENCODER_AXIS = "[Modules] Text Encoder"
+TEXT_ENCODER_NOTE = ("Text Encoder 축은 칸마다 앱의 TE 선택을 그 파일로 바꿉니다(VAE 는 그대로) — 바뀌는 칸마다 모델을 다시 "
+                     "불러오므로 X 축(가장 바깥 반복)에 두면 가장 적게 다시 불러옵니다.")
 # These are application execution/safety bounds, not invented server choices.
 BOUNDS = {"steps": (1, 150, "integer"), "cfg_scale": (1, 30, "number"),
           "seed": (-1, 2**32 - 1, "integer"), "width": (64, 4096, "integer"),
@@ -56,12 +69,47 @@ def _axis(key, spec=None, *, choices=None, source=""):
             "step": 8 if key in {"width", "height"} else (1 if kind == "integer" else 0.1)} if low <= high else None
 
 
+def text_encoder_axis(text_encoders, *, source):
+    """TE 칩 선택지 → Text Encoder 축(값 '지금 TE 그대로' + 파일들). 선택지가 없으면 None(축 없음)."""
+    files = [name for name in dict.fromkeys(str(item or "").strip() for item in text_encoders or ())
+             if name and name != TEXT_ENCODER_CURRENT]
+    if not files:
+        return None
+    return _axis(TEXT_ENCODER, choices=[TEXT_ENCODER_CURRENT, *files], source=source)
+
+
+def replace_text_encoder(modules, current, value):
+    """forge_additional_modules 에서 지금 TE(``current`` — TE 칩 값, 하나 이하) 칸을 ``value`` 로 바꾼 새 목록.
+
+    TE 가 없으면 ``value`` 를 더한다(TE 칩에서 그 파일을 고른 것과 같다). VAE·다른 모듈은 자리 그대로. TE 가 둘 이상이면
+    (Flux CLIP-L + T5 처럼) 어느 칸을 바꿀지 앱이 모르므로 ValueError — 확장 축은 파일 헤더로 자리를 보지만 앱은 파일을
+    읽지 않는다.
+    """
+    current = [str(item).strip() for item in current or () if str(item or "").strip()]
+    if len(current) > 1:
+        raise ValueError(f"Text Encoder 축: 지금 TE 가 {len(current)}개({', '.join(current)})라 칸마다 어느 것을 바꿀지 "
+                         "정할 수 없습니다 — TE 를 하나만 고르거나 이 축을 빼세요")
+    out, replaced = [], False
+    for item in modules or ():
+        if not isinstance(item, str):
+            continue
+        if item.strip() in current:
+            if not replaced:
+                out.append(value)
+                replaced = True
+            continue
+        out.append(item)
+    if not replaced:
+        out.append(value)
+    return out
+
+
 def _fields(schema, node):
     info = schema.get(node, {}).get("input", {})
     return {**info.get("required", {}), **info.get("optional", {})} if isinstance(info, dict) else {}
 
 
-def comfy_capabilities(schema, *, workflow=None, hires=False, family="standard"):
+def comfy_capabilities(schema, *, workflow=None, hires=False, family="standard", text_encoders=()):
     if not isinstance(schema, dict):
         raise ValueError("ComfyUI 기능 응답이 올바르지 않습니다")
     if family == "krea2":
@@ -129,10 +177,18 @@ def comfy_capabilities(schema, *, workflow=None, hires=False, family="standard")
         axes.append(_axis("model", choices=choices, source="ComfyUI model loader choices"))
     if "ForgeNeoModelSamplingShift" in used and "shift" in _fields(schema, "ForgeNeoModelSamplingShift"):
         add("distilled_cfg_scale", _fields(schema, "ForgeNeoModelSamplingShift")["shift"], "ForgeNeoModelSamplingShift.shift")
-    return {"axes": axes, "unsupported": [], "notes": ["현재 앱의 T2I 실행 경로에 적용 가능한 서버 필드만 표시합니다."]}
+    notes = ["현재 앱의 T2I 실행 경로에 적용 가능한 서버 필드만 표시합니다."]
+    # Text Encoder: 앱이 그래프를 만들 때만(컴파일러가 forge_additional_modules 를 CLIP 로더에 넣는다) — 사용자 워크플로는
+    # 그 그래프의 로더를 그대로 쓰므로 앱 TE 선택이 닿지 않는다
+    te_axis = text_encoder_axis(text_encoders, source="forge_additional_modules → CLIPLoader") if not workflow else None
+    if te_axis:
+        axes.append(te_axis)
+        notes.append(TEXT_ENCODER_NOTE)
+    return {"axes": axes, "unsupported": [], "notes": notes}
 
 
-def forge_capabilities(openapi, *, scripts=(), samplers=(), schedulers=(), models=(), hires=False, family="standard"):
+def forge_capabilities(openapi, *, scripts=(), samplers=(), schedulers=(), models=(), hires=False, family="standard",
+                       text_encoders=()):
     if not isinstance(openapi, dict):
         raise ValueError("Forge API schema 응답이 올바르지 않습니다")
     if family == "krea2":
@@ -162,6 +218,9 @@ def forge_capabilities(openapi, *, scripts=(), samplers=(), schedulers=(), model
     model_axis = _axis("model", choices=[x.get("title") for x in models if isinstance(x, dict)], source="sdapi/v1/sd-models")
     if model_axis:
         axes.append(model_axis)
+    te_axis = text_encoder_axis(text_encoders, source="forge_additional_modules")
+    if te_axis:
+        axes.append(te_axis)
     advertised = []
     for script in scripts if isinstance(scripts, list) else ():
         if (isinstance(script, dict) and not script.get("is_img2img")
@@ -170,11 +229,15 @@ def forge_capabilities(openapi, *, scripts=(), samplers=(), schedulers=(), model
                 if str(arg.get("label", "")).casefold() == "x type":
                     advertised = [x for x in arg.get("choices", []) if isinstance(x, str)]
     mapped = {axis["label"] for axis in axes} | {"Nothing", "Schedule type", "Checkpoint name", "Size", "Distilled CFG Scale"}
-    return {"axes": axes, "unsupported": [label for label in advertised if label not in mapped],
-            "notes": ["Forge XYZ 스크립트의 임의 확장 축은 실행하지 않습니다. API와 앱이 함께 지원하는 축만 사용합니다."]}
+    if te_axis:
+        mapped.add(FORGE_TEXT_ENCODER_AXIS)
+    notes = ["Forge XYZ 스크립트의 임의 확장 축은 실행하지 않습니다. API와 앱이 함께 지원하는 축만 사용합니다."]
+    if te_axis:
+        notes.append(TEXT_ENCODER_NOTE)
+    return {"axes": axes, "unsupported": [label for label in advertised if label not in mapped], "notes": notes}
 
 
-def fetch_capabilities(backend, kind, *, hires=False, family="standard"):
+def fetch_capabilities(backend, kind, *, hires=False, family="standard", text_encoders=()):
     if kind not in {"comfyui", "webui"}:
         raise ValueError("지원하지 않는 XYZ 백엔드입니다")
     if family == "krea2":
@@ -182,7 +245,8 @@ def fetch_capabilities(backend, kind, *, hires=False, family="standard"):
         result = _krea2_result()
     elif kind == "comfyui":
         workflow = backend._load_configured_workflow("txt2img")
-        result = comfy_capabilities(backend.get_object_info(), workflow=workflow, hires=hires, family=family)
+        result = comfy_capabilities(backend.get_object_info(), workflow=workflow, hires=hires, family=family,
+                                    text_encoders=text_encoders)
     elif kind == "webui":
         import requests
         endpoints = {"openapi": "/openapi.json", "scripts": "/sdapi/v1/script-info",
@@ -200,14 +264,18 @@ def fetch_capabilities(backend, kind, *, hires=False, family="standard"):
             return name, data
         with ThreadPoolExecutor(max_workers=5) as executor:
             data = dict(executor.map(read, endpoints.items()))
-        result = forge_capabilities(data.pop("openapi"), **data, hires=hires, family=family)
+        result = forge_capabilities(data.pop("openapi"), **data, hires=hires, family=family, text_encoders=text_encoders)
     result.update(backend=kind, backendId=backend_identity(kind, backend), maxJobs=MAX_JOBS)
     result["capabilityId"] = hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
     return result
 
 
-def build_jobs(base_payload, model, axes, capability):
-    """Validate a bounded Cartesian product and preserve the full generation snapshot."""
+def build_jobs(base_payload, model, axes, capability, *, text_encoders=()):
+    """Validate a bounded Cartesian product and preserve the full generation snapshot.
+
+    ``text_encoders``: 지금 앱 TE 선택(TE 칩 값 — base_payload 의 forge_additional_modules 중 TE 칸). Text Encoder 축이 그
+    칸을 칸마다 바꾼다(replace_text_encoder).
+    """
     if not isinstance(axes, list) or not 1 <= len(axes) <= 3:
         raise ValueError("XYZ 축을 1–3개 선택하세요")
     definitions = {axis["id"]: axis for axis in capability.get("axes", [])}
@@ -251,6 +319,8 @@ def build_jobs(base_payload, model, axes, capability):
                 if not isinstance(value, str) or len(value) > 8000:
                     raise ValueError("S/R 대체값이 올바르지 않습니다")
                 checked.append(value)
+        if key == TEXT_ENCODER and any(value != TEXT_ENCODER_CURRENT for value in checked):
+            replace_text_encoder((), text_encoders, "")   # TE 가 둘 이상이면 첫 칸을 만들기 전에 거절한다
         normalized.append({"id": key, "label": definition["label"], "search": axis.get("search"), "values": checked})
     jobs = []
     for values in itertools.product(*(axis["values"] for axis in normalized)):
@@ -264,6 +334,17 @@ def build_jobs(base_payload, model, axes, capability):
                 payload[field] = str(payload.get(field, "")).replace(axis["search"], value)
             elif key == "model":
                 selected_model = value
+            elif key == TEXT_ENCODER:
+                modules = [item for item in payload.get("forge_additional_modules") or () if isinstance(item, str)]
+                if value != TEXT_ENCODER_CURRENT:
+                    modules = replace_text_encoder(modules, text_encoders, value)
+                # 칸마다 목록을 늘 싣는다 — 'Use current' 칸이 키 없이 가면 Forge 에는 앞 칸이 옵션으로 바꿔 둔 TE 가 남는다.
+                # 앱에서 VAE·TE 를 고르지 않았으면 빈 목록(체크포인트 내장 VAE·TE — ComfyUI 와 같은 뜻)이다.
+                payload["forge_additional_modules"] = modules
+                # 베이스에 모듈이 없어 Hires 가 'Built-in'(빈 목록)이었으면 1패스와 같은 목록을 쓰게 한다(보통 생성과
+                # 같은 규칙 — ui/generator_generation: 모듈이 있으면 'Use same choices')
+                if modules and payload.get("enable_hr") and payload.get("hr_additional_modules") == []:
+                    payload["hr_additional_modules"] = ["Use same choices"]
             else:
                 payload[key] = value
             metadata[axis["label"]] = value

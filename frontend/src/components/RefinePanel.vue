@@ -59,6 +59,8 @@
             <ToggleSwitch v-model="maskHull" size="sm" />
             <span>Convex Hull (머리카락 가닥 감싸기)</span>
           </label>
+          <!-- 얼굴 안에서만 찾기 (sam-extra 0.34.0) — T2I SAM3 카드·배치 SAM3 와 같은 줄 -->
+          <Sam3FaceCropFields :widgets="faceCrop" />
           <label class="mt-12">Mask Mode</label>
           <CustomSelect v-model="maskMode" :options="['Individual', 'Combined']" placeholder="Individual" />
         </details>
@@ -145,9 +147,11 @@ import { requestAction } from '../stores/widgetStore.js'
 import { onBackendEvent } from '../bridge.js'
 import { mediaUrl } from '../utils/media.js'
 import { sam3CnDefaults, sam3CnSettings } from '../utils/sam3ControlNet'
+import { sam3FaceCropDefaults, sam3FaceCropSettings } from '../utils/sam3FaceCrop'
 import CustomSelect from './CustomSelect.vue'
 import ToggleSwitch from './ToggleSwitch.vue'
 import Sam3ControlNetPanel from './Sam3ControlNetPanel.vue'
+import Sam3FaceCropFields from './Sam3FaceCropFields.vue'
 
 /**
  * SAM3 Refine 패널 (sam-extra 워크플로 2).
@@ -214,6 +218,8 @@ const unloadAfter = ref(true)
 // ControlNet 13필드 — widget id 키의 로컬 상태 (utils/sam3ControlNet). 예전엔 10필드만
 // 있었고(override_external·threshold_a/b 누락) 전처리기 목록을 손으로 복제해 두었다.
 const cn = reactive(sam3CnDefaults())
+// 얼굴 안에서만 찾기 3필드 — widget id 키의 로컬 상태 (utils/sam3FaceCrop, 기본 꺼짐)
+const faceCrop = reactive(sam3FaceCropDefaults())
 
 function setImage(path: string) {
   const normalized = (path || '').replace(/\\/g, '/')
@@ -269,6 +275,8 @@ function run() {
       sam3_seed: parseInt(seed.value) || -1,
       // ControlNet 13필드 (sam3_cn_*)
       ...sam3CnSettings(cn),
+      // 얼굴 안에서만 찾기 (sam3_face_crop* — 끄면 백엔드 build_state 가 빼고 보낸다)
+      ...sam3FaceCropSettings(faceCrop),
       // 부모 i2i 샘플링 파라미터
       steps: steps.value,
       cfg_scale: cfg.value,

@@ -84,6 +84,13 @@ KEY_SAM3_VERSION = "SAM3 Version"
 KEY_SAM3_SOURCE = "SAM3 Source"
 SAM3_SOURCE_INIT_NOTE = "init image"
 SAM3_SOURCE_OUTPUT_NOTE = "output"
+# '얼굴 안에서만 찾기'(sam-extra 0.34.0) — 켰을 때만 남는다: 인자 'SAM3 Face Crop'(True, sam3ext/args.py ALL_ARGS)과 결과 기록
+# 'SAM3 Face Crop Faces'(그 장에서 쓴 얼굴 수, scripts/!sam3.py INFOTEXT_FACE_CROP_FACES — 0 이면 얼굴을 못 찾아 마스크 없음 → 이미지
+# 그대로). 켜고 보냈는데 'SAM3 Face Crop' 이 없으면 이 키를 모르는 예전 sam-extra(또는 Reload UI 만 한 Forge)가 전체 이미지에서 찾았다.
+KEY_SAM3_FACE_CROP = "SAM3 Face Crop"
+KEY_SAM3_FACE_CROP_MODEL = "SAM3 Face Crop Model"
+KEY_SAM3_FACE_CROP_CONFIDENCE = "SAM3 Face Crop Confidence"
+KEY_SAM3_FACE_CROP_FACES = "SAM3 Face Crop Faces"
 KEY_ANIMA38_STATUS = "Anima38"                          # v2 bundle / v1 adapter / bypass / off: <이유>
 ANIMA38_LEGACY_STATUS_KEYS = ("Anima 3.8B", "8B")       # 옛 키, Forge 파서가 '.' 에서 자른 이름
 KEY_PAG = "Anima Perturbation Guidance"                 # PAG/SEG/SLG 가 실제로 붙었을 때만 쓴다
@@ -163,6 +170,8 @@ CODE_FORGE_OPTION_FROZEN = "forge_option_frozen"      # 설정 잠금으로 거�
 # 단독 SAM3·Refine 의 원본 기준 요청(core/sam3_args.with_init_source) — denoise 0 부모 패스의 VAE 왕복 드리프트
 CODE_SAM3_SOURCE_UNSUPPORTED = "sam3_source_unsupported"   # 결과: 'SAM3 Source' 없음 — 이 sam-extra 는 요청을 모른다(정보)
 CODE_SAM3_SOURCE_FALLBACK = "sam3_source_fallback"         # 결과: 'output (<이유>)' — 요청했지만 부모 출력으로 돌았다(경고)
+CODE_SAM3_FACE_CROP_UNSUPPORTED = "sam3_face_crop_unsupported"   # 결과: 켰는데 'SAM3 Face Crop' 없음 — 전체 이미지에서 찾음(경고)
+CODE_SAM3_FACE_CROP_NO_FACES = "sam3_face_crop_no_faces"         # 결과: 'SAM3 Face Crop Faces: 0' — 얼굴이 없어 마스크 없음(경고)
 
 # SAM3 가 적용되지 않았다는 뜻인 알림 — 단독 SAM3/Refine 은 그 결과(원본 또는 VAE 왕복본)를 저장하지 않는다
 SAM3_FAILURE_CODES = (CODE_SAM3_ERROR, CODE_SAM3_NOT_APPLIED)
@@ -205,6 +214,9 @@ NOTICE_MIN_TTL_S = {
     # 원본 기준 SAM3 알림도 확장·설정이 그대로면 장마다 같다(배치 SAM3 100장이 30초마다 다시 띄우지 않게)
     CODE_SAM3_SOURCE_UNSUPPORTED: PRE_GENERATION_NOTICE_TTL_S,
     CODE_SAM3_SOURCE_FALLBACK: PRE_GENERATION_NOTICE_TTL_S,
+    # 얼굴 안에서만 찾기도 확장·모델·신뢰도가 그대로면 장마다 같다(얼굴 없는 이미지가 섞인 배치가 장마다 띄우지 않게)
+    CODE_SAM3_FACE_CROP_UNSUPPORTED: PRE_GENERATION_NOTICE_TTL_S,
+    CODE_SAM3_FACE_CROP_NO_FACES: PRE_GENERATION_NOTICE_TTL_S,
     # VAE DeGrid 도 모델·확장이 그대로면 장마다·요청마다 같다(배치 100장이 30초마다 다시 띄우지 않게)
     CODE_DEGRID_ERROR: PRE_GENERATION_NOTICE_TTL_S,
     CODE_DEGRID_NOT_APPLIED: PRE_GENERATION_NOTICE_TTL_S,
@@ -285,6 +297,8 @@ SAM3_SETTING_LABELS = {
     "sam3_cn_module": "ControlNet Module(전처리기)",
     "sam3_cn_control_mode": "ControlNet Control mode",
     "sam3_cn_resize_mode": "ControlNet Resize mode",
+    "sam3_face_crop_model": "얼굴 검출 모델",
+    "sam3_face_crop_confidence": "얼굴 검출 신뢰도",
 }
 # KeyError 값과 맞대 볼 SAM3 설정 (먼저 맞는 것)
 _KEYED_SETTINGS = ("sam3_cn_module", "sam3_cn_model", "sam3_sampler", "sam3_scheduler", "sam3_checkpoint")
@@ -491,6 +505,11 @@ class RequestedFeatures:
         return bool(self.anima38 is not None and self.anima38.enabled and not self.anima38.bypass)
 
     @property
+    def sam3_face_crop(self) -> bool:
+        """'얼굴 안에서만 찾기'를 켜고 보냈나 — 확장 Sam3Args 처럼 bool 로 읽는다(앱 build_state 는 켤 때만 키를 싣는다)."""
+        return _truthy((self.sam3_state or {}).get(sam3_args.FACE_CROP_KEY))
+
+    @property
     def sam3_init_source(self) -> bool:
         """원본 기준 SAM3 요청(단독 SAM3·Refine) — 확장 process() 와 같은 규칙(공백·대소문자 무시)."""
         value = (self.sam3_state or {}).get(sam3_args.SOURCE_STATE_KEY)
@@ -686,8 +705,13 @@ def _setting_label(key: str) -> str:
 # 'SAM3 Error' 원문의 종류 — 힌트 문구와 '다음 이미지도 같은 이유로 실패하는가'(배치 중단)를 함께 정한다.
 _ERR_VALIDATION, _ERR_OOM, _ERR_HF, _ERR_CHECKPOINT, _ERR_PACKAGE = "validation", "oom", "hf", "checkpoint", "package"
 _ERR_KEY, _ERR_DEVICE, _ERR_CONTROLNET, _ERR_OTHER = "key", "device", "controlnet", "other"
+# 얼굴 안에서만 찾기의 검출기를 쓸 수 없음(sam3ext/face_detect.py FaceDetectorUnavailable — 모델 파일 없음·ultralytics 없음·
+# ultralytics 가 받으려는 이름). 확장은 아무것도 받지 않는다.
+_ERR_FACE_DETECTOR = "face_detector"
+FACE_DETECTOR_ERROR = "FaceDetectorUnavailable"     # 'SAM3 Error' 원문 머리 — 확장은 f"{type(e).__name__}: {e}" 로 남긴다
 # 설정 값·설치 문제 — 같은 설정의 배치에서는 모든 이미지가 같게 실패한다
-_REPEATING_SAM3_ERRORS = frozenset({_ERR_VALIDATION, _ERR_HF, _ERR_CHECKPOINT, _ERR_PACKAGE, _ERR_KEY, _ERR_DEVICE})
+_REPEATING_SAM3_ERRORS = frozenset({_ERR_VALIDATION, _ERR_HF, _ERR_CHECKPOINT, _ERR_PACKAGE, _ERR_KEY, _ERR_DEVICE,
+                                    _ERR_FACE_DETECTOR})
 
 # HF 다운로드 실패만 — 숫자('401'·'403')나 'huggingface' 를 맨몸으로 찾으면 텐서 모양 [1, 4032, 256] 이나
 # HF 캐시 경로(.cache/huggingface/hub)가 든 체크포인트 로드 오류까지 '승인·로그인 필요'로 오해한다.
@@ -704,6 +728,10 @@ def _sam3_error_kind(reason: Any) -> tuple[str, str]:
     """'SAM3 Error' 원문 → (종류, KeyError 값). KeyError 가 아니면 값은 ''."""
     text = str(reason or "")
     lower = text.lower()
+    # 얼굴 검출기 문구가 먼저 — "the 'ultralytics' package is not installed" 를 SAM3 패키지(_ERR_PACKAGE)로,
+    # "model … not found" 를 체크포인트로 읽지 않게
+    if FACE_DETECTOR_ERROR.lower() in lower or lower.lstrip().startswith("face crop:"):
+        return _ERR_FACE_DETECTOR, ""
     if "validation error" in lower:
         return _ERR_VALIDATION, ""
     if "out of memory" in lower or "outofmemory" in lower:
@@ -730,6 +758,8 @@ def sam3_error_hint(reason: str, state: Optional[Mapping] = None) -> str:
     text = str(reason or "")
     state = state or {}
     kind, value = _sam3_error_kind(text)
+    if kind == _ERR_FACE_DETECTOR:
+        return face_detector_hint(text, state)
     if kind == _ERR_VALIDATION:
         fields = [f for f in dict.fromkeys(_SAM3_FIELD_RE.findall(text))]
         labels = ", ".join(_setting_label(f) for f in fields) or "SAM3 카드의 값"
@@ -755,6 +785,20 @@ def sam3_error_hint(reason: str, state: Optional[Mapping] = None) -> str:
     if kind == _ERR_CONTROLNET:
         return "SAM3 ControlNet 설정(Model·Module) — Forge 의 ControlNet 목록에 있는 이름인지 확인하세요"
     return "Forge 콘솔의 '[-] SAM3: failed' 줄에서 원인을 확인하세요"
+
+
+def face_detector_hint(reason: str, state: Optional[Mapping] = None) -> str:
+    """'SAM3 Error: FaceDetectorUnavailable: face crop: …' → 확인할 것(한 문장). 확장 sam3ext/face_detect.py 의 문구 셋을 가른다."""
+    lower = str(reason or "").lower()
+    model = str((state or {}).get(sam3_args.FACE_CROP_MODEL_KEY) or sam3_args.FACE_CROP_DEFAULT_MODEL).strip()
+    if "ultralytics" in lower and "not installed" in lower:
+        return ("Forge venv 에 ultralytics 가 없습니다 — ADetailer 확장을 설치하면 함께 깔립니다"
+                "('얼굴 안에서만 찾기'를 끄면 SAM3 는 예전처럼 돕니다)")
+    if "would rename" in lower:
+        return (f"ultralytics 가 얼굴 검출 모델 '{model}' 의 이름을 바꿔 받으려 합니다 — 파일 이름을 바꾸거나 "
+                "'얼굴 검출 모델'에서 다른 파일을 고르세요(확장은 받지 않습니다)")
+    return (f"얼굴 검출 모델 '{model}' 이(가) Forge models/adetailer 에 없습니다 — ADetailer 가 쓰는 그 폴더에 두거나 "
+            "SAM3 설정의 '얼굴 검출 모델'에서 다른 파일을 고르세요(확장은 받지 않습니다)")
 
 
 def anima38_off_hint(status: str, *, kind: Optional[str] = None) -> str:
@@ -846,6 +890,43 @@ def _sam3_source_notices(images: Sequence[Mapping]) -> list[Notice]:
             f"바뀔 수 있습니다{' — ' + hint if hint else ''}. (이유: {_short(reason, 120)})",
             feature="sam3", detail=f"{SAM3_SOURCE_OUTPUT_NOTE} ({kind})", hint=hint))
     return out
+
+
+def _sam3_face_crop_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
+    """'얼굴 안에서만 찾기'를 켜고 보낸 SAM3 의 결과 — SAM3 가 적용된 장('SAM3 Enable')에서만 본다(실패는 'SAM3 Error' 알림).
+
+    - 'SAM3 Face Crop' 이 어느 장에도 없다: 키를 모르는 sam-extra(0.33.x 이하 — process() 가 모르는 키를 조용히 버린다)이거나
+      업데이트 뒤 Reload UI 만 한 Forge(옛 모듈이 남아 얼굴 crop 없이 돈다) — SAM3 가 전체 이미지에서 찾았다(경고).
+    - 'SAM3 Face Crop Faces: 0': 그 장에서 얼굴을 찾지 못해 마스크가 없다 — 이미지 그대로(확장의 '검출 없음' 처리, 경고).
+      모델·신뢰도는 그 장의 기록(없으면 보낸 값)으로 보인다.
+    """
+    applied = [p for p in images if _truthy(p.get(KEY_SAM3_ENABLE))]
+    if not applied:
+        return []
+    if not any(KEY_SAM3_FACE_CROP in p for p in applied):
+        return [Notice(
+            CODE_SAM3_FACE_CROP_UNSUPPORTED, LEVEL_WARNING,
+            "'얼굴 안에서만 찾기'를 켰지만 결과에 'SAM3 Face Crop' 기록이 없습니다 — 연결된 sam-extra 가 0.34.0 보다 "
+            "오래됐거나 업데이트 뒤 Forge 를 완전히 다시 시작하지 않아(Reload UI 만으로는 옛 모듈이 남습니다) SAM3 가 전체 "
+            "이미지에서 찾았습니다.",
+            feature="sam3", detail=KEY_SAM3_FACE_CROP)]
+    total = len(applied)
+    empty = [p for p in applied if _number(p.get(KEY_SAM3_FACE_CROP_FACES)) == 0]
+    if not empty:
+        return []
+    state = request.sam3_state or {}
+    model = str(empty[0].get(KEY_SAM3_FACE_CROP_MODEL) or state.get(sam3_args.FACE_CROP_MODEL_KEY)
+                or sam3_args.FACE_CROP_DEFAULT_MODEL).strip()
+    confidence = _number(empty[0].get(KEY_SAM3_FACE_CROP_CONFIDENCE))
+    if confidence is None:
+        confidence = _number(state.get(sam3_args.FACE_CROP_CONFIDENCE_KEY))
+    shown = f"{confidence:g}" if confidence is not None else "?"
+    scope = f"{len(empty)}/{total}장에서 " if total > 1 else ""
+    return [Notice(
+        CODE_SAM3_FACE_CROP_NO_FACES, LEVEL_WARNING,
+        f"'얼굴 안에서만 찾기'가 {scope}얼굴을 찾지 못해 SAM3 마스크가 없습니다(그 이미지는 SAM3 없이 그대로) — 얼굴 검출 "
+        f"모델 '{model}' · 신뢰도 {shown}. 신뢰도를 낮추거나, 얼굴 밖에서 찾을 대상이면 '얼굴 안에서만 찾기'를 끄세요.",
+        feature="sam3", detail=f"{model}|{shown}")]
 
 
 def _dora_result_notices(request: RequestedFeatures, images: Sequence[Mapping]) -> list[Notice]:
@@ -1460,6 +1541,8 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
     elif request.sam3 and request.sam3_init_source:
         # 단독 SAM3·Refine 의 원본 기준 요청 — SAM3 가 적용된 결과에서만(실패는 위 두 알림이 말한다)
         out.extend(_sam3_source_notices(images))
+    if not errors and request.sam3 and request.sam3_face_crop:
+        out.extend(_sam3_face_crop_notices(request, images))
 
     # Anima 3.8B — 'off: …' 는 3.8B 가 켜져야 했을 때(v2 번들 또는 명시적으로 켬)만 남는다.
     statuses = [_anima38_status(p) for p in images]
@@ -1982,6 +2065,9 @@ __all__ = [
     "CODE_LORA_SPARSE_GUESS", "CODE_PAG_DROPPED", "CODE_PROPAGATION_DROPPED", "CODE_PROPAGATION_RETRIED",
     "CODE_REQUEST_REJECTED", "CODE_SAM3_ERROR", "CODE_SAM3_HF_DOWNLOAD", "CODE_SAM3_NOT_APPLIED",
     "CODE_SAM3_SOURCE_FALLBACK", "CODE_SAM3_SOURCE_UNSUPPORTED",
+    "CODE_SAM3_FACE_CROP_NO_FACES", "CODE_SAM3_FACE_CROP_UNSUPPORTED", "FACE_DETECTOR_ERROR",
+    "KEY_SAM3_FACE_CROP", "KEY_SAM3_FACE_CROP_CONFIDENCE", "KEY_SAM3_FACE_CROP_FACES", "KEY_SAM3_FACE_CROP_MODEL",
+    "face_detector_hint",
     "CODE_SCRIPT_MISSING", "CODE_SPEED_FALLBACK", "CODE_SPEED_INVALID", "CODE_SPEED_NOT_APPLIED",
     "CODE_SPEED_SKIPPED", "CODE_XSCHED_INVALID_TEXT", "CODE_XSCHED_NOT_APPLIED", "INFO_KEY", "KEY_ANIMA38_STATUS", "KEY_PAG", "KEY_SAM3_ENABLE", "KEY_SAM3_ERROR",
     "KEY_DEGRID_ERROR", "KEY_DEGRID_MODEL", "KEY_SAM3_SOURCE", "KEY_SAM3_VERSION", "KEY_SPARSE_LORA_GUESS", "LEVEL_ERROR", "LEVEL_INFO", "LEVEL_WARNING", "NOTICE_MIN_TTL_S",

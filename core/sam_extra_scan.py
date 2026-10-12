@@ -140,6 +140,9 @@ class ScriptInfo:
     # 모드별 {False: txt2img, True: img2img} — ui() 의 모든 return 갈래를 is_img2img 로 풀어 읽는다(_ui_returns).
     ui_returns: dict | None = None
     ui_components_by_mode: dict | None = None
+    # show() 가 AlwaysVisible 인 모드 (False = txt2img, True = img2img) — 대부분 둘 다. ``False if is_img2img else
+    # scripts.AlwaysVisible`` 는 txt2img 만(script-info 에도 txt2img 항목만 나온다 — always_visible_modes).
+    modes: tuple = (False, True)
 
 
 # ── 소스 해석 ────────────────────────────────────────────────────────────────
@@ -439,8 +442,12 @@ class ExtensionSource:
         return None
 
     def _for_envs(self, path: Path, loop: ast.For, depth) -> list[dict[str, ast.AST]]:
-        """``for a, b in ((x, y), (z, w))`` → [{a: x, b: y}, {a: z, b: w}]. 풀 수 없으면 []."""
-        iterable = loop.iter
+        """``for a, b in ((x, y), (z, w))`` → [{a: x, b: y}, {a: z, b: w}]. 풀 수 없으면 [].
+
+        dict 리터럴(지역·모듈 이름 하나에 한 번 대입)을 도는 루프도 푼다 — ``for key, opt in options.items()`` 는
+        (키, 값) 쌍, ``options.keys()``·``for key in options`` 는 키(sam-extra 0.34.0 의 내장 tagcomplete 가 ``tac_*``
+        옵션 54개를 dict 하나로 모아 ``add_option(key, opt)`` 로 등록한다)."""
+        iterable = self._dict_iteration(path, loop) or loop.iter
         if isinstance(iterable, ast.Name):
             iterable = self.bindings(path).get(iterable.id, iterable)
         if not isinstance(iterable, (ast.Tuple, ast.List)):
@@ -459,6 +466,42 @@ class ExtensionSource:
             else:
                 return []
         return envs
+
+    def _dict_literal(self, path: Path, node: ast.AST, name: str) -> ast.Dict | None:
+        """``name`` 이 ``node`` 를 감싼 함수의 지역(없으면 모듈) 이름이고 문자열 키만 가진 dict 리터럴 하나에 묶였으면 그 dict."""
+        scope = self.enclosing_function(path, node)
+        values = []
+        if scope is not None:
+            values = [n.value for n in _walk_scope(scope) if isinstance(n, ast.Assign) and len(n.targets) == 1
+                      and isinstance(n.targets[0], ast.Name) and n.targets[0].id == name]
+        if not values:
+            bound = self.bindings(path).get(name)
+            values = [bound] if bound is not None else []
+        if len(values) != 1 or not isinstance(values[0], ast.Dict):
+            return None
+        literal = values[0]
+        if not all(isinstance(key, ast.Constant) and isinstance(key.value, str) for key in literal.keys):
+            return None   # ``**other`` 펼치기·계산한 키는 따라가지 않는다
+        return literal
+
+    def _dict_iteration(self, path: Path, loop: ast.For) -> ast.List | None:
+        """dict 리터럴을 도는 ``for`` 의 반복 값(``.items()`` 면 (키, 값) 튜플, 그 밖엔 키)을 리스트 노드로. 아니면 None."""
+        iterable = loop.iter
+        mode = "keys"
+        if (isinstance(iterable, ast.Call) and isinstance(iterable.func, ast.Attribute) and not iterable.args
+                and not iterable.keywords and iterable.func.attr in ("items", "keys")):
+            mode = iterable.func.attr
+            iterable = iterable.func.value
+        if not isinstance(iterable, ast.Name):
+            return None
+        literal = self._dict_literal(path, loop, iterable.id)
+        if literal is None:
+            return None
+        if mode == "items":
+            elts = [ast.Tuple(elts=[key, value], ctx=ast.Load()) for key, value in zip(literal.keys, literal.values)]
+        else:
+            elts = list(literal.keys)
+        return ast.List(elts=elts, ctx=ast.Load())
 
     def _module_of_expr(self, path: Path, node: ast.AST) -> str | None:
         """``alias`` 또는 ``a.b.c`` 가 확장 안의 모듈을 가리키면 그 절대 이름."""
@@ -587,6 +630,7 @@ class ExtensionSource:
                     ui_components=by_mode[False] if common else None,
                     ui_returns=ui_returns,
                     ui_components_by_mode=by_mode,
+                    modes=always_visible_modes(show),
                 )
         return found
 
@@ -696,6 +740,17 @@ class ExtensionSource:
                 for key, _env in self._resolve_arg(path, call, 0, "key", "옵션 키", report=False):
                     found[key] = dict(attrs)
                 continue
+            if isinstance(info, ast.Name):
+                # 루프 변수(dict 리터럴의 값 — 반복마다 다른 OptionInfo) 또는 지역 OptionHTML(안내 줄)
+                html = self._option_html(path, info, scope)
+                for key, env in self._resolve_arg(path, call, 0, "key", "옵션 키", report=False):
+                    value = _strip_option_chain(env.get(info.id)) if info.id in env else None
+                    if isinstance(value, ast.Call) and _call_name(value.func) == "OptionInfo":
+                        found[key] = self._option_info_attrs(path, value, scope, {})
+                    elif html:
+                        found[key] = {"file": self.rel(path), "default": None, "component": "HTML", "infotext": "",
+                                      "onchange": False, "choices": ()}
+                continue
             helper = self._option_helper(path, info)
             if helper is None:
                 continue
@@ -710,6 +765,28 @@ class ExtensionSource:
                         for field, value in attrs.items()}
                 found[key] = merged
         return found
+
+    def _option_html(self, path: Path, name: ast.Name, scope) -> bool:
+        """``name`` 이 지역에서 한 번 ``OptionHTML(…)``(또는 ``getattr(shared, "OptionHTML", …)`` 별칭 호출)로 정해졌나.
+
+        Forge 의 ``shared.OptionHTML(text)`` 는 설정 화면의 안내 줄(gr.HTML, 값 없음)이다 — 확장은 없는 판을 위해
+        ``option_html = getattr(shared, "OptionHTML", None)`` 로 받아 부른다(sam3ext/tagcomplete/coexist.py)."""
+        if scope is None:
+            return False
+        assigned = [n.value for n in _walk_scope(scope) if isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Name) and n.targets[0].id == name.id]
+        if len(assigned) != 1 or not isinstance(assigned[0], ast.Call):
+            return False
+        func = assigned[0].func
+        if _call_name(func) == "OptionHTML":
+            return True
+        if not isinstance(func, ast.Name):
+            return False
+        alias = [n.value for n in _walk_scope(scope) if isinstance(n, ast.Assign) and len(n.targets) == 1
+                 and isinstance(n.targets[0], ast.Name) and n.targets[0].id == func.id]
+        return (len(alias) == 1 and isinstance(alias[0], ast.Call) and isinstance(alias[0].func, ast.Name)
+                and alias[0].func.id == "getattr" and len(alias[0].args) >= 2
+                and isinstance(alias[0].args[1], ast.Constant) and alias[0].args[1].value == "OptionHTML")
 
     def _option_info_attrs(self, path: Path, info: ast.Call, scope, env: Mapping[str, ast.AST]) -> dict:
         """``OptionInfo(…)`` 호출 하나의 속성(``option_infos`` 참고). ``env`` 는 도우미 매개변수 → 호출 인자 값."""
@@ -1039,8 +1116,37 @@ def _option_choices(component_args: ast.AST | None, value_of) -> tuple | None:
 
 
 def _is_always_visible(node: ast.AST | None) -> bool:
+    """``scripts.AlwaysVisible`` — 조건식이면 어느 갈래든(``False if is_img2img else scripts.AlwaysVisible`` 는 txt2img 에서만
+    always-on 이다 — sam-extra 0.34.0 scripts/layout_unload_models.py ``UnloadModelsReload``. 모드별로 나오는지는
+    ``always_visible_modes`` 가 가른다)."""
+    if isinstance(node, ast.IfExp):
+        return _is_always_visible(node.body) or _is_always_visible(node.orelse)
     return (isinstance(node, ast.Attribute) and node.attr == "AlwaysVisible") or (
         isinstance(node, ast.Name) and node.id == "AlwaysVisible")
+
+
+def always_visible_modes(show: ast.AST | None) -> tuple[bool, ...]:
+    """``show(self, is_img2img)`` 가 AlwaysVisible 을 돌려주는 모드 (False = txt2img, True = img2img), 정렬된 튜플.
+
+    조건식 ``A if is_img2img else B``·``A if not is_img2img else B`` 만 모드별로 가른다. 그 밖의 return(또는 모르는
+    조건)은 두 모드 모두로 본다 — 예전 판정과 같다."""
+    modes: set = set()
+    returns = [r for r in _walk_scope(show) if isinstance(r, ast.Return)] if show is not None else []
+    for ret in returns:
+        value = ret.value
+        if isinstance(value, ast.IfExp):
+            test, flip = value.test, False
+            if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+                test, flip = test.operand, True
+            if isinstance(test, ast.Name) and test.id == "is_img2img":
+                if _is_always_visible(value.body):
+                    modes.add(not flip)
+                if _is_always_visible(value.orelse):
+                    modes.add(flip)
+                continue
+        if _is_always_visible(value):
+            modes.update(UI_MODES)
+    return tuple(sorted(modes))
 
 
 UI_MODES = (False, True)   # ui(self, is_img2img) 의 두 호출 — txt2img, img2img

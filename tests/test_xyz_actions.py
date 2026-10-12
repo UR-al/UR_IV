@@ -84,6 +84,17 @@ class XYZActionTests(unittest.TestCase):
             self.assertIs(captured, backend)
             self.assertTrue(payload["alwayson_scripts"]["test"]["args"][0])
 
+    def test_text_encoder_choices_and_selection_come_from_the_te_chips(self):
+        actions = XYZActionsMixin()
+        actions.vue_bridge = SimpleNamespace(last_widget_property=lambda wid, prop: (
+            ["te_a.safetensors", "", "te_b.safetensors"] if (wid, prop) == ("te_main_input", "items") else None))
+        actions.te_main_input = SimpleNamespace(text=lambda: " te_a.safetensors , ")
+        self.assertEqual(actions._xyz_text_encoder_choices(), ("te_a.safetensors", "te_b.safetensors"))
+        self.assertEqual(actions._xyz_text_encoder_selection(), ["te_a.safetensors"])
+        self.assertEqual(actions._xyz_context()["text_encoders"], ("te_a.safetensors", "te_b.safetensors"))
+        bare = XYZActionsMixin()      # 위젯이 없는 호스트(테스트 대역·초기화 전) — 축 없음
+        self.assertEqual((bare._xyz_text_encoder_choices(), bare._xyz_text_encoder_selection()), ((), []))
+
 
 if __name__ == "__main__":
     unittest.main()

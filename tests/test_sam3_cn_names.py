@@ -235,7 +235,8 @@ class BuildStateTests(unittest.TestCase):
 
     def test_state_keys_unchanged(self):
         state = sam3_args.build_state({}, capabilities=live_capabilities())
-        self.assertEqual(set(state) - {"sam3_enable", "enabled"}, set(sam3_args.SAM3_KEYS))
+        # 얼굴 안에서만 찾기 세 키는 켤 때만 보낸다(sam3_args.apply_face_crop) — 끈 state 는 예전 키 그대로
+        self.assertEqual(set(state) - {"sam3_enable", "enabled"}, set(sam3_args.SAM3_KEYS) - set(sam3_args.FACE_CROP_KEYS))
 
 
 # (이름, 채널, Tile & Repair) — 확장 tests/test_sam3_cn_lllite.py NameTests.CASES ·

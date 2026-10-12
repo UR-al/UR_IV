@@ -68,6 +68,18 @@ def _as_text(value, default: str) -> str:
 #   - sam3_inpainting_fill : UI 'original' / API 'latent noise')
 _INT_MAX = 1 << 30
 
+# '얼굴 안에서만 찾기'(sam-extra 0.34.0 — face_yolov8 얼굴 상자를 넓힌 정사각 crop 안에서만 SAM3). Sam3Args 의 맨 뒤 세
+# 필드이고 확장도 키가 없으면 꺼짐으로 예전과 같다. 앱은 **켰을 때만** 셋을 보낸다(build_state) — 끄면 요청이 0.34.0
+# 전과 바이트 단위로 같다. 기본값은 확장 sam3ext/face_detect.py DEFAULT_MODEL·DEFAULT_CONFIDENCE(SEMANTIC_PINS
+# sam3_face_crop_default_*). ≤ 0.33.1 확장은 process() 가 아는 키만 골라 이 키를 조용히 버린다 — 결과 알림이
+# 'SAM3 Face Crop' 기록이 없는 것으로 알린다(core/sam_extra_notices).
+FACE_CROP_KEY = 'sam3_face_crop'
+FACE_CROP_MODEL_KEY = 'sam3_face_crop_model'
+FACE_CROP_CONFIDENCE_KEY = 'sam3_face_crop_confidence'
+FACE_CROP_KEYS = (FACE_CROP_KEY, FACE_CROP_MODEL_KEY, FACE_CROP_CONFIDENCE_KEY)
+FACE_CROP_DEFAULT_MODEL = 'face_yolov8n.pt'
+FACE_CROP_DEFAULT_CONFIDENCE = 0.3
+
 SAM3_SPEC = (
     ('sam3_mode',                       _C, 'Inpaint',    ('Mask only', 'Inpaint')),
     ('sam3_mask_mode',                  _C, 'Individual', ('Combined', 'Individual')),
@@ -123,6 +135,10 @@ SAM3_SPEC = (
     ('sam3_cn_processor_res',           _I, 512,          (0, _INT_MAX)),
     ('sam3_cn_threshold_a',             _F, -1.0,         (-1e9, 1e9)),
     ('sam3_cn_threshold_b',             _F, -1.0,         (-1e9, 1e9)),
+    # ── 얼굴 안에서만 찾기 (맨 뒤 — 켤 때만 보낸다: FACE_CROP_KEYS, core/sam3_face_crop 이 위젯·저장 표)
+    (FACE_CROP_KEY,                     _B, False,        None),
+    (FACE_CROP_MODEL_KEY,               _T, FACE_CROP_DEFAULT_MODEL, None),
+    (FACE_CROP_CONFIDENCE_KEY,          _F, FACE_CROP_DEFAULT_CONFIDENCE, (0.0, 1.0)),
 )
 
 SAM3_KEYS = tuple(key for key, _k, _d, _e in SAM3_SPEC)
@@ -172,6 +188,21 @@ def default_settings() -> dict:
     return {key: default for key, _k, default, _e in SAM3_SPEC}
 
 
+def apply_face_crop(state: dict) -> dict:
+    """'얼굴 안에서만 찾기' 세 키를 확장 규칙으로 맞춘다(제자리) — 끄면 셋을 빼고, 켜면 빈 모델을 기본 모델로.
+
+    끈 요청은 0.34.0 전 요청과 바이트 단위로 같아야 한다(키가 없으면 확장도 꺼짐). 켠 요청의 모델 이름은 확장
+    ``Sam3Args._normalise_face_crop_model`` 처럼 앞뒤 공백을 떼고 비면 기본 모델이다. 신뢰도는 SAM3_SPEC 범위(0–1)로
+    이미 잘려 있다(확장 _NUMERIC_BOUNDS 와 같다).
+    """
+    if not state.get(FACE_CROP_KEY):
+        for key in FACE_CROP_KEYS:
+            state.pop(key, None)
+        return state
+    state[FACE_CROP_MODEL_KEY] = str(state.get(FACE_CROP_MODEL_KEY) or '').strip() or FACE_CROP_DEFAULT_MODEL
+    return state
+
+
 def build_state(settings=None, *, prompt: str = '', negative_prompt: str = '',
                 capabilities=None) -> dict:
     """SAM3 alwayson state dict 생성.
@@ -205,6 +236,8 @@ def build_state(settings=None, *, prompt: str = '', negative_prompt: str = '',
     # detect prompt는 비면 확장이 'face'로 되돌리므로 여기서도 동일하게 보정
     if not str(state['sam3_prompt']).strip():
         state['sam3_prompt'] = 'face'
+
+    apply_face_crop(state)
 
     if not str(state['sam3_inpaint_prompt']).strip() and prompt:
         state['sam3_inpaint_prompt'] = prompt

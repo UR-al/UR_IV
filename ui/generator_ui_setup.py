@@ -464,6 +464,11 @@ class UISetupMixin:
             'cn_processor_res': LineEditProxy(b, '_sam3_cn_processor_res'),
             'cn_threshold_a': LineEditProxy(b, '_sam3_cn_threshold_a'),
             'cn_threshold_b': LineEditProxy(b, '_sam3_cn_threshold_b'),
+            # 얼굴 안에서만 찾기(sam-extra 0.34.0) 3필드 — 표·기본값은 core/sam3_face_crop. 모델은 ADetailer 목록을
+            # 추천(items)으로 받는 자유 입력(목록 밖 파일 이름도 그대로 보낸다)
+            'face_crop': CheckBoxProxy(b, '_sam3_face_crop'),
+            'face_crop_model': LineEditProxy(b, '_sam3_face_crop_model'),
+            'face_crop_confidence': LineEditProxy(b, '_sam3_face_crop_confidence'),
         }
         self.sam3_widgets['threshold'].setText('0.40')
         self.sam3_widgets['mask_dilation'].setText('0')
@@ -487,6 +492,9 @@ class UISetupMixin:
         # 선택지를 getProperty(id, 'items') 로 읽는다.
         from core.sam3_controlnet import init_widgets as _init_sam3_cn_widgets
         _init_sam3_cn_widgets(self.sam3_widgets)
+        # 얼굴 안에서만 찾기 — 기본 꺼짐·face_yolov8n.pt·0.3 (확장 sam3ext/face_detect.py 기본값, core/sam3_face_crop)
+        from core.sam3_face_crop import init_widgets as _init_sam3_face_crop_widgets
+        _init_sam3_face_crop_widgets(self.sam3_widgets)
 
         # ── Anima Guidance Suite (PAG/SEG/SLG · APG/CWM/SMC · Skimmed · DCW/RDC/DAVE/CNS
         #    · Detail Daemon · Modulation). 위치 인자 계약은 core/anima_guidance.py 참조.

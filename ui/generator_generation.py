@@ -959,6 +959,7 @@ class GenerationMixin:
 
     def _build_sam3_settings(self, payload):
         """SAM3 설정 딕셔너리 생성"""
+        from core.sam3_face_crop import settings_to_state as _sam3_face_crop_settings
         widgets = getattr(self, 'sam3_widgets', None)
         if not widgets:
             return None
@@ -1035,6 +1036,8 @@ class GenerationMixin:
             "sam3_cn_processor_res": _int(widgets['cn_processor_res'], 512),
             "sam3_cn_threshold_a": _float(widgets['cn_threshold_a'], -1.0),
             "sam3_cn_threshold_b": _float(widgets['cn_threshold_b'], -1.0),
+            # ── 얼굴 안에서만 찾기 (sam-extra 0.34.0) — 끄면 build_state 가 세 키를 뺀다(요청이 예전과 같다)
+            **_sam3_face_crop_settings(widgets),
         }
 
     def _build_anima_settings(self) -> dict:

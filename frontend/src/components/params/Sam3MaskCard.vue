@@ -36,6 +36,8 @@
     <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_preview_overlay === 'true'" @update:model-value="storeWidgets._sam3_preview_overlay = $event ? 'true' : 'false'" size="sm" /><span>Replace output with overlay preview</span></label>
     <label class="ext-check-row"><ToggleSwitch :model-value="storeWidgets._sam3_save_artifacts === 'true'" @update:model-value="storeWidgets._sam3_save_artifacts = $event ? 'true' : 'false'" size="sm" /><span>Save mask/overlay artifacts</span></label>
     <label class="ext-check-row" title="검출 직후 SAM3(~3.5GB) VRAM 회수 — 16GB GPU 권장"><ToggleSwitch :model-value="storeWidgets._sam3_unload_after === 'true'" @update:model-value="storeWidgets._sam3_unload_after = $event ? 'true' : 'false'" size="sm" /><span>Unload SAM3 from VRAM after detection (~3.5GB)</span></label>
+    <!-- 얼굴 안에서만 찾기 (sam-extra 0.34.0) — _sam3_face_crop* 3필드, Refine·배치 SAM3 와 같은 줄 -->
+    <Sam3FaceCropFields :widgets="storeWidgets" />
 
     <!-- 인페인트 하위 섹션 -->
     <details class="ext-card" open style="margin-top:8px">
@@ -91,10 +93,12 @@
 /**
  * 파라미터 열 — SAM3 Mask 카드(Forge Neo SAM3 확장과 1:1, _sam3_* 위젯). App.vue 에서 추출(App.vue 분할 ④).
  * ControlNet 13필드는 Sam3ControlNetPanel(RefinePanel · BatchView 와 같은 컴포넌트)이 그린다.
+ * '얼굴 안에서만 찾기'(sam-extra 0.34.0) 3필드는 Sam3FaceCropFields(같은 세 화면 공용)가 그린다.
  */
 import CustomSelect from '../CustomSelect.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
 import Sam3ControlNetPanel from '../Sam3ControlNetPanel.vue'
+import Sam3FaceCropFields from '../Sam3FaceCropFields.vue'
 import { useWidgetStore } from '../../stores/widgetStore.js'
 import { SAM3_DEVICE_ITEMS, SAM3_FILL_ITEMS, useParamItems } from '../../composables/useParamItems'
 import { widgetFlag } from '../../composables/widgetFlag'

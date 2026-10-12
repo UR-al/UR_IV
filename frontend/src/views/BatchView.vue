@@ -296,6 +296,8 @@
           <label class="ad-toggle"><input type="checkbox" v-model="sam3SaveArtifacts" /><span>Artifacts 저장</span></label>
           <label class="ad-toggle" title="검출 직후 SAM3(~3.5GB) VRAM 회수 — 16GB GPU 권장">
             <input type="checkbox" v-model="sam3UnloadAfter" /><span>검출 후 SAM3 VRAM 해제</span></label>
+          <!-- 얼굴 안에서만 찾기 (sam-extra 0.34.0) — T2I SAM3 카드·Refine 과 같은 줄 -->
+          <Sam3FaceCropFields :widgets="sam3FaceCrop" class="sam3-face-crop" />
           <!-- ControlNet 13필드 — T2I·Refine 과 같은 패널 (예전엔 배치 SAM3 에 CN 이 아예 없었다) -->
           <Sam3ControlNetPanel :widgets="sam3Cn" class="sam3-cn" />
         </div>
@@ -472,11 +474,13 @@ import { droppedImagePaths, newPaths } from '../utils/dropPaths'
 import { appendPromptText } from '../utils/promptComments'
 import { jobPercent, jobProgressText, parseBatchJobState } from '../utils/batchJobState'
 import { sam3CnDefaults, sam3CnSettings } from '../utils/sam3ControlNet'
+import { sam3FaceCropDefaults, sam3FaceCropSettings } from '../utils/sam3FaceCrop'
 import { createExifWarningNotice } from '../utils/exifWarningNotice'
 import { createSam3ErrorToasts, sam3ResultOutcome } from '../utils/sam3BatchResult'
 import { useUpscalerDegridWarning } from '../composables/useUpscalerDegridWarning'
 import CustomSelect from '../components/CustomSelect.vue'
 import Sam3ControlNetPanel from '../components/Sam3ControlNetPanel.vue'
+import Sam3FaceCropFields from '../components/Sam3FaceCropFields.vue'
 import type {
   ActionName,
   ActionPayload,
@@ -1326,6 +1330,8 @@ const sam3RestoreFace = ref(false)
 const sam3UnloadAfter = ref(true)
 // ControlNet 13필드 (widget id 키 로컬 상태 — utils/sam3ControlNet)
 const sam3Cn = reactive(sam3CnDefaults())
+// 얼굴 안에서만 찾기 3필드 (widget id 키 로컬 상태 — utils/sam3FaceCrop, 기본 꺼짐)
+const sam3FaceCrop = reactive(sam3FaceCropDefaults())
 const sam3CurrentIdx = ref(-1)
 const sam3Preview = ref('')
 const sam3Before = ref('')
@@ -1385,6 +1391,8 @@ function _sam3Settings() {
     sam3_unload_after: sam3UnloadAfter.value,
     // ControlNet 주입 (sam3_cn_* 13필드)
     ...sam3CnSettings(sam3Cn),
+    // 얼굴 안에서만 찾기 (sam3_face_crop* — 끄면 백엔드 build_state 가 빼고 보낸다)
+    ...sam3FaceCropSettings(sam3FaceCrop),
     use_exif_prompt: sam3UseExifPrompt.value,
     // 부모 i2i 샘플링 파라미터 (Forge 현재 UI 값에 좌우되지 않게)
     steps: sam3Steps.value,
@@ -1737,6 +1745,7 @@ onUnmounted(() => {
   overflow: hidden; text-overflow: ellipsis; word-break: break-all;
 }
 .sam3-cn { margin-top: 6px; }
+.sam3-face-crop { margin-top: 2px; }
 /* 주 버튼: 면은 --accent-fill(글자가 4.5:1 로 읽히게 민 값), 글자는 --on-accent */
 .btn-start {
   padding: 10px; background: var(--accent-fill); border: none; border-radius: 8px;

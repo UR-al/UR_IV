@@ -23,6 +23,7 @@ from core import anima_speed
 from core import colorcraft
 from core import extra_samplers
 from core import extra_schedulers
+from core import sam3_args
 from core import vae_degrid
 from core.comfy_node_classes import (
     CHECKPOINT_LOADER_NODES,
@@ -967,6 +968,7 @@ class ComfyWorkflowCompiler:
         state = self._sam3_state(payload)
         if state is None:
             raise WorkflowCompileError("활성화된 SAM3 Mask 설정이 없습니다.")
+        self._reject_sam3_face_crop(state)
         local_payload = copy.deepcopy(dict(payload))
         local_scripts = copy.deepcopy(dict(local_payload.get("alwayson_scripts") or {}))
         for name in list(local_scripts):
@@ -2529,6 +2531,7 @@ class ComfyWorkflowCompiler:
 
         sam_state = self._sam3_state(payload)
         if sam_state is not None:
+            self._reject_sam3_face_crop(sam_state)
             state = dict(sam_state)
             # Forge SAM3: its own seed only with "use seed" on (-1 = random);
             # otherwise the image's seed.  One value for mask metadata and
@@ -4610,6 +4613,19 @@ class ComfyWorkflowCompiler:
         state = args[0]
         enabled = state.get("sam3_enable", state.get("enabled", True))
         return state if _bool(enabled, True) else None
+
+    @staticmethod
+    def _reject_sam3_face_crop(state: Mapping[str, Any]) -> None:
+        """SAM3 '얼굴 안에서만 찾기'(sam-extra 0.34.0 — face_yolov8 얼굴 crop 안에서만 SAM3)는 아직 팩 노드에 없다.
+
+        조용히 빼면 SAM3 가 전체 이미지에서 찾아 얼굴 밖의 같은 대상까지 인페인트한다 — ADetailer 의 표현할 수 없는 설정
+        (_validate_adetailer_slot)처럼 컴파일을 멈춘다. 끈 요청은 state 에 키가 없다(core/sam3_args.apply_face_crop).
+        """
+        if _bool(state.get(sam3_args.FACE_CROP_KEY)):
+            raise WorkflowCompileError(
+                "SAM3 '얼굴 안에서만 찾기'(face crop)는 아직 ComfyUI 노드로 표현할 수 없습니다 — SAM3 설정에서 끄거나 "
+                "Forge(sam-extra 0.34.0 이상)에서 생성하세요."
+            )
 
     def _sam3_cache_model(self, state: Mapping[str, Any]) -> bool:
         """``ForgeNeoSAM3Mask.cache_model`` with Forge's bundle-keeping rules.

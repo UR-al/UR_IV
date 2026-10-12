@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.33.1"
+EXT_VERSION_AUDITED = "0.34.0"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -136,7 +136,30 @@ EXT_VERSION_AUDITED = "0.33.1"
 # Linear Quadratic 안내)다. 계약 테스트는 설치된 확장(feat b04ff89 — 643e911 과 트리 같음)으로 엄격 모드에서 돌렸다.
 # 픽스처(tests/fixtures/sam_extra_script_info.json)는 2026-10-05 테스트 Forge(7862)의 0.33.1(b04ff89)에서 읽기 전용 GET 으로
 # 다시 받았다 — 머리(captured_at·ext_version·commit)만 바뀌고 스크립트 16개·항목 32개는 그대로다.
-EXT_COMMIT_AUDITED = "643e9118d61c7aba20fdb173dad63c935f95af0b"
+# 2026-10-12 v0.34.0(feat 659d354, master 머지 36f18af — 트리 같음, 태그 v0.34.0): 다섯 갈래.
+# (1) SAM3 '얼굴 안에서만 찾기' — Sam3Args 맨 뒤 세 키 sam3_face_crop(False)·sam3_face_crop_model('face_yolov8n.pt')·
+#     sam3_face_crop_confidence(0.3, 0–1). 앱은 SAM3_SPEC 에 더하고 **켤 때만** 보낸다(core/sam3_args.apply_face_crop — 끈 요청은
+#     예전과 바이트 단위로 같다, SAM3_OPT_IN_KEYS). UI 는 T2I SAM3 카드·Refine·배치 SAM3 의 한 줄(core/sam3_face_crop ·
+#     components/Sam3FaceCropFields.vue), 결과 알림 'SAM3 Face Crop' 없음·'SAM3 Face Crop Faces: 0'·FaceDetectorUnavailable
+#     (core/sam_extra_notices). ComfyUI 팩에는 아직 없어 컴파일러가 거절한다(_reject_sam3_face_crop). script-info SAM3 state 는
+#     50 → 53키. Refine 패널 입력 40 → 43 은 앱이 부르지 않는 Gradio 버튼(UI_ONLY_FEATURES)이다.
+# (2) 태그 자동완성 내장(sd-webui-tagcomplete-neo 편입) — 옵션 tac_* 57개·sam3_* 셋·/tacapi/v1/* 15개·모듈 셋은 Forge 화면
+#     전용이라 ignored(앱은 자기 자동완성 utils/tag_completer 를 쓴다). 스캐너가 dict 리터럴을 도는 add_option 루프와
+#     getattr(shared, 'OptionHTML') 안내 줄을 읽게 보강했다.
+# (3) XYZ '[Modules] Text Encoder' 축(always-on 'XYZ Text Encoder (sam-extra)' — 인자 0개, script_info=False)과 Forge 기본
+#     'VAE' 축의 제자리 교체(형식이 다른 VAE 를 섞으면 검은 칸이 나던 것) — 앱 XYZ 는 Forge XYZ 스크립트를 쓰지 않고 칸마다
+#     따로 생성하므로(모듈은 /sdapi/v1/options → 모델 다시 불러오기) VAE 문제는 앱에 없었다. 앱 XYZ 에 같은 뜻의
+#     'Text Encoder' 축을 더했다(core/xyz_capabilities — Forge·ComfyUI 둘 다, XYZ_AXES['[Modules]'] mapped). [SAM3] 축 셋은
+#     다른 [SAM3] 축처럼 P18.
+# (4) 'SAM Extra unload models (reload for hires fix)'(txt2img 만 always-on, 인자 0개 — ✨ 다시 읽기) · 모델 내리기 버튼
+#     (숨은 Gradio handle_unload, API 없음) — 화면 전용 ignored. 스캐너가 'False if is_img2img else AlwaysVisible' 을
+#     모드별로 읽게 보강했다(ScriptInfo.modes, SCRIPTS 의 modes).
+# (5) Forge 2.30 호환(Batch Cond/Uncond·Spectrum·DeGrid 안내·2.30-6 드롭다운) — 인자·infotext·옵션 계약 그대로(새
+#     sam3ext/forge_batching.py 는 내부 판정).
+# 픽스처는 릴리스 전 실제 GPU 점검(2026-10-12 01:27, 후보 25db685 — 659d354 와 CHANGELOG 만 다르다)에서 테스트 Forge 2.30-6
+# (7861)이 준 script-info 저장본으로 만들었다(tools/refresh_sam_extra_fixture.py --from-file). 그 Forge 를 다시 띄우면 한 번 더
+# 받는다(docs/sam_extra_sync.md 2번).
+EXT_COMMIT_AUDITED = "36f18affde4d9434a3c8b6e340e88818ce9f4bc0"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -159,7 +182,8 @@ def deferred(package: str, reason: str) -> dict:
 def _script(*, file: str, form: str, live_argc: int, shape: str, classification: dict,
             ui_return=None, api_reads: str | None = "", arg_names: tuple | None = None,
             runtime_choices: tuple = (), app_title: str = "", app_spec: tuple | None = None,
-            app_arg_names: str = "", api_note: str = "", script_info: bool = True) -> dict:
+            app_arg_names: str = "", api_note: str = "", script_info: bool = True,
+            modes: tuple = (False, True)) -> dict:
     """스크립트 항목.
 
     form        dict / positional / positional_or_dict / none (API 가 받는 모양)
@@ -172,21 +196,25 @@ def _script(*, file: str, form: str, live_argc: int, shape: str, classification:
     script_info False = ui() 가 None 을 돌려줘 Forge 가 api_info 를 만들지 않는다(modules/scripts.py
                 create_script_ui_inner) — script-info·픽스처에 없고 shape 도 없다. 제목으로는 여전히 alwayson_scripts 에
                 받는다(api.py script_name_to_index 가 title() 로 찾는다). 계약 테스트는 ui() 가 None 인지를 AST 로 본다.
+    modes       show() 가 AlwaysVisible 인 모드(False = txt2img, True = img2img) — script-info 항목도 그 모드에만 있다.
+                대부분 둘 다. 'False if is_img2img else AlwaysVisible' 은 txt2img 만(스캐너 always_visible_modes).
     """
     return {"file": file, "form": form, "live_argc": live_argc, "shape": shape, "ui_return": ui_return,
             "api_reads": api_reads, "arg_names": arg_names, "runtime_choices": tuple(runtime_choices),
             "app_title": app_title, "app_spec": app_spec, "app_arg_names": app_arg_names,
-            "api_note": api_note, "script_info": script_info, **classification}
+            "api_note": api_note, "script_info": script_info, "modes": tuple(modes), **classification}
 
 
 # ── always-on 스크립트 (제목 = alwayson_scripts 키, script-info 에 15개(0.30.1 라이브 11 + 미커밋 4) + ui() None 인 NegPiP) ──
 SCRIPTS = MappingProxyType({
     "SAM3 Mask": _script(
-        file="scripts/!sam3.py", form="dict", live_argc=2, shape="9702cc627a8c",
+        # shape: v0.34.0 state 53키(얼굴 안에서만 찾기 셋이 맨 뒤 — False·'face_yolov8n.pt'·0.3)
+        file="scripts/!sam3.py", form="dict", live_argc=2, shape="dca029c3e66d",
         ui_return=None, api_reads=None, app_title="core.sam3_args:SCRIPT_SAM3",
         api_note="args=[state dict]. process() 는 dict 첫 인자에서 sam3_enable/enabled 를 읽고, 정해진 "
-                 "49개 키만 골라 Sam3Args 에 넘긴다 — 모르는 키는 오류 없이 버려진다(나-4). "
-                 "script-info args[1].value 는 50개 키(sam3_enable 포함). sam3_cn_module/sam3_cn_model 은 "
+                 "52개 키만 골라 Sam3Args 에 넘긴다 — 모르는 키는 오류 없이 버려진다(나-4). "
+                 "script-info args[1].value 는 53개 키(sam3_enable 포함). 맨 뒤 셋(얼굴 안에서만 찾기, v0.34.0)은 앱이 "
+                 "켤 때만 보낸다(SAM3_OPT_IN_KEYS — 키가 없으면 확장도 꺼짐, ≤ 0.33.1 은 조용히 버린다). sam3_cn_module/sam3_cn_model 은 "
                  "Forge ControlNet 이 대소문자까지 그대로 찾는다(supported_preprocessors[name]·"
                  "controlnet_filename_dict[name]) — 앱은 기능 스냅샷의 /controlnet/module_list·model_list "
                  "표기로 맞추고, 모르면 CN_MODULES 정적 폴백('None')을 쓴다(P3). 단독 SAM3·Refine 은 state 에 "
@@ -205,6 +233,11 @@ SCRIPTS = MappingProxyType({
             # 단독 SAM3·Refine 의 원본 기준 요청(denoise 0 부모 패스의 VAE 왕복 드리프트) → 'SAM3 Source' 결과 알림
             "core/sam3_args.py:with_init_source", "backends/webui_backend.py:with_init_source",
             "core/sam_extra_notices.py:KEY_SAM3_SOURCE", "core/sam_extra_notices.py:_sam3_source_notices",
+            # 얼굴 안에서만 찾기(v0.34.0) — 켤 때만 세 키, T2I 카드·Refine·배치 SAM3 한 줄, 결과 알림·검출기 오류 힌트
+            "core/sam3_args.py:FACE_CROP_KEYS", "core/sam3_args.py:apply_face_crop",
+            "core/sam3_face_crop.py:FACE_CROP_FIELDS", "core/sam3_face_crop.py:model_choices",
+            "frontend/src/components/Sam3FaceCropFields.vue", "frontend/src/utils/sam3FaceCrop.ts",
+            "core/sam_extra_notices.py:_sam3_face_crop_notices", "core/sam_extra_notices.py:face_detector_hint",
             comfy=("core/comfy_workflow_compiler.py:compile_sam3_mask_only",
                    "core/comfy_workflow_compiler.py:_sam3_pass_stack",
                    "core/comfy_workflow_compiler.py:_postprocess_stack_loras",
@@ -219,7 +252,10 @@ SCRIPTS = MappingProxyType({
                  "삼킨 <lora:…> 포함)를 떼고 이름이 정확히 lora 인 것만 건다(_positive_extra_networks). 네거티브의 "
                  "태그는 Forge 가 파싱하지 않아 글자 그대로 인코딩된다 — 노드 negative_prompt 도 그대로. 강도는 "
                  "Forge 순서다: <lora:이름:TE:UNet>·te=/unet= (_lora_spec)",
-            gaps=("P14: BatchView SAM3 필드·inpaint W/H 폴백 1024",))),
+            gaps=("P14: BatchView SAM3 필드·inpaint W/H 폴백 1024",
+                  "ComfyUI: '얼굴 안에서만 찾기'는 팩에 없다 — 켠 요청은 컴파일러가 거절한다(_reject_sam3_face_crop). 팩 "
+                  "ForgeNeoSAM3Mask 에 얼굴 crop(face_crop 순수 기하 + Impact Subpack UltralyticsDetectorProvider 의 "
+                  "bbox/face_yolov8*.pt)을 더하는 것은 다음 단계"))),
     "Anima Perturbation Guidance": _script(
         # shape: Attn Scale 최대 15→100(원본 scale 0~100 — wave B PAG-F), DCW·CWM·RDC·CNS 기본값·범위와 숨은
         # RDC 스위치 True(원본 입력 — wave C DCW-F·CNS-F). 픽스처는 둘 다 Forge 정지 중 소스 AST 로 맞췄다.
@@ -868,6 +904,26 @@ SCRIPTS = MappingProxyType({
             note="Forge 는 NegPiP 체크와 상관없이 always-on 으로 돈다(프롬프트에 음수 가중치가 있을 때만 켜짐). 보조 패스 "
                  "전달 규칙은 core/alwayson_propagation PROPAGATION[TITLE_NEGPIP](Comfy 만). 기능 스냅샷 밖이라 알림은 "
                  "OTHER_EXTENSIONS 의 'negpip' 이 맡는다")),
+    # v0.34.0 — 둘 다 인자 0개, 앱이 보내는 것이 없다(core/alwayson_propagation NEVER)
+    "XYZ Text Encoder (sam-extra)": _script(
+        file="scripts/modules_xyz_text_encoder.py", form="none", live_argc=0, shape="", ui_return=None,
+        api_reads=None, script_info=False,
+        api_note="ui() 가 None 이라 인자 0개이고 script-info 에 나오지 않는다(NegPiP 와 같은 모양). before_process·process·"
+                 "postprocess 는 Forge XYZ 스크립트가 칸에 단 속성(_sam_extra_xyz_text_encoder·VAE 칸 표시)이 있을 때만 돈다 — "
+                 "앱 요청에는 그 속성이 없어 아무것도 하지 않는다. 같은 파일이 xyz_grid.axis_options 에 '[Modules] Text Encoder' "
+                 "를 더하고 기본 'VAE' 축을 제자리에서 바꿔 끼운다(XYZ_AXES['[Modules]'])",
+        classification=ignored("Forge XYZ 스크립트 전용 훅 — 앱 XYZ 는 칸마다 따로 생성하고 모듈은 forge_additional_modules"
+                               "(옵션 → 모델 다시 불러오기)로 바꾸므로 이 훅이 할 일이 없다. 앱의 같은 뜻 축은 "
+                               "core/xyz_capabilities TEXT_ENCODER")),
+    "SAM Extra unload models (reload for hires fix)": _script(
+        file="scripts/layout_unload_models.py", form="none", live_argc=0, shape="97d170e1550e", ui_return=(),
+        api_reads=None, modes=(False,),
+        api_note="txt2img 에서만 always-on(show: False if is_img2img else AlwaysVisible), ui() 는 빈 목록 — script-info 에 "
+                 "txt2img 항목만 인자 0개로 나온다. before_process 가 '모델 내리기' 뒤 갤러리 ✨(p.txt2img_upscale)에서 "
+                 "체크포인트가 없을 때만 forge_model_reload() 한다 — 앱은 ✨ 경로를 쓰지 않는다",
+        classification=ignored("v0.34.0 '모델 내리기' 버튼(UI_ONLY_FEATURES['/handle_unload'])의 ✨ 다시 읽기 보조 — Forge "
+                               "화면 전용. 앱의 언로드는 POST /sdapi/v1/unload-checkpoint(backends/webui_backend."
+                               "unload_checkpoint — Forge 체크포인트만 내린다)")),
 })
 
 # ── SAM3 state 계약 (dict 형태라 위치 대신 키로 맞춘다) ─────────────────────────────
@@ -878,8 +934,11 @@ SAM3_ACTIVATION_KEYS = ("sam3_enable", "enabled")
 # 보내지 않는다: 생성 안에서는 부모 출력이 곧 결과라 init 이미지로 돌리면 안 된다. 이 키를 모르는 예전 확장도 state 에서
 # 정해진 키만 골라 Sam3Args 에 넘기므로 오류 없이 무시한다(결과에 'SAM3 Source' 가 없어 앱이 정보 알림).
 SAM3_REQUEST_ONLY_KEYS = ("sam3_source_image",)
+# 켤 때만 보내는 키 — Sam3Args 필드이고 SAM3_SPEC 에 있지만 끈 요청에는 싣지 않는다(core/sam3_args.apply_face_crop): 키가
+# 없으면 확장도 꺼짐이라 결과가 같고, 끈 요청이 0.34.0 전과 바이트 단위로 같다. process() 는 읽어야 한다(계약 테스트).
+SAM3_OPT_IN_KEYS = ("sam3_face_crop", "sam3_face_crop_model", "sam3_face_crop_confidence")
 SAM3_ENABLE_LABEL = "Enable SAM3"      # script-info args[0].label
-SAM3_LIVE_STATE_KEYS = 50              # script-info args[1].value 키 수 = Sam3Args 49 + sam3_enable
+SAM3_LIVE_STATE_KEYS = 53              # script-info args[1].value 키 수 = Sam3Args 52 + sam3_enable (v0.34.0: +얼굴 crop 셋)
 
 # ── Forge 옵션 (shared.opts.add_option, 38개 — 0.30.1 라이브 20 + 2026-10-03 미커밋 18) ─────────────────
 # 주의(나-7): override_settings 에 모르는 키가 있으면 Forge classic 은 KeyError 로 요청 전체를 실패시킨다.
@@ -899,6 +958,36 @@ def _p10(key_const: str, note: str) -> dict:
 _PROGRESS_BAR = ignored("진행 막대 설정(sd-webui-smooth-progress 편입, 기본 끔) — Forge 웹 화면(javascript/progress_bar.js)만 "
                         "onOptionsChanged 로 읽는다. 생성·결과와 무관하고 앱은 자체 진행 표시를 쓴다(라우트는 ROUTES "
                         "'GET /sam-extra/progress')")
+# v0.34.0 태그 자동완성 내장(sd-webui-tagcomplete-neo 8e0d81f 편입) — Forge 웹 화면의 프롬프트 칸 추천. 생성·인자·infotext 와
+# 무관하고 앱은 자기 자동완성(utils/tag_completer·useTagAutocomplete)을 쓴다.
+_TAGCOMPLETE = ignored("태그 자동완성 설정(tac_*, 따로 설치하던 tagcomplete 와 같은 키 57개) — Forge 웹 화면의 프롬프트 칸 "
+                       "자동완성만 읽는다. 생성·결과와 무관하고 앱은 자기 태그 자동완성을 쓴다")
+_TAGCOMPLETE_ROUTE = ignored("태그 자동완성 /tacapi/v1/* (따로 설치하던 tagcomplete 와 같은 경로 15개 — 사용 횟수·LoRA 정보·"
+                             "미리보기·와일드카드 내용(와일드카드 폴더의 .txt 만)) — Forge 웹 화면의 자동완성 JS 전용. 앱은 쓰지 않는다")
+_TAC_OPTION_KEYS = (
+    "tac_tagFile", "tac_active", "tac_activeIn.txt2img", "tac_activeIn.img2img", "tac_activeIn.negativePrompts",
+    "tac_activeIn.thirdParty", "tac_activeIn.modelList", "tac_activeIn.modelListMode", "tac_slidingPopup",
+    "tac_maxResults", "tac_showAllResults", "tac_resultStepLength", "tac_delayTime", "tac_useIndexedSearch",
+    "tac_useWildcards", "tac_sortWildcardResults", "tac_wildcardExclusionList", "tac_skipWildcardRefresh",
+    "tac_useEmbeddings", "tac_forceRefreshEmbeddings", "tac_includeEmbeddingsInNormalResults", "tac_useLoras",
+    "tac_useLycos", "tac_useLoraPrefixForLycos", "tac_showWikiLinks", "tac_showExtraNetworkPreviews",
+    "tac_modelSortOrder", "tac_useStyleVars", "tac_frequencySort", "tac_frequencyFunction", "tac_frequencyMinCount",
+    "tac_frequencyMaxAge", "tac_frequencyRecommendCap", "tac_frequencyIncludeAlias", "tac_replaceUnderscores",
+    "tac_undersocreReplacementExclusionList", "tac_escapeParentheses", "tac_appendComma", "tac_appendSpace",
+    "tac_alwaysSpaceAtEnd", "tac_modelKeywordCompletion", "tac_modelKeywordLocation", "tac_modelKeywordCivitai",
+    "tac_civitaiApiKey", "tac_wildcardCompletionMode", "tac_alias.searchByAlias", "tac_alias.onlyShowAlias",
+    "tac_translation.translationFile", "tac_translation.oldFormat", "tac_translation.searchByTranslation",
+    "tac_translation.liveTranslation", "tac_extra.extraFile", "tac_extra.addMode", "tac_chantFile",
+    "tac_keymap", "tac_colormap", "tac_refreshTempFiles",
+)
+_TAC_ROUTES = (
+    "GET /tacapi/v1/civitai-trigger-words/{lora_name}", "GET /tacapi/v1/get-all-use-counts",
+    "GET /tacapi/v1/get-use-count", "GET /tacapi/v1/lora-cached-hash/{lora_name}", "GET /tacapi/v1/lora-info/{lora_name}",
+    "GET /tacapi/v1/lyco-info/{lyco_name}", "GET /tacapi/v1/refresh-styles-if-changed",
+    "GET /tacapi/v1/thumb-preview-blob/{filename}", "GET /tacapi/v1/thumb-preview/{filename}",
+    "GET /tacapi/v1/wildcard-contents", "POST /tacapi/v1/get-use-count-list", "POST /tacapi/v1/increase-use-count",
+    "POST /tacapi/v1/refresh-embeddings", "POST /tacapi/v1/refresh-temp-files", "PUT /tacapi/v1/reset-use-count",
+)
 _MCP_PERMISSION = ignored("MCP 서버 권한 스위치(기본: 생성만 켬) — Forge 밖 uv 프로젝트 mcp_server/ 가 도구 호출마다 Forge "
                           "config.json 에서 다시 읽는다(scripts/mcp_settings.py 는 등록만). Forge 생성·결과와 무관하고 앱은 MCP "
                           "서버를 쓰지 않는다")
@@ -983,6 +1072,11 @@ OPTIONS = MappingProxyType({
     "sam3_fast_dropdown_visible_choices": ignored("N3 — Forge 빠른 드롭다운 표시 개수"),
     "sam3_lora_manager_tab_mode": ignored("N2 — Forge extra-networks 탭 배치"),
     "sam3_lora_manager_port": ignored("N2 — 포트는 /sam3-lora/spawn 응답 URL 에 들어 있다"),
+    # v0.34.0 태그 자동완성 내장 — sam3_* 셋(안내 줄·내장 스위치·저장되지 않는 숨은 시작 정보)과 tac_* 57개
+    "sam3_builtin_tagcomplete_enabled": _TAGCOMPLETE,
+    "sam3_tac_builtin_note": _TAGCOMPLETE,
+    "sam3_tac_builtin_boot": _TAGCOMPLETE,
+    **{key: _TAGCOMPLETE for key in _TAC_OPTION_KEYS},
 })
 
 # ── FastAPI 라우트 ("METHOD /path") ─────────────────────────────────────────────
@@ -1032,6 +1126,8 @@ ROUTES = MappingProxyType({
               "위치 — Forge 진행 막대(javascript/progress_bar.js)용이다. 앱은 /sdapi/v1/progress 를 폴링하고 요청마다 "
               "force_task_id 를 붙이므로(core/webui_cancel) 같은 id 로 물으면 작업 전체 ETA 를 받을 수 있다 — 앱 진행 "
               "표시 개선 후보, 요청 전 보류"),
+    # v0.34.0 태그 자동완성 내장 — 따로 설치하던 tagcomplete 와 같은 경로
+    **{route: _TAGCOMPLETE_ROUTE for route in _TAC_ROUTES},
 })
 
 # ── XYZ 축 (접두어별 163개 — 0.30.1 라이브 133: [SAM3] 37, [Anima …] 80, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4;
@@ -1042,11 +1138,25 @@ XYZ_AXES = MappingProxyType({
     "[SAM3]": {**deferred("P18", "S9 — 앱 XYZ 가 SAM3 state 키를 바꿔 가며 돌릴 수 없다"), "labels": (
         "CFG Scale", "CN Enable", "CN Guidance End", "CN Guidance Start", "CN Model", "CN Module",
         "CN Override External", "CN Weight", "Checkpoint", "Denoising Strength", "Detect Prompt", "Device",
-        "Enable", "Exclude Prompt", "Inpaint Height", "Inpaint Only Masked", "Inpaint Padding",
+        "Enable", "Exclude Prompt", "Face Crop", "Face Crop Confidence", "Face Crop Model", "Inpaint Height",
+        "Inpaint Only Masked", "Inpaint Padding",
         "Inpaint Prompt", "Inpaint Width", "Inpainting Fill", "Mask Blur", "Mask Dilation", "Mask Hull",
         "Mask Mode", "Mask Outline Expand", "Mode", "Negative Prompt", "Noise Multiplier",
         "Prompt S/R (SAM3 inpaint and main prompt)", "Prompt S/R (SAM3 inpaint)", "Restore Face", "Sampler",
         "Scheduler", "Seed", "Steps", "Threshold", "Unload After")},
+    # v0.34.0 — 칸마다 텍스트 인코더 파일을 바꾸는 축(VAE / Text Encoder 드롭다운에서 고른 것과 같은 모델). 앱 XYZ 는 칸마다
+    # 따로 생성하는 대기열이라 같은 뜻의 'Text Encoder' 축을 Forge·ComfyUI 모두에 둔다: 칸의 forge_additional_modules 에서 TE
+    # 칸만 바꾼다(VAE 그대로 — Forge 는 옵션으로 모듈을 바꿔 다시 불러오고, ComfyUI 는 CLIP 로더). 확장은 파일 헤더로 자리
+    # (CLIP-L·T5 …)를 보아 TE 가 둘인 모델의 한 칸만 바꾸지만, 앱은 파일을 읽지 않아 TE 가 둘 이상이면 축을 거절한다
+    "[Modules]": {**mapped(
+        "core/xyz_capabilities.py:TEXT_ENCODER", "core/xyz_capabilities.py:text_encoder_axis",
+        "core/xyz_capabilities.py:replace_text_encoder", "core/xyz_capabilities.py:FORGE_TEXT_ENCODER_AXIS",
+        "ui/xyz_actions.py:_xyz_text_encoder_choices",
+        note="값 = 'Use current'(확장 'Use Forge current' — 앱 TE 칩 그대로) + 앱 TE 칩 선택지. Forge XYZ 의 이 축 라벨은 "
+             "앱 XYZ 의 '실행하지 않는 확장 축' 목록에서 뺀다(FORGE_TEXT_ENCODER_AXIS)",
+        gaps=("P18: 확장의 자리 판정(te_slots — 헤더로 CLIP-L/T5 등)은 없다 — TE 가 둘 이상이면 축을 쓸 수 없고, 선택지는 "
+              "모델과 맞는 파일만 거르지 않는다(앱 TE 칩과 같은 목록). 'a + b' 두 파일 값도 없다",)),
+                  "labels": ("Text Encoder",)},
     "[Anima Pert]": {**_XYZ_GUIDANCE, "labels": (
         "Attn Block Indices", "Attn Head Indices", "Attn Method", "Attn Scale", "Enable", "End Percent",
         "Legacy Perturbation Strength", "Legacy Soft/Approx", "Perturbation Strength", "Rescale",
@@ -1103,7 +1213,13 @@ XYZ_AXES = MappingProxyType({
 # 필요한 기능은 앱이 다시 만들거나 확장에 JSON 라우트를 추가한다(열린 질문 1).
 UI_ONLY_FEATURES = MappingProxyType({
     "/handle_refine_click": {"file": "sam3ext/ui_refine.py", **ignored(
-        "Refine 패널 버튼(입력 47개). 앱은 alwayson SAM3 로 자체 Refine 을 돌린다", package="P12")},
+        "Refine 패널 버튼(위젯 값 43개 — v0.34.0 얼굴 crop 셋, 캔버스 포함 45). 앱은 alwayson SAM3 로 자체 Refine 을 돌린다"
+        "(얼굴 crop 은 같은 state 세 키)", package="P12")},
+    "/handle_unload": {"file": "sam3ext/ui_unload_models.py", **ignored(
+        "v0.34.0 notebook 탭 줄의 '모델 내리기' 버튼(숨은 Gradio, 요청 id 입력 → JSON) — Forge 모델·Forge 캐시(업스케일러·"
+        "TAESD·얼굴 복원)·sam-extra 가 쥔 모델(SAM3·얼굴 검출기·Anima 3.8B·IP-Adapter·DeGrid·TIPO 등)을 모두 내린다. JSON "
+        "라우트가 없다. 앱의 언로드(VRAM 게이지·생성 후 언로드)는 POST /sdapi/v1/unload-checkpoint 라 Forge 체크포인트만 "
+        "내린다 — SAM3 번들은 앱이 늘 보내는 'Unload after'(sam3_unload_after)가 놓는다")},
     "/handle_anima_click": {"file": "sam3ext/ui_anima.py", **ignored(
         "T11 Tile-Repair/PiD 패널 버튼(입력 30개·갤러리 상태). 앱은 이 이름 엔드포인트 대신 ROUTES 의 "
         "POST /sam-extra/tile-repair 를 쓴다. PiD Upscale 모드는 패널 전용(보류)", package=HOLD)},
@@ -1211,6 +1327,16 @@ MODULES = MappingProxyType({
     "scripts/list_order.py": ignored(_LIST_ORDER),
     "scripts/layout_save_defaults.py": ignored(_SAVE_DEFAULTS + " — 이 파일은 footer 의 on_after_component 연결 시점만 "
                                                                    "등록한다"),
+    # v0.34.0
+    "scripts/builtin_tagcomplete.py": ignored(
+        "태그 자동완성 내장 — 상류 헬퍼(sam3ext/tagcomplete/) 시작·설정 등록·/tacapi 라우트(OPTIONS·ROUTES 의 _TAGCOMPLETE). "
+        "Forge 웹 화면 전용"),
+    "scripts/layout_unload_models.py": ignored(
+        "모델 내리기 버튼 연결(UI_ONLY_FEATURES['/handle_unload'])과 ✨ 다시 읽기 스크립트(SCRIPTS['SAM Extra unload models "
+        "(reload for hires fix)']) — Forge 화면 전용"),
+    "scripts/modules_xyz_text_encoder.py": ignored(
+        "XYZ '[Modules] Text Encoder' 축·기본 'VAE' 축 제자리 교체·칸 훅(SCRIPTS['XYZ Text Encoder (sam-extra)']) — Forge XYZ "
+        "스크립트 전용. 앱 XYZ 의 같은 뜻 축은 XYZ_AXES['[Modules]']"),
     # sam3ext/
     "sam3ext/__init__.py": ignored("패키지 지연 import — 공개 이름(SAM3_NAME, Sam3Args)은 SCRIPTS 가 본다"),
     "sam3ext/__version__.py": mapped("core/sam_extra_contract.py:EXT_VERSION_AUDITED",
@@ -1386,6 +1512,43 @@ MODULES = MappingProxyType({
     "sam3ext/save_defaults.py": ignored(_SAVE_DEFAULTS + " — 프리셋 설정 22개 검사·쓰기(순수 로직, 이 파일)"),
     "sam3ext/ui_save_defaults.py": ignored(_SAVE_DEFAULTS + " — 숨은 Gradio 버튼을 main_entry 컴포넌트에 잇는 다리"),
     "sam3ext/progress_api.py": deferred(HOLD, "ROUTES['GET /sam-extra/progress'] — 진행률·작업 전체 ETA 계산과 라우트 등록"),
+    # v0.34.0
+    "sam3ext/face_crop.py": mapped(
+        "core/sam3_args.py:FACE_CROP_KEYS",
+        note="얼굴 crop 순수 기하(넓히기 20/40 %·정사각·밀어 넣기·주인 얼굴·잘린 조각·Exclude 영역)와 키워드 변환 — 앱은 키·기본값만 "
+             "보내고 계산은 Forge 에서 확장이 한다",
+        gaps=("ComfyUI: 팩에 없다(SCRIPTS['SAM3 Mask'] gaps) — 이 모듈은 sam-extra 자체 코드라 MIT 로 팩에 다시 쓸 수 있다"
+              "(2026-10-05 결정)",)),
+    "sam3ext/face_detect.py": mapped(
+        "core/sam3_args.py:FACE_CROP_DEFAULT_MODEL", "core/sam3_args.py:FACE_CROP_DEFAULT_CONFIDENCE",
+        "core/sam3_face_crop.py:model_choices", "core/sam_extra_notices.py:FACE_DETECTOR_ERROR",
+        note="얼굴 검출(models/adetailer 의 ultralytics YOLO, 받지 않음) — 앱은 기본값(SEMANTIC_PINS sam3_face_crop_default_*)·"
+             "드롭다운 규칙(.pt·YOLO-World 제외·기본 → face_* → 그 밖, tests/test_sam3_face_crop.py 가 설치된 find_face_models 와 "
+             "대조)·FaceDetectorUnavailable 문구 → 힌트만 안다"),
+    "sam3ext/forge_batching.py": ignored(
+        "Forge 2.30 Batch Cond/Uncond 판정(shared.batch_cond_uncond) — Anima 3.8B VRAM 여유·Adaptive Guidance 내부. 인자·"
+        "infotext·옵션 계약 없음(ADG 의 'ADG inactive (Batch Cond/Uncond off)' 상태 글은 기존 status 키)"),
+    "sam3ext/gguf_header.py": ignored(
+        "XYZ Text Encoder 축의 GGUF 헤더 읽기(표준 라이브러리만) — Forge XYZ 전용. 앱 XYZ 는 파일을 읽지 않는다"),
+    "sam3ext/xyz_text_encoder.py": ignored(
+        "XYZ Text Encoder 축의 자리 판정(Forge loader 재구현)·값 해석·목록 합치기 — Forge XYZ 전용. 앱 Text Encoder 축은 TE 칩 "
+        "선택지와 TE 하나 바꾸기만(XYZ_AXES['[Modules]'] gaps)"),
+    "sam3ext/xyz_text_encoder_cell.py": ignored(
+        "칸의 모듈 목록을 loading parameters·Module N 에만 넣고 칸 끝에 되돌리는 훅 — Forge XYZ 전용"),
+    "sam3ext/xyz_vae.py": ignored(
+        "XYZ 기본 'VAE' 축 교체의 형식 판정(헤더로 2D/3D 등) — Forge XYZ 전용. 앱 XYZ 에는 VAE 축이 없고, 앱의 모듈 변경은 "
+        "옵션 → 모델 다시 불러오기라 형식이 섞여도 검은 칸 문제가 없다"),
+    "sam3ext/xyz_vae_cell.py": ignored("형식이 다른 VAE 칸만 모듈 목록으로 다시 불러오는 훅 — Forge XYZ 전용"),
+    "sam3ext/unload_models.py": ignored(
+        "모델 내리기 순서·거절·결과 글·Forge 캐시 훅·✨ 다시 읽기(Host 로 받는 순수 로직) — 버튼 전용(UI_ONLY_FEATURES)"),
+    "sam3ext/unload_registry.py": ignored(
+        "모델 내리기의 sam-extra 해제 훅 목록(SAM3·얼굴 검출기·Anima 3.8B·IP-Adapter·DeGrid·TIPO·Modulation·Colorcraft·샘플링 "
+        "캐시) — 버튼 전용"),
+    "sam3ext/ui_unload_models.py": ignored(
+        "모델 내리기 숨은 Gradio 버튼(handle_unload — UI_ONLY_FEATURES)과 Forge 호스트 — 버튼 전용"),
+    "sam3ext/tagcomplete/": ignored(
+        "태그 자동완성 내장(상류 sd-webui-tagcomplete-neo 8e0d81f, MIT) — 헬퍼·공존 가드·시작 정보·경로·옮기기 도구가 쓰는 "
+        "규칙. Forge 웹 화면 전용(OPTIONS·ROUTES 의 _TAGCOMPLETE)"),
     # javascript/
     "javascript/appearance_theme.js": ignored(_N6),
     "javascript/lora_manager.js": ignored(_N6 + " — 폴링·브리지 로직은 P6 참고", package="P6"),
@@ -1405,6 +1568,10 @@ MODULES = MappingProxyType({
     "javascript/composition_prompt.js": ignored(_N6 + " — 앱 frontend/src/utils/compositionPrompt.ts 의 이식(태그 계산). 확장 "
                                                   "tests/_origin_composition_prompt/ 가 앱 원본을 SHA-256 으로 고정해 대조한다"),
     "javascript/composition_ui.js": ignored(_N6 + " — 구도 · 카메라 칸 화면(앱 CompositionControl.vue 이식)"),
+    # v0.34.0
+    "javascript/notebook_unload_models.js": ignored(_N6 + " — 모델 내리기 버튼·결과 줄(기본값 저장 묶음 안)"),
+    "javascript/tagcomplete_loader.js": ignored(_N6 + " — 내장 태그 자동완성 로더(숨은 설정 sam3_tac_builtin_boot 를 읽어 "
+                                                  "상류 JS 15개를 싣는다)"),
 })
 
 # ── preload.py 명령줄 플래그 ─────────────────────────────────────────────────
@@ -2219,6 +2386,23 @@ SEMANTIC_PINS = (
      "expected": "output", "app": "core.sam_extra_notices:SAM3_SOURCE_OUTPUT_NOTE",
      "meaning": "'SAM3 Source: output (<이유>)' 의 머리 — 요청했지만 조건이 안 맞아 부모 출력으로 돌았다(경고 "
                 "CODE_SAM3_SOURCE_FALLBACK 이 괄호 안 이유를 보인다)"},
+    # 얼굴 안에서만 찾기(v0.34.0) — 앱 core/sam3_args·core/sam3_face_crop·core/sam_extra_notices 가 같은 값을 하드코딩한다
+    {"id": "sam3_face_crop_default_model", "source": "ast", "file": "sam3ext/face_detect.py", "name": "DEFAULT_MODEL",
+     "expected": "face_yolov8n.pt", "app": "core.sam3_args:FACE_CROP_DEFAULT_MODEL",
+     "meaning": "얼굴 검출 모델 기본값(Sam3Args.sam3_face_crop_model 의 기본값·빈 값 대체·드롭다운 첫 항목) — 앱 카드 기본값과 "
+                "빈 모델 칸 대체"},
+    {"id": "sam3_face_crop_default_confidence", "source": "ast", "file": "sam3ext/face_detect.py",
+     "name": "DEFAULT_CONFIDENCE", "expected": 0.3, "app": "core.sam3_args:FACE_CROP_DEFAULT_CONFIDENCE",
+     "meaning": "얼굴 검출 신뢰도 기본값(Sam3Args.sam3_face_crop_confidence, 0–1 로 잘림)"},
+    {"id": "sam3_face_crop_model_suffix", "source": "ast", "file": "sam3ext/face_detect.py", "name": "MODEL_SUFFIX",
+     "expected": ".pt", "app": "core.sam3_face_crop:MODEL_SUFFIX",
+     "meaning": "얼굴 검출 모델로 쓰는 파일 확장자(ultralytics YOLO 상자 모델, YOLO-World 제외) — 앱은 ADetailer 모델 목록에서 "
+                "같은 규칙으로 추천 목록을 만든다(model_choices)"},
+    {"id": "sam3_face_crop_faces_infotext_key", "source": "ast", "file": "scripts/!sam3.py",
+     "name": "INFOTEXT_FACE_CROP_FACES", "expected": "SAM3 Face Crop Faces",
+     "app": "core.sam_extra_notices:KEY_SAM3_FACE_CROP_FACES",
+     "meaning": "켰을 때만 남는 결과 기록(그 장에서 쓴 얼굴 수, 붙여 넣기 아님) — 0 이면 얼굴을 못 찾아 마스크 없음(앱 경고 "
+                "CODE_SAM3_FACE_CROP_NO_FACES)"},
     {"id": "sam3_hf_checkpoint_name", "source": "ast", "file": "sam3ext/core.py", "name": "HF_CHECKPOINT_NAME",
      "expected": "sam3.pt", "app": "core.sam_extra_notices:HF_CHECKPOINT_NAME",
      "meaning": "로컬에 없으면 생성 중 Hugging Face 에서 받는 기본 체크포인트 이름 — 앱이 생성 전에 경고한다(다-5)"},

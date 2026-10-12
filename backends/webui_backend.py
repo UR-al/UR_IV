@@ -890,6 +890,11 @@ class WebUIBackend(AbstractBackend):
         '생성 후 모델 언로드' · 대기열 정기 정리 · VRAM 게이지 수동 언로드가 모두 이것을 쓴다.
         엔드포인트가 없는 옛 버전(404)이나 서버 오류면 False — 성공으로 보고하지 않는다.
 
+        Forge 의 체크포인트만 내린다. sam-extra 0.34.0 의 '모델 내리기' 버튼(Forge notebook 화면)은 그 밖에 Forge 가
+        쥔 업스케일러·TAESD·얼굴 복원 모델과 sam-extra 가 쥔 모델(SAM3·얼굴 검출기·Anima 3.8B·IP-Adapter·DeGrid·TIPO 등)
+        까지 내리지만 숨은 Gradio 버튼뿐이라 API 가 없다(core/sam_extra_contract UI_ONLY_FEATURES['/handle_unload']).
+        SAM3 번들은 앱이 늘 보내는 'Unload after'(sam3_unload_after)가 검출 직후 놓는다.
+
         타임아웃은 공유 상수 — 후처리 작업이 이 언로드(hold)를 기다리는 시간
         (BACKEND_JOB_UNLOAD_WAIT_SECONDS)이 이 요청의 상한보다 길도록 한 곳에서 맞춘다.
         """

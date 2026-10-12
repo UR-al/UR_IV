@@ -404,7 +404,8 @@ class TestScriptInfoFixture(unittest.TestCase):
                 continue
             with self.subTest(script=title):
                 modes = self._modes(title)
-                self.assertEqual(set(modes), {False, True}, "txt2img·img2img 항목이 모두 있어야 한다")
+                self.assertEqual(set(modes), set(entry["modes"]),
+                                 "script-info 항목의 모드(txt2img·img2img) ≠ 레지스트리 modes(show() 의 AlwaysVisible 모드)")
                 for is_img2img, args in modes.items():
                     self.assertEqual(
                         len(args), entry["live_argc"],
@@ -642,6 +643,15 @@ class TestInstalledExtension(unittest.TestCase):
                 with self.subTest(script=title):
                     self.assertEqual(info.file, reg.SCRIPTS[title]["file"])
 
+    def test_script_modes(self):
+        """show() 가 AlwaysVisible 인 모드 — 한 모드에서만 always-on 이면 script-info 에도 그 모드 항목만 나온다
+        (v0.34.0 'SAM Extra unload models (reload for hires fix)' 는 txt2img 만)."""
+        for title, info in self.scripts.items():
+            if title in reg.SCRIPTS:
+                with self.subTest(script=title):
+                    self.assertEqual(info.modes, tuple(reg.SCRIPTS[title]["modes"]),
+                                     f"\n{info.file} {info.cls}.show() 의 AlwaysVisible 모드가 레지스트리와 다르다")
+
     def test_ui_return_order(self):
         for title, entry in reg.SCRIPTS.items():
             info = self.scripts.get(title)
@@ -805,11 +815,18 @@ class TestInstalledExtension(unittest.TestCase):
         요청 전용 키(``SAM3_REQUEST_ONLY_KEYS`` — 단독 SAM3·Refine 의 원본 기준 요청)는 생성 안 SAM3(build_state)가
         보내지 않고 단독 경로(``with_init_source``)만 더한다. process() 는 그 키를 Sam3Args 밖에서 읽어야 한다
         (extra=forbid 라 Sam3Args 에 넣으면 검증이 통째로 실패해 SAM3 가 꺼진다).
+
+        켤 때만 보내는 키(``SAM3_OPT_IN_KEYS`` — 얼굴 안에서만 찾기)는 켠 state 로 본다: 끈 state 에는 없어야 하고(요청이
+        예전과 같다), 켠 state 에는 다 있어야 하며 process() 가 Sam3Args 로 읽어야 한다.
         """
-        from core.sam3_args import build_state, with_init_source
+        from core.sam3_args import FACE_CROP_KEY, build_state, with_init_source
         request_only = set(reg.SAM3_REQUEST_ONLY_KEYS)
-        sent = set(build_state({}))
-        standalone = set(with_init_source(build_state({})))
+        opt_in = set(reg.SAM3_OPT_IN_KEYS)
+        off = set(build_state({}))
+        sent = set(build_state({FACE_CROP_KEY: True}))
+        self.assertEqual(sorted(off & opt_in), [], "끈 요청에는 켤 때만 보내는 키가 없어야 한다(요청이 예전과 같게)")
+        self.assertEqual(sorted(sent - off), sorted(opt_in), "켠 요청이 더하는 키 = SAM3_OPT_IN_KEYS")
+        standalone = set(with_init_source(build_state({FACE_CROP_KEY: True})))
         dropped = sorted(sent - self.state_reads)
         unsent = sorted(self.state_reads - sent - request_only)
         self.assertEqual(dropped, [], f"앱이 보내지만 process() 가 읽지 않는 키(조용히 버려짐): {dropped}")
