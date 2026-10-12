@@ -4639,9 +4639,17 @@ class ComfyWorkflowCompiler:
                 "재시작하거나, SAM3 설정에서 끄거나, Forge(sam-extra)에서 생성하세요."
             )
         confidence = _float(state.get(sam3_args.FACE_CROP_CONFIDENCE_KEY), sam3_args.FACE_CROP_DEFAULT_CONFIDENCE)
+        model = sam3_face_crop.resolve_model_path(state.get(sam3_args.FACE_CROP_MODEL_KEY))
+        if not os.path.isabs(model):
+            # 앱 Forge models/adetailer 에 없다 — 이름만 넘기면 노드가 ComfyUI 의 models/ultralytics·adetailer 에서 찾고, 거기도
+            # 없으면 SAM3 마스크 없이 끝낸다(Forge 는 'SAM3 Error: FaceDetectorUnavailable' 로 SAM3 없이 저장). 알림은 없다.
+            _logger.warning(
+                "SAM3 '얼굴 안에서만 찾기': 얼굴 검출 모델 %r 을(를) 앱 Forge models/adetailer 에서 찾지 못해 이름만 넘깁니다 — "
+                "ComfyUI 의 models/ultralytics·adetailer 에도 없으면 SAM3 마스크 없이 끝납니다", model,
+            )
         return {
             "face_crop": True,
-            "face_crop_model": sam3_face_crop.resolve_model_path(state.get(sam3_args.FACE_CROP_MODEL_KEY)),
+            "face_crop_model": model,
             "face_crop_confidence": min(1.0, max(0.0, confidence)),
         }
 

@@ -84,6 +84,20 @@ class XYZActionTests(unittest.TestCase):
             self.assertIs(captured, backend)
             self.assertTrue(payload["alwayson_scripts"]["test"]["args"][0])
 
+    def test_the_forge_module_restore_marker_goes_to_webui_only(self):
+        """XYZ Text Encoder 축 칸의 표시(core/xyz_capabilities.TRANSIENT_MODULES_KEY)는 Forge 옵션용 — ComfyUI 칸에서는 뗀다."""
+        from core.xyz_capabilities import TRANSIENT_MODULES_KEY, backend_identity
+
+        backend = SimpleNamespace(api_url="http://synthetic.invalid")
+        for kind, kept in ((BackendType.WEBUI, True), (BackendType.COMFYUI, False)):
+            with self.subTest(kind=kind.value), mock.patch("backends.get_backend", return_value=backend), \
+                    mock.patch("backends.get_backend_type", return_value=kind):
+                item = {"prompt": "p", "_xyz_model": "m", TRANSIENT_MODULES_KEY: True,
+                        "_xyz_backend_id": backend_identity(kind.value, backend)}
+                payload, _model, _backend = XYZActionsMixin()._xyz_prepare_queue_generation(item)
+                self.assertEqual(TRANSIENT_MODULES_KEY in payload, kept)
+                self.assertIn(TRANSIENT_MODULES_KEY, item, "the queued snapshot is not changed")
+
     def test_text_encoder_choices_and_selection_come_from_the_te_chips(self):
         actions = XYZActionsMixin()
         actions.vue_bridge = SimpleNamespace(last_widget_property=lambda wid, prop: (

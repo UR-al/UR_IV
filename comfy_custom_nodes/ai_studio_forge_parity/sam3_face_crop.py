@@ -1,7 +1,7 @@
 """SAM3 "search inside faces only" (face crop) for ``ForgeNeoSAM3Mask``: the pure geometry (pack 1.8.0).
 
-This is sam-extra's ``sam3ext/face_crop.py`` (v0.34.0, with the crop growth of the v0.34.1 fix, sam-extra commit
-959e5d6) on ComfyUI. The code is sam-extra's own, licensed to this pack under MIT by its author
+This is sam-extra's ``sam3ext/face_crop.py`` (v0.34.0, with the crop growth of v0.34.1 as fixed before its release,
+sam-extra commit b815f68) on ComfyUI. The code is sam-extra's own, licensed to this pack under MIT by its author
 (``THIRD_PARTY_NOTICES.md`` "Code shared with the sam-extra Forge extension"); only the docstrings are rewritten.
 NumPy (and Pillow for a mask of another size) only: no torch, no ultralytics, no ComfyUI. The flow is
 ``sam3_face_crop_run.run_face_crop`` (sam-extra's face-crop branch of ``run_sam3_on_pil``):
@@ -20,7 +20,9 @@ NumPy (and Pillow for a mask of another size) only: no torch, no ultralytics, no
 6. A part that leaves the face (hair) is cut with a straight edge at an inner crop edge. Per detected token, when the
    pieces that face owns reach an inner edge of its crop far enough (``touching_sides``) the crop grows toward those
    sides (``grow_toward``: square, pushed inside) and only that token runs again (``growth_requests``, at most
-   ``GROW_ROUNDS``). Without contact the SAM3 calls and the masks are those without growth.
+   ``GROW_ROUNDS`` times per face and token). Of a grown crop's result only the pieces that overlap the earlier result
+   are used (``continuing_pieces``: a piece that came into view only in the grown crop, cut off from the face's mask,
+   is dropped). Without contact the SAM3 calls and the masks are those without growth.
 """
 from __future__ import annotations
 
@@ -448,6 +450,23 @@ def growth_requests(
         if grown != crops[face]:
             requests[face] = (sides, grown)
     return requests
+
+
+def continuing_pieces(pieces: Sequence[np.ndarray], earlier: Sequence[np.ndarray]) -> list[bool]:
+    """Per piece found in a grown crop (image coordinates): does it share at least one pixel with the earlier result
+    (``earlier``: the pieces this face and token found in its previous crop)? Only those pieces are used.
+
+    A grown crop is there to see more of what the previous crop saw (hair cut at its edge). A piece that does not touch
+    the earlier result came into view only in the grown crop and is cut off from the face's mask (the hair of a person
+    whose face was not detected, say): it is dropped, so it neither widens the mask nor grows the crop toward it.
+    Without ``earlier`` every piece is False.
+    """
+    if not earlier:
+        return [False] * len(pieces)
+    seen = np.asarray(earlier[0], dtype=bool)
+    if len(earlier) > 1:
+        seen = np.any(np.stack([np.asarray(piece, dtype=bool) for piece in earlier], axis=0), axis=0)
+    return [bool(np.any(np.logical_and(np.asarray(piece, dtype=bool), seen))) for piece in pieces]
 
 
 def order_faces(boxes: Sequence[Box]) -> list[int]:

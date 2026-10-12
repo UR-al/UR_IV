@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   COMFY_MIN_PACK_VERSION, COMFY_SUPPORT_PROPERTY, FACE_CROP_DEFAULT_CONFIDENCE, FACE_CROP_DEFAULT_MODEL,
-  SAM3_FACE_CROP_FIELDS, faceCropBlocked, faceCropBlockedReason, faceCropModelOptions, faceCropSupport,
-  sam3FaceCropDefaults, sam3FaceCropId, sam3FaceCropSettings,
+  FACE_CROP_GROWTH_VERSION, SAM3_FACE_CROP_FIELDS, faceCropBlocked, faceCropBlockedReason, faceCropHairNote,
+  faceCropModelOptions, faceCropPackNote, faceCropRecheckable, faceCropSupport, sam3FaceCropDefaults, sam3FaceCropId,
+  sam3FaceCropSettings,
 } from './sam3FaceCrop'
 
 describe('sam3FaceCrop table', () => {
@@ -72,14 +73,48 @@ describe('faceCropSupport', () => {
     expect(COMFY_SUPPORT_PROPERTY).toBe('comfySupport')
     expect(COMFY_MIN_PACK_VERSION).toBe('1.8.0')
   })
-  it('blocks switching on only for a ComfyUI that cannot run it, with the reason', () => {
-    for (const support of ['unknown', 'supported', 'unsupported', 'comfy', 'comfy_ready'] as const) {
+  it('blocks switching on only for a ComfyUI without the face detector, with the reason', () => {
+    for (const support of ['unknown', 'supported', 'unsupported', 'comfy', 'comfy_ready', 'comfy_old_pack'] as const) {
       expect(faceCropBlocked(support)).toBe(false)
       expect(faceCropBlockedReason(support)).toBe('')
     }
     expect(faceCropBlocked('comfy_no_detector')).toBe(true)
     expect(faceCropBlockedReason('comfy_no_detector')).toContain('ultralytics')
-    expect(faceCropBlocked('comfy_old_pack')).toBe(true)
-    expect(faceCropBlockedReason('comfy_old_pack')).toContain('1.8.0')
+    expect(faceCropBlockedReason('comfy_no_detector')).toContain('↻')
+    expect(faceCropBlockedReason('comfy_no_detector')).not.toContain('멈춥니다')
+    expect(faceCropBlockedReason('comfy_no_detector', true)).toContain('켜 둔 채 생성하면 이 이유로 멈춥니다')
+  })
+  it('only warns about an old pack (the next generation can install it) and offers a re-check there', () => {
+    expect(faceCropPackNote('comfy_old_pack')).toContain('1.8.0')
+    expect(faceCropPackNote('comfy_old_pack')).toContain('다음 생성 때 번들 노드 팩을 설치')
+    for (const support of ['unknown', 'supported', 'unsupported', 'comfy', 'comfy_ready', 'comfy_no_detector'] as const) {
+      expect(faceCropPackNote(support)).toBe('')
+    }
+    expect(['comfy_no_detector', 'comfy_old_pack'].map((s) => faceCropRecheckable(s as never))).toEqual([true, true])
+    expect(['comfy', 'comfy_ready', 'supported', 'unknown'].map((s) => faceCropRecheckable(s as never)))
+      .toEqual([false, false, false, false])
+  })
+})
+
+describe('faceCropHairNote', () => {
+  const forge = (version: unknown) => ({ version: { extension_version: version } })
+  it('says the ComfyUI pack regrows cut hair (sam-extra 0.34.1) and never claims parity with an older Forge', () => {
+    for (const support of ['comfy', 'comfy_ready', 'comfy_old_pack', 'comfy_no_detector'] as const) {
+      const note = faceCropHairNote(null, support)
+      expect(note).toContain('crop 을 키워 다시 찾습니다')
+      expect(note).toContain(FACE_CROP_GROWTH_VERSION)
+      expect(note).not.toContain('잘립니다')
+    }
+  })
+  it('follows the connected sam-extra on Forge: 0.34.1 and later regrow, 0.34.0 (or unknown) cuts', () => {
+    expect(faceCropHairNote(forge('0.34.0'), 'supported')).toContain('잘립니다')
+    expect(faceCropHairNote(forge(null), 'unknown')).toContain('잘립니다')
+    expect(faceCropHairNote({ version: {} }, 'supported')).toContain('잘립니다')
+    for (const version of ['0.34.1', '0.35.0', 'v1.0', '0.34.10']) {
+      const note = faceCropHairNote(forge(version), 'supported')
+      expect(note).toContain('crop 을 키워 다시 찾습니다')
+      expect(note).not.toContain('잘립니다')
+    }
+    expect(faceCropHairNote(forge('0.33.9'), 'unsupported')).toContain('잘립니다')
   })
 })

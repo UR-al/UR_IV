@@ -612,6 +612,69 @@ def _detect_token_instances(provider: Any, model: Any, image: Any, token: str,
     return pieces, boxes, scores
 
 
+def _copy_image_state(state: dict) -> dict:
+    """sam-extra ``_run_prompt``: a shallow copy of a ``set_image`` state, with its own ``backbone_out`` dict.
+
+    ``set_text_prompt`` writes the text features into ``state["backbone_out"]`` (``update``) and adds the prompt and
+    result keys to ``state``, so every token gets a copy shaped like the state right after ``set_image``."""
+    copy = dict(state)
+    backbone = state.get("backbone_out")
+    if isinstance(backbone, dict):
+        copy["backbone_out"] = dict(backbone)
+    return copy
+
+
+class _CropBackbone:
+    """The Easy SAM3 processor for the face-crop path, with sam-extra's one image backbone per region.
+
+    sam-extra's ``_run_prompt`` runs the SAM3 image backbone (ViT) once per region and every token on a copy of that
+    state; Easy SAM3's ``Sam3ImageSegmentation`` calls ``set_image`` again for every prompt (twice per call). The
+    caller names the crop it is about to segment (``focus``: batch index and crop box, plus the crop size as a check);
+    ``set_image`` encodes a crop once and hands every later call for it a copy (``_copy_image_state``). One slot, like
+    sam-extra: the next crop drops the previous crop's features first (VRAM). Anything else passes through.
+    """
+
+    def __init__(self, processor: Any):
+        self._processor = processor
+        self._key: Any = None
+        self._size: Any = None
+        self._cached_key: Any = None
+        self._state: dict | None = None
+        self.encoded = 0
+
+    @classmethod
+    def wrap(cls, bundle: Any) -> tuple[Any, "_CropBackbone | None"]:
+        """``(bundle to call Easy SAM3 with, the wrapper or None)`` — None when the bundle has no usable processor."""
+        processor = bundle.get("processor") if isinstance(bundle, dict) else None
+        if not (callable(getattr(processor, "set_image", None)) and callable(getattr(processor, "set_text_prompt", None))):
+            return bundle, None
+        wrapper = cls(processor)
+        return {**bundle, "processor": wrapper}, wrapper
+
+    def focus(self, key: Any, size: tuple[int, int]) -> None:
+        self._key, self._size = key, (int(size[0]), int(size[1]))
+
+    def release(self) -> None:
+        self._key = self._size = self._cached_key = None
+        self._state = None
+
+    def set_image(self, image: Any, state: Any = None):
+        if state is not None or self._key is None or tuple(getattr(image, "size", ()) or ()) != self._size:
+            return self._processor.set_image(image) if state is None else self._processor.set_image(image, state)
+        if self._state is None or self._cached_key != self._key:
+            self._state = None   # free the previous crop's features before encoding this one
+            self._cached_key = None
+            encoded = self._processor.set_image(image)
+            self.encoded += 1
+            if not isinstance(encoded, dict):
+                return encoded
+            self._state, self._cached_key = encoded, self._key
+        return _copy_image_state(self._state)
+
+    def __getattr__(self, name: str):
+        return getattr(self._processor, name)
+
+
 def _face_crop_options(model: Any, confidence: Any) -> tuple[str, float]:
     """sam-extra's ``face_crop_kwargs``: an empty model is the default model; the confidence is cut to 0-1 and a
     value that is not a finite number is the default."""
@@ -823,6 +886,7 @@ class ForgeNeoSAM3Mask:
         # Face crop (sam-extra run_sam3_on_pil): the faces are planned before SAM3 loads, and without a face in any
         # image the bundle is never loaded (every image ends like a run that found nothing).
         face_plans = None
+        face_error = None
         if bool(face_crop) and needs_provider:
             face_model, face_confidence = _face_crop_options(face_crop_model, face_crop_confidence)
             if isinstance(sam3_model, dict):
@@ -831,9 +895,18 @@ class ForgeNeoSAM3Mask:
                 detector_device = device
             else:
                 detector_device = _resolve_sam3_request(checkpoint, device, precision)[0]
-            face_plans = _plan_face_crops(image_value, face_model, face_confidence, detector_device)
-            if not any(plan.crops for plan in face_plans):
+            try:
+                face_plans = _plan_face_crops(image_value, face_model, face_confidence, detector_device)
+            except _face_detect.FaceDetectorUnavailable as exc:
+                # sam-extra's postprocess_image: SAM3 fails as a whole ('SAM3 Error: FaceDetectorUnavailable: ...')
+                # and the image is saved without SAM3. Here: no mask (not even the hand-drawn one), the reason in
+                # the report and the console, and SAM3 is never loaded.
+                face_error = f"{type(exc).__name__}: {' '.join(str(exc).split())}"
+                logging.getLogger(__name__).warning("[-] SAM3: failed, no SAM3 mask: %s", face_error)
                 needs_provider = False
+            else:
+                if not any(plan.crops for plan in face_plans):
+                    needs_provider = False
 
         loaded_here = False
         cache_state = "not_loaded"
@@ -857,30 +930,41 @@ class ForgeNeoSAM3Mask:
         try:
             if needs_provider:
                 provider = _resolve_easy_node(_EASY_SEGMENTATION_KEYS, "image segmentation")
-            if face_plans is not None:
+            if face_error is not None:
+                selected_groups = []
+            elif face_plans is not None:
                 from .sam3_face_crop_run import segment_batch
 
+                # One image backbone per crop like sam-extra (Easy SAM3 would encode the crop twice per token).
+                crop_bundle, backbone = _CropBackbone.wrap(model_bundle)
+
                 def _segment_crop(index, token, crop):
+                    if backbone is not None:
+                        backbone.focus((index, crop.as_tuple()), (crop.width, crop.height))
                     return _detect_token_instances(
-                        provider, model_bundle,
+                        provider, crop_bundle,
                         image_value[index:index + 1, crop.y0:crop.y1, crop.x0:crop.x1, :], token,
                         float(threshold), int(detection_limit),
                     )
 
-                faces = segment_batch(
-                    image_value, face_plans,
-                    groups=groups_spec if needs_main_detection else [],
-                    exclude_tokens=[token for tokens in exclusion_groups for token in tokens],
-                    segment_image=_segment_crop,
-                    refine=lambda mask, index: _refine_face_mask(
-                        mask, image_value[index:index + 1], bool(convex_hull),
-                        int(mask_outline_px), int(mask_dilation),
-                    ),
-                    manual_mask=manual_mask,
-                    source=source,
-                    margin=max(0, int(mask_outline_px)) + max(0, int(mask_dilation)),
-                    log=_log_face_crop,
-                )
+                try:
+                    faces = segment_batch(
+                        image_value, face_plans,
+                        groups=groups_spec if needs_main_detection else [],
+                        exclude_tokens=[token for tokens in exclusion_groups for token in tokens],
+                        segment_image=_segment_crop,
+                        refine=lambda mask, index: _refine_face_mask(
+                            mask, image_value[index:index + 1], bool(convex_hull),
+                            int(mask_outline_px), int(mask_dilation),
+                        ),
+                        manual_mask=manual_mask,
+                        source=source,
+                        margin=max(0, int(mask_outline_px)) + max(0, int(mask_dilation)),
+                        log=_log_face_crop,
+                    )
+                finally:
+                    if backbone is not None:
+                        backbone.release()
                 selected_groups = faces.groups
                 all_boxes.extend(faces.boxes)
                 all_scores.extend(faces.scores)
@@ -941,7 +1025,10 @@ class ForgeNeoSAM3Mask:
         )
         report: dict[str, Any] = {
             "enabled": True,
-            "status": "ok" if bool((combined > 0.0).any()) else "no_detection",
+            "status": (
+                "face_detector_unavailable" if face_error is not None
+                else "ok" if bool((combined > 0.0).any()) else "no_detection"
+            ),
             "mask_mode": "Combined" if mode == "combined" else "Individual",
             "mask_source": source,
             "prompt_groups": groups_spec,
@@ -955,6 +1042,10 @@ class ForgeNeoSAM3Mask:
             "boxes": all_boxes,
             "scores": all_scores,
         }
+        if face_error is not None:
+            # sam-extra records it as 'SAM3 Error' on the image it saves without SAM3
+            report["error"] = face_error
+            report["face_crop_status"] = face_error
         if face_plans is not None:
             # sam-extra's artifact meta 'face_crop' and its console line (a list per image for a batch)
             metas = [plan.as_meta() for plan in face_plans]

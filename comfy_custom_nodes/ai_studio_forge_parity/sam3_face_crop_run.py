@@ -1,12 +1,14 @@
 """SAM3 face crop for ``ForgeNeoSAM3Mask``: sam-extra's face-crop branch of ``run_sam3_on_pil`` (pack 1.8.0).
 
 ``run_face_crop`` is the face-crop part of sam-extra's ``sam3ext/core.py`` ``run_sam3_on_pil`` (v0.34.0 with the crop
-growth of the v0.34.1 fix, sam-extra commit 959e5d6), statement for statement: SAM3 runs per face crop (every Detect
-token of every group, then the Exclude tokens in the crop widened by Outline + Dilation), the pieces are pasted back
-at image coordinates, a token whose owned pieces reach an inner crop edge runs again on a grown crop (at most
-``sam3_face_crop.GROW_ROUNDS`` rounds; a grown crop that finds nothing keeps the earlier result), a grown face's
-Exclude is also searched around its grown crops, and every group gives one mask per owner face (left -> right) after
-Convex Hull -> Outline -> Dilation. Boxes and scores come face -> group -> token. The SAM3 calls are made in sam-extra's
+growth of v0.34.1 as fixed before its release, sam-extra commit b815f68), statement for statement: SAM3 runs per face
+crop (every Detect token of every group, then the Exclude tokens in the crop widened by Outline + Dilation), the
+pieces are pasted back at image coordinates, a token whose owned pieces reach an inner crop edge runs again on a grown
+crop (at most ``sam3_face_crop.GROW_ROUNDS`` times per face and token; only the pieces that overlap the earlier result
+are kept, with their boxes and scores; a grown crop that keeps nothing keeps the earlier result), a grown face's
+Exclude is also searched around its grown crops (on its last grown crop right away when Outline + Dilation is 0, and
+every crop/area and token is asked once), and every group gives one mask per owner face (left -> right) after Convex
+Hull -> Outline -> Dilation. Boxes and scores come face -> group -> token. The SAM3 calls are made in sam-extra's
 order. ``_clean_split_masks`` and its helpers are sam-extra's (``core.py``): every SAM3 object mask is cut to its best
 box plus a margin. All of it is sam-extra's own code under its author's MIT grant (``THIRD_PARTY_NOTICES.md``).
 
@@ -29,10 +31,12 @@ from .sam3_face_crop import (
     FaceCropInfo,
     assign_owners,
     box_to_image,
+    continuing_pieces,
     enclosing_crop,
     grow_crop,
     growth_requests,
     paste_mask,
+    touching_sides,
 )
 
 # (pieces in crop coordinates, boxes in crop coordinates, scores) of one SAM3 text prompt on one crop.
@@ -135,6 +139,30 @@ def _crop_text(crop: CropBox) -> str:
     return f"{crop.width}x{crop.height}@{crop.x0},{crop.y0}"
 
 
+def _continuing_result(
+    found: tuple[list[np.ndarray], list[list[float]], list[float], list[int]],
+    earlier: list[np.ndarray],
+) -> tuple[tuple[list[np.ndarray], list[list[float]], list[float]], int]:
+    """sam-extra ``core._continuing_result``: of what a grown crop found (pieces, boxes, scores and each piece's box
+    number from ``_run_token``) only the pieces that overlap the earlier result (``earlier``: the pieces this face and
+    token found in its previous crop) with their boxes and scores -> ((pieces, boxes, scores), dropped piece count).
+
+    A box (and the score with its number) that only dropped pieces point at is dropped too; a box a kept piece also
+    points at stays. When every piece overlaps, the result is the one given.
+    """
+    pieces, boxes, scores, links = found
+    keep = continuing_pieces(pieces, earlier)
+    if all(keep):
+        return (list(pieces), list(boxes), list(scores)), 0
+    kept_links = {link for link, flag in zip(links, keep) if flag}
+    dropped = {link for link, flag in zip(links, keep) if not flag} - kept_links
+    return (
+        [piece for piece, flag in zip(pieces, keep) if flag],
+        [box for index, box in enumerate(boxes) if index not in dropped],
+        [score for index, score in enumerate(scores) if index not in dropped],
+    ), keep.count(False)
+
+
 def run_face_crop(
     info: FaceCropInfo,
     groups: Sequence[Sequence[str]],
@@ -167,11 +195,24 @@ def run_face_crop(
     token_crops = [[list(crops) for _ in tokens] for tokens in groups]
     exclude_pieces: list[np.ndarray] = []
 
-    def _run_token(sub_prompt: str, crop: CropBox) -> tuple[list[np.ndarray], list[list[float]], list[float]]:
+    def _run_token(
+        sub_prompt: str, crop: CropBox
+    ) -> tuple[list[np.ndarray], list[list[float]], list[float], list[int]]:
+        """One token on one crop: pieces and boxes (image coordinates), scores, and per piece its box number (-1 when
+        there is none): the box whose rounded rectangle overlaps the piece's bbox most, as ``_clean_split_masks`` picks
+        it. The numbers are only used to drop a dropped piece's box and score (``_continuing_result``)."""
         split, crop_boxes, crop_scores = segment(sub_prompt, crop)
-        pieces = [paste_mask(piece, crop, (h, w)) for piece in split if np.any(piece)]
+        found = [piece for piece in split if np.any(piece)]
+        pieces = [paste_mask(piece, crop, (h, w)) for piece in found]
         boxes = [box_to_image([float(v) for v in box], crop) for box in crop_boxes]
-        return pieces, boxes, [float(score) for score in crop_scores]
+        links = [-1] * len(found)
+        if crop_boxes:
+            rects = [tuple(int(round(float(v))) for v in box) for box in crop_boxes]
+            for index, piece in enumerate(found):
+                piece_box = _mask_bbox(piece)
+                if piece_box is not None:
+                    links[index] = max(range(len(rects)), key=lambda i: _intersection_area(piece_box, rects[i]))
+        return pieces, boxes, [float(score) for score in crop_scores], links
 
     def _token_pieces(group_index: int, token_index: int) -> tuple[list[np.ndarray], list[int]]:
         pieces: list[np.ndarray] = []
@@ -193,21 +234,44 @@ def run_face_crop(
     for region, crop in enumerate(crops):
         for group_index, group_tokens in enumerate(groups):
             for token_index, sub_prompt in enumerate(group_tokens):
-                runs[group_index][token_index][region] = _run_token(sub_prompt, crop)
+                runs[group_index][token_index][region] = _run_token(sub_prompt, crop)[:3]
         _search_exclude(exclude_area[region])
 
+    # Crop growth: a (token, face) whose owned pieces are cut at an inner edge of its crop runs that token again on a
+    # crop grown toward the touched sides (owners are decided again every pass). Only the pieces of a grown run that
+    # overlap the earlier result are used (``continuing_pieces``; the others and their boxes/scores are dropped). The
+    # cap is GROW_ROUNDS growths per face x token, so a face that first reaches an edge after its neighbour grew still
+    # grows its share. Without contact SAM3 is not called again.
     rounds_cap = int(geometry.GROW_ROUNDS)
-    grown_rounds = [[[0] * n_crops for _ in tokens] for tokens in groups]
+    grown_count = [[[0] * n_crops for _ in tokens] for tokens in groups]   # growths per (group, token, face)
     grown_sides: dict[tuple[int, int, int], set[str]] = {}
-    settled: set[tuple[int, int, int]] = set()
-    for round_index in range(1, rounds_cap + 1):
+    settled: set[tuple[int, int, int]] = set()   # a grown crop kept nothing: the earlier result stays, no more growth
+    # What a grown crop found, and Exclude pieces, per (crop, token): two faces grown to the same crop, or the same
+    # Exclude area, ask SAM3 once.
+    grown_found: dict[tuple[CropBox, str], tuple[list[np.ndarray], list[list[float]], list[float], list[int]]] = {}
+    exclude_found: dict[tuple[CropBox, str], list[np.ndarray]] = {}
+
+    def _exclude_in(sub_prompt: str, area: CropBox) -> list[np.ndarray]:
+        key = (area, sub_prompt)
+        if key not in exclude_found:
+            split, _, _ = segment(sub_prompt, area)
+            exclude_found[key] = [paste_mask(piece, area, (h, w)) for piece in split]
+        return exclude_found[key]
+
+    while True:   # every pass grows (count + 1) or settles at least one face x token, so it always ends
         jobs: dict[CropBox, list[tuple[int, int, int, tuple[str, ...]]]] = {}
         for group_index, group_tokens in enumerate(groups):
             for token_index in range(len(group_tokens)):
                 pieces, sources = _token_pieces(group_index, token_index)
                 if not pieces:
                     continue
-                open_faces = {f for f in range(n_crops) if (group_index, token_index, f) not in settled}
+                counts = grown_count[group_index][token_index]
+                open_faces = {
+                    f for f in range(n_crops)
+                    if (group_index, token_index, f) not in settled and counts[f] < rounds_cap
+                }
+                if not open_faces:
+                    continue
                 requests = growth_requests(
                     pieces, sources, face_boxes, token_crops[group_index][token_index], (w, h), faces=open_faces
                 )
@@ -216,34 +280,55 @@ def run_face_crop(
         if not jobs:
             break
         for grown, items in jobs.items():
+            where = _crop_text(grown)
+            last = False   # this crop is some face x token's last crop (it grows no further)
             for group_index, token_index, face, sides in items:
                 sub_prompt = groups[group_index][token_index]
-                where = _crop_text(grown)
-                result = _run_token(sub_prompt, grown)
                 key = (group_index, token_index, face)
+                if (grown, sub_prompt) not in grown_found:
+                    grown_found[(grown, sub_prompt)] = _run_token(sub_prompt, grown)
+                found = grown_found[(grown, sub_prompt)]
+                result, left_out = _continuing_result(found, runs[group_index][token_index][face][0])
                 if not result[0]:
                     settled.add(key)
-                    log(f"face crop — face {face + 1} {sub_prompt!r}: nothing found in the grown crop {where}; "
-                        "keeping the face crop result")
+                    before = token_crops[group_index][token_index][face]
+                    what = f"nothing found in the grown crop {where}"
+                    if found[0]:
+                        what = f"no piece of the grown crop {where} overlaps the earlier result"
+                    log(f"face crop — face {face + 1} {sub_prompt!r}: {what}; keeping the result from "
+                        f"{_crop_text(before)}")
                     continue
                 runs[group_index][token_index][face] = result
                 token_crops[group_index][token_index][face] = grown
-                grown_rounds[group_index][token_index][face] = round_index
+                grown_count[group_index][token_index][face] += 1
+                count = grown_count[group_index][token_index][face]
                 grown_sides.setdefault(key, set()).update(sides)
+                if not last:
+                    reached = np.any(np.stack(result[0], axis=0), axis=0)
+                    last = count >= rounds_cap or not touching_sides(reached, grown)
+                note = f"; left out {left_out} piece(s) not overlapping the earlier result" if left_out else ""
                 log(f"face crop — face {face + 1} {sub_prompt!r} reached the crop edge ({', '.join(sides)}); "
-                    f"SAM3 again on {where} (round {round_index}/{rounds_cap})")
+                    f"SAM3 again on {where} (round {count}/{rounds_cap}){note}")
+            # With Outline + Dilation 0 a grown face's Exclude area is its last crop: search it now, while that crop is
+            # the one SAM3 just saw (sam-extra keeps its backbone; the Exclude step below then reuses this result).
+            if last and exclude_tokens and growth == 0:
+                for sub_prompt in exclude_tokens:
+                    _exclude_in(sub_prompt, grown)
     for (group_index, token_index, face), sides in grown_sides.items():
         info.growth.append(
             CropGrowth(
                 face=face,
                 prompt=groups[group_index][token_index],
                 crop=token_crops[group_index][token_index][face],
-                rounds=grown_rounds[group_index][token_index][face],
+                rounds=grown_count[group_index][token_index][face],
                 sides=tuple(side for side in SIDES if side in sides),
             )
         )
     info.growth.sort(key=lambda g: (g.face, g.prompt, g.crop.as_tuple()))
+    # A grown face's Exclude is also searched where its mask can reach (around every crop it used + Outline +
+    # Dilation); two faces with the same area search it once.
     if exclude_tokens and grown_sides:
+        searched: set[CropBox] = set()
         for face in range(n_crops):
             used: list[CropBox] = []
             for group_crops in token_crops:
@@ -255,7 +340,11 @@ def run_face_crop(
             area = grow_crop(enclosing_crop(used, (w, h)), growth, (w, h))
             if area == exclude_area[face]:
                 continue
-            _search_exclude(area)
+            if area in searched:
+                continue
+            searched.add(area)
+            for sub_prompt in exclude_tokens:
+                exclude_pieces.extend(_exclude_in(sub_prompt, area))
     outcome.exclude_pieces = exclude_pieces
 
     for face in range(n_crops):

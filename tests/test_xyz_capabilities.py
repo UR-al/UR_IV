@@ -161,6 +161,19 @@ class XYZCapabilityTests(unittest.TestCase):
         self.assertEqual([job["forge_additional_modules"] for job in jobs], [["te_a.safetensors"], []])
         self.assertEqual([job["hr_additional_modules"] for job in jobs], [["Use same choices"], []])
 
+    def test_text_encoder_axis_marks_its_cells_for_the_forge_module_restore(self):
+        """Forge 옵션으로 바꾼 TE 를 끝나고 되돌리도록(webui_backend._switch_model_if_needed) TE 축 칸만 표시한다."""
+        from core.xyz_capabilities import TEXT_ENCODER_CURRENT, TRANSIENT_MODULES_KEY, build_jobs, text_encoder_axis
+        capability = {"axes": [text_encoder_axis(["te_a.safetensors"], source="t"),
+                               {"id": "steps", "label": "Steps", "type": "integer", "min": 1, "max": 50, "step": 1}]}
+        base = {"prompt": "p", "forge_additional_modules": ["vae.safetensors"]}
+        jobs = build_jobs(base, "m", [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT, "te_a.safetensors"]}],
+                          capability, text_encoders=[])
+        self.assertEqual([job.get(TRANSIENT_MODULES_KEY) for job in jobs], [True, True])
+        jobs = build_jobs(base, "m", [{"id": "steps", "values": [10, 20]}], capability, text_encoders=[])
+        self.assertEqual([TRANSIENT_MODULES_KEY in job for job in jobs], [False, False], "the chip's modules stay")
+        self.assertNotIn(TRANSIENT_MODULES_KEY, base)
+
     def test_text_encoder_axis_refuses_two_encoders_but_allows_only_current(self):
         from core.xyz_capabilities import TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
         capability = {"axes": [text_encoder_axis(["clip_l.safetensors", "t5xxl.safetensors"], source="t")]}

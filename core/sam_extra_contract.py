@@ -261,10 +261,15 @@ SCRIPTS = MappingProxyType({
                  "Forge 순서다: <lora:이름:TE:UNet>·te=/unet= (_lora_spec)",
             gaps=("P14: BatchView SAM3 필드·inpaint W/H 폴백 1024",
                   "ComfyUI '얼굴 안에서만 찾기'(팩 1.8.0)는 얼굴 검출에 ComfyUI Python 의 ultralytics 가 있어야 한다(ComfyUI "
-                  "의존성이 아니다 — 없으면 카드가 켜기를 막고 컴파일러가 이유와 함께 멈춘다). 팩은 v0.34.1 crop 키우기까지 "
-                  "하므로 Forge 에 v0.34.0 이 깔린 동안은 crop 가장자리에 닿은 머리카락 결과가 Forge 와 다를 수 있다",
+                  "의존성이 아니다 — 없으면 카드가 켜기를 막고 컴파일러가 이유와 함께 멈춘다; 옛 팩은 카드가 경고만 하고 다음 "
+                  "생성이 번들 팩을 먼저 설치한다). 팩은 v0.34.1 crop 키우기(확장 b815f68 — 릴리스 전에 고친 것)까지 하므로 "
+                  "Forge 에 v0.34.0 이 깔린 동안은 crop 가장자리에 닿은 머리카락 결과가 Forge 와 다를 수 있다",
                   "ComfyUI 결과에는 'SAM3 Face Crop Faces' 같은 infotext 가 없다 — 얼굴 수·crop 은 노드 리포트(face_crop·"
-                  "face_crop_status)와 ComfyUI 콘솔에만 있고 앱은 얼굴을 못 찾은 장을 알리지 않는다"))),
+                  "face_crop_status)와 ComfyUI 콘솔에만 있고 앱은 얼굴을 못 찾은 장을 알리지 않는다",
+                  "ComfyUI 에서 얼굴 검출기를 쓸 수 없으면(모델 파일 없음·ultralytics import 실패·받아야 하는 이름) 노드가 "
+                  "마스크 없이 끝낸다(리포트 status face_detector_unavailable·error) — Forge 처럼 생성은 이어지지만(Forge 는 "
+                  "'SAM3 Error: FaceDetectorUnavailable' 로 SAM3 없이 저장) 앱은 노드 리포트를 읽지 않아 알림이 없다. 컴파일러는 "
+                  "앱 Forge models/adetailer 에서 못 찾은 모델 이름을 넘길 때 로그만 남긴다"))),
     "Anima Perturbation Guidance": _script(
         # shape: Attn Scale 최대 15→100(원본 scale 0~100 — wave B PAG-F), DCW·CWM·RDC·CNS 기본값·범위와 숨은
         # RDC 스위치 True(원본 입력 — wave C DCW-F·CNS-F). 픽스처는 둘 다 Forge 정지 중 소스 AST 로 맞췄다.
@@ -1160,9 +1165,12 @@ XYZ_AXES = MappingProxyType({
     "[Modules]": {**mapped(
         "core/xyz_capabilities.py:TEXT_ENCODER", "core/xyz_capabilities.py:text_encoder_axis",
         "core/xyz_capabilities.py:replace_text_encoder", "core/xyz_capabilities.py:FORGE_TEXT_ENCODER_AXIS",
-        "ui/xyz_actions.py:_xyz_text_encoder_choices",
+        "ui/xyz_actions.py:_xyz_text_encoder_choices", "core/xyz_capabilities.py:TRANSIENT_MODULES_KEY",
         note="값 = 'Use current'(확장 'Use Forge current' — 앱 TE 칩 그대로) + 앱 TE 칩 선택지. Forge XYZ 의 이 축 라벨은 "
-             "앱 XYZ 의 '실행하지 않는 확장 축' 목록에서 뺀다(FORGE_TEXT_ENCODER_AXIS)",
+             "앱 XYZ 의 '실행하지 않는 확장 축' 목록에서 뺀다(FORGE_TEXT_ENCODER_AXIS). 확장 축은 칸의 로딩 파라미터만 바꾸고 "
+             "칸 끝에 되돌려 config.json·드롭다운이 그대로지만, 앱 칸은 Forge 옵션(config.json 에도 저장)을 바꾼다 — 그래서 "
+             "TE 축 칸은 표시(TRANSIENT_MODULES_KEY)를 달고, WebUI 백엔드가 처음 목록을 기억했다가 모듈 키 없는 다음 요청 때 "
+             "옵션이 아직 앱이 쓴 목록이면 되돌린다(backends/webui_backend._switch_model_if_needed)",
         gaps=("P18: 확장의 자리 판정(te_slots — 헤더로 CLIP-L/T5 등)은 없다 — TE 가 둘 이상이면 축을 쓸 수 없고, 선택지는 "
               "모델과 맞는 파일만 거르지 않는다(앱 TE 칩과 같은 목록). 'a + b' 두 파일 값도 없다",)),
                   "labels": ("Text Encoder",)},
@@ -1528,9 +1536,11 @@ MODULES = MappingProxyType({
              "보내고 계산은 Forge 에서 확장이 한다",
         comfy=("comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop.py:plan_face_crops",
                "comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop.py:growth_requests",
+               "comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop.py:continuing_pieces",
                "comfy_custom_nodes/ai_studio_forge_parity/sam3_face_crop_run.py:run_face_crop"),
         gaps=("ComfyUI: 팩 1.8.0 이 이 모듈을 그대로 옮겼다(sam-extra 자체 코드 — 2026-10-05 결정, 팩 THIRD_PARTY_NOTICES). 팩은 "
-              "v0.34.1 의 crop 키우기(touching_sides·grow_toward·growth_requests, 확장 959e5d6)까지 들고 있다 — "
+              "v0.34.1 의 crop 키우기(touching_sides·grow_toward·growth_requests·continuing_pieces — 릴리스 전에 고친 확장 "
+              "b815f68: 키운 crop 은 앞 결과에 이어진 조각만, 상한·횟수는 얼굴 × 토큰마다)까지 들고 있다 — "
               "tests/test_comfy_sam3_face_crop.py 가 설치된 확장(키우기 없음은 GROW_ROUNDS 0)과 대조한다",)),
     "sam3ext/face_detect.py": mapped(
         "core/sam3_args.py:FACE_CROP_DEFAULT_MODEL", "core/sam3_args.py:FACE_CROP_DEFAULT_CONFIDENCE",

@@ -1121,6 +1121,16 @@ class FaceCropNoticeTests(_QuietAssumption):
         self.assertIn("2/3장", batch[0].message)
         self.assertNotIn(sn.CODE_SAM3_FACE_CROP_NO_FACES, sn.SAM3_FAILURE_CODES, "얼굴 없음은 '검출 없음' 처리 — 실패가 아니다")
 
+    def test_one_failed_image_does_not_hide_the_face_crop_warning_of_the_others(self):
+        """SAM3 가 한 장에서 실패해도(OOM) 나머지 장의 얼굴 crop 경고(옛 확장·얼굴 없음)는 그대로 — 실패한 장은 보지 않는다."""
+        on = sam3_payload(sam3_face_crop=True)
+        self.assertEqual(codes(sn.result_notices(info_of(SAM3_OK, SAM3_OOM), on)),
+                         [sn.CODE_SAM3_ERROR, sn.CODE_SAM3_FACE_CROP_UNSUPPORTED])
+        notices = sn.result_notices(info_of(face_infotext(0), SAM3_OOM, face_infotext(2)), on)
+        self.assertEqual(codes(notices), [sn.CODE_SAM3_ERROR, sn.CODE_SAM3_FACE_CROP_NO_FACES])
+        self.assertIn("1/2장", notices[1].message, "only the images SAM3 ran on are counted")
+        self.assertEqual(codes(sn.result_notices(info_of(SAM3_OOM, SAM3_OOM), on)), [sn.CODE_SAM3_ERROR])
+
     def test_face_detector_errors_get_their_own_hint_and_stop_a_batch(self):
         cases = ((EXT_FACE_MODEL_MISSING, "models/adetailer"), (EXT_FACE_NO_ULTRALYTICS, "ultralytics"))
         for message, needle in cases:

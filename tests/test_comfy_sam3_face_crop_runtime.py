@@ -65,12 +65,15 @@ class _TorchProcessor:
 
         self.cases = cases
         self.calls = []
+        self.images = []   # every set_image (an image backbone pass)
 
     def set_confidence_threshold(self, value):
         self.threshold = value
 
     def set_image(self, image):
-        return {"rgb": np.asarray(image.convert("RGB")).copy()}
+        rgb = np.asarray(image.convert("RGB")).copy()
+        self.images.append(tuple(rgb.shape[:2]))
+        return {"rgb": rgb}
 
     def set_text_prompt(self, prompt, state):
         rgb = state["rgb"]
@@ -141,6 +144,9 @@ class RealEasySam3Tests(unittest.TestCase):
                     pack = self._run(rgb, opts, faces, scores, kwargs, segmenter, bundle)
                 pack.calls = processor.calls
                 parity._assert_same(pack, oracle, f"scene {index}")
+                # the real node calls set_image twice per prompt; the pack's face-crop path encodes each crop once,
+                # in sam-extra's order (sam3_nodes._CropBackbone)
+                self.assertEqual(processor.images, oracle.images, f"scene {index}: image backbones")
 
     def _run(self, rgb, opts, faces, scores, kwargs, segmenter, bundle):
         import json

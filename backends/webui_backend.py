@@ -35,6 +35,12 @@ _MAX_RESULT_BYTES = 256 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 384 * 1024 * 1024
 # get_info 의 sd-models — 5xx(모델 로딩 중)면 이만큼 쉬고 딱 한 번 더 묻는다.
 _TRANSIENT_STATUS = (500, 502, 503, 504)
+# XYZ Text Encoder 축(core/xyz_capabilities.TRANSIENT_MODULES_KEY)이 Forge 옵션 forge_additional_modules 를 칸마다 바꾼 기록 —
+# api_url → {"written": 앱이 마지막으로 쓴 목록, "original": 처음 바꾸기 전 목록}(둘 다 파일 이름, 정렬). 백엔드 객체가 다시
+# 만들어져도(재연결·API 작업) 남도록 모듈 단위다. _switch_model_if_needed 가 모듈 키 없는 다음 요청 때 되돌리고 지운다.
+_MODULE_RESTORE: Dict[str, Dict[str, list]] = {}
+_MODULE_RESTORE_LOCK = threading.Lock()
+_KEEP_RESTORE = object()
 _SD_MODELS_RETRY_PAUSE_S = 1.0
 
 
@@ -825,9 +831,18 @@ class WebUIBackend(AbstractBackend):
             return None
         return wanted
 
-    def _switch_model_if_needed(self, model_name: str, modules=None):
-        """필요 시 모델 전환 + VAE/TE 모듈 동기화 (한 번의 옵션 POST)."""
-        if not model_name and modules is None:
+    def _switch_model_if_needed(self, model_name: str, modules=None, *, transient: bool = False):
+        """필요 시 모델 전환 + VAE/TE 모듈 동기화 (한 번의 옵션 POST).
+
+        ``transient`` = XYZ Text Encoder 축의 칸(core/xyz_capabilities.TRANSIENT_MODULES_KEY): Forge 는 옵션을 config.json 에도
+        저장하므로 처음 바꾸기 전 목록을 기억해 두고(``_MODULE_RESTORE``), 모듈 키 없이 오는 다음 요청(TE 칩이 빈 보통 생성 —
+        Forge 의 선택을 그대로 쓰는 요청) 때 옵션이 아직 앱이 마지막으로 쓴 목록이면 되돌린다. 그사이 다른 곳(Forge UI)에서
+        바꿨으면 그 선택을 둔다. 모듈 목록을 실은 보통 요청은 그 목록이 이기므로 기억을 지운다.
+        """
+        key = self.api_url
+        with _MODULE_RESTORE_LOCK:
+            pending = _MODULE_RESTORE.get(key)
+        if not model_name and modules is None and pending is None:
             return
         current_response = requests.get(
             url=f'{self.api_url}/sdapi/v1/options',
@@ -835,24 +850,47 @@ class WebUIBackend(AbstractBackend):
         )
         current_response.raise_for_status()
         current_options = current_response.json()
+        has_modules = 'forge_additional_modules' in current_options
+        current_names = self._module_names(current_options.get('forge_additional_modules')) if has_modules else None
 
         changes: Dict[str, Any] = {}
+        record: Any = _KEEP_RESTORE
+        restoring = False
         # 모듈을 체크포인트보다 먼저 — Forge 가 순서대로 처리하고 마지막에 한 번 로딩 파라미터를 갱신한다
-        wanted = self._desired_forge_modules(current_options, modules)
+        if modules is None:
+            wanted = None
+            if pending is not None:
+                record = None
+                if has_modules and current_names == pending["written"] and current_names != pending["original"]:
+                    wanted = list(pending["original"])
+                    restoring = True
+        else:
+            wanted = self._desired_forge_modules(current_options, modules)
+            if has_modules:
+                record = None
+                if transient:
+                    original = pending["original"] if pending is not None else current_names
+                    record = {"written": self._module_names(modules), "original": list(original)}
         if wanted is not None:
             changes['forge_additional_modules'] = wanted
         if model_name and current_options.get('sd_model_checkpoint') != model_name:
             changes['sd_model_checkpoint'] = model_name
-        if not changes:
-            return
-        if 'forge_additional_modules' in changes:
-            logger.info("Forge modules → %s", changes['forge_additional_modules'] or '(없음)')
-        switch_response = requests.post(
-            url=f'{self.api_url}/sdapi/v1/options',
-            json=changes,
-            headers=_HEADERS, timeout=60
-        )
-        switch_response.raise_for_status()
+        if changes:
+            if 'forge_additional_modules' in changes:
+                logger.info("Forge modules → %s%s", changes['forge_additional_modules'] or '(없음)',
+                            " (XYZ Text Encoder 축 전으로 되돌림)" if restoring else "")
+            switch_response = requests.post(
+                url=f'{self.api_url}/sdapi/v1/options',
+                json=changes,
+                headers=_HEADERS, timeout=60
+            )
+            switch_response.raise_for_status()
+        if record is not _KEEP_RESTORE:
+            with _MODULE_RESTORE_LOCK:
+                if record is None:
+                    _MODULE_RESTORE.pop(key, None)
+                else:
+                    _MODULE_RESTORE[key] = record
 
     def refresh_loras(self) -> bool:
         """Forge 가 LoRA 폴더를 다시 스캔하게 한다(POST /sdapi/v1/refresh-loras).
@@ -975,12 +1013,18 @@ class WebUIBackend(AbstractBackend):
         try:
             from core.alwayson_propagation import take_provenance
             from core.prompt_comments import strip_request_comments
+            from core.xyz_capabilities import TRANSIENT_MODULES_KEY
+            transient_modules = False
+            if TRANSIENT_MODULES_KEY in payload:   # 앱 표시 — Forge 에 보내지 않는다
+                payload = dict(payload)
+                transient_modules = bool(payload.pop(TRANSIENT_MODULES_KEY))
             payload, provenance = take_provenance(payload)
             # 프롬프트 주석(// · /* */)은 보내지 않는다 — 생성 API·대기열·자동화 어느 길로 와도(ComfyUI 와 같은 방어선)
             payload = strip_request_comments(payload)
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
-            self._switch_model_if_needed(model_name, payload.get('forge_additional_modules'))
+            self._switch_model_if_needed(model_name, payload.get('forge_additional_modules'),
+                                         transient=transient_modules)
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
 

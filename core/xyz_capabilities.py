@@ -29,6 +29,12 @@ TEXT_ENCODER_CURRENT = "Use current"   # 칸에서 TE 를 바꾸지 않는다(�
 FORGE_TEXT_ENCODER_AXIS = "[Modules] Text Encoder"
 TEXT_ENCODER_NOTE = ("Text Encoder 축은 칸마다 앱의 TE 선택을 그 파일로 바꿉니다(VAE 는 그대로) — 바뀌는 칸마다 모델을 다시 "
                      "불러오므로 X 축(가장 바깥 반복)에 두면 가장 적게 다시 불러옵니다.")
+# Text Encoder 축을 쓴 칸의 비공개 표시 — Forge 는 칸의 모듈 목록을 옵션(config.json 에도 저장)으로 바꾸므로, WebUI 백엔드가
+# 처음 바꾸기 전 목록을 기억했다가 모듈 키 없이 오는 다음 요청(TE 칩이 빈 보통 생성 등) 때 되돌린다
+# (backends/webui_backend._switch_model_if_needed). 확장의 '[Modules] Text Encoder' 축이 칸의 로딩 파라미터만 바꾸고 칸이 끝나면
+# 되돌려 config.json·드롭다운을 건드리지 않는 것과 같은 결과다. 요청에 싣지 않는다(WebUI 백엔드가 떼고, ComfyUI 대기열은
+# ui/xyz_actions 가 뗀다 — 그래프는 칸마다 새로 만들어 남는 상태가 없다).
+TRANSIENT_MODULES_KEY = "_forge_modules_transient"
 # These are application execution/safety bounds, not invented server choices.
 BOUNDS = {"steps": (1, 150, "integer"), "cfg_scale": (1, 30, "number"),
           "seed": (-1, 2**32 - 1, "integer"), "width": (64, 4096, "integer"),
@@ -323,8 +329,11 @@ def build_jobs(base_payload, model, axes, capability, *, text_encoders=()):
             replace_text_encoder((), text_encoders, "")   # TE 가 둘 이상이면 첫 칸을 만들기 전에 거절한다
         normalized.append({"id": key, "label": definition["label"], "search": axis.get("search"), "values": checked})
     jobs = []
+    text_encoder_axis_used = any(axis["id"] == TEXT_ENCODER for axis in normalized)
     for values in itertools.product(*(axis["values"] for axis in normalized)):
         payload = copy.deepcopy(base_payload)
+        if text_encoder_axis_used:
+            payload[TRANSIENT_MODULES_KEY] = True
         selected_model = model
         metadata = {}
         for axis, value in zip(normalized, values):

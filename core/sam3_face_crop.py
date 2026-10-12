@@ -7,9 +7,11 @@
   * 위젯 dict 키(``face_crop``) = 저장 키 = ``'_sam3_' + 키`` 가 widget id
   * 확장 인자 키는 ``'sam3_' + 키`` (``core.sam3_args.SAM3_SPEC`` 의 맨 뒤 세 키 — 켤 때만 보낸다: ``apply_face_crop``)
   * 기본값은 SAM3_SPEC 에서 가져온다(확장 sam3ext/face_detect.py DEFAULT_MODEL·DEFAULT_CONFIDENCE — SEMANTIC_PINS)
-  * 모델 칸은 자유 입력(LineEditProxy) + 추천 목록(items) — 목록은 ADetailer 모델 목록(``/adetailer/v1/ad_model``)에서
-    확장 드롭다운과 같은 규칙으로 고른다(``model_choices``). 확장은 아무것도 받지 않으므로 목록에만 있고 파일이 없는
-    이름은 생성 때 'SAM3 Error: FaceDetectorUnavailable' 로 알린다(core/sam_extra_notices).
+  * 모델 칸은 선택 칸(Vue CustomSelect — 확장 드롭다운처럼 목록에서 고른다; 프록시는 LineEditProxy 라 저장·프리셋의 목록 밖
+    이름도 그대로 둔다) + 추천 목록(items) — 목록은 확장 드롭다운과 같은 규칙으로 고른다(``model_choices``): Forge 는
+    ADetailer 모델 목록(``/adetailer/v1/ad_model``), ComfyUI 는 앱 Forge ``models/adetailer`` 폴더(``local_model_names`` —
+    ``resolve_model_path`` 가 찾는 곳). 확장은 아무것도 받지 않으므로 목록에만 있고 파일이 없는 이름은 생성 때
+    'SAM3 Error: FaceDetectorUnavailable' 로 알린다(core/sam_extra_notices).
 
 ComfyUI(앱 노드 팩 1.8.0): ``ForgeNeoSAM3Mask`` 의 선택 입력 ``face_crop``·``face_crop_model``·``face_crop_confidence``
 (확장 키에서 'sam3_' 를 뗀 이름)가 같은 계산을 한다 — 팩 ``sam3_face_crop*.py`` 는 sam-extra 의 얼굴 crop(v0.34.0 + v0.34.1 의
@@ -17,20 +19,26 @@ crop 키우기)을 그대로 옮긴 것이다(sam-extra 자체 코드, 작성자
 Python 에 ultralytics 가 있어야 한다 — 노드의 정보용 COMBO ``face_crop_detector`` 가 그 여부를 /object_info 로 알린다
 (``comfy_support``). 모델은 앱 Forge ``models/adetailer`` 의 파일을 절대 경로로 넘긴다(``resolve_model_path`` — SAM3
 체크포인트처럼). 컴파일러(core/comfy_workflow_compiler._sam3_face_crop_inputs)는 켠 요청만 세 입력을 넣고, 옛 팩·검출기 없음은
-이유와 함께 멈춘다. 카드는 연결 때 받은 상태(위젯 ``_sam3_face_crop`` 의 ``comfySupport`` 속성, ``push_comfy_support``)로
-켜기를 막고 이유를 보인다.
+이유와 함께 멈춘다. 카드는 받은 상태(위젯 ``_sam3_face_crop`` 의 ``comfySupport`` 속성, ``push_comfy_support``)로 검출기가
+없으면 켜기를 막고 옛 팩이면 경고한다. 상태는 연결 때만이 아니라 ComfyUI 백엔드가 ``/object_info`` 를 새로 받을 때마다
+(``publish_comfy_support`` ← ComfyUIBackend.get_object_info — 카드 ↻, 팩 설치·재시작 뒤 생성의 새 스키마, 재연결) 다시 보낸다
+(``watch_comfy_support``).
 """
 from __future__ import annotations
 
+import logging
+import threading
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
 
 from core import sam3_args
+
+logger = logging.getLogger(__name__)
 
 # (위젯/저장 키, 프록시 종류) — 순서는 확장 SAM3 Mask 아코디언의 줄과 같다.
 FACE_CROP_FIELDS: tuple[tuple[str, str], ...] = (
     ('face_crop', 'check'),
-    ('face_crop_model', 'text'),        # ADetailer 모델 목록(추천) 또는 자유 입력 (LineEditProxy)
+    ('face_crop_model', 'text'),        # 추천 목록에서 고르는 선택 칸(LineEditProxy — 목록 밖 저장값도 그대로 둔다)
     ('face_crop_confidence', 'text'),
 )
 FACE_CROP_FIELD_KEYS: tuple[str, ...] = tuple(key for key, _kind in FACE_CROP_FIELDS)
@@ -140,9 +148,37 @@ def settings_to_state(widgets: Mapping) -> dict:
 
 
 def push_model_items(proxy, ad_models: Iterable) -> None:
-    """얼굴 모델 칸의 추천 목록(items)을 ADetailer 모델 목록으로 채운다 — Vue 는 ``getProperty(id, 'items')`` 로 읽는다."""
+    """얼굴 모델 칸의 추천 목록(items)을 모델 이름 목록(Forge 는 ADetailer 모델 목록, ComfyUI 는 ``local_model_names``)으로
+    채운다 — Vue 는 ``getProperty(id, 'items')`` 로 읽는다."""
     if proxy is not None and hasattr(proxy, 'setSuggestions'):
         proxy.setSuggestions(model_choices(ad_models))
+
+
+def local_model_names(models_root: Optional[Path] = None) -> list[str]:
+    """앱 Forge ``models/adetailer`` 의 YOLO 상자 모델 파일 이름(하위 폴더 포함, 이름순) — ComfyUI 에서 얼굴 모델 칸의 추천
+    목록. ComfyUI 에는 ADetailer 모델 API 가 없고, 컴파일러가 이 폴더의 파일을 절대 경로로 넘긴다(``resolve_model_path``).
+    확장 ``face_detect._scan`` 과 같은 규칙(.pt, YOLO-World 제외). 폴더가 없거나 읽지 못하면 빈 목록."""
+    if models_root is None:
+        try:
+            from core.forge_modules import get_forge_root
+            models_root = get_forge_root()
+        except Exception:
+            return []
+    folder = Path(models_root) / ADETAILER_FOLDER
+    try:
+        if not folder.is_dir():
+            return []
+        found = sorted((p for p in folder.rglob(f'*{MODEL_SUFFIX}') if p.is_file() and is_box_model(p.name)),
+                       key=lambda p: p.name.lower())
+    except OSError:
+        return []
+    return list(dict.fromkeys(p.name for p in found))
+
+
+def push_comfy_model_items(proxy) -> None:
+    """ComfyUI 에서 얼굴 모델 칸의 추천 목록 — 앱 Forge ``models/adetailer`` 의 파일(``local_model_names``). ComfyUI 에는 ADetailer
+    모델 API 가 없어 그 목록은 앱의 기본값 대체뿐이다(face_yolov8n·hand_yolov8n …)."""
+    push_model_items(proxy, local_model_names())
 
 
 def init_widgets(widgets: Mapping) -> None:
@@ -243,7 +279,7 @@ def resolve_model_path(name: Any, models_root: Optional[Path] = None) -> str:
 
 def push_comfy_support(host, support: Optional[str]) -> None:
     """연결된 ComfyUI 의 얼굴 crop 상태(``comfy_support``)를 카드로(``_sam3_face_crop`` 의 ``comfySupport`` 속성). Forge·모름·
-    끊김은 None — 카드는 기능 스냅샷 규칙을 쓴다."""
+    끊김은 None — 카드는 기능 스냅샷 규칙을 쓴다. 어느 스레드에서 불러도 된다(브리지가 시그널로 보낸다)."""
     bridge = getattr(host, 'vue_bridge', None)
     push = getattr(bridge, 'pushWidgetProperty', None)
     if not callable(push):
@@ -252,3 +288,45 @@ def push_comfy_support(host, support: Optional[str]) -> None:
         push(widget_id('face_crop'), COMFY_SUPPORT_PROPERTY, support)
     except RuntimeError:
         pass   # 종료 중 QObject 가 이미 사라졌다
+
+
+_support_lock = threading.Lock()
+_support_listener: Optional[Callable[[Any, str], None]] = None
+
+
+def set_comfy_support_listener(callback: Optional[Callable[[Any, str], None]]) -> None:
+    """``publish_comfy_support`` 를 들을 곳(하나 — GUI 의 ``watch_comfy_support``). None 이면 듣지 않는다."""
+    global _support_listener
+    with _support_lock:
+        _support_listener = callback
+
+
+def publish_comfy_support(source: Any, object_info: Any) -> Optional[str]:
+    """ComfyUI 백엔드(``source``)가 받은 ``/object_info`` 의 얼굴 crop 상태를 듣는 곳에 알린다 — ComfyUIBackend.get_object_info 가
+    새 문서마다 부른다(연결, 카드 ↻, 팩 설치·재시작 뒤 생성의 새 스키마). 판단 재료가 없으면(None) 알리지 않는다(아는 상태를
+    지우지 않게). 듣는 쪽의 오류는 받는 쪽(백엔드)에 번지지 않는다. 판단한 상태를 돌려준다."""
+    support = comfy_support(object_info)
+    with _support_lock:
+        listener = _support_listener
+    if support is None or listener is None:
+        return support
+    try:
+        listener(source, support)
+    except Exception as exc:   # 표시 전용 — 생성·연결을 막지 않는다
+        logger.debug("SAM3 face crop support push failed: %s", exc)
+    return support
+
+
+def watch_comfy_support(host) -> None:
+    """활성 백엔드가 ``/object_info`` 를 새로 받을 때마다 그 상태를 카드로 보내게 한다(연결 성공 때 부른다 — 여러 번 불러도
+    마지막 host 하나). 다른(옛) 백엔드 객체가 늦게 받은 문서는 버린다."""
+    def on_support(source: Any, support: str) -> None:
+        try:
+            from backends import get_backend
+            if get_backend() is not source:
+                return
+        except Exception:
+            return
+        push_comfy_support(host, support)
+
+    set_comfy_support_listener(on_support)

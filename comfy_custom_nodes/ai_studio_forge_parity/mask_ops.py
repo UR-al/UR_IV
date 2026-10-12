@@ -361,12 +361,21 @@ def finish_masks(groups: Sequence[Any], image: Any, *, blur_pixels: int, invert:
     # Forge checks whether detection produced a usable mask *before* applying
     # the inpaint-mask inversion flag.  Inverting an empty detection here would
     # otherwise turn "nothing found" into a full-frame mask and unexpectedly
-    # redraw the entire image.
-    has_pixels = any(bool((mask > 0.0).any()) for mask in processed)
-    if invert and has_pixels:
-        combined = 1.0 - combined
-        individual = 1.0 - individual
+    # redraw the entire image.  Forge decides per image, and an empty pass does
+    # not exist there (it drops empty group masks), so every batch row is
+    # judged on its own: an image of an IMAGE batch that found nothing, or a
+    # zero row that only pads an image with fewer Individual masks, stays empty.
+    if invert:
+        combined = _invert_rows_with_pixels(combined)
+        individual = _invert_rows_with_pixels(individual)
     return combined, individual
+
+
+def _invert_rows_with_pixels(masks: Any):
+    """``1 - mask`` for every ``[B,H,W]`` row that has pixels; empty rows stay empty."""
+    torch = _torch()
+    has_pixels = (masks > 0.0).flatten(1).any(dim=1).view(-1, 1, 1)
+    return torch.where(has_pixels, 1.0 - masks, masks)
 
 
 # sam-extra's face-crop frame colour (RGB): orange, apart from the blue SAM3 boxes.

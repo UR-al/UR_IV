@@ -2998,10 +2998,16 @@ class VueBridge(QObject):
             if proxy and hasattr(proxy, 'addItems'):
                 proxy.addItems(models)
         # SAM3 '얼굴 안에서만 찾기' 의 얼굴 검출 모델 추천 — 확장 드롭다운과 같은 규칙(YOLO 상자 .pt, 기본 → face_* → 그 밖).
-        # T2I 카드·Refine·배치 SAM3 가 getProperty('_sam3_face_crop_model', 'items') 로 읽는다.
+        # T2I 카드·Refine·배치 SAM3 가 getProperty('_sam3_face_crop_model', 'items') 로 읽는다. ComfyUI 에는 ADetailer 모델 API 가
+        # 없어(위 목록은 기본값 대체) 컴파일러가 넘기는 앱 Forge models/adetailer 의 파일로 채운다.
         try:
-            from core.sam3_face_crop import push_model_items
-            push_model_items(self._proxies.get('_sam3_face_crop_model'), models if isinstance(models, list) else ())
+            from backends import BackendType, get_backend_type
+            from core.sam3_face_crop import push_comfy_model_items, push_model_items
+            proxy = self._proxies.get('_sam3_face_crop_model')
+            if get_backend_type() == BackendType.COMFYUI:
+                push_comfy_model_items(proxy)
+            else:
+                push_model_items(proxy, models if isinstance(models, list) else ())
         except Exception as exc:
             logger.debug("face crop model items: %s", exc)
 

@@ -483,6 +483,14 @@ class ComfyUIBackend(AbstractBackend):
         # Every live fetch (connect/get_info, inspector, XYZ) refreshes the
         # compile snapshot, so the next compile starts from the newest schema.
         self._object_info_cache.store(api_url, data)
+        # SAM3 '얼굴 안에서만 찾기' 상태도 새 문서로 — 팩 설치·재시작 뒤 생성(_preflight_bundled_node_pack 다음 새 스키마),
+        # 카드 ↻, 재연결이 받은 문서가 카드의 켜기 게이트를 바꾼다(core/sam3_face_crop.watch_comfy_support)
+        try:
+            from core.sam3_face_crop import publish_comfy_support
+
+            publish_comfy_support(self, data)
+        except Exception as exc:
+            _logger.debug("SAM3 face crop support publish skipped: %s", exc)
         return data
 
     def _compile_object_info(self, *, fresh: bool = False) -> Tuple[dict, bool]:

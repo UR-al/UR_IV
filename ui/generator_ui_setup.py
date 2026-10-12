@@ -464,8 +464,8 @@ class UISetupMixin:
             'cn_processor_res': LineEditProxy(b, '_sam3_cn_processor_res'),
             'cn_threshold_a': LineEditProxy(b, '_sam3_cn_threshold_a'),
             'cn_threshold_b': LineEditProxy(b, '_sam3_cn_threshold_b'),
-            # 얼굴 안에서만 찾기(sam-extra 0.34.0) 3필드 — 표·기본값은 core/sam3_face_crop. 모델은 ADetailer 목록을
-            # 추천(items)으로 받는 자유 입력(목록 밖 파일 이름도 그대로 보낸다)
+            # 얼굴 안에서만 찾기(sam-extra 0.34.0) 3필드 — 표·기본값은 core/sam3_face_crop. 모델은 추천 목록(items — Forge 는
+            # ADetailer 목록, ComfyUI 는 앱 Forge models/adetailer)에서 고르는 선택 칸(저장·프리셋의 목록 밖 이름은 그대로 보낸다)
             'face_crop': CheckBoxProxy(b, '_sam3_face_crop'),
             'face_crop_model': LineEditProxy(b, '_sam3_face_crop_model'),
             'face_crop_confidence': LineEditProxy(b, '_sam3_face_crop_confidence'),

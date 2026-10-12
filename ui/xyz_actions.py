@@ -162,4 +162,8 @@ class XYZActionsMixin:
         model = str(payload.pop("_xyz_model", ""))
         for key in ("id", "group_id", "group_index", "group_total", "is_last_of_group", "_xyz_backend_id"):
             payload.pop(key, None)
+        if get_backend_type().value != "webui":
+            # Text Encoder 축의 '되돌릴 모듈 변경' 표시는 Forge 옵션용 — ComfyUI 는 칸마다 그래프를 새로 만든다
+            from core.xyz_capabilities import TRANSIENT_MODULES_KEY
+            payload.pop(TRANSIENT_MODULES_KEY, None)
         return payload, model, backend

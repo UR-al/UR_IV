@@ -418,6 +418,27 @@ class TestComfySam3Nodes(unittest.TestCase):
         self.assertEqual(combined.sum().item(), 0)
         self.assertEqual(individual.sum().item(), 0)
 
+    def test_invert_is_decided_per_image_of_a_batch(self):
+        """Forge inverts per image and has no empty pass: in an IMAGE batch an image that found nothing, and a zero
+        row that only pads an image with fewer Individual masks, are not turned into full-frame masks."""
+        source = _image(batch=2, height=4, width=4)
+        first = torch.zeros((2, 4, 4))
+        first[0, 0:2, 0:2] = 1            # image 0 found something, image 1 nothing
+        second = torch.zeros((2, 4, 4))
+        second[0, 3, 3] = 1               # image 0's second mask; image 1 has no second mask either
+        combined, individual = mask_ops.finish_masks([first, second], source, blur_pixels=0, invert=True)
+        self.assertEqual(combined.shape, (2, 4, 4))
+        self.assertEqual(combined[0].sum().item(), 16 - 5)
+        self.assertEqual(combined[1].sum().item(), 0, "the image without a detection stays empty")
+        self.assertEqual(individual.shape, (4, 4, 4))
+        self.assertEqual([row.sum().item() for row in individual], [16 - 4, 0, 16 - 1, 0])
+
+        padded = torch.zeros((2, 4, 4))
+        padded[1, 1, 1] = 1               # only image 1 has a second mask: image 0's row pads
+        combined, individual = mask_ops.finish_masks([first, padded], source, blur_pixels=0, invert=True)
+        self.assertEqual([row.sum().item() for row in combined], [16 - 4, 16 - 1])
+        self.assertEqual([row.sum().item() for row in individual], [16 - 4, 0, 0, 16 - 1])
+
     def test_mask_node_runs_or_groups_sequential_groups_and_exclusion(self):
         _FakeSegmenter.calls = []
         with mock.patch.object(sam3_nodes, "_resolve_easy_node", return_value=_FakeSegmenter):

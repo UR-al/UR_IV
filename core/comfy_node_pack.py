@@ -67,11 +67,13 @@ PACK_ID = "ai_studio_forge_parity"
 # prepares Colorcraft again with a Hires VAE-only override (``hires_carry.apply_vae_change``),
 # the pack's flow shift keeps carried ``model_sampling`` values, and Euler (SMEA) Dy CFG++
 # sub-steps leave the guidance suite's step state alone.
-# 1.8.0: SAM3 "search inside faces only" (sam-extra v0.34.0 face crop with the v0.34.1 crop growth) in
-# ForgeNeoSAM3Mask: optional inputs ``face_crop``/``face_crop_model``/``face_crop_confidence`` and the
-# informational ``face_crop_detector`` COMBO (whether ComfyUI can import ultralytics). sam-extra's own code
-# (``sam3_face_crop*.py``, ``sam3_face_detect.py``) under its author's MIT grant, checked against the extension
-# on CPU (tests/test_comfy_sam3_face_crop.py). Without ``face_crop`` the node and the graphs are unchanged; the
+# 1.8.0: SAM3 "search inside faces only" (sam-extra v0.34.0 face crop with the v0.34.1 crop growth as fixed
+# before its release, sam-extra b815f68) in ForgeNeoSAM3Mask: optional inputs
+# ``face_crop``/``face_crop_model``/``face_crop_confidence`` and the informational ``face_crop_detector`` COMBO
+# (whether ComfyUI can import ultralytics). sam-extra's own code (``sam3_face_crop*.py``, ``sam3_face_detect.py``)
+# under its author's MIT grant, checked against the extension on CPU (tests/test_comfy_sam3_face_crop.py); one
+# image backbone per crop like the extension, and a missing face detector leaves no mask instead of failing the
+# prompt. Without ``face_crop`` the node and the graphs are unchanged (``invert`` is now decided per batch row); the
 # compiler sends the inputs only for a request with face crop on and refuses an older pack (no such input) or a
 # ComfyUI without ultralytics with the reason (core/sam3_face_crop.comfy_support).
 PACK_VERSION = "1.8.0"

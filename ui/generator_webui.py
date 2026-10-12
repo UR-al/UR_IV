@@ -926,13 +926,26 @@ class WebUIMixin:
             push_comfy_models(self, info.get('degrid_models'))
         except Exception as exc:
             print(f"[Models] VAE DeGrid 모델 선택지 전달 실패: {exc}")
-        # ComfyUI 의 SAM3 얼굴 crop 상태(팩 1.8.0·ultralytics) — Forge 는 None 이라 카드가 기능 스냅샷 규칙으로
+        # ComfyUI 의 SAM3 얼굴 crop 상태(팩 1.8.0·ultralytics) — Forge 는 None 이라 카드가 기능 스냅샷 규칙으로. 그 뒤
+        # ComfyUI 가 /object_info 를 새로 받을 때마다(카드 ↻, 팩 설치·재시작 뒤 생성) 다시 보낸다
         try:
-            from core.sam3_face_crop import push_comfy_support
+            from core.sam3_face_crop import push_comfy_support, watch_comfy_support
 
             push_comfy_support(self, info.get('sam3_face_crop_comfy'))
+            watch_comfy_support(self)
         except Exception as exc:
             print(f"[Models] SAM3 얼굴 crop 상태 전달 실패: {exc}")
+        # ComfyUI 의 얼굴 검출 모델 추천 목록 — 앱 Forge models/adetailer 의 파일(ADetailer 모델 API 가 없다). 부팅 뒤 백엔드를
+        # ComfyUI 로 바꿔 연결해도 ADetailer 기본값 대체 목록이 남지 않게 연결 때 다시 채운다
+        try:
+            from backends import BackendType, get_backend_type
+
+            if get_backend_type() == BackendType.COMFYUI:
+                from core.sam3_face_crop import push_comfy_model_items
+
+                push_comfy_model_items((getattr(self, 'sam3_widgets', None) or {}).get('face_crop_model'))
+        except Exception as exc:
+            print(f"[Models] SAM3 얼굴 검출 모델 목록 전달 실패: {exc}")
 
         # 샘플러
         samplers = info.get('samplers', [])

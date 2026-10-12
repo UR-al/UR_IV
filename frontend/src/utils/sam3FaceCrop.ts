@@ -11,13 +11,16 @@
  * 확장 sam3ext/face_detect.py DEFAULT_MODEL·DEFAULT_CONFIDENCE)와 같아야 한다 — tests/test_sam3_face_crop.py 가 이
  * 파일을 읽어 대조한다. 끈 설정은 Python build_state 가 세 키를 빼서 보낸다(요청이 0.34.0 전과 같다).
  *
- * 얼굴 검출 모델 목록은 Python 이 ADetailer 모델 목록에서 확장 드롭다운과 같은 규칙으로 골라
- * `_sam3_face_crop_model` 의 items 로 보낸다(core/sam3_face_crop.model_choices). 확장은 아무것도 받지 않으므로 목록
- * 밖 이름도 그대로 보낸다(없는 파일이면 결과 알림이 'FaceDetectorUnavailable' 을 알린다).
+ * 얼굴 검출 모델 목록은 Python 이 확장 드롭다운과 같은 규칙으로 골라 `_sam3_face_crop_model` 의 items 로 보낸다
+ * (core/sam3_face_crop.model_choices — Forge 는 ADetailer 모델 목록, ComfyUI 는 앱 Forge models/adetailer 폴더). 칸은
+ * 선택만 받는다(확장 드롭다운처럼). 목록 밖의 지금 값(다른 PC 에서 온 설정 등)은 지우지 않고 그대로 보낸다(없는 파일이면
+ * Forge 결과 알림이 'FaceDetectorUnavailable' 을 알리고, ComfyUI 노드는 마스크 없이 끝낸다).
  *
  * ComfyUI 는 앱 노드 팩 1.8.0 의 ForgeNeoSAM3Mask 가 같은 계산을 한다(sam-extra 얼굴 crop + 0.34.1 crop 키우기). 얼굴 검출은
- * ultralytics 라 ComfyUI 의 Python 에 있어야 한다 — Python 이 연결 때 /object_info 로 판단해(core/sam3_face_crop.comfy_support)
- * `_sam3_face_crop` 의 `comfySupport` 속성으로 보낸다. 검출기가 없거나 팩이 옛것이면 카드가 켜기를 막고 이유를 보인다.
+ * ultralytics 라 ComfyUI 의 Python 에 있어야 한다 — Python 이 /object_info 를 받을 때마다(연결·카드 ↻·팩 설치 뒤 생성)
+ * 판단해(core/sam3_face_crop.comfy_support) `_sam3_face_crop` 의 `comfySupport` 속성으로 보낸다. 검출기가 없으면 카드가
+ * 켜기를 막고 이유를 보인다. 팩이 옛것이면 경고만 한다 — 앱이 관리하는 ComfyUI 는 다음 생성이 번들 팩을 먼저 설치하고,
+ * 컴파일러가 새 스키마로 다시 판단한다.
  */
 
 export type Sam3FaceCropKind = 'bool' | 'number' | 'text'
@@ -137,20 +140,61 @@ export function faceCropSupport(caps: FaceCropCapabilitiesLike | null | undefine
   return Array.isArray(missing) && missing.includes(sam3FaceCropSettingKey('face_crop')) ? 'unsupported' : 'supported'
 }
 
-/** 이 백엔드에서 켤 수 없음 — 카드가 켜기를 막는다(이미 켜진 설정은 끌 수 있고, 켠 채 생성하면 컴파일러가 멈춘다). */
+/**
+ * 이 백엔드에서 켤 수 없음 — ComfyUI 에 얼굴 검출기(ultralytics)가 없을 때만. 카드가 켜기를 막는다(이미 켜진 설정은 끌 수 있고,
+ * 켠 채 생성하면 컴파일러가 멈춘다). 옛 팩은 막지 않는다(`faceCropPackNote` — 다음 생성이 팩을 먼저 설치할 수 있다).
+ */
 export function faceCropBlocked(support: FaceCropSupport): boolean {
+  return support === 'comfy_no_detector'
+}
+
+/** 카드가 상태를 다시 묻는 버튼(↻ — 기능 스냅샷 새로고침이 ComfyUI 에선 /object_info 를 다시 받는다)을 보일 상태 */
+export function faceCropRecheckable(support: FaceCropSupport): boolean {
   return support === 'comfy_no_detector' || support === 'comfy_old_pack'
 }
 
-/** ComfyUI 에서 쓸 수 없는 이유(카드의 경고 줄) — 쓸 수 있거나 Forge 면 ''. */
-export function faceCropBlockedReason(support: FaceCropSupport): string {
-  if (support === 'comfy_no_detector') {
-    return '연결된 ComfyUI 의 Python 에 얼굴 검출기(ultralytics)가 없어 켤 수 없습니다 — ComfyUI 의 Python 에 ultralytics 를 '
-      + '설치하고 재시작하거나 Forge(sam-extra)에서 쓰세요.'
+/** ComfyUI 에서 켤 수 없는 이유(카드의 경고 줄) — 쓸 수 있거나 Forge 면 ''. `enabled` = 이미 켜져 있다(저장·프리셋에서). */
+export function faceCropBlockedReason(support: FaceCropSupport, enabled = false): string {
+  if (support !== 'comfy_no_detector') return ''
+  const reason = '연결된 ComfyUI 의 Python 에 얼굴 검출기(ultralytics)가 없어 켤 수 없습니다 — ComfyUI 의 Python 에 ultralytics 를 '
+    + '설치하고 재시작한 뒤 ↻ 로 다시 확인하거나(다시 연결해도 됩니다) Forge(sam-extra)에서 쓰세요.'
+  return enabled ? `${reason} 켜 둔 채 생성하면 이 이유로 멈춥니다 — 끄세요.` : reason
+}
+
+/** 옛 팩(1.8.0 전)의 경고 줄 — 켤 수는 있다. 그 밖이면 ''. */
+export function faceCropPackNote(support: FaceCropSupport): string {
+  if (support !== 'comfy_old_pack') return ''
+  return `ComfyUI 의 앱 노드 팩이 ${COMFY_MIN_PACK_VERSION} 보다 오래됐습니다 — 앱이 시작한 ComfyUI 면 다음 생성 때 번들 노드 `
+    + '팩을 설치하고 다시 시작합니다. 직접 띄운 ComfyUI 는 팩을 갱신하고 재시작한 뒤 ↻ 로 다시 확인하세요. 그 뒤에도 face_crop '
+    + '입력이나 얼굴 검출기(ultralytics)가 없으면 켠 채 생성할 때 이유와 함께 멈춥니다.'
+}
+
+/** 'major.minor.patch' 가 `want` 이상인가 — 숫자가 아닌 판(없음 포함)은 false. */
+function versionAtLeast(version: unknown, want: readonly number[]): boolean {
+  const match = /^\s*v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(version ?? ''))
+  if (!match) return false
+  const have = [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)]
+  for (let i = 0; i < want.length; i += 1) {
+    if (have[i] !== want[i]) return have[i] > want[i]
   }
-  if (support === 'comfy_old_pack') {
-    return `ComfyUI 의 앱 노드 팩이 ${COMFY_MIN_PACK_VERSION} 보다 오래돼 켤 수 없습니다 — 번들 노드 팩을 갱신하고 ComfyUI 를 `
-      + '재시작하세요.'
+  return true
+}
+
+/** sam-extra 가 crop 가장자리에 잘린 머리카락을 crop 을 키워 다시 찾기 시작한 판 */
+export const FACE_CROP_GROWTH_VERSION = '0.34.1'
+
+/**
+ * 영역 밖으로 뻗은 머리카락을 어떻게 하는지 — 백엔드마다 다르다. ComfyUI 팩은 sam-extra 0.34.1 의 crop 키우기를 하고,
+ * Forge 는 연결된 sam-extra 판(기능 스냅샷 version.extension_version)에 따른다: 0.34.1 이상이면 키우고 그 전(0.34.0)은 자른다.
+ */
+export function faceCropHairNote(caps: { readonly version?: unknown } | null | undefined, support: FaceCropSupport): string {
+  if (support.startsWith('comfy')) {
+    return `crop 가장자리에 잘린 머리카락은 crop 을 키워 다시 찾습니다(sam-extra ${FACE_CROP_GROWTH_VERSION} 방식 — Forge 에 그 전 `
+      + 'sam-extra 가 있으면 Forge 는 자릅니다).'
   }
-  return ''
+  const version = (caps?.version as { extension_version?: unknown } | undefined)?.extension_version
+  if (versionAtLeast(version, FACE_CROP_GROWTH_VERSION.split('.').map(Number))) {
+    return 'crop 가장자리에 잘린 머리카락은 crop 을 키워 다시 찾습니다.'
+  }
+  return `영역 밖으로 뻗은 머리카락은 잘립니다(sam-extra ${FACE_CROP_GROWTH_VERSION} 부터는 crop 을 키워 다시 찾습니다).`
 }

@@ -165,12 +165,42 @@ class ModelChoiceTests(unittest.TestCase):
 
     def test_bridge_pushes_the_choices_when_adetailer_models_arrive(self):
         import json
+        from unittest import mock
+        from backends import BackendType
         from ui.vue_bridge import VueBridge
         bridge = _Bridge()
         proxy = LineEditProxy(bridge, '_sam3_face_crop_model')
         host = SimpleNamespace(_proxies={'_sam3_face_crop_model': proxy})
-        VueBridge._apply_adetailer_models_json(host, json.dumps(['hand_yolov8n.pt', 'face_yolov8n.pt']))
+        with mock.patch('backends.get_backend_type', return_value=BackendType.WEBUI):
+            VueBridge._apply_adetailer_models_json(host, json.dumps(['hand_yolov8n.pt', 'face_yolov8n.pt']))
         self.assertEqual(bridge.properties[('_sam3_face_crop_model', 'items')], ['face_yolov8n.pt', 'hand_yolov8n.pt'])
+
+    def test_comfyui_suggests_the_forge_adetailer_files_the_compiler_sends(self):
+        """ComfyUI 에는 ADetailer 모델 API 가 없다(앱의 기본값 대체 목록) — 추천은 resolve_model_path 가 찾는 앱 Forge
+        models/adetailer 의 파일(확장 find_face_models 규칙)."""
+        import json
+        from unittest import mock
+        from backends import BackendType
+        from ui.vue_bridge import VueBridge
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'adetailer' / 'sub').mkdir(parents=True)
+            for name in ('face_yolov8m.pt', 'hand_yolov8n.pt', 'yolov8x-worldv2.pt', 'notes.txt'):
+                (root / 'adetailer' / name).write_bytes(b'')
+            (root / 'adetailer' / 'sub' / 'face_yolov8n.pt').write_bytes(b'')
+            self.assertEqual(fc.local_model_names(root), ['face_yolov8m.pt', 'face_yolov8n.pt', 'hand_yolov8n.pt'])
+            self.assertEqual(fc.local_model_names(root / 'missing'), [])
+            bridge = _Bridge()
+            host = SimpleNamespace(_proxies={'_sam3_face_crop_model': LineEditProxy(bridge, '_sam3_face_crop_model')})
+            fallback = ['face_yolov8n.pt', 'hand_yolov8n.pt', 'person_yolov8n-seg.pt', 'mediapipe_face_full']
+            with mock.patch('backends.get_backend_type', return_value=BackendType.COMFYUI), \
+                    mock.patch('core.forge_modules.get_forge_root', return_value=root):
+                VueBridge._apply_adetailer_models_json(host, json.dumps(fallback))
+            self.assertEqual(bridge.properties[('_sam3_face_crop_model', 'items')],
+                             ['face_yolov8n.pt', 'face_yolov8m.pt', 'hand_yolov8n.pt'])
+        webui = (ROOT / 'ui' / 'generator_webui.py').read_text(encoding='utf-8')
+        loaded = webui[webui.index('def on_webui_info_loaded'):webui.index('def on_webui_info_error')]
+        self.assertIn("push_comfy_model_items((getattr(self, 'sam3_widgets', None) or {}).get('face_crop_model'))", loaded)
 
 
 @requires_extension
@@ -300,7 +330,71 @@ class ComfySupportTests(unittest.TestCase):
         self.assertIn("'sam3_face_crop_comfy': getattr(info, 'sam3_face_crop_comfy', None)", worker)
         webui = (ROOT / 'ui' / 'generator_webui.py').read_text(encoding='utf-8')
         self.assertIn("push_comfy_support(self, info.get('sam3_face_crop_comfy'))", webui)
+        self.assertIn('watch_comfy_support(self)', webui)
         self.assertIn('push_comfy_support(self, None)', webui)
+
+
+class ComfySupportRefreshTests(unittest.TestCase):
+    """연결 뒤에도 ComfyUI 가 /object_info 를 새로 받을 때마다 카드 상태가 바뀐다 — 팩 설치·재시작 뒤 생성의 새 스키마, 카드 ↻,
+    재연결(ComfyUIBackend.get_object_info → publish_comfy_support → watch_comfy_support 가 등록한 GUI). 예전엔 연결 때만 보내
+    팩 갱신·ultralytics 설치 뒤에도 '옛 팩'·'검출기 없음' 이 다시 연결할 때까지 남았다."""
+
+    def setUp(self):
+        from unittest import mock
+        from backends.comfyui_backend import ComfyUIBackend
+
+        self.mock = mock
+        self.bridge = _Bridge()
+        self.host = SimpleNamespace(vue_bridge=self.bridge)
+        self.backend = ComfyUIBackend('http://127.0.0.1:1', workflow_path='')
+        self.addCleanup(fc.set_comfy_support_listener, None)
+        fc.watch_comfy_support(self.host)
+        patcher = mock.patch('backends.get_backend', return_value=self.backend)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _fetch(self, document, backend=None):
+        response = SimpleNamespace(json=lambda: document, content=b'{}')
+        with self.mock.patch('core.http_retry.get_with_retry', return_value=response):
+            return (backend or self.backend).get_object_info()
+
+    def _card(self):
+        return self.bridge.properties.get(('_sam3_face_crop', 'comfySupport'), 'unset')
+
+    def test_a_fresh_schema_updates_the_card(self):
+        self._fetch({fc.COMFY_NODE_CLASS: {'input': {'required': {'image': ['IMAGE']}, 'optional': {}}}})
+        self.assertEqual(self._card(), fc.COMFY_OLD_PACK, 'pack 1.6.0 at connect')
+        self._fetch({fc.COMFY_NODE_CLASS: _pack_schema(detector=False)})
+        self.assertEqual(self._card(), fc.COMFY_NO_DETECTOR, 'after the pack install and restart')
+        self._fetch({fc.COMFY_NODE_CLASS: _pack_schema(detector=True)})
+        self.assertEqual(self._card(), fc.COMFY_READY, 'after installing ultralytics, re-checked')
+
+    def test_unknown_documents_and_other_backends_do_not_change_the_card(self):
+        from backends.comfyui_backend import ComfyUIBackend
+
+        self._fetch({fc.COMFY_NODE_CLASS: _pack_schema()})
+        self._fetch({fc.COMFY_NODE_CLASS: {'input': {'required': {}}}})          # class-only: unknown
+        self.assertEqual(self._card(), fc.COMFY_READY)
+        old = ComfyUIBackend('http://127.0.0.1:2', workflow_path='')
+        self._fetch({}, backend=old)                                              # not the active backend
+        self.assertEqual(self._card(), fc.COMFY_READY)
+        fc.set_comfy_support_listener(lambda *_: (_ for _ in ()).throw(RuntimeError('GUI gone')))
+        self.assertIsInstance(self._fetch({}), dict, 'a failing listener never breaks the fetch')
+
+    def test_the_compile_after_a_pack_install_and_the_card_refresh_both_publish(self):
+        """팩 설치 뒤 컴파일(_compile_object_info — 캐시가 비어 새로 받는다)과 카드 ↻(vae_degrid_ui.refresh_comfy_models)."""
+        from ui import vae_degrid_ui
+
+        response = SimpleNamespace(json=lambda: {fc.COMFY_NODE_CLASS: _pack_schema(detector=False)}, content=b'{}')
+        with self.mock.patch('core.http_retry.get_with_retry', return_value=response):
+            self.backend._object_info_cache.invalidate()
+            self.backend._compile_object_info()
+        self.assertEqual(self._card(), fc.COMFY_NO_DETECTOR)
+        response = SimpleNamespace(json=lambda: {fc.COMFY_NODE_CLASS: _pack_schema(detector=True)}, content=b'{}')
+        with self.mock.patch('core.http_retry.get_with_retry', return_value=response):
+            thread = vae_degrid_ui.refresh_comfy_models(SimpleNamespace(vue_bridge=_Bridge()))
+            thread.join(5)
+        self.assertEqual(self._card(), fc.COMFY_READY)
 
 
 class ComfyCompilerTests(unittest.TestCase):

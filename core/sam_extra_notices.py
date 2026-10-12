@@ -1541,7 +1541,8 @@ def _result_notices(info: Any, payload: Any = None, *, capabilities: Any = None)
     elif request.sam3 and request.sam3_init_source:
         # 단독 SAM3·Refine 의 원본 기준 요청 — SAM3 가 적용된 결과에서만(실패는 위 두 알림이 말한다)
         out.extend(_sam3_source_notices(images))
-    if not errors and request.sam3 and request.sam3_face_crop:
+    if request.sam3 and request.sam3_face_crop:
+        # SAM3 가 적용된 장만 본다 — 한 장의 실패('SAM3 Error')가 다른 장의 얼굴 crop 경고(옛 확장·얼굴 없음)를 가리지 않는다
         out.extend(_sam3_face_crop_notices(request, images))
 
     # Anima 3.8B — 'off: …' 는 3.8B 가 켜져야 했을 때(v2 번들 또는 명시적으로 켬)만 남는다.

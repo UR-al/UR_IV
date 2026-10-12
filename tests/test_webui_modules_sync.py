@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from backends import webui_backend
 from backends.webui_backend import WebUIBackend
 
 
@@ -34,11 +35,13 @@ ANIMA_MODULES = [
 class ForgeModuleSyncTests(unittest.TestCase):
     def setUp(self):
         self.backend = WebUIBackend("http://127.0.0.1:17860")
+        webui_backend._MODULE_RESTORE.clear()
+        self.addCleanup(webui_backend._MODULE_RESTORE.clear)
 
-    def _run(self, options, model, modules):
+    def _run(self, options, model, modules, **kwargs):
         with patch("backends.webui_backend.requests.get", return_value=_Resp(options)), \
              patch("backends.webui_backend.requests.post", return_value=_Resp({})) as post:
-            self.backend._switch_model_if_needed(model, modules)
+            self.backend._switch_model_if_needed(model, modules, **kwargs)
         return post
 
     def test_anima_switch_sends_modules_and_checkpoint_in_one_post(self):
@@ -75,12 +78,120 @@ class ForgeModuleSyncTests(unittest.TestCase):
     def test_generate_passes_payload_modules(self):
         """_generate 가 본문의 모듈을 동기화 함수로 넘긴다 — 여기서 끊기면 위 테스트가 다 헛것이다."""
         seen = {}
-        with patch.object(self.backend, "_switch_model_if_needed", side_effect=lambda m, mods=None: seen.update(model=m, modules=mods)), \
+        with patch.object(self.backend, "_switch_model_if_needed",
+                          side_effect=lambda m, mods=None, transient=False: seen.update(model=m, modules=mods,
+                                                                                         transient=transient)), \
              patch("backends.webui_backend.requests.post", side_effect=RuntimeError("stop here")):
             result = self.backend._generate("/sdapi/v1/txt2img", "Anima-3.8B-v1.1.safetensors",
                                             {"prompt": "x", "forge_additional_modules": ANIMA_MODULES})
         self.assertFalse(result.success)
-        self.assertEqual(seen, {"model": "Anima-3.8B-v1.1.safetensors", "modules": ANIMA_MODULES})
+        self.assertEqual(seen, {"model": "Anima-3.8B-v1.1.safetensors", "modules": ANIMA_MODULES, "transient": False})
+
+    def test_generate_takes_the_xyz_marker_off_the_request(self):
+        """XYZ Text Encoder 축 칸의 표시는 동기화 함수로만 가고 Forge 요청에는 실리지 않는다."""
+        from core.xyz_capabilities import TRANSIENT_MODULES_KEY
+
+        seen, sent = {}, []
+        payload = {"prompt": "x", "forge_additional_modules": ["te_b.safetensors"], TRANSIENT_MODULES_KEY: True}
+        with patch.object(self.backend, "_switch_model_if_needed",
+                          side_effect=lambda m, mods=None, transient=False: seen.update(transient=transient)), \
+             patch("backends.webui_backend.requests.post",
+                   side_effect=lambda *a, **k: sent.append(k.get("json")) or (_ for _ in ()).throw(RuntimeError("x"))):
+            self.backend._generate("/sdapi/v1/txt2img", "m.safetensors", payload)
+        self.assertEqual(seen, {"transient": True})
+        self.assertTrue(sent)
+        self.assertTrue(all(TRANSIENT_MODULES_KEY not in body for body in sent if isinstance(body, dict)))
+        self.assertIn(TRANSIENT_MODULES_KEY, payload, "the caller's payload is not changed")
+
+
+class _ForgeOptions:
+    """Forge /sdapi/v1/options: GET gives the stored options, POST changes (and keeps) them."""
+
+    def __init__(self, modules):
+        self.options = {"sd_model_checkpoint": "anima.safetensors",
+                        "forge_additional_modules": [f"C:/forge/models/text_encoder/{m}" for m in modules]}
+        self.posts = []
+
+    def get(self, url, **kwargs):
+        return _Resp(dict(self.options))
+
+    def post(self, url, json=None, **kwargs):
+        self.posts.append(json)
+        self.options.update(json)
+        return _Resp({})
+
+
+class XyzTextEncoderRestoreTests(unittest.TestCase):
+    """XYZ 'Text Encoder' 축은 칸마다 Forge 옵션(config.json 에도 저장)을 바꾼다 — 끝난 뒤 모듈 키 없이 오는 보통 생성은
+    처음 목록으로 되돌린다(확장의 '[Modules] Text Encoder' 축처럼 남는 상태가 없다)."""
+
+    def setUp(self):
+        webui_backend._MODULE_RESTORE.clear()
+        self.addCleanup(webui_backend._MODULE_RESTORE.clear)
+        self.forge = _ForgeOptions(["clip_l_a.safetensors"])
+
+    def _switch(self, modules, *, transient=False, backend=None):
+        backend = backend or WebUIBackend("http://127.0.0.1:17860")
+        with patch("backends.webui_backend.requests.get", side_effect=self.forge.get), \
+             patch("backends.webui_backend.requests.post", side_effect=self.forge.post):
+            backend._switch_model_if_needed("anima.safetensors", modules, transient=transient)
+
+    def _names(self):
+        return WebUIBackend._module_names(self.forge.options["forge_additional_modules"])
+
+    def test_the_next_generation_without_modules_restores_the_list_before_the_run(self):
+        self._switch([], transient=True)                          # 'Use current' with an empty chip
+        self._switch(["clip_l_b.safetensors"], transient=True)    # the last cell
+        self.assertEqual(self._names(), ["clip_l_b.safetensors"])
+        self._switch(None, backend=WebUIBackend("http://127.0.0.1:17860"))   # normal T2I, empty chip (a new backend)
+        self.assertEqual(self._names(), ["clip_l_a.safetensors"])
+        self.assertEqual(self.forge.posts[-1], {"forge_additional_modules": ["clip_l_a.safetensors"]})
+        posts = len(self.forge.posts)
+        self._switch(None)
+        self.assertEqual(len(self.forge.posts), posts, "restored once")
+
+    def test_a_list_changed_elsewhere_after_the_run_is_kept(self):
+        self._switch(["clip_l_b.safetensors"], transient=True)
+        self.forge.options["forge_additional_modules"] = ["C:/forge/models/text_encoder/clip_l_c.safetensors"]
+        self._switch(None)
+        self.assertEqual(self._names(), ["clip_l_c.safetensors"], "the Forge UI's choice wins")
+        self.assertEqual(webui_backend._MODULE_RESTORE, {})
+
+    def test_a_request_with_its_own_modules_ends_the_restore(self):
+        self._switch(["clip_l_b.safetensors"], transient=True)
+        self._switch(["clip_l_d.safetensors"])                    # a normal request with the chip set
+        self.assertEqual(self._names(), ["clip_l_d.safetensors"])
+        self._switch(None)
+        self.assertEqual(self._names(), ["clip_l_d.safetensors"])
+
+    def test_without_a_run_nothing_is_restored(self):
+        self._switch(["clip_l_b.safetensors"])                    # the chip, not the XYZ axis
+        self._switch(None)
+        self.assertEqual(self._names(), ["clip_l_b.safetensors"])
+
+    def test_an_xyz_run_then_a_normal_generation_end_to_end(self):
+        """build_jobs → 대기열 칸(_generate) → 칩이 빈 보통 생성(_generate): Forge 가 처음 목록으로 돌아온다."""
+        from core.xyz_capabilities import TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
+
+        capability = {"axes": [text_encoder_axis(["clip_l_b.safetensors"], source="t")]}
+        jobs = build_jobs({"prompt": "p"}, "anima.safetensors",
+                          [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT, "clip_l_b.safetensors"]}],
+                          capability, text_encoders=[])
+        backend = WebUIBackend("http://127.0.0.1:17860")
+        seen = []
+
+        def generate(payload):
+            payload = {k: v for k, v in payload.items() if not k.startswith("_xyz")}
+            with patch.object(backend, "_generate_once", side_effect=RuntimeError("stop after the switch")), \
+                 patch("backends.webui_backend.requests.get", side_effect=self.forge.get), \
+                 patch("backends.webui_backend.requests.post", side_effect=self.forge.post):
+                backend._generate("/sdapi/v1/txt2img", "anima.safetensors", payload)
+            seen.append(self._names())
+
+        for job in jobs:
+            generate(job)
+        generate({"prompt": "p"})
+        self.assertEqual(seen, [[], ["clip_l_b.safetensors"], ["clip_l_a.safetensors"]])
 
 
 class ProgressPreviewTests(unittest.TestCase):
