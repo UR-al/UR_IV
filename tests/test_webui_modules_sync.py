@@ -79,29 +79,38 @@ class ForgeModuleSyncTests(unittest.TestCase):
         """_generate 가 본문의 모듈을 동기화 함수로 넘긴다 — 여기서 끊기면 위 테스트가 다 헛것이다."""
         seen = {}
         with patch.object(self.backend, "_switch_model_if_needed",
-                          side_effect=lambda m, mods=None, transient=False: seen.update(model=m, modules=mods,
-                                                                                         transient=transient)), \
+                          side_effect=lambda m, mods=None, transient=False, te_cell=None: seen.update(
+                              model=m, modules=mods, transient=transient, te_cell=te_cell)), \
              patch("backends.webui_backend.requests.post", side_effect=RuntimeError("stop here")):
             result = self.backend._generate("/sdapi/v1/txt2img", "Anima-3.8B-v1.1.safetensors",
                                             {"prompt": "x", "forge_additional_modules": ANIMA_MODULES})
         self.assertFalse(result.success)
-        self.assertEqual(seen, {"model": "Anima-3.8B-v1.1.safetensors", "modules": ANIMA_MODULES, "transient": False})
+        self.assertEqual(seen, {"model": "Anima-3.8B-v1.1.safetensors", "modules": ANIMA_MODULES, "transient": False,
+                                "te_cell": None})
 
     def test_generate_takes_the_xyz_marker_off_the_request(self):
-        """XYZ Text Encoder 축 칸의 표시는 동기화 함수로만 가고 Forge 요청에는 실리지 않는다."""
-        from core.xyz_capabilities import TRANSIENT_MODULES_KEY
+        """XYZ Text Encoder 축 칸의 표시·TE 선택은 동기화 함수로만 가고 Forge 요청에는 실리지 않는다."""
+        from core.xyz_capabilities import FORGE_TE_CELL_KEY, TRANSIENT_MODULES_KEY
 
-        seen, sent = {}, []
-        payload = {"prompt": "x", "forge_additional_modules": ["te_b.safetensors"], TRANSIENT_MODULES_KEY: True}
-        with patch.object(self.backend, "_switch_model_if_needed",
-                          side_effect=lambda m, mods=None, transient=False: seen.update(transient=transient)), \
-             patch("backends.webui_backend.requests.post",
-                   side_effect=lambda *a, **k: sent.append(k.get("json")) or (_ for _ in ()).throw(RuntimeError("x"))):
-            self.backend._generate("/sdapi/v1/txt2img", "m.safetensors", payload)
-        self.assertEqual(seen, {"transient": True})
-        self.assertTrue(sent)
-        self.assertTrue(all(TRANSIENT_MODULES_KEY not in body for body in sent if isinstance(body, dict)))
-        self.assertIn(TRANSIENT_MODULES_KEY, payload, "the caller's payload is not changed")
+        cell = {"value": "te_b.safetensors", "encoders": ["te_a.safetensors", "te_b.safetensors"]}
+        for payload, expected in (
+                ({"prompt": "x", "forge_additional_modules": ["te_b.safetensors"], TRANSIENT_MODULES_KEY: True},
+                 {"transient": True, "te_cell": None}),
+                ({"prompt": "x", TRANSIENT_MODULES_KEY: True, FORGE_TE_CELL_KEY: cell},
+                 {"transient": True, "te_cell": cell})):
+            seen, sent = {}, []
+            with self.subTest(keys=sorted(payload)), \
+                 patch.object(self.backend, "_switch_model_if_needed",
+                              side_effect=lambda m, mods=None, transient=False, te_cell=None: seen.update(
+                                  transient=transient, te_cell=te_cell)), \
+                 patch("backends.webui_backend.requests.post",
+                       side_effect=lambda *a, **k: sent.append(k.get("json")) or (_ for _ in ()).throw(RuntimeError("x"))):
+                self.backend._generate("/sdapi/v1/txt2img", "m.safetensors", payload)
+                self.assertEqual(seen, expected)
+                self.assertTrue(sent)
+                self.assertTrue(all(not {TRANSIENT_MODULES_KEY, FORGE_TE_CELL_KEY} & set(body)
+                                    for body in sent if isinstance(body, dict)))
+                self.assertIn(TRANSIENT_MODULES_KEY, payload, "the caller's payload is not changed")
 
 
 class _ForgeOptions:
@@ -170,13 +179,15 @@ class XyzTextEncoderRestoreTests(unittest.TestCase):
         self.assertEqual(self._names(), ["clip_l_b.safetensors"])
 
     def test_an_xyz_run_then_a_normal_generation_end_to_end(self):
-        """build_jobs → 대기열 칸(_generate) → 칩이 빈 보통 생성(_generate): Forge 가 처음 목록으로 돌아온다."""
+        """build_jobs → 대기열 칸(_generate) → 칩이 빈 보통 생성(_generate): Forge 가 처음 목록으로 돌아온다.
+        칩이 빈 Forge 칸은 Forge 의 목록에서 TE 만 바꾼다 — 'Use current' 칸은 Forge 의 목록 그대로다(예전엔 빈 목록)."""
         from core.xyz_capabilities import TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
 
-        capability = {"axes": [text_encoder_axis(["clip_l_b.safetensors"], source="t")]}
+        capability = {"axes": [text_encoder_axis(["clip_l_a.safetensors", "clip_l_b.safetensors"], source="t")],
+                      "backend": "webui"}
         jobs = build_jobs({"prompt": "p"}, "anima.safetensors",
                           [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT, "clip_l_b.safetensors"]}],
-                          capability, text_encoders=[])
+                          capability, text_encoders=[], forge_modules=["clip_l_a.safetensors"])
         backend = WebUIBackend("http://127.0.0.1:17860")
         seen = []
 
@@ -191,7 +202,167 @@ class XyzTextEncoderRestoreTests(unittest.TestCase):
         for job in jobs:
             generate(job)
         generate({"prompt": "p"})
-        self.assertEqual(seen, [[], ["clip_l_b.safetensors"], ["clip_l_a.safetensors"]])
+        self.assertEqual(seen, [["clip_l_a.safetensors"], ["clip_l_b.safetensors"], ["clip_l_a.safetensors"]])
+
+
+ANIMA_VAE = "C:/forge/models/VAE/qwen_image_vae.safetensors"
+ANIMA_TE = "C:\\forge\\models\\text_encoder\\qwen_3_06b_base.safetensors"
+TE_CHOICES = ["qwen_3_06b_base.safetensors", "sub/qwen_alt.safetensors"]   # 앱 TE 칩 선택지(텍스트 인코더 폴더)
+
+
+class XyzTextEncoderForgeListTests(unittest.TestCase):
+    """앱 VAE·TE 칩이 빈 Text Encoder 축 칸 — 보통 생성처럼 Forge 드롭다운의 목록(Anima: VAE + TE)을 쓰고 TE 만 바꾼다.
+    예전엔 칸이 [그 TE]·[] 를 옵션으로 보내 Forge 가 VAE 를 잃었다("You do not have VAE state dict!" 500)."""
+
+    def setUp(self):
+        webui_backend._MODULE_RESTORE.clear()
+        self.addCleanup(webui_backend._MODULE_RESTORE.clear)
+        self.forge = _ForgeOptions([])
+        self.forge.options["forge_additional_modules"] = [ANIMA_VAE, ANIMA_TE]
+
+    def _patched(self):
+        return patch("backends.webui_backend.requests.get", side_effect=self.forge.get), \
+            patch("backends.webui_backend.requests.post", side_effect=self.forge.post)
+
+    def _cell(self, value, *, encoders=TE_CHOICES, backend=None):
+        backend = backend or WebUIBackend("http://127.0.0.1:17860")
+        get, post = self._patched()
+        with get, post:
+            backend._switch_model_if_needed("anima.safetensors", None, transient=True,
+                                            te_cell={"value": value, "encoders": list(encoders)})
+
+    def _normal(self):
+        """칩이 빈 보통 생성 — 모듈 키 없음(새 백엔드 객체: 기록은 모듈 단위라 남는다)."""
+        get, post = self._patched()
+        with get, post:
+            WebUIBackend("http://127.0.0.1:17860")._switch_model_if_needed("anima.safetensors", None)
+
+    def _base(self):
+        get, post = self._patched()
+        with get, post:
+            return WebUIBackend("http://127.0.0.1:17860").forge_module_base()
+
+    def _names(self):
+        return WebUIBackend._module_names(self.forge.options["forge_additional_modules"])
+
+    def test_a_te_cell_keeps_forges_vae(self):
+        self._cell("sub/qwen_alt.safetensors")
+        self.assertEqual(self._names(), ["qwen_alt.safetensors", "qwen_image_vae.safetensors"])
+        self.assertEqual(self.forge.posts, [{"forge_additional_modules": ["qwen_alt.safetensors",
+                                                                          "qwen_image_vae.safetensors"]}])
+        self.assertEqual(webui_backend._MODULE_RESTORE["http://127.0.0.1:17860"],
+                         {"written": ["qwen_alt.safetensors", "qwen_image_vae.safetensors"],
+                          "original": ["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"]})
+
+    def test_use_current_keeps_forges_list(self):
+        self._cell(None)
+        self.assertEqual(self.forge.posts, [], "Forge's list is the cell's list - nothing to change")
+        self._cell("sub/qwen_alt.safetensors")
+        self._cell(None)                                          # 'Use current' after a TE cell puts Forge's list back
+        self.assertEqual(self._names(), ["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"])
+        self._normal()
+        self.assertEqual(len(self.forge.posts), 2, "nothing left to restore")
+        self.assertEqual(webui_backend._MODULE_RESTORE, {})
+
+    def test_the_next_generation_without_modules_restores_forges_list(self):
+        self._cell(None)
+        self._cell("qwen_3_06b_base.safetensors")
+        self._cell("sub/qwen_alt.safetensors")                    # the last cell
+        with self.assertLogs("backends.webui_backend", level="INFO") as logs:
+            self._normal()
+        self.assertEqual(self._names(), ["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"])
+        self.assertEqual(self.forge.posts[-1], {"forge_additional_modules": ["qwen_3_06b_base.safetensors",
+                                                                             "qwen_image_vae.safetensors"]})
+        self.assertTrue(any("XYZ Text Encoder 축 전으로 되돌림" in line for line in logs.output), logs.output)
+        posts = len(self.forge.posts)
+        self._normal()
+        self.assertEqual(len(self.forge.posts), posts, "restored once")
+
+    def test_a_second_run_starts_from_the_list_before_the_first(self):
+        """앞 XYZ 가 바꿔 둔 채(보통 생성 전) 다시 돌려도 보통 생성이 쓸 목록 = 첫 XYZ 전 목록이다."""
+        self._cell("sub/qwen_alt.safetensors")                    # run 1 ends on the other TE
+        self.assertEqual(self._base(), ["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"])
+        self._cell(None)                                          # run 2, 'Use current'
+        self.assertEqual(self._names(), ["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"])
+        self._cell("sub/qwen_alt.safetensors")
+        self.assertEqual(webui_backend._MODULE_RESTORE["http://127.0.0.1:17860"]["original"],
+                         ["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"])
+
+    def test_a_list_changed_in_forge_between_runs_becomes_the_base(self):
+        self._cell("sub/qwen_alt.safetensors")
+        self.forge.options["forge_additional_modules"] = ["C:/forge/models/VAE/other_vae.safetensors", ANIMA_TE]
+        self.assertEqual(self._base(), ["other_vae.safetensors", "qwen_3_06b_base.safetensors"])
+        self._cell(None)
+        self.assertEqual(self._names(), ["other_vae.safetensors", "qwen_3_06b_base.safetensors"], "the Forge UI's choice")
+        self._cell("sub/qwen_alt.safetensors")
+        self.assertEqual(self._names(), ["other_vae.safetensors", "qwen_alt.safetensors"])
+        self._normal()
+        self.assertEqual(self._names(), ["other_vae.safetensors", "qwen_3_06b_base.safetensors"])
+
+    def test_no_te_in_forges_list_adds_the_choice(self):
+        self.forge.options["forge_additional_modules"] = [ANIMA_VAE]
+        self._cell("sub/qwen_alt.safetensors")
+        self.assertEqual(self._names(), ["qwen_alt.safetensors", "qwen_image_vae.safetensors"])
+        self._normal()
+        self.assertEqual(self._names(), ["qwen_image_vae.safetensors"])
+
+    def test_two_encoders_in_forges_list_refuse_before_any_change(self):
+        self.forge.options["forge_additional_modules"] = ["C:/f/VAE/ae.safetensors", "C:/f/text_encoder/clip_l.safetensors",
+                                                          "C:/f/text_encoder/t5xxl.safetensors"]
+        encoders = ["clip_l.safetensors", "t5xxl.safetensors", "clip_g.safetensors"]
+        with self.assertRaisesRegex(ValueError, "TE 가 2개"):
+            self._cell("clip_g.safetensors", encoders=encoders)
+        self.assertEqual((self.forge.posts, webui_backend._MODULE_RESTORE), ([], {}))
+        self._cell(None, encoders=encoders)                       # 'Use current' only is fine
+        self.assertEqual(self.forge.posts, [])
+        # 대기열 칸(_generate)은 Forge 에 보내지 않고 이유와 함께 실패한다
+        from core.xyz_capabilities import FORGE_TE_CELL_KEY, TRANSIENT_MODULES_KEY
+        get, post = self._patched()
+        backend = WebUIBackend("http://127.0.0.1:17860")
+        with get, post, patch.object(backend, "_generate_once", side_effect=AssertionError("must not send")):
+            result = backend._generate("/sdapi/v1/txt2img", "anima.safetensors", {
+                "prompt": "p", TRANSIENT_MODULES_KEY: True,
+                FORGE_TE_CELL_KEY: {"value": "clip_g.safetensors", "encoders": encoders}})
+        self.assertFalse(result.success)
+        self.assertIn("TE 가 2개", result.error)
+        self.assertEqual(self.forge.posts, [])
+
+    def test_a1111_without_the_option_ignores_the_cell(self):
+        del self.forge.options["forge_additional_modules"]
+        self._cell("sub/qwen_alt.safetensors")
+        self.assertEqual((self.forge.posts, webui_backend._MODULE_RESTORE), ([], {}))
+        self.assertIsNone(self._base())
+
+    def test_an_anima_xyz_run_end_to_end(self):
+        """build_jobs(칩이 빈 Forge) → 대기열 칸(_generate) → 칩이 빈 보통 생성: 칸마다 VAE 가 남고 TE 만 바뀌며, Forge 요청에는
+        모듈 키도 비공개 키도 없다(Forge classic 은 옵션만 본다)."""
+        from core.xyz_capabilities import TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
+
+        capability = {"axes": [text_encoder_axis(TE_CHOICES, source="t")], "backend": "webui"}
+        jobs = build_jobs({"prompt": "p"}, "anima.safetensors",
+                          [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT, "sub/qwen_alt.safetensors"]}],
+                          capability, text_encoders=[], forge_modules=self._base())
+        backend = WebUIBackend("http://127.0.0.1:17860")
+        seen, requests_sent = [], []
+
+        def generate(payload):
+            payload = {k: v for k, v in payload.items() if not k.startswith("_xyz")}
+            get, post = self._patched()
+            with get, post, patch.object(backend, "_generate_once",
+                                         side_effect=lambda _e, body, *a, **k: requests_sent.append(body) or
+                                         (_ for _ in ()).throw(RuntimeError("stop after the switch"))):
+                backend._generate("/sdapi/v1/txt2img", "anima.safetensors", payload)
+            seen.append(self._names())
+
+        for job in jobs:
+            generate(job)
+        generate({"prompt": "p"})
+        self.assertEqual(seen, [["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"],
+                                ["qwen_alt.safetensors", "qwen_image_vae.safetensors"],
+                                ["qwen_3_06b_base.safetensors", "qwen_image_vae.safetensors"]])
+        self.assertEqual(len(requests_sent), 3)
+        self.assertTrue(all(not any(key.startswith("_forge") or key == "forge_additional_modules" for key in body)
+                            for body in requests_sent), requests_sent)
 
 
 class ProgressPreviewTests(unittest.TestCase):

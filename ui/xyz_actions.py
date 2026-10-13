@@ -6,7 +6,7 @@ import json
 import secrets
 import threading
 
-from core.xyz_capabilities import backend_identity, build_jobs, fetch_capabilities
+from core.xyz_capabilities import TEXT_ENCODER, backend_identity, build_jobs, fetch_capabilities
 
 
 class XYZActionsMixin:
@@ -73,6 +73,22 @@ class XYZActionsMixin:
         from core.main_module_choices import split_te_selection
         return split_te_selection(text)
 
+    @staticmethod
+    def _xyz_forge_modules(backend, kind, capability):
+        """칩이 빈 Forge 에서 Text Encoder 축 칸이 TE 를 바꿀 Forge 의 목록(WebUIBackend.forge_module_base — 보통 생성이 쓸
+        목록). 첫 칸을 만들기 전에 TE 가 둘 이상인지 보는 데만 쓴다(core/xyz_capabilities.build_jobs). 축이 없거나 Forge 가
+        아니거나 못 읽으면 None — 칸을 보낼 때 백엔드가 그때의 목록으로 다시 본다."""
+        if kind != "webui" or not any(axis.get("id") == TEXT_ENCODER for axis in capability.get("axes", [])):
+            return None
+        reader = getattr(backend, "forge_module_base", None)
+        if not callable(reader):
+            return None
+        try:
+            names = reader()
+        except Exception:
+            return None
+        return list(names) if isinstance(names, list) else None
+
     def _xyz_request_capabilities(self, payload):
         from backends import get_backend, get_backend_type
         backend, kind = get_backend(), get_backend_type().value
@@ -90,11 +106,14 @@ class XYZActionsMixin:
                 event = {"ok": False, "requestId": request_id, "axes": [],
                          "error": str(exc) if isinstance(exc, ValueError) else "백엔드 기능을 읽지 못했습니다. 연결과 API 사용 설정을 확인하세요."}
                 capability = None
+            # 작업자 스레드에서 같이 읽는다 — 시작 클릭(GUI 스레드)은 네트워크를 타지 않는다
+            forge_modules = self._xyz_forge_modules(backend, kind, capability) if capability else None
             with self._xyz_lock:
                 if (serial != self._xyz_query_serial or get_backend() is not backend
                         or get_backend_type().value != kind):
                     return  # An old backend may finish after the new one.
-                self._xyz_capabilities = {"data": capability, "backend": backend, "context": context} if capability else None
+                self._xyz_capabilities = {"data": capability, "backend": backend, "context": context,
+                                          "forge_modules": forge_modules} if capability else None
             self._xyz_emit("xyzCapabilitiesReceived", event)
         threading.Thread(target=work, daemon=True, name="xyz-capabilities").start()
 
@@ -131,7 +150,8 @@ class XYZActionsMixin:
             from ui.sampling_blocks import freeze_sampling_payload, show_sampling_notice_list
             notices = freeze_sampling_payload(self, base)
             jobs = build_jobs(base, self.model_combo.currentText(), payload.get("axes"), cached["data"],
-                              text_encoders=self._xyz_text_encoder_selection())
+                              text_encoders=self._xyz_text_encoder_selection(),
+                              forge_modules=cached.get("forge_modules"))
             kind = get_backend_type().value
             for index, job in enumerate(jobs):
                 job["_xyz_backend_id"] = backend_identity(kind, backend)
@@ -163,7 +183,9 @@ class XYZActionsMixin:
         for key in ("id", "group_id", "group_index", "group_total", "is_last_of_group", "_xyz_backend_id"):
             payload.pop(key, None)
         if get_backend_type().value != "webui":
-            # Text Encoder 축의 '되돌릴 모듈 변경' 표시는 Forge 옵션용 — ComfyUI 는 칸마다 그래프를 새로 만든다
-            from core.xyz_capabilities import TRANSIENT_MODULES_KEY
+            # Text Encoder 축의 '되돌릴 모듈 변경' 표시와 칩이 빈 칸의 TE 선택은 Forge 옵션용 — ComfyUI 는 칸마다 그래프를
+            # 새로 만든다
+            from core.xyz_capabilities import FORGE_TE_CELL_KEY, TRANSIENT_MODULES_KEY
             payload.pop(TRANSIENT_MODULES_KEY, None)
+            payload.pop(FORGE_TE_CELL_KEY, None)
         return payload, model, backend

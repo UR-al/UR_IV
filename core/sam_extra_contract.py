@@ -1167,14 +1167,23 @@ XYZ_AXES = MappingProxyType({
         "Prompt S/R (SAM3 inpaint and main prompt)", "Prompt S/R (SAM3 inpaint)", "Restore Face", "Sampler",
         "Scheduler", "Seed", "Steps", "Threshold", "Unload After")},
     # v0.34.0 — 칸마다 텍스트 인코더 파일을 바꾸는 축(VAE / Text Encoder 드롭다운에서 고른 것과 같은 모델). 앱 XYZ 는 칸마다
-    # 따로 생성하는 대기열이라 같은 뜻의 'Text Encoder' 축을 Forge·ComfyUI 모두에 둔다: 칸의 forge_additional_modules 에서 TE
-    # 칸만 바꾼다(VAE 그대로 — Forge 는 옵션으로 모듈을 바꿔 다시 불러오고, ComfyUI 는 CLIP 로더). 확장은 파일 헤더로 자리
+    # 따로 생성하는 대기열이라 같은 뜻의 'Text Encoder' 축을 Forge·ComfyUI 모두에 둔다: 보통 생성이 쓸 모듈 목록에서 TE 만
+    # 바꾼다(VAE 그대로 — Forge 는 옵션으로 모듈을 바꿔 다시 불러오고, ComfyUI 는 CLIP 로더). 앱 VAE·TE 칩이 빈 Forge 는 보통
+    # 생성이 Forge 드롭다운의 목록을 쓰므로 칸도 그 목록에서 TE 만 바꾼다(WebUI 백엔드가 보낼 때 계산). 확장은 파일 헤더로 자리
     # (CLIP-L·T5 …)를 보아 TE 가 둘인 모델의 한 칸만 바꾸지만, 앱은 파일을 읽지 않아 TE 가 둘 이상이면 축을 거절한다
     "[Modules]": {**mapped(
         "core/xyz_capabilities.py:TEXT_ENCODER", "core/xyz_capabilities.py:text_encoder_axis",
         "core/xyz_capabilities.py:replace_text_encoder", "core/xyz_capabilities.py:FORGE_TEXT_ENCODER_AXIS",
         "ui/xyz_actions.py:_xyz_text_encoder_choices", "core/xyz_capabilities.py:TRANSIENT_MODULES_KEY",
-        note="값 = 'Use current'(확장 'Use Forge current' — 앱 TE 칩 그대로) + 앱 TE 칩 선택지. Forge XYZ 의 이 축 라벨은 "
+        "core/xyz_capabilities.py:FORGE_TE_CELL_KEY", "core/xyz_capabilities.py:forge_te_cell_modules",
+        "backends/webui_backend.py:forge_module_base",
+        note="값 = 'Use current'(확장 'Use Forge current' — 보통 생성의 목록 그대로) + 앱 TE 칩 선택지. 칸의 목록 = 보통 생성이 "
+             "쓸 목록에서 TE 만 바꾼 것: 앱 VAE·TE 칩을 골랐으면 그 목록(칸의 forge_additional_modules), 칩이 빈 Forge 면 Forge "
+             "드롭다운의 지금 목록(앞 XYZ 가 바꿔 둔 채면 그 전 목록) — 칸은 TE 선택만 비공개 키(FORGE_TE_CELL_KEY)로 싣고 "
+             "WebUI 백엔드가 보낼 때 그 목록에서 TE 만 바꾼다(forge_te_cell_modules — VAE 그대로, TE 가 없으면 더한다). 어느 것이 "
+             "TE 인지는 앱 TE 칩 선택지(텍스트 인코더 폴더 파일)와 파일 이름으로 가르고, Forge 목록에 TE 가 둘 이상이면 첫 칸 "
+             "전에 거절한다(축 목록을 받을 때 읽은 목록 — forge_module_base). 칩이 빈 ComfyUI 는 보통 생성도 체크포인트 내장 "
+             "VAE·TE 라 칸이 [그 TE] 를 싣는다. Forge XYZ 의 이 축 라벨은 "
              "앱 XYZ 의 '실행하지 않는 확장 축' 목록에서 뺀다(FORGE_TEXT_ENCODER_AXIS). 확장 축은 칸의 로딩 파라미터만 바꾸고 "
              "칸 끝에 되돌려 config.json·드롭다운이 그대로지만, 앱 칸은 Forge 옵션(config.json 에도 저장)을 바꾼다 — 그래서 "
              "TE 축 칸은 표시(TRANSIENT_MODULES_KEY)를 달고, WebUI 백엔드가 처음 목록을 기억했다가 모듈 키 없는 다음 요청 때 "

@@ -141,25 +141,106 @@ class XYZCapabilityTests(unittest.TestCase):
         self.assertEqual(comfy_capabilities(schema, family="krea2", text_encoders=tes)["axes"], [])
 
     def test_text_encoder_axis_replaces_only_the_te_entry_in_every_cell(self):
-        from core.xyz_capabilities import TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
-        capability = {"axes": [text_encoder_axis(["te_a.safetensors", "te_b.safetensors"], source="t"),
-                               {"id": "steps", "label": "Steps", "type": "integer", "min": 1, "max": 50, "step": 1}]}
+        """앱 VAE·TE 칩을 골랐으면 칸이 그 목록의 TE 칸을 바꾼 목록을 싣는다 — Forge·ComfyUI 같다(GPU 로 확인한 길 그대로).
+        Forge 의 목록(forge_modules)은 보지 않는다 — TE 가 둘인 목록을 줘도 거절하지 않는다."""
+        from core.xyz_capabilities import FORGE_TE_CELL_KEY, TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
+        axes = [text_encoder_axis(["te_a.safetensors", "te_b.safetensors"], source="t"),
+                {"id": "steps", "label": "Steps", "type": "integer", "min": 1, "max": 50, "step": 1}]
         base = {"prompt": "p", "forge_additional_modules": ["vae.safetensors", "te_a.safetensors"],
                 "enable_hr": True, "hr_additional_modules": ["Use same choices"]}
-        jobs = build_jobs(base, "m", [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT, "te_b.safetensors"]},
-                                      {"id": "steps", "values": [10, 20]}], capability, text_encoders=["te_a.safetensors"])
-        self.assertEqual([job["forge_additional_modules"] for job in jobs], [
-            ["vae.safetensors", "te_a.safetensors"], ["vae.safetensors", "te_a.safetensors"],
-            ["vae.safetensors", "te_b.safetensors"], ["vae.safetensors", "te_b.safetensors"]])
-        self.assertEqual(jobs[2]["_xyz_info"]["axes"], {"Text Encoder": "te_b.safetensors", "Steps": 10})
+        for backend in ("webui", "comfyui"):
+            with self.subTest(backend=backend):
+                jobs = build_jobs(base, "m", [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT, "te_b.safetensors"]},
+                                              {"id": "steps", "values": [10, 20]}], {"axes": axes, "backend": backend},
+                                  text_encoders=["te_a.safetensors"],
+                                  forge_modules=["te_a.safetensors", "te_b.safetensors"])
+                self.assertEqual([job["forge_additional_modules"] for job in jobs], [
+                    ["vae.safetensors", "te_a.safetensors"], ["vae.safetensors", "te_a.safetensors"],
+                    ["vae.safetensors", "te_b.safetensors"], ["vae.safetensors", "te_b.safetensors"]])
+                self.assertEqual(jobs[2]["_xyz_info"]["axes"], {"Text Encoder": "te_b.safetensors", "Steps": 10})
+                self.assertFalse(any(FORGE_TE_CELL_KEY in job for job in jobs))
         self.assertEqual(base["forge_additional_modules"], ["vae.safetensors", "te_a.safetensors"])
-        # 앱에서 TE 를 고르지 않았으면 더하고(내장 TE 를 대신), 'Use current' 칸은 빈 목록을 명시한다 — 앞 칸이 Forge 옵션에
-        # 바꿔 둔 TE 가 남지 않게. 1패스에 모듈이 생긴 칸의 Hires 는 'Use same choices'
+
+    def test_comfy_cells_without_app_modules_name_the_te_or_the_built_in(self):
+        """칩이 빈 ComfyUI 는 보통 생성도 체크포인트 내장 VAE·TE 다 — 칸은 [그 TE](CLIP 로더에 들어간다)를 더하고, 'Use current'
+        칸은 빈 목록(내장)을 명시한다(예전과 같다). 1패스에 모듈이 생긴 칸의 Hires 는 'Use same choices'. 손으로 만든
+        capability(backend 없음)도 같은 길이다."""
+        from core.xyz_capabilities import FORGE_TE_CELL_KEY, TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
         bare = {"prompt": "p", "enable_hr": True, "hr_additional_modules": []}
-        jobs = build_jobs(bare, "m", [{"id": "text_encoder", "values": ["te_a.safetensors", TEXT_ENCODER_CURRENT]}],
-                          capability, text_encoders=[])
-        self.assertEqual([job["forge_additional_modules"] for job in jobs], [["te_a.safetensors"], []])
-        self.assertEqual([job["hr_additional_modules"] for job in jobs], [["Use same choices"], []])
+        for backend in ("comfyui", None):
+            with self.subTest(backend=backend):
+                capability = {"axes": [text_encoder_axis(["te_a.safetensors", "te_b.safetensors"], source="t")]}
+                if backend:
+                    capability["backend"] = backend
+                jobs = build_jobs(bare, "m", [{"id": "text_encoder", "values": ["te_a.safetensors", TEXT_ENCODER_CURRENT]}],
+                                  capability, text_encoders=[], forge_modules=["te_a.safetensors", "te_b.safetensors"])
+                self.assertEqual([job["forge_additional_modules"] for job in jobs], [["te_a.safetensors"], []])
+                self.assertEqual([job["hr_additional_modules"] for job in jobs], [["Use same choices"], []])
+                self.assertFalse(any(FORGE_TE_CELL_KEY in job for job in jobs))
+
+    def test_forge_cells_without_app_modules_carry_only_the_te_choice(self):
+        """칩이 빈 Forge 의 보통 생성은 모듈 키 없이 Forge 드롭다운의 목록(예: qwen_image_vae + qwen_3_06b_base)을 쓴다 — 칸도
+        목록을 싣지 않고 TE 선택만 싣는다(WebUI 백엔드가 Forge 목록에서 TE 만 바꾼다). 예전엔 [그 TE]·[] 를 실어 Forge 가
+        VAE 를 잃었다("You do not have VAE state dict!")."""
+        from core.xyz_capabilities import (FORGE_TE_CELL_KEY, TEXT_ENCODER_CURRENT, TRANSIENT_MODULES_KEY, build_jobs,
+                                           text_encoder_axis)
+        tes = ["qwen_3_06b_base.safetensors", "sub/qwen_alt.safetensors"]
+        capability = {"axes": [text_encoder_axis(tes, source="t"),
+                               {"id": "steps", "label": "Steps", "type": "integer", "min": 1, "max": 50, "step": 1}],
+                      "backend": "webui"}
+        bare = {"prompt": "p", "enable_hr": True, "hr_additional_modules": []}
+        forge = ["qwen_image_vae.safetensors", "qwen_3_06b_base.safetensors"]
+        jobs = build_jobs(bare, "anima", [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT, "sub/qwen_alt.safetensors"]}],
+                          capability, text_encoders=[], forge_modules=forge)
+        self.assertTrue(all("forge_additional_modules" not in job for job in jobs), "Forge keeps its own list")
+        self.assertEqual([job[FORGE_TE_CELL_KEY] for job in jobs], [
+            {"value": None, "encoders": tes}, {"value": "sub/qwen_alt.safetensors", "encoders": tes}])
+        self.assertEqual([job[TRANSIENT_MODULES_KEY] for job in jobs], [True, True])
+        # Hires: TE 를 고른 칸은 1패스 목록을 쓰고('Use same choices'), 'Use current' 칸은 보통 생성 그대로('Built-in')
+        self.assertEqual([job["hr_additional_modules"] for job in jobs], [[], ["Use same choices"]])
+        self.assertEqual(jobs[1]["_xyz_info"]["axes"], {"Text Encoder": "sub/qwen_alt.safetensors"})
+        self.assertNotIn(FORGE_TE_CELL_KEY, bare)
+        # 축 목록을 받을 때 Forge 목록을 못 읽었으면(None) 첫 칸 전 확인 없이 만든다 — 백엔드가 보낼 때 다시 본다
+        jobs = build_jobs(bare, "anima", [{"id": "text_encoder", "values": ["sub/qwen_alt.safetensors"]}], capability)
+        self.assertEqual(jobs[0][FORGE_TE_CELL_KEY]["value"], "sub/qwen_alt.safetensors")
+        # Text Encoder 축이 없으면 칸에 아무것도 싣지 않는다(보통 생성과 같은 요청)
+        jobs = build_jobs(bare, "anima", [{"id": "steps", "values": [10]}], capability, forge_modules=forge)
+        self.assertFalse({FORGE_TE_CELL_KEY, TRANSIENT_MODULES_KEY, "forge_additional_modules"} & set(jobs[0]))
+
+    def test_forge_te_cell_modules_replaces_only_the_te_in_forges_list(self):
+        from core.xyz_capabilities import TEXT_ENCODER_CURRENT, forge_te_cell_modules
+        tes = ["qwen_3_06b_base.safetensors", "sub/qwen_alt.safetensors"]
+        forge = ["C:/forge/models/VAE/qwen_image_vae.safetensors",
+                 "C:\\forge\\models\\text_encoder\\qwen_3_06b_base.safetensors"]
+        self.assertEqual(forge_te_cell_modules(forge, tes, "sub/qwen_alt.safetensors"),
+                         ["qwen_image_vae.safetensors", "qwen_alt.safetensors"], "the VAE stays")
+        for current in (None, TEXT_ENCODER_CURRENT):
+            self.assertEqual(forge_te_cell_modules(forge, tes, current),
+                             ["qwen_image_vae.safetensors", "qwen_3_06b_base.safetensors"], "'Use current' = Forge's list")
+        # Forge 목록에 TE 가 없으면 더한다(체크포인트 내장 TE 를 대신 — VAE 그대로)
+        self.assertEqual(forge_te_cell_modules(forge[:1], tes, "qwen_3_06b_base.safetensors"),
+                         ["qwen_image_vae.safetensors", "qwen_3_06b_base.safetensors"])
+        self.assertEqual(forge_te_cell_modules([], tes, "sub/qwen_alt.safetensors"), ["qwen_alt.safetensors"])
+        # 파일 이름은 대소문자 없이 맞추고, TE 칩 선택지에 없는 파일(VAE·어댑터 …)은 TE 로 보지 않는다
+        self.assertEqual(forge_te_cell_modules(["Qwen_3_06B_Base.safetensors", "adapter.safetensors"], tes,
+                                               "sub/qwen_alt.safetensors"), ["qwen_alt.safetensors", "adapter.safetensors"])
+        two = ["ae.safetensors", "clip_l.safetensors", "t5xxl.safetensors"]
+        with self.assertRaisesRegex(ValueError, "Text Encoder 축: Forge 에서 고른 .*TE 가 2개"):
+            forge_te_cell_modules(two, ["clip_l.safetensors", "t5xxl.safetensors"], "clip_l.safetensors")
+        self.assertEqual(forge_te_cell_modules(two, ["clip_l.safetensors", "t5xxl.safetensors"], TEXT_ENCODER_CURRENT), two)
+
+    def test_forge_cells_refuse_two_encoders_in_forges_list_before_the_first_cell(self):
+        from core.xyz_capabilities import FORGE_TE_CELL_KEY, TEXT_ENCODER_CURRENT, build_jobs, text_encoder_axis
+        capability = {"axes": [text_encoder_axis(["clip_l.safetensors", "t5xxl.safetensors", "clip_g.safetensors"],
+                                                 source="t")], "backend": "webui"}
+        forge = ["ae.safetensors", "clip_l.safetensors", "t5xxl.safetensors"]
+        with self.assertRaisesRegex(ValueError, "TE 가 2개"):
+            build_jobs({"prompt": "p"}, "flux", [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT,
+                                                                                   "clip_g.safetensors"]}],
+                       capability, forge_modules=forge)
+        jobs = build_jobs({"prompt": "p"}, "flux", [{"id": "text_encoder", "values": [TEXT_ENCODER_CURRENT]}],
+                          capability, forge_modules=forge)
+        self.assertEqual([job[FORGE_TE_CELL_KEY]["value"] for job in jobs], [None], "'Use current' only is fine")
 
     def test_text_encoder_axis_marks_its_cells_for_the_forge_module_restore(self):
         """Forge 옵션으로 바꾼 TE 를 끝나고 되돌리도록(webui_backend._switch_model_if_needed) TE 축 칸만 표시한다."""

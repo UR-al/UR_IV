@@ -38,6 +38,7 @@ _TRANSIENT_STATUS = (500, 502, 503, 504)
 # XYZ Text Encoder 축(core/xyz_capabilities.TRANSIENT_MODULES_KEY)이 Forge 옵션 forge_additional_modules 를 칸마다 바꾼 기록 —
 # api_url → {"written": 앱이 마지막으로 쓴 목록, "original": 처음 바꾸기 전 목록}(둘 다 파일 이름, 정렬). 백엔드 객체가 다시
 # 만들어져도(재연결·API 작업) 남도록 모듈 단위다. _switch_model_if_needed 가 모듈 키 없는 다음 요청 때 되돌리고 지운다.
+# 칩이 빈 칸(core/xyz_capabilities.FORGE_TE_CELL_KEY)은 'original' 을 보통 생성이 쓸 목록으로 삼아 그 TE 만 바꾼다.
 _MODULE_RESTORE: Dict[str, Dict[str, list]] = {}
 _MODULE_RESTORE_LOCK = threading.Lock()
 _KEEP_RESTORE = object()
@@ -831,18 +832,48 @@ class WebUIBackend(AbstractBackend):
             return None
         return wanted
 
-    def _switch_model_if_needed(self, model_name: str, modules=None, *, transient: bool = False):
+    @staticmethod
+    def _restore_base(pending, current_names) -> list[str]:
+        """칩이 빈(모듈 키 없는) 보통 생성이 쓸 Forge 목록 — 옵션이 아직 XYZ Text Encoder 축이 마지막으로 쓴 목록이면 그 축
+        전 목록(기억의 'original' — 그 생성이 먼저 되돌린다), 아니면 지금 목록(그사이 Forge UI 에서 바꿨으면 그 선택)."""
+        if pending is not None and current_names == pending["written"]:
+            return list(pending["original"])
+        return list(current_names)
+
+    def forge_module_base(self) -> Optional[list[str]]:
+        """칩이 빈 보통 생성이 쓸 Forge 의 VAE / Text Encoder 목록(파일 이름, 정렬). 옵션이 없는 백엔드(A1111)는 None.
+
+        XYZ Text Encoder 축이 첫 칸을 만들기 전에 그 목록에 TE 가 둘 이상인지 볼 때 쓴다(ui/xyz_actions — 축 목록을 받는
+        작업자 스레드에서). 칸을 보낼 때는 ``_switch_model_if_needed`` 가 그때의 옵션으로 다시 계산한다.
+        """
+        response = requests.get(url=f'{self.api_url}/sdapi/v1/options', headers=_HEADERS, timeout=10)
+        response.raise_for_status()
+        options = response.json()
+        if not isinstance(options, dict) or 'forge_additional_modules' not in options:
+            return None
+        with _MODULE_RESTORE_LOCK:
+            pending = _MODULE_RESTORE.get(self.api_url)
+        return self._restore_base(pending, self._module_names(options.get('forge_additional_modules')))
+
+    def _switch_model_if_needed(self, model_name: str, modules=None, *, transient: bool = False, te_cell=None):
         """필요 시 모델 전환 + VAE/TE 모듈 동기화 (한 번의 옵션 POST).
 
         ``transient`` = XYZ Text Encoder 축의 칸(core/xyz_capabilities.TRANSIENT_MODULES_KEY): Forge 는 옵션을 config.json 에도
         저장하므로 처음 바꾸기 전 목록을 기억해 두고(``_MODULE_RESTORE``), 모듈 키 없이 오는 다음 요청(TE 칩이 빈 보통 생성 —
         Forge 의 선택을 그대로 쓰는 요청) 때 옵션이 아직 앱이 마지막으로 쓴 목록이면 되돌린다. 그사이 다른 곳(Forge UI)에서
         바꿨으면 그 선택을 둔다. 모듈 목록을 실은 보통 요청은 그 목록이 이기므로 기억을 지운다.
+
+        ``te_cell`` = 앱 VAE·TE 칩이 빈 Text Encoder 축 칸(core/xyz_capabilities.FORGE_TE_CELL_KEY — 요청에 모듈 키가 없다):
+        칩이 빈 보통 생성이 쓸 Forge 목록(``_restore_base`` — 앞 칸이 바꿔 둔 채면 축 전 목록)에서 TE 만 바꾼 목록
+        (``forge_te_cell_modules`` — VAE·다른 모듈 그대로, 'Use current' 면 그 목록 그대로)을 보내고, 칸이므로 ``transient``
+        처럼 기억한다('original' = 그 목록). 그 목록에 TE 가 둘 이상이면 아무것도 바꾸기 전에 ValueError.
         """
         key = self.api_url
         with _MODULE_RESTORE_LOCK:
             pending = _MODULE_RESTORE.get(key)
-        if not model_name and modules is None and pending is None:
+        if not isinstance(te_cell, dict):
+            te_cell = None
+        if not model_name and modules is None and pending is None and te_cell is None:
             return
         current_response = requests.get(
             url=f'{self.api_url}/sdapi/v1/options',
@@ -857,7 +888,13 @@ class WebUIBackend(AbstractBackend):
         record: Any = _KEEP_RESTORE
         restoring = False
         # 모듈을 체크포인트보다 먼저 — Forge 가 순서대로 처리하고 마지막에 한 번 로딩 파라미터를 갱신한다
-        if modules is None:
+        if modules is None and te_cell is not None and has_modules:
+            from core.xyz_capabilities import forge_te_cell_modules
+            base = self._restore_base(pending, current_names)
+            cell = self._module_names(forge_te_cell_modules(base, te_cell.get("encoders"), te_cell.get("value")))
+            wanted = cell if cell != current_names else None
+            record = {"written": cell, "original": base}
+        elif modules is None:
             wanted = None
             if pending is not None:
                 record = None
@@ -1013,18 +1050,19 @@ class WebUIBackend(AbstractBackend):
         try:
             from core.alwayson_propagation import take_provenance
             from core.prompt_comments import strip_request_comments
-            from core.xyz_capabilities import TRANSIENT_MODULES_KEY
-            transient_modules = False
-            if TRANSIENT_MODULES_KEY in payload:   # 앱 표시 — Forge 에 보내지 않는다
+            from core.xyz_capabilities import FORGE_TE_CELL_KEY, TRANSIENT_MODULES_KEY
+            transient_modules, te_cell = False, None
+            if TRANSIENT_MODULES_KEY in payload or FORGE_TE_CELL_KEY in payload:   # 앱 표시 — Forge 에 보내지 않는다
                 payload = dict(payload)
-                transient_modules = bool(payload.pop(TRANSIENT_MODULES_KEY))
+                transient_modules = bool(payload.pop(TRANSIENT_MODULES_KEY, False))
+                te_cell = payload.pop(FORGE_TE_CELL_KEY, None)
             payload, provenance = take_provenance(payload)
             # 프롬프트 주석(// · /* */)은 보내지 않는다 — 생성 API·대기열·자동화 어느 길로 와도(ComfyUI 와 같은 방어선)
             payload = strip_request_comments(payload)
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
             self._switch_model_if_needed(model_name, payload.get('forge_additional_modules'),
-                                         transient=transient_modules)
+                                         transient=transient_modules, te_cell=te_cell)
             if cancel_check and cancel_check():
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다")
 

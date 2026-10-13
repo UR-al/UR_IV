@@ -18,19 +18,30 @@ LABELS = {"steps": "Steps", "cfg_scale": "CFG Scale", "seed": "Seed", "width": "
           "denoising_strength": "Hires denoising", "text_encoder": "Text Encoder"}
 
 # ── Text Encoder 축 (sam-extra 0.34.0 의 Forge XYZ '[Modules] Text Encoder' 축과 같은 뜻) ─────────────────────────────
-# 칸마다 앱의 TE 선택(TE 칩 — forge_additional_modules 의 TE 칸)을 그 파일로 바꾼다. VAE·그 밖의 모듈은 그대로다. 앱 XYZ 는 칸마다
-# 따로 생성하는 대기열이라 Forge·ComfyUI 모두 보통 생성과 같은 길로 간다: Forge 는 모듈이 바뀐 칸에서 /sdapi/v1/options 로
-# 모듈을 바꿔 모델을 다시 불러오고(드롭다운에서 고를 때와 같음 — backends/webui_backend._switch_model_if_needed), ComfyUI 는
-# 컴파일러가 그 파일을 CLIP 로더에 넣는다. 그래서 Forge XYZ 의 기본 'VAE' 축이 형식이 다른 VAE 를 덮어써 검은 칸이 나던 문제
-# (sam-extra 0.34.0 이 고침)는 앱 XYZ 에 없다 — 앱은 Forge XYZ 스크립트를 부르지 않는다.
+# 칸마다 보통 생성이 쓸 모듈 목록에서 TE 만 그 파일로 바꾼다. VAE·그 밖의 모듈은 그대로다. 보통 생성이 쓸 목록은
+# - 앱 VAE·TE 칩을 골랐으면 그 목록(요청의 forge_additional_modules) — 칸이 그 TE 칸을 바꾼 목록을 싣는다(replace_text_encoder).
+# - 칩이 비었으면 Forge 는 요청에 모듈을 싣지 않아 Forge 드롭다운의 지금 목록을 쓴다(Anima 사용자 대부분 — 예: qwen_image_vae +
+#   qwen_3_06b_base). 그래서 칸은 목록 대신 TE 선택만 비공개 키(FORGE_TE_CELL_KEY)로 싣고, WebUI 백엔드가 Forge 의 지금 목록
+#   (앞 XYZ 가 바꿔 둔 채면 그 전 목록)에서 TE 만 바꾼다(forge_te_cell_modules). 칩이 빈 ComfyUI 는 보통 생성도 체크포인트 내장
+#   VAE·TE 라 칸이 [그 TE](또는 'Use current' 면 빈 목록 = 내장)를 싣는 지금 길 그대로다.
+# 앱 XYZ 는 칸마다 따로 생성하는 대기열이라 Forge·ComfyUI 모두 보통 생성과 같은 길로 간다: Forge 는 모듈이 바뀐 칸에서
+# /sdapi/v1/options 로 모듈을 바꿔 모델을 다시 불러오고(드롭다운에서 고를 때와 같음 — backends/webui_backend.
+# _switch_model_if_needed), ComfyUI 는 컴파일러가 그 파일을 CLIP 로더에 넣는다. 그래서 Forge XYZ 의 기본 'VAE' 축이 형식이 다른
+# VAE 를 덮어써 검은 칸이 나던 문제(sam-extra 0.34.0 이 고침)는 앱 XYZ 에 없다 — 앱은 Forge XYZ 스크립트를 부르지 않는다.
 TEXT_ENCODER = "text_encoder"
-TEXT_ENCODER_CURRENT = "Use current"   # 칸에서 TE 를 바꾸지 않는다(지금 TE 칩 그대로) — 확장의 'Use Forge current'
+TEXT_ENCODER_CURRENT = "Use current"   # 칸에서 TE 를 바꾸지 않는다(보통 생성의 목록 그대로) — 확장의 'Use Forge current'
 # 확장이 Forge XYZ 에 더한 축 라벨 — 앱 Text Encoder 축이 같은 일을 하므로 '실행하지 않는 확장 축' 목록에 넣지 않는다
 FORGE_TEXT_ENCODER_AXIS = "[Modules] Text Encoder"
-TEXT_ENCODER_NOTE = ("Text Encoder 축은 칸마다 앱의 TE 선택을 그 파일로 바꿉니다(VAE 는 그대로) — 바뀌는 칸마다 모델을 다시 "
+TEXT_ENCODER_NOTE = ("Text Encoder 축은 칸마다 보통 생성이 쓸 모듈 목록에서 TE 만 그 파일로 바꿉니다(VAE 등은 그대로 — 앱 VAE·TE "
+                     "칩이 비었으면 Forge 는 Forge 에서 고른 목록, ComfyUI 는 체크포인트 내장). 바뀌는 칸마다 모델을 다시 "
                      "불러오므로 X 축(가장 바깥 반복)에 두면 가장 적게 다시 불러옵니다.")
+# 칩이 빈 Forge 칸의 TE 선택 — {"value": 파일 | None('Use current'), "encoders": [TE 칩 선택지 = 축 값의 파일들]}. WebUI 백엔드가
+# 떼어(_generate) Forge 의 지금 목록에서 그 TE 만 바꾼 목록을 옵션으로 보낸다. 목록 중 어느 것이 TE 인지는 파일을 읽지 않고
+# 앱이 아는 TE 파일(텍스트 인코더 폴더 — TE 칩 선택지)과 파일 이름으로 가른다. 요청에 싣지 않는다(ComfyUI 대기열은
+# ui/xyz_actions 가 뗀다).
+FORGE_TE_CELL_KEY = "_forge_te_cell"
 # Text Encoder 축을 쓴 칸의 비공개 표시 — Forge 는 칸의 모듈 목록을 옵션(config.json 에도 저장)으로 바꾸므로, WebUI 백엔드가
-# 처음 바꾸기 전 목록을 기억했다가 모듈 키 없이 오는 다음 요청(TE 칩이 빈 보통 생성 등) 때 되돌린다
+# 처음 바꾸기 전 목록을 기억했다가 모듈 키 없이 오는 다음 요청(VAE·TE 칩이 빈 보통 생성 등) 때 되돌린다
 # (backends/webui_backend._switch_model_if_needed). 확장의 '[Modules] Text Encoder' 축이 칸의 로딩 파라미터만 바꾸고 칸이 끝나면
 # 되돌려 config.json·드롭다운을 건드리지 않는 것과 같은 결과다. 요청에 싣지 않는다(WebUI 백엔드가 떼고, ComfyUI 대기열은
 # ui/xyz_actions 가 뗀다 — 그래프는 칸마다 새로 만들어 남는 상태가 없다).
@@ -84,6 +95,11 @@ def text_encoder_axis(text_encoders, *, source):
     return _axis(TEXT_ENCODER, choices=[TEXT_ENCODER_CURRENT, *files], source=source)
 
 
+def encoders_of(definition):
+    """Text Encoder 축 정의 → 앱이 아는 TE 파일들(축 값 = TE 칩 선택지, 'Use current' 빼고)."""
+    return [name for name in (definition or {}).get("choices") or () if name != TEXT_ENCODER_CURRENT]
+
+
 def replace_text_encoder(modules, current, value):
     """forge_additional_modules 에서 지금 TE(``current`` — TE 칩 값, 하나 이하) 칸을 ``value`` 로 바꾼 새 목록.
 
@@ -108,6 +124,34 @@ def replace_text_encoder(modules, current, value):
     if not replaced:
         out.append(value)
     return out
+
+
+def module_basename(name):
+    """옵션의 전체 경로든 TE 칩의 하위폴더 상대경로든 파일 이름만(Forge modules_change 도 파일 이름으로 찾는다)."""
+    return str(name or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+
+
+def forge_text_encoders(modules, encoders):
+    """``modules`` 중 TE — 앱이 아는 TE 파일(``encoders`` — TE 칩 선택지)과 파일 이름(대소문자 무시)이 같은 것."""
+    known = {module_basename(item).casefold() for item in encoders or () if module_basename(item)}
+    return [item for item in modules or () if module_basename(item).casefold() in known]
+
+
+def forge_te_cell_modules(forge_modules, encoders, value):
+    """칩이 빈 Forge 칸의 모듈 목록(파일 이름) — Forge 의 목록 ``forge_modules`` 에서 TE 만 ``value`` 로 바꾼다.
+
+    ``value`` 가 None·'Use current' 면 목록 그대로. TE 가 없으면 ``value`` 를 더하고, VAE·다른 모듈은 그대로 둔다. Forge 목록에
+    TE 가 둘 이상이면 어느 것을 바꿀지 앱이 모르므로 ValueError(replace_text_encoder 의 칩 규칙과 같다).
+    """
+    names = [module_basename(item) for item in forge_modules or () if isinstance(item, str) and module_basename(item)]
+    if value is None or value == TEXT_ENCODER_CURRENT:
+        return names
+    current = forge_text_encoders(names, [*(encoders or ()), value])
+    if len(current) > 1:
+        raise ValueError(f"Text Encoder 축: Forge 에서 고른 VAE / Text Encoder 목록에 TE 가 {len(current)}개"
+                         f"({', '.join(current)})라 칸마다 어느 것을 바꿀지 정할 수 없습니다 — Forge 에서 TE 를 하나만 "
+                         "고르거나 이 축을 빼세요")
+    return replace_text_encoder(names, current, module_basename(value))
 
 
 def _fields(schema, node):
@@ -276,14 +320,20 @@ def fetch_capabilities(backend, kind, *, hires=False, family="standard", text_en
     return result
 
 
-def build_jobs(base_payload, model, axes, capability, *, text_encoders=()):
+def build_jobs(base_payload, model, axes, capability, *, text_encoders=(), forge_modules=None):
     """Validate a bounded Cartesian product and preserve the full generation snapshot.
 
     ``text_encoders``: 지금 앱 TE 선택(TE 칩 값 — base_payload 의 forge_additional_modules 중 TE 칸). Text Encoder 축이 그
     칸을 칸마다 바꾼다(replace_text_encoder).
+
+    ``forge_modules``: Forge(``capability["backend"] == "webui"``)에서 앱 VAE·TE 칩이 비었을 때(베이스에 모듈 없음) 보통 생성이
+    쓸 Forge 의 목록(WebUIBackend.forge_module_base — 축 목록을 받을 때 읽은 것). 알면 그 목록에 TE 가 둘 이상인지 첫 칸을
+    만들기 전에 본다. 칸은 목록 대신 TE 선택(FORGE_TE_CELL_KEY)을 싣고, 백엔드가 칸을 보낼 때의 Forge 목록으로 다시 계산한다.
     """
     if not isinstance(axes, list) or not 1 <= len(axes) <= 3:
         raise ValueError("XYZ 축을 1–3개 선택하세요")
+    # 칩이 빈 Forge — 보통 생성은 Forge 의 목록을 쓰므로 칸도 그 목록에서 TE 만 바꾼다(ComfyUI 는 빈 칩 = 체크포인트 내장)
+    forge_current = capability.get("backend") == "webui" and not base_payload.get("forge_additional_modules")
     definitions = {axis["id"]: axis for axis in capability.get("axes", [])}
     normalized = []
     seen = set()
@@ -325,11 +375,15 @@ def build_jobs(base_payload, model, axes, capability, *, text_encoders=()):
                 if not isinstance(value, str) or len(value) > 8000:
                     raise ValueError("S/R 대체값이 올바르지 않습니다")
                 checked.append(value)
-        if key == TEXT_ENCODER and any(value != TEXT_ENCODER_CURRENT for value in checked):
+        picked = [value for value in checked if value != TEXT_ENCODER_CURRENT] if key == TEXT_ENCODER else []
+        if picked and not forge_current:
             replace_text_encoder((), text_encoders, "")   # TE 가 둘 이상이면 첫 칸을 만들기 전에 거절한다
+        elif picked and forge_modules is not None:
+            forge_te_cell_modules(forge_modules, encoders_of(definition), picked[0])   # Forge 목록에 TE 가 둘 이상이면
         normalized.append({"id": key, "label": definition["label"], "search": axis.get("search"), "values": checked})
     jobs = []
     text_encoder_axis_used = any(axis["id"] == TEXT_ENCODER for axis in normalized)
+    encoders = encoders_of(definitions[TEXT_ENCODER]) if text_encoder_axis_used and forge_current else []
     for values in itertools.product(*(axis["values"] for axis in normalized)):
         payload = copy.deepcopy(base_payload)
         if text_encoder_axis_used:
@@ -343,12 +397,21 @@ def build_jobs(base_payload, model, axes, capability, *, text_encoders=()):
                 payload[field] = str(payload.get(field, "")).replace(axis["search"], value)
             elif key == "model":
                 selected_model = value
+            elif key == TEXT_ENCODER and forge_current:
+                # 목록은 싣지 않는다 — 모듈 키가 없어야 Forge 의 목록을 쓰는 보통 생성과 같다. WebUI 백엔드가 칸을 보낼 때
+                # Forge 의 목록에서 TE 만 바꾼다('Use current' = 그 목록 그대로 — 앞 칸이 바꿔 둔 TE 를 되돌린다)
+                te_value = None if value == TEXT_ENCODER_CURRENT else value
+                payload[FORGE_TE_CELL_KEY] = {"value": te_value, "encoders": list(encoders)}
+                # TE 를 고른 칸은 1패스 목록이 있으니 Hires 도 그 목록을 쓴다(아래 칩 칸과 같은 규칙). 'Use current' 칸은
+                # 보통 생성과 같다(Hires 'Built-in' 그대로)
+                if te_value and payload.get("enable_hr") and payload.get("hr_additional_modules") == []:
+                    payload["hr_additional_modules"] = ["Use same choices"]
             elif key == TEXT_ENCODER:
                 modules = [item for item in payload.get("forge_additional_modules") or () if isinstance(item, str)]
                 if value != TEXT_ENCODER_CURRENT:
                     modules = replace_text_encoder(modules, text_encoders, value)
                 # 칸마다 목록을 늘 싣는다 — 'Use current' 칸이 키 없이 가면 Forge 에는 앞 칸이 옵션으로 바꿔 둔 TE 가 남는다.
-                # 앱에서 VAE·TE 를 고르지 않았으면 빈 목록(체크포인트 내장 VAE·TE — ComfyUI 와 같은 뜻)이다.
+                # 칩이 빈 ComfyUI 면 빈 목록(체크포인트 내장 VAE·TE — 보통 생성과 같은 뜻)이다(칩이 빈 Forge 는 위 갈래).
                 payload["forge_additional_modules"] = modules
                 # 베이스에 모듈이 없어 Hires 가 'Built-in'(빈 목록)이었으면 1패스와 같은 목록을 쓰게 한다(보통 생성과
                 # 같은 규칙 — ui/generator_generation: 모듈이 있으면 'Use same choices')
