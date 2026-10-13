@@ -6,7 +6,23 @@ import json
 import secrets
 import threading
 
-from core.xyz_capabilities import TEXT_ENCODER, backend_identity, build_jobs, fetch_capabilities
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
+
+from core.xyz_capabilities import (TEXT_ENCODER, ForgeTextEncoderListError, backend_identity, build_jobs,
+                                   fetch_capabilities)
+
+
+class _XYZGuiRelay(QObject):
+    """작업자 스레드가 'GUI 스레드에서 이것을 불러 달라'고 넘기는 통로(큐 연결 — ui/memo_actions._MemoGuiRelay 와 같다)."""
+
+    call = pyqtSignal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.call.connect(self._run, Qt.ConnectionType.QueuedConnection)
+
+    def _run(self, fn):
+        fn()
 
 
 class XYZActionsMixin:
@@ -27,10 +43,24 @@ class XYZActionsMixin:
         self._xyz_capabilities = None
         self._xyz_query_serial = 0
         self._xyz_seen_requests = set()
+        # 창(QObject)이면 창의 스레드(GUI)로 넘기는 통로. 테스트 호스트(QObject 아님)는 부른 스레드에서 바로 부른다
+        self._xyz_gui_relay = None
+        if isinstance(self, QObject):
+            relay = _XYZGuiRelay()
+            relay.moveToThread(self.thread())   # 슬롯은 창의 스레드에서 돈다
+            self._xyz_gui_relay = relay   # 부모 없이 만들었으니 참조를 쥔다
         from core.app_context import get_context, Events
         context = get_context()
         self._xyz_subscriptions = [context.subscribe(event, lambda _: self._xyz_invalidate())
                                    for event in (Events.BACKEND_CHANGED, Events.BACKEND_URL_CHANGED)]
+
+    def _xyz_on_gui(self, fn):
+        """작업자 스레드에서: ``fn`` 을 GUI 스레드에서 부른다(통로가 없는 테스트 호스트는 바로)."""
+        relay = getattr(self, "_xyz_gui_relay", None)
+        if relay is None:
+            fn()
+        else:
+            relay.call.emit(fn)
 
     def _xyz_emit(self, signal, payload):
         bridge = getattr(self, "vue_bridge", None)
@@ -117,7 +147,21 @@ class XYZActionsMixin:
             self._xyz_emit("xyzCapabilitiesReceived", event)
         threading.Thread(target=work, daemon=True, name="xyz-capabilities").start()
 
-    def _xyz_start_plot(self, payload):
+    def _xyz_reread_forge_modules(self, cached, backend, kind, payload):
+        """축 목록을 받을 때 읽어 둔 Forge 목록이 시작을 거절했다(TE 둘 이상). 사용자가 그 뒤 Forge 에서 TE 를 하나로 고쳤을 수
+        있으니 작업자 스레드에서 Forge 의 지금 목록을 다시 읽어 캐시에 두고, GUI 스레드에서 한 번 더 시작한다 — 그 목록도
+        거절하면 그때 거절한다(GUI 스레드는 네트워크를 타지 않는다). 못 읽으면 읽어 둔 목록으로 다시 보고 그렇다고 알린다."""
+        def work():
+            fresh = self._xyz_forge_modules(backend, kind, cached["data"])
+            with self._xyz_lock:
+                if fresh is not None and self._xyz_capabilities is cached:   # 그사이 새로고침했으면 그 목록이 더 새것
+                    self._xyz_capabilities = {**cached, "forge_modules": fresh}
+            self._xyz_on_gui(lambda: self._xyz_start_plot(payload, forge_reread=fresh is not None))
+        threading.Thread(target=work, daemon=True, name="xyz-forge-modules").start()
+
+    def _xyz_start_plot(self, payload, *, forge_reread=None):
+        """``forge_reread`` = 이 클릭을 Forge 목록을 다시 읽은 뒤 다시 부른 것인지(None = 클릭 그대로, True = 다시 읽음,
+        False = 다시 읽지 못함 — _xyz_reread_forge_modules)."""
         from backends import get_backend, get_backend_type
         request_id = str(payload.get("requestId") or secrets.token_hex(12))[:100]
         event = {"requestId": request_id, "ok": False}
@@ -149,10 +193,20 @@ class XYZActionsMixin:
             # sampling blocks the build gate dropped (ui/sampling_blocks).
             from ui.sampling_blocks import freeze_sampling_payload, show_sampling_notice_list
             notices = freeze_sampling_payload(self, base)
-            jobs = build_jobs(base, self.model_combo.currentText(), payload.get("axes"), cached["data"],
-                              text_encoders=self._xyz_text_encoder_selection(),
-                              forge_modules=cached.get("forge_modules"))
             kind = get_backend_type().value
+            try:
+                jobs = build_jobs(base, self.model_combo.currentText(), payload.get("axes"), cached["data"],
+                                  text_encoders=self._xyz_text_encoder_selection(),
+                                  forge_modules=cached.get("forge_modules"))
+            except ForgeTextEncoderListError as exc:
+                if forge_reread is None:
+                    # 읽어 둔 목록이 낡았을 수 있다 — 지금 목록으로 다시 본 뒤 답한다(이 클릭은 아직 답하지 않는다)
+                    self._xyz_reread_forge_modules(cached, backend, kind, payload)
+                    return
+                if forge_reread is False:
+                    raise ValueError(f"{exc} (Forge 의 지금 목록을 다시 읽지 못해 축 목록을 받을 때 읽은 목록으로 "
+                                     "봤습니다 — 연결을 확인하세요)") from exc
+                raise
             for index, job in enumerate(jobs):
                 job["_xyz_backend_id"] = backend_identity(kind, backend)
                 job["_xyz_info"].update(requestId=request_id, index=index, total=len(jobs))

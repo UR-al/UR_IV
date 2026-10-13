@@ -137,20 +137,29 @@ def forge_text_encoders(modules, encoders):
     return [item for item in modules or () if module_basename(item).casefold() in known]
 
 
+class ForgeTextEncoderListError(ValueError):
+    """Forge 의 VAE / Text Encoder 목록에 TE 가 둘 이상 — 칩이 빈 Forge 칸이 어느 것을 바꿀지 모른다(forge_te_cell_modules).
+
+    목록은 Forge 에서 바뀌므로 시작 클릭(ui/xyz_actions)은 이 거절이 축 목록을 받을 때 읽어 둔 목록에서 나왔으면 Forge 의
+    지금 목록을 다시 읽고 한 번 더 본다.
+    """
+
+
 def forge_te_cell_modules(forge_modules, encoders, value):
     """칩이 빈 Forge 칸의 모듈 목록(파일 이름) — Forge 의 목록 ``forge_modules`` 에서 TE 만 ``value`` 로 바꾼다.
 
     ``value`` 가 None·'Use current' 면 목록 그대로. TE 가 없으면 ``value`` 를 더하고, VAE·다른 모듈은 그대로 둔다. Forge 목록에
-    TE 가 둘 이상이면 어느 것을 바꿀지 앱이 모르므로 ValueError(replace_text_encoder 의 칩 규칙과 같다).
+    TE 가 둘 이상이면 어느 것을 바꿀지 앱이 모르므로 ForgeTextEncoderListError(ValueError — replace_text_encoder 의 칩 규칙과
+    같다).
     """
     names = [module_basename(item) for item in forge_modules or () if isinstance(item, str) and module_basename(item)]
     if value is None or value == TEXT_ENCODER_CURRENT:
         return names
     current = forge_text_encoders(names, [*(encoders or ()), value])
     if len(current) > 1:
-        raise ValueError(f"Text Encoder 축: Forge 에서 고른 VAE / Text Encoder 목록에 TE 가 {len(current)}개"
-                         f"({', '.join(current)})라 칸마다 어느 것을 바꿀지 정할 수 없습니다 — Forge 에서 TE 를 하나만 "
-                         "고르거나 이 축을 빼세요")
+        raise ForgeTextEncoderListError(
+            f"Text Encoder 축: Forge 에서 고른 VAE / Text Encoder 목록에 TE 가 {len(current)}개({', '.join(current)})라 "
+            "칸마다 어느 것을 바꿀지 정할 수 없습니다 — Forge 에서 TE 를 하나만 고르거나 이 축을 빼세요")
     return replace_text_encoder(names, current, module_basename(value))
 
 
@@ -328,7 +337,8 @@ def build_jobs(base_payload, model, axes, capability, *, text_encoders=(), forge
 
     ``forge_modules``: Forge(``capability["backend"] == "webui"``)에서 앱 VAE·TE 칩이 비었을 때(베이스에 모듈 없음) 보통 생성이
     쓸 Forge 의 목록(WebUIBackend.forge_module_base — 축 목록을 받을 때 읽은 것). 알면 그 목록에 TE 가 둘 이상인지 첫 칸을
-    만들기 전에 본다. 칸은 목록 대신 TE 선택(FORGE_TE_CELL_KEY)을 싣고, 백엔드가 칸을 보낼 때의 Forge 목록으로 다시 계산한다.
+    만들기 전에 본다(ForgeTextEncoderListError — 호출자는 그 뒤 Forge 에서 고쳤을 수 있으니 지금 목록으로 다시 본다). 칸은
+    목록 대신 TE 선택(FORGE_TE_CELL_KEY)을 싣고, 백엔드가 칸을 보낼 때의 Forge 목록으로 다시 계산한다.
     """
     if not isinstance(axes, list) or not 1 <= len(axes) <= 3:
         raise ValueError("XYZ 축을 1–3개 선택하세요")

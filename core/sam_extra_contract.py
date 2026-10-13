@@ -1176,14 +1176,15 @@ XYZ_AXES = MappingProxyType({
         "core/xyz_capabilities.py:replace_text_encoder", "core/xyz_capabilities.py:FORGE_TEXT_ENCODER_AXIS",
         "ui/xyz_actions.py:_xyz_text_encoder_choices", "core/xyz_capabilities.py:TRANSIENT_MODULES_KEY",
         "core/xyz_capabilities.py:FORGE_TE_CELL_KEY", "core/xyz_capabilities.py:forge_te_cell_modules",
-        "backends/webui_backend.py:forge_module_base",
+        "backends/webui_backend.py:forge_module_base", "ui/xyz_actions.py:_xyz_reread_forge_modules",
         note="값 = 'Use current'(확장 'Use Forge current' — 보통 생성의 목록 그대로) + 앱 TE 칩 선택지. 칸의 목록 = 보통 생성이 "
              "쓸 목록에서 TE 만 바꾼 것: 앱 VAE·TE 칩을 골랐으면 그 목록(칸의 forge_additional_modules), 칩이 빈 Forge 면 Forge "
              "드롭다운의 지금 목록(앞 XYZ 가 바꿔 둔 채면 그 전 목록) — 칸은 TE 선택만 비공개 키(FORGE_TE_CELL_KEY)로 싣고 "
              "WebUI 백엔드가 보낼 때 그 목록에서 TE 만 바꾼다(forge_te_cell_modules — VAE 그대로, TE 가 없으면 더한다). 어느 것이 "
              "TE 인지는 앱 TE 칩 선택지(텍스트 인코더 폴더 파일)와 파일 이름으로 가르고, Forge 목록에 TE 가 둘 이상이면 첫 칸 "
-             "전에 거절한다(축 목록을 받을 때 읽은 목록 — forge_module_base). 칩이 빈 ComfyUI 는 보통 생성도 체크포인트 내장 "
-             "VAE·TE 라 칸이 [그 TE] 를 싣는다. Forge XYZ 의 이 축 라벨은 "
+             "전에 거절한다(축 목록을 받을 때 읽은 목록 — forge_module_base. 그 목록이 거절하면 시작 클릭이 작업자 스레드에서 "
+             "지금 목록을 다시 읽어 본다 — Forge 에서 고친 뒤 축 새로고침 없이 다시 시작). 칩이 빈 ComfyUI 는 보통 생성도 "
+             "체크포인트 내장 VAE·TE 라 칸이 [그 TE] 를 싣는다. Forge XYZ 의 이 축 라벨은 "
              "앱 XYZ 의 '실행하지 않는 확장 축' 목록에서 뺀다(FORGE_TEXT_ENCODER_AXIS). 확장 축은 칸의 로딩 파라미터만 바꾸고 "
              "칸 끝에 되돌려 config.json·드롭다운이 그대로지만, 앱 칸은 Forge 옵션(config.json 에도 저장)을 바꾼다 — 그래서 "
              "TE 축 칸은 표시(TRANSIENT_MODULES_KEY)를 달고, WebUI 백엔드가 처음 목록을 기억했다가 모듈 키 없는 다음 요청 때 "
