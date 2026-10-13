@@ -1,9 +1,9 @@
 {
  "schema": 1,
- "source": "저장된 GET /sdapi/v1/script-info 응답 script_info.json (받은 시각 2026-10-11T16:27:19+00:00, tools/refresh_sam_extra_fixture.py --from-file)",
- "captured_at": "2026-10-12T12:37:43+00:00",
+ "source": "저장된 GET /sdapi/v1/script-info 응답 script_info.json (받은 시각 2026-10-12T22:16:39+00:00, tools/refresh_sam_extra_fixture.py --from-file)",
+ "captured_at": "2026-10-13T00:02:47+00:00",
  "api_url": "http://127.0.0.1:7861",
- "ext_version": "0.34.0",
+ "ext_version": "0.34.1",
  "extension": null,
  "scripts": [
   {

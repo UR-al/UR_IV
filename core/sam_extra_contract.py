@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.34.0"
+EXT_VERSION_AUDITED = "0.34.1"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -161,7 +161,15 @@ EXT_VERSION_AUDITED = "0.34.0"
 # 픽스처는 릴리스 전 실제 GPU 점검(2026-10-12 01:27, 후보 25db685 — 659d354 와 CHANGELOG 만 다르다)에서 테스트 Forge 2.30-6
 # (7861)이 준 script-info 저장본으로 만들었다(tools/refresh_sam_extra_fixture.py --from-file). 그 Forge 를 다시 띄우면 한 번 더
 # 받는다(docs/sam_extra_sync.md 2번).
-EXT_COMMIT_AUDITED = "36f18affde4d9434a3c8b6e340e88818ce9f4bc0"
+# 2026-10-13 v0.34.1(feat 89421f9, master 머지 c3d6f89 — 트리 같음, 태그 v0.34.1): 인자 · state 키 · infotext · 옵션 · XYZ 축
+# 그대로(CHANGELOG v0.34.1). (1) 기본값 저장 결과 JSON 의 written_keys 와 숨은 저장 버튼 뒤 refresh_settings(.then) — Forge
+#     화면 전용(Apply settings 가 저장한 값을 되돌리던 것). (2) 얼굴 crop 키우기 — crop 가장자리에 닿은 마스크는 그 얼굴 × 토큰의
+#     crop 을 키워 다시 찾고 앞 결과에 이어진 조각만 남긴다. 팩 1.8.0 sam3_face_crop*.py 가 같은 계산(b815f68 기준 —
+#     tests/test_comfy_sam3_face_crop PackContinuationTests). 끈 요청 · 가장자리에 닿지 않은 결과는 0.34.0 과 같다.
+#     (3) 결과 줄 자리 · Tag Autocomplete 안내 CSS — 화면 전용.
+# 픽스처는 2026-10-13 테스트 Forge 2.30-7(7861)의 v0.34.1(b815f68 — 89421f9 와 CHANGELOG 만 다르다) script-info 저장본으로
+# 다시 만들었다(--from-file) — 머리(source · captured_at · ext_version)만 바뀌고 스크립트 17개 · 항목 33개는 그대로다.
+EXT_COMMIT_AUDITED = "c3d6f89cf1f334904ba024532ddfd4c2742c702b"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
