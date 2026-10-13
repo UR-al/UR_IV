@@ -430,6 +430,9 @@ class TestDefaultCompilation(unittest.TestCase):
         self.assertTrue(sam["inputs"]["restore_face"])
         _mask_id, mask = _node(graph, "ForgeNeoSAM3Mask")
         self.assertEqual(mask["inputs"]["artifact_directory"], "")
+        # Forge sam-extra autocasts SAM3 to bf16 on CUDA; fp16 here drifted from Forge's masks.
+        self.assertEqual(mask["inputs"]["device"], "cuda")
+        self.assertEqual(mask["inputs"]["precision"], "bf16")
 
     def test_generated_forge_nodes_match_bundled_input_contracts(self):
         from comfy_custom_nodes.ai_studio_forge_parity import (

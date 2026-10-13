@@ -2555,9 +2555,12 @@ class ComfyWorkflowCompiler:
                 "invert": False,
                 "checkpoint": str(state.get("sam3_checkpoint") or "sam3.pt"),
                 "device": str(state.get("sam3_device") or "cuda"),
+                # Forge sam-extra runs SAM3 under bf16 autocast on CUDA (sam3ext/core.py); Easy SAM3 keeps fp32
+                # weights and uses this dtype only for autocast, so bf16 gives Forge's masks (fp16 drifted on small
+                # parts — eyes IoU 0.821 vs 0.996, 2026-10-13 GPU check).
                 "precision": str(
                     state.get("sam3_precision")
-                    or ("fp16" if str(state.get("sam3_device") or "cuda").casefold() == "cuda" else "fp32")
+                    or ("bf16" if str(state.get("sam3_device") or "cuda").casefold() == "cuda" else "fp32")
                 ),
                 "unload_after": _bool(state.get("sam3_unload_after"), True),
                 "save_artifacts": _bool(state.get("sam3_save_artifacts"), True),
