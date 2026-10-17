@@ -17,7 +17,8 @@
   어텐션만, :5669-5686). img2img 아코디언은 꺼짐(:5675)이라 I2I·인페인트는 "I2I·인페인트에도 적용" 토글(기본 끔)을
   따른다. 런타임에 ui-config 를 읽지 않는다(라벨이 키라 깨지기 쉽고 원격 Forge 에는 파일이 없다).
 - ComfyUI 는 순정 공식(weight_decompose)과 그대로 복제만 한다 — 블록을 만들지 않는다(컴파일러는 모르는 제목을
-  무시한다). 팩 노드로 맞추는 일은 HOLD(P8-C).
+  무시한다). 팩 1.9.0 의 ``ForgeNeoDoraInferenceMode`` 노드가 같은 모드 넷을 커스텀 워크플로에서 하지만, 컴파일러가
+  그 노드를 넣는 일은 HOLD(P8-C).
 
 ``tests/test_dora_infer_mode.py`` 가 상수·정규화·판정을, ``tests/test_sam_extra_contract.py`` 의 SEMANTIC_PINS 가
 확장 상수(모드·정책·범위 키, 라벨, infotext 키)와의 일치를 지킨다.

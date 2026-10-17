@@ -76,7 +76,19 @@ PACK_ID = "ai_studio_forge_parity"
 # prompt. Without ``face_crop`` the node and the graphs are unchanged (``invert`` is now decided per batch row); the
 # compiler sends the inputs only for a request with face crop on and refuses an older pack (no such input) or a
 # ComfyUI without ultralytics with the reason (core/sam3_face_crop.comfy_support).
-PACK_VERSION = "1.8.0"
+# 1.9.0: new ForgeNeoMossSpectrum (custom workflows only; MODEL -> MODEL): the Spectrum feature forecasting of
+# sorryhyun/ComfyUI-Spectrum-KSampler's MOSS-Image patch (MIT, ff25e70) with MOSS-Image's head restated from the
+# moss-image node (Apache-2.0). APPLY_MODEL + OUTER_SAMPLE wrappers: a fresh state per sampling run, the step count
+# and index from the run's sigma list (Detail Daemon's noted sigma first), off-grid calls run the model, every
+# forecast tensor released when the run ends; other models are returned unchanged. The SPEED and Euler (SMEA) Dy
+# guards also find Spectrum patcher wrappers. The compiler emits no new node, so it needs no gate.
+# Same (unreleased) 1.9.0: new ForgeNeoDoraInferenceMode (custom workflows only; MODEL -> MODEL after the LoRA
+# loaders): sam-extra's "DoRA Inference Mode" (LyCORIS fp32 / Forge-Comfy fp32 / stock / DoRA off) for the DoRA
+# patches already on the MODEL - a clone whose LoRA/LoHa/LoKr/GLoRA DoRA adapters are mode subclasses of their
+# ComfyUI classes, with a new patches_uuid and an OUTER_SAMPLE wrapper that reports each sampling run; no ComfyUI
+# function is patched. Adapted from sam-extra's own ``decompose`` under its author's MIT grant (the LyCORIS mode takes
+# LyCORIS' own operations, bit for bit with its training merge). The compiler emits no new node, so it needs no gate.
+PACK_VERSION = "1.9.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

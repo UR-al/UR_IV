@@ -47,9 +47,20 @@ from .colorcraft_nodes import (
     NODE_CLASS_MAPPINGS as _COLORCRAFT_NODES,
     NODE_DISPLAY_NAME_MAPPINGS as _COLORCRAFT_DISPLAY_NAMES,
 )
+# MOSS Spectrum (pack 1.9.0): registers nothing at import (no Hires carry, no sampler names).
+from .moss_spectrum_nodes import (
+    NODE_CLASS_MAPPINGS as _MOSS_SPECTRUM_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _MOSS_SPECTRUM_DISPLAY_NAMES,
+)
+# DoRA Inference Mode (pack 1.9.0): registers nothing at import and patches no ComfyUI function; the mode lives on
+# the patches of the MODELs that pass through the node.
+from .dora_infer_mode_nodes import (
+    NODE_CLASS_MAPPINGS as _DORA_MODE_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _DORA_MODE_DISPLAY_NAMES,
+)
 
 
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside
@@ -93,6 +104,8 @@ NODE_CLASS_MAPPINGS = _merge_node_maps(
     _EXTRA_SAMPLER_NODES,
     _SPEED_NODES,
     _COLORCRAFT_NODES,
+    _MOSS_SPECTRUM_NODES,
+    _DORA_MODE_NODES,
 )
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -107,6 +120,8 @@ NODE_DISPLAY_NAME_MAPPINGS.update(_EXTRA_SCHEDULER_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_EXTRA_SAMPLER_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_SPEED_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_COLORCRAFT_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_MOSS_SPECTRUM_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_DORA_MODE_DISPLAY_NAMES)
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

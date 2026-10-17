@@ -13,7 +13,9 @@
   that is not ``CONST`` (flow matching); sigma_max > 1; a ``denoise_mask`` (inpainting); processed
   conds carrying ``ref_latents`` (Anima reference, Flux Kontext, Qwen edit …) or ``c_concat``
   (image-to-video / fill conditioning) or a ``control`` entry (ControlNet); the pack's
-  ControlNet-LLLite marker; ComfyUI Spectrum. ComfyUI-only: area/mask conds and several latents
+  ControlNet-LLLite marker; ComfyUI Spectrum (a Spectrum ``model_function_wrapper``, or the pack's MOSS
+  Spectrum since pack 1.9.0, found by its own wrappers — ``guidance_common.spectrum_wrapper_registered``).
+  ComfyUI-only: area/mask conds and several latents
   sampled together (``latent_shapes``) are tied to the full grid as well.
 * **Sampling host** (:class:`ComfySpeedHost`, a ``speed_runner.SpeedHost``): the spectral seeds
   (the fixed SPEED seed, else the generation's per-image seeds ``image_seed + i`` like Forge's
@@ -75,6 +77,7 @@ from .guidance_common import (
     declares_keyword,
     mark_republished,
     sampler_base,
+    spectrum_wrapper_registered,
 )
 from .speed_runner import SpeedHost, SpeedRun, run_speed
 from .speed_schedule import Plan, PlanError
@@ -378,8 +381,9 @@ CONCAT_REASON = (
 CONTROLNET_REASON = f"ControlNet is on (its hint is {_FULL_GRID})"
 LLLITE_REASON = f"ControlNet-LLLite is on (its hint is {_FULL_GRID})"
 SPECTRUM_REASON = (
-    "ComfyUI Spectrum (DiTSpectrumPatch) is on - SPEED steps aside (its stop-caching point comes "
-    "from the step count and it can forecast a coarse-sized tensor across the size change)"
+    "ComfyUI Spectrum (DiTSpectrumPatch or Forge Neo MOSS Spectrum) is on - SPEED steps aside (its "
+    "stop-caching point comes from the step count and it can forecast a coarse-sized tensor across the "
+    "size change)"
 )
 AREA_REASON = f"area / mask conditioning is on (it is {_FULL_GRID})"
 LATENT_SHAPES_REASON = f"several latents are sampled together (latent_shapes) - they are {_FULL_GRID}"
@@ -448,7 +452,8 @@ def _options(extra_args: Any) -> tuple[Mapping, Mapping]:
 
 
 def _spectrum_function(options: Mapping) -> bool:
-    """A model-function wrapper from a Spectrum provider (its own name or module says so)."""
+    """A model-function wrapper from a Spectrum provider (its own name or module says so). The pack's MOSS
+    Spectrum hooks patcher-extension wrappers instead: ``guidance_common.spectrum_wrapper_registered``."""
     function = options.get("model_function_wrapper")
     if function is None:
         return False
@@ -490,7 +495,7 @@ def comfy_runtime_guard(guider: Any, x: Any, sigmas: Any, extra_args: Any) -> st
     if options.get(LLLITE_MARKER):
         return LLLITE_REASON
     flag = transformer.get(DY_SUBSTEPS_OFF_KEY)
-    if flag == SPECTRUM_FLAG or _spectrum_function(options):
+    if flag == SPECTRUM_FLAG or _spectrum_function(options) or spectrum_wrapper_registered(options):
         return SPECTRUM_REASON
     if flag:
         return f"{flag} is on - SPEED steps aside (that sampler already changes how this pass samples)"

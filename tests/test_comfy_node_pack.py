@@ -93,6 +93,8 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "ForgeNeoAnimaTileRepair",
     "ForgeNeoSaveImage",
     "AIStudioRelight",
+    "ForgeNeoMossSpectrum",       # 1.9.0: Spectrum for MOSS-Image (MODEL -> MODEL; the compiler never emits it)
+    "ForgeNeoDoraInferenceMode",  # 1.9.0: sam-extra's DoRA Inference Mode on a MODEL's DoRA patches (MODEL -> MODEL)
 })
 EXPECTED_BUNDLED_NODES = COMPILER_BUILT_NODES | CUSTOM_WORKFLOW_NODES
 
@@ -171,7 +173,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 42)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 44)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
@@ -483,7 +485,7 @@ class TestPackNotices(unittest.TestCase):
 
     def test_every_license_file_is_named_in_the_notices_and_back(self):
         files = sorted(path.name for path in (PACK_DIR / "LICENSES").iterdir() if path.is_file())
-        self.assertEqual(len(files), 17)      # 1.7.0: diff-sampler-Apache-2.0.txt (IPNDM_V weights, extra_samplers_ipndm)
+        self.assertEqual(len(files), 18)      # 1.9.0: moss-image-Apache-2.0.txt (the MOSS-Image head in moss_spectrum)
         for name in files:
             with self.subTest(license=name):
                 self.assertIn(f"LICENSES/{name}", self.notices)

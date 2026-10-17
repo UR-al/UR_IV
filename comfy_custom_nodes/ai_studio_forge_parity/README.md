@@ -61,12 +61,104 @@ inspector recognises them.
 - `ForgeNeoAnimaTileRepair` (Anima Tile & Repair ControlNet-LLLite, pack
   1.4.0+)
 - `ForgeNeoSaveImage`, `AIStudioRelight`
+- `ForgeNeoMossSpectrum` (Spectrum forecasting for MOSS-Image, pack 1.9.0+; see "1.9.0 changes")
+- `ForgeNeoDoraInferenceMode` (sam-extra's DoRA Inference Mode for the DoRA patches on a MODEL, pack 1.9.0+;
+  after the LoRA loaders; see "1.9.0 changes")
 
 When the app generates from an ANIMA custom workflow it keeps
 `ForgeNeoLoraBlockWeight` and `ForgeNeoAnimaLoraLoaderModelOnly` in the active
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.9.0 changes
+
+New `ForgeNeoMossSpectrum` ("Forge Neo MOSS Spectrum (Spectrum-KSampler)", MODEL -> MODEL, custom workflows only):
+the Spectrum feature forecasting of the "KSampler (Spectrum for MOSS)" node of
+[sorryhyun/ComfyUI-Spectrum-KSampler](https://github.com/sorryhyun/ComfyUI-Spectrum-KSampler) at `ff25e70` (MIT)
+for MOSS-Image models from the `moss-image` loader. The app compiler does not emit it.
+
+- After a warmup, most steps skip the DiT's blocks: the image tokens entering `final_norm_video` are forecast per
+  conditioning branch from the steps that ran (Chebyshev degree 3 ridge 0.1 over the step index, blended with a
+  first-order Taylor step, w 0.3) and only MOSS-Image's own head runs (time embedding, head modulation, final norm,
+  final linear; restated from the moss-image node, Apache-2.0). The schedule is upstream's: warmup 6, the last 3
+  steps actual, a window from 2.0 growing by `flex_window` after each actual step. At 50 steps `flex_window`
+  0.25 / 0.5 (default) / 1.0 run the model on 22 / 19 / 16 steps.
+- Inputs: `enabled` (default on), `flex_window` (0-2, step 0.05), `warmup_steps`, `tail_actual_steps`; advanced
+  `window_size`, `blend_w`, `cheby_degree`, `ridge_lambda` with upstream's defaults. No steps input: the step
+  count is the sampler's sigma list (`len(sample_sigmas) - 1`) and the step index is the sampler's sigma looked
+  up on it (the sigma Detail Daemon noted before scaling it, when Detail Daemon runs). A call whose sigma is not on
+  the list (second-order midpoints) or lies behind the current step (restart) runs the model and changes nothing;
+  the one exception is the run's first sigma when the sampler moves it just below the list's first (ComfyUI's SDE
+  and exponential samplers on a flow model, e.g. `dpmpp_2m_sde`, `er_sde`, the flow ODE entries): it is step 0, as
+  upstream counts it. A branch records one observation per step: Heun's corrector at the next step's sigma begins
+  that step, and the step's own call then runs the model without a second one (two at one step would blow up the
+  Taylor step). A branch is forecast only once it has `cheby_degree` + 2 observations (5 by default): a negative
+  that starts mid-run runs the model until then.
+  Upstream's flow shift, uncond block skip and `torch.compile` are not part of the node: use `ModelSamplingSD3`
+  and `SkipLayerGuidanceDiTSimple` (its separate cond and uncond calls get their own forecasters).
+- Every sampling run of the patched MODEL starts fresh (a Hires pass, a SAM3 or ADetailer detailer pass), and
+  when it ends every forecast tensor is released (upstream keeps them on the MODEL until the next run). The
+  capture hook exists only during a forward that runs the model. One console line per run:
+  `[MOSS Spectrum] 19/50 steps ran the model, 31 forecast (…)`.
+- Hooks: an `APPLY_MODEL` and an `OUTER_SAMPLE` wrapper (key `ai_studio_forge_parity.moss_spectrum`) that chain
+  with other nodes' wrappers; `model_function_wrapper`, post-CFG and sampler wrappers are untouched. The pack's
+  Anima SPEED steps aside on a MODEL with it, and Euler (SMEA) Dy (CFG++) runs without its sub-steps, as both do
+  for ComfyUI Spectrum. They find this node by its own wrappers only: other wrappers whose name says "spectrum"
+  (upstream's Anima modulation guidance, DCW) leave SPEED and Dy on.
+- A MODEL that is not MOSS-Image is returned unchanged with one warning.
+
+New `ForgeNeoDoraInferenceMode` ("Forge Neo DoRA Inference Mode (sam-extra)", MODEL -> MODEL, custom workflows
+only): the "DoRA 추론 방식" (DoRA Inference Mode) of the sam-extra Forge extension (v0.34.0) for the DoRA patches
+already on a MODEL. Its fp32 merge builds on sam-extra's own code (`decompose`, `_can_return_fp32`, `_is_oom`):
+sam-extra (GPL-3.0-only) parts written by the same author (UR-al), licensed to this pack under the MIT License by that
+author (`THIRD_PARTY_NOTICES.md` "DoRA inference mode (pack 1.9.0)"). The app compiler does not emit it.
+
+- Why: ComfyUI merges a LoRA/LoCon, LoHa, LoKr or GLoRA file that carries `dora_scale` with `weight_decompose`. On
+  the output axis (`dora_scale` [out, 1], LyCORIS' default) it divides by the norm of the original weight `||W0||`,
+  where LyCORIS trained with `||W0 + dW||`, and it computes in fp16 (full load on most GPUs) or the model's
+  bf16/fp16 (dynamic VRAM, lowvram) with that dtype's eps. On the input axis (`[1, in]`) the formula is the same and
+  only the precision differs.
+- `mode`, sam-extra's four in its order: `LyCORIS fp32 (as trained)` (default): LyCORIS' `apply_weight_decompose`
+  operation for operation in fp32 — `(W0 + dW) * r`, `r = m / (||W0 + dW|| + eps)` per row (output axis) or per
+  column (input axis) with LyCORIS' `vector_norm` and fp32 eps, then its `1 * (r - 1) + 1` (which rounds when `r` is
+  outside [0.5, 2]) — so at strength 1 the LyCORIS training merge bit for bit (checked on CPU against LyCORIS 3.2's
+  `get_merged_weight` for LoCon and LoKr and its training forward for LoHa and LoKr), rounded once to the stored
+  dtype. It starts from the `W0` ComfyUI hands the patch: on ComfyUI's GPU full-load path that is its copy in
+  `lora_compute_dtype` (fp16 on most GPUs), lossless for fp16 and fp8 checkpoints and practically for bf16 ones (only
+  values below fp16's normal range lose bits), while an fp32-stored weight keeps fp16's rounding of `W0` (so does
+  ComfyUI's stock merge). `Forge/Comfy fp32`: ComfyUI's formula (`||W0||` on the output axis) in fp32, sam-extra's
+  operations; `Forge/Comfy (stock)`: ComfyUI's own merge (also undoes an earlier mode of this node on the same
+  MODEL); `DoRA off (no magnitude)`: `dora_scale` ignored, merged like the same file without it (`W0 + s*dW`, the
+  magnitude learned in training is lost). `enabled` off returns the MODEL unchanged.
+- Strength (the LoRA loader's) blends the fp32 modes as Forge and sam-extra do: `W0 + s*(W_dora - W0)`, so 0 is the
+  MODEL without the LoRA. LyCORIS' own multiplier (all of `dW`, only the magnitude scaled) is not followed. `dW` is
+  computed in fp32 by ComfyUI's own adapter code whatever dtype ComfyUI merges in (on Forge's lowvram path sam-extra
+  receives it in the storage dtype).
+- How: the node clones the MODEL and replaces only the clone's DoRA adapters with subclasses of their ComfyUI classes
+  that carry the mode (a class attribute, so the adapters LowVramPatch rebuilds keep it), and gives the clone a new
+  `patches_uuid` (ComfyUI merges again and dynamic VRAM drops its cached weights). No ComfyUI function is patched. Put
+  the node after the LoRA loaders: LoRAs loaded after it, other MODELs and the CLIP's patches (text-encoder DoRA;
+  sam-extra's Forge hook is global and covers them) merge the stock way. Its MODEL input is `model` and its ID has no
+  "lora", so the app keeps it in an Anima custom workflow's model chain.
+- ComfyUI's full-load path gets the fp32 result and rounds it once (`stochastic_rounding`, a plain cast for
+  fp16/bf16); offset patches (fused qkv) and LowVramPatch are written in place in the weight's dtype. LowVramPatch
+  merges per forward unless dynamic VRAM keeps the result. Besides the weight the fp32 merge holds at most two fp32
+  copies of the layer (ComfyUI's adapter hands `dW` over before it would add it, and the merge is written into it):
+  as many as ComfyUI's stock full-load merge, twice its LowVramPatch merge in bf16/fp16. A failure merges that patch
+  the stock way; an OOM empties the cache first, also one that ComfyUI's adapter logs and swallows while building
+  `dW` (it then hands no delta over). OFT/BOFT (as in sam-extra) and a LoRA with `reshape_weight` stay stock;
+  bypass LoRA loaders and hook LoRAs (`CreateHookLora`) are not MODEL patches and are not affected. The sam-extra
+  accordion's inserted-block policy (Anima block up-conversion) is not part of the node; the pack's Anima loaders
+  copy blocks as they are.
+- Console: one line when the node runs, `[DoRA mode] LyCORIS fp32 (as trained): 240 DoRA patches merge with ...
+  (LoKr 240)` (ComfyUI caches the node, so a re-queued prompt does not repeat it). The clone also carries an
+  `OUTER_SAMPLE` wrapper (key `ai_studio_forge_parity.dora_infer_mode`) that gives each sampling run of that MODEL a
+  fresh account, as sam-extra counts per generation, and ends it with `... 240 DoRA patches merged this run` (plus
+  the merge count when LowVramPatch merges per forward) and, if any, `... 3 merges fell back to the stock way this
+  run - first cause: ...`. A fallback is also logged when it happens, once per kind per run. A run that merges
+  nothing (the weights stayed loaded) prints nothing. A MODEL without DoRA patches is returned unchanged with one
+  warning.
 
 ## 1.8.0 changes
 

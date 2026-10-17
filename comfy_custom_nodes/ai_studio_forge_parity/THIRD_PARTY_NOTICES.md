@@ -237,6 +237,7 @@ for the pack first. Either way, the author wrote both copies.
 | `sam3_face_crop_run.py` (pack 1.8.0) | `run_face_crop` (the face-crop branch of `run_sam3_on_pil`, with the v0.34.1 crop growth), `_continuing_result`, `_split_masks`, `_mask_bbox`, `_intersection_area`, `_restrict_mask_to_box`, `_clean_split_masks` | `sam3ext/core.py` `run_sam3_on_pil` and the helpers of the same names |
 | `sam3_nodes.py` (pack 1.8.0) | `_copy_image_state` and the one-backbone-per-region rule of `_CropBackbone` | `sam3ext/core.py` `run_sam3_on_pil` (`_run_prompt`: `set_image` once per region, a shallow copy of the state and its `backbone_out` per token) |
 | `sam3_face_detect.py` (pack 1.8.0) | `FaceDetectorUnavailable`, `FaceDetection`, `_is_box_model`, `_scan`, `resolve_face_model`, `missing_model_message`, `_guard_no_download`, `ultralytics_device`, `_to_list`, `detect_faces` (`detect_faces_many`, `_detection`) | `sam3ext/face_detect.py` (same names; the pack looks in ComfyUI's model folders instead of Forge's `models/adetailer`) |
+| `dora_infer_mode.py` (pack 1.9.0) | `decompose` (adapted: LyCORIS' operations in its LyCORIS branch, the delta merged in place), `_can_return_fp32`, `_is_oom`, `_soft_empty_cache` | `sam3ext/dora_infer_mode.py` (same names; installed v0.34.0) |
 
 Formulas shared with GPL-3.0 hosts. Each item is the formula only: the code around it is sam-extra's or the pack's,
 and the bit-equal tests fix its floating-point operations.
@@ -264,6 +265,13 @@ and the bit-equal tests fix its floating-point operations.
   `sample_ipndm_v` writes them (code that ComfyUI marks as zju-pi's, under Apache 2), with the fourth-order weight's
   last factor `h_{n−1}/h_{n−2}` replaced by `h_{n−2}/h_{n−3}` — sam-extra 0.33.1's fix. ComfyUI's own function keeps
   the typo and is not called; the loop and the history are the pack's own code.
+- **DoRA weight decomposition** (`dora_infer_mode.decompose`): `W' = (W0 + dW) * m / (||.|| + eps)`, the norm
+  taken per row of `W0` on the output axis and per column of `W0 + dW` on the input axis (output axis when
+  `dora_scale.shape[0] == W.shape[0]`), and `W0 + s*(W' - W0)` for a strength s (Liu et al., arXiv:2402.09353),
+  as ComfyUI's and Forge's `weight_decompose` write it, evaluated in fp32 with the fp32 eps. The `lycoris`
+  variant takes the output-axis norm of `W0 + dW` as LyCORIS does and its operations (`vector_norm`, the
+  `multiplier * (scale - 1) + 1` step; `lycoris/modules/lokr.py` `apply_weight_decompose`, Apache-2.0, the formula
+  only). The stock and DoRA-off modes call ComfyUI's own adapter code at run time.
 
 ## sam-extra ports (pack 1.7.0): sam-extra code under the author's MIT grant, and the test oracle
 
@@ -441,3 +449,72 @@ dependency of this pack; the node imports it only when face crop is on and the u
 Python. No detector model is included: the YOLO box model (for example `face_yolov8n.pt`) is the user's file, by
 absolute path (the app sends its Forge `models/adetailer` file) or from ComfyUI's `models/ultralytics/bbox`,
 `models/ultralytics` or `models/adetailer`, and keeps its own license.
+
+## MOSS Spectrum (pack 1.9.0)
+
+`moss_spectrum.py` and `moss_spectrum_nodes.py` (`ForgeNeoMossSpectrum`) port the Spectrum feature forecasting of
+the "KSampler (Spectrum for MOSS)" node to a ComfyUI MODEL patch. The algorithm and parts of the code are
+upstream's; the module docstring of `moss_spectrum.py` names each upstream function with its lines
+(`origin:`). The forecaster (`Forecaster`) is upstream's `_Forecaster` unchanged except for a `clear` method;
+`WindowSchedule` is the window bookkeeping of `_advance_spectrum_state` and the window branch of
+`SpectrumState.should_cache`; `batch_keys` and `normalize_cond_or_uncond` are `_spectrum_batch_keys` and
+`_normalize_cond_or_uncond`; `SpectrumRun.update` and `SpectrumRun.evaluate` follow `_update_forecasters` and
+the step logic of `apply_moss_spectrum_patch`'s wrapper.
+
+| Upstream | Commit | Used for | License |
+| --- | --- | --- | --- |
+| [sorryhyun/ComfyUI-Spectrum-KSampler](https://github.com/sorryhyun/ComfyUI-Spectrum-KSampler) | `ff25e70203cfd9b83c20307474ceff29dfb2139c` | `moss.py`: `_Forecaster` (the linear form of the Chebyshev ridge + Taylor estimator), `MossSpectrumState._forecaster_ready`, `_moss_head`, `_update_forecasters`, the capture pre-hook and the wrapper's step logic, the defaults (window 2.0, `flex_window`, warmup 6, tail 3, w 0.3, degree 3, ridge 0.1, history 100); `spectrum.py`: `_spectrum_batch_keys`, `_normalize_cond_or_uncond`, `SpectrumState.should_cache` (window branch), the window bookkeeping of `_advance_spectrum_state`; `_vendor/networks/spectrum_forecast.py`: `SpectrumPredictor`, the estimator `_Forecaster` solves in linear form (read for the tests' explicit fit, not copied) | MIT, Copyright (c) 2026 sorryhyun — `LICENSES/ComfyUI-Spectrum-KSampler-MIT.txt` (the same text as at the SPEED port's commit) |
+
+Local integration code, not upstream's: the APPLY_MODEL and OUTER_SAMPLE wrappers (upstream sets a
+`model_function_wrapper` and keeps one state on the patched MODEL), one state per sampling run released when the
+run ends, the capture hook present only during an actual forward, the step count and index read from the run's
+sigma list (Detail Daemon's noted sigma first, `locate_step`) with off-grid and Euler (SMEA) Dy sub-step calls
+running the model, the sampler's moved first sigma counted as step 0 (`offset_start`), one observation per branch
+and step, a branch forecast only once it is ready (upstream's cached path checks only that it has a forecaster),
+the latent-shape check before a forecast, the run report, the MOSS-Image detection that leaves other models
+unchanged, the node's inputs, and the check by which the SPEED and Dy guards find this node's own wrappers
+(`guidance_common.spectrum_wrapper_registered`). Upstream's flow shift, uncond block skip and
+`torch.compile` options are not part of the node. The upstream repository's code is never imported.
+
+This notice does not replace or modify the upstream license.
+
+## MOSS-Image head (pack 1.9.0)
+
+`moss_spectrum.moss_head` restates the head of `MOSSImageTransformer.forward` from the `moss-image` ComfyUI node
+of [OpenMOSS/MOSS-Image](https://github.com/OpenMOSS/MOSS-Image) (`comfyui/`, package version 0.1.1; `model.py`
+SHA-256 `9ea7e073d180664dd410c16ec33a2eee1aa0b715474878eafaa434ec99eebf77`): lines 198-209 (the float64 sinusoid,
+`time_embedding`, `video_head_modulation`) and 242-245 (`final_norm_video`, the modulation, `final_linear_video`,
+the reshape). That code is licensed under the Apache License, Version 2.0; the full text is included at
+`LICENSES/moss-image-Apache-2.0.txt` (the node's `LICENSE` file, unchanged). The node ships no NOTICE file.
+Changes: the per-sample loop runs for the whole batch at once (the form of upstream Spectrum's `_moss_head`), on
+forecast image-token features instead of the last block's output.
+
+The pack neither includes nor imports `moss-image`: the MODEL comes from the user's moss-image loader. No
+MOSS-Image weight, text encoder or VAE is included. This notice does not replace or modify the Apache-2.0 license.
+
+## DoRA inference mode (pack 1.9.0)
+
+`dora_infer_mode.py` and `dora_infer_mode_nodes.py` (`ForgeNeoDoraInferenceMode`) bring the "DoRA 추론 방식" (DoRA
+Inference Mode) of the sam-extra Forge extension (installed v0.34.0, HEAD `659d354`) to ComfyUI. `decompose` (the
+fp32 DoRA merge: its Forge/Comfy norms, strength blend and in-place/return rule), `_can_return_fp32`, `_is_oom` and
+`_soft_empty_cache` are sam-extra's own code from `sam3ext/dora_infer_mode.py`, adapted (the LyCORIS branch of
+`decompose` takes LyCORIS' operations, the delta arrives alpha-scaled and is merged in place, and the OOM helpers read
+ComfyUI's `comfy.model_management`): **sam-extra (GPL-3.0-only) parts written by the same author (UR-al), licensed to
+this pack under the MIT License by that author** (`LICENSES/sam-extra-MIT.txt`; the functions are named in "Code
+shared with the sam-extra Forge extension"). The mode keys and their meaning, the strength blend and the stock
+fallback follow the same module (`MODES`, `_make_wrapper`). sam-extra's DoRA code contains no third-party code.
+
+Local integration code, not sam-extra's: the mode per MODEL (subclasses of ComfyUI's adapter classes that carry the
+mode, and a cloned MODEL with new patch lists and a new `patches_uuid`) instead of sam-extra's global swap of
+`weight_decompose` in Forge's adapter modules, the fp32 `dW` taken from ComfyUI's own adapter code (`fp32_delta`), the
+per-run account (`RunAccount`, an `OUTER_SAMPLE` wrapper), the patch rewrite and the node. ComfyUI's code (GPL-3.0) is
+called at run time and is not included; the DoRA formula that ComfyUI and Forge write is listed under "Formulas
+shared with GPL-3.0 hosts". The LyCORIS formula
+([KohakuBlueleaf/LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS), Apache-2.0, `lycoris/modules/lokr.py`
+`get_merged_weight` and `apply_weight_decompose`) is followed as a formula, operation for operation (`vector_norm`
+over the DoRA axis plus the fp32 eps, `multiplier * (scale - 1) + 1` at multiplier 1, the product): no LyCORIS code is
+included or imported, and the tests write it out themselves.
+
+The installed extension is also the test oracle: `tests/test_comfy_dora_infer_mode.py` compares the Forge/Comfy fp32
+branch of `decompose` with sam-extra's bit for bit on CPU, and the LyCORIS branch with sam-extra's where both use the
+same operations; the pack never imports the extension. This notice does not replace or modify sam-extra's license.

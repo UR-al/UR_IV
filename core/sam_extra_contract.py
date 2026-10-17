@@ -454,11 +454,16 @@ SCRIPTS = MappingProxyType({
             "core/sam_extra_notices.py:CODE_DORA_NOT_APPLIED",
             "frontend/src/components/params/DoraModeCard.vue",
             "frontend/src/utils/doraMode.ts",
+            # 팩 1.9.0 노드(커스텀 워크플로용 — 컴파일러는 아직 넣지 않는다)
+            comfy=("comfy_custom_nodes/ai_studio_forge_parity/dora_infer_mode_nodes.py:ForgeNeoDoraInferenceMode",
+                   "comfy_custom_nodes/ai_studio_forge_parity/dora_infer_mode.py:apply_dora_mode"),
             note="dict 로 보낸다. 실효 순정(꺼짐 또는 forge+keep)이면 블록을 빼고(결과가 같다), 기능 스냅샷이 스크립트를 "
                  "확인했을 때만 보낸다. 앱 기본값은 사용자 Forge ui-config 의 txt2img 값(켬·LyCORIS — KNOWN_DIFFS), "
                  "I2I·인페인트는 카드 토글(기본 끔 = img2img 아코디언 꺼짐). ComfyUI 는 블록을 만들지 않는다(순정 공식·"
                  "그대로 복제와 같다 — 사용자가 바꾼 값이면 LoRA 생성에 정보 알림)",
-            gaps=("HOLD: Comfy 는 순정·그대로 복제만 — 팩 노드(P8-C)가 있어야 LyCORIS·끼워 넣은 블록 정책을 맞춘다",
+            gaps=("HOLD: 팩 1.9.0 노드 ForgeNeoDoraInferenceMode(모드 넷 — sam-extra 자체 코드, 2026-10-05 결정)는 커스텀 "
+                  "워크플로용으로 있고 컴파일러가 아직 넣지 않는다(P8-C) — 앱의 Comfy 생성은 순정 공식·그대로 복제다. 끼워 넣은 "
+                  "블록 정책은 노드에 없다",
                   "P16: 결과 infotext 'DoRA mode'·'DoRA inserted' 붙여 넣기(core/dora_infer_mode.from_infotext 는 준비됨)",
                   "P18: [DoRA] XYZ 축"))),
     "Anima VAE 2x (spacepxl decoder)": _script(
@@ -1467,7 +1472,15 @@ MODULES = MappingProxyType({
         "core/dora_infer_mode.py:EXTENSION_MODES", "core/dora_infer_mode.py:normalize_mode",
         note="DoRA 병합 공식 — 앱은 모드 키·별칭 정규화·infotext 'DoRA mode' 만 쓴다(SEMANTIC_PINS dora_modes·"
              "dora_infotext_*)",
-        gaps=("HOLD: Comfy 는 순정 공식만(P8-C 팩 노드)",)),
+        comfy=("comfy_custom_nodes/ai_studio_forge_parity/dora_infer_mode.py:decompose",
+               "comfy_custom_nodes/ai_studio_forge_parity/dora_infer_mode.py:merge_dora_patch",
+               "comfy_custom_nodes/ai_studio_forge_parity/dora_infer_mode_nodes.py:ForgeNeoDoraInferenceMode"),
+        gaps=("ComfyUI: 팩 1.9.0 이 이 모듈의 decompose·_can_return_fp32·_is_oom 을 옮겼다(sam-extra 자체 코드 — "
+              "2026-10-05 결정, 팩 THIRD_PARTY_NOTICES). 모드는 전역 훅이 아니라 노드를 거친 MODEL 의 패치에만 붙는다. "
+              "LyCORIS 모드는 LyCORIS 연산(vector_norm·multiplier*(scale-1)+1)을 그대로 따라서 conv 입력 축과 비율이 "
+              "[0.5, 2] 밖인 행에서 확장의 같은 모드와 fp32 몇 ulp 다르다(학습 병합과는 비트 동일) — "
+              "tests/test_comfy_dora_infer_mode.py 가 설치된 확장과 대조한다",
+              "HOLD: 컴파일러가 노드를 아직 넣지 않는다(P8-C) — 앱의 Comfy 생성은 순정 공식만",)),
     "sam3ext/lora_manager_core.py": mapped("backends/webui_backend.py:get_lora_manager_url",
                                            note="_BRIDGE_JS 메시지 모양은 SEMANTIC_PINS 의 lora_bridge_message",
                                            gaps=("P6: _BRIDGE_JS 'sam3-add-lora' 메시지를 앱이 받지 않는다",)),
@@ -2489,6 +2502,11 @@ SEMANTIC_PINS = (
     {"id": "dora_modes", "source": "ast", "file": "sam3ext/dora_infer_mode.py", "name": "MODES",
      "expected": ("forge", "forge_fp32", "lycoris", "no_magnitude"), "app": "core.dora_infer_mode:EXTENSION_MODES",
      "meaning": "API dict 의 mode 키 — 모르는 값은 LyCORIS 로 읽힌다(coerce_args). 'forge' = 순정(블록 없음과 같음)"},
+    {"id": "dora_modes_comfy", "source": "ast", "file": "sam3ext/dora_infer_mode.py", "name": "MODES",
+     "expected": ("forge", "forge_fp32", "lycoris", "no_magnitude"),
+     "app": "comfy_custom_nodes.ai_studio_forge_parity.dora_infer_mode:MODES",
+     "meaning": "API dict 의 mode 키 — 모르는 값은 LyCORIS 로 읽힌다(coerce_args). 'forge' = 순정(블록 없음과 같음) — Comfy "
+                "팩(ForgeNeoDoraInferenceMode 의 모드 키·mode_class)도 같은 값이어야 ComfyUI 가 Forge 와 같다"},
     {"id": "dora_insert_policies", "source": "ast", "file": "sam3ext/anima_lora_blocks.py",
      "name": "DUPLICATE_POLICIES", "expected": ("keep", "additive", "skip", "weak"),
      "app": "core.dora_infer_mode:INSERT_POLICIES",

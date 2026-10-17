@@ -12,7 +12,10 @@ sam-extra on Forge, which skips the sub-steps for Spectrum Integrated, Wan I2V `
   ``ForgeNeoAnimaSpeed`` never sets it: sam-extra keeps the sub-steps under SPEED and places them by
   ``sam_extra_step_offset``.)
 * ``REASON_SPECTRUM`` — a ``model_function_wrapper`` from a Spectrum provider (its name or module says
-  ``spectrum`` — sam-extra's detection rule), e.g. a user workflow's own Spectrum patch.
+  ``spectrum`` — sam-extra's detection rule), e.g. a user workflow's own Spectrum patch, or the pack's MOSS
+  Spectrum (pack 1.9.0), found by its own APPLY_MODEL / OUTER_SAMPLE wrappers
+  (``guidance_common.spectrum_wrapper_registered``; other patcher-extension wrappers that merely say
+  ``spectrum``, such as upstream Spectrum-KSampler's modulation guidance, do not count).
 * ``REASON_CONCAT`` — concat conditioning (``c_concat`` / ``concat_latent_image``: inpainting
   checkpoints, Flux Fill, Wan I2V): the model concatenates it with the latent on the channel axis at
   full size (``model_base._apply_model``), a size mismatch at the sub-step's resolution.
@@ -30,7 +33,7 @@ import logging
 from typing import Any, Callable, Mapping
 
 from .extra_samplers_dy import SubstepInputs
-from .guidance_common import DY_SUBSTEPS_OFF_KEY
+from .guidance_common import DY_SUBSTEPS_OFF_KEY, spectrum_wrapper_registered
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
 
@@ -41,7 +44,7 @@ REASON_REGIONAL = "regional"
 
 _EXPLANATIONS = {
     REASON_FLAG: "{flag} is on for this MODEL (it forecasts whole steps)",
-    REASON_SPECTRUM: "a Spectrum model-function wrapper forecasts whole steps",
+    REASON_SPECTRUM: "a Spectrum model wrapper forecasts whole steps",
     REASON_CONCAT: "concat conditioning (c_concat: inpainting / fill models, Wan I2V) is joined to the latent at "
                    "full size",
     REASON_REGIONAL: "area / mask conditioning is tied to the full latent grid",
@@ -86,7 +89,8 @@ def blocking_reasons(model: Any, extra_args: Any) -> list[str]:
     reasons: list[str] = []
     if _transformer_options(extra_args).get(DY_SUBSTEPS_OFF_KEY):
         reasons.append(REASON_FLAG)
-    if is_spectrum_wrapper(_model_function_wrapper(extra_args)):
+    if is_spectrum_wrapper(_model_function_wrapper(extra_args)) or spectrum_wrapper_registered(
+            _mapping(extra_args).get("model_options")):
         reasons.append(REASON_SPECTRUM)
     conds = processed_conds(model)
     if any(key in cond or key in _mapping(cond.get("model_conds")) for cond in conds for key in _CONCAT_KEYS):

@@ -1247,6 +1247,32 @@ class ColorcraftRegistryTests(unittest.TestCase):
         self.assertEqual(options["opt_infotext_colorcraft_pre_dd"],
                          "core.forge_override_settings:INFOTEXT_COLORCRAFT_PRE_DD")
 
+class DoraPackRegistryTests(unittest.TestCase):
+    """팩 1.9.0 ForgeNeoDoraInferenceMode — sam-extra 코드를 옮긴 행이 comfy 로 팩을 가리키고(1.7.0·1.8.0 관례), 팩이
+    하드코딩한 MODES 에 '_comfy' 쌍둥이가 있으며, '순정 공식만' 이라는 낡은 틈이 남지 않는다(검토 F4)."""
+
+    PACK = "comfy_custom_nodes/ai_studio_forge_parity/"
+
+    def test_dora_rows_point_at_the_pack(self):
+        script = reg.SCRIPTS["DoRA Inference Mode"]
+        module = reg.MODULES["sam3ext/dora_infer_mode.py"]
+        self.assertIn(f"{self.PACK}dora_infer_mode_nodes.py:ForgeNeoDoraInferenceMode", script["comfy"])
+        self.assertIn(f"{self.PACK}dora_infer_mode.py:decompose", module["comfy"])
+        self.assertTrue(any(gap.startswith("ComfyUI: 팩 1.9.0") for gap in module["gaps"]), module["gaps"])
+        stale = [gap for row in (script, module) for gap in row["gaps"] if "순정 공식만(P8-C" in gap
+                 or "팩 노드(P8-C)가 있어야" in gap]
+        self.assertEqual(stale, [])
+
+    def test_dora_modes_twin(self):
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS}
+        twin = pins["dora_modes_comfy"]
+        self.assertEqual(twin["app"], "comfy_custom_nodes.ai_studio_forge_parity.dora_infer_mode:MODES")
+        self.assertEqual({key: twin[key] for key in ("source", "file", "name", "expected")},
+                         {key: pins["dora_modes"][key] for key in ("source", "file", "name", "expected")})
+        from comfy_custom_nodes.ai_studio_forge_parity import dora_infer_mode
+        self.assertEqual(dora_infer_mode.MODES, twin["expected"])
+
+
 class ComfyWiringRegistryTests(unittest.TestCase):
     """계획 C6 — 네 기능의 MODULES 행(계산 모듈)도 팩 1.7.0 의 다시 구현을 comfy 로 가리키고, 어느 행에도 '팩 1.7.0 단계
     전'·'comfy_pending' 틈이 남지 않는다."""
@@ -1355,6 +1381,7 @@ class ComfyPackMirrorPinTests(unittest.TestCase):
             "colorcraft_host": ("MASK_AXES", "MASK_MODES", "COMBINE_OPERATIONS", "ANCHOR_CACHE_LIMIT"),
             "colorcraft_basis": ("LATENT_FORMAT_TO_FAMILY", "MODEL_DEV_DEFAULTS", "VAE_DOWNSCALE_FACTORS",
                                  "VAE_DOWNSCALE_FACTOR"),
+            "dora_infer_mode": ("MODES",),   # 팩 1.9.0 DoRA 추론 방식
         }
         self.assertEqual(sorted({f"{self.PACK}{module}:{name}" for module, names in wanted.items() for name in names}
                                 - apps), [], "쌍둥이 핀이 없는 팩 상수")

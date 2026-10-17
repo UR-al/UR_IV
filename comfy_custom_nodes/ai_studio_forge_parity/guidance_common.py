@@ -258,6 +258,47 @@ def is_extra_sampler_substep(args: Any) -> bool:
     return bool(options.get(SUBSTEP_MARKER))
 
 
+# The pack's MOSS Spectrum patch (pack 1.9.0; ``moss_spectrum`` imports these, so they live here): the
+# ``ModelPatcher.add_wrapper_with_key`` key of its wrappers, the attribute each of its wrapper callables carries
+# (the patch's ``SpectrumPatch``), and the wrapper types it registers (``comfy.patcher_extension.WrappersMP``
+# ``APPLY_MODEL`` and ``OUTER_SAMPLE``).
+MOSS_SPECTRUM_WRAPPER_KEY = "ai_studio_forge_parity.moss_spectrum"
+MOSS_SPECTRUM_ATTR = "_ai_studio_moss_spectrum"
+MOSS_SPECTRUM_WRAPPER_TYPES = ("apply_model", "outer_sample")
+
+
+def spectrum_wrapper_registered(model_options: Any) -> bool:
+    """Does a run's ``model_options`` carry the pack's own MOSS Spectrum patch?
+
+    ComfyUI merges the MODEL's wrappers into ``transformer_options["wrappers"]`` (``{type: {key: [callables]}}``)
+    when a sampling run starts. Under the APPLY_MODEL or OUTER_SAMPLE type, a non-empty
+    ``MOSS_SPECTRUM_WRAPPER_KEY`` entry or a callable carrying ``MOSS_SPECTRUM_ATTR`` counts; nothing else does.
+    No name rule: other wrappers whose key or module says ``spectrum`` forecast no steps — upstream
+    Spectrum-KSampler's Anima modulation guidance (APPLY_MODEL key ``spectrum_mod_guidance_apply``, which
+    ``ForgeNeoAnimaModGuidance`` calls), its DCW / FSG CALC_COND_BATCH wrappers (ComfyUI names a folder node's
+    modules after the folder path), any wrapper under an install path that says ``spectrum``. The SPEED and
+    Euler (SMEA) Dy guards read it next to their ``model_function_wrapper`` name rule (pack 1.9.0).
+    """
+
+    options = model_options if isinstance(model_options, dict) else {}
+    transformer = options.get("transformer_options")
+    wrappers = transformer.get("wrappers") if isinstance(transformer, dict) else None
+    if not isinstance(wrappers, dict):
+        return False
+    for wrapper_type in MOSS_SPECTRUM_WRAPPER_TYPES:
+        registered = wrappers.get(wrapper_type)
+        if not isinstance(registered, dict):
+            continue
+        for key, functions in registered.items():
+            if not isinstance(functions, (list, tuple)) or not functions:
+                continue
+            if key == MOSS_SPECTRUM_WRAPPER_KEY:
+                return True
+            if any(getattr(function, MOSS_SPECTRUM_ATTR, None) is not None for function in functions):
+                return True
+    return False
+
+
 def _first_options(*holders: Any) -> dict[str, Any]:
     for holder in holders:
         if isinstance(holder, dict):
