@@ -1,6 +1,6 @@
 """LoRA 매니저용 병합 카탈로그 캐시 — 비동기 requestLoras·동기 getLoras·백그라운드 프리워밍이 공유한다.
 
-캐시가 비면 백엔드 ``get_loras()`` HTTP(timeout 10초)와 디스크 카탈로그 병합
+캐시가 비면 백엔드 ``get_loras()`` HTTP(Forge: lite 30초 → 폴백 /sdapi/v1/loras 120초)와 디스크 카탈로그 병합
 (ModelInventory.merge_loras)이 필요하다. 예전엔 LoRA 매니저가 동기 슬롯 getLoras 로 이 둘을
 GUI 스레드에서 해 창이 수 초 멈췄다. 지금은
 - 매니저가 ``VueBridge.requestLoras`` → 워커 스레드의 :func:`load_catalog_json` → ``lorasReady`` 로 받고,

@@ -15,7 +15,8 @@
 
 ``optional=True`` 는 병렬로 들어오는 중인 항목에만 쓴다 — 확장에 아직 없거나 (mapped 면) 앱 참조가 아직
 없어도 통과한다. 새 항목을 조용히 넘기는 뜻은 아니다(분류되지 않은 항목은 여전히 실패). 양쪽이 자리 잡으면
-표시를 지운다 — 지금은 쓰는 항목이 없다(공유 메모 라우트·파일은 양쪽이 자리 잡아 표시를 지웠다).
+표시를 지운다 — 지금은 가벼운 LoRA 목록(ROUTES 'GET /sam3-lora/lite'·MODULES 'sam3ext/lora_lite.py' — sam-extra 작업
+트리에만 있다)이 쓴다(공유 메모 라우트·파일은 양쪽이 자리 잡아 표시를 지웠다).
 
 AST 로 읽는 것과 못 읽는 것: 설치된 확장 소스에서 ui() 컴포넌트의 라벨·기본값·범위·step·선택지를 읽어
 픽스처와 비교한다(소스가 바뀌었는데 픽스처가 낡으면 실패). 읽지 못하는 칸은 ``UI_UNREAD`` 에 사유와 함께 적는다.
@@ -1116,6 +1117,15 @@ ROUTES = MappingProxyType({
     "GET /sam3-lora/config": mapped(
         "core/sam_extra_capabilities.py:EP_LORA_CONFIG",
         note="부작용 없는 존재 확인 — 런타임 기능 스냅샷(P5)이 쓴다"),
+    # 가벼운 LoRA 목록(2026-10-24 — sam-extra 작업 트리 feat/lora-list-lite 에만 있어 optional, 설치본에 들어오면 표시를 지운다).
+    # 로그인 의존성만 있고 X-SAM3-Notebook 헤더는 없다(/sdapi/v1/loras 처럼 외부 클라이언트용).
+    "GET /sam3-lora/lite": mapped(
+        "backends/webui_backend.py:_LORA_LITE_PATH", "backends/webui_backend.py:_get_loras_lite",
+        "backends/webui_backend.py:_lora_from_lite_item",
+        note="get_loras 가 매번 먼저 묻는다(30초). 실패하면(404 포함 — 막 뜬 Forge 는 확장 라우트를 늦게 붙여 기억하지 "
+             "않는다) /sdapi/v1/loras(120초)로 폴백. 두 경로의 trigger_words 는 같다(tests/test_webui_lora_lite.py). "
+             "?refresh=1 은 쓰지 않는다 — force 는 POST /sdapi/v1/refresh-loras 뒤 GET",
+        optional=True),
     "GET /sam3-notebook": deferred(HOLD, "T7 Notebook 프리셋 저장소 — 앱 프리셋과 겹친다(보류). "
                                          "메모는 /sam3-notebook/memos 로 따로 동기화한다"),
     "PUT /sam3-notebook": deferred(HOLD, "T7 Notebook 프리셋 저장소 — 앱 프리셋과 겹친다(보류)"),
@@ -1484,6 +1494,10 @@ MODULES = MappingProxyType({
     "sam3ext/lora_manager_core.py": mapped("backends/webui_backend.py:get_lora_manager_url",
                                            note="_BRIDGE_JS 메시지 모양은 SEMANTIC_PINS 의 lora_bridge_message",
                                            gaps=("P6: _BRIDGE_JS 'sam3-add-lora' 메시지를 앱이 받지 않는다",)),
+    "sam3ext/lora_lite.py": mapped(
+        "backends/webui_backend.py:_lora_from_lite_item", "backends/webui_backend.py:_sorted_tag_frequency",
+        note="ROUTES['GET /sam3-lora/lite'] — activation_text·tag_frequency_top(앞 32개) 규칙이 앱 Method 1·2 와 같다",
+        optional=True),
     "sam3ext/notebook_store.py": deferred(HOLD, "T7 Notebook 프리셋 저장소"),
     "sam3ext/notebook_memos.py": mapped("core/forge_memo_client.py:ForgeMemoClient",
                                         note="공유 메모 저장소(memos.json). 스키마·한도는 SEMANTIC_PINS 의 memo_*"),

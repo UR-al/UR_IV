@@ -258,6 +258,92 @@ def _forge_init_size(image_b64: str) -> tuple:
         return upright.size
 
 
+# ── LoRA 목록(get_loras) ─────────────────────────────────────────────────────
+# /sdapi/v1/loras 는 LoRA 마다 safetensors 메타데이터 전체를 싣는다 — 809개 라이브러리에서 143MB JSON,
+# Forge 메타데이터 캐시가 따뜻해도 ~5초, 차가우면 72초(2026-10-24 실측). sam-extra 의 GET /sam3-lora/lite 는
+# 같은 순서·같은 name/alias/path 에 트리거 워드 재료(activation_text, 정렬된 tag_frequency_top 앞 32개)만 싣는다.
+# 두 경로는 아래 규칙으로 **같은** trigger_words 를 낸다(tests/test_webui_lora_lite.py 가 지킨다).
+_LORA_LITE_PATH = '/sam3-lora/lite'
+_LORA_LITE_VERSION = 1
+_LORA_LITE_TIMEOUT_S = 30
+_LORA_FULL_TIMEOUT_S = 120
+_TRIGGERS_FROM_ACTIVATION = 8   # Method 1: activation text 쉼표 조각 앞 8개
+_TRIGGERS_FROM_TAGS = 5         # Method 2: 학습 태그 빈도 앞 5개
+
+
+class _LoraLiteMissing(Exception):
+    """GET /sam3-lora/lite 가 404 — 그 라우트가 없는 sam-extra(또는 없음)거나, 막 뜬 Forge 가 아직 확장 라우트를
+    붙이기 전이다(앱의 준비 확인 /sdapi/v1/samplers 는 create_api 때, 확장 라우트는 그 뒤 app_started 때 생긴다)."""
+
+
+def _activation_trigger_words(text) -> list:
+    """Method 1: activation text(CivitAI·사용자 입력)를 쉼표로 나눠 빈 조각을 빼고 앞 8개."""
+    if not isinstance(text, str) or not text:
+        return []
+    return [t.strip() for t in text.split(',') if t.strip()][:_TRIGGERS_FROM_ACTIVATION]
+
+
+def _sorted_tag_frequency(tag_freq) -> list:
+    """ss_tag_frequency(JSON 문자열 또는 dict) → [(태그, 횟수), ...] 횟수 내림차순.
+
+    데이터셋별 dict 를 값 순서대로 ``dict.update`` 로 합치고(같은 태그는 뒤 데이터셋 값이 이긴다),
+    ``sorted(..., reverse=True)`` 는 안정 정렬이라 같은 횟수는 합친 순서를 지킨다. sam-extra 의
+    tag_frequency_top 도 같은 규칙이다(그 앞 32개).
+    """
+    if isinstance(tag_freq, str):
+        try:
+            tag_freq = json.loads(tag_freq)
+        except Exception:
+            return []
+    if not isinstance(tag_freq, dict):
+        return []
+    merged = {}
+    for ds_tags in tag_freq.values():
+        if isinstance(ds_tags, dict):
+            merged.update(ds_tags)
+    return sorted(merged.items(), key=lambda x: x[1], reverse=True)
+
+
+def _lora_from_full_item(item) -> dict:
+    """/sdapi/v1/loras 항목 하나 → {name, alias, path, trigger_words}."""
+    lora = {
+        'name': item.get('name', ''),
+        'alias': item.get('alias', item.get('name', '')),
+        'path': item.get('path', ''),
+        'trigger_words': [],
+    }
+    metadata = item.get('metadata', {})
+    if metadata:
+        lora['trigger_words'] = _activation_trigger_words(
+            metadata.get('activation text', '') or metadata.get('ss_activation_text', ''))
+        if not lora['trigger_words']:   # Method 2: ss_tag_frequency (학습 태그 — 폴백)
+            sorted_tags = _sorted_tag_frequency(metadata.get('ss_tag_frequency', {}))
+            lora['trigger_words'] = [t[0] for t in sorted_tags[:_TRIGGERS_FROM_TAGS]]
+    return lora
+
+
+def _lora_from_lite_item(item) -> dict:
+    """/sam3-lora/lite 항목 하나 → _lora_from_full_item 과 같은 dict. 모양이 틀리면 ValueError(→ 전체 목록으로 폴백)."""
+    if not isinstance(item, dict):
+        raise ValueError(f"lite 항목이 객체가 아님: {type(item).__name__}")
+    lora = {
+        'name': item.get('name', ''),
+        'alias': item.get('alias', item.get('name', '')),
+        'path': item.get('path', ''),
+        'trigger_words': _activation_trigger_words(item.get('activation_text', '')),
+    }
+    if not lora['trigger_words']:
+        top = item.get('tag_frequency_top') or []
+        if not isinstance(top, list):
+            raise ValueError("lite tag_frequency_top 이 목록이 아님")
+        # 서버가 이미 횟수 내림차순(안정)으로 정렬해 앞 32개를 준다 — 그 앞 5개가 옛 경로의 앞 5개다.
+        lora['trigger_words'] = [
+            entry[0] for entry in top[:_TRIGGERS_FROM_TAGS]
+            if isinstance(entry, (list, tuple)) and entry
+        ]
+    return lora
+
+
 class WebUIBackend(AbstractBackend):
     """Stable Diffusion WebUI API 백엔드"""
 
@@ -752,59 +838,60 @@ class WebUIBackend(AbstractBackend):
         return {}
 
     def get_loras(self) -> list:
-        """WebUI LoRA 목록 반환 (트리거 워드 포함)"""
+        """WebUI LoRA 목록 — [{name, alias, path, trigger_words}] (Forge /sdapi/v1/loras 순서).
+
+        먼저 sam-extra 의 가벼운 GET /sam3-lora/lite(timeout 30초)를 묻는다. 404·연결 실패·응답 지연·
+        모양이 틀린 JSON 이면 메타데이터 전체를 싣는 /sdapi/v1/loras(timeout 120초 — 차가운 캐시 72초 실측)로
+        폴백한다. 404 도 기억하지 않고 매번 lite 부터 묻는다 — 막 뜬 Forge 는 앱의 준비 확인을 통과한 뒤에야 확장
+        라우트를 붙여(_LoraLiteMissing) 그 틈의 404 를 기억하면 이 객체가 사는 동안 느린 경로에 묶이고, 라우트가 정말
+        없는 Forge 에 한 번 더 묻는 값은 폴백(수 초)에 비하면 수 ms 다.
+        두 경로의 trigger_words 규칙은 같다(_lora_from_full_item / _lora_from_lite_item).
+        느리므로 GUI 스레드에서 부르지 않는다 — 호출자는 ui.lora_catalog_cache 의 워커(requestLoras·프리워밍)다.
+        """
+        started = time.monotonic()
         try:
-            r = requests.get(
-                f'{self.api_url}/sdapi/v1/loras',
-                headers=_HEADERS, timeout=10
-            )
-            r.raise_for_status()
-            data = r.json()
-            if isinstance(data, list):
-                result = []
-                for item in data:
-                    lora = {
-                        'name': item.get('name', ''),
-                        'alias': item.get('alias', item.get('name', '')),
-                        'path': item.get('path', ''),
-                        'trigger_words': [],
-                    }
-                    metadata = item.get('metadata', {})
-                    if metadata:
-                        # Method 1: activation text (CivitAI / user-defined)
-                        act_text = (metadata.get('activation text', '')
-                                    or metadata.get('ss_activation_text', ''))
-                        if act_text:
-                            lora['trigger_words'] = [
-                                t.strip() for t in act_text.split(',') if t.strip()
-                            ][:8]
-                        # Method 2: ss_tag_frequency (trained tags — fallback)
-                        if not lora['trigger_words']:
-                            tag_freq = metadata.get('ss_tag_frequency', {})
-                            if isinstance(tag_freq, str):
-                                try:
-                                    import json as _json
-                                    tag_freq = _json.loads(tag_freq)
-                                except Exception:
-                                    tag_freq = {}
-                            if isinstance(tag_freq, dict):
-                                all_tags = {}
-                                for ds_tags in tag_freq.values():
-                                    if isinstance(ds_tags, dict):
-                                        all_tags.update(ds_tags)
-                                if all_tags:
-                                    sorted_tags = sorted(
-                                        all_tags.items(),
-                                        key=lambda x: x[1], reverse=True
-                                    )
-                                    lora['trigger_words'] = [
-                                        t[0] for t in sorted_tags[:5]
-                                    ]
-                    result.append(lora)
-                return result
+            result = self._get_loras_lite()
+        except _LoraLiteMissing:
+            lite_note = 'lite 404'
         except Exception as e:
-            logger.warning("get_loras failed: %s", e)
-        return []
+            lite_note = f'lite 실패: {type(e).__name__}'
+        else:
+            logger.info("LoRA 목록: %s %d개 · %.2f초", _LORA_LITE_PATH, len(result),
+                        time.monotonic() - started)
+            return result
+        try:
+            result = self._get_loras_full()
+        except Exception as e:
+            logger.warning("get_loras failed (%s, /sdapi/v1/loras: %s)", lite_note, e)
+            return []
+        logger.info("LoRA 목록: /sdapi/v1/loras (%s) %d개 · %.2f초", lite_note, len(result),
+                    time.monotonic() - started)
+        return result
+
+    def _get_loras_lite(self) -> list:
+        """GET /sam3-lora/lite → 목록. 404 면 _LoraLiteMissing, 그 밖의 실패는 예외 그대로(폴백)."""
+        r = requests.get(f'{self.api_url}{_LORA_LITE_PATH}', headers=_HEADERS,
+                         timeout=_LORA_LITE_TIMEOUT_S)
+        if r.status_code == 404:
+            raise _LoraLiteMissing()
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, dict) or data.get('version') != _LORA_LITE_VERSION:
+            raise ValueError("lite 응답 version 이 1 이 아님")
+        items = data.get('items')
+        if not isinstance(items, list):
+            raise ValueError("lite 응답에 items 목록이 없음")
+        return [_lora_from_lite_item(item) for item in items]
+
+    def _get_loras_full(self) -> list:
+        """GET /sdapi/v1/loras(메타데이터 전체) → 목록. 목록이 아닌 응답은 []."""
+        r = requests.get(f'{self.api_url}/sdapi/v1/loras', headers=_HEADERS,
+                         timeout=_LORA_FULL_TIMEOUT_S)
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, list):
+            return []
+        return [_lora_from_full_item(item) for item in data]
 
     @staticmethod
     def _module_names(values) -> list[str]:

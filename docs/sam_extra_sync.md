@@ -36,7 +36,7 @@ gap matrix 5-(a) 가운데 다음은 아직 없다. 이 검사가 있다고 가�
 - **ignored**: 앱과 무관하다. Forge 화면 전용이거나 해당 없는 항목이다. `reason` 이 필요하다.
 - **deferred**: 아직 앱에 없다. `package`(gap matrix 의 P1-P21, 보류 항목은 `HOLD`)와 `reason` 이 필요하다.
 - 스크립트의 `script_info=False` 는 `ui()` 가 None 인 always-on 스크립트(NegPiP)에만 쓴다. Forge 가 `api_info` 를 만들지 않아 script-info·픽스처에 없고 shape 도 없다. 계약 테스트는 `ui()` 의 모든 return 이 None 인지 AST 로 본다.
-- `optional=True` 는 병렬로 들어오는 중인 항목에만 쓴다. 확장이나 앱 한쪽에 아직 없어도 통과한다. 양쪽이 자리 잡으면 표시를 지운다. 지금은 쓰는 항목이 없다(공유 메모 라우트와 파일은 양쪽이 자리 잡아 표시를 지웠다).
+- `optional=True` 는 병렬로 들어오는 중인 항목에만 쓴다. 확장이나 앱 한쪽에 아직 없어도 통과한다. 양쪽이 자리 잡으면 표시를 지운다. 지금은 가벼운 LoRA 목록(라우트 `GET /sam3-lora/lite`, 파일 `sam3ext/lora_lite.py` — sam-extra 작업 트리에만 있다)이 쓴다. 설치본에 들어오면 표시를 지우고 `LORA_LITE_PATH`·`LITE_VERSION`·`TAG_FREQUENCY_TOP` 을 의미 핀으로 건다(공유 메모 라우트와 파일은 양쪽이 자리 잡아 표시를 지웠다).
 - mapped 의 앱 참조는 파이썬 파일이면 심볼이 코드 식별자로 있어야 한다. 주석이나 문자열에만 남은 이름은 인정하지 않는다.
 
 ## 체크리스트: 확장이 업데이트되면

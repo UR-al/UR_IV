@@ -2420,7 +2420,7 @@ class VueBridge(QObject):
     def getLoras(self, mode: str = '') -> str:
         """활성 API 메타데이터 + 메인/보조 디스크 LoRA 카탈로그 반환(호출 스레드에서, 동기).
 
-        QWebChannel 슬롯이 아니다 — 캐시가 빗나가면 백엔드 HTTP(timeout 10초)와 디스크 병합을
+        QWebChannel 슬롯이 아니다 — 캐시가 빗나가면 백엔드 HTTP(Forge 는 최대 30+120초)와 디스크 병합을
         호출 스레드에서 하므로, GUI 스레드에서 부르는 프론트는 비동기 짝 :meth:`requestLoras`
         (→ ``lorasReady``)를 쓴다. 이 메서드는 파이썬 쪽 동기 진입점으로 남긴다(캐시 계약 테스트).
 
@@ -2440,7 +2440,7 @@ class VueBridge(QObject):
     def requestLoras(self, mode: str = '', request_id: str = ''):
         """getLoras 의 비동기 짝 — LoRA 매니저가 쓴다. 결과는 lorasReady.
 
-        캐시가 빗나가면(첫 열기·force·백엔드 전환 뒤) 백엔드 HTTP(timeout 10초)와 디스크 카탈로그
+        캐시가 빗나가면(첫 열기·force·백엔드 전환 뒤) 백엔드 HTTP(Forge 는 최대 30+120초)와 디스크 카탈로그
         병합(os.walk·해시)을 하므로 워커 스레드에서 한다 — 동기 getLoras 는 GUI 스레드를 수 초 막았다.
         캐시 갱신은 ui.lora_catalog_cache.load_catalog_json 이 경합(백엔드 전환 무효화)에 안전하게 한다.
         요청마다 키가 달라 '다시 스캔'(force)이 앞선 요청에 합쳐져 사라지지 않는다.
