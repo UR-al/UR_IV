@@ -33,7 +33,7 @@
 ## 3. CI (`.github/workflows/moss-image.yml` 의 21 파일 = 기존 20 + `tests/test_anima_block_compile.py`, `CUDA_VISIBLE_DEVICES=-1`, `PYTHONIOENCODING=utf-8`, torch 2.7.1 CPU)
 
 - 1차 실행(`1436f253`, 한 프로세스, 8:34): **1024 passed, 53 skipped, 3 failed** — §2.1 의 LoKr 3개(테스트 순서 상호작용 → 수정 `34b842b4`). ortholora 는 허용폭으로 통과.
-- 2차 실행(`34b842b4`): 실행 중 — 결과는 이 파일의 후속 커밋에 기록.
+- 2차 실행(`34b842b4`, 한 프로세스, 8:24): **1032 passed, 53 skipped, 0 failed** (53 skip 은 GitHub CI 와 같은 환경 skip: 모델 파일·Forge·외부 체크아웃 없음). 가장 느린 테스트 35.6 s(`test_lowrank_bf16_error_not_worse_than_stock[dense-tlora]`).
 
 ## 4. 로컬 GPU A/B 체크리스트 (RTX 5090 32 GB, Windows 11, torch 2.7.1 + Triton)
 
