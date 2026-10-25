@@ -214,3 +214,8 @@ eager 런치 수는 사용자 프로파일(forward 2만 회 ≈ 500/블록)과 �
 ## 8. 부록 — 하네스 재현
 
 하네스(세션 스크래치패드, 휘발)는 토이 Anima + LyCORIS 네트워크 생성(`toy.py`, `presets.py`), 끊김 프로브(`breaks.py`, `probe.py`), 후보 패치 참조 구현(`fixes.py`: 클로저 재바인딩, `tsm_compile_safe`, `tsm_hoist_experts`, `tsm_lokr_hoist`), 런치 집계(`launches.py`), 재컴파일 측정(`tsm_recompile.py`), GC 수치 비교(`gc_check.py`), 부착 방식 매트릭스(`patch_matrix.py`)로 구성됩니다. 이식 브랜치 `cloud/anima-speed-ports` 의 CPU 테스트가 같은 검사(블록당 그래프 1개·끊김 0·eager 와 수치 동일·해상도 재컴파일 0)를 담습니다.
+
+## 9. 후속 (2026-10-25)
+
+- **이식 브랜치** UR-al/sd-scripts `cloud/anima-speed-ports` (`f738479b1cdfb9bfbdfd14f702a250a6595c8a80`, 3a4f196b 기준): §3 상위 기법 중 TSM·LoKr(+DoRA) 에 통하고 RTX 5090 + torch 2.7.1 에서 이득이 기대되는 ① 블록 단위 `torch.compile`(`--anima_block_compile`, 동적 토큰 축 밴드 · 가짜 5D 블록 루프 · 컴파일 캐시 격리 · 샘플링/검증은 eager · 혼합 timestep TSM 청크는 eager)과 ② `--anima_activation_memory_budget`(체크포인팅 없는 구간용) 을 기본 꺼짐 옵션으로 넣었다. QKV 융합(LoKr 저장 형식·TSM 의미 변경), LLM 어댑터 캐시(~1%, 캐시 형식 변경), σ-저해상(TSM 외) 은 넣지 않았다. 테스트 `tests/test_anima_block_compile.py`(CI 목록에 추가): lokr+DoRA·lora·tsm 1/2단계·tsm-lokr 모두 블록당 그래프 1개·끊김 0, 컴파일 fwd+bwd 가 eager 와 동일(체크포인팅 유/무; 소 `lora` 의 adaLN up 기울기 6개만 bf16 1~2 ulp), TSM 같은 구간 timestep 재컴파일 0, 해상도 스윕 재컴파일 0. 기법별 기대 이득·GPU A/B 측정법은 `docs/anima_train_network.md` 의 `--anima_block_compile` 항목, anima_lora 유래 설계의 MIT 고지는 `THIRD_PARTY_NOTICES.md`. GPU 실측은 아직 없음(§7).
+- **리뷰** 4a9c2637·3a4f196b: `reports/review_4a9c2637_3a4f196b.md`. 확정 결함 수정은 UR-al/sd-scripts `cloud/review-fixes` (`a1a8acb1d87c35b2de74ebf3d59c45dbd6d94d67`).
