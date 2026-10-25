@@ -1,7 +1,7 @@
 # UR-al/sd-scripts `cloud/integration` — 병합 내역, CI, 로컬 GPU A/B 체크리스트
 
 - 브랜치: UR-al/sd-scripts **`cloud/integration`** = `moss-image`(3a4f196b) + `cloud/review-fixes`(a1a8acb1) + `cloud/anima-speed-ports`(f738479b) + 리뷰 권고 A2·bf16 테스트 허용폭 커밋. `moss-image` 는 손대지 않았다 — 로컬 학습이 끝난 뒤 로컬 세션이 `moss-image` 를 이 브랜치로 **fast-forward** 하면 된다(3a4f196b 를 조상으로 두고 위에 쌓았으므로 FF 가능).
-- 최종 SHA: **`1436f253b119a512595f5c6966f73e146da4ab55`** (푸시됨). CI 결과: §3.
+- 최종 SHA: **`34b842b414dfdb28d2c90ca8331be55ddb890e1e`** (푸시됨; `1436f253` 위에 §2.1 의 수정 커밋). CI 결과: §3.
 
 ## 1. 병합 내역
 
@@ -10,7 +10,8 @@
 | 기준 | `3a4f196b` | moss-image (`--step_rows`, TSM 마스크드 단일 호출) | — |
 | 1 | `813f8f9` merge `cloud/review-fixes` (`a1a8acb1`) | `--dataset_class` 행수 0 수정, 에폭 셔플을 첫 fetch 앞으로(`attach_epoch_value`/`sync_epoch`), `RowPacker` 조각 복사·부모 해제, `train_batch_size > step_rows`·`--dataset_class` 경고, 재개 비용 문서화, 테스트 6개 | 없음(자동 병합) |
 | 2 | `d9f146b` merge `cloud/anima-speed-ports` (`f738479b`) | `--anima_block_compile` + 하위 옵션, `--anima_activation_memory_budget`, `library/anima_block_compile.py`, 가짜 5D 블록 루프, LyCORIS 재바인딩·TSM 호이스트, attention 루프, `after_network_loaded` 훅, `tests/test_anima_block_compile.py`(CI 목록), 문서, `THIRD_PARTY_NOTICES.md` | 없음(자동 병합) — 두 브랜치가 같은 파일을 만진 곳은 `train_network.py`(서로 다른 함수: `after_network_loaded` 훅/호출 vs DataLoader 생성 전 `attach_epoch_value`)와 `docs/anima_train_network.md`(다른 항목) 뿐 |
-| 3 | 테스트 커밋 (§2) | A2 매개화 + bf16 허용폭 | — |
+| 3 | `1436f253` 테스트 커밋 (§2) | A2 매개화 + bf16 허용폭 | — |
+| 4 | `34b842b4` (§2.1) | 블록 컴파일: LyCORIS 모듈 지연 캐시를 첫 trace 전에 채움(`prime_module_caches`), 테스트 fixture 의 패치 순서를 운영 순서로, 콜드 스타트 테스트 | — |
 
 ### 블록 컴파일 경로와 review-fixes 변경의 정합성
 - **`attach_epoch_value` / `sync_epoch`** 는 데이터셋 `__getitem__` 쪽(DataLoader 워커·메인 프로세스의 fetch) 에서만 동작하고, 블록 컴파일은 `after_network_loaded`(네트워크 적용·가중치 로드 뒤, `accelerator.prepare` 앞)에서 모델의 Block 만 감싼다. 두 변경이 공유하는 상태는 없다. 블록 컴파일이 데이터셋에서 읽는 것은 `token_counts_from_dataset_group`(버킷 해상도 → 토큰 수 밴드) 하나이고, 이것은 `bucket_manager.resos` 만 읽는다 — 에폭 셔플은 `buckets_indices` 순서만 바꾸고 해상도 집합은 바꾸지 않는다.
@@ -23,9 +24,16 @@
 - **A2**: `test_tsm_grouped_batch_equals_per_sample_calls`, `test_tsm_mixed_plan_and_switch`, `test_tsm_fused_both_lowrank_modes_match_split_fp64` 를 `tsm_n_scales ∈ {(8,1), (4,2,1)}` 로 매개화하고 부분 겹침 청크 `[100, 300, 600, 900]`(코어 전문가 4개 모두 다르고 컨텍스트 전문가를 공유: (4,2,1) 에서 |U| = 7) 을 추가. 플랜 테스트는 공유 블록이 **그 블록을 고른 행에서만** 켜지는지((1,0) → 행 0·1, (1,1) → 행 2·3, (2,0) → 전부) 확인. 결과: 90 케이스 전부 샘플별 / 그룹별 / 분리 경로 기준과 일치(fp64 rtol 1e-9; fp32 저랭크 모드는 2e-4).
 - **`test_factored_forward_bf16_not_worse[ortholora]`**: 이 테스트의 5항 평균(출력 + 기울기 4개의 fp64 대비 상대 오차, 6 시드)은 반올림 위치가 다른 두 경로를 비교하므로 시드마다 몇 % 씩 양쪽으로 움직인다. 이 CPU(torch 2.7.1+cu126 휠, avx512_bf16 없음 → oneDNN 에뮬레이션 bf16 GEMM)에서 36 시드 실측: ortholora 시드별 flag/stock 비 **0.83 ~ 1.11**(sd 0.058 → 6-시드 평균의 sd ≈ 2.4%), 6-시드 창별 비 1.016 / 0.994 / 0.969 / 0.954 / 0.948 / 0.945 — 테스트의 시드 0~5 가 정확히 1.016 으로 실패(GitHub 러너의 `+cpu` 휠에선 통과). lora 는 0.84 ~ 0.87 로 안정. 출력 항 단독은 모든 시드에서 0.70 ~ 0.73(flag 가 30% 더 정확). → 평균에 **10% 허용폭**(≈ 4 sd) 을 두고 출력 항은 엄격 유지. "stock 보다 의미 있게 나쁘지 않다" 는 의도는 유지된다: 반올림 자리 하나의 가치가 ~30%(출력 항이 보여 줌)이므로 진짜 회귀(예: stock 이 fp32 로 두는 곱을 bf16 으로)는 10% 를 훌쩍 넘는다. 근거는 테스트 주석과 커밋 메시지에.
 
+### 2.1 통합 CI 가 드러낸 결함과 수정 (블록 컴파일, LoKr+DoRA 콜드 스타트)
+
+병합 트리의 21 파일을 **한 프로세스**로 돌리자 `test_lycoris_algo_fixes.py::test_lokr_fixed_path_still_runs_the_fast_rebuild`, `test_moss_pipeline.py::test_fast_lokr_forward_is_bit_identical_to_lycoris`, `::test_fast_lokr_with_bias_and_cached_static_check` 3개가 실패했다(두 브랜치를 따로 돌릴 땐 통과). 원인은 `tests/test_anima_block_compile.py` 가 그 앞에서 실행되며 fixture 가 **운영 순서의 반대로**(`apply_module_patches()` → `install_fast_lokr_forward()`) 패치해 `install_fast_lokr_forward` 가 수정 경로의 LoKr forward 를 "stock" 으로 기록한 것. fixture 를 운영 순서(`prepare_anima_runtime` 처럼 fast forward 먼저)로 고쳤다.
+
+그러자 **블록 컴파일의 진짜 결함**이 드러났다: 트레이너는 가중치 로드 직후 컴파일하므로 **첫 trace 가 네트워크의 첫 forward** 인데, LoKr+DoRA 의 `lycoris_fast._compute_static_eligible` 가 모듈마다 한 번 `float(scalar)`(= `.item()`) 를 읽는다 → 컴파일 그래프 안에서 그래프 분단 → dynamo 가 그때 컴파일한 조각(Block 호출당 **21 그래프**)을 그대로 유지하고 해상도마다 +2 재특화. 이전 테스트는 모두 컴파일 전에 eager 스텝을 한 번 돌려 캐시가 따뜻했기에 못 봤다(콜드 explain: lokr_dora 19 breaks `Tensor.item`, 나머지 4 프리셋 0). 수정: `lycoris_algo_fixes.prime_module_caches(network)` 가 지연 캐시(LoKr `_static_eligible`/`_fast_lokr_scale`, LoCon/OrthoLoRA fast 플래그)를 eager 로 채우고, `after_network_loaded` 가 **가중치 로드 뒤·compile_blocks 앞**에 부른다(LoKr 판정은 로드된 scalar 에 의존). 새 테스트: 5 프리셋 모두 콜드 네트워크에서 prime 뒤 1 그래프·0 분단, lokr_dora 는 prime 없이는 `.item()` 분단; 해상도 스윕·재컴파일 수 테스트도 이제 트레이너처럼 콜드 네트워크를 컴파일한다. GPU A/B 때 **`TORCH_LOGS=recompiles` 에 `_fast_forward`/`_static_eligible` 프레임이 따로 보이면 이 결함의 재발** — §4.3.
+
 ## 3. CI (`.github/workflows/moss-image.yml` 의 21 파일 = 기존 20 + `tests/test_anima_block_compile.py`, `CUDA_VISIBLE_DEVICES=-1`, `PYTHONIOENCODING=utf-8`, torch 2.7.1 CPU)
 
-(실행 중 — 결과는 이 파일의 후속 커밋에 기록; 비교 기준: 3a4f196b 단독·두 브랜치 단독 실행은 모두 927~931 passed / 53 skipped / `test_factored_forward_bf16_not_worse[ortholora]` 1 failed(환경 의존, §2 의 허용폭으로 해소 예정))
+- 1차 실행(`1436f253`, 한 프로세스, 8:34): **1024 passed, 53 skipped, 3 failed** — §2.1 의 LoKr 3개(테스트 순서 상호작용 → 수정 `34b842b4`). ortholora 는 허용폭으로 통과.
+- 2차 실행(`34b842b4`): 실행 중 — 결과는 이 파일의 후속 커밋에 기록.
 
 ## 4. 로컬 GPU A/B 체크리스트 (RTX 5090 32 GB, Windows 11, torch 2.7.1 + Triton)
 
@@ -55,7 +63,8 @@
 - `set TORCH_LOGS=graph_breaks,recompiles`(PowerShell: `$env:TORCH_LOGS="graph_breaks,recompiles"`) 로 B 를 한 번 돌린다.
   - 기대: **graph break 0 건**(한 줄도 없어야 함). 뜨면 그 줄의 파일·이유를 기록(`library/attention.py`·`lycoris_algo_fixes.py` 어디인지).
   - 기대 recompile 수: 2(Block 0 bf16 입력 vs 나머지 fp32 잔차) × 전문가 선택 수(LoKr 1, TSM 1단계 n_core=8) × GC 방식 수(`--gradient_checkpointing` 만: 1~3 — 체크포인트 forward(no-grad)·재계산 forward·backward 를 inductor 가 어떻게 나누느냐에 따라) × 밴드 수(union 1). LoKr 에서 4 티어를 다 지난 뒤에도 recompile 줄이 계속 늘면 밴드가 작동하지 않는 것 → `--anima_block_compile_dynamic static` 과 비교하고 보고.
-  - 시작 로그 `block compile: N Blocks compiled per call (backend inductor, ... union bands [(lo, hi)], token counts [...])` 에서 밴드가 데이터의 토큰 수 범위(512² = 1024 … 2048² = 16384)를 덮는지 확인. `... is outside every compiled band` 경고가 뜨면 그 해상도는 정적 특화(한 번 더 컴파일).
+  - 시작 로그 `block compile: N Blocks compiled per call (backend inductor, ... union bands [(lo, hi)], token counts [...], K LyCORIS module caches primed)` 에서 밴드가 데이터의 토큰 수 범위(512² = 1024 … 2048² = 16384)를 덮는지, K 가 네트워크 모듈 수(LoKr: 640)인지 확인. `... is outside every compiled band` 경고가 뜨면 그 해상도는 정적 특화(한 번 더 컴파일).
+  - §2.1 의 콜드 스타트 결함 재발 신호: `TORCH_LOGS=recompiles,graph_breaks` 에 `_fast_forward` / `_static_eligible` / `torch_dynamo_resume_in__fast_forward_*` 가 **별도 프레임**으로 보이거나 `Tensor.item` 분단이 뜨면 캐시가 trace 전에 안 채워진 것(prime 이 안 돌았거나 새 지연 캐시가 생긴 것) — 보고.
 - 더 자세히: `TORCH_LOGS=+dynamo` 는 매우 길다; 필요하면 첫 10 스텝만.
 
 ### 4.4 예상 첫 컴파일 시간
