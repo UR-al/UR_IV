@@ -260,6 +260,9 @@ NEVER: Mapping[str, str] = MappingProxyType({
     # sam-extra 0.34.0 — 둘 다 인자 0개이고 앱이 만들지 않는다
     "XYZ Text Encoder (sam-extra)": "인자 0개 Forge XYZ 칸 훅(ui() None) — 앱 XYZ 는 칸마다 따로 생성해 할 일이 없다",
     "SAM Extra unload models (reload for hires fix)": "인자 0개 txt2img 훅 — '모델 내리기' 뒤 갤러리 ✨ 만 돕는다(앱은 쓰지 않음)",
+    # sam-extra 0.35.0 — 앱이 만들지 않는다(레지스트리 HOLD). 프롬프트 <lora:…> 의 TSM 파일은 확장이 Forge 로더를 감싸 모든 패스에서
+    # 스스로 적용하므로 블록이 없어도 보조 패스가 메인과 다르지 않다
+    "TSM LoRA": "HOLD — 앱에 TSM 카드·블록이 없다(core/sam_extra_contract SCRIPTS). 아코디언 기본값(끔·'없음')으로 돈다",
 })
 
 _CANONICAL = {title.casefold(): title for title in (*PROPAGATION, *NEVER)}

@@ -15,8 +15,13 @@
 
 ``optional=True`` 는 병렬로 들어오는 중인 항목에만 쓴다 — 확장에 아직 없거나 (mapped 면) 앱 참조가 아직
 없어도 통과한다. 새 항목을 조용히 넘기는 뜻은 아니다(분류되지 않은 항목은 여전히 실패). 양쪽이 자리 잡으면
-표시를 지운다 — 지금은 가벼운 LoRA 목록(ROUTES 'GET /sam3-lora/lite'·MODULES 'sam3ext/lora_lite.py' — sam-extra 작업
-트리에만 있다)이 쓴다(공유 메모 라우트·파일은 양쪽이 자리 잡아 표시를 지웠다).
+표시를 지운다 — 지금 쓰는 항목은 없다(공유 메모 라우트·파일, 그리고 가벼운 LoRA 목록 ROUTES 'GET /sam3-lora/lite'·
+MODULES 'sam3ext/lora_lite.py' 는 v0.35.0 설치본에 들어와 2026-10-25 표시를 지우고 SEMANTIC_PINS lora_lite_* 를 걸었다).
+
+픽스처가 레지스트리보다 뒤처질 때(``EXT_FIXTURE_VERSION`` < ``EXT_VERSION_AUDITED``): 라이브 Forge 없이 소스만으로 맞춘
+판의 새 always-on 스크립트는 ``_script(fixture_pending=사유)`` 로 적는다 — 픽스처 기준 테스트가 그 스크립트만 건너뛰고
+(shape '' 허용), 픽스처에 그 제목이 나타나면 표시가 낡았다고 실패한다. 픽스처를 받으면 표시를 지우고 shape 를 채운 뒤
+EXT_FIXTURE_VERSION 을 올린다. 기존 스크립트의 인자·라벨·기본값이 바뀐 판에는 쓸 수 없다(CHANGELOG 로 확인한다).
 
 AST 로 읽는 것과 못 읽는 것: 설치된 확장 소스에서 ui() 컴포넌트의 라벨·기본값·범위·step·선택지를 읽어
 픽스처와 비교한다(소스가 바뀌었는데 픽스처가 낡으면 실패). 읽지 못하는 칸은 ``UI_UNREAD`` 에 사유와 함께 적는다.
@@ -32,7 +37,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-EXT_VERSION_AUDITED = "0.34.1"
+EXT_VERSION_AUDITED = "0.35.1"
 # 감사 시점 HEAD — 원본 동등성 작업(861ac02..dd18876), 변경 기록(80d2dce), LoRA Manager 경로 인증(a2114b5), DAVE+DD 우회 토글(8878b9e),
 # API 원본 기준 SAM3 sam3_source_image(3955d42 — scripts/!sam3.py 만, SAM3_REQUEST_ONLY_KEYS·SEMANTIC_PINS sam3_source_*),
 # 원본으로 돌 때 Forge img2img 색 보정 끄기(0059da8 — scripts/!sam3.py 만, 새 폴백 이유 'color correction', 계약 키·상수 그대로)까지.
@@ -170,7 +175,31 @@ EXT_VERSION_AUDITED = "0.34.1"
 #     (3) 결과 줄 자리 · Tag Autocomplete 안내 CSS — 화면 전용.
 # 픽스처는 2026-10-13 테스트 Forge 2.30-7(7861)의 v0.34.1(b815f68 — 89421f9 와 CHANGELOG 만 다르다) script-info 저장본으로
 # 다시 만들었다(--from-file) — 머리(source · captured_at · ext_version)만 바뀌고 스크립트 17개 · 항목 33개는 그대로다.
-EXT_COMMIT_AUDITED = "c3d6f89cf1f334904ba024532ddfd4c2742c702b"
+# 2026-10-25 v0.35.0 → v0.35.1(태그 v0.35.1 = master 머지 e29cfa1 — release-v0.35.1 2474b69 를 합침). 라이브 Forge 가 없는
+#     클라우드 작업 트리에서 `git clone --branch v0.35.1` 로 받은 소스를 AISTUDIO_FORGE_EXTENSION_DIR 로 두고 강제 모드로 맞췄다
+#     — 픽스처는 0.34.1 그대로(아래 EXT_FIXTURE_VERSION). v0.35.0: (1) 새 always-on 'TSM LoRA'(scripts/lora_tsm.py — 인자 6
+#     enabled·lora·strength·stage·pooling·lokr_merge_cache, positional_or_dict, XYZ [TSM] 3축 cost 0.2, infotext 'TSM LoRA'·
+#     'TSM LoRA info'·'TSM stage'·'TSM pooling'·'TSM LoKr merge cache', 새 패키지 sam3ext/tsm_lora/, unload_registry 훅
+#     tsm_lora, layout_lanes 자리 lora-tsm) — 앱에 카드·블록이 없어 deferred(HOLD), 보조 패스는 NEVER(core/alwayson_propagation).
+#     프롬프트 <lora:…> 의 TSM 파일은 확장이 Forge 로더(networks.load_lora_for_models)를 감싸 아코디언 없이도 적용하므로 앱
+#     요청도 그 경로를 받는다(앱 변경 없음). 픽스처에 아직 없어 fixture_pending. (2) 가벼운 LoRA 목록 GET /sam3-lora/lite
+#     (sam3ext/lora_lite.py — 앱 5ace02c 가 작업 트리 판을 보고 먼저 쓰기 시작한 라우트)가 설치본에 들어와 optional 표시를
+#     지우고 SEMANTIC_PINS lora_lite_path·lora_lite_version·lora_lite_tag_frequency_top 을 걸었다. 기존 스크립트 인자·infotext·
+#     옵션·XYZ 축은 그대로(CHANGELOG v0.35.0). v0.35.1(Forge Neo 2.31 대응): 스크립트 인자·infotext·설정 키·XYZ 축 이름·자리·
+#     cost 그대로(CHANGELOG) — '[Modules] Text Encoder' 축과 바꿔 끼운 'VAE' 축의 2.31 동작 수정(scripts/modules_xyz_text_encoder.py·
+#     sam3ext/xyz_text_encoder*.py·xyz_vae.py — 앱 XYZ 는 Forge XYZ 스크립트를 쓰지 않아 영향 없음, 앱 TE 축 core/xyz_capabilities
+#     그대로), te_slots 의 Qwen3.5 9B(MOSS) 자리, DoRA 추론 방식의 오프셋 패치(합쳐진 qkv 등) DoRA 누락 수정(sam3ext/
+#     dora_infer_mode.py _is_partial_view·decompose return_fp32 — 모드 키·라벨·infotext 그대로; 팩 1.9.0 의 옮긴 사본은 아직
+#     _base 로만 뷰를 가린다 — MODULES gaps), MCP 서버 moss·qwen21(스캐너 단위 밖 mcp_server/), ui_vae_degrid HELP_EXTRAS 문구
+#     (핀 없음), anima_safe_pag·!sam3·dora_infer_mode 스크립트는 주석·docstring 만. 옵션·라우트(lite 빼고)·플래그·Gradio 이름
+#     엔드포인트·Sam3Args·process() 키는 0.34.1 → 0.35.1 사이에 그대로(계약 테스트 강제 모드 통과, unresolved 없음). 소스 ↔ 픽스처 비교
+#     (test_fixture_matches_installed_source)는 0.34.1 픽스처의 17개 스크립트가 0.35.1 소스와 모두 같았다.
+EXT_COMMIT_AUDITED = "e29cfa1748372fa6fbb4e769fcee3801b146e25a"
+# 픽스처(tests/fixtures/sam_extra_script_info.json)를 받은 확장 버전. EXT_VERSION_AUDITED 보다 낮으면 그 사이 판이 기존 스크립트의
+# 인자·라벨·기본값을 바꾸지 않았음을 CHANGELOG 와 소스 AST(test_fixture_matches_installed_source)로 확인한 것이고, 새 스크립트는
+# SCRIPTS 에 fixture_pending 사유를 달아 둔다(모듈 설명). 픽스처를 다시 받으면 같은 값으로 올린다(docs/sam_extra_sync.md 2번·5번).
+# 2026-10-25: 0.34.1(2026-10-13 테스트 Forge 2.30-7 저장본) — 클라우드 작업 트리에 Forge 가 없어 0.35.1 로 다시 받지 못했다.
+EXT_FIXTURE_VERSION = "0.34.1"
 
 MAPPED, IGNORED, DEFERRED = "mapped", "ignored", "deferred"
 STATUSES = (MAPPED, IGNORED, DEFERRED)
@@ -194,7 +223,7 @@ def _script(*, file: str, form: str, live_argc: int, shape: str, classification:
             ui_return=None, api_reads: str | None = "", arg_names: tuple | None = None,
             runtime_choices: tuple = (), app_title: str = "", app_spec: tuple | None = None,
             app_arg_names: str = "", api_note: str = "", script_info: bool = True,
-            modes: tuple = (False, True)) -> dict:
+            modes: tuple = (False, True), fixture_pending: str = "") -> dict:
     """스크립트 항목.
 
     form        dict / positional / positional_or_dict / none (API 가 받는 모양)
@@ -209,11 +238,14 @@ def _script(*, file: str, form: str, live_argc: int, shape: str, classification:
                 받는다(api.py script_name_to_index 가 title() 로 찾는다). 계약 테스트는 ui() 가 None 인지를 AST 로 본다.
     modes       show() 가 AlwaysVisible 인 모드(False = txt2img, True = img2img) — script-info 항목도 그 모드에만 있다.
                 대부분 둘 다. 'False if is_img2img else AlwaysVisible' 은 txt2img 만(스캐너 always_visible_modes).
+    fixture_pending  픽스처(EXT_FIXTURE_VERSION 판)에 아직 없는 이유. 있으면 픽스처 기준 테스트가 이 스크립트를 건너뛰고
+                shape 는 '' 로 둔다(픽스처가 레지스트리보다 뒤처진 판에서만 — 모듈 설명). 픽스처를 받으면 지우고 shape 를 채운다.
     """
     return {"file": file, "form": form, "live_argc": live_argc, "shape": shape, "ui_return": ui_return,
             "api_reads": api_reads, "arg_names": arg_names, "runtime_choices": tuple(runtime_choices),
             "app_title": app_title, "app_spec": app_spec, "app_arg_names": app_arg_names,
-            "api_note": api_note, "script_info": script_info, "modes": tuple(modes), **classification}
+            "api_note": api_note, "script_info": script_info, "modes": tuple(modes),
+            "fixture_pending": fixture_pending, **classification}
 
 
 # ── always-on 스크립트 (제목 = alwayson_scripts 키, script-info 에 15개(0.30.1 라이브 11 + 미커밋 4) + ui() None 인 NegPiP) ──
@@ -952,6 +984,25 @@ SCRIPTS = MappingProxyType({
         classification=ignored("v0.34.0 '모델 내리기' 버튼(UI_ONLY_FEATURES['/handle_unload'])의 ✨ 다시 읽기 보조 — Forge "
                                "화면 전용. 앱의 언로드는 POST /sdapi/v1/unload-checkpoint(backends/webui_backend."
                                "unload_checkpoint — Forge 체크포인트만 내린다)")),
+    # v0.35.0 — TSM LoRA(시간 단계 전문가 · 실험). 아코디언 인자 6개(scripts/lora_tsm.py ARG_NAMES·coerce_args — dict 한 개 또는
+    # 위치 인자, 뒤 인자는 빼도 기본값). arg1 은 Forge LoRA 목록을 TSM 메타데이터로 거른 실행 시점 목록('없음' + 파일 이름).
+    # 픽스처는 0.34.1 라이브라 이 항목이 없다(fixture_pending — Forge 0.35.1 을 띄워 다시 받으면 지우고 shape 를 채운다).
+    "TSM LoRA": _script(
+        file="scripts/lora_tsm.py", form="positional_or_dict", live_argc=6, shape="",
+        ui_return=("enabled", "lora", "strength", "stage", "pooling", "lokr_merge_cache"),
+        arg_names=("enabled", "lora", "strength", "stage", "pooling", "lokr_merge_cache"), runtime_choices=(1,),
+        api_note="위치 인자 [enabled, lora, strength, stage, pooling, lokr_merge_cache] 또는 그 키의 dict 한 개(coerce_args — "
+                 "API 는 위치로 읽지 않는다). arg1 은 실행 시점 파일 목록('없음' = 아코디언 파일 없음). 강도 -2~3(step 0.05), "
+                 "단계 계산·라우터 입력 묶음은 한국어 라벨 라디오(STAGE_CHOICES·POOL_CHOICES)이고 XYZ 축 값은 영어 키(auto·1·2·off, "
+                 "sample·batch). 프롬프트 <lora:…> 의 TSM 파일은 이 인자와 상관없이 적용된다(networks.load_lora_for_models 를 "
+                 "감싼 로더 — 아코디언을 꺼도. CHANGELOG: 빼고 비교하려면 단계 계산을 '끔' 으로).",
+        fixture_pending="0.34.1 라이브 픽스처(2026-10-13)에 없다 — v0.35.0 의 새 스크립트. Forge 0.35.1 을 다시 띄워 "
+                        "tools/refresh_sam_extra_fixture.py 로 받은 뒤 지우고 shape 를 채운다(인자 6개·라벨·기본값·범위는 소스 "
+                        "AST 로 확인했다 — tests/test_sam_extra_contract test_ui_return_order·test_arg_names)",
+        classification=deferred(HOLD, "v0.35.0 TSM LoRA(실험) — 앱에 TSM 카드·블록이 없다(요청 전 보류). 앱이 보내지 않으면 "
+                                      "Forge 는 아코디언 기본값(끔·'없음')으로 돌고, 프롬프트의 TSM 파일은 확장 로더가 그대로 "
+                                      "적용한다(TSM 파일이 없는 생성은 바뀌지 않는다). 보조 패스 규칙은 core/alwayson_propagation "
+                                      "NEVER")),
 })
 
 # ── SAM3 state 계약 (dict 형태라 위치 대신 키로 맞춘다) ─────────────────────────────
@@ -1117,15 +1168,16 @@ ROUTES = MappingProxyType({
     "GET /sam3-lora/config": mapped(
         "core/sam_extra_capabilities.py:EP_LORA_CONFIG",
         note="부작용 없는 존재 확인 — 런타임 기능 스냅샷(P5)이 쓴다"),
-    # 가벼운 LoRA 목록(2026-10-24 — sam-extra 작업 트리 feat/lora-list-lite 에만 있어 optional, 설치본에 들어오면 표시를 지운다).
-    # 로그인 의존성만 있고 X-SAM3-Notebook 헤더는 없다(/sdapi/v1/loras 처럼 외부 클라이언트용).
+    # 가벼운 LoRA 목록(v0.35.0 — 2026-10-24 작업 트리 판을 optional 로 먼저 적었고, 2026-10-25 v0.35.1 소스로 맞추며 표시를 지웠다).
+    # 로그인 의존성만 있고 X-SAM3-Notebook 헤더는 없다(/sdapi/v1/loras 처럼 외부 클라이언트용). 응답 {version: 1, count, items[
+    # {name, alias, path, activation_text, tag_frequency_top}]} — 경로·version·앞 32개는 SEMANTIC_PINS lora_lite_*. 내장 LoRA 지원이
+    # 없는 Forge 는 503, --gradio-auth 로그인(--api 면 --api-auth)이 없는 클라이언트는 401 — 앱은 404 와 함께 모두 전체 목록으로 폴백.
     "GET /sam3-lora/lite": mapped(
         "backends/webui_backend.py:_LORA_LITE_PATH", "backends/webui_backend.py:_get_loras_lite",
         "backends/webui_backend.py:_lora_from_lite_item",
         note="get_loras 가 매번 먼저 묻는다(30초). 실패하면(404 포함 — 막 뜬 Forge 는 확장 라우트를 늦게 붙여 기억하지 "
              "않는다) /sdapi/v1/loras(120초)로 폴백. 두 경로의 trigger_words 는 같다(tests/test_webui_lora_lite.py). "
-             "?refresh=1 은 쓰지 않는다 — force 는 POST /sdapi/v1/refresh-loras 뒤 GET",
-        optional=True),
+             "?refresh=1 은 쓰지 않는다 — force 는 POST /sdapi/v1/refresh-loras 뒤 GET"),
     "GET /sam3-notebook": deferred(HOLD, "T7 Notebook 프리셋 저장소 — 앱 프리셋과 겹친다(보류). "
                                          "메모는 /sam3-notebook/memos 로 따로 동기화한다"),
     "PUT /sam3-notebook": deferred(HOLD, "T7 Notebook 프리셋 저장소 — 앱 프리셋과 겹친다(보류)"),
@@ -1169,7 +1221,8 @@ ROUTES = MappingProxyType({
 
 # ── XYZ 축 (접두어별 163개 — 0.30.1 라이브 133: [SAM3] 37, [Anima …] 80, [Anima Skim] 7, [Detail Daemon] 5, [DoRA] 4;
 #    2026-10-03 미커밋 26: [Colorcraft] 14, [Anima SPEED] 6, [Extra Schedulers (sam-extra)] 4, [Extra Samplers] 2;
-#    v0.33.0 +4: [Extra Schedulers (sam-extra)] Flow Cosmos 셋, [Extra Samplers] ER SDE noise window) ──
+#    v0.33.0 +4: [Extra Schedulers (sam-extra)] Flow Cosmos 셋, [Extra Samplers] ER SDE noise window;
+#    v0.34.0 +4: [Modules] Text Encoder, [SAM3] Face Crop 셋; v0.35.0 +3: [TSM] Stage·Router pooling·Strength — 170개) ──
 _XYZ_GUIDANCE = deferred("P18", "G17 — 앱 XYZ 가 가이던스 spec 키·인덱스를 바꿔 가며 돌릴 수 없다")
 XYZ_AXES = MappingProxyType({
     "[SAM3]": {**deferred("P18", "S9 — 앱 XYZ 가 SAM3 state 키를 바꿔 가며 돌릴 수 없다"), "labels": (
@@ -1256,6 +1309,10 @@ XYZ_AXES = MappingProxyType({
     "[Extra Samplers]": {**deferred("P18", "앱 XYZ 에 ER SDE max stage·η·잡음 구간 축이 없다 — Sampler 축은 이미 있고(앱 "
                                            "XYZ 'Sampler'), 블록은 그 칸에도 카드 값으로 같이 간다(core/extra_samplers.plan)"),
                          "labels": ("ER SDE eta", "ER SDE max stage", "ER SDE noise window")},
+    # v0.35.0 — TSM LoRA 아코디언 값을 p 속성(_sam3_tsm_*_xyz)으로 덮어쓰는 축 셋(cost 0.2). Stage 값 auto·1·2·off, Router
+    # pooling 값 sample·batch(화면 라디오의 한국어 라벨이 아닌 키), Strength 는 아코디언 파일의 강도(프롬프트 쪽은 Prompt S/R)
+    "[TSM]": {**deferred("P18", "앱 XYZ 에 TSM 축이 없다 — SCRIPTS['TSM LoRA'] 자체가 HOLD(앱에 카드·블록 없음)"),
+              "labels": ("Router pooling", "Stage", "Strength")},
 })
 
 # ── Gradio 전용 기능 (이름 엔드포인트 = 함수 이름) — 앱이 기대면 안 되는 것 ──────────────
@@ -1338,7 +1395,10 @@ MODULES = MappingProxyType({
         gaps=("M4: 토글이 꺼져 건너뛴 부분 LoRA 는 gr.Warning 만 남아 API 응답에 흔적이 없다 — 앱은 알 수 없다. "
               "확장이 infotext 나 응답에 건너뜀을 남기기 전까지 보류",)),
     "scripts/anima_ref_poc.py": ignored("N9 — 디버그"),
-    "scripts/lora_manager.py": ignored("N8 — 숨은 Gradio 브리지와 옵션 두 개(N2)"),
+    "scripts/lora_manager.py": ignored("N8 — 숨은 Gradio 브리지와 옵션 두 개(N2). v0.35.0 부터 app_started 에서 GET /sam3-lora/lite "
+                                       "도 등록한다(라우트 자체는 ROUTES 의 mapped 행 — 여기는 등록 호출만)"),
+    "scripts/lora_tsm.py": deferred(HOLD, "SCRIPTS['TSM LoRA'](v0.35.0, 실험) — 아코디언·infotext·XYZ [TSM] 축·Forge 로더 감싸기 "
+                                          "연결. 앱에 TSM 카드·블록이 없다(보류)"),
     "scripts/appearance_theme.py": ignored("N3 — Forge 화면 테마 옵션"),
     "scripts/negpip.py": mapped("core/alwayson_propagation.py:TITLE_NEGPIP",
                                 note="SCRIPTS['NegPiP'] (sd-forge-negpip 편입). 내장 스위치 옵션 sam3_builtin_negpip_enabled 도 "
@@ -1490,14 +1550,19 @@ MODULES = MappingProxyType({
               "LyCORIS 모드는 LyCORIS 연산(vector_norm·multiplier*(scale-1)+1)을 그대로 따라서 conv 입력 축과 비율이 "
               "[0.5, 2] 밖인 행에서 확장의 같은 모드와 fp32 몇 ulp 다르다(학습 병합과는 비트 동일) — "
               "tests/test_comfy_dora_infer_mode.py 가 설치된 확장과 대조한다",
-              "HOLD: 컴파일러가 노드를 아직 넣지 않는다(P8-C) — 앱의 Comfy 생성은 순정 공식만",)),
+              "HOLD: 컴파일러가 노드를 아직 넣지 않는다(P8-C) — 앱의 Comfy 생성은 순정 공식만",
+              "v0.35.1: 확장은 Forge 가 torch.inference_mode 안에서 합쳐 narrow 뷰의 _base 가 None 인 오프셋 패치(합쳐진 qkv·"
+              "diffusers q/k/v·gate_up)에서 LyCORIS·Forge fp32 모드의 DoRA 가 통째로 빠지던 것을 _is_partial_view(저장소 시작 "
+              "위치·크기)와 decompose return_fp32(늘 제자리에도 쓴다)로 고쳤다. 팩 1.9.0 사본의 _can_return_fp32 는 아직 _base "
+              "로만 뷰를 가린다 — ComfyUI 도 inference_mode 안에서 패치하면 같은 누락이 있을 수 있다(2026-10-25 확인 못 함, "
+              "소유자 판단 대기 — 고치면 팩 버전을 올린다)",)),
     "sam3ext/lora_manager_core.py": mapped("backends/webui_backend.py:get_lora_manager_url",
                                            note="_BRIDGE_JS 메시지 모양은 SEMANTIC_PINS 의 lora_bridge_message",
                                            gaps=("P6: _BRIDGE_JS 'sam3-add-lora' 메시지를 앱이 받지 않는다",)),
     "sam3ext/lora_lite.py": mapped(
         "backends/webui_backend.py:_lora_from_lite_item", "backends/webui_backend.py:_sorted_tag_frequency",
-        note="ROUTES['GET /sam3-lora/lite'] — activation_text·tag_frequency_top(앞 32개) 규칙이 앱 Method 1·2 와 같다",
-        optional=True),
+        note="ROUTES['GET /sam3-lora/lite'] — activation_text·tag_frequency_top(앞 32개) 규칙이 앱 Method 1·2 와 같다"
+             "(v0.35.0 설치본 — 경로·version·32 는 SEMANTIC_PINS lora_lite_*)"),
     "sam3ext/notebook_store.py": deferred(HOLD, "T7 Notebook 프리셋 저장소"),
     "sam3ext/notebook_memos.py": mapped("core/forge_memo_client.py:ForgeMemoClient",
                                         note="공유 메모 저장소(memos.json). 스키마·한도는 SEMANTIC_PINS 의 memo_*"),
@@ -1616,9 +1681,11 @@ MODULES = MappingProxyType({
         "모델 내리기 순서·거절·결과 글·Forge 캐시 훅·✨ 다시 읽기(Host 로 받는 순수 로직) — 버튼 전용(UI_ONLY_FEATURES)"),
     "sam3ext/unload_registry.py": ignored(
         "모델 내리기의 sam-extra 해제 훅 목록(SAM3·얼굴 검출기·Anima 3.8B·IP-Adapter·DeGrid·TIPO·Modulation·Colorcraft·샘플링 "
-        "캐시) — 버튼 전용"),
+        "캐시·v0.35.0 TSM LoRA) — 버튼 전용"),
     "sam3ext/ui_unload_models.py": ignored(
         "모델 내리기 숨은 Gradio 버튼(handle_unload — UI_ONLY_FEATURES)과 Forge 호스트 — 버튼 전용"),
+    "sam3ext/tsm_lora/": deferred(HOLD, "TSM LoRA 계산·파일 형식(tsm-native·tsm-lokr)·DiT 훅·블록 대응(v0.35.0) — SCRIPTS['TSM LoRA'] 와 "
+                                        "같은 보류. 프롬프트 <lora:…> 의 TSM 파일 적용(Forge 로더 감싸기)은 앱 변경 없이 그대로 받는다"),
     "sam3ext/tagcomplete/": ignored(
         "태그 자동완성 내장(상류 sd-webui-tagcomplete-neo 8e0d81f, MIT) — 헬퍼·공존 가드·시작 정보·경로·옮기기 도구가 쓰는 "
         "규칙. Forge 웹 화면 전용(OPTIONS·ROUTES 의 _TAGCOMPLETE)"),
@@ -2500,6 +2567,19 @@ SEMANTIC_PINS = (
     {"id": "memo_max_text", "source": "ast", "file": "sam3ext/notebook_memos.py",
      "name": "MAX_MEMO_TEXT_LENGTH", "expected": 100_000, "app": "core.memo_store:MAX_TEXT_LENGTH",
      "meaning": "본문 최대 길이 — 앱이 더 길게 받으면 PUT 이 거부된다"},
+    # 가벼운 LoRA 목록 계약(v0.35.0) — 앱 backends/webui_backend.py 가 경로·version 을 하드코딩하고, tag_frequency_top 의
+    # 앞 _TRIGGERS_FROM_TAGS(5)개를 trigger_words 로 쓴다(32 ≥ 5 가 두 경로의 trigger_words 가 같다는 전제 — 계약 테스트가 본다).
+    {"id": "lora_lite_path", "source": "ast", "file": "sam3ext/lora_lite.py", "name": "LORA_LITE_PATH",
+     "expected": "/sam3-lora/lite", "app": "backends.webui_backend:_LORA_LITE_PATH",
+     "meaning": "가벼운 LoRA 목록 라우트 경로 — 다르면 앱은 매번 404 를 받아 /sdapi/v1/loras(따뜻한 캐시 수 초·차가우면 72초)로만 돈다"},
+    {"id": "lora_lite_version", "source": "ast", "file": "sam3ext/lora_lite.py", "name": "LITE_VERSION", "expected": 1,
+     "app": "backends.webui_backend:_LORA_LITE_VERSION",
+     "meaning": "응답 {version} — 앱은 다른 값이면 모양이 틀린 것으로 보고 전체 목록으로 폴백한다. 올라가면 항목 규칙부터 맞춘다"},
+    {"id": "lora_lite_tag_frequency_top", "source": "ast", "file": "sam3ext/lora_lite.py", "name": "TAG_FREQUENCY_TOP",
+     "expected": 32,
+     "meaning": "tag_frequency_top 에 싣는 태그 수(횟수 내림차순·안정 정렬) — 앱 Method 2 는 그 앞 5개(_TRIGGERS_FROM_TAGS)만 "
+                "쓰므로 5 이상이면 /sdapi/v1/loras 경로와 같은 trigger_words 다. tests/test_webui_lora_lite.py 의 가짜 lite 가 "
+                "같은 32 로 자른다"},
     # LoRA Manager iframe → 부모 창 postMessage (P6 가 이 모양을 파싱한다).
     {"id": "lora_bridge_message", "source": "ast", "file": "sam3ext/lora_manager_core.py", "name": "_BRIDGE_JS",
      "patterns": (

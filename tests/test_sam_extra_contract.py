@@ -13,6 +13,8 @@
    범위·step·선택지를 AST 로 읽어 픽스처와 비교한다. 2) 는 픽스처만 보므로, 이 검사가 없으면 확장 소스의
    범위·기본값 변경이 Forge 를 다시 시작해 픽스처를 갱신할 때까지 통과한다.
    확장이 없으면 이유를 남기고 skip, AISTUDIO_REQUIRE_FORGE_EXT=1 이면 실패(`tests/_sam_extra_ext.py`).
+   픽스처가 레지스트리보다 뒤처진 판(`EXT_FIXTURE_VERSION` < `EXT_VERSION_AUDITED` — 라이브 Forge 없이 소스로만 맞춘
+   동기화)에서는 `fixture_pending` 사유가 붙은 새 스크립트만 2) 가 건너뛰고, 3) 이 소스로 인자 수·순서·ARG_NAMES 를 본다.
 
 실패 메시지의 '새 항목'은 레지스트리에 분류하고, '사라진 항목'은 앱 쪽 사용처를 정리한 뒤 지운다.
 아직 없는 검사(gap matrix 5-(a) 5·6·7 일부)는 `core/sam_extra_contract.py` 모듈 설명에 적어 두었다.
@@ -145,6 +147,10 @@ def _diff_problems(observed: dict, known: dict) -> list[str]:
         problems.append(f"  더는 차이가 없다 {key} ({known[key].get('package') or known[key]['kind']}) — "
                         "KNOWN_DIFFS 에서 지워라")
     return problems
+
+
+def _version_tuple(version: str) -> tuple:
+    return tuple(int(part) for part in str(version).split("."))
 
 
 def _arg_table(args) -> str:
@@ -290,6 +296,37 @@ class TestRegistry(unittest.TestCase):
                 self.assertRegex(prefix, r"^\[[^\]]+\]$")
                 self.assertEqual(len(group["labels"]), len(set(group["labels"])))
 
+    def test_fixture_pending_marks_match_the_fixture_lag(self):
+        """fixture_pending 은 픽스처가 레지스트리보다 뒤처진 판(EXT_FIXTURE_VERSION < EXT_VERSION_AUDITED)에서만, script-info 에
+        나오는 새 스크립트에만 쓴다(shape 는 픽스처에서 나오니 비워 둔다). 두 버전이 같아지면 표시가 하나도 남지 않아야 한다 —
+        남으면 픽스처를 받고도 shape 를 채우지 않은 것이다."""
+        pending = {title: entry for title, entry in reg.SCRIPTS.items() if entry["fixture_pending"]}
+        lagging = reg.EXT_FIXTURE_VERSION != reg.EXT_VERSION_AUDITED
+        self.assertEqual(bool(pending), lagging,
+                         f"fixture_pending {sorted(pending)} ↔ EXT_FIXTURE_VERSION {reg.EXT_FIXTURE_VERSION} / "
+                         f"EXT_VERSION_AUDITED {reg.EXT_VERSION_AUDITED}")
+        if lagging:
+            self.assertLess(_version_tuple(reg.EXT_FIXTURE_VERSION), _version_tuple(reg.EXT_VERSION_AUDITED))
+        for title, entry in pending.items():
+            with self.subTest(script=title):
+                self.assertTrue(entry["script_info"], "ui() None 인 스크립트는 픽스처에 원래 없다 — 표시가 필요 없다")
+                self.assertEqual(entry["shape"], "", "shape 는 픽스처에서 나온다 — 받기 전에는 비워 둔다")
+                self.assertTrue(entry["fixture_pending"].strip())
+                self.assertIsInstance(entry["ui_return"], tuple, "픽스처가 없으니 ui() 반환 순서는 소스에서 적어 둔다")
+
+    def test_lora_lite_is_no_longer_optional_and_pinned(self):
+        """v0.35.0 가벼운 LoRA 목록이 설치본에 들어왔다(2026-10-25) — optional 표시가 없고 경로·version·앞 32개 핀이 있으며, 앱
+        Method 2 가 쓰는 앞 5개(_TRIGGERS_FROM_TAGS)는 핀 값 안에 든다(두 경로의 trigger_words 가 같다는 전제)."""
+        from backends import webui_backend as wb
+        self.assertFalse(reg.ROUTES["GET /sam3-lora/lite"].get("optional"))
+        self.assertFalse(reg.MODULES["sam3ext/lora_lite.py"].get("optional"))
+        pins = {pin["id"]: pin for pin in reg.SEMANTIC_PINS if pin["id"].startswith("lora_lite_")}
+        self.assertEqual(sorted(pins), ["lora_lite_path", "lora_lite_tag_frequency_top", "lora_lite_version"])
+        self.assertEqual({(pin["source"], pin["file"]) for pin in pins.values()}, {("ast", "sam3ext/lora_lite.py")})
+        self.assertEqual(pins["lora_lite_path"]["app"], "backends.webui_backend:_LORA_LITE_PATH")
+        self.assertEqual(pins["lora_lite_version"]["app"], "backends.webui_backend:_LORA_LITE_VERSION")
+        self.assertLessEqual(wb._TRIGGERS_FROM_TAGS, pins["lora_lite_tag_frequency_top"]["expected"])
+
     def test_index_set_roundtrip(self):
         self.assertEqual(format_index_set({0, 1, 2, 4, 6, 7}), "0-2,4,6-7")
         self.assertEqual(parse_index_set("0-2,4,6-7"), frozenset({0, 1, 2, 4, 6, 7}))
@@ -381,14 +418,22 @@ class TestScriptInfoFixture(unittest.TestCase):
         version = self.fixture.get("ext_version")
         if version is None:
             self.skipTest("픽스처에 로컬 확장 버전이 없다(확장이 없는 PC 에서 받음)")
-        self.assertEqual(version, reg.EXT_VERSION_AUDITED,
-                         f"\n픽스처는 확장 {version} 에서 받았고 레지스트리는 {reg.EXT_VERSION_AUDITED} 기준이다. "
-                         f"{SYNC_DOC} 의 순서대로 둘을 맞춰라.")
+        self.assertEqual(version, reg.EXT_FIXTURE_VERSION,
+                         f"\n픽스처는 확장 {version} 에서 받았고 레지스트리는 픽스처를 {reg.EXT_FIXTURE_VERSION} 에서 받은 것으로 "
+                         f"적어 두었다(감사 기준 {reg.EXT_VERSION_AUDITED}). {SYNC_DOC} 의 순서대로 둘을 맞춰라 — 픽스처를 다시 "
+                         f"받았으면 EXT_FIXTURE_VERSION 을 올리고 fixture_pending 표시를 지운다.")
 
     def test_fixture_scripts_match_registry(self):
-        registered = {title.lower() for title, entry in reg.SCRIPTS.items() if entry["script_info"]}
+        registered = {title.lower() for title, entry in reg.SCRIPTS.items()
+                      if entry["script_info"] and not entry["fixture_pending"]}
         message = _set_mismatch("script-info 스크립트(소문자 제목)", registered, set(self.by_title))
         self.assertFalse(message, message)
+
+    def test_fixture_pending_scripts_are_not_in_the_fixture_yet(self):
+        """fixture_pending 표시는 픽스처에 아직 없는 스크립트에만 — 픽스처를 받아 나타나면 표시를 지우고 shape 를 채운다."""
+        stale = sorted(title for title, entry in reg.SCRIPTS.items()
+                       if entry["fixture_pending"] and title.lower() in self.by_title)
+        self.assertEqual(stale, [], "픽스처에 이미 있는 스크립트의 fixture_pending 표시 — 지우고 shape 를 채워라")
 
     def test_scripts_outside_script_info_have_no_live_entry(self):
         """script_info=False(ui() None — Forge 가 api_info 를 만들지 않는다)는 script-info 에 나올 수 없다."""
@@ -400,7 +445,7 @@ class TestScriptInfoFixture(unittest.TestCase):
 
     def test_live_arg_counts(self):
         for title, entry in reg.SCRIPTS.items():
-            if not entry["script_info"]:
+            if not entry["script_info"] or entry["fixture_pending"]:
                 continue
             with self.subTest(script=title):
                 modes = self._modes(title)
@@ -414,7 +459,7 @@ class TestScriptInfoFixture(unittest.TestCase):
 
     def test_arg_shapes(self):
         for title, entry in reg.SCRIPTS.items():
-            if not entry["script_info"]:
+            if not entry["script_info"] or entry["fixture_pending"]:
                 continue
             with self.subTest(script=title):
                 for is_img2img, args in self._modes(title).items():
