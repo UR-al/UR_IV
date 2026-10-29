@@ -455,6 +455,15 @@ class ForgeNeoModelSamplingShift:
         return (_patch_flow_shift(model, shift),)
 
 
+def upscale_method_choices() -> list[str]:
+    """The Hires ``upscale_method`` list: latent methods, then the ``upscale_models`` files (also the studio's picker)."""
+    return list(dict.fromkeys([
+        "latent:bislerp", "latent:bicubic", "latent:bilinear",
+        "latent:nearest-exact", "latent:area",
+        *filename_choices("upscale_models"),
+    ]))
+
+
 class ForgeNeoHiresFix:
     @classmethod
     def INPUT_TYPES(cls):
@@ -463,11 +472,7 @@ class ForgeNeoHiresFix:
             *filename_choices("checkpoints"),
             *filename_choices("diffusion_models"),
         ]))
-        upscale_choices = list(dict.fromkeys([
-            "latent:bislerp", "latent:bicubic", "latent:bilinear",
-            "latent:nearest-exact", "latent:area",
-            *filename_choices("upscale_models"),
-        ]))
+        upscale_choices = upscale_method_choices()
         return {"required": {
             "model": ("MODEL",), "positive": ("CONDITIONING",), "negative": ("CONDITIONING",), "samples": ("LATENT",),
             "seed": ("INT", {"default": -1, "min": -1, "max": 0xFFFFFFFFFFFFFFFF}), "enabled": ("BOOLEAN", {"default": False}),
