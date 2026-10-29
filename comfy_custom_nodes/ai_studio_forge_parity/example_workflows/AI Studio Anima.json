@@ -1,0 +1,4636 @@
+{
+  "last_node_id": 36,
+  "last_link_id": 69,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "AIStudioPanel",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        790,
+        960
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"masked\"}}"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "AIStudioResultView",
+      "pos": [
+        806,
+        0
+      ],
+      "size": [
+        680,
+        960
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "{}"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "AIStudioXYZView",
+      "pos": [
+        1502,
+        0
+      ],
+      "size": [
+        400,
+        960
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "{}"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "UNETLoader",
+      "pos": [
+        20,
+        1120
+      ],
+      "size": [
+        340,
+        88
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "unet_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "unet_name"
+          },
+          "link": null
+        },
+        {
+          "name": "weight_dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "weight_dtype"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "title": "UNet (2.9B·base)",
+      "properties": {
+        "aistudio_role": "unet"
+      }
+    },
+    {
+      "id": 5,
+      "type": "CLIPLoader",
+      "pos": [
+        400,
+        1120
+      ],
+      "size": [
+        340,
+        112
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_name"
+          },
+          "link": null
+        },
+        {
+          "name": "type",
+          "type": "COMBO",
+          "widget": {
+            "name": "type"
+          },
+          "link": null
+        },
+        {
+          "name": "device",
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "title": "TE",
+      "properties": {
+        "aistudio_role": "te"
+      }
+    },
+    {
+      "id": 6,
+      "type": "VAELoader",
+      "pos": [
+        780,
+        1120
+      ],
+      "size": [
+        340,
+        64
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            24,
+            36,
+            46,
+            52,
+            57,
+            66
+          ]
+        }
+      ],
+      "title": "VAE",
+      "properties": {
+        "aistudio_role": "vae"
+      }
+    },
+    {
+      "id": 7,
+      "type": "ForgeNeoAnima38V2Loader",
+      "pos": [
+        20,
+        1372
+      ],
+      "size": [
+        340,
+        64
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 6,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "title": "UNet 3.8B",
+      "properties": {
+        "aistudio_role": "unet38"
+      }
+    },
+    {
+      "id": 8,
+      "type": "ForgeNeoAnimaQwen35Loader",
+      "pos": [
+        400,
+        1372
+      ],
+      "size": [
+        340,
+        64
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 7,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "qwen35_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "qwen35_model"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            14,
+            18
+          ]
+        }
+      ],
+      "title": "Qwen3.5 TE (3.8B)",
+      "properties": {
+        "aistudio_role": "qwen35"
+      }
+    },
+    {
+      "id": 9,
+      "type": "AIStudioSwitch",
+      "pos": [
+        780,
+        1372
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "a",
+          "type": "*",
+          "link": 1
+        },
+        {
+          "name": "b",
+          "type": "*",
+          "link": 2
+        },
+        {
+          "name": "select",
+          "type": "INT",
+          "widget": {
+            "name": "select"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "title": "계열: 모델",
+      "properties": {
+        "aistudio_role": "family_switch_model"
+      },
+      "widgets_values": [
+        0
+      ]
+    },
+    {
+      "id": 10,
+      "type": "ForgeNeoModelSamplingShift",
+      "pos": [
+        20,
+        1596
+      ],
+      "size": [
+        260,
+        64
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 3
+        },
+        {
+          "name": "shift",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "title": "Shift",
+      "properties": {
+        "aistudio_role": "shift"
+      },
+      "widgets_values": [
+        3.0
+      ]
+    },
+    {
+      "id": 11,
+      "type": "ForgeNeoExtraSchedulers",
+      "pos": [
+        320,
+        1596
+      ],
+      "size": [
+        340,
+        256
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 4
+        },
+        {
+          "name": "custom_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "custom_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_expression",
+          "type": "STRING",
+          "widget": {
+            "name": "custom_expression"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_sigmas",
+          "type": "STRING",
+          "widget": {
+            "name": "custom_sigmas"
+          },
+          "link": null
+        },
+        {
+          "name": "laplace_mu",
+          "type": "FLOAT",
+          "widget": {
+            "name": "laplace_mu"
+          },
+          "link": null
+        },
+        {
+          "name": "laplace_beta",
+          "type": "FLOAT",
+          "widget": {
+            "name": "laplace_beta"
+          },
+          "link": null
+        },
+        {
+          "name": "flow_cosmos_rho",
+          "type": "FLOAT",
+          "widget": {
+            "name": "flow_cosmos_rho"
+          },
+          "link": null
+        },
+        {
+          "name": "flow_cosmos_sigma_max",
+          "type": "FLOAT",
+          "widget": {
+            "name": "flow_cosmos_sigma_max"
+          },
+          "link": null
+        },
+        {
+          "name": "flow_cosmos_sigma_min",
+          "type": "FLOAT",
+          "widget": {
+            "name": "flow_cosmos_sigma_min"
+          },
+          "link": null
+        },
+        {
+          "name": "owned_names",
+          "type": "COMBO",
+          "widget": {
+            "name": "owned_names"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "title": "스케줄러 값",
+      "properties": {
+        "aistudio_role": "sched"
+      }
+    },
+    {
+      "id": 12,
+      "type": "AIStudioLoraStack",
+      "pos": [
+        700,
+        1596
+      ],
+      "size": [
+        400,
+        260
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 5
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 6
+        },
+        {
+          "name": "positive",
+          "type": "STRING",
+          "widget": {
+            "name": "positive"
+          },
+          "link": null
+        },
+        {
+          "name": "negative",
+          "type": "STRING",
+          "widget": {
+            "name": "negative"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            8,
+            10,
+            13,
+            17,
+            37,
+            45,
+            58,
+            65
+          ]
+        },
+        {
+          "name": "positive",
+          "type": "STRING",
+          "links": [
+            9,
+            15
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "STRING",
+          "links": [
+            11,
+            19
+          ]
+        }
+      ],
+      "title": "LoRA",
+      "properties": {
+        "aistudio_role": "lora_stack"
+      },
+      "widgets_values": [
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 13,
+      "type": "ForgeNeoDoraInferenceMode",
+      "pos": [
+        1140,
+        1596
+      ],
+      "size": [
+        340,
+        88
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 7
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            12,
+            16,
+            28,
+            32,
+            44,
+            53,
+            64
+          ]
+        }
+      ],
+      "title": "DoRA",
+      "properties": {
+        "aistudio_role": "dora"
+      },
+      "widgets_values": [
+        true,
+        "Forge/Comfy (stock)"
+      ]
+    },
+    {
+      "id": 14,
+      "type": "AIStudioPromptEncode",
+      "pos": [
+        20,
+        1996
+      ],
+      "size": [
+        400,
+        168
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 8
+        },
+        {
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          },
+          "link": 9
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "forge_syntax",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "forge_syntax"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            20
+          ]
+        }
+      ],
+      "title": "프롬프트",
+      "properties": {
+        "aistudio_role": "pos_encode"
+      },
+      "widgets_values": [
+        "",
+        32,
+        true
+      ]
+    },
+    {
+      "id": 15,
+      "type": "AIStudioPromptEncode",
+      "pos": [
+        460,
+        1996
+      ],
+      "size": [
+        400,
+        168
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 10
+        },
+        {
+          "name": "text",
+          "type": "STRING",
+          "widget": {
+            "name": "text"
+          },
+          "link": 11
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "forge_syntax",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "forge_syntax"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "title": "네거티브",
+      "properties": {
+        "aistudio_role": "neg_encode"
+      },
+      "widgets_values": [
+        "",
+        32,
+        true
+      ]
+    },
+    {
+      "id": 16,
+      "type": "ForgeNeoAnima38V2Prompt",
+      "pos": [
+        900,
+        1996
+      ],
+      "size": [
+        400,
+        160
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 15,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 12
+        },
+        {
+          "name": "native_clip",
+          "type": "CLIP",
+          "link": 13
+        },
+        {
+          "name": "qwen35_clip",
+          "type": "CLIP",
+          "link": 14
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "expanded",
+          "type": "CONDITIONING",
+          "links": [
+            21
+          ]
+        },
+        {
+          "name": "native",
+          "type": "CONDITIONING",
+          "links": null
+        }
+      ],
+      "title": "프롬프트 (3.8B)",
+      "properties": {
+        "aistudio_role": "pos_encode38"
+      }
+    },
+    {
+      "id": 17,
+      "type": "ForgeNeoAnima38V2Prompt",
+      "pos": [
+        1340,
+        1996
+      ],
+      "size": [
+        400,
+        160
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 16,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 16
+        },
+        {
+          "name": "native_clip",
+          "type": "CLIP",
+          "link": 17
+        },
+        {
+          "name": "qwen35_clip",
+          "type": "CLIP",
+          "link": 18
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "expanded",
+          "type": "CONDITIONING",
+          "links": [
+            23
+          ]
+        },
+        {
+          "name": "native",
+          "type": "CONDITIONING",
+          "links": null
+        }
+      ],
+      "title": "네거티브 (3.8B)",
+      "properties": {
+        "aistudio_role": "neg_encode38"
+      }
+    },
+    {
+      "id": 18,
+      "type": "AIStudioSwitch",
+      "pos": [
+        1780,
+        1996
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "a",
+          "type": "*",
+          "link": 20
+        },
+        {
+          "name": "b",
+          "type": "*",
+          "link": 21
+        },
+        {
+          "name": "select",
+          "type": "INT",
+          "widget": {
+            "name": "select"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            29,
+            33,
+            47,
+            54,
+            67
+          ]
+        }
+      ],
+      "title": "계열: 프롬프트",
+      "properties": {
+        "aistudio_role": "family_switch_pos"
+      },
+      "widgets_values": [
+        0
+      ]
+    },
+    {
+      "id": 19,
+      "type": "AIStudioSwitch",
+      "pos": [
+        2040,
+        1996
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "a",
+          "type": "*",
+          "link": 22
+        },
+        {
+          "name": "b",
+          "type": "*",
+          "link": 23
+        },
+        {
+          "name": "select",
+          "type": "INT",
+          "widget": {
+            "name": "select"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            30,
+            34,
+            48,
+            55,
+            68
+          ]
+        }
+      ],
+      "title": "계열: 네거티브",
+      "properties": {
+        "aistudio_role": "family_switch_neg"
+      },
+      "widgets_values": [
+        0
+      ]
+    },
+    {
+      "id": 20,
+      "type": "LoadImage",
+      "pos": [
+        20,
+        2304
+      ],
+      "size": [
+        340,
+        340
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 19,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "widget": {
+            "name": "image"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            25,
+            26
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            27
+          ]
+        }
+      ],
+      "title": "i2i 이미지",
+      "properties": {
+        "aistudio_role": "i2i_image"
+      }
+    },
+    {
+      "id": 21,
+      "type": "ForgeNeoLatentInput",
+      "pos": [
+        400,
+        2304
+      ],
+      "size": [
+        340,
+        476
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 24
+        },
+        {
+          "name": "img2img_image",
+          "type": "IMAGE",
+          "link": 25
+        },
+        {
+          "name": "inpaint_image",
+          "type": "IMAGE",
+          "link": 26
+        },
+        {
+          "name": "inpaint_mask_image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "inpaint_mask",
+          "type": "MASK",
+          "link": 27
+        },
+        {
+          "name": "reference_image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "name": "batch_size",
+          "type": "INT",
+          "widget": {
+            "name": "batch_size"
+          },
+          "link": null
+        },
+        {
+          "name": "fit",
+          "type": "COMBO",
+          "widget": {
+            "name": "fit"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_invert",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "mask_invert"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_blur",
+          "type": "INT",
+          "widget": {
+            "name": "mask_blur"
+          },
+          "link": null
+        },
+        {
+          "name": "grow_mask_by",
+          "type": "INT",
+          "widget": {
+            "name": "grow_mask_by"
+          },
+          "link": null
+        },
+        {
+          "name": "reference_enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "reference_enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "reference_layout",
+          "type": "COMBO",
+          "widget": {
+            "name": "reference_layout"
+          },
+          "link": null
+        },
+        {
+          "name": "reference_fraction",
+          "type": "FLOAT",
+          "widget": {
+            "name": "reference_fraction"
+          },
+          "link": null
+        },
+        {
+          "name": "reference_gap",
+          "type": "INT",
+          "widget": {
+            "name": "reference_gap"
+          },
+          "link": null
+        },
+        {
+          "name": "reference_background",
+          "type": "FLOAT",
+          "widget": {
+            "name": "reference_background"
+          },
+          "link": null
+        },
+        {
+          "name": "reference_fit",
+          "type": "COMBO",
+          "widget": {
+            "name": "reference_fit"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            31
+          ]
+        }
+      ],
+      "title": "잠재",
+      "properties": {
+        "aistudio_role": "latent"
+      },
+      "widgets_values": [
+        "txt2img",
+        832,
+        1216,
+        1,
+        "crop",
+        false,
+        4,
+        6,
+        false,
+        "reference_left",
+        0.5,
+        0,
+        0.0,
+        "contain"
+      ]
+    },
+    {
+      "id": 22,
+      "type": "ForgeNeoKSamplerCNS",
+      "pos": [
+        780,
+        2304
+      ],
+      "size": [
+        340,
+        772
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 28
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 29
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 30
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 31
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "cns_enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_strength"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_power",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_power"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_scale"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "spectrum_enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_window_size",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_window_size"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_flex_window",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_flex_window"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_warmup_steps",
+          "type": "INT",
+          "widget": {
+            "name": "spectrum_warmup_steps"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_tail_actual_steps",
+          "type": "INT",
+          "widget": {
+            "name": "spectrum_tail_actual_steps"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_blend_w",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_blend_w"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_cheby_degree",
+          "type": "INT",
+          "widget": {
+            "name": "spectrum_cheby_degree"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_ridge_lambda",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_ridge_lambda"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_history_size",
+          "type": "INT",
+          "widget": {
+            "name": "spectrum_history_size"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_one_sampler_only",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "spectrum_one_sampler_only"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_verbose",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "spectrum_verbose"
+          },
+          "link": null
+        },
+        {
+          "name": "speed_enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "speed_enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "speed_split_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "speed_split_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "speed_spd_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "speed_spd_scale"
+          },
+          "link": null
+        },
+        {
+          "name": "speed_spd_sigma",
+          "type": "FLOAT",
+          "widget": {
+            "name": "speed_spd_sigma"
+          },
+          "link": null
+        },
+        {
+          "name": "speed_adaptive_smc_alpha",
+          "type": "FLOAT",
+          "widget": {
+            "name": "speed_adaptive_smc_alpha"
+          },
+          "link": null
+        },
+        {
+          "name": "forge_noise",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "forge_noise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            35
+          ]
+        }
+      ],
+      "title": "샘플러",
+      "properties": {
+        "aistudio_role": "sampler"
+      },
+      "widgets_values": [
+        0,
+        "fixed",
+        32,
+        3.0,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        1.0,
+        false,
+        1.0,
+        0.5,
+        2.0,
+        false,
+        2.0,
+        0.25,
+        6,
+        3,
+        0.3,
+        3,
+        0.1,
+        100,
+        false,
+        false,
+        false,
+        "single",
+        0.5,
+        0.7,
+        0.0,
+        true
+      ]
+    },
+    {
+      "id": 23,
+      "type": "ForgeNeoHiresFix",
+      "pos": [
+        20,
+        3216
+      ],
+      "size": [
+        400,
+        1108
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 32
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 33
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 34
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 35
+        },
+        {
+          "name": "base_vae",
+          "type": "VAE",
+          "link": 36
+        },
+        {
+          "name": "base_clip",
+          "type": "CLIP",
+          "link": 37
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "scale_by",
+          "type": "FLOAT",
+          "widget": {
+            "name": "scale_by"
+          },
+          "link": null
+        },
+        {
+          "name": "upscale_method",
+          "type": "COMBO",
+          "widget": {
+            "name": "upscale_method"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "name": "seed_delta",
+          "type": "INT",
+          "widget": {
+            "name": "seed_delta"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "cns_enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_strength"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_power",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_power"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_scale"
+          },
+          "link": null
+        },
+        {
+          "name": "base_steps",
+          "type": "INT",
+          "widget": {
+            "name": "base_steps"
+          },
+          "link": null
+        },
+        {
+          "name": "base_sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "base_sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "base_scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "base_scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "resize_width",
+          "type": "INT",
+          "widget": {
+            "name": "resize_width"
+          },
+          "link": null
+        },
+        {
+          "name": "resize_height",
+          "type": "INT",
+          "widget": {
+            "name": "resize_height"
+          },
+          "link": null
+        },
+        {
+          "name": "shift",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "checkpoint_name"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint_weight_dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "checkpoint_weight_dtype"
+          },
+          "link": null
+        },
+        {
+          "name": "text_encoder_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "text_encoder_name"
+          },
+          "link": null
+        },
+        {
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        },
+        {
+          "name": "positive_text",
+          "type": "STRING",
+          "widget": {
+            "name": "positive_text"
+          },
+          "link": null
+        },
+        {
+          "name": "negative_text",
+          "type": "STRING",
+          "widget": {
+            "name": "negative_text"
+          },
+          "link": null
+        },
+        {
+          "name": "base_positive_text",
+          "type": "STRING",
+          "widget": {
+            "name": "base_positive_text"
+          },
+          "link": null
+        },
+        {
+          "name": "base_negative_text",
+          "type": "STRING",
+          "widget": {
+            "name": "base_negative_text"
+          },
+          "link": null
+        },
+        {
+          "name": "clip_type",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_type"
+          },
+          "link": null
+        },
+        {
+          "name": "forge_noise",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "forge_noise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            38
+          ]
+        },
+        {
+          "name": "decode_vae",
+          "type": "VAE",
+          "links": [
+            39
+          ]
+        }
+      ],
+      "title": "Hires",
+      "properties": {
+        "aistudio_role": "hires"
+      },
+      "widgets_values": [
+        -1,
+        "fixed",
+        false,
+        1.5,
+        "4x-UltraSharp.pth",
+        16,
+        3.0,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0.4,
+        0,
+        false,
+        1.0,
+        0.5,
+        2.0,
+        32,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0,
+        0,
+        3.0,
+        "Use same checkpoint",
+        "default",
+        "Use same choices",
+        "Use same choices",
+        "",
+        "",
+        "",
+        "",
+        "stable_diffusion",
+        true
+      ]
+    },
+    {
+      "id": 24,
+      "type": "VAEDecode",
+      "pos": [
+        460,
+        3216
+      ],
+      "size": [
+        220,
+        60
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 38
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 39
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            40
+          ]
+        }
+      ],
+      "title": "VAE 디코드",
+      "properties": {
+        "aistudio_role": "decode"
+      }
+    },
+    {
+      "id": 25,
+      "type": "AIStudioUpscaleImage",
+      "pos": [
+        20,
+        4464
+      ],
+      "size": [
+        340,
+        112
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 40
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "model_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scale_by",
+          "type": "FLOAT",
+          "widget": {
+            "name": "scale_by"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            41,
+            42
+          ]
+        }
+      ],
+      "title": "업스케일",
+      "properties": {
+        "aistudio_role": "upscale"
+      }
+    },
+    {
+      "id": 26,
+      "type": "ForgeNeoSAM3Mask",
+      "pos": [
+        20,
+        4716
+      ],
+      "size": [
+        400,
+        872
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 25,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 41
+        },
+        {
+          "name": "sam3_model",
+          "type": "EASY_SAM3_MODEL",
+          "link": null
+        },
+        {
+          "name": "manual_mask",
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "exclude_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "exclude_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_source",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_source"
+          },
+          "link": null
+        },
+        {
+          "name": "threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "name": "detection_limit",
+          "type": "INT",
+          "widget": {
+            "name": "detection_limit"
+          },
+          "link": null
+        },
+        {
+          "name": "convex_hull",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "convex_hull"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_dilation",
+          "type": "INT",
+          "widget": {
+            "name": "mask_dilation"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_outline_px",
+          "type": "INT",
+          "widget": {
+            "name": "mask_outline_px"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_blur",
+          "type": "INT",
+          "widget": {
+            "name": "mask_blur"
+          },
+          "link": null
+        },
+        {
+          "name": "invert",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "invert"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint",
+          "type": "STRING",
+          "widget": {
+            "name": "checkpoint"
+          },
+          "link": null
+        },
+        {
+          "name": "device",
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        },
+        {
+          "name": "precision",
+          "type": "COMBO",
+          "widget": {
+            "name": "precision"
+          },
+          "link": null
+        },
+        {
+          "name": "unload_after",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "unload_after"
+          },
+          "link": null
+        },
+        {
+          "name": "save_artifacts",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_artifacts"
+          },
+          "link": null
+        },
+        {
+          "name": "artifact_directory",
+          "type": "STRING",
+          "widget": {
+            "name": "artifact_directory"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "cache_model",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "cache_model"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "face_crop"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_model",
+          "type": "STRING",
+          "widget": {
+            "name": "face_crop_model"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_confidence",
+          "type": "FLOAT",
+          "widget": {
+            "name": "face_crop_confidence"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_detector",
+          "type": "COMBO",
+          "widget": {
+            "name": "face_crop_detector"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "selected_mask",
+          "type": "MASK",
+          "links": [
+            43
+          ]
+        },
+        {
+          "name": "combined_mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "individual_masks",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "overlay",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "boxes",
+          "type": "BBOX",
+          "links": null
+        },
+        {
+          "name": "scores",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "name": "artifacts_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "SAM3 마스크",
+      "properties": {
+        "aistudio_role": "sam3_mask"
+      }
+    },
+    {
+      "id": 27,
+      "type": "ForgeNeoSAM3Detailer",
+      "pos": [
+        460,
+        4716
+      ],
+      "size": [
+        400,
+        1212
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 26,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 42
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 43
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 44
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 45
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 46
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 47
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 48
+        },
+        {
+          "name": "control_net",
+          "type": "CONTROL_NET",
+          "link": null
+        },
+        {
+          "name": "control_image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "face_detector",
+          "type": "BBOX_DETECTOR",
+          "link": null
+        },
+        {
+          "name": "inpaint_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "inpaint_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "negative_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "negative_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "name": "noise_multiplier",
+          "type": "FLOAT",
+          "widget": {
+            "name": "noise_multiplier"
+          },
+          "link": null
+        },
+        {
+          "name": "fill_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "fill_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "only_masked",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "only_masked"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_padding",
+          "type": "INT",
+          "widget": {
+            "name": "mask_padding"
+          },
+          "link": null
+        },
+        {
+          "name": "use_custom_size",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "use_custom_size"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_width",
+          "type": "INT",
+          "widget": {
+            "name": "custom_width"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_height",
+          "type": "INT",
+          "widget": {
+            "name": "custom_height"
+          },
+          "link": null
+        },
+        {
+          "name": "grow_mask_by",
+          "type": "INT",
+          "widget": {
+            "name": "grow_mask_by"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_enable",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "controlnet_enable"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_model_name",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_model_name"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_module",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_module"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_override_external",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "controlnet_override_external"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_strength"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_start",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_start"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_end",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_end"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_processor_resolution",
+          "type": "INT",
+          "widget": {
+            "name": "controlnet_processor_resolution"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "restore_face",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "restore_face"
+          },
+          "link": null
+        },
+        {
+          "name": "restore_face_settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "restore_face_settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "target_width",
+          "type": "INT",
+          "widget": {
+            "name": "target_width"
+          },
+          "link": null
+        },
+        {
+          "name": "target_height",
+          "type": "INT",
+          "widget": {
+            "name": "target_height"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            49
+          ]
+        },
+        {
+          "name": "applied_mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "SAM3 디테일",
+      "properties": {
+        "aistudio_role": "sam3_detailer"
+      },
+      "widgets_values": [
+        "",
+        "",
+        "Individual",
+        0,
+        "fixed",
+        32,
+        3.0,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0.4,
+        1.0,
+        "original",
+        true,
+        32,
+        false,
+        512,
+        512,
+        6,
+        false,
+        "None",
+        "inpaint_only",
+        false,
+        1.0,
+        0.0,
+        1.0,
+        512,
+        "{\"pixel_perfect\": true, \"override_external\": false, \"control_mode\": \"Balanced\", \"resize_mode\": \"Crop and Resize\", \"threshold_a\": -1.0, \"threshold_b\": -1.0}",
+        false,
+        "{\"detector_model\": \"bbox/face_yolov8m.pt\", \"guide_size\": 512, \"guide_size_for_bbox\": true, \"max_size\": 1024, \"bbox_threshold\": 0.5, \"bbox_dilation\": 10, \"bbox_crop_factor\": 3.0, \"denoise\": 0.4, \"feather\": 5, \"noise_mask\": true, \"force_inpaint\": true, \"drop_size\": 10, \"cycle\": 1}",
+        false,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 28,
+      "type": "AIStudioSaveForge",
+      "pos": [
+        20,
+        6068
+      ],
+      "size": [
+        400,
+        192
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 49
+        },
+        {
+          "name": "studio_state",
+          "type": "STRING",
+          "widget": {
+            "name": "studio_state"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [],
+      "title": "저장",
+      "properties": {
+        "aistudio_role": "save"
+      },
+      "widgets_values": [
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"masked\"}}",
+        0,
+        "fixed",
+        "AIStudio/anima"
+      ]
+    },
+    {
+      "id": 29,
+      "type": "LoadImage",
+      "pos": [
+        20,
+        6400
+      ],
+      "size": [
+        340,
+        340
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 28,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "widget": {
+            "name": "image"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            50
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "title": "후처리 이미지",
+      "properties": {
+        "aistudio_role": "post_image"
+      }
+    },
+    {
+      "id": 30,
+      "type": "AIStudioUpscaleImage",
+      "pos": [
+        400,
+        6400
+      ],
+      "size": [
+        340,
+        112
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 29,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 50
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "model_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scale_by",
+          "type": "FLOAT",
+          "widget": {
+            "name": "scale_by"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            51
+          ]
+        }
+      ],
+      "title": "후처리 업스케일",
+      "properties": {
+        "aistudio_role": "post_upscale"
+      }
+    },
+    {
+      "id": 31,
+      "type": "VAEEncode",
+      "pos": [
+        780,
+        6400
+      ],
+      "size": [
+        220,
+        60
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 30,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "pixels",
+          "type": "IMAGE",
+          "link": 51
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 52
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            56
+          ]
+        }
+      ],
+      "title": "후처리 인코드",
+      "properties": {
+        "aistudio_role": "post_encode"
+      }
+    },
+    {
+      "id": 32,
+      "type": "ForgeNeoHiresFix",
+      "pos": [
+        1040,
+        6400
+      ],
+      "size": [
+        400,
+        1108
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 31,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 53
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 54
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 55
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 56
+        },
+        {
+          "name": "base_vae",
+          "type": "VAE",
+          "link": 57
+        },
+        {
+          "name": "base_clip",
+          "type": "CLIP",
+          "link": 58
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "scale_by",
+          "type": "FLOAT",
+          "widget": {
+            "name": "scale_by"
+          },
+          "link": null
+        },
+        {
+          "name": "upscale_method",
+          "type": "COMBO",
+          "widget": {
+            "name": "upscale_method"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "name": "seed_delta",
+          "type": "INT",
+          "widget": {
+            "name": "seed_delta"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "cns_enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_strength"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_power",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_power"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_scale"
+          },
+          "link": null
+        },
+        {
+          "name": "base_steps",
+          "type": "INT",
+          "widget": {
+            "name": "base_steps"
+          },
+          "link": null
+        },
+        {
+          "name": "base_sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "base_sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "base_scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "base_scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "resize_width",
+          "type": "INT",
+          "widget": {
+            "name": "resize_width"
+          },
+          "link": null
+        },
+        {
+          "name": "resize_height",
+          "type": "INT",
+          "widget": {
+            "name": "resize_height"
+          },
+          "link": null
+        },
+        {
+          "name": "shift",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "checkpoint_name"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint_weight_dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "checkpoint_weight_dtype"
+          },
+          "link": null
+        },
+        {
+          "name": "text_encoder_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "text_encoder_name"
+          },
+          "link": null
+        },
+        {
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        },
+        {
+          "name": "positive_text",
+          "type": "STRING",
+          "widget": {
+            "name": "positive_text"
+          },
+          "link": null
+        },
+        {
+          "name": "negative_text",
+          "type": "STRING",
+          "widget": {
+            "name": "negative_text"
+          },
+          "link": null
+        },
+        {
+          "name": "base_positive_text",
+          "type": "STRING",
+          "widget": {
+            "name": "base_positive_text"
+          },
+          "link": null
+        },
+        {
+          "name": "base_negative_text",
+          "type": "STRING",
+          "widget": {
+            "name": "base_negative_text"
+          },
+          "link": null
+        },
+        {
+          "name": "clip_type",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_type"
+          },
+          "link": null
+        },
+        {
+          "name": "forge_noise",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "forge_noise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            59
+          ]
+        },
+        {
+          "name": "decode_vae",
+          "type": "VAE",
+          "links": [
+            60
+          ]
+        }
+      ],
+      "title": "후처리 Hires",
+      "properties": {
+        "aistudio_role": "post_hires"
+      },
+      "widgets_values": [
+        -1,
+        "fixed",
+        false,
+        1.5,
+        "4x-UltraSharp.pth",
+        16,
+        3.0,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0.4,
+        0,
+        false,
+        1.0,
+        0.5,
+        2.0,
+        32,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0,
+        0,
+        3.0,
+        "Use same checkpoint",
+        "default",
+        "Use same choices",
+        "Use same choices",
+        "",
+        "",
+        "",
+        "",
+        "stable_diffusion",
+        true
+      ]
+    },
+    {
+      "id": 33,
+      "type": "VAEDecode",
+      "pos": [
+        1480,
+        6400
+      ],
+      "size": [
+        220,
+        60
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 32,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 59
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 60
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            61,
+            62
+          ]
+        }
+      ],
+      "title": "후처리 디코드",
+      "properties": {
+        "aistudio_role": "post_decode"
+      }
+    },
+    {
+      "id": 34,
+      "type": "ForgeNeoSAM3Mask",
+      "pos": [
+        1740,
+        6400
+      ],
+      "size": [
+        400,
+        872
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 33,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 61
+        },
+        {
+          "name": "sam3_model",
+          "type": "EASY_SAM3_MODEL",
+          "link": null
+        },
+        {
+          "name": "manual_mask",
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "exclude_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "exclude_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_source",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_source"
+          },
+          "link": null
+        },
+        {
+          "name": "threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "name": "detection_limit",
+          "type": "INT",
+          "widget": {
+            "name": "detection_limit"
+          },
+          "link": null
+        },
+        {
+          "name": "convex_hull",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "convex_hull"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_dilation",
+          "type": "INT",
+          "widget": {
+            "name": "mask_dilation"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_outline_px",
+          "type": "INT",
+          "widget": {
+            "name": "mask_outline_px"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_blur",
+          "type": "INT",
+          "widget": {
+            "name": "mask_blur"
+          },
+          "link": null
+        },
+        {
+          "name": "invert",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "invert"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint",
+          "type": "STRING",
+          "widget": {
+            "name": "checkpoint"
+          },
+          "link": null
+        },
+        {
+          "name": "device",
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        },
+        {
+          "name": "precision",
+          "type": "COMBO",
+          "widget": {
+            "name": "precision"
+          },
+          "link": null
+        },
+        {
+          "name": "unload_after",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "unload_after"
+          },
+          "link": null
+        },
+        {
+          "name": "save_artifacts",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_artifacts"
+          },
+          "link": null
+        },
+        {
+          "name": "artifact_directory",
+          "type": "STRING",
+          "widget": {
+            "name": "artifact_directory"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "cache_model",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "cache_model"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "face_crop"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_model",
+          "type": "STRING",
+          "widget": {
+            "name": "face_crop_model"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_confidence",
+          "type": "FLOAT",
+          "widget": {
+            "name": "face_crop_confidence"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_detector",
+          "type": "COMBO",
+          "widget": {
+            "name": "face_crop_detector"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "selected_mask",
+          "type": "MASK",
+          "links": [
+            63
+          ]
+        },
+        {
+          "name": "combined_mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "individual_masks",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "overlay",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "boxes",
+          "type": "BBOX",
+          "links": null
+        },
+        {
+          "name": "scores",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "name": "artifacts_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "후처리 SAM3 마스크",
+      "properties": {
+        "aistudio_role": "post_sam3_mask"
+      }
+    },
+    {
+      "id": 35,
+      "type": "ForgeNeoSAM3Detailer",
+      "pos": [
+        2180,
+        6400
+      ],
+      "size": [
+        400,
+        1212
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 34,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 62
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 63
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 64
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 65
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 66
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 67
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 68
+        },
+        {
+          "name": "control_net",
+          "type": "CONTROL_NET",
+          "link": null
+        },
+        {
+          "name": "control_image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "face_detector",
+          "type": "BBOX_DETECTOR",
+          "link": null
+        },
+        {
+          "name": "inpaint_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "inpaint_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "negative_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "negative_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "name": "noise_multiplier",
+          "type": "FLOAT",
+          "widget": {
+            "name": "noise_multiplier"
+          },
+          "link": null
+        },
+        {
+          "name": "fill_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "fill_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "only_masked",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "only_masked"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_padding",
+          "type": "INT",
+          "widget": {
+            "name": "mask_padding"
+          },
+          "link": null
+        },
+        {
+          "name": "use_custom_size",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "use_custom_size"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_width",
+          "type": "INT",
+          "widget": {
+            "name": "custom_width"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_height",
+          "type": "INT",
+          "widget": {
+            "name": "custom_height"
+          },
+          "link": null
+        },
+        {
+          "name": "grow_mask_by",
+          "type": "INT",
+          "widget": {
+            "name": "grow_mask_by"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_enable",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "controlnet_enable"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_model_name",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_model_name"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_module",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_module"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_override_external",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "controlnet_override_external"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_strength"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_start",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_start"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_end",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_end"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_processor_resolution",
+          "type": "INT",
+          "widget": {
+            "name": "controlnet_processor_resolution"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "restore_face",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "restore_face"
+          },
+          "link": null
+        },
+        {
+          "name": "restore_face_settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "restore_face_settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "target_width",
+          "type": "INT",
+          "widget": {
+            "name": "target_width"
+          },
+          "link": null
+        },
+        {
+          "name": "target_height",
+          "type": "INT",
+          "widget": {
+            "name": "target_height"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            69
+          ]
+        },
+        {
+          "name": "applied_mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "후처리 SAM3 디테일",
+      "properties": {
+        "aistudio_role": "post_sam3_detailer"
+      },
+      "widgets_values": [
+        "",
+        "",
+        "Individual",
+        0,
+        "fixed",
+        32,
+        3.0,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0.4,
+        1.0,
+        "original",
+        true,
+        32,
+        false,
+        512,
+        512,
+        6,
+        false,
+        "None",
+        "inpaint_only",
+        false,
+        1.0,
+        0.0,
+        1.0,
+        512,
+        "{\"pixel_perfect\": true, \"override_external\": false, \"control_mode\": \"Balanced\", \"resize_mode\": \"Crop and Resize\", \"threshold_a\": -1.0, \"threshold_b\": -1.0}",
+        false,
+        "{\"detector_model\": \"bbox/face_yolov8m.pt\", \"guide_size\": 512, \"guide_size_for_bbox\": true, \"max_size\": 1024, \"bbox_threshold\": 0.5, \"bbox_dilation\": 10, \"bbox_crop_factor\": 3.0, \"denoise\": 0.4, \"feather\": 5, \"noise_mask\": true, \"force_inpaint\": true, \"drop_size\": 10, \"cycle\": 1}",
+        false,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 36,
+      "type": "AIStudioSaveForge",
+      "pos": [
+        2620,
+        6400
+      ],
+      "size": [
+        400,
+        192
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 35,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 69
+        },
+        {
+          "name": "studio_state",
+          "type": "STRING",
+          "widget": {
+            "name": "studio_state"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [],
+      "title": "후처리 저장",
+      "properties": {
+        "aistudio_role": "post_save"
+      },
+      "widgets_values": [
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"masked\"}}",
+        0,
+        "fixed",
+        "AIStudio/anima"
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      4,
+      0,
+      9,
+      0,
+      "MODEL"
+    ],
+    [
+      2,
+      7,
+      0,
+      9,
+      1,
+      "MODEL"
+    ],
+    [
+      3,
+      9,
+      0,
+      10,
+      0,
+      "MODEL"
+    ],
+    [
+      4,
+      10,
+      0,
+      11,
+      0,
+      "MODEL"
+    ],
+    [
+      5,
+      11,
+      0,
+      12,
+      0,
+      "MODEL"
+    ],
+    [
+      6,
+      5,
+      0,
+      12,
+      1,
+      "CLIP"
+    ],
+    [
+      7,
+      12,
+      0,
+      13,
+      0,
+      "MODEL"
+    ],
+    [
+      8,
+      12,
+      1,
+      14,
+      0,
+      "CLIP"
+    ],
+    [
+      9,
+      12,
+      2,
+      14,
+      1,
+      "STRING"
+    ],
+    [
+      10,
+      12,
+      1,
+      15,
+      0,
+      "CLIP"
+    ],
+    [
+      11,
+      12,
+      3,
+      15,
+      1,
+      "STRING"
+    ],
+    [
+      12,
+      13,
+      0,
+      16,
+      0,
+      "MODEL"
+    ],
+    [
+      13,
+      12,
+      1,
+      16,
+      1,
+      "CLIP"
+    ],
+    [
+      14,
+      8,
+      0,
+      16,
+      2,
+      "CLIP"
+    ],
+    [
+      15,
+      12,
+      2,
+      16,
+      3,
+      "STRING"
+    ],
+    [
+      16,
+      13,
+      0,
+      17,
+      0,
+      "MODEL"
+    ],
+    [
+      17,
+      12,
+      1,
+      17,
+      1,
+      "CLIP"
+    ],
+    [
+      18,
+      8,
+      0,
+      17,
+      2,
+      "CLIP"
+    ],
+    [
+      19,
+      12,
+      3,
+      17,
+      3,
+      "STRING"
+    ],
+    [
+      20,
+      14,
+      0,
+      18,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      21,
+      16,
+      0,
+      18,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      22,
+      15,
+      0,
+      19,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      23,
+      17,
+      0,
+      19,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      24,
+      6,
+      0,
+      21,
+      0,
+      "VAE"
+    ],
+    [
+      25,
+      20,
+      0,
+      21,
+      1,
+      "IMAGE"
+    ],
+    [
+      26,
+      20,
+      0,
+      21,
+      2,
+      "IMAGE"
+    ],
+    [
+      27,
+      20,
+      1,
+      21,
+      4,
+      "MASK"
+    ],
+    [
+      28,
+      13,
+      0,
+      22,
+      0,
+      "MODEL"
+    ],
+    [
+      29,
+      18,
+      0,
+      22,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      30,
+      19,
+      0,
+      22,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      31,
+      21,
+      0,
+      22,
+      3,
+      "LATENT"
+    ],
+    [
+      32,
+      13,
+      0,
+      23,
+      0,
+      "MODEL"
+    ],
+    [
+      33,
+      18,
+      0,
+      23,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      34,
+      19,
+      0,
+      23,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      35,
+      22,
+      0,
+      23,
+      3,
+      "LATENT"
+    ],
+    [
+      36,
+      6,
+      0,
+      23,
+      4,
+      "VAE"
+    ],
+    [
+      37,
+      12,
+      1,
+      23,
+      5,
+      "CLIP"
+    ],
+    [
+      38,
+      23,
+      0,
+      24,
+      0,
+      "LATENT"
+    ],
+    [
+      39,
+      23,
+      1,
+      24,
+      1,
+      "VAE"
+    ],
+    [
+      40,
+      24,
+      0,
+      25,
+      0,
+      "IMAGE"
+    ],
+    [
+      41,
+      25,
+      0,
+      26,
+      0,
+      "IMAGE"
+    ],
+    [
+      42,
+      25,
+      0,
+      27,
+      0,
+      "IMAGE"
+    ],
+    [
+      43,
+      26,
+      0,
+      27,
+      1,
+      "MASK"
+    ],
+    [
+      44,
+      13,
+      0,
+      27,
+      2,
+      "MODEL"
+    ],
+    [
+      45,
+      12,
+      1,
+      27,
+      3,
+      "CLIP"
+    ],
+    [
+      46,
+      6,
+      0,
+      27,
+      4,
+      "VAE"
+    ],
+    [
+      47,
+      18,
+      0,
+      27,
+      5,
+      "CONDITIONING"
+    ],
+    [
+      48,
+      19,
+      0,
+      27,
+      6,
+      "CONDITIONING"
+    ],
+    [
+      49,
+      27,
+      0,
+      28,
+      0,
+      "IMAGE"
+    ],
+    [
+      50,
+      29,
+      0,
+      30,
+      0,
+      "IMAGE"
+    ],
+    [
+      51,
+      30,
+      0,
+      31,
+      0,
+      "IMAGE"
+    ],
+    [
+      52,
+      6,
+      0,
+      31,
+      1,
+      "VAE"
+    ],
+    [
+      53,
+      13,
+      0,
+      32,
+      0,
+      "MODEL"
+    ],
+    [
+      54,
+      18,
+      0,
+      32,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      55,
+      19,
+      0,
+      32,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      56,
+      31,
+      0,
+      32,
+      3,
+      "LATENT"
+    ],
+    [
+      57,
+      6,
+      0,
+      32,
+      4,
+      "VAE"
+    ],
+    [
+      58,
+      12,
+      1,
+      32,
+      5,
+      "CLIP"
+    ],
+    [
+      59,
+      32,
+      0,
+      33,
+      0,
+      "LATENT"
+    ],
+    [
+      60,
+      32,
+      1,
+      33,
+      1,
+      "VAE"
+    ],
+    [
+      61,
+      33,
+      0,
+      34,
+      0,
+      "IMAGE"
+    ],
+    [
+      62,
+      33,
+      0,
+      35,
+      0,
+      "IMAGE"
+    ],
+    [
+      63,
+      34,
+      0,
+      35,
+      1,
+      "MASK"
+    ],
+    [
+      64,
+      13,
+      0,
+      35,
+      2,
+      "MODEL"
+    ],
+    [
+      65,
+      12,
+      1,
+      35,
+      3,
+      "CLIP"
+    ],
+    [
+      66,
+      6,
+      0,
+      35,
+      4,
+      "VAE"
+    ],
+    [
+      67,
+      18,
+      0,
+      35,
+      5,
+      "CONDITIONING"
+    ],
+    [
+      68,
+      19,
+      0,
+      35,
+      6,
+      "CONDITIONING"
+    ],
+    [
+      69,
+      35,
+      0,
+      36,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "① 모델",
+      "bounding": [
+        0,
+        1040,
+        1140,
+        212
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "①b 3.8B",
+      "bounding": [
+        0,
+        1292,
+        1020,
+        184
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "② 시프트·LoRA",
+      "bounding": [
+        0,
+        1516,
+        1500,
+        360
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "③ 프롬프트",
+      "bounding": [
+        0,
+        1916,
+        2280,
+        268
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 5,
+      "title": "④ 잠재·샘플링",
+      "bounding": [
+        0,
+        2224,
+        1140,
+        872
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 6,
+      "title": "⑤ Hires",
+      "bounding": [
+        0,
+        3136,
+        700,
+        1208
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 7,
+      "title": "⑥ 업스케일",
+      "bounding": [
+        0,
+        4384,
+        380,
+        212
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 8,
+      "title": "⑦ SAM3",
+      "bounding": [
+        0,
+        4636,
+        880,
+        1312
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 9,
+      "title": "⑧ 저장",
+      "bounding": [
+        0,
+        5988,
+        440,
+        292
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 10,
+      "title": "⑨ 후처리",
+      "bounding": [
+        0,
+        6320,
+        3040,
+        1312
+      ],
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1,
+      "offset": [
+        40,
+        60
+      ]
+    }
+  },
+  "version": 0.4
+}
