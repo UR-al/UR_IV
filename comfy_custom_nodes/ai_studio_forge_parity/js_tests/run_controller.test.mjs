@@ -197,6 +197,21 @@ test("stop during queueing never queues the remaining cells", async () => {
   assert.equal(gridBody(routes), undefined); // no cell finished: nothing to draw
 });
 
+test("stop ends a started prompt whose end event never comes (lost websocket event)", async () => {
+  const { api, controller, emitted } = setup();
+  await controller.generate();
+  api.fire("execution_start", { prompt_id: "p0" });
+  await controller.stop(); // the interrupt is never answered
+  assert.equal(controller.running, false); // before whenIdle(), which would never resolve if this failed
+  await controller.whenIdle();
+  assert.deepEqual(api.log.slice(1), [["interrupt", null]]);
+  assert.deepEqual(emittedOf(emitted, "running").map((e) => e.running), [true, false]);
+  api.fire("executed", { prompt_id: "p0", node: SAVE, output: { images: [ref("late.png")] } });
+  api.fire("execution_success", { prompt_id: "p0" }); // too late: ignored
+  assert.deepEqual(emittedOf(emitted, "images"), []);
+  assert.deepEqual(await controller.generate(), { queued: 1 }); // not stuck on "이미 생성 중"
+});
+
 test("failed cell becomes null", async () => {
   const plan = plan2x2();
   const { api, controller, emitted, routes } = setup({ plan, xyz: XYZ_ON });
@@ -365,6 +380,50 @@ test("imageRecord gives the seed of a session image or of the PNG parameters", a
   assert.equal((await controller.imageRecord({ image: ref("s.png"), record: { state: withDefaults({ seed: 5 }), seed: 6 } })).seed, 6);
   assert.equal((await controller.imageRecord({ image: ref("info.png"), record: null })).seed, 42);
   assert.equal(await controller.imageRecord({ image: ref("none.png"), record: null }), null);
+});
+
+test("same seed regenerates the picked image's settings with the current post settings (spec §3.2)", async () => {
+  const current = {
+    prompt: "the panel now",
+    seed: 1,
+    batch: 4,
+    hires: { on: true, denoise: 0.3 },
+    sam3: { on: true, prompt: "hands" },
+  };
+  const { api, controller, emitted, routes, baseCalls, readCalls } = setup({ state: current, xyz: XYZ_ON });
+  const state = withDefaults({ prompt: "from the session", seed: 9, steps: 20, batch: 2, hires: { on: false, denoise: 0.7 } });
+  const result = await controller.sameSeed({ image: ref("s.png"), record: { state, seed: 10 } });
+  assert.deepEqual(result, { queued: 1, seed: 10 }); // studio_main puts the seed into the panel too
+  assert.deepEqual(readCalls, []);
+  assert.deepEqual(routes, []); // one image, not the X/Y/Z plot the panel has on
+  assert.equal(baseCalls[0].sam3_detailer, 0); // the current SAM3 toggle
+  assert.equal(baseCalls[0].post_hires, 4);
+  const [{ data, options }] = api.queued;
+  assert.equal(options, undefined);
+  const inputs = (role) => data.output[ROLE_IDS[role]].inputs;
+  assert.equal(inputs("lora_stack").positive, "from the session");
+  assert.equal(inputs("sampler").seed, 10);
+  assert.equal(inputs("sampler").steps, 20);
+  assert.equal(inputs("latent").batch_size, 1); // the picked image only
+  assert.deepEqual([inputs("hires").enabled, inputs("hires").denoise], [true, 0.3]);
+  assert.deepEqual([inputs("sam3_detailer").enabled, inputs("sam3_mask").prompt], [true, "hands"]);
+  finishCell(api, "p0", "again.png");
+  await controller.whenIdle();
+  const [{ items }] = emittedOf(emitted, "images");
+  assert.equal(items[0].image.filename, "again.png");
+  assert.equal(items[0].record.seed, 10);
+});
+
+test("same seed without a session record uses the PNG parameters, else a notice", async () => {
+  const { api, controller } = setup({ parameters: (image) => (image.filename === "info.png" ? golden.infotext.text : null) });
+  await controller.sameSeed({ image: ref("info.png"), record: null });
+  assert.equal(api.queued[0].data.output[ROLE_IDS.sampler].inputs.seed, 42);
+  assert.ok((await controller.sameSeed({ image: ref("other.png"), record: null })).notice); // still busy
+  finishCell(api, "p0", "x.png");
+  await controller.whenIdle();
+  assert.ok((await controller.sameSeed({ image: ref("none.png"), record: null })).notice);
+  assert.ok((await controller.sameSeed(null)).notice);
+  assert.equal(api.queued.length, 1);
 });
 
 // ---------------------------------------------------------------------------------------------- studio_pnginfo.js

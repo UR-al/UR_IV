@@ -60,6 +60,17 @@ function imageSeed(state, index) {
   return s.forge_like.master && s.forge_like.noise ? s.seed + index : s.seed;
 }
 
+const POST_SETTINGS = Object.freeze(["hires", "upscale", "sam3"]);
+
+/** 같은 시드's state: the record's settings (seed included) with the current post-processing sections as they are, batch 1. */
+function sameSeedState(record, currentState) {
+  const current = withDefaults(currentState);
+  const state = postRunState(record, current, null);
+  for (const section of POST_SETTINGS) state[section] = { ...current[section] };
+  state.batch = 1; // the picked image only
+  return state;
+}
+
 const imageRef = (image) => ({ filename: image.filename, subfolder: image.subfolder || "", type: image.type || "output" });
 
 export class RunController {
@@ -179,7 +190,28 @@ export class RunController {
     });
   }
 
-  /** 정지: drop this controller's pending prompts, interrupt the running one (R11); unfinished cells become empty. */
+  /**
+   * 같은 시드 on one image (spec §3.2): generate it again right away — its own settings and seed (session record,
+   * else PNG `parameters`), the current post-processing settings, one image, never the X/Y/Z plot.
+   */
+  async sameSeed(item) {
+    if (this.job) return this.notice(NOTICES.busy);
+    if (!item?.image) return this.notice(NOTICES.noImage);
+    const record = await this.imageRecord(item);
+    if (!record) return this.notice(NOTICES.noInfo);
+    if (this.job) return this.notice(NOTICES.busy); // started while the PNG was read
+    const result = await this.run("single", 1, async (job) => {
+      const prompt = await this.panelPrompt(sameSeedState(record, this.deps.getState()));
+      await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
+    });
+    return result.queued ? { ...result, seed: record.seed } : result;
+  }
+
+  /**
+   * 정지: drop this controller's pending prompts, interrupt the running one (R11); unfinished cells become empty.
+   * A started prompt is given up too, so a lost end event (websocket reconnect, ComfyUI restart) cannot leave the
+   * run stuck; its late events are ignored.
+   */
   async stop() {
     const job = this.job;
     if (!job || job.stopped) return;
@@ -192,6 +224,11 @@ export class RunController {
       await this.cancelPrompts(pending.map((entry) => entry.id));
     } finally {
       pending.forEach((entry) => this.resolveSlot(job, entry.slot, null));
+      for (const entry of job.entries.values()) {
+        if (entry.done) continue;
+        entry.done = true;
+        this.resolveSlot(job, entry.slot, null);
+      }
     }
   }
 

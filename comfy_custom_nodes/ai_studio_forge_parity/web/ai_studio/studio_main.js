@@ -198,10 +198,10 @@ async function galleryAction(name, item) {
       return;
     }
     if (name === "seed") {
-      const record = await controller.imageRecord(item);
-      if (!record) return notice("이 이미지엔 생성 정보가 없음");
-      viewOf(PANEL)?.setSeed(record.seed);
-      return notice(`시드 ${record.seed}`);
+      // spec §3.2: runs right away on the picked image (its settings and seed, the current post-processing settings)
+      const result = await controller.sameSeed(item);
+      if (result?.queued) viewOf(PANEL)?.setSeed(result.seed); // the panel keeps that seed too, like Forge's ♻
+      return;
     }
     await controller.runPost(name, item);
   } catch (error) {
