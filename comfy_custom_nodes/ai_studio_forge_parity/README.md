@@ -67,6 +67,11 @@ inspector recognises them.
 - `AIStudioLoraStack` (Anima studio: strips Forge `<lora:name:strength>` tags from the positive/negative prompts and
   applies them to MODEL and CLIP through `ForgeNeoAnimaLoraLoader`; a LoRA file it cannot find is skipped with one
   warning line)
+- `AIStudioSaveForge` (Anima studio: saves PNGs with a Forge-style `parameters` chunk built from the studio state
+  (`Steps, Sampler, Schedule type, CFG scale, Shift, Seed, Size, Model, VAE`, plus `Denoising strength` and the `Hires …`
+  keys when they apply) next to ComfyUI's `prompt` / `workflow` chunks, so the app's PNG Info and Forge read the files)
+- `AIStudioUpscaleImage` (Anima studio: `enabled` off passes the image through; on runs the chosen upscale model
+  through ComfyUI's `UpscaleModelLoader` / `ImageUpscaleWithModel` and resizes to the input size x `scale_by`)
 
 When the app generates from an ANIMA custom workflow it keeps
 `ForgeNeoLoraBlockWeight` and `ForgeNeoAnimaLoraLoaderModelOnly` in the active

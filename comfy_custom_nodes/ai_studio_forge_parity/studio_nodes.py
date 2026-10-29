@@ -4,9 +4,13 @@ ComfyUI-dependent imports stay inside functions so this module imports in the ap
 """
 from __future__ import annotations
 
+import json
 import logging
 
+from .compat import filename_choices, invoke_provider
+from .studio_infotext import build_infotext
 from .studio_lora_tags import collapse_duplicates, parse_lora_tags, resolve_lora_name
+from .studio_state import normalize_state
 
 CATEGORY = "AI Studio/Studio"
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -67,11 +71,119 @@ class AIStudioLoraStack:
         return (model, clip, positive_text, negative_text)
 
 
+def _parse_state(text: str) -> dict:
+    try:
+        raw = json.loads(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"studio_state is not valid JSON: {exc}") from exc
+    return normalize_state(raw)
+
+
+def _uint8_image(image):
+    """One ``[H, W, C]`` float image in 0..1 (torch tensor or array) -> PIL image, as ComfyUI's SaveImage does."""
+    import numpy as np
+    from PIL import Image
+
+    array = image.detach().cpu().numpy() if hasattr(image, "detach") else np.asarray(image)
+    return Image.fromarray(np.clip(255.0 * array, 0, 255).astype(np.uint8))
+
+
+class AIStudioSaveForge:
+    """Saves PNGs with a Forge-style ``parameters`` chunk next to ComfyUI's ``prompt`` / ``workflow`` chunks."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "studio_state": ("STRING", {"multiline": True, "default": "{}"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2**63 - 1}),
+                "filename_prefix": ("STRING", {"default": "AIStudio/anima"}),
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "save"
+    OUTPUT_NODE = True
+    CATEGORY = CATEGORY
+    DESCRIPTION = "Saves images as PNG with Forge-style generation info (parameters) plus the ComfyUI workflow."
+
+    def save(self, images, studio_state, seed, filename_prefix, prompt=None, extra_pnginfo=None):
+        from PIL import PngImagePlugin
+
+        from .compat import folder_paths_module
+
+        infotext = build_infotext(_parse_state(studio_state), seed=int(seed))
+        folder_paths = folder_paths_module()
+        full_folder, stem, counter, subfolder, _ = folder_paths.get_save_image_path(
+            filename_prefix, folder_paths.get_output_directory(), images[0].shape[1], images[0].shape[0]
+        )
+        results = []
+        for batch_index, image in enumerate(images):
+            pnginfo = PngImagePlugin.PngInfo()
+            pnginfo.add_text("parameters", infotext)
+            if prompt is not None:
+                pnginfo.add_text("prompt", json.dumps(prompt))
+            for key, value in (extra_pnginfo or {}).items():
+                pnginfo.add_text(str(key), json.dumps(value))
+            file_name = f"{stem.replace('%batch_num%', str(batch_index))}_{counter:05}_.png"
+            _uint8_image(image).save(f"{full_folder}/{file_name}", pnginfo=pnginfo, compress_level=4)
+            results.append({"filename": file_name, "subfolder": subfolder, "type": "output"})
+            counter += 1
+        return {"ui": {"images": results}}
+
+
+class AIStudioUpscaleImage:
+    """Model upscale (UpscaleModelLoader + ImageUpscaleWithModel), then resized to the input size x ``scale_by``."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "enabled": ("BOOLEAN", {"default": False}),
+                "model_name": (filename_choices("upscale_models"),),
+                "scale_by": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 8.0, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "upscale"
+    CATEGORY = CATEGORY
+    DESCRIPTION = "Upscales with an upscale model and fits the result to the original size x scale_by (off = unchanged)."
+
+    def upscale(self, image, enabled, model_name, scale_by):
+        if not enabled:
+            return (image,)
+        if not model_name:
+            raise ValueError("Upscale is on but no upscale model is chosen.")
+        import comfy.utils
+
+        height, width = int(image.shape[1]), int(image.shape[2])
+        model = invoke_provider(
+            "UpscaleModelLoader", method="load_model", feature="Studio upscale", args=(model_name,)
+        )[0]
+        upscaled = invoke_provider(
+            "ImageUpscaleWithModel", method="upscale", feature="Studio upscale", args=(model, image)
+        )[0]
+        target_w, target_h = max(1, round(width * float(scale_by))), max(1, round(height * float(scale_by)))
+        if (int(upscaled.shape[2]), int(upscaled.shape[1])) != (target_w, target_h):
+            resized = comfy.utils.common_upscale(upscaled.movedim(-1, 1), target_w, target_h, "lanczos", "disabled")
+            upscaled = resized.movedim(1, -1)
+        return (upscaled,)
+
+
 NODE_CLASS_MAPPINGS = {
     "AIStudioLoraStack": AIStudioLoraStack,
+    "AIStudioSaveForge": AIStudioSaveForge,
+    "AIStudioUpscaleImage": AIStudioUpscaleImage,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "AIStudioLoraStack": "AI Studio LoRA Stack",
+    "AIStudioSaveForge": "AI Studio Save (Forge info)",
+    "AIStudioUpscaleImage": "AI Studio Upscale Image",
 }
 
-__all__ = ["AIStudioLoraStack", "NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+__all__ = ["AIStudioLoraStack", "AIStudioSaveForge", "AIStudioUpscaleImage", "NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
