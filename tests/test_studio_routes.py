@@ -1,4 +1,6 @@
 """Anima studio web extension plumbing: route registry, WEB_DIRECTORY, installer fingerprint."""
+import posixpath
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,6 +64,20 @@ class StudioRoutesTests(unittest.TestCase):
         self.assertIn("WEB_DIRECTORY", pack.__all__)
         web = Path(pack.__file__).parent / "web" / "ai_studio" / "studio_main.js"
         self.assertIn("AIStudio.Studio", web.read_text(encoding="utf-8"))
+
+    def test_web_imports_of_comfy_scripts_resolve_to_site_root(self):
+        # JS is served at /extensions/<pack>/<rel path>; "scripts/*.js" must resolve to /scripts/*.js.
+        web = Path(pack.__file__).parent / "web"
+        found = 0
+        for js in web.rglob("*.js"):
+            rel = js.relative_to(web).as_posix()
+            url_dir = posixpath.dirname("/extensions/ai_studio_forge_parity/" + rel)
+            text = js.read_text(encoding="utf-8")
+            for spec in re.findall(r"""from\s+["']([^"']*scripts/[^"']+)["']""", text):
+                found += 1
+                self.assertEqual(posixpath.normpath(posixpath.join(url_dir, spec)).startswith("/scripts/"), True,
+                                 f"{rel}: {spec} resolves to {posixpath.normpath(posixpath.join(url_dir, spec))}")
+        self.assertGreaterEqual(found, 1)
 
     def test_no_test_files_under_web_directory(self):
         web = Path(pack.__file__).parent / "web"
