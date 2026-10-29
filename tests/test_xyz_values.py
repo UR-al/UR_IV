@@ -160,6 +160,34 @@ class BoolTests(unittest.TestCase):
             _parse("bool", "maybe")
 
 
+class ValueCapTests(unittest.TestCase):
+    """One axis may expand to at most MAX_VALUES values; the count is checked before anything is built."""
+
+    def test_cap_is_10000(self):
+        self.assertEqual(xv.MAX_VALUES, 10000)
+
+    def test_ranges_at_the_cap_pass(self):
+        self.assertEqual(len(_parse("int", "1-10000")), 10000)
+        self.assertEqual(len(_parse("float", "0-1 [10000]")), 10000)
+
+    def test_huge_ranges_raise_before_allocating(self):
+        for kind, text in (("int", "0-999999999999"), ("int", "0-1 [999999999999]"),
+                           ("float", "0-999999999999"), ("float", "0-1 (+0.0000000001)"),
+                           ("float", "0-1 [999999999999]")):
+            with self.subTest(kind=kind, text=text):
+                with self.assertRaisesRegex(ValueError, "too many values"):
+                    _parse(kind, text)
+
+    def test_many_fields_together_raise(self):
+        with self.assertRaisesRegex(ValueError, "too many values"):
+            _parse("int", "1-6000, 1-6000")
+
+    def test_permutations_capped_by_factorial(self):
+        self.assertEqual(len(_parse("permutations", "a,b,c,d,e,f,g")), 5040)
+        with self.assertRaisesRegex(ValueError, "too many values"):
+            _parse("permutations", "a,b,c,d,e,f,g,h")
+
+
 class UnknownKindTests(unittest.TestCase):
     def test_unknown_kind_raises(self):
         with self.assertRaises(ValueError):

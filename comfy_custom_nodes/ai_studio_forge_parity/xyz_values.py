@@ -6,7 +6,9 @@ description only; the pack carries no Forge code.
 
 Deliberate differences from Forge: an unparsable value raises ``ValueError`` (Forge crashes or, for
 ``Size``, silently keeps the current size) so the whole list is validated before any image is made, and
-``1e-3`` is one number, not a range.
+``1e-3`` is one number, not a range.  One axis expands to at most ``MAX_VALUES`` values (ranges and
+permutations are counted before they are built), so a typo like ``0-999999999`` fails fast instead of
+filling memory.
 """
 from __future__ import annotations
 
@@ -29,6 +31,12 @@ _FLOAT_COUNT = re.compile(rf"\s*({_FLOAT_NUM})\s*-\s*({_FLOAT_NUM})(?:\s*\[(\d+(
 _SIZE = re.compile(r"\s*(\d+)\s*x\s*(\d+)\s*")
 _TRUE = {"true", "1", "on", "yes"}
 _FALSE = {"false", "0", "off", "no"}
+MAX_VALUES = 10000
+
+
+def _check_count(count: int) -> None:
+    if count > MAX_VALUES:
+        raise ValueError(f"too many values ({count}, at most {MAX_VALUES} per axis)")
 
 
 def split_values(text: str) -> list[str]:
@@ -57,11 +65,14 @@ def _int_values(field: str) -> list[int]:
         step = int(match[3]) if match[3] else 1
         if step == 0:
             raise ValueError(f"step must not be 0: {field!r}")
-        return list(range(start, end + 1, step))  # end + 1 even for a negative step, like Forge
+        values = range(start, end + 1, step)
+        _check_count(len(values))
+        return list(values)  # end + 1 even for a negative step, like Forge
     match = _INT_COUNT.fullmatch(field)
     if match:
         start, end = int(_num(match[1])), int(_num(match[2]))
         count = int(match[3]) if match[3] else 1
+        _check_count(count)
         return [int(v) for v in _linspace(start, end, count)]
     try:
         return [int(field)]
@@ -71,6 +82,7 @@ def _int_values(field: str) -> list[int]:
 
 def _arange(start: float, stop: float, step: float) -> list[float]:
     length = math.ceil((stop - start) / step)
+    _check_count(length)
     return [start + i * step for i in range(max(0, length))]
 
 
@@ -86,6 +98,7 @@ def _float_values(field: str) -> list[float]:
     if match:
         start, end = float(_num(match[1])), float(_num(match[2]))
         count = int(float(match[3])) if match[3] else 1
+        _check_count(count)
         return _linspace(start, end, count)
     try:
         value = float(field)
@@ -112,6 +125,14 @@ def _bool_value(field: str) -> bool:
     raise ValueError(f"not a true/false value: {field!r}")
 
 
+def _capped(values) -> list:
+    out = []
+    for value in values:
+        out.append(value)
+        _check_count(len(out))
+    return out
+
+
 def parse_axis_values(kind: Kind, text: str) -> list:
     """Parse one axis' value box.
 
@@ -126,11 +147,14 @@ def parse_axis_values(kind: Kind, text: str) -> list:
         return fields
     filled = [f for f in fields if f]
     if kind == "int":
-        return [v for f in filled for v in _int_values(f)]
+        return _capped(v for f in filled for v in _int_values(f))
     if kind == "float":
-        return [v for f in filled for v in _float_values(f)]
+        return _capped(v for f in filled for v in _float_values(f))
     if kind == "permutations":
-        return list(itertools.permutations(filled)) if filled else []
+        if not filled:
+            return []
+        _check_count(math.factorial(min(len(filled), 20)))  # 8 tokens already exceed the cap
+        return list(itertools.permutations(filled))
     if kind == "size":
         return [_size_value(f) for f in filled]
     if kind == "bool":
