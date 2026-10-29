@@ -1,0 +1,412 @@
+// node:test for the studio's run controller (web/ai_studio/run_controller.js): the state machine only, no DOM.
+// A fake ComfyUI `api` records queue / delete / interrupt calls and fires websocket events in any order.
+// Run: cd frontend && npm run test:pack
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { deflateSync } from "node:zlib";
+
+import { RunController } from "../web/ai_studio/run_controller.js";
+import { DEFAULT_STATE, stageModes, withDefaults } from "../web/ai_studio/studio_logic.js";
+import { readPngText, withExtraParams } from "../web/ai_studio/studio_pnginfo.js";
+import { ROLES } from "../web/ai_studio/studio_roles.js";
+
+const golden = JSON.parse(readFileSync(new URL("./fixtures/studio_logic_golden.json", import.meta.url), "utf-8"));
+
+const ROLE_IDS = Object.fromEntries(ROLES.map((role, i) => [role, String(i + 1)]));
+const SAVE = ROLE_IDS.save;
+const POST_SAVE = ROLE_IDS.post_save;
+
+class FakeApi {
+  constructor() {
+    this.listeners = new Map();
+    this.queued = [];
+    this.log = [];
+    this.failNext = null;
+  }
+
+  addEventListener(name, fn) {
+    if (!this.listeners.has(name)) this.listeners.set(name, []);
+    this.listeners.get(name).push(fn);
+  }
+
+  fire(name, detail) {
+    for (const fn of this.listeners.get(name) || []) fn({ detail });
+  }
+
+  async queuePrompt(number, data, options) {
+    if (this.failNext) {
+      const error = this.failNext;
+      this.failNext = null;
+      throw error;
+    }
+    const id = `p${this.queued.length}`;
+    this.queued.push({ id, number, data, options });
+    this.log.push(["queue", id]);
+    if (this.onQueue) this.onQueue(id);
+    return { prompt_id: id, number: this.queued.length, node_errors: {} };
+  }
+
+  async deleteItem(type, id) {
+    this.log.push(["delete", type, id]);
+  }
+
+  async interrupt(id) {
+    this.log.push(["interrupt", id]);
+  }
+}
+
+// graphToPrompt stand-in: every role node, bypassed (mode 4) ones omitted like ComfyUI does.
+function fakeBasePrompt(calls) {
+  return async (modes) => {
+    calls.push(modes);
+    const output = {};
+    for (const role of ROLES) {
+      if (modes[role] === 4) continue;
+      output[ROLE_IDS[role]] = { class_type: `Fake_${role}`, inputs: {}, _meta: { title: role } };
+    }
+    return { output, workflow: { nodes: [] } };
+  };
+}
+
+const ref = (filename) => ({ filename, subfolder: "AIStudio", type: "output" });
+
+// A 2x2 X/Y plan whose generation order is not the cell order (X loops outermost).
+function plan2x2(stateOf = () => ({})) {
+  const cells = [];
+  for (let iy = 0; iy < 2; iy++) {
+    for (let ix = 0; ix < 2; ix++) {
+      const index = ix + iy * 2;
+      cells.push({ ix, iy, iz: 0, state: withDefaults({ seed: 100 + index, ...stateOf(index) }) });
+    }
+  }
+  return {
+    cells,
+    order: [0, 2, 1, 3],
+    labels: { x: ["Seed: 100", "Seed: 101"], y: ["Steps: 20", "Steps: 30"], z: [""] },
+    fixed: {},
+    infotext_extra: { Script: "X/Y/Z plot", "X Type": "Seed", "X Values": "100, 101", "Y Type": "Steps", "Y Values": "20,30" },
+    errors: [],
+  };
+}
+
+function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {} } = {}) {
+  const api = new FakeApi();
+  const emitted = [];
+  const routes = [];
+  const baseCalls = [];
+  const readCalls = [];
+  const controller = new RunController({
+    api,
+    basePrompt: fakeBasePrompt(baseCalls),
+    roleIds: () => ROLE_IDS,
+    getState: () => withDefaults({ ...structuredClone(DEFAULT_STATE), ...state }),
+    getXyz: () => xyz,
+    route: async (path, body) => {
+      routes.push([path, body]);
+      if (path === "/xyz/plan") return plan;
+      if (path === "/xyz/grid") return { grid: ref("xyz_grid_00001.png"), subgrids: [] };
+      throw new Error(`unexpected route ${path}`);
+    },
+    readParameters: async (image) => {
+      readCalls.push(image);
+      return typeof parameters === "function" ? parameters(image) : parameters;
+    },
+    families: () => ({}),
+    upscalers: () => undefined,
+    emit: (type, payload) => emitted.push([type, payload]),
+    now: () => 0,
+  });
+  return { api, controller, emitted, routes, baseCalls, readCalls };
+}
+
+const XYZ_ON = {
+  on: true,
+  axes: [{ axis: "seed", text: "100, 101" }, { axis: "steps", text: "20,30" }, { axis: "nothing", text: "" }],
+  options: { draw_legend: true, include_images: false, include_sub_grids: false, margin: 0, row_count: 0 },
+};
+
+function finishCell(api, id, filename) {
+  api.fire("execution_start", { prompt_id: id });
+  api.fire("executed", { prompt_id: id, node: SAVE, display_node: SAVE, output: { images: [ref(filename)] } });
+  api.fire("execution_success", { prompt_id: id });
+}
+
+const gridBody = (routes) => routes.find(([path]) => path === "/xyz/grid")?.[1];
+const cellImages = (body) =>
+  [...body.cells].sort((a, b) => a.ix + a.iy * 2 - (b.ix + b.iy * 2)).map((cell) => cell.image && cell.image.filename);
+const emittedOf = (emitted, type) => emitted.filter(([kind]) => kind === type).map(([, payload]) => payload);
+
+// ---------------------------------------------------------------------------------------------- XYZ
+
+test("xyz run collects images in plan order", async () => {
+  const plan = plan2x2();
+  const { api, controller, emitted, routes } = setup({ plan, xyz: XYZ_ON, parameters: golden.infotext.text });
+  await controller.generate();
+  assert.equal(api.queued.length, 4);
+  // queue k holds cell plan.order[k]
+  api.queued.forEach((entry, k) => {
+    assert.equal(entry.data.output[ROLE_IDS.sampler].inputs.seed, 100 + plan.order[k]);
+  });
+  assert.equal(controller.running, true);
+  // a preview node's executed event is not a cell image
+  api.fire("executed", { prompt_id: "p0", node: ROLE_IDS.decode, output: { images: [ref("preview.png")] } });
+  for (const k of [3, 1, 0, 2]) finishCell(api, `p${k}`, `cell${plan.order[k]}.png`);
+  await controller.whenIdle();
+
+  const body = gridBody(routes);
+  assert.deepEqual([body.nx, body.ny, body.nz], [2, 2, 1]);
+  assert.deepEqual(cellImages(body), ["cell0.png", "cell1.png", "cell2.png", "cell3.png"]);
+  assert.deepEqual(body.labels, plan.labels);
+  assert.deepEqual(body.options, { draw_legend: true, include_sub_grids: false, margin: 0, row_count: 0 });
+  assert.match(body.infotext, /Seed: 42, .*Script: X\/Y\/Z plot, X Type: Seed, X Values: "100, 101", Y Type: Steps, Y Values: "20,30"$/);
+  const [grid] = emittedOf(emitted, "grid");
+  assert.deepEqual(grid.item.image, ref("xyz_grid_00001.png"));
+  assert.equal(controller.running, false);
+  assert.deepEqual(emittedOf(emitted, "running").map((e) => e.running), [true, false]);
+  assert.equal(emittedOf(emitted, "images").length, 0); // include_images off
+});
+
+test("stop marks remaining cells null", async () => {
+  const plan = plan2x2();
+  const { api, controller, routes } = setup({ plan, xyz: XYZ_ON });
+  await controller.generate();
+  finishCell(api, "p0", `cell${plan.order[0]}.png`);
+  api.fire("execution_start", { prompt_id: "p1" });
+  await controller.stop();
+  // pending prompts are deleted before the global interrupt (else the server would start the next one)
+  assert.deepEqual(api.log.slice(4), [["delete", "queue", "p2"], ["delete", "queue", "p3"], ["interrupt", null]]);
+  api.fire("execution_interrupted", { prompt_id: "p1" });
+  api.fire("execution_success", { prompt_id: "p2" }); // too late: already given up
+  await controller.whenIdle();
+  const images = cellImages(gridBody(routes));
+  assert.deepEqual(images, [`cell${plan.order[0]}.png`, null, null, null]);
+  assert.equal(controller.running, false);
+});
+
+test("stop during queueing never queues the remaining cells", async () => {
+  const plan = plan2x2();
+  const { api, controller, routes } = setup({ plan, xyz: XYZ_ON });
+  api.onQueue = (id) => {
+    if (id === "p1") controller.stop();
+  };
+  await controller.generate();
+  await controller.whenIdle();
+  assert.equal(api.queued.length, 2);
+  assert.ok(api.log.some((entry) => entry[0] === "delete" && entry[2] === "p1"));
+  assert.equal(gridBody(routes), undefined); // no cell finished: nothing to draw
+});
+
+test("failed cell becomes null", async () => {
+  const plan = plan2x2();
+  const { api, controller, emitted, routes } = setup({ plan, xyz: XYZ_ON });
+  await controller.generate();
+  finishCell(api, "p0", `cell${plan.order[0]}.png`);
+  api.fire("execution_start", { prompt_id: "p1" });
+  api.fire("execution_error", { prompt_id: "p1", exception_message: "CUDA out of memory" });
+  finishCell(api, "p2", `cell${plan.order[2]}.png`);
+  finishCell(api, "p3", `cell${plan.order[3]}.png`);
+  await controller.whenIdle();
+  const images = cellImages(gridBody(routes));
+  const failed = plan.order[1];
+  assert.equal(images[failed], null);
+  assert.equal(images.filter(Boolean).length, 3);
+  assert.ok(emittedOf(emitted, "notice").some((n) => n.text.includes("CUDA out of memory")));
+});
+
+test("xyz plan errors are shown and nothing is queued (R13)", async () => {
+  const plan = { cells: [], order: [], labels: {}, errors: ['Prompt S/R did not find "x" in either prompt or negative prompt'] };
+  const { api, controller, emitted } = setup({ plan, xyz: XYZ_ON });
+  const result = await controller.generate();
+  assert.equal(api.queued.length, 0);
+  assert.match(result.notice, /Prompt S\/R did not find/);
+  assert.match(emittedOf(emitted, "notice")[0].text, /Prompt S\/R did not find/);
+  assert.equal(controller.running, false);
+});
+
+test("xyz cells get the stage modes of their own state (R16)", async () => {
+  const plan = plan2x2((index) => ({ sam3: { on: index % 2 === 1 } }));
+  const { api, controller, baseCalls } = setup({ plan, xyz: XYZ_ON });
+  await controller.generate();
+  assert.equal(baseCalls.length, 2); // one base prompt per stage-mode signature
+  assert.deepEqual(baseCalls.map((modes) => modes.sam3_detailer).sort(), [0, 4]);
+  api.queued.forEach((entry, k) => {
+    const detailer = entry.data.output[ROLE_IDS.sam3_detailer];
+    if (plan.order[k] % 2 === 1) assert.equal(detailer.inputs.enabled, true);
+    else assert.equal(detailer, undefined);
+  });
+});
+
+test("cell images go to the gallery when include_images is on", async () => {
+  const plan = plan2x2();
+  const xyz = { ...XYZ_ON, options: { ...XYZ_ON.options, include_images: true } };
+  const { api, controller, emitted } = setup({ plan, xyz });
+  await controller.generate();
+  for (const k of [0, 1, 2, 3]) finishCell(api, `p${k}`, `cell${plan.order[k]}.png`);
+  await controller.whenIdle();
+  const items = emittedOf(emitted, "images").flatMap((e) => e.items);
+  assert.equal(items.length, 4);
+  assert.equal(items[0].record.state.seed, 100 + plan.order[0]);
+  assert.equal(items[0].record.seed, 100 + plan.order[0]);
+});
+
+// ---------------------------------------------------------------------------------------------- single run
+
+test("generate queues the panel state with its stage modes and records each image's seed", async () => {
+  const { api, controller, emitted, baseCalls } = setup({ state: { seed: 7, batch: 2, steps: 20 } });
+  const result = await controller.generate();
+  assert.deepEqual(result, { queued: 1 });
+  assert.deepEqual(baseCalls, [stageModes(withDefaults({ seed: 7, batch: 2, steps: 20 }), null, { families: {} })]);
+  const [{ data, number }] = api.queued;
+  assert.equal(number, 0);
+  assert.equal(data.output[ROLE_IDS.sampler].inputs.steps, 20);
+  assert.equal(data.output[ROLE_IDS.sampler].inputs.seed, 7);
+  api.fire("execution_start", { prompt_id: "p0" });
+  api.fire("progress", { prompt_id: "p0", node: ROLE_IDS.sampler, value: 5, max: 20 });
+  api.fire("progress", { prompt_id: "other", node: "9", value: 1, max: 2 }); // someone else's prompt
+  api.fire("executed", { prompt_id: "p0", node: SAVE, output: { images: [ref("a.png"), ref("b.png")] } });
+  api.fire("execution_success", { prompt_id: "p0" });
+  await controller.whenIdle();
+  const progress = emittedOf(emitted, "progress");
+  assert.equal(progress.length, 1);
+  assert.deepEqual([progress[0].value, progress[0].max, progress[0].percent], [5, 20, 25]);
+  const [{ items }] = emittedOf(emitted, "images");
+  assert.deepEqual(items.map((item) => item.image.filename), ["a.png", "b.png"]);
+  assert.deepEqual(items.map((item) => item.record.seed), [7, 8]); // Forge-like noise: image i uses seed + i
+  assert.equal(items[1].record.state.seed, 8);
+  assert.equal(items[1].record.state.steps, 20);
+});
+
+test("events that arrive before queuePrompt answers are not lost", async () => {
+  const { api, controller, emitted } = setup();
+  api.onQueue = (id) => {
+    api.fire("execution_start", { prompt_id: id });
+    api.fire("executed", { prompt_id: id, node: SAVE, output: { images: [ref("fast.png")] } });
+    api.fire("execution_success", { prompt_id: id });
+  };
+  await controller.generate();
+  await controller.whenIdle();
+  assert.equal(emittedOf(emitted, "images")[0].items[0].image.filename, "fast.png");
+});
+
+test("a prompt the server rejects ends the run with a notice", async () => {
+  const { api, controller, emitted } = setup();
+  api.failNext = Object.assign(new Error("Prompt outputs failed validation"), {});
+  const result = await controller.generate();
+  assert.match(result.notice, /failed validation/);
+  assert.equal(controller.running, false);
+  assert.deepEqual(emittedOf(emitted, "running").map((e) => e.running), [true, false]);
+});
+
+test("generate while running answers with a notice and queues nothing more", async () => {
+  const { api, controller } = setup();
+  await controller.generate();
+  const second = await controller.generate();
+  assert.ok(second.notice);
+  assert.equal(api.queued.length, 1);
+});
+
+test("panelPrompt is the panel state applied to a prompt built with its stage modes", async () => {
+  const { controller, baseCalls } = setup({ state: { tab: "i2i", steps: 12 } });
+  const { output, workflow } = await controller.panelPrompt();
+  assert.equal(baseCalls[0].i2i_image, 0);
+  assert.equal(output[ROLE_IDS.sampler].inputs.steps, 12);
+  assert.equal(output[ROLE_IDS.latent].inputs.mode, "img2img");
+  assert.deepEqual(workflow, { nodes: [] });
+});
+
+// ---------------------------------------------------------------------------------------------- post-processing
+
+test("post without record uses parameters", async () => {
+  const { api, controller, emitted, baseCalls, readCalls } = setup({ parameters: golden.infotext.text });
+  const item = { image: ref("old.png"), record: null };
+  const result = await controller.runPost("hires", item);
+  assert.deepEqual(result, { queued: 1 });
+  assert.deepEqual(readCalls, [item.image]);
+  assert.equal(baseCalls[0].post_hires, 0);
+  assert.equal(baseCalls[0].post_image, 0);
+  const [{ data, options }] = api.queued;
+  assert.deepEqual(options, { partialExecutionTargets: [POST_SAVE] });
+  assert.equal(data.output[ROLE_IDS.post_image].inputs.image, "AIStudio/old.png [output]");
+  assert.equal(data.output[ROLE_IDS.post_hires].inputs.enabled, true);
+  assert.equal(data.output[POST_SAVE].inputs.seed, 42);
+  assert.equal(data.output[ROLE_IDS.lora_stack].inputs.positive, "1girl, solo <lora:meow:1>");
+  api.fire("executed", { prompt_id: "p0", node: POST_SAVE, output: { images: [ref("hires.png")] } });
+  api.fire("execution_success", { prompt_id: "p0" });
+  await controller.whenIdle();
+  const [{ items }] = emittedOf(emitted, "images");
+  assert.equal(items[0].image.filename, "hires.png");
+  assert.equal(items[0].record.seed, 42);
+});
+
+test("post with a session record uses it, not the image's parameters", async () => {
+  const { api, controller, readCalls } = setup({ parameters: golden.infotext.text });
+  const state = withDefaults({ prompt: "from the session", seed: 9 });
+  await controller.runPost("upscale", { image: ref("s.png"), record: { state, seed: 9 } });
+  assert.deepEqual(readCalls, []);
+  const [{ data }] = api.queued;
+  assert.equal(data.output[ROLE_IDS.lora_stack].inputs.positive, "from the session");
+  assert.equal(data.output[ROLE_IDS.post_upscale].inputs.enabled, true);
+  assert.equal(data.output[POST_SAVE].inputs.seed, 9);
+});
+
+test("post without anything returns notice", async () => {
+  const { api, controller, emitted, baseCalls } = setup({ parameters: null });
+  const result = await controller.runPost("sam3", { image: ref("disk.png"), record: null });
+  assert.ok(result.notice);
+  assert.equal(api.queued.length, 0);
+  assert.equal(baseCalls.length, 0);
+  assert.equal(emittedOf(emitted, "notice")[0].text, result.notice);
+  assert.ok((await controller.runPost("sam3", null)).notice); // no image picked
+});
+
+test("imageRecord gives the seed of a session image or of the PNG parameters", async () => {
+  const { controller } = setup({ parameters: (image) => (image.filename === "info.png" ? golden.infotext.text : null) });
+  assert.equal((await controller.imageRecord({ image: ref("s.png"), record: { state: withDefaults({ seed: 5 }), seed: 6 } })).seed, 6);
+  assert.equal((await controller.imageRecord({ image: ref("info.png"), record: null })).seed, 42);
+  assert.equal(await controller.imageRecord({ image: ref("none.png"), record: null }), null);
+});
+
+// ---------------------------------------------------------------------------------------------- studio_pnginfo.js
+
+test("withExtraParams appends keys to the parameters line, Forge-quoted", () => {
+  const text = "a cat\nNegative prompt: dog\nSteps: 20, Seed: 1";
+  assert.equal(
+    withExtraParams(text, { Script: "X/Y/Z plot", "X Values": "1, 2", "Y Values": "a:b" }),
+    'a cat\nNegative prompt: dog\nSteps: 20, Seed: 1, Script: X/Y/Z plot, X Values: "1, 2", Y Values: "a:b"',
+  );
+  assert.equal(withExtraParams("", { Script: "X/Y/Z plot" }), "Script: X/Y/Z plot");
+  assert.equal(withExtraParams(null, {}), "");
+});
+
+function pngChunk(type, data) {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, "latin1");
+  return Buffer.concat([head, data, Buffer.alloc(4)]);
+}
+
+test("readPngText reads tEXt and iTXt (plain and compressed) chunks", async () => {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const korean = "소녀, 1girl\nSteps: 20, Seed: 3";
+  const itxt = (key, text, compressed) =>
+    Buffer.concat([
+      Buffer.from(`${key}\0`, "latin1"),
+      Buffer.from([compressed ? 1 : 0, 0]),
+      Buffer.from("\0\0", "latin1"),
+      compressed ? deflateSync(Buffer.from(text, "utf-8")) : Buffer.from(text, "utf-8"),
+    ]);
+  const png = Buffer.concat([
+    signature,
+    pngChunk("IHDR", Buffer.alloc(13)),
+    pngChunk("tEXt", Buffer.from("prompt\0{\"1\": {}}", "latin1")),
+    pngChunk("iTXt", itxt("parameters", korean, false)),
+    pngChunk("iTXt", itxt("workflow", "{}", true)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  const text = await readPngText(png.buffer.slice(png.byteOffset, png.byteOffset + png.length));
+  assert.equal(text.parameters, korean);
+  assert.equal(text.prompt, '{"1": {}}');
+  assert.equal(text.workflow, "{}");
+  assert.deepEqual(await readPngText(new ArrayBuffer(4)), {});
+});

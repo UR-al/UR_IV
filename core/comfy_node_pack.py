@@ -102,6 +102,10 @@ OWNER_MARKER = ".aistudio-owned.json"
 # .js/.css a change refreshes the install without a restart.
 _PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors", ".js", ".css", ".ttf"})
 _RUNTIME_SUFFIXES = frozenset({".py", ".json", ".safetensors"})
+# Repo-only folders: never copied into ComfyUI nor fingerprinted.  js_tests/ holds the
+# pack's node:test files and their golden .json fixture (a copied .json would count as a
+# runtime file and ask for a restart whenever a fixture changed).
+_DEV_ONLY_DIRS = frozenset({"js_tests"})
 
 
 class ComfyNodePackError(RuntimeError):
@@ -138,6 +142,7 @@ def pack_files(source: Path | str, *, runtime_only: bool = False) -> list[Path]:
             for path in source_path.rglob("*")
             if path.is_file()
             and "__pycache__" not in path.parts
+            and not _DEV_ONLY_DIRS.intersection(path.relative_to(source_path).parts)
             and path.name != OWNER_MARKER
             and path.suffix.casefold() in suffixes
         ),
@@ -254,7 +259,7 @@ def install_bundled_node_pack(
         shutil.copytree(
             source_path,
             staging,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", OWNER_MARKER),
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", OWNER_MARKER, *_DEV_ONLY_DIRS),
         )
         marker = {
             "owner": OWNER_ID,

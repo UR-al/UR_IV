@@ -289,6 +289,50 @@ class TestBundledComfyNodePack(unittest.TestCase):
             self.assertTrue(repaired.changed)
             self.assertEqual((repaired.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v2")
 
+    def test_js_tests_folder_is_neither_installed_nor_fingerprinted(self):
+        # R18: the pack's node:test files and their golden JSON fixture are for the repo only. A copied .json would
+        # also count as a runtime file and ask for a ComfyUI restart whenever a fixture changes.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            custom_nodes = tmp_path / "custom_nodes"
+            custom_nodes.mkdir()
+            source = _source(tmp_path)
+            (source / "web").mkdir()
+            (source / "web" / "studio.js").write_text("export {};\n", encoding="utf-8")
+            before = node_pack_fingerprint(source)
+            before_runtime = node_pack_fingerprint(source, runtime_only=True)
+            fixtures = source / "js_tests" / "fixtures"
+            fixtures.mkdir(parents=True)
+            (source / "js_tests" / "studio.test.mjs").write_text("// test\n", encoding="utf-8")
+            (source / "js_tests" / "helper.js").write_text("// helper\n", encoding="utf-8")
+            golden = fixtures / "golden.json"
+            golden.write_text('{"v": 1}\n', encoding="utf-8")
+
+            self.assertEqual(node_pack_fingerprint(source), before)
+            self.assertEqual(node_pack_fingerprint(source, runtime_only=True), before_runtime)
+            self.assertEqual(
+                sorted(p.relative_to(source).as_posix() for p in pack_files(source)),
+                ["__init__.py", "web/studio.js"],
+            )
+
+            first = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertFalse((first.target / "js_tests").exists())
+            self.assertTrue((first.target / "web" / "studio.js").is_file())
+
+            golden.write_text('{"v": 2}\n', encoding="utf-8")
+            again = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertFalse(again.changed)
+            self.assertFalse(again.restart_required)
+
+    def test_the_real_pack_keeps_its_js_tests_out_of_the_install(self):
+        from core.comfy_node_pack import bundled_node_pack_path
+
+        root = bundled_node_pack_path()
+        self.assertTrue((root / "js_tests").is_dir())
+        shipped = {p.relative_to(root).as_posix() for p in pack_files(root)}
+        self.assertFalse([path for path in shipped if path.startswith("js_tests/")])
+        self.assertIn("web/ai_studio/studio_main.js", shipped)
+
     def test_the_real_pack_ships_its_legend_font(self):
         from core.comfy_node_pack import bundled_node_pack_path, pack_files
 
