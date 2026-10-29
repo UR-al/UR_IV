@@ -477,7 +477,15 @@ def _invoke_sam3_loader(checkpoint_path: Path, model_name: str,
     result = _result_tuple(output)
     if not result or not isinstance(result[0], dict):
         raise RuntimeError("Easy SAM3 loader returned an invalid model bundle.")
-    return result[0]
+    bundle = result[0]
+    # Easy SAM3 forces fp16 whenever the file name contains "fp16" (e.g.
+    # sam3.1_multiplex_fp16.safetensors), overriding the requested precision.
+    # It only records the dtype (weights stay as loaded), so put the request back.
+    torch = _torch()
+    bundle["dtype"] = {
+        "bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32,
+    }[resolved_precision]
+    return bundle
 
 
 def _offload_sam3(bundle: Any) -> None:
