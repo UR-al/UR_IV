@@ -59,6 +59,10 @@ from .dora_infer_mode_nodes import (
     NODE_DISPLAY_NAME_MAPPINGS as _DORA_MODE_DISPLAY_NAMES,
 )
 
+from .studio_nodes import (
+    NODE_CLASS_MAPPINGS as _STUDIO_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _STUDIO_DISPLAY_NAMES,
+)
 from .studio_routes import register_routes as _register_studio_routes
 
 
@@ -108,6 +112,7 @@ NODE_CLASS_MAPPINGS = _merge_node_maps(
     _COLORCRAFT_NODES,
     _MOSS_SPECTRUM_NODES,
     _DORA_MODE_NODES,
+    _STUDIO_NODES,
 )
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -124,6 +129,7 @@ NODE_DISPLAY_NAME_MAPPINGS.update(_SPEED_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_COLORCRAFT_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_MOSS_SPECTRUM_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_DORA_MODE_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_STUDIO_DISPLAY_NAMES)
 
 
 # Anima studio web extension: ComfyUI serves every *.js under this folder (keep tests out of it).

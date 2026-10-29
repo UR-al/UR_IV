@@ -64,6 +64,9 @@ inspector recognises them.
 - `ForgeNeoMossSpectrum` (Spectrum forecasting for MOSS-Image, pack 1.9.0+; see "1.9.0 changes")
 - `ForgeNeoDoraInferenceMode` (sam-extra's DoRA Inference Mode for the DoRA patches on a MODEL, pack 1.9.0+;
   after the LoRA loaders; see "1.9.0 changes")
+- `AIStudioLoraStack` (Anima studio: strips Forge `<lora:name:strength>` tags from the positive/negative prompts and
+  applies them to MODEL and CLIP through `ForgeNeoAnimaLoraLoader`; a LoRA file it cannot find is skipped with one
+  warning line)
 
 When the app generates from an ANIMA custom workflow it keeps
 `ForgeNeoLoraBlockWeight` and `ForgeNeoAnimaLoraLoaderModelOnly` in the active

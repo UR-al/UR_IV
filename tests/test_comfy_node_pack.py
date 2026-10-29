@@ -95,6 +95,7 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "AIStudioRelight",
     "ForgeNeoMossSpectrum",       # 1.9.0: Spectrum for MOSS-Image (MODEL -> MODEL; the compiler never emits it)
     "ForgeNeoDoraInferenceMode",  # 1.9.0: sam-extra's DoRA Inference Mode on a MODEL's DoRA patches (MODEL -> MODEL)
+    "AIStudioLoraStack",          # Anima studio: Forge <lora:> tags -> LoRA loaders (the studio workflow, not the compiler)
 })
 EXPECTED_BUNDLED_NODES = COMPILER_BUILT_NODES | CUSTOM_WORKFLOW_NODES
 
@@ -173,7 +174,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 44)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 45)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
