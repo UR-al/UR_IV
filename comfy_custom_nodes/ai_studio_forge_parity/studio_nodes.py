@@ -10,6 +10,7 @@ import logging
 from .compat import filename_choices, invoke_provider
 from .studio_infotext import build_infotext
 from .studio_lora_tags import collapse_duplicates, parse_lora_tags, resolve_lora_name
+from .studio_prompt_schedule import schedule_prompt
 from .studio_state import normalize_state
 
 CATEGORY = "AI Studio/Studio"
@@ -175,15 +176,66 @@ class AIStudioUpscaleImage:
         return (upscaled,)
 
 
+def _plain_encode(clip, text: str):
+    return invoke_provider("CLIPTextEncode", method="encode", feature="Studio prompt", args=(clip, text))[0]
+
+
+class AIStudioPromptEncode:
+    """CLIPTextEncode with Forge prompt editing: each ``[a:b:w]`` / ``[a|b]`` segment becomes a timestep range."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP",),
+                # dynamicPrompts off: the frontend must not rewrite {a|b} before Forge's [a|b] rules run.
+                "text": ("STRING", {"multiline": True, "default": "", "dynamicPrompts": False}),
+                "steps": ("INT", {"default": 32, "min": 1, "max": 10000}),
+                "forge_syntax": ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "encode"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("Encodes a prompt; with forge_syntax on, Forge's [a:b:step] / [a|b] prompt editing becomes timestep "
+                   "ranges over the given steps (off = the same as CLIP Text Encode).")
+
+    def encode(self, clip, text, steps, forge_syntax=True):
+        if not forge_syntax:
+            return (_plain_encode(clip, text),)
+        steps = int(steps)
+        segments = schedule_prompt(text, steps)
+        if len(segments) == 1:
+            return (_plain_encode(clip, segments[0][1]),)
+        encoded: dict = {}
+        combined = []
+        start = 0
+        for end, segment in segments:
+            if segment not in encoded:
+                encoded[segment] = _plain_encode(clip, segment)
+            combined += invoke_provider(
+                "ConditioningSetTimestepRange", method="set_range", feature="Studio prompt editing",
+                args=(encoded[segment], start / steps, end / steps),
+            )[0]
+            start = end
+        return (combined,)
+
+
 NODE_CLASS_MAPPINGS = {
     "AIStudioLoraStack": AIStudioLoraStack,
     "AIStudioSaveForge": AIStudioSaveForge,
     "AIStudioUpscaleImage": AIStudioUpscaleImage,
+    "AIStudioPromptEncode": AIStudioPromptEncode,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "AIStudioLoraStack": "AI Studio LoRA Stack",
     "AIStudioSaveForge": "AI Studio Save (Forge info)",
     "AIStudioUpscaleImage": "AI Studio Upscale Image",
+    "AIStudioPromptEncode": "AI Studio Prompt Encode (Forge syntax)",
 }
 
-__all__ = ["AIStudioLoraStack", "AIStudioSaveForge", "AIStudioUpscaleImage", "NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+__all__ = [
+    "AIStudioLoraStack", "AIStudioPromptEncode", "AIStudioSaveForge", "AIStudioUpscaleImage",
+    "NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS",
+]

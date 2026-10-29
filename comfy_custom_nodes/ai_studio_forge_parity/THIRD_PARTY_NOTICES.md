@@ -528,3 +528,12 @@ Neo also bundles. The font file is licensed under Apache-2.0; the full license t
 and shrink, margins, Z sub-grids, Row Count) is written here from a behavior description of Forge's X/Y/Z plot and
 contains none of Forge's AGPL-3.0 code (`TestPackCarriesNoForgeCode`). Lines that Roboto cannot draw (Korean) use the
 system's Malgun Gothic or Noto Sans KR font, which the pack does not ship.
+
+## Forge prompt editing and noise rules (`studio_prompt_schedule.py`, `studio_forge_noise.py`)
+
+The Anima studio's "Forge-like" options follow two rules of Forge Neo (A1111 stable-diffusion-webui code, AGPL-3.0):
+the prompt editing grammar of `modules/prompt_parser.py` (`[a:b:step]`, `[a|b]`, which step a number means, when the
+whole prompt is left as written) and how `modules/rng.py` seeds the initial noise and the global RNG. Only the rules
+are shared. No Forge code is included: the prompt parser is a hand-written recursive-descent parser of this pack
+(Forge uses a lark grammar), and the noise helpers are plain torch calls; `studio_forge_parity.md` describes both and
+where they differ. `tests/test_comfy_node_pack.py` checks that no pack function is a near-copy of Forge's code.

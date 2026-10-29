@@ -99,6 +99,7 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "AIStudioLoraStack",          # Anima studio: Forge <lora:> tags -> LoRA loaders (the studio workflow, not the compiler)
     "AIStudioSaveForge",          # Anima studio: PNG save with Forge-style `parameters` + ComfyUI prompt/workflow chunks
     "AIStudioUpscaleImage",       # Anima studio: model upscale resized to original x scale_by (off = passthrough)
+    "AIStudioPromptEncode",       # Anima studio: CLIPTextEncode + Forge prompt editing as timestep ranges
 })
 EXPECTED_BUNDLED_NODES = COMPILER_BUILT_NODES | CUSTOM_WORKFLOW_NODES
 
@@ -177,7 +178,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 47)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 48)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):

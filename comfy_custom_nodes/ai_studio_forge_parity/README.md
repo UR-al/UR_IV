@@ -72,6 +72,16 @@ inspector recognises them.
   keys when they apply) next to ComfyUI's `prompt` / `workflow` chunks, so the app's PNG Info and Forge read the files)
 - `AIStudioUpscaleImage` (Anima studio: `enabled` off passes the image through; on runs the chosen upscale model
   through ComfyUI's `UpscaleModelLoader` / `ImageUpscaleWithModel` and resizes to the input size x `scale_by`)
+- `AIStudioPromptEncode` (Anima studio: `forge_syntax` off is `CLIPTextEncode`; on, Forge's prompt editing
+  `[a:b:step]` / `[a::step]` / `[:b:step]` / `[a|b]` (nested, `\[` escapes) is worked out for `steps` and each segment
+  is encoded once and set to its share of the steps with `ConditioningSetTimestepRange`; weights `(x:1.2)` are left to
+  the Anima tokenizer, which reads them as Forge's Anima path does. What matches Forge and what does not:
+  `studio_forge_parity.md`)
+
+`ForgeNeoKSamplerCNS` and `ForgeNeoHiresFix` also take an optional `forge_noise` input (default off; the app compiler
+never sets it) for the Anima studio's "Forge-like noise": each image's initial noise from its own seed (`seed + i`), as
+Forge Neo draws it, and the sampler seed `(last image seed + 100000) % 65536`, the global seed Forge leaves for SDE
+samplers such as EXP Heun 2 x0 SDE (`studio_forge_noise.py`; not with SPEED).
 
 When the app generates from an ANIMA custom workflow it keeps
 `ForgeNeoLoraBlockWeight` and `ForgeNeoAnimaLoraLoaderModelOnly` in the active

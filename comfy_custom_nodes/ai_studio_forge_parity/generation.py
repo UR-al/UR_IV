@@ -32,6 +32,7 @@ from .guidance_cns import (
 )
 from .guidance_common import DY_SUBSTEPS_OFF_KEY, set_transformer_option
 from .guidance_detail import PASS_BASE, PASS_HIRES, with_pass_tag
+from .studio_forge_noise import forge_image_seeds, forge_initial_noise, forge_step_noise_seed
 from .anima_lora_nodes import (
     AnimaLoraStateCache,
     load_lora_block_weight,
@@ -280,7 +281,13 @@ class ForgeNeoLatentInput:
         return (latent,)
 
 
-def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise):
+# Optional input of the sampler / hires nodes: Forge Neo's initial and SDE step noise (studio_forge_noise).
+FORGE_NOISE_INPUT = ("BOOLEAN", {"default": False, "tooltip": (
+    "Forge Neo's noise: each image's own seed (seed + i) for the initial noise, and Forge's global seed for the "
+    "step noise of SDE samplers that draw it like EXP Heun 2 x0 SDE. Not with SPEED.")})
+
+
+def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise, forge_noise=False):
     require_torch()
     import comfy.sample
     import comfy.utils
@@ -294,13 +301,19 @@ def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, n
     batch_inds = latent.get("batch_index")
     # The initial noise is never coloured: CNS colours each step's ancestral
     # noise through the MODEL's SAMPLER_SAMPLE wrapper (guidance_cns.apply_cns).
-    noise = comfy.sample.prepare_noise(latent_image, int(seed), batch_inds)
+    sampler_seed = int(seed)
+    if forge_noise:
+        seeds = forge_image_seeds(sampler_seed, latent_image.shape[0], batch_inds)
+        noise = forge_initial_noise(latent_image, seeds)
+        sampler_seed = forge_step_noise_seed(seeds[-1])
+    else:
+        noise = comfy.sample.prepare_noise(latent_image, int(seed), batch_inds)
     callback = latent_preview.prepare_callback(model, int(steps))
     samples = comfy.sample.sample(
         model, noise, int(steps), float(cfg), sampler_name, scheduler,
         positive, negative, latent_image, denoise=float(denoise),
         noise_mask=latent.get("noise_mask"), callback=callback,
-        disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=int(seed),
+        disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=sampler_seed,
     )
     output = dict(latent)
     output.pop("downscale_ratio_spacial", None)
@@ -354,6 +367,8 @@ class ForgeNeoKSamplerCNS:
             "speed_spd_scale": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 1.0}),
             "speed_spd_sigma": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 1.0}),
             "speed_adaptive_smc_alpha": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0}),
+        }, "optional": {
+            "forge_noise": FORGE_NOISE_INPUT,
         }}
 
     RETURN_TYPES = ("LATENT",)
@@ -361,7 +376,7 @@ class ForgeNeoKSamplerCNS:
     FUNCTION = "sample"
     CATEGORY = CATEGORY
 
-    def sample(self, model, positive, negative, latent_image, seed, steps, cfg, sampler_name, scheduler, denoise=1.0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, spectrum_enabled=False, spectrum_window_size=2.0, spectrum_flex_window=0.25, spectrum_warmup_steps=6, spectrum_tail_actual_steps=3, spectrum_blend_w=0.3, spectrum_cheby_degree=3, spectrum_ridge_lambda=0.1, spectrum_history_size=100, spectrum_one_sampler_only=False, spectrum_verbose=False, speed_enabled=False, speed_split_mode="single", speed_spd_scale=0.5, speed_spd_sigma=0.7, speed_adaptive_smc_alpha=0.0):
+    def sample(self, model, positive, negative, latent_image, seed, steps, cfg, sampler_name, scheduler, denoise=1.0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, spectrum_enabled=False, spectrum_window_size=2.0, spectrum_flex_window=0.25, spectrum_warmup_steps=6, spectrum_tail_actual_steps=3, spectrum_blend_w=0.3, spectrum_cheby_degree=3, spectrum_ridge_lambda=0.1, spectrum_history_size=100, spectrum_one_sampler_only=False, spectrum_verbose=False, speed_enabled=False, speed_split_mode="single", speed_spd_scale=0.5, speed_spd_sigma=0.7, speed_adaptive_smc_alpha=0.0, forge_noise=False):
         model = _with_cns(model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
         # The base pass of the generation: HiFlow records here, S² draws with the 'base' tag (guidance_detail).
         model = with_pass_tag(model, PASS_BASE)
@@ -396,7 +411,7 @@ class ForgeNeoKSamplerCNS:
                 "DiTSpectrumPatch", method="patch", feature="Spectrum sampler",
                 args=(model, int(steps), float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps), float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size), True, bool(spectrum_one_sampler_only), bool(spectrum_verbose)),
             )[0]
-        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise)
+        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise, forge_noise=bool(forge_noise))
 
 
 def _patch_flow_shift(model: Any, shift: float):
@@ -493,6 +508,7 @@ class ForgeNeoHiresFix:
             "base_positive_text": ("STRING", {"default": "", "multiline": True}), "base_negative_text": ("STRING", {"default": "", "multiline": True}),
         }, "optional": {
             "clip_type": (["stable_diffusion", "cosmos", "sd3", "qwen_image", "wan", "krea2"],),
+            "forge_noise": FORGE_NOISE_INPUT,
         }}
 
     RETURN_TYPES = ("LATENT", "VAE")
@@ -500,7 +516,7 @@ class ForgeNeoHiresFix:
     FUNCTION = "run"
     CATEGORY = CATEGORY
 
-    def run(self, model, positive, negative, samples, seed=-1, enabled=False, scale_by=1.5, upscale_method="latent:bislerp", steps=0, cfg=5.0, sampler_name="euler", scheduler="simple", denoise=0.35, seed_delta=0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, base_vae=None, base_clip=None, base_steps=30, base_sampler_name="euler", base_scheduler="simple", resize_width=0, resize_height=0, shift=3.0, checkpoint_name="Use same checkpoint", checkpoint_weight_dtype="default", text_encoder_name="Use same choices", vae_name="Use same choices", positive_text="", negative_text="", base_positive_text="", base_negative_text="", clip_type="stable_diffusion"):
+    def run(self, model, positive, negative, samples, seed=-1, enabled=False, scale_by=1.5, upscale_method="latent:bislerp", steps=0, cfg=5.0, sampler_name="euler", scheduler="simple", denoise=0.35, seed_delta=0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, base_vae=None, base_clip=None, base_steps=30, base_sampler_name="euler", base_scheduler="simple", resize_width=0, resize_height=0, shift=3.0, checkpoint_name="Use same checkpoint", checkpoint_weight_dtype="default", text_encoder_name="Use same choices", vae_name="Use same choices", positive_text="", negative_text="", base_positive_text="", base_negative_text="", clip_type="stable_diffusion", forge_noise=False):
         if not enabled:
             return samples, base_vae
         import comfy.utils
@@ -595,7 +611,7 @@ class ForgeNeoHiresFix:
         active_model = _with_cns(active_model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
         # The hires pass: HiFlow aligns here with the base pass's trajectory, S² draws with the 'hires' tag.
         active_model = with_pass_tag(active_model, PASS_HIRES)
-        output = _common_sample(active_model, actual_seed, actual_steps, cfg, sampler_name or base_sampler_name, scheduler or base_scheduler, positive, negative, resized, denoise)[0]
+        output = _common_sample(active_model, actual_seed, actual_steps, cfg, sampler_name or base_sampler_name, scheduler or base_scheduler, positive, negative, resized, denoise, forge_noise=bool(forge_noise))[0]
         return output, active_vae
 
 
