@@ -96,7 +96,9 @@ OWNER_MARKER = ".aistudio-owned.json"
 # and licenses too) versus what ComfyUI actually imports or reads at runtime.
 # .safetensors: the Colorcraft basis vectors under vendor/ (1.7.0) are read at run
 # time, so a vectors-only change must change the fingerprint and ask for a restart.
-_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors"})
+# .js/.css (web/ai_studio): ComfyUI serves them from disk, so a change refreshes the
+# install (fingerprinted) but needs only a browser reload, not a restart.
+_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors", ".js", ".css"})
 _RUNTIME_SUFFIXES = frozenset({".py", ".json", ".safetensors"})
 
 

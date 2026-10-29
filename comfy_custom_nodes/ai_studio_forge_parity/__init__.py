@@ -59,6 +59,8 @@ from .dora_infer_mode_nodes import (
     NODE_DISPLAY_NAME_MAPPINGS as _DORA_MODE_DISPLAY_NAMES,
 )
 
+from .studio_routes import register_routes as _register_studio_routes
+
 
 __version__ = "1.9.0"
 
@@ -124,4 +126,10 @@ NODE_DISPLAY_NAME_MAPPINGS.update(_MOSS_SPECTRUM_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_DORA_MODE_DISPLAY_NAMES)
 
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+# Anima studio web extension: ComfyUI serves every *.js under this folder (keep tests out of it).
+WEB_DIRECTORY = "./web"
+# Mount the studio's HTTP routes (no-op outside ComfyUI).
+_register_studio_routes()
+
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

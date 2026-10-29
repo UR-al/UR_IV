@@ -169,7 +169,7 @@ def bundle_fingerprint(root: Path | None = None) -> dict:
 
     ``diskMatch`` compares this for the app source and the installed copy, so
     it must be exactly what ``install_bundled_node_pack`` decides a reinstall
-    on (``.py``/``.json``/``.md``/``.txt``), not a ``.py``-only variant.
+    on (``.py``/``.json``/``.md``/``.txt``/``.safetensors``/``.js``/``.css``), not a ``.py``-only variant.
     """
     from core.comfy_node_pack import ComfyNodePackError, node_pack_fingerprint, pack_files
 
