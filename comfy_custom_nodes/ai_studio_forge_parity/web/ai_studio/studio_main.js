@@ -7,6 +7,7 @@ import { PanelView } from "./panel_view.js";
 import { ResultView } from "./result_view.js";
 import { RunController } from "./run_controller.js";
 import { refFromValue } from "./studio_dom.js";
+import { engineRoomCollapsed, toggleEngineRoom } from "./studio_engine_room.js";
 import { readPngText } from "./studio_pnginfo.js";
 import { ROLE_PROPERTY } from "./studio_roles.js";
 import { XyzView } from "./xyz_view.js";
@@ -160,23 +161,11 @@ async function openMaskEditor() {
 
 const engineRoom = {
   nodes: () => (graph()?.nodes || []).filter((node) => node.properties?.[ROLE_PROPERTY] && !UI_NODES[node.comfyClass]),
-  collapsed() {
-    const nodes = engineRoom.nodes();
-    return nodes.length > 0 && nodes.every((node) => node.flags?.collapsed);
-  },
+  collapsed: () => engineRoomCollapsed(engineRoom.nodes()),
   toggle() {
     const nodes = engineRoom.nodes();
     if (!nodes.length) return;
-    const collapse = !engineRoom.collapsed();
-    const engine = new Set(nodes);
-    const groups = (graph().groups || [])
-      .map((group) => {
-        group.recomputeInsideNodes();
-        return [group, [...group.nodes]];
-      })
-      .filter(([, members]) => members.some((node) => engine.has(node)));
-    for (const node of nodes) if (Boolean(node.flags?.collapsed) !== collapse) node.collapse(); // collapse() toggles (R11)
-    for (const [group, members] of groups) group.resizeTo(members);
+    toggleEngineRoom(graph().groups || [], nodes, app.canvas?.ctx);
     graph().setDirtyCanvas(true, true);
   },
 };
