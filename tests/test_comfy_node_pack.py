@@ -16,6 +16,7 @@ from core.comfy_node_pack import (
     PACK_VERSION,
     install_bundled_node_pack,
     node_pack_fingerprint,
+    pack_files,
 )
 from core.comfy_compatibility import bundle_fingerprint
 import comfy_custom_nodes.ai_studio_forge_parity as bundled_pack
@@ -251,6 +252,44 @@ class TestBundledComfyNodePack(unittest.TestCase):
             unchanged = install_bundled_node_pack(custom_nodes, source=source)
             self.assertFalse(unchanged.changed)
             self.assertFalse(unchanged.restart_required)
+
+    def test_font_file_is_installed_fingerprinted_and_needs_no_restart(self):
+        # fonts/Roboto-Regular.ttf (the X/Y/Z grid legend) must reach ComfyUI and be tamper-checked like the web files.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            custom_nodes = tmp_path / "custom_nodes"
+            custom_nodes.mkdir()
+            source = _source(tmp_path)
+            without = node_pack_fingerprint(source)
+            (source / "fonts").mkdir()
+            font = source / "fonts" / "legend.ttf"
+            font.write_bytes(b"\x00\x01font-v1")
+            self.assertNotEqual(node_pack_fingerprint(source), without)
+            self.assertEqual(
+                [p.name for p in pack_files(source) if p.suffix == ".ttf"], ["legend.ttf"],
+            )
+            self.assertEqual([p.name for p in pack_files(source, runtime_only=True)], ["__init__.py"])
+
+            first = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertEqual((first.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v1")
+
+            font.write_bytes(b"\x00\x01font-v2")
+            refreshed = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(refreshed.changed)
+            self.assertFalse(refreshed.restart_required)
+            self.assertEqual((refreshed.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v2")
+
+            (refreshed.target / "fonts" / "legend.ttf").write_bytes(b"tampered")
+            repaired = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(repaired.changed)
+            self.assertEqual((repaired.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v2")
+
+    def test_the_real_pack_ships_its_legend_font(self):
+        from core.comfy_node_pack import bundled_node_pack_path, pack_files
+
+        root = bundled_node_pack_path()
+        shipped = {p.relative_to(root).as_posix() for p in pack_files(root)}
+        self.assertIn("fonts/Roboto-Regular.ttf", shipped)
 
     def test_tampered_runtime_file_requires_restart_after_repair(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -488,7 +527,7 @@ class TestPackNotices(unittest.TestCase):
 
     def test_every_license_file_is_named_in_the_notices_and_back(self):
         files = sorted(path.name for path in (PACK_DIR / "LICENSES").iterdir() if path.is_file())
-        self.assertEqual(len(files), 18)      # 1.9.0: moss-image-Apache-2.0.txt (the MOSS-Image head in moss_spectrum)
+        self.assertEqual(len(files), 19)      # 1.9.0: moss-image-Apache-2.0.txt (the MOSS-Image head in moss_spectrum); Roboto-Apache-2.0.txt (xyz_grid_draw legend font)
         for name in files:
             with self.subTest(license=name):
                 self.assertIn(f"LICENSES/{name}", self.notices)

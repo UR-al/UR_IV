@@ -518,3 +518,13 @@ included or imported, and the tests write it out themselves.
 The installed extension is also the test oracle: `tests/test_comfy_dora_infer_mode.py` compares the Forge/Comfy fp32
 branch of `decompose` with sam-extra's bit for bit on CPU, and the LyCORIS branch with sam-extra's where both use the
 same operations; the pack never imports the extension. This notice does not replace or modify sam-extra's license.
+
+## X/Y/Z grid legend font (Roboto)
+
+`xyz_grid_draw.py` draws the X/Y/Z plot's legend with `fonts/Roboto-Regular.ttf`, an unmodified copy of the Roboto
+Regular font file (Google, designer Christian Robertson, "Copyright 2011 Google Inc. All Rights Reserved.") that Forge
+Neo also bundles. The font file is licensed under Apache-2.0; the full license text is included at
+`LICENSES/Roboto-Apache-2.0.txt`. Only the font file is copied: the grid layout (cell box, legend padding, word wrap
+and shrink, margins, Z sub-grids, Row Count) is written here from a behavior description of Forge's X/Y/Z plot and
+contains none of Forge's AGPL-3.0 code (`TestPackCarriesNoForgeCode`). Lines that Roboto cannot draw (Korean) use the
+system's Malgun Gothic or Noto Sans KR font, which the pack does not ship.

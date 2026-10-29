@@ -98,7 +98,9 @@ OWNER_MARKER = ".aistudio-owned.json"
 # time, so a vectors-only change must change the fingerprint and ask for a restart.
 # .js/.css (web/ai_studio): ComfyUI serves them from disk, so a change refreshes the
 # install (fingerprinted) but needs only a browser reload, not a restart.
-_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors", ".js", ".css"})
+# .ttf (fonts/): the X/Y/Z grid legend font is read when a grid is drawn (never imported), so like
+# .js/.css a change refreshes the install without a restart.
+_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors", ".js", ".css", ".ttf"})
 _RUNTIME_SUFFIXES = frozenset({".py", ".json", ".safetensors"})
 
 
