@@ -88,7 +88,12 @@ PACK_ID = "ai_studio_forge_parity"
 # ComfyUI classes, with a new patches_uuid and an OUTER_SAMPLE wrapper that reports each sampling run; no ComfyUI
 # function is patched. Adapted from sam-extra's own ``decompose`` under its author's MIT grant (the LyCORIS mode takes
 # LyCORIS' own operations, bit for bit with its training merge). The compiler emits no new node, so it needs no gate.
-PACK_VERSION = "1.9.0"
+# 1.10.0: the Anima studio (custom workflows only; the compiler emits none of it): eight AIStudio* nodes (LoRA tags,
+# Forge-info save, upscale, Forge prompt syntax, the panel / result / X/Y/Z UI nodes, a lazy two-way switch), an
+# optional forge_noise input on ForgeNeoKSamplerCNS / ForgeNeoHiresFix, the web extension under web/ai_studio (.js/.css
+# now installed and fingerprinted, js_tests/ never), HTTP routes under /aistudio/studio, the X/Y/Z grid (Roboto legend
+# font, .ttf installed), SAM3.1 multiplex files in the SAM3 picker, and example_workflows/AI Studio Anima.json.
+PACK_VERSION = "1.10.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

@@ -66,7 +66,7 @@ from .studio_nodes import (
 from .studio_routes import register_routes as _register_studio_routes
 
 
-__version__ = "1.9.0"
+__version__ = "1.10.0"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside

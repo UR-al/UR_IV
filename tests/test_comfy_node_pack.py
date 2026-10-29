@@ -230,6 +230,26 @@ class TestBundledComfyNodePack(unittest.TestCase):
     def test_pack_version_matches_package_version(self):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
+    def test_anima_studio_release_is_1_10_0(self):
+        # 팩 1.10.0 = Anima 스튜디오(노드·웹 확장·라우트·예제 워크플로). 버전·변경 주석·README 변경 절이 같이 간다.
+        self.assertEqual(bundled_pack.__version__, "1.10.0")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.10.0: the Anima studio", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.10.0 changes"), readme.index("## 1.9.0 changes"))
+        changes = " ".join(readme.split("## 1.10.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        studio_nodes = sorted(name for name in NODE_CLASS_MAPPINGS if name.startswith("AIStudio") and name != "AIStudioRelight")
+        self.assertEqual(len(studio_nodes), 8)
+        for text in (*(f"`{name}`" for name in studio_nodes),
+                     "`example_workflows/AI Studio Anima.json`", "`tools/build_anima_studio_workflow.py`",
+                     "`web/ai_studio`", "`/aistudio/studio`", "`GET /choices`", "`POST /xyz/plan`",
+                     "`POST /xyz/grid`", "`POST /open_output`", "`POST /to_input`", "`forge_noise`",
+                     "`studio_forge_parity.md`", "`fonts/Roboto-Regular.ttf`", "`js_tests/`",
+                     "`sam3.1_multiplex_fp16.safetensors`"):
+            with self.subTest(text=text):
+                self.assertIn(text, changes)
+
     def test_doc_only_refresh_copies_files_without_requiring_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             tmp_path = Path(directory)

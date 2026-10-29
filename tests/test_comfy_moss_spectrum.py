@@ -338,7 +338,7 @@ class RegistrationTests(unittest.TestCase):
         self.assertFalse(any(name.startswith("speed_") for name in names))   # not a sam-extra SPEED port module
 
     def test_version_lockstep(self):
-        self.assertEqual(bundled_pack.__version__, "1.9.0")
+        self.assertEqual(bundled_pack.__version__, "1.10.0")
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
         source = (Path(__file__).resolve().parent.parent / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# 1.9.0: new ForgeNeoMossSpectrum", source)
