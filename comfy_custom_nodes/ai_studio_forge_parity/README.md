@@ -77,6 +77,11 @@ inspector recognises them.
   is encoded once and set to its share of the steps with `ConditioningSetTimestepRange`; weights `(x:1.2)` are left to
   the Anima tokenizer, which reads them as Forge's Anima path does. What matches Forge and what does not:
   `studio_forge_parity.md`)
+- `AIStudioPanel`, `AIStudioResultView`, `AIStudioXYZView` (Anima studio: the control panel, the result/gallery view and
+  the X/Y/Z panel; the studio JS in `web/ai_studio` draws them, each keeps its state in one hidden `STRING`; no outputs,
+  so ComfyUI never runs them)
+- `AIStudioSwitch` (Anima studio: `select` 0 passes `a`, 1 passes `b`; both inputs are optional and lazy, so only the
+  chosen model family's nodes (2.9B/base or 3.8B) run)
 
 `ForgeNeoKSamplerCNS` and `ForgeNeoHiresFix` also take an optional `forge_noise` input (default off; the app compiler
 never sets it) for the Anima studio's "Forge-like noise": each image's initial noise from its own seed (`seed + i`), as

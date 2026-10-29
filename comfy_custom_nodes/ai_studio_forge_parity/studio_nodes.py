@@ -222,20 +222,77 @@ class AIStudioPromptEncode:
         return (combined,)
 
 
+def _ui_node(class_name: str, widget: str, description: str) -> type:
+    """A node the studio JS draws as a DOM widget: one hidden, socketless STRING (its saved state), no outputs.
+
+    Not an output node and nothing reads it, so ComfyUI never executes or validates it.
+    """
+
+    def input_types(cls):
+        return {"required": {widget: ("STRING", {"default": "{}", "hidden": True, "socketless": True})}}
+
+    return type(class_name, (), {
+        "INPUT_TYPES": classmethod(input_types),
+        "RETURN_TYPES": (),
+        "FUNCTION": "noop",
+        "OUTPUT_NODE": False,
+        "CATEGORY": CATEGORY,
+        "DESCRIPTION": description,
+        "noop": lambda self, **_: (),
+    })
+
+
+AIStudioPanel = _ui_node("AIStudioPanel", "state", "Anima studio control panel (drawn by the studio JS; never runs).")
+AIStudioResultView = _ui_node("AIStudioResultView", "view", "Anima studio result / gallery view (drawn by the studio JS).")
+AIStudioXYZView = _ui_node("AIStudioXYZView", "xyz", "Anima studio X/Y/Z plot panel (drawn by the studio JS).")
+
+
+class AIStudioSwitch:
+    """Passes ``a`` (select 0) or ``b`` (select 1); only the selected input is evaluated (lazy), so the other model
+    family's loaders never run."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {"select": ("INT", {"default": 0, "min": 0, "max": 1})},
+            "optional": {"a": ("*", {"lazy": True}), "b": ("*", {"lazy": True})},
+        }
+
+    RETURN_TYPES = ("*",)
+    FUNCTION = "switch"
+    CATEGORY = CATEGORY
+    DESCRIPTION = "Outputs input a (select 0) or b (select 1); the other input is not evaluated."
+
+    def check_lazy_status(self, select, a=None, b=None):
+        return ["b"] if int(select) == 1 else ["a"]
+
+    def switch(self, select, a=None, b=None):
+        return (b if int(select) == 1 else a,)
+
+
 NODE_CLASS_MAPPINGS = {
     "AIStudioLoraStack": AIStudioLoraStack,
     "AIStudioSaveForge": AIStudioSaveForge,
     "AIStudioUpscaleImage": AIStudioUpscaleImage,
     "AIStudioPromptEncode": AIStudioPromptEncode,
+    "AIStudioPanel": AIStudioPanel,
+    "AIStudioResultView": AIStudioResultView,
+    "AIStudioXYZView": AIStudioXYZView,
+    "AIStudioSwitch": AIStudioSwitch,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "AIStudioLoraStack": "AI Studio LoRA Stack",
     "AIStudioSaveForge": "AI Studio Save (Forge info)",
     "AIStudioUpscaleImage": "AI Studio Upscale Image",
     "AIStudioPromptEncode": "AI Studio Prompt Encode (Forge syntax)",
+    "AIStudioPanel": "AI Studio Panel",
+    "AIStudioResultView": "AI Studio Result View",
+    "AIStudioXYZView": "AI Studio XYZ View",
+    "AIStudioSwitch": "AI Studio Switch",
 }
 
 __all__ = [
-    "AIStudioLoraStack", "AIStudioPromptEncode", "AIStudioSaveForge", "AIStudioUpscaleImage",
+    "AIStudioLoraStack", "AIStudioPanel", "AIStudioPromptEncode", "AIStudioResultView", "AIStudioSaveForge",
+    "AIStudioSwitch", "AIStudioUpscaleImage", "AIStudioXYZView",
     "NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS",
 ]

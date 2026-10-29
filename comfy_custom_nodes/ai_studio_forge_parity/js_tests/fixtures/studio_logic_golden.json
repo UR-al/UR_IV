@@ -1,0 +1,265 @@
+{
+  "_comment": "Shared golden cases: tests/test_studio_logic_golden.py (Python) and js_tests/studio_logic.test.mjs (JS) both assert against this file.",
+  "default_state": {
+    "version": 1,
+    "tab": "t2i",
+    "i2i_mode": "img2img",
+    "prompt": "",
+    "negative": "",
+    "unet": "",
+    "te": "",
+    "vae": "",
+    "sampler": "exp_heun_2_x0_sde",
+    "scheduler": "flow_cosmos_dynamic",
+    "steps": 32,
+    "cfg": 3.0,
+    "shift": 3.0,
+    "seed": -1,
+    "width": 832,
+    "height": 1216,
+    "batch": 1,
+    "loras": [],
+    "dora_mode": "LyCORIS fp32 (as trained)",
+    "forge_like": {
+      "master": true,
+      "noise": true,
+      "prompt_syntax": true,
+      "dora": true,
+      "attention": false
+    },
+    "hires": {
+      "on": false,
+      "upscaler": "4x-UltraSharp.pth",
+      "sampler": "",
+      "scale": 1.5,
+      "steps": 16,
+      "denoise": 0.4
+    },
+    "upscale": {
+      "on": false,
+      "model": "",
+      "scale": 2.0
+    },
+    "sam3": {
+      "on": false,
+      "checkpoint": "",
+      "prompt": "face",
+      "denoise": 0.4,
+      "steps": 0,
+      "cfg": 0.0
+    },
+    "i2i": {
+      "image": "",
+      "denoise": 0.55,
+      "mask_blur": 4,
+      "inpaint_area": "masked"
+    }
+  },
+  "effective_prompt": [
+    {
+      "state": {
+        "prompt": "1girl",
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 1.0
+          }
+        ]
+      },
+      "expected": "1girl <lora:meow:1>"
+    },
+    {
+      "state": {
+        "prompt": "1girl <lora:meow:0.7>",
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 1.0
+          },
+          {
+            "on": true,
+            "name": "enaa97 V2",
+            "strength": 0.9
+          }
+        ]
+      },
+      "expected": "1girl <lora:meow:0.7> <lora:enaa97 V2:0.9>"
+    },
+    {
+      "state": {
+        "prompt": "<lora:meow> 1girl",
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.5
+          }
+        ]
+      },
+      "expected": "<lora:meow> 1girl"
+    },
+    {
+      "state": {
+        "prompt": "1girl",
+        "loras": [
+          {
+            "on": false,
+            "name": "meow",
+            "strength": 1.0
+          },
+          {
+            "on": true,
+            "name": "",
+            "strength": 1.0
+          },
+          {
+            "name": "bjunbae",
+            "strength": 0.6
+          }
+        ]
+      },
+      "expected": "1girl <lora:bjunbae:0.6>"
+    },
+    {
+      "state": {
+        "prompt": "",
+        "loras": [
+          {
+            "on": true,
+            "name": "a",
+            "strength": 0.30000000000000004
+          }
+        ]
+      },
+      "expected": "<lora:a:0.3>"
+    },
+    {
+      "state": {
+        "prompt": "x",
+        "loras": [
+          {
+            "on": true,
+            "name": "s1",
+            "strength": 1e-05
+          },
+          {
+            "on": true,
+            "name": "s2",
+            "strength": 0.0001
+          },
+          {
+            "on": true,
+            "name": "s3",
+            "strength": -0.5
+          },
+          {
+            "on": true,
+            "name": "s4",
+            "strength": 10
+          },
+          {
+            "on": true,
+            "name": "s5",
+            "strength": 1.25
+          },
+          {
+            "on": true,
+            "name": "s6",
+            "strength": 0.123456789
+          }
+        ]
+      },
+      "expected": "x <lora:s1:1e-05> <lora:s2:0.0001> <lora:s3:-0.5> <lora:s4:10> <lora:s5:1.25> <lora:s6:0.123457>"
+    },
+    {
+      "state": {
+        "prompt": "x",
+        "loras": [
+          {
+            "on": true,
+            "name": "dup",
+            "strength": 1.0
+          },
+          {
+            "on": true,
+            "name": "dup",
+            "strength": 0.5
+          }
+        ]
+      },
+      "expected": "x <lora:dup:1> <lora:dup:0.5>"
+    },
+    {
+      "state": {
+        "prompt": "<LORA:Meow:1> x",
+        "loras": [
+          {
+            "on": true,
+            "name": "Meow",
+            "strength": 0.8
+          }
+        ]
+      },
+      "expected": "<LORA:Meow:1> x <lora:Meow:0.8>"
+    },
+    {
+      "state": {
+        "prompt": "no loras",
+        "loras": []
+      },
+      "expected": "no loras"
+    }
+  ],
+  "unet_family": [
+    {
+      "name": "anima-preview2.safetensors",
+      "expected": "2.9b"
+    },
+    {
+      "name": "anima_3.8b_v2.safetensors",
+      "expected": "3.8b"
+    },
+    {
+      "name": "Anima-3_8B-bundle.safetensors",
+      "expected": "3.8b"
+    },
+    {
+      "name": "anima38b.safetensors",
+      "expected": "3.8b"
+    },
+    {
+      "name": "anima-base-v1.safetensors",
+      "expected": "base"
+    },
+    {
+      "name": "my_ep38_lora_merge.safetensors",
+      "expected": "2.9b"
+    },
+    {
+      "name": "anima-3-8B.safetensors",
+      "expected": "3.8b"
+    }
+  ],
+  "infotext": {
+    "state": {
+      "prompt": "1girl, solo",
+      "negative": "worst quality, lowres",
+      "unet": "anima/anima-preview2.safetensors",
+      "vae": "qwen_image_vae.safetensors",
+      "loras": [
+        {
+          "on": true,
+          "name": "meow",
+          "strength": 1.0
+        }
+      ],
+      "hires": {
+        "on": true
+      }
+    },
+    "seed": 42,
+    "text": "1girl, solo <lora:meow:1>\nNegative prompt: worst quality, lowres\nSteps: 32, Sampler: EXP Heun 2 x0 SDE, Schedule type: Flow Cosmos Dynamic, CFG scale: 3, Shift: 3, Seed: 42, Size: 832x1216, Model: anima-preview2, VAE: qwen_image_vae, Denoising strength: 0.4, Hires upscale: 1.5, Hires steps: 16, Hires upscaler: 4x-UltraSharp"
+  }
+}
