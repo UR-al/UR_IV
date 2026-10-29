@@ -457,7 +457,8 @@ def build_workflow() -> dict:
         "links": links,
         "groups": groups,
         "config": {},
-        "extra": {"ds": {"scale": 1, "offset": [40, 60]}},
+        # 0.9: the three C4 columns (790 + 680 + 400 px, 960 px tall) fit ComfyUI at 1920x1080 (at 1 they are cut off)
+        "extra": {"ds": {"scale": 0.9, "offset": [40, 60]}},
         "version": 0.4,
     }
 

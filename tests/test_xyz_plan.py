@@ -333,5 +333,36 @@ class SerializationTests(unittest.TestCase):
         self.assertEqual(set(data), {"cells", "order", "labels", "fixed", "infotext_extra", "errors"})
 
 
+
+class LoraCheckTests(unittest.TestCase):
+    """A <lora:...> tag of any cell that matches no file is an error before anything is queued (final review I5)."""
+
+    AXES = _axes(("prompt_sr", "na-e10, na-e14, na-e18"))
+
+    def test_mistyped_epoch_is_named(self):
+        plan = _plan({"prompt": "1boy <lora:na-e10:1>"}, self.AXES)  # no loras= : no check (pure planner use)
+        self.assertEqual(plan.errors, [])
+        plan = xp.plan_xyz({"prompt": "1boy <lora:na-e10:1>"}, self.AXES, OPTIONS, rng=random.Random(0),
+                           families=FAMILIES, loras=["na-e10.safetensors", "sub/NA-E18.safetensors"])
+        self.assertEqual((plan.cells, plan.errors), ([], ["LoRA not found: na-e14"]))
+
+    def test_list_loras_and_negative_tags_are_checked(self):
+        state = {"prompt": "x", "negative": "<lora:neg:1>", "loras": [{"on": True, "name": "listed", "strength": 1}]}
+        plan = xp.plan_xyz(state, _axes(("cfg", "1, 2")), OPTIONS, rng=random.Random(0), families=FAMILIES,
+                           loras=["neg.safetensors"])
+        self.assertEqual(plan.errors, ["LoRA not found: listed"])
+
+    def test_list_is_read_only_when_a_cell_has_a_tag(self):
+        def unreadable():
+            raise OSError("no folder")
+
+        plan = xp.plan_xyz({"prompt": "plain"}, _axes(("cfg", "1, 2")), OPTIONS, rng=random.Random(0),
+                           families=FAMILIES, loras=unreadable)
+        self.assertEqual((len(plan.cells), plan.errors), (2, []))
+        plan = xp.plan_xyz({"prompt": "<lora:a:1>"}, _axes(("cfg", "1, 2")), OPTIONS, rng=random.Random(0),
+                           families=FAMILIES, loras=unreadable)
+        self.assertEqual(plan.cells, [])
+        self.assertEqual(plan.errors, ["LoRA list could not be read: no folder"])
+
 if __name__ == "__main__":
     unittest.main()

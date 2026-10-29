@@ -139,6 +139,13 @@ class WorkflowFileTests(unittest.TestCase):
             with self.subTest(node=node["id"]):
                 self.assertIn(node["type"], known)
 
+    def test_opens_zoomed_to_fit_1920x1080(self):
+        # spec section 7: the workflow opens in the C4 layout; at scale 1 the three columns (790 + 680 + 400 px,
+        # 960 px tall) are cut off inside ComfyUI's chrome at 1920x1080 (final review M2), 0.9 fits.
+        scale = self.workflow["extra"]["ds"]["scale"]
+        self.assertTrue(0.85 <= scale <= 0.9, scale)
+        self.assertLessEqual((790 + 680 + 400) * scale + self.workflow["extra"]["ds"]["offset"][0], 1920 - 120)
+
     def test_links_consistent(self):
         workflow = self.workflow
         ids = [link[0] for link in workflow["links"]]

@@ -4,6 +4,8 @@
 // Pure ES module without side effects (ComfyUI also loads every .js under web/ as an extension).
 import {
   applyStateToPrompt,
+  missingLoras,
+  missingPicks,
   postPrompt,
   postRunState,
   recordFromParameters,
@@ -30,6 +32,7 @@ export const NOTICES = Object.freeze({
   noInfo: "이 이미지엔 생성 정보가 없음",
   noCells: "격자로 만들 이미지가 없음",
   failed: "실행 오류",
+  noLora: "LoRA 없음 (빼고 생성)",
 });
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -62,10 +65,15 @@ function imageSeed(state, index) {
 
 const POST_SETTINGS = Object.freeze(["hires", "upscale", "sam3"]);
 
-/** 같은 시드's state: the record's settings (seed included) with the current post-processing sections as they are, batch 1. */
+/**
+ * 같은 시드's state: the record's settings (seed included) with the current post-processing sections as they are,
+ * batch 1. A record read from PNG `parameters` has no tab: it regenerates as t2i, never as img2img over whatever
+ * the panel's i2i box holds now.
+ */
 function sameSeedState(record, currentState) {
   const current = withDefaults(currentState);
   const state = postRunState(record, current, null);
+  if (!record?.tab) state.tab = "t2i";
   for (const section of POST_SETTINGS) state[section] = { ...current[section] };
   state.batch = 1; // the picked image only
   return state;
@@ -78,18 +86,20 @@ export class RunController {
    * `deps`: `api` (ComfyUI api: queuePrompt, interrupt, deleteItem, addEventListener), `basePrompt(modes)` (graphToPrompt
    * with those node modes -> `{output, workflow}`), `roleIds()`, `getState()`, `getXyz()` (`{on, axes, options}`),
    * `route(path, body)` (studio route JSON; throws on an HTTP error), `readParameters(imageRef)` (PNG `parameters` or
-   * null), `families()`, `upscalers()`, `emit(type, payload)` for the views, `now()` (ms).
+   * null), `families()`, `upscalers()`, `loras()` (LoRA file list or undefined), `emit(type, payload)` for the views,
+   * `now()` (ms).
    */
   constructor(deps) {
     this.deps = deps;
     this.job = null;
+    this.starting = false; // claimed by a run that is still awaiting its plan / PNG read (see claim())
     this.early = new Map();
     this.progressBase = null;
     for (const name of EVENTS) deps.api.addEventListener(name, (event) => this.handleEvent(name, event?.detail));
   }
 
   get running() {
-    return this.job !== null;
+    return this.job !== null || this.starting;
   }
 
   /** Resolves when the current run (if any) has finished, its grid included. */
@@ -121,22 +131,48 @@ export class RunController {
     return { output: applyStateToPrompt(base.output, this.deps.roleIds(), state, options), workflow: base.workflow };
   }
 
+  /**
+   * Runs `work` with the controller claimed: a second 생성 / gallery click while the first one still awaits its
+   * plan or PNG read gets the busy notice instead of starting a second job (which would orphan the first). The
+   * claim is released when `work` returns; by then run() has set `this.job` (or nothing was started).
+   */
+  async claim(work) {
+    if (this.running) return this.notice(NOTICES.busy);
+    this.starting = true;
+    try {
+      return await work();
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  /** A notice for the run's `<lora:…>` tags that match no LoRA file (the LoRA node skips them); never blocks. */
+  warnMissingLoras(state) {
+    const missing = missingLoras(state, this.deps.loras?.());
+    if (missing.length) this.notice(`${NOTICES.noLora}: ${missing.join(", ")}`);
+  }
+
   /** 생성: the X/Y/Z plot when its panel is on (R17), else one generation of the panel state. */
-  async generate() {
-    if (this.job) return this.notice(NOTICES.busy);
-    if (this.deps.getXyz?.()?.on) return this.generateXyz();
-    return this.run("single", 1, async (job) => {
-      const prompt = await this.panelPrompt();
-      await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
+  generate() {
+    return this.claim(() => {
+      const state = this.deps.getState();
+      const missing = missingPicks(state);
+      if (missing) return this.notice(missing);
+      if (this.deps.getXyz?.()?.on) return this.generateXyz(state);
+      this.warnMissingLoras(state);
+      return this.run("single", 1, async (job) => {
+        const prompt = await this.panelPrompt(state);
+        await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
+      });
     });
   }
 
-  async generateXyz() {
-    if (this.job) return this.notice(NOTICES.busy);
+  /** The X/Y/Z run (called by generate() with the controller claimed); the planner checks the cells' LoRAs. */
+  async generateXyz(state) {
     const xyz = this.deps.getXyz?.() || {};
     let plan;
     try {
-      plan = await this.deps.route("/xyz/plan", { state: this.deps.getState(), axes: xyz.axes || [], options: xyz.options || {} });
+      plan = await this.deps.route("/xyz/plan", { state, axes: xyz.axes || [], options: xyz.options || {} });
     } catch (error) {
       return this.notice(errorText(error));
     }
@@ -173,17 +209,24 @@ export class RunController {
   }
 
   /** Gallery 업스케일 / Hires / SAM3 on one image: its own settings, the current post-processing settings (spec §4). */
-  async runPost(action, item) {
-    if (this.job) return this.notice(NOTICES.busy);
+  runPost(action, item) {
+    return this.claim(() => this.startPost(action, item));
+  }
+
+  async startPost(action, item) {
     if (!item?.image) return this.notice(NOTICES.noImage);
     const flat = await this.imageRecord(item);
     if (!flat) return this.notice(NOTICES.noInfo);
     const record = { ...flat, image: item.image };
+    const current = this.deps.getState();
+    const runState = postRunState(record, current, action);
+    const missing = missingPicks(runState, action);
+    if (missing) return this.notice(missing);
+    if (action !== "upscale") this.warnMissingLoras(runState);
     return this.run("post", 1, async (job) => {
-      const current = this.deps.getState();
       const options = this.options();
       const roleIds = this.deps.roleIds();
-      const base = await this.deps.basePrompt(stageModes(postRunState(record, current, action), action, options));
+      const base = await this.deps.basePrompt(stageModes(runState, action, options));
       const { prompt, outputNodeIds } = postPrompt(base.output, roleIds, record, action, current, options);
       const data = { output: prompt, workflow: base.workflow };
       await this.queueSlot(job, 0, data, { partialExecutionTargets: outputNodeIds }, String(roleIds.post_save));
@@ -194,17 +237,21 @@ export class RunController {
    * 같은 시드 on one image (spec §3.2): generate it again right away — its own settings and seed (session record,
    * else PNG `parameters`), the current post-processing settings, one image, never the X/Y/Z plot.
    */
-  async sameSeed(item) {
-    if (this.job) return this.notice(NOTICES.busy);
-    if (!item?.image) return this.notice(NOTICES.noImage);
-    const record = await this.imageRecord(item);
-    if (!record) return this.notice(NOTICES.noInfo);
-    if (this.job) return this.notice(NOTICES.busy); // started while the PNG was read
-    const result = await this.run("single", 1, async (job) => {
-      const prompt = await this.panelPrompt(sameSeedState(record, this.deps.getState()));
-      await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
+  sameSeed(item) {
+    return this.claim(async () => {
+      if (!item?.image) return this.notice(NOTICES.noImage);
+      const record = await this.imageRecord(item);
+      if (!record) return this.notice(NOTICES.noInfo);
+      const state = sameSeedState(record, this.deps.getState());
+      const missing = missingPicks(state);
+      if (missing) return this.notice(missing);
+      this.warnMissingLoras(state);
+      const result = await this.run("single", 1, async (job) => {
+        const prompt = await this.panelPrompt(state);
+        await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
+      });
+      return result.queued ? { ...result, seed: record.seed } : result;
     });
-    return result.queued ? { ...result, seed: record.seed } : result;
   }
 
   /**

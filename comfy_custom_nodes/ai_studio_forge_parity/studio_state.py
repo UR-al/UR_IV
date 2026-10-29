@@ -38,7 +38,9 @@ DEFAULT_STATE: dict = {
     "hires": {"on": False, "upscaler": "4x-UltraSharp.pth", "sampler": "", "scale": 1.5, "steps": 16, "denoise": 0.4},
     "upscale": {"on": False, "model": "", "scale": 2.0},
     "sam3": {"on": False, "checkpoint": "", "prompt": "face", "denoise": 0.4, "steps": 0, "cfg": 0.0},
-    "i2i": {"image": "", "denoise": 0.55, "mask_blur": 4, "inpaint_area": "masked"},
+    # inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture); the panel shows
+    # "전체" greyed out (studio_forge_parity.md), the key keeps the saved shape.
+    "i2i": {"image": "", "denoise": 0.55, "mask_blur": 4, "inpaint_area": "whole"},
 }
 
 _ENUMS = {

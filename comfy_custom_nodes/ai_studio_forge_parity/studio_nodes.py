@@ -18,12 +18,10 @@ LOGGER = logging.getLogger("ai_studio_forge_parity")
 
 
 def _available_loras() -> list[str]:
+    """ComfyUI's LoRA file list.  A folder error is raised, not turned into "no LoRA found" for every tag."""
     from .compat import folder_paths_module
 
-    try:
-        return list(folder_paths_module().get_filename_list("loras"))
-    except Exception:
-        return []
+    return list(folder_paths_module().get_filename_list("loras"))
 
 
 class AIStudioLoraStack:
@@ -115,7 +113,9 @@ class AIStudioSaveForge:
 
         from .compat import folder_paths_module
 
-        infotext = build_infotext(_parse_state(studio_state), seed=int(seed))
+        state = _parse_state(studio_state)
+        # Forge-like noise drew image i of a batch from seed + i, and Forge writes each image's own seed.
+        per_image = state["forge_like"]["master"] and state["forge_like"]["noise"]
         folder_paths = folder_paths_module()
         full_folder, stem, counter, subfolder, _ = folder_paths.get_save_image_path(
             filename_prefix, folder_paths.get_output_directory(), images[0].shape[1], images[0].shape[0]
@@ -123,7 +123,8 @@ class AIStudioSaveForge:
         results = []
         for batch_index, image in enumerate(images):
             pnginfo = PngImagePlugin.PngInfo()
-            pnginfo.add_text("parameters", infotext)
+            image_seed = int(seed) + batch_index if per_image else int(seed)
+            pnginfo.add_text("parameters", build_infotext(state, seed=image_seed))
             if prompt is not None:
                 pnginfo.add_text("prompt", json.dumps(prompt))
             for key, value in (extra_pnginfo or {}).items():

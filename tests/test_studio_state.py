@@ -71,7 +71,7 @@ class StudioStateTests(unittest.TestCase):
                                   "i2i": {"inpaint_area": "whole"}})
         self.assertEqual((out["sampler"], out["tab"], out["i2i_mode"]), ("euler", "i2i", "inpaint"))
         self.assertEqual(out["i2i"]["inpaint_area"], "whole")
-        self.assertEqual(ss.normalize_state({"i2i": {"inpaint_area": "x"}})["i2i"]["inpaint_area"], "masked")
+        self.assertEqual(ss.normalize_state({"i2i": {"inpaint_area": "x"}})["i2i"]["inpaint_area"], "whole")
 
     def test_nested_unknown_keys_dropped_and_partial_filled(self):
         out = ss.normalize_state({"hires": {"on": True, "scale": 2, "zzz": 1}, "forge_like": {"attention": True, "q": 1},

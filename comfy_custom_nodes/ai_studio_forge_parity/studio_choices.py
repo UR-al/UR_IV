@@ -77,6 +77,15 @@ def unet_families(names=None, bundle_names=None) -> dict:
     return {name: unet_family(name, bundle) for name in names}
 
 
+def lora_names(folder_paths=None) -> list[str]:
+    """ComfyUI's LoRA file list.  Unlike the picker lists this raises when the list cannot be read, so the planner
+    does not report every ``<lora:...>`` tag as a missing file."""
+    folder_paths = folder_paths if folder_paths is not None else _folder_paths()
+    if folder_paths is None:
+        raise RuntimeError("ComfyUI folder_paths is not available")
+    return list(folder_paths.get_filename_list("loras"))
+
+
 # ------------------------------------------------------------------------------------------------- SAM3 files
 
 def _forge_sam3_directories(base_path: str) -> list[str]:

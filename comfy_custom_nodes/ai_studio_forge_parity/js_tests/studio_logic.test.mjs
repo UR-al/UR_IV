@@ -6,8 +6,13 @@ import { test } from "node:test";
 
 import {
   DEFAULT_STATE,
+  PICK_NOTICES,
   applyStateToPrompt,
+  defaultModel,
   effectivePrompt,
+  imageSize,
+  missingLoras,
+  missingPicks,
   postPrompt,
   postRunState,
   recordFromParameters,
@@ -483,4 +488,62 @@ test("xyzCellPrompts follows plan order", () => {
   assert.deepEqual(prompts.map((p) => inputs(p.prompt, roleIds, "sampler").cfg), [5, 3, 4]);
   assert.ok(prompts.every((p) => inputs(p.prompt, roleIds, "sampler").seed === 77));
   assert.notEqual(prompts[0].prompt, prompts[1].prompt);
+});
+
+// ---------------------------------------------------------------------------------------------- final fix wave
+
+test("missingLoras matches Python's missing_loras (the planner's LoRA check)", () => {
+  for (const testCase of golden.missing_loras) {
+    assert.deepEqual(missingLoras(testCase.state, testCase.available), testCase.missing, JSON.stringify(testCase.state));
+  }
+  assert.deepEqual(missingLoras({ prompt: "<lora:x:1>" }, undefined), []); // list not loaded: no claim
+});
+
+test("defaultModel picks an Anima 2.9B UNET, the Qwen3 0.6B TE and the Qwen-Image VAE", () => {
+  const unets = ["3d.safetensors", "anima-3.8b.safetensors", "anima-base.safetensors", "Anima-preview2.safetensors"];
+  assert.equal(defaultModel("unets", unets, {}), "Anima-preview2.safetensors");
+  assert.equal(defaultModel("unets", ["anima-x.safetensors"], { "anima-x.safetensors": "3.8b" }), "");
+  assert.equal(defaultModel("tes", ["Anima-3.8B-expanded_adapter.safetensors", "t5.safetensors", "qwen_3_06b_base.safetensors"]),
+    "qwen_3_06b_base.safetensors");
+  assert.equal(defaultModel("tes", ["qwen3-0.6b.safetensors"]), "qwen3-0.6b.safetensors");
+  assert.equal(defaultModel("vaes", ["ae.safetensors", "anima_vae.safetensors", "qwen_image_vae.safetensors"]), "qwen_image_vae.safetensors");
+  assert.equal(defaultModel("vaes", ["ae.safetensors", "anima_vae.safetensors"]), "anima_vae.safetensors");
+  assert.equal(defaultModel("vaes", ["ae.safetensors"]), "");
+  assert.equal(defaultModel("loras", ["anima.safetensors"]), "");
+  assert.equal(defaultModel("unets", undefined), "");
+});
+
+test("missingPicks refuses empty model picks, and 업스케일 without a model", () => {
+  const picked = { unet: "a.safetensors", te: "t.safetensors", vae: "v.safetensors" };
+  assert.equal(missingPicks(picked), "");
+  assert.equal(missingPicks(DEFAULT_STATE), PICK_NOTICES.models);
+  assert.equal(missingPicks({ ...picked, te: "" }), PICK_NOTICES.models);
+  assert.equal(missingPicks({ ...picked, upscale: { on: true, model: "" } }), PICK_NOTICES.upscale);
+  assert.equal(missingPicks({ ...picked, upscale: { on: true, model: "4x.pth" } }), "");
+  assert.equal(missingPicks({ upscale: { model: "4x.pth" } }, "upscale"), ""); // a post upscale needs only its model
+  assert.equal(missingPicks({ ...picked }, "upscale"), PICK_NOTICES.upscale);
+  assert.equal(missingPicks({ ...picked, vae: "" }, "hires"), PICK_NOTICES.models);
+});
+
+test("imageSize: an i2i image's size, rounded to 8 and kept in 64..4096", () => {
+  assert.deepEqual(imageSize(1248, 1824), { width: 1248, height: 1824 });
+  assert.deepEqual(imageSize(1023, 1021), { width: 1024, height: 1024 });
+  assert.deepEqual(imageSize(10, 9000), { width: 64, height: 4096 });
+  assert.equal(imageSize(undefined, 512), null);
+  assert.equal(imageSize(0, 512), null);
+  assert.equal(imageSize("x", 512), null);
+});
+
+test("i2i runs at the state's size (the image's, once sent) and inpaint_area maps to no input", () => {
+  const { prompt: api, roleIds } = studioPrompt();
+  const base = { tab: "i2i", i2i_mode: "inpaint", width: 1248, height: 1824 };
+  const prompt = (area) => applyStateToPrompt(api, roleIds, { ...base, i2i: { image: "a.png", inpaint_area: area } }, { rng: fixedRng });
+  const latent = inputs(prompt("whole"), roleIds, "latent");
+  assert.deepEqual([latent.mode, latent.width, latent.height], ["inpaint", 1248, 1824]);
+  const withoutSavedState = (out) => {
+    delete out[roleIds.save].inputs.studio_state; // the PNG's saved state is the only place the value shows up
+    return out;
+  };
+  assert.deepEqual(withoutSavedState(prompt("masked")), withoutSavedState(prompt("whole"))); // the greyed setting changes nothing
+  assert.equal(DEFAULT_STATE.i2i.inpaint_area, "whole"); // and the panel says so (Forge's default too)
 });

@@ -52,7 +52,7 @@
       "image": "",
       "denoise": 0.55,
       "mask_blur": 4,
-      "inpaint_area": "masked"
+      "inpaint_area": "whole"
     }
   },
   "effective_prompt": [
@@ -261,5 +261,89 @@
     },
     "seed": 42,
     "text": "1girl, solo <lora:meow:1>\nNegative prompt: worst quality, lowres\nSteps: 32, Sampler: EXP Heun 2 x0 SDE, Schedule type: Flow Cosmos Dynamic, CFG scale: 3, Shift: 3, Seed: 42, Size: 832x1216, Model: anima-preview2, VAE: qwen_image_vae, Denoising strength: 0.4, Hires upscale: 1.5, Hires steps: 16, Hires upscaler: 4x-UltraSharp"
-  }
+  },
+  "missing_loras": [
+    {
+      "state": {
+        "prompt": "1girl <lora:na-e10:1> <lora:na-e11:0.5>"
+      },
+      "available": [
+        "meow.safetensors",
+        "sub\\na-e10.safetensors",
+        "Styles/Ink.pt",
+        "na-e100.safetensors"
+      ],
+      "missing": [
+        "na-e11"
+      ]
+    },
+    {
+      "state": {
+        "prompt": "<lora:MEOW.safetensors:0.7> <lora:ink:1:0.5> <hypernet:x:1>"
+      },
+      "available": [
+        "meow.safetensors",
+        "sub\\na-e10.safetensors",
+        "Styles/Ink.pt",
+        "na-e100.safetensors"
+      ],
+      "missing": []
+    },
+    {
+      "state": {
+        "prompt": "x",
+        "loras": [
+          {
+            "on": true,
+            "name": "gone",
+            "strength": 1.0
+          },
+          {
+            "on": false,
+            "name": "off",
+            "strength": 1.0
+          }
+        ]
+      },
+      "available": [
+        "meow.safetensors",
+        "sub\\na-e10.safetensors",
+        "Styles/Ink.pt",
+        "na-e100.safetensors"
+      ],
+      "missing": [
+        "gone"
+      ]
+    },
+    {
+      "state": {
+        "prompt": "<lora:na-e1:1> <lora: :1>",
+        "negative": "<lora:neg:1> <LORA:upper:1>"
+      },
+      "available": [
+        "meow.safetensors",
+        "sub\\na-e10.safetensors",
+        "Styles/Ink.pt",
+        "na-e100.safetensors"
+      ],
+      "missing": [
+        "na-e1",
+        "neg"
+      ]
+    },
+    {
+      "state": {
+        "prompt": "<lora:sub/na-e10:te=0.5> <lora:e10:1>"
+      },
+      "available": [
+        "meow.safetensors",
+        "sub\\na-e10.safetensors",
+        "Styles/Ink.pt",
+        "na-e100.safetensors"
+      ],
+      "missing": [
+        "e10"
+      ]
+    }
+  ]
 }

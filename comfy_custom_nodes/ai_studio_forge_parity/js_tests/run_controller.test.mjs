@@ -90,7 +90,10 @@ function plan2x2(stateOf = () => ({})) {
   };
 }
 
-function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {} } = {}) {
+// The panel's model picks (missingPicks refuses a run while any is empty).
+const PICKS = { unet: "anima-2.9b.safetensors", te: "qwen_3_06b_base.safetensors", vae: "qwen_image_vae.safetensors" };
+
+function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined } = {}) {
   const api = new FakeApi();
   const emitted = [];
   const routes = [];
@@ -100,10 +103,11 @@ function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state
     api,
     basePrompt: fakeBasePrompt(baseCalls),
     roleIds: () => ROLE_IDS,
-    getState: () => withDefaults({ ...structuredClone(DEFAULT_STATE), ...state }),
+    getState: () => withDefaults({ ...structuredClone(DEFAULT_STATE), ...PICKS, ...state }),
     getXyz: () => xyz,
     route: async (path, body) => {
       routes.push([path, body]);
+      if (route) return route(path, body);
       if (path === "/xyz/plan") return plan;
       if (path === "/xyz/grid") return { grid: ref("xyz_grid_00001.png"), subgrids: [] };
       throw new Error(`unexpected route ${path}`);
@@ -114,6 +118,7 @@ function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state
     },
     families: () => ({}),
     upscalers: () => undefined,
+    loras: () => loras,
     emit: (type, payload) => emitted.push([type, payload]),
     now: () => 0,
   });
@@ -271,7 +276,7 @@ test("generate queues the panel state with its stage modes and records each imag
   const { api, controller, emitted, baseCalls } = setup({ state: { seed: 7, batch: 2, steps: 20 } });
   const result = await controller.generate();
   assert.deepEqual(result, { queued: 1 });
-  assert.deepEqual(baseCalls, [stageModes(withDefaults({ seed: 7, batch: 2, steps: 20 }), null, { families: {} })]);
+  assert.deepEqual(baseCalls, [stageModes(withDefaults({ ...PICKS, seed: 7, batch: 2, steps: 20 }), null, { families: {} })]);
   const [{ data, number }] = api.queued;
   assert.equal(number, 0);
   assert.equal(data.output[ROLE_IDS.sampler].inputs.steps, 20);
@@ -355,8 +360,8 @@ test("post without record uses parameters", async () => {
 });
 
 test("post with a session record uses it, not the image's parameters", async () => {
-  const { api, controller, readCalls } = setup({ parameters: golden.infotext.text });
-  const state = withDefaults({ prompt: "from the session", seed: 9 });
+  const { api, controller, readCalls } = setup({ parameters: golden.infotext.text, state: { upscale: { model: "4x-UltraSharp.pth" } } });
+  const state = withDefaults({ ...PICKS, prompt: "from the session", seed: 9 });
   await controller.runPost("upscale", { image: ref("s.png"), record: { state, seed: 9 } });
   assert.deepEqual(readCalls, []);
   const [{ data }] = api.queued;
@@ -391,7 +396,7 @@ test("same seed regenerates the picked image's settings with the current post se
     sam3: { on: true, prompt: "hands" },
   };
   const { api, controller, emitted, routes, baseCalls, readCalls } = setup({ state: current, xyz: XYZ_ON });
-  const state = withDefaults({ prompt: "from the session", seed: 9, steps: 20, batch: 2, hires: { on: false, denoise: 0.7 } });
+  const state = withDefaults({ ...PICKS, prompt: "from the session", seed: 9, steps: 20, batch: 2, hires: { on: false, denoise: 0.7 } });
   const result = await controller.sameSeed({ image: ref("s.png"), record: { state, seed: 10 } });
   assert.deepEqual(result, { queued: 1, seed: 10 }); // studio_main puts the seed into the panel too
   assert.deepEqual(readCalls, []);
@@ -468,4 +473,120 @@ test("readPngText reads tEXt and iTXt (plain and compressed) chunks", async () =
   assert.equal(text.prompt, '{"1": {}}');
   assert.equal(text.workflow, "{}");
   assert.deepEqual(await readPngText(new ArrayBuffer(4)), {});
+});
+
+// ---------------------------------------------------------------------------------------------- final fix wave
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+test("a second 생성 while the X/Y/Z plan is still awaited gets the busy notice and starts no second job", async () => {
+  const plan = plan2x2();
+  const pending = deferred();
+  const { api, controller, routes, emitted } = setup({
+    xyz: XYZ_ON,
+    route: (path) => (path === "/xyz/plan" ? pending.promise : { grid: ref("xyz_grid_00001.png"), subgrids: [] }),
+  });
+  const first = controller.generate();
+  const second = await controller.generate(); // double-click / held Ctrl+Enter during the plan request
+  assert.equal(second.notice, "이미 생성 중");
+  assert.equal(controller.running, true);
+  pending.resolve(plan);
+  assert.deepEqual(await first, { queued: 4 });
+  assert.equal(routes.filter(([path]) => path === "/xyz/plan").length, 1);
+  assert.equal(api.queued.length, 4); // one job
+  for (const k of [0, 1, 2, 3]) finishCell(api, `p${k}`, `cell${plan.order[k]}.png`);
+  await controller.whenIdle();
+  assert.equal(controller.running, false);
+  assert.deepEqual(emittedOf(emitted, "running").map((e) => e.running), [true, false]);
+});
+
+test("a rejected plan releases the claim, so the next 생성 runs", async () => {
+  const plan = { cells: [], order: [], labels: {}, errors: ["Steps: no values"] };
+  const { controller } = setup({ plan, xyz: XYZ_ON });
+  assert.match((await controller.generate()).notice, /no values/);
+  assert.equal(controller.running, false);
+  assert.match((await controller.generate()).notice, /no values/); // not "이미 생성 중"
+});
+
+test("a second gallery click while the PNG is read gets the busy notice", async () => {
+  const pending = deferred();
+  const { api, controller } = setup({ parameters: () => pending.promise });
+  const first = controller.runPost("hires", { image: ref("old.png"), record: null });
+  assert.equal((await controller.runPost("sam3", { image: ref("old.png"), record: null })).notice, "이미 생성 중");
+  assert.equal((await controller.sameSeed({ image: ref("old.png"), record: null })).notice, "이미 생성 중");
+  assert.equal((await controller.generate()).notice, "이미 생성 중");
+  pending.resolve(golden.infotext.text);
+  assert.deepEqual(await first, { queued: 1 });
+  assert.equal(api.queued.length, 1);
+});
+
+test("an image without generation info releases the claim", async () => {
+  const { controller } = setup({ parameters: null });
+  assert.ok((await controller.runPost("hires", { image: ref("x.png"), record: null })).notice);
+  assert.equal(controller.running, false);
+  assert.deepEqual(await controller.generate(), { queued: 1 });
+});
+
+test("generate refuses empty model picks and 업스케일 without a model, with one notice", async () => {
+  for (const state of [{ unet: "" }, { te: "" }, { vae: "" }]) {
+    const { api, controller, emitted } = setup({ state });
+    assert.equal((await controller.generate()).notice, "체크포인트·TE·VAE 고르기");
+    assert.equal(api.queued.length, 0);
+    assert.deepEqual(emittedOf(emitted, "notice").map((n) => n.text), ["체크포인트·TE·VAE 고르기"]);
+    assert.equal(controller.running, false);
+  }
+  const upscale = setup({ state: { upscale: { on: true, model: "" } } });
+  assert.equal((await upscale.controller.generate()).notice, "업스케일 모델 고르기");
+  assert.equal(upscale.api.queued.length, 0);
+  const xyz = setup({ state: { vae: "" }, xyz: XYZ_ON });
+  assert.ok((await xyz.controller.generate()).notice);
+  assert.deepEqual(xyz.routes, []); // refused before the plan request
+});
+
+test("post runs refuse empty picks: 업스케일 needs only its model", async () => {
+  const session = { state: withDefaults({ ...PICKS, seed: 3 }), seed: 3 };
+  const noModel = setup();
+  assert.equal((await noModel.controller.runPost("upscale", { image: ref("a.png"), record: session })).notice, "업스케일 모델 고르기");
+  const upscaleOnly = setup({ state: { unet: "", te: "", vae: "", upscale: { model: "4x.pth" } } });
+  const record = { state: withDefaults({ seed: 3 }), seed: 3 }; // a session record without picks
+  assert.deepEqual(await upscaleOnly.controller.runPost("upscale", { image: ref("a.png"), record }), { queued: 1 });
+  const hires = setup({ state: { te: "" } });
+  assert.equal((await hires.controller.runPost("hires", { image: ref("a.png"), record })).notice, "체크포인트·TE·VAE 고르기");
+  assert.equal(hires.api.queued.length, 0);
+});
+
+test("a LoRA tag that matches no file gives a notice but still generates", async () => {
+  const loras = ["meow.safetensors", "sub/na-e10.safetensors"];
+  const { api, controller, emitted } = setup({
+    loras,
+    state: { prompt: "1girl <lora:na-e10:1> <lora:na-e11:0.5>", loras: [{ on: true, name: "Meow", strength: 1 }, { on: true, name: "gone", strength: 1 }] },
+  });
+  assert.deepEqual(await controller.generate(), { queued: 1 });
+  assert.equal(api.queued.length, 1);
+  assert.deepEqual(emittedOf(emitted, "notice").map((n) => n.text), ["LoRA 없음 (빼고 생성): na-e11, gone"]);
+  const quiet = setup({ loras: undefined, state: { prompt: "<lora:x:1>" } }); // list not loaded yet: no notice
+  await quiet.controller.generate();
+  assert.deepEqual(emittedOf(quiet.emitted, "notice"), []);
+});
+
+test("same seed on a PNG-only image regenerates as t2i even when the panel is on i2i", async () => {
+  const { api, controller, baseCalls } = setup({ parameters: golden.infotext.text, state: { tab: "i2i", i2i_mode: "inpaint", i2i: { image: "box.png" } } });
+  await controller.sameSeed({ image: ref("info.png"), record: null });
+  assert.equal(baseCalls[0].i2i_image, 4); // the i2i input is bypassed
+  const inputs = api.queued[0].data.output[ROLE_IDS.latent].inputs;
+  assert.equal(inputs.mode, "txt2img");
+  assert.equal(api.queued[0].data.output[ROLE_IDS.sampler].inputs.denoise, 1.0);
+  assert.equal(api.queued[0].data.output[ROLE_IDS.sampler].inputs.seed, 42);
+  // a session record keeps its own tab
+  finishCell(api, "p0", "x.png");
+  await controller.whenIdle();
+  const i2iRecord = { state: withDefaults({ ...PICKS, tab: "i2i", seed: 5, i2i: { image: "src.png" } }), seed: 5 };
+  await controller.sameSeed({ image: ref("s.png"), record: i2iRecord });
+  assert.equal(api.queued[1].data.output[ROLE_IDS.latent].inputs.mode, "img2img");
 });

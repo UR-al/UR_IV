@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"masked\"}}"
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}}"
       ]
     },
     {
@@ -2704,7 +2704,7 @@
         "aistudio_role": "save"
       },
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"masked\"}}",
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}}",
         0,
         "fixed",
         "AIStudio/anima"
@@ -3939,7 +3939,7 @@
         "aistudio_role": "post_save"
       },
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"masked\"}}",
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}}",
         0,
         "fixed",
         "AIStudio/anima"
@@ -4625,7 +4625,7 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 1,
+      "scale": 0.9,
       "offset": [
         40,
         60

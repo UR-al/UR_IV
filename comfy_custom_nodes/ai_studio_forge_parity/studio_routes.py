@@ -11,7 +11,7 @@ The routes (all JSON; a failure is ``{"error": ...}`` with status 400):
 - ``POST /xyz/plan``          ``{state, axes, options}`` -> the planned X/Y/Z cells (``xyz_plan``)
 - ``POST /xyz/grid``          generated cell images -> grid PNG(s) in ``output/AIStudio/xyz`` (``xyz_grid_draw``)
 - ``POST /open_output``       opens the output folder in the file manager (Windows only)
-- ``POST /to_input``          copies an output / temp / input image into the input folder
+- ``POST /to_input``          copies an output / temp / input image into the input folder (answer: name, width, height)
 
 Each ``handle_*`` is a pure function ``-> (status, dict)``; the aiohttp wrappers are thin.  An image is only ever
 named by ``{filename, subfolder, type}`` and must resolve inside ComfyUI's output, temp or input folder.
@@ -170,8 +170,9 @@ def handle_choices(query) -> tuple[int, dict]:
         return _error(str(exc))
 
 
-def handle_plan(body, *, families=None) -> tuple[int, dict]:
-    """Plan an X/Y/Z grid.  ``families`` (file -> "2.9b" | "base" | "3.8b") defaults to the installed UNET files.
+def handle_plan(body, *, families=None, loras=None) -> tuple[int, dict]:
+    """Plan an X/Y/Z grid.  ``families`` (file -> "2.9b" | "base" | "3.8b") defaults to the installed UNET files,
+    ``loras`` to ComfyUI's LoRA list (read only when a cell has a ``<lora:...>`` tag; a tag no file matches is an error).
 
     A plan the planner rejects (bad values, mixed families, ...) is still a 200 answer: ``cells`` is empty and
     ``errors`` lists the reasons.  400 is for a body that is not ``{state, axes, options}`` at all."""
@@ -186,7 +187,9 @@ def handle_plan(body, *, families=None) -> tuple[int, dict]:
         return _error(str(exc))
     if families is None:
         families = studio_choices.unet_families()
-    plan = xyz_plan.plan_xyz(state, axes, options, rng=random.Random(), families=families)
+    if loras is None:
+        loras = studio_choices.lora_names
+    plan = xyz_plan.plan_xyz(state, axes, options, rng=random.Random(), families=families, loras=loras)
     return 200, dataclasses.asdict(plan)
 
 
@@ -316,8 +319,23 @@ def handle_open_output(_body=None) -> tuple[int, dict]:
     return 200, {"path": path}
 
 
+def _image_size(path: Path) -> dict:
+    """``{"width", "height"}`` of an image file (read from its header), or ``{}`` when it cannot be read."""
+    from PIL import Image
+
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+    except (OSError, ValueError):
+        return {}
+    return {"width": int(width), "height": int(height)}
+
+
 def handle_to_input(body) -> tuple[int, dict]:
-    """Copy an output / temp image into the input folder; a taken name gets ``_1``, ``_2`` ... (never overwrites)."""
+    """Copy an output / temp image into the input folder; a taken name gets ``_1``, ``_2`` ... (never overwrites).
+
+    The answer carries the image's ``width`` / ``height`` too: like Forge's send-to buttons, the panel then runs
+    i2i / inpaint at the image's size, not the t2i size."""
     try:
         source = resolve_image(body)
         target_dir = _directory("input")
@@ -329,7 +347,7 @@ def handle_to_input(body) -> tuple[int, dict]:
                     shutil.copyfileobj(reader, writer)
             except FileExistsError:
                 continue
-            return 200, {"name": name}
+            return 200, {"name": name, **_image_size(target_dir / name)}
         raise _BadRequest("too many copies of this image")
     except _BadRequest as exc:
         return _error(str(exc))

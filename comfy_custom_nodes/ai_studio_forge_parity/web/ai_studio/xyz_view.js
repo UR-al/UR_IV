@@ -158,19 +158,32 @@ export class XyzView {
     clearTimeout(this.estimateTimer);
   }
 
-  /** Asks /xyz/plan (debounced) for the cell count or the planner's error (Forge-worded). */
+  /**
+   * Asks /xyz/plan (debounced) for the cell count or the planner's error (Forge-worded). Not while XYZ is off: the
+   * default X axis (Seed, empty, as in Forge) would show "Seed: no values" in a panel the user has not touched.
+   */
   refreshEstimate() {
     clearTimeout(this.estimateTimer);
+    if (!this.settings.on) {
+      this.estimate = "";
+      this.error = "";
+      this.renderEstimate();
+      return;
+    }
     this.estimateTimer = setTimeout(async () => {
       const { axes, options } = this.settings;
+      let error = "";
+      let estimate = "";
       try {
         const plan = await this.ctx.plan({ state: this.ctx.getState(), axes, options });
-        this.error = plan?.errors?.length ? plan.errors.join("\n") : "";
-        this.estimate = this.error ? "" : estimateText(axes, plan?.labels);
-      } catch (error) {
-        this.error = String(error?.message || error);
-        this.estimate = "";
+        error = plan?.errors?.length ? plan.errors.join("\n") : "";
+        estimate = error ? "" : estimateText(axes, plan?.labels);
+      } catch (failure) {
+        error = String(failure?.message || failure);
       }
+      if (!this.settings.on) return; // switched off while the request ran
+      this.error = error;
+      this.estimate = estimate;
       this.renderEstimate();
     }, ESTIMATE_DELAY_MS);
   }
@@ -203,7 +216,7 @@ export class XyzView {
     this.errorEl = h("div", { class: "ais-xyz-error", role: "status" });
     this.element.replaceChildren(
       h("div", { class: "ais-xh" }, h("span", {}, "XYZ 비교"),
-        pill(settings.on, () => this.set((s) => { s.on = !s.on; }, { rerender: true, estimate: false }), { title: "켜면 생성 버튼이 XYZ로 돈다" })),
+        pill(settings.on, () => this.set((s) => { s.on = !s.on; }, { rerender: true }), { title: "켜면 생성 버튼이 XYZ로 돈다" })),
       h("div", { class: "ais-xb" },
         settings.axes.map((_, index) => this.axisBlock(index)),
         h("div", { class: "ais-row ais-swaps" }, h("span", { class: "ais-label" }, "축 바꾸기"), h("span", { class: "ais-ctl" }, swap(0, 1), swap(1, 2), swap(0, 2))),

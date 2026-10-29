@@ -55,6 +55,19 @@ class LoraStackTests(unittest.TestCase):
         warnings = [line for line in logs.output if "ghost" in line]
         self.assertEqual(len(warnings), 1)
 
+    def test_unreadable_lora_folder_is_an_error_not_every_tag_missing(self):
+        def broken(kind):
+            raise OSError("drive gone")
+
+        node = studio_nodes.AIStudioLoraStack()
+        node._loader = _FakeLoader()
+        with mock.patch.dict(sys.modules, {"folder_paths": SimpleNamespace(get_filename_list=broken)}):
+            with self.assertRaisesRegex(OSError, "drive gone"):
+                node.apply("M", "C", "<lora:a:1> x", "")
+            # no tag: the list is never read
+            self.assertEqual(node.apply("M", "C", "x", ""), ("M", "C", "x", ""))
+        self.assertEqual(node._loader.calls, [])
+
     def test_loader_instance_is_cached_on_the_node(self):
         node = studio_nodes.AIStudioLoraStack()
         first = node._get_loader()

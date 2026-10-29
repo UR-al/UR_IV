@@ -1,10 +1,15 @@
 // Anima studio: the control panel (C4 left column, 790px) drawn into AIStudioPanel's DOM widget.
 // Its state lives as JSON in the node's hidden `state` STRING widget, so it is saved with the workflow.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
-import { DORA_MODES, withDefaults } from "./studio_logic.js";
+import { DORA_MODES, defaultModel, imageSize, withDefaults } from "./studio_logic.js";
 import { h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 
 const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3"];
+// Model picks filled with an Anima default when their list arrives empty-handed (an empty pick would run the
+// loader's first file; the run controller refuses a run while one is still empty).
+const MODEL_KEYS = { unets: "unet", tes: "te", vaes: "vae" };
+const INPAINT_AREA_REASON =
+  "불가: 지금 인페인트는 늘 그림 전체를 이 크기로 다시 그린다 (Forge의 '전체'). '마스크만'(잘라서 크게 그리기)은 아직 없음";
 
 // "Forge처럼" items; greyed ones follow studio_forge_parity.md (불가 rows).
 const FORGE_ITEMS = [
@@ -31,7 +36,8 @@ const row = (label, ...controls) => h("div", { class: "ais-row" }, h("span", { c
 export class PanelView {
   /**
    * `widget`: the node's hidden `state` widget. `ctx`: `choices(kind)` -> Promise<{items}>, `generate()`, `stop()`,
-   * `changed()`, `engineRoom` {collapsed(), toggle()}, `i2i` {get(), set(value), url(value), upload(file), maskEditor()}.
+   * `changed()`, `engineRoom` {collapsed(), toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width,
+   * height}, maskEditor()}.
    */
   constructor(widget, ctx) {
     this.widget = widget;
@@ -50,9 +56,17 @@ export class PanelView {
     for (const kind of CHOICE_KINDS) {
       this.ctx.choices(kind).then((data) => {
         this.choices[kind] = data?.items || [];
+        this.pickDefault(kind, data);
         this.scheduleRender();
       });
     }
+  }
+
+  pickDefault(kind, data) {
+    const key = MODEL_KEYS[kind];
+    if (!key || this.state[key]) return;
+    const name = defaultModel(kind, data?.items, data?.families);
+    if (name) this.set((s) => { s[key] = name; });
   }
 
   read() {
@@ -91,11 +105,13 @@ export class PanelView {
     }, true);
   }
 
-  showI2i(image, mode) {
+  /** Forge's send-to: the image goes to the i2i tab and its size (`{width, height}`) becomes the generation size. */
+  showI2i(image, mode, size = null) {
     this.set((s) => {
       s.tab = "i2i";
       s.i2i_mode = mode === "inpaint" ? "inpaint" : "img2img";
       s.i2i.image = image;
+      Object.assign(s, imageSize(size?.width, size?.height) || {});
     }, true);
   }
 
@@ -233,8 +249,12 @@ export class PanelView {
     return h("div", { class: "ais-tabs-wrap" }, h("div", { class: "ais-tabs" }, tab("t2i"), tab("i2i")), body);
   }
 
+  sizeBox(s, key) {
+    return numberBox(s[key], (value) => this.set((st) => { st[key] = value; }), { min: 64, max: 4096, step: 8, width: 62 });
+  }
+
   sizeCard(s) {
-    const size = (key) => numberBox(s[key], (value) => this.set((st) => { st[key] = value; }), { min: 64, max: 4096, step: 8, width: 62 });
+    const size = (key) => this.sizeBox(s, key);
     const swap = h("button", { type: "button", class: "ais-mini", title: "가로 세로 바꾸기", "aria-label": "가로 세로 바꾸기",
       onClick: () => this.set((st) => { [st.width, st.height] = [st.height, st.width]; }, true) }, "⇅");
     return card("크기", null, [
@@ -260,8 +280,12 @@ export class PanelView {
     const file = h("input", { type: "file", accept: "image/*", hidden: true, onChange: async (e) => {
       const chosen = e.target.files?.[0];
       if (!chosen) return;
-      const name = await this.ctx.i2i.upload(chosen);
-      if (name) this.set((st) => { st.i2i.image = name; }, true);
+      const uploaded = await this.ctx.i2i.upload(chosen); // {name, width, height}
+      if (!uploaded?.name) return;
+      this.set((st) => {
+        st.i2i.image = uploaded.name;
+        Object.assign(st, imageSize(uploaded.width, uploaded.height) || {});
+      }, true);
     } });
     const picture = value
       ? h("img", { class: "ais-i2i-img", src: this.ctx.i2i.url(value), alt: "입력 이미지" })
@@ -276,11 +300,14 @@ export class PanelView {
   i2iCard(s) {
     const mode = (name, text) =>
       pill(s.i2i_mode === name, () => this.set((st) => { st.i2i_mode = name; }, true), { on: text, off: text });
-    const areas = [{ value: "masked", label: "마스크만" }, { value: "whole", label: "전체" }];
+    // Greyed like 어텐션: no node input takes the area, every inpaint is whole-picture (studio_forge_parity.md).
+    const areas = [{ value: "whole", label: "전체" }, { value: "masked", label: "마스크만" }];
+    const area = h("span", { title: INPAINT_AREA_REASON }, select(areas, "whole", () => {}, { disabled: true, "aria-label": "인페인트 영역" }));
     return card("i2i 설정", null, [
       row("모드", mode("img2img", "i2i"), mode("inpaint", "인페인트")),
+      row("크기", this.sizeBox(s, "width"), "×", this.sizeBox(s, "height")), // the image's size when sent / uploaded
       row("디노이즈", numberBox(s.i2i.denoise, (value) => this.set((st) => { st.i2i.denoise = value; }), { min: 0, max: 1, step: 0.05, width: 62 })),
-      row("인페인트 영역", select(areas, s.i2i.inpaint_area, (value) => this.set((st) => { st.i2i.inpaint_area = value; }))),
+      row("인페인트 영역", area),
       row("마스크 흐림", numberBox(s.i2i.mask_blur, (value) => this.set((st) => { st.i2i.mask_blur = value; }), { min: 0, max: 64, step: 1, width: 62 })),
     ]);
   }

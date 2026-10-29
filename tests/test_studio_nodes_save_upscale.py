@@ -73,6 +73,26 @@ class SaveForgeTests(unittest.TestCase):
         result = self._save(_images(2))
         self.assertEqual([x["filename"] for x in result["ui"]["images"]], ["anima_00001_.png", "anima_00002_.png"])
 
+    def _seeds(self, count, stem="anima"):
+        seeds = []
+        for index in range(count):
+            with Image.open(self.root / "AIStudio" / f"{stem}_{index + 1:05}_.png") as image:
+                line = image.info["parameters"].splitlines()[-1]
+            seeds.append(int(line.split("Seed: ", 1)[1].split(",", 1)[0]))
+        return seeds
+
+    def test_batch_with_forge_like_noise_writes_each_images_own_seed(self):
+        # Forge-like noise (the default) drew image i from seed + i; Forge writes each image's own seed.
+        self._save(_images(3))
+        self.assertEqual(self._seeds(3), [42, 43, 44])
+
+    def test_batch_without_forge_like_noise_keeps_the_batch_seed(self):
+        cases = {"noise_off": {"master": True, "noise": False}, "master_off": {"master": False, "noise": True}}
+        for stem, forge_like in cases.items():
+            with self.subTest(forge_like=forge_like):
+                self._save(_images(2), studio_state=_state_json(forge_like=forge_like), filename_prefix=f"AIStudio/{stem}")
+                self.assertEqual(self._seeds(2, stem), [42, 42])
+
     def test_app_reader_reads_our_parameters(self):
         from core.image_metadata import read_metadata_for_ui
 

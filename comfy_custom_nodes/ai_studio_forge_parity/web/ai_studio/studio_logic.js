@@ -48,7 +48,9 @@ export const DEFAULT_STATE = deepFreeze({
   hires: { on: false, upscaler: "4x-UltraSharp.pth", sampler: "", scale: 1.5, steps: 16, denoise: 0.4 },
   upscale: { on: false, model: "", scale: 2.0 },
   sam3: { on: false, checkpoint: "", prompt: "face", denoise: 0.4, steps: 0, cfg: 0.0 },
-  i2i: { image: "", denoise: 0.55, mask_blur: 4, inpaint_area: "masked" },
+  // inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture), so the panel shows
+  // "전체" greyed out; the key stays so a saved state keeps its shape.
+  i2i: { image: "", denoise: 0.55, mask_blur: 4, inpaint_area: "whole" },
 });
 
 const SECTIONS = new Set(["forge_like", "hires", "upscale", "sam3", "i2i"]);
@@ -116,6 +118,92 @@ export function unetFamily(name, families) {
   if (/(?<!\d)3[._-]?8b/i.test(file)) return "3.8b";
   if (file.toLowerCase().includes("base")) return "base";
   return "2.9b";
+}
+
+const SIZE_STEP = 8;
+const SIZE_MIN = 64;
+const SIZE_MAX = 4096;
+
+/**
+ * The generation size for an i2i / inpaint input image (Forge's send-to carries the image's size): each side rounded
+ * to a multiple of 8 and kept in the panel's 64..4096 range; null when the size is unknown.
+ */
+export function imageSize(width, height) {
+  const side = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return null;
+    return Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round(number / SIZE_STEP) * SIZE_STEP));
+  };
+  const w = side(width);
+  const h = side(height);
+  return w === null || h === null ? null : { width: w, height: h };
+}
+
+/**
+ * The model file the panel picks when its list arrives and nothing is chosen yet (an empty pick would leave the
+ * loader on whatever file sorts first): a 2.9B-family Anima UNET, the Qwen3 0.6B TE, the Qwen-Image / Anima VAE.
+ */
+export function defaultModel(kind, items, families) {
+  const names = (Array.isArray(items) ? items : []).filter((item) => typeof item === "string");
+  const find = (pattern) => names.find((name) => pattern.test(name)) || "";
+  if (kind === "unets") return names.find((name) => /anima/i.test(name) && unetFamily(name, families) === "2.9b") || "";
+  if (kind === "tes") return find(/qwen.*0[._-]?6b/i);
+  if (kind === "vaes") return find(/qwen[_-]?image/i) || find(/anima/i);
+  return "";
+}
+
+export const PICK_NOTICES = Object.freeze({
+  models: "체크포인트·TE·VAE 고르기",
+  upscale: "업스케일 모델 고르기",
+});
+
+/**
+ * Why a run of `state` must not start (an empty pick would run the loader's first file), else "". `action` is a
+ * gallery post-processing run ("upscale" needs only the upscale model), null for a generation.
+ */
+export function missingPicks(state, action = null) {
+  const s = withDefaults(state);
+  const upscale = action === "upscale" || (action === null && s.upscale.on);
+  if (action !== "upscale" && (!s.unet || !s.te || !s.vae)) return PICK_NOTICES.models;
+  if (upscale && !s.upscale.model) return PICK_NOTICES.upscale;
+  return "";
+}
+
+const LORA_EXTENSIONS = [".safetensors", ".ckpt", ".pt", ".pth", ".bin"];
+
+function loraTagName(args) {
+  const positional = args.split(":").filter((item) => item.split("=").length !== 2);
+  return (positional[0] || "").trim();
+}
+
+/** Names of the `<lora:...>` tags a run loads (studio_lora_tags.parse_lora_tags: positive, then the negative's). */
+export function loraTagNames(state) {
+  const s = withDefaults(state);
+  const names = [];
+  for (const match of effectivePrompt(s).matchAll(/<(\w+):([^>]+)>/g)) if (match[1] === "lora") names.push(loraTagName(match[2]));
+  for (const match of (s.negative || "").matchAll(/<(lora):([^>]+)>/gi)) if (match[1] === "lora") names.push(loraTagName(match[2]));
+  return [...new Set(names.filter(Boolean))];
+}
+
+function stripLoraExtension(path) {
+  const lowered = path.toLowerCase();
+  const extension = LORA_EXTENSIONS.find((item) => lowered.endsWith(item));
+  return extension ? path.slice(0, -extension.length) : path;
+}
+
+/** studio_lora_tags.resolve_lora_name: the name with or without extension, else the file stem in a subfolder. */
+export function resolveLoraName(name, available) {
+  const fold = (text) => stripLoraExtension(String(text).replace(/\\/g, "/")).toLowerCase();
+  const wanted = fold(String(name || "").trim());
+  if (!wanted) return null;
+  const stems = (available || []).map((entry) => [fold(entry), entry]);
+  return (stems.find(([stem]) => stem === wanted) || stems.find(([stem]) => stem.endsWith(`/${wanted}`)) || [])[1] ?? null;
+}
+
+/** The tag names of `state` that match no file of `available` (the LoRA node skips them). */
+export function missingLoras(state, available) {
+  if (!Array.isArray(available)) return [];
+  return loraTagNames(state).filter((name) => resolveLoraName(name, available) === null);
 }
 
 function concreteSeed(seed, rng) {

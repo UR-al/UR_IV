@@ -130,7 +130,8 @@ class _Dirs:
 
 class StudioPlanRouteTests(unittest.TestCase):
     def test_plan_handler_roundtrip(self):
-        status, payload = studio_routes.handle_plan(PLAN_BODY, families={})
+        loras = [f"na-e{n}.safetensors" for n in (10, 14, 18, 20)]
+        status, payload = studio_routes.handle_plan(PLAN_BODY, families={}, loras=loras)
         self.assertEqual(status, 200)
         self.assertEqual(payload["errors"], [])
         self.assertEqual(len(payload["cells"]), 12)
@@ -141,6 +142,28 @@ class StudioPlanRouteTests(unittest.TestCase):
         self.assertEqual(payload["labels"]["x"], ["na-e10", "na-e14", "na-e18", "na-e20"])
         self.assertIn("infotext_extra", payload)
         json.dumps(payload)
+
+    def test_plan_reports_lora_tags_that_match_no_file(self):
+        status, payload = studio_routes.handle_plan(PLAN_BODY, families={}, loras=["na-e10.safetensors"])
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["cells"], [])
+        self.assertEqual(payload["errors"], ["LoRA not found: na-e14, na-e18, na-e20"])
+
+    def test_plan_reads_comfyui_lora_list_and_reports_an_unreadable_one(self):
+        folder_paths = SimpleNamespace(get_filename_list=lambda kind: [f"sub/na-e{n}.safetensors" for n in (10, 14, 18, 20)])
+        with mock.patch.dict("sys.modules", {"folder_paths": folder_paths}):
+            status, payload = studio_routes.handle_plan(PLAN_BODY, families={})
+        self.assertEqual((status, payload["errors"], len(payload["cells"])), (200, [], 12))
+
+        def broken(kind):
+            raise OSError("drive gone")
+
+        with mock.patch.dict("sys.modules", {"folder_paths": SimpleNamespace(get_filename_list=broken)}):
+            status, payload = studio_routes.handle_plan(PLAN_BODY, families={})
+        self.assertEqual(payload["cells"], [])
+        self.assertEqual(len(payload["errors"]), 1)
+        self.assertIn("LoRA list could not be read", payload["errors"][0])
+        self.assertIn("drive gone", payload["errors"][0])
 
     def test_plan_errors_come_back_with_status_200_and_no_cells(self):
         body = {**PLAN_BODY, "axes": [{"axis": "prompt_sr", "text": "zzz, b"}]}
@@ -304,7 +327,12 @@ class StudioFileRouteTests(unittest.TestCase):
 
     def test_to_input_copies_temp_images_too(self):
         ref = self.dirs.image("temp", "preview.png")
-        self.assertEqual(studio_routes.handle_to_input(ref), (200, {"name": "preview.png"}))
+        self.assertEqual(studio_routes.handle_to_input(ref), (200, {"name": "preview.png", "width": 64, "height": 64}))
+
+    def test_to_input_answers_the_image_size(self):
+        # Forge's send-to carries the image's size: a Hires result goes to i2i at 1248x1824, not the t2i size.
+        ref = self.dirs.image("output", "hires.png", size=(1248, 1824), subfolder="AIStudio")
+        self.assertEqual(studio_routes.handle_to_input(ref), (200, {"name": "hires.png", "width": 1248, "height": 1824}))
 
     def test_to_input_refuses_paths_outside_and_non_images(self):
         (self.dirs.root / "secret.png").write_bytes(b"x")
@@ -386,7 +414,9 @@ class StudioHandlerRegistrationTests(unittest.IsolatedAsyncioTestCase):
                     raise ValueError("not json")
                 return self._body
 
-        with mock.patch.dict("sys.modules", {"aiohttp": SimpleNamespace(web=web)}):
+        loras = [f"na-e{n}.safetensors" for n in (10, 14, 18, 20)]
+        folder_paths = SimpleNamespace(get_filename_list=lambda kind: loras if kind == "loras" else [])
+        with mock.patch.dict("sys.modules", {"aiohttp": SimpleNamespace(web=web), "folder_paths": folder_paths}):
             handlers = studio_routes._HANDLERS
             data, status = await handlers[("GET", "/choices")](Request(query={"kind": "dora_modes"}))
             self.assertEqual(status, 200)

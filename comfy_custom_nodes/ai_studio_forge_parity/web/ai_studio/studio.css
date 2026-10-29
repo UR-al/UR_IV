@@ -16,6 +16,7 @@
 .ais-root *, .ais-root *::before, .ais-root *::after { box-sizing: border-box; }
 .ais-root button { font-family: inherit; cursor: pointer; }
 .ais-root button:disabled { cursor: not-allowed; opacity: 0.5; }
+.ais-root select:disabled { opacity: 0.55; pointer-events: none; } /* greyed setting: the wrapper span shows the reason */
 .ais-root [hidden] { display: none !important; }
 
 /* fields (.f) and pills (.on / .off) */

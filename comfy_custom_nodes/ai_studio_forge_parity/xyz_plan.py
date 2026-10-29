@@ -18,8 +18,10 @@ the pack carries no Forge code.
   order.  Each cell state is normalized again, so axis values are clamped like the control panel's.
 
 Validation problems (unparsable values, unknown checkpoint or DoRA mode, 3.8B mixed with 2.9B/base, a grid of
-100 MP or more, Prompt S/R or Prompt order text not found) come back in ``errors`` with no cells; ``plan_xyz``
-never raises for them.
+100 MP or more, Prompt S/R or Prompt order text not found, and - when ``loras`` is given - a ``<lora:...>`` tag of
+any cell that matches no LoRA file) come back in ``errors`` with no cells; ``plan_xyz`` never raises for them.
+The LoRA check exists because the LoRA node only logs a missing file and renders the cell without it: in an
+epoch x strength grid a mistyped epoch would read as a bad epoch (Forge tells the user instead).
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ import re
 from dataclasses import dataclass, field
 
 from .dora_infer_mode import MODE_LABELS, mode_key
+from .studio_lora_tags import parse_lora_tags, resolve_lora_name
 from .studio_state import effective_prompt, normalize_state
 from .xyz_axes import AxisSpec, axis_by_id
 from .xyz_values import parse_axis_values
@@ -285,11 +288,37 @@ def _infotext(axes: list[_Axis], fixed: dict) -> dict:
     return extra
 
 
+# ---------------------------------------------------------------------------------------------- LoRA files
+
+def missing_loras(states, available) -> list[str]:
+    """Tag names (first appearance order) of the ``<lora:...>`` tags the states load that match no file of
+    ``available`` (``resolve_lora_name``, the LoRA node's rule).  ``available`` may be a zero-argument callable; it is
+    only called when some state has a tag, and its error propagates."""
+    names: list[str] = []
+    for state in states:
+        tags, _ = parse_lora_tags(effective_prompt(state), state.get("negative") or "")
+        names += [tag.name for tag in tags if tag.name not in names]
+    if not names:
+        return []
+    files = list(available() if callable(available) else available)
+    return [name for name in names if resolve_lora_name(name, files) is None]
+
+
+def _check_loras(cells: list, loras) -> None:
+    try:
+        missing = missing_loras([cell.state for cell in cells], loras)
+    except Exception as exc:  # the LoRA folder could not be listed: do not report every tag as missing
+        raise _PlanError(f"LoRA list could not be read: {exc}") from exc
+    if missing:
+        raise _PlanError(f"LoRA not found: {', '.join(missing)}")
+
+
 # ---------------------------------------------------------------------------------------------- the plan
 
-def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, families: dict) -> XyzPlan:
+def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, families: dict, loras=None) -> XyzPlan:
     """Plan an X/Y/Z grid: ``axes`` is ``[{"axis": AxisSpec.id, "text": value box}]`` for X, Y, Z (missing = Nothing),
-    ``families`` maps every UNET file to ``"2.9b" | "base" | "3.8b"``.  See the module docstring for the rules."""
+    ``families`` maps every UNET file to ``"2.9b" | "base" | "3.8b"``, ``loras`` is the LoRA file list (or a callable
+    returning it; None skips the LoRA check).  See the module docstring for the rules."""
     options = options if isinstance(options, dict) else {}
     keep_minus1 = bool(options.get("keep_minus1"))
     try:
@@ -316,6 +345,8 @@ def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, fami
                         _apply(cell, axis, values[i], search)
                     cell["seed"] += _seed_offset(ix, iy, iz, counts, options)
                     cells.append(Cell(ix, iy, iz, normalize_state(cell)))
+        if loras is not None:
+            _check_loras(cells, loras)
     except _PlanError as exc:
         return XyzPlan(errors=list(exc.args))
     return XyzPlan(

@@ -29,7 +29,7 @@ const CHOICES_TTL_MS = 60000;
 
 const views = new WeakMap(); // UI node -> its view
 const choiceCache = new Map();
-const loaded = { families: undefined, upscalers: undefined };
+const loaded = { families: undefined, upscalers: undefined, loras: undefined };
 let controller = null;
 let originalGraphToPrompt = null;
 
@@ -73,6 +73,7 @@ function choices(kind) {
       .then((data) => {
         if (kind === "unets") loaded.families = data.families || {};
         if (kind === "upscalers") loaded.upscalers = data.items || [];
+        if (kind === "loras") loaded.loras = data.items || [];
         return data;
       })
       .catch((error) => {
@@ -142,10 +143,22 @@ const i2i = {
     const data = await response.json();
     const value = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
     i2i.set(value);
-    return value;
+    return { name: value, ...(await fileImageSize(file)) };
   },
   maskEditor: () => openMaskEditor(),
 };
+
+/** `{width, height}` of a picked image file (Forge's send-to size), or `{}` when the browser cannot decode it. */
+async function fileImageSize(file) {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close?.();
+    return size;
+  } catch {
+    return {};
+  }
+}
 
 async function openMaskEditor() {
   const node = roleNodes().get("i2i_image");
@@ -180,9 +193,10 @@ async function galleryAction(name, item) {
     }
     if (!item) return notice("고른 이미지가 없음");
     if (name === "i2i" || name === "inpaint") {
-      const { name: value } = await route("/to_input", item.image); // a copy in input/, Forge's "send to"
+      // a copy in input/ and its size, Forge's "send to" (the i2i run uses the image's size)
+      const { name: value, width, height } = await route("/to_input", item.image);
       i2i.set(value);
-      viewOf(PANEL)?.showI2i(value, name === "inpaint" ? "inpaint" : "img2img");
+      viewOf(PANEL)?.showI2i(value, name === "inpaint" ? "inpaint" : "img2img", { width, height });
       if (name === "inpaint") await openMaskEditor();
       return;
     }
@@ -282,6 +296,7 @@ app.registerExtension({
       readParameters,
       families: () => loaded.families,
       upscalers: () => loaded.upscalers,
+      loras: () => loaded.loras,
       emit,
     });
     wrapQueue();
