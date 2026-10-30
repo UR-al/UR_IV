@@ -86,10 +86,10 @@ const state = (overrides = {}) => ({ ...structuredClone(DEFAULT_STATE), ...overr
 
 test("ROLES lists every engine role once, without family_switch_clip (R6)", () => {
   assert.equal(new Set(ROLES).size, ROLES.length);
-  assert.equal(ROLES.length, 34);
+  assert.equal(ROLES.length, 49);
   assert.ok(!ROLES.includes("family_switch_clip"));
-  const { roleIds } = studioPrompt();
-  assert.deepEqual([...ROLES].sort(), Object.keys(roleIds).sort());
+  const { roleIds } = studioPrompt(); // a workflow without extension nodes: studio_ext.test.mjs covers those roles
+  assert.deepEqual(ROLES.filter((role) => !role.startsWith("ext_")).sort(), Object.keys(roleIds).sort());
 });
 
 test("negpip follows the panel switch", () => {
@@ -352,7 +352,7 @@ test("applyStateToPrompt fills keys missing from an old saved state", () => {
 test("stageModes bypasses the unused family, i2i input, SAM3 and post nodes (R7)", () => {
   const modes = stageModes(state({ unet: "anima-preview2.safetensors" }));
   assert.deepEqual(Object.keys(modes).sort(), [...ROLES].sort());
-  const bypassed = Object.keys(modes).filter((role) => modes[role] === 4).sort();
+  const bypassed = Object.keys(modes).filter((role) => modes[role] === 4 && !role.startsWith("ext_")).sort();
   assert.deepEqual(bypassed, [
     "i2i_image", "neg_encode38", "pos_encode38", "post_decode", "post_encode", "post_hires", "post_image",
     "post_sam3_detailer", "post_sam3_mask", "post_save", "post_upscale", "qwen35", "sam3_detailer", "sam3_mask", "unet38",

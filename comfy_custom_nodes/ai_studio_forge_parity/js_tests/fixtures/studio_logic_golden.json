@@ -54,6 +54,215 @@
       "denoise": 0.55,
       "mask_blur": 4,
       "inpaint_area": "whole"
+    },
+    "ext": {
+      "guidance": {
+        "on": false,
+        "guid_enabled": false,
+        "guid_attn_method": "PAG",
+        "guid_scale": 4.0,
+        "guid_block_indices": "18",
+        "guid_head_indices": "",
+        "guid_official_strength": 0.75,
+        "guid_legacy_attn": false,
+        "guid_legacy_strength": 0.75,
+        "guid_seg_sigma": 100.0,
+        "guid_start_percent": 0.0,
+        "guid_end_percent": 0.7,
+        "guid_rescale": 0.2,
+        "guid_rescale_mode": "full",
+        "guid_auto_decay": false,
+        "guid_slg_on": false,
+        "guid_slg_scale": 3.0,
+        "guid_slg_blocks": "18",
+        "guid_slg_mode": "Fixed",
+        "guid_s2_scale": 0.25,
+        "guid_s2_ratio": 0.05,
+        "guid_s2_blocks": "",
+        "guid_s2_start": 0.1,
+        "guid_s2_end": 0.9,
+        "guid_cfg_mode": "Preserve incoming",
+        "guid_experimental_stack": false,
+        "guid_apg_enabled": false,
+        "guid_apg_eta": 0.0,
+        "guid_apg_norm": 15.0,
+        "guid_apg_momentum": 0.0,
+        "guid_apg_autooff": true,
+        "guid_adg_enabled": false,
+        "guid_adg_start": 0.5,
+        "guid_adg_interval": 0,
+        "guid_smc_master_enabled": false,
+        "guid_smc_enabled": false,
+        "guid_smc_preset": "Auto",
+        "guid_smc_lambda": 6.0,
+        "guid_smc_k": 0.1,
+        "guid_smc_mode": "Unit-L2",
+        "guid_smc_adaptive_alpha": 0.2,
+        "guid_smc_adaptive_lambda": 5.0,
+        "guid_cwm_enabled": false,
+        "guid_cwm_alpha_low": 0.0,
+        "guid_cwm_alpha_high": 0.0,
+        "guid_dcw_enabled": false,
+        "guid_dcw_lambda_low": 0.05,
+        "guid_dcw_lambda_high": 0.01,
+        "guid_rdc_enabled": false,
+        "guid_rdc_tau": 0.0,
+        "guid_rdc_alpha_ll": 0.03,
+        "guid_rdc_alpha_hh": 0.0,
+        "guid_dave_enabled": false,
+        "guid_dave_strength": 0.3,
+        "guid_dave_tau": 0.1,
+        "guid_dave_blocks": "8-18",
+        "guid_cns_enabled": false,
+        "guid_cns_strength": 1.0,
+        "guid_cns_gamma_power": 0.5,
+        "guid_cns_gamma_scale": 2.0,
+        "guid_mod_enabled": false,
+        "guid_mod_clip_model": "",
+        "guid_mod_weight": 3.0,
+        "guid_mod_start_layer": 0,
+        "guid_mod_end_layer": -1,
+        "guid_mod_base_source": "Main positive",
+        "guid_mod_base_prompt": "",
+        "guid_mod_positive_prompt": "masterpiece, best quality, highres",
+        "guid_mod_negative_source": "Main negative",
+        "guid_mod_negative_prompt": "worst quality, low quality",
+        "guid_mod_adapter_mode": "Auto-download official",
+        "guid_mod_adapter_path": "",
+        "guid_tsr_enabled": false,
+        "guid_tsr_k": 0.95,
+        "guid_tsr_sigma": 1.0,
+        "guid_mg_enabled": false,
+        "guid_mg_alpha": 0.5,
+        "guid_mg_beta": 0.6,
+        "guid_mg_normalize": false,
+        "guid_mg_min": 0.3,
+        "guid_mg_max": 0.95,
+        "guid_higs_enabled": false,
+        "guid_higs_weight": 1.75,
+        "guid_higs_eta": 0.0,
+        "guid_higs_alpha": 0.75,
+        "guid_higs_cutoff": 0.05,
+        "guid_higs_t_min": 0.4,
+        "guid_higs_t_max": 1.0,
+        "guid_hiflow_enabled": false,
+        "guid_hiflow_alpha": 1.0,
+        "guid_hiflow_beta": 0.5,
+        "guid_hiflow_cutoff": 0.2
+      },
+      "optimal_scale": {
+        "on": false,
+        "ocfg_blend": 0.25,
+        "ocfg_start": 0.0,
+        "ocfg_end": 1.0
+      },
+      "skim": {
+        "on": false,
+        "skim_skimming_cfg": 7.0,
+        "skim_full_skim_negative": false,
+        "skim_disable_flipping_filter": false,
+        "skim_start_percent": 0.0,
+        "skim_end_percent": 1.0,
+        "skim_flip_at": 0.0
+      },
+      "detail_daemon": {
+        "on": false,
+        "dd_amount": 0.1,
+        "dd_start": 0.2,
+        "dd_end": 0.8,
+        "dd_bias": 0.5,
+        "dd_exponent": 1.0,
+        "dd_start_offset": 0.0,
+        "dd_end_offset": 0.0,
+        "dd_fade": 0.0,
+        "dd_smooth": true,
+        "dd_hires": false
+      },
+      "lora_block": {
+        "on": false,
+        "lora_name": "",
+        "strength_model": 1.0,
+        "strength_clip": 1.0,
+        "inverse": false,
+        "A": 4.0,
+        "B": 1.0,
+        "block_vector": ""
+      },
+      "speed": {
+        "on": false,
+        "mode": "transition",
+        "threshold": "neo_shift",
+        "preset": "anima",
+        "scales": "0.5,1.0",
+        "delta": 0.01,
+        "sigma_divisor": 1.03,
+        "manual_sigmas": "0.7",
+        "adaptive": true,
+        "transform": "dct",
+        "spectrum_A": 203.615097,
+        "spectrum_beta": 1.915461,
+        "seed": -1,
+        "hires": false,
+        "apply_img2img": false
+      },
+      "er_sde": {
+        "on": false,
+        "xsamp_max_stage": 3,
+        "xsamp_eta": 1.0,
+        "xsamp_noise_window": false,
+        "xsamp_noise_start": 0.2,
+        "xsamp_noise_end": 0.8
+      },
+      "vae_2x": {
+        "on": false,
+        "vae_name": "",
+        "output_mode": "1x refined (downsample)",
+        "blur_sigma": 0.5,
+        "latent_renorm": false
+      },
+      "degrid": {
+        "on": false,
+        "model": "auto",
+        "mode": "Full",
+        "strength": 1.0,
+        "tile": 512,
+        "apply_img2img": false
+      },
+      "pid": {
+        "on": false,
+        "ckpt_name": "",
+        "steps": 4,
+        "sigma": 0.0,
+        "seed": -1
+      },
+      "sam3_refine": {
+        "on": false,
+        "denoise": 0.4,
+        "mask_mode": "Individual",
+        "fill_mode": "original",
+        "only_masked": true,
+        "mask_padding": 32,
+        "grow_mask_by": 6,
+        "noise_multiplier": 1.0,
+        "use_custom_size": false,
+        "custom_width": 512,
+        "custom_height": 512,
+        "inpaint_prompt": "",
+        "negative_prompt": ""
+      },
+      "sam3_tile": {
+        "on": false,
+        "mask_mode": "Individual",
+        "tile_width": 512,
+        "tile_height": 512,
+        "tile_padding": 64,
+        "denoise": 0.4,
+        "noise_multiplier": 1.0,
+        "fill_mode": "original",
+        "grow_mask_by": 6,
+        "inpaint_prompt": "",
+        "negative_prompt": ""
+      }
     }
   },
   "effective_prompt": [
@@ -345,6 +554,521 @@
       "missing": [
         "e10"
       ]
+    }
+  ],
+  "ext_compiler": [
+    {
+      "name": "suite on a t2i Hires run: PAG, CNS, DCW with RDC, HiFlow",
+      "state": {
+        "cfg": 3.5,
+        "seed": 123,
+        "hires": {
+          "on": true
+        },
+        "ext": {
+          "guidance": {
+            "on": true,
+            "guid_enabled": true,
+            "guid_scale": 5.0,
+            "guid_cns_enabled": true,
+            "guid_cns_strength": 0.7,
+            "guid_dcw_enabled": true,
+            "guid_rdc_enabled": true,
+            "guid_rdc_tau": 0.1,
+            "guid_hiflow_enabled": true
+          }
+        }
+      },
+      "expected": {
+        "ext_guidance": {
+          "enabled": true,
+          "settings_delta": {
+            "cfg_scale": 3.5,
+            "guid_cns_enabled": true,
+            "guid_cns_strength": 0.7,
+            "guid_dcw_enabled": true,
+            "guid_enabled": true,
+            "guid_hiflow_enabled": true,
+            "guid_rdc_enabled": true,
+            "guid_rdc_tau": 0.1,
+            "guid_scale": 5.0
+          }
+        },
+        "cns": {
+          "cns_enabled": true,
+          "cns_strength": 0.7,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "suite in i2i: HiFlow off, S² takes the seed",
+      "state": {
+        "tab": "i2i",
+        "cfg": 4.0,
+        "seed": 77,
+        "hires": {
+          "on": true
+        },
+        "ext": {
+          "guidance": {
+            "on": true,
+            "guid_enabled": true,
+            "guid_slg_on": true,
+            "guid_slg_mode": "Stochastic (S²)",
+            "guid_hiflow_enabled": true
+          }
+        }
+      },
+      "expected": {
+        "ext_guidance": {
+          "enabled": true,
+          "settings_delta": {
+            "cfg_scale": 4.0,
+            "guid_enabled": true,
+            "guid_s2_seed": 77,
+            "guid_slg_mode": "Stochastic (S²)",
+            "guid_slg_on": true
+          }
+        },
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "suite: RDC without DCW is off, a blank DAVE block list is the default",
+      "state": {
+        "seed": 5,
+        "ext": {
+          "guidance": {
+            "on": true,
+            "guid_tsr_enabled": true,
+            "guid_rdc_enabled": true,
+            "guid_rdc_tau": 0.15,
+            "guid_dave_blocks": ""
+          }
+        }
+      },
+      "expected": {
+        "ext_guidance": {
+          "enabled": true,
+          "settings_delta": {
+            "cfg_scale": 3.0,
+            "guid_tsr_enabled": true
+          }
+        },
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "suite switched on with nothing inside stays out",
+      "state": {
+        "seed": 5,
+        "ext": {
+          "guidance": {
+            "on": true,
+            "guid_cfg_mode": "APG",
+            "guid_cns_strength": 0.5
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 0.5,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "suite off: CNS values do not reach the sampler",
+      "state": {
+        "seed": 5,
+        "ext": {
+          "guidance": {
+            "on": false,
+            "guid_cns_enabled": true,
+            "guid_cns_strength": 0.5
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "Optimal Scale, Skim CFG, ER SDE",
+      "state": {
+        "seed": 9,
+        "ext": {
+          "optimal_scale": {
+            "on": true,
+            "ocfg_blend": 0.5,
+            "ocfg_start": 0.1
+          },
+          "skim": {
+            "on": true,
+            "skim_skimming_cfg": 3.0,
+            "skim_full_skim_negative": true,
+            "skim_flip_at": 0.4
+          },
+          "er_sde": {
+            "on": true,
+            "xsamp_max_stage": 2,
+            "xsamp_eta": 0.5,
+            "xsamp_noise_window": true
+          }
+        }
+      },
+      "expected": {
+        "ext_er_sde": {
+          "max_stage": 2,
+          "eta": 0.5,
+          "noise_window": true,
+          "noise_start": 0.2,
+          "noise_end": 0.8
+        },
+        "ext_optimal_scale": {
+          "enabled": true,
+          "blend": 0.5,
+          "start_percent": 0.1,
+          "end_percent": 1.0
+        },
+        "ext_skim": {
+          "enabled": true,
+          "skimming_cfg": 3.0,
+          "full_skim_negative": true,
+          "disable_flipping_filter": false,
+          "start_percent": 0.0,
+          "end_percent": 1.0,
+          "flip_percent": 0.4
+        },
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "Detail Daemon on the base pass, SAM3 with its own cfg",
+      "state": {
+        "cfg": 3.0,
+        "seed": 9,
+        "sam3": {
+          "on": true,
+          "cfg": 5.0
+        },
+        "ext": {
+          "detail_daemon": {
+            "on": true,
+            "dd_amount": 0.3,
+            "dd_smooth": false
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        },
+        "ext_dd": {
+          "enabled": true,
+          "settings_json": {
+            "dd_amount": 0.3,
+            "dd_bias": 0.5,
+            "dd_enabled": true,
+            "dd_end": 0.8,
+            "dd_end_offset": 0.0,
+            "dd_exponent": 1.0,
+            "dd_fade": 0.0,
+            "dd_smooth": false,
+            "dd_start": 0.2,
+            "dd_start_offset": 0.0
+          },
+          "cfg_scale_override": 3.0
+        },
+        "ext_dd_sam3": {
+          "enabled": true,
+          "settings_json": {
+            "dd_amount": 0.3,
+            "dd_bias": 0.5,
+            "dd_enabled": true,
+            "dd_end": 0.8,
+            "dd_end_offset": 0.0,
+            "dd_exponent": 1.0,
+            "dd_fade": 0.0,
+            "dd_smooth": false,
+            "dd_start": 0.2,
+            "dd_start_offset": 0.0
+          },
+          "cfg_scale_override": 5.0
+        }
+      }
+    },
+    {
+      "name": "Detail Daemon on the Hires pass leaves base and SAM3",
+      "state": {
+        "cfg": 3.0,
+        "seed": 9,
+        "hires": {
+          "on": true
+        },
+        "sam3": {
+          "on": true
+        },
+        "ext": {
+          "detail_daemon": {
+            "on": true,
+            "dd_hires": true
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        },
+        "ext_dd_hires": {
+          "enabled": true,
+          "settings_json": {
+            "dd_amount": 0.1,
+            "dd_bias": 0.5,
+            "dd_enabled": true,
+            "dd_end": 0.8,
+            "dd_end_offset": 0.0,
+            "dd_exponent": 1.0,
+            "dd_fade": 0.0,
+            "dd_smooth": true,
+            "dd_start": 0.2,
+            "dd_start_offset": 0.0
+          },
+          "cfg_scale_override": 3.0
+        }
+      }
+    },
+    {
+      "name": "Detail Daemon skips an unsupported sampler",
+      "state": {
+        "seed": 9,
+        "sampler": "dpm_adaptive",
+        "ext": {
+          "detail_daemon": {
+            "on": true
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "SPEED on base and Hires",
+      "state": {
+        "seed": 11,
+        "hires": {
+          "on": true
+        },
+        "ext": {
+          "speed": {
+            "on": true,
+            "hires": true,
+            "preset": "flux",
+            "seed": 3
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        },
+        "ext_speed": {
+          "enabled": true,
+          "mode": "transition",
+          "threshold": "neo_shift",
+          "preset": "flux",
+          "scales": "0.5,1.0",
+          "delta": 0.01,
+          "sigma_divisor": 1.03,
+          "manual_sigmas": "0.7",
+          "adaptive": true,
+          "transform": "dct",
+          "spectrum_A": 203.615097,
+          "spectrum_beta": 1.915461,
+          "seed": 3,
+          "pass_label": "base",
+          "image_seed": 11,
+          "img2img_rescale": true
+        },
+        "ext_speed_hires": {
+          "enabled": true,
+          "mode": "transition",
+          "threshold": "neo_shift",
+          "preset": "flux",
+          "scales": "0.5,1.0",
+          "delta": 0.01,
+          "sigma_divisor": 1.03,
+          "manual_sigmas": "0.7",
+          "adaptive": true,
+          "transform": "dct",
+          "spectrum_A": 203.615097,
+          "spectrum_beta": 1.915461,
+          "seed": 3,
+          "pass_label": "hires",
+          "image_seed": 11,
+          "img2img_rescale": true
+        }
+      }
+    },
+    {
+      "name": "SPEED stays off the Hires pass without its switch",
+      "state": {
+        "seed": 11,
+        "hires": {
+          "on": true
+        },
+        "ext": {
+          "speed": {
+            "on": true
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        },
+        "ext_speed": {
+          "enabled": true,
+          "mode": "transition",
+          "threshold": "neo_shift",
+          "preset": "anima",
+          "scales": "0.5,1.0",
+          "delta": 0.01,
+          "sigma_divisor": 1.03,
+          "manual_sigmas": "0.7",
+          "adaptive": true,
+          "transform": "dct",
+          "spectrum_A": 203.615097,
+          "spectrum_beta": 1.915461,
+          "seed": -1,
+          "pass_label": "base",
+          "image_seed": 11,
+          "img2img_rescale": true
+        }
+      }
+    },
+    {
+      "name": "SPEED in i2i needs its switch",
+      "state": {
+        "tab": "i2i",
+        "seed": 11,
+        "ext": {
+          "speed": {
+            "on": true
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
+    },
+    {
+      "name": "SPEED in i2i with its switch",
+      "state": {
+        "tab": "i2i",
+        "seed": 11,
+        "ext": {
+          "speed": {
+            "on": true,
+            "apply_img2img": true
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        },
+        "ext_speed": {
+          "enabled": true,
+          "mode": "transition",
+          "threshold": "neo_shift",
+          "preset": "anima",
+          "scales": "0.5,1.0",
+          "delta": 0.01,
+          "sigma_divisor": 1.03,
+          "manual_sigmas": "0.7",
+          "adaptive": true,
+          "transform": "dct",
+          "spectrum_A": 203.615097,
+          "spectrum_beta": 1.915461,
+          "seed": -1,
+          "pass_label": "img2img",
+          "image_seed": 11,
+          "img2img_rescale": true
+        }
+      }
+    },
+    {
+      "name": "SPEED never runs on inpaint",
+      "state": {
+        "tab": "i2i",
+        "i2i_mode": "inpaint",
+        "seed": 11,
+        "ext": {
+          "speed": {
+            "on": true,
+            "apply_img2img": true
+          }
+        }
+      },
+      "expected": {
+        "cns": {
+          "cns_enabled": false,
+          "cns_strength": 1.0,
+          "cns_gamma_power": 0.5,
+          "cns_gamma_scale": 2.0
+        }
+      }
     }
   ]
 }

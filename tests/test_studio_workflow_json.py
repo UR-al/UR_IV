@@ -28,7 +28,7 @@ UI_LAYOUT = {
     "AIStudioResultView": ([806, 0], [680, 960]),
     "AIStudioXYZView": ([1502, 0], [400, 960]),
 }
-ROW_PREFIXES = ["①", "①b", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"]
+ROW_PREFIXES = ["①", "①b", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
 POST_ROW = [
     ("post_image", "LoadImage"),
     ("post_upscale", "AIStudioUpscaleImage"),
@@ -40,8 +40,14 @@ POST_ROW = [
     ("post_save", "AIStudioSaveForge"),
 ]
 # studio_logic.stageModes(DEFAULT_STATE): 2.9B family, t2i, SAM3 off, no post run (R7).
+EXT_ROLES = {"ext_lora_block", "ext_er_sde", "ext_optimal_scale", "ext_guidance", "ext_skim", "ext_dd", "ext_speed",
+             "ext_dd_hires", "ext_speed_hires", "ext_dd_sam3", "ext_vae_2x", "ext_pid", "ext_sam3_refine", "ext_sam3_tile",
+             "ext_degrid"}
 DEFAULT_BYPASSED = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "i2i_image", "sam3_mask", "sam3_detailer",
-                    *(role for role, _ in POST_ROW)}
+                    *(role for role, _ in POST_ROW), *EXT_ROLES}
+# Each pass's MODEL, sampler side first (the app compiler's order; the same tail from ext_skim up).
+GUIDED_CHAIN = ["ext_skim", "ext_guidance", "ext_optimal_scale", "ext_er_sde", "dora", "negpip", "ext_lora_block",
+                "lora_stack", "sched", "shift", "family_switch_model"]
 NODE_TITLE_HEIGHT = 30
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN"}
 
@@ -124,7 +130,7 @@ class WorkflowFileTests(unittest.TestCase):
 
     def test_every_role_once(self):
         roles = _roles_from_js()
-        self.assertEqual(len(roles), 34)
+        self.assertEqual(len(roles), 34 + len(EXT_ROLES))
         self.assertNotIn("family_switch_clip", roles)  # R6
         found = [node["properties"]["aistudio_role"] for node in self.engine]
         self.assertCountEqual(found, roles)
@@ -140,11 +146,14 @@ class WorkflowFileTests(unittest.TestCase):
             return self.nodes[link[1]]["properties"].get("aistudio_role"), link[2]
 
         self.assertEqual(self.by_role["negpip"]["type"], "ForgeNeoNegPip")
-        self.assertEqual(source("negpip", "model"), ("lora_stack", 0))
-        self.assertEqual(source("negpip", "clip"), ("lora_stack", 1))
+        self.assertEqual(source("ext_lora_block", "model"), ("lora_stack", 0))
+        self.assertEqual(source("ext_lora_block", "clip"), ("lora_stack", 1))
+        self.assertEqual(source("negpip", "model"), ("ext_lora_block", 0))
+        self.assertEqual(source("negpip", "clip"), ("ext_lora_block", 1))
         self.assertEqual(source("dora", "model"), ("negpip", 0))
         for role, name in (("pos_encode", "clip"), ("neg_encode", "clip"), ("pos_encode38", "native_clip"),
-                           ("neg_encode38", "native_clip"), ("sam3_detailer", "clip"), ("hires", "base_clip")):
+                           ("neg_encode38", "native_clip"), ("sam3_detailer", "clip"), ("hires", "base_clip"),
+                           ("ext_guidance", "clip"), ("ext_sam3_refine", "clip"), ("ext_sam3_tile", "clip")):
             with self.subTest(role=role):
                 self.assertEqual(source(role, name), ("negpip", 1))
 
@@ -212,7 +221,8 @@ class WorkflowFileTests(unittest.TestCase):
         written = {node["properties"]["aistudio_role"]: node for node in self.engine if "widgets_values" in node}
         # Nodes whose COMBO choices depend on the ComfyUI install are left to their defaults (R20).
         for role in ("unet", "te", "vae", "unet38", "qwen35", "pos_encode38", "i2i_image", "sched", "upscale",
-                     "sam3_mask", "post_upscale", "post_image"):
+                     "sam3_mask", "post_upscale", "post_image", "ext_lora_block", "ext_er_sde", "ext_vae_2x", "ext_pid",
+                     "ext_degrid", "ext_sam3_refine"):
             self.assertNotIn(role, written)
         values = {}
         for role, node in written.items():
@@ -242,6 +252,9 @@ class WorkflowFileTests(unittest.TestCase):
         state = json.loads(values["save"]["studio_state"])
         self.assertEqual((state["steps"], state["sampler"], state["seed"]), (32, "exp_heun_2_x0_sde", -1))
         self.assertEqual({values[f"family_switch_{x}"]["select"] for x in ("model", "pos", "neg")}, {0})
+        self.assertEqual((values["ext_speed"]["pass_label"], values["ext_speed_hires"]["pass_label"]), ("base", "hires"))
+        self.assertEqual(values["ext_speed"]["control_after_generate"], "fixed")
+        self.assertIs(values["ext_guidance"]["enabled"], False)
 
     def test_both_families_reach_sampler(self):
         sampler = self.by_role["sampler"]
@@ -295,7 +308,7 @@ class WorkflowFileTests(unittest.TestCase):
     def test_post_row_matches_post_routes(self):
         # R19: studio_logic.js POST_ROUTES re-link slot-0 IMAGE outputs along exactly this row.
         _, rows = self._rows()
-        row = [(node["properties"]["aistudio_role"], node["type"]) for node in rows["⑨"]]
+        row = [(node["properties"]["aistudio_role"], node["type"]) for node in rows["⑩"]]
         self.assertEqual(row, POST_ROW)
         image_links = [
             ("post_upscale", "image", "post_image"),
@@ -312,6 +325,72 @@ class WorkflowFileTests(unittest.TestCase):
                 self.assertEqual((source["properties"]["aistudio_role"], slot), (source_role, 0))
         for role in ("post_image", "post_upscale", "post_decode", "post_sam3_detailer"):
             self.assertEqual(self.by_role[role]["outputs"][0]["type"], "IMAGE")
+
+    def _model_chain(self, role):
+        chain = []
+        node = self.by_role[role]
+        while True:
+            names = [entry["name"] for entry in node["inputs"]]
+            found = self._source(node, "model" if "model" in names else "a") if {"model", "a"} & set(names) else None
+            if found is None:
+                return chain
+            node = found[0]
+            chain.append(node["properties"]["aistudio_role"])
+
+    def test_extension_row_title_and_order(self):
+        groups, rows = self._rows()
+        self.assertEqual(groups["④"]["title"], "④ 확장")
+        self.assertEqual([node["properties"]["aistudio_role"] for node in rows["④"]],
+                         ["ext_optimal_scale", "ext_guidance", "ext_skim", "ext_dd", "ext_speed", "ext_dd_hires",
+                          "ext_speed_hires", "ext_dd_sam3"])
+
+    def test_model_chain_of_each_pass_follows_the_compiler(self):
+        tail = [*GUIDED_CHAIN, "unet"]
+        self.assertEqual(self._model_chain("sampler"), ["ext_speed", "ext_dd", *tail])
+        self.assertEqual(self._model_chain("hires"), ["ext_speed_hires", "ext_dd_hires", *tail])
+        # SPEED never reaches a detailer; each pass re-decides Detail Daemon with its own cfg
+        for role in ("sam3_detailer", "ext_sam3_refine", "ext_sam3_tile"):
+            self.assertEqual(self._model_chain(role), ["ext_dd_sam3", *tail], role)
+
+    def test_post_runs_get_the_main_pass_models(self):
+        self.assertEqual(self._model_chain("post_hires"), self._model_chain("hires"))
+        self.assertEqual(self._model_chain("post_sam3_detailer"), self._model_chain("sam3_detailer"))
+
+    def test_guidance_suite_gets_the_prompts(self):
+        for name, role in (("positive", "family_switch_pos"), ("negative", "family_switch_neg")):
+            self.assertEqual(self._source(self.by_role["ext_guidance"], name)[0], self.by_role[role])
+
+    def test_image_and_vae_chain(self):
+        def source(role, name):
+            found, slot = self._source(self.by_role[role], name)
+            return found["properties"]["aistudio_role"], slot
+
+        self.assertEqual(source("ext_vae_2x", "vae"), ("hires", 1))
+        self.assertEqual(source("decode", "vae"), ("ext_vae_2x", 0))
+        self.assertEqual(source("ext_pid", "image"), ("decode", 0))
+        self.assertEqual(source("ext_pid", "latent"), ("hires", 0))
+        self.assertEqual(source("upscale", "image"), ("ext_pid", 0))
+        self.assertEqual(source("ext_sam3_refine", "image"), ("sam3_detailer", 0))
+        self.assertEqual(source("ext_sam3_tile", "image"), ("ext_sam3_refine", 0))
+        for role in ("ext_sam3_refine", "ext_sam3_tile"):
+            self.assertEqual(source(role, "mask"), ("sam3_mask", 0))
+        self.assertEqual(source("ext_degrid", "image"), ("ext_sam3_tile", 0))
+        self.assertEqual(source("save", "images"), ("ext_degrid", 0))
+
+    def test_bypassed_extensions_pass_their_linked_outputs_through(self):
+        # ExecutableNodeDTO._getBypassSlotIndex: the input at the output's slot when its type matches, else the first
+        # input of that type; a bypassed node with no such linked input would lose the link.
+        for role in EXT_ROLES:
+            node = self.by_role[role]
+            for slot, output in enumerate(node["outputs"]):
+                if not output["links"]:
+                    continue
+                inputs = node["inputs"]
+                index = slot if slot < len(inputs) and inputs[slot]["type"] == output["type"] else next(
+                    i for i, entry in enumerate(inputs) if entry["type"] == output["type"])
+                with self.subTest(role=role, slot=slot):
+                    self.assertIsNotNone(inputs[index]["link"])
+                    self.assertEqual(inputs[index]["name"], output["type"].lower())
 
     def test_ui_nodes_layout(self):
         for class_type, (pos, size) in UI_LAYOUT.items():

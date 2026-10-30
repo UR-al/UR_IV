@@ -2,6 +2,7 @@
 // No `window`, no ComfyUI imports, no side effects (ComfyUI also loads this file as an extension).
 // Mirrors studio_state.py (defaults, effective prompt), studio_choices.py (unet family) and reads
 // studio_infotext.py's text; js_tests/fixtures/studio_logic_golden.json pins both sides.
+import { EXT_DEFAULTS, EXT_ROLES, extCnsInputs, extInputs, extModes, extNeedsSam3Mask, normalizeExt, sam3PassInputs } from "./studio_ext.js";
 import { ROLES } from "./studio_roles.js";
 
 export const DORA_MODES = Object.freeze([
@@ -52,6 +53,7 @@ export const DEFAULT_STATE = deepFreeze({
   // inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture), so the panel shows
   // "전체" greyed out; the key stays so a saved state keeps its shape.
   i2i: { image: "", denoise: 0.55, mask_blur: 4, inpaint_area: "whole" },
+  ext: EXT_DEFAULTS, // the table in ext_schema.js: one {on, fields...} per extension
 });
 
 const SECTIONS = new Set(["forge_like", "hires", "upscale", "sam3", "i2i"]);
@@ -83,6 +85,7 @@ export function withDefaults(state) {
     if (value === undefined || value === null) continue;
     if (SECTIONS.has(key)) out[key] = { ...out[key], ...(isObject(value) ? value : {}) };
     else if (key === "loras") out.loras = Array.isArray(value) ? value.filter(isObject).map(normalizeLora) : [];
+    else if (key === "ext") out.ext = normalizeExt(value);
     else out[key] = structuredClone(value);
   }
   return out;
@@ -247,6 +250,7 @@ function hiresInputs(s, enabled, options) {
     cfg: s.cfg,
     base_steps: s.steps,
     forge_noise: s.forge_like.master && s.forge_like.noise,
+    ...extCnsInputs(s),
   };
 }
 
@@ -255,15 +259,7 @@ const upscaleInputs = (s, enabled) => ({ enabled, model_name: choice(s.upscale.m
 const sam3MaskInputs = (s, enabled) => ({ enabled, checkpoint: choice(s.sam3.checkpoint), prompt: s.sam3.prompt });
 
 function sam3DetailerInputs(s, enabled) {
-  return {
-    enabled,
-    denoise: s.sam3.denoise,
-    steps: s.sam3.steps > 0 ? s.sam3.steps : s.steps,
-    cfg: s.sam3.cfg > 0 ? s.sam3.cfg : s.cfg,
-    sampler_name: s.sampler,
-    scheduler: s.scheduler,
-    seed: s.seed,
-  };
+  return { enabled, denoise: s.sam3.denoise, ...sam3PassInputs(s) };
 }
 
 const saveInputs = (s) => ({ studio_state: JSON.stringify(s), seed: s.seed });
@@ -304,12 +300,14 @@ function mainInputs(s, options) {
       scheduler: s.scheduler,
       denoise: isI2i ? s.i2i.denoise : 1.0,
       forge_noise: s.forge_like.master && s.forge_like.noise,
+      ...extCnsInputs(s),
     },
     hires: hiresInputs(s, s.hires.on && !isI2i, options), // Forge's img2img has no hires pass
     upscale: upscaleInputs(s, s.upscale.on),
-    sam3_mask: sam3MaskInputs(s, s.sam3.on),
+    sam3_mask: sam3MaskInputs(s, s.sam3.on || extNeedsSam3Mask(s)),
     sam3_detailer: sam3DetailerInputs(s, s.sam3.on),
     save: saveInputs(s),
+    ...Object.fromEntries(EXT_ROLES.map((role) => [role, extInputs(s, role, { postAction: options.postAction })])),
   };
 }
 
@@ -335,6 +333,7 @@ function prepared(state, rng) {
 /**
  * A deep copy of ComfyUI's API prompt (graphToPrompt `output`) with the panel state written into the role nodes.
  * `options`: `rng` (seed -1), `families` (/choices?kind=unets), `upscalers` (hires choices; a missing file -> latent:bicubic).
+ * An extension whose role the graph lacks (an older workflow) is skipped.
  */
 export function applyStateToPrompt(apiPrompt, roleIds, state, options = {}) {
   const s = prepared(state, options.rng);
@@ -343,7 +342,10 @@ export function applyStateToPrompt(apiPrompt, roleIds, state, options = {}) {
   return out;
 }
 
-/** role -> 0 (run) | 4 (bypass): the unused family, the i2i input in t2i, SAM3 when off, post nodes unless a post run (R7). */
+/**
+ * role -> 0 (run) | 4 (bypass): the unused family, the i2i input in t2i, SAM3 when off, post nodes unless a post run
+ * (R7), and every extension that does not run (studio_ext.extModes).
+ */
 export function stageModes(state, postAction = null, options = {}) {
   const s = withDefaults(state);
   const bypass = new Set(
@@ -352,9 +354,11 @@ export function stageModes(state, postAction = null, options = {}) {
       : ["unet38", "qwen35", "pos_encode38", "neg_encode38"],
   );
   if (s.tab === "t2i") bypass.add("i2i_image");
-  if (!s.sam3.on) ["sam3_mask", "sam3_detailer"].forEach((role) => bypass.add(role));
+  if (!s.sam3.on) bypass.add("sam3_detailer");
+  if (!s.sam3.on && !extNeedsSam3Mask(s)) bypass.add("sam3_mask");
   if (!postAction) ROLES.filter((role) => role.startsWith("post_")).forEach((role) => bypass.add(role));
-  return Object.fromEntries(ROLES.map((role) => [role, bypass.has(role) ? MODE_BYPASS : MODE_ALWAYS]));
+  const ext = extModes(s, null, { postAction });
+  return Object.fromEntries(ROLES.map((role) => [role, bypass.has(role) ? MODE_BYPASS : ext[role] ?? MODE_ALWAYS]));
 }
 
 /**
@@ -404,7 +408,7 @@ export function postPrompt(apiPrompt, roleIds, record, action, currentState = re
   if (!image) throw new Error("postPrompt: the record has no image");
   const s = prepared(postRunState(record, currentState, action), options.rng);
   const out = structuredClone(apiPrompt);
-  writeRoles(out, roleIds, mainInputs(s, options));
+  writeRoles(out, roleIds, mainInputs(s, { ...options, postAction: action }));
   writeRoles(out, roleIds, {
     post_image: { image },
     post_upscale: upscaleInputs(s, action === "upscale"),

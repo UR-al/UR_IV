@@ -5,11 +5,16 @@ Output: ``comfy_custom_nodes/ai_studio_forge_parity/example_workflows/AI Studio 
 ``tests/test_studio_workflow_json.py`` checks that this script reproduces the saved file.
 
 Layout: the three studio UI nodes on top (panel, result view, XYZ view); below them the engine room, one group per
-row from top to bottom (① models, ①b 3.8B, ② LoRA, ③ prompts, ④ latent/sampling, ⑤ Hires, ⑥ upscale, ⑦ SAM3,
-⑧ save, ⑨ gallery post-processing), nodes left to right, every link left->right in a row or from an upper row to a
-lower one (R6). Engine nodes are saved folded (the panel's engine-room button unfolds them); groups are sized for the
-unfolded layout. Each engine node carries ``properties.aistudio_role``; the roles come from
+row from top to bottom (① models, ①b 3.8B, ② LoRA, ③ prompts, ④ extensions, ⑤ latent/sampling, ⑥ Hires, ⑦ upscale,
+⑧ SAM3, ⑨ save, ⑩ gallery post-processing), nodes left to right, every link left->right in a row or from an upper row
+to a lower one (R6). Engine nodes are saved folded (the panel's engine-room button unfolds them); groups are sized for
+the unfolded layout. Each engine node carries ``properties.aistudio_role``; the roles come from
 ``web/ai_studio/studio_roles.js`` (R20, single source).
+
+The extension nodes sit where the app compiler puts them (``core/comfy_workflow_compiler.py``) and are saved bypassed:
+a bypassed node passes its first input of the same type through, so ``ext_*`` off is the plain graph. Every pass has
+its own MODEL: ER SDE -> Optimal Scale -> guidance suite -> Skim CFG is shared, then base = Detail Daemon -> SPEED,
+Hires = its own pair, SAM3 = its own Detail Daemon (never SPEED). The post row (R19) takes the same pass models.
 
 How the frontend (1.57.4) restores a node from this file, which the node entries must follow:
 - ``inputs[i]`` overwrites the node's i-th input slot; the slots are the socket inputs, then one slot per widget
@@ -85,8 +90,10 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("shift", "ForgeNeoModelSamplingShift", "Shift"),
         ("sched", "ForgeNeoExtraSchedulers", "스케줄러 값"),
         ("lora_stack", "AIStudioLoraStack", "LoRA"),
+        ("ext_lora_block", "ForgeNeoLoraBlockWeight", "LoRA 블록"),
         ("negpip", "ForgeNeoNegPip", "NegPiP"),
         ("dora", "ForgeNeoDoraInferenceMode", "DoRA"),
+        ("ext_er_sde", "ForgeNeoExtraSamplerSettings", "ER SDE"),
     ]),
     ("③ 프롬프트", [
         ("pos_encode", "AIStudioPromptEncode", "프롬프트"),
@@ -96,26 +103,41 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("family_switch_pos", "AIStudioSwitch", "계열: 프롬프트"),
         ("family_switch_neg", "AIStudioSwitch", "계열: 네거티브"),
     ]),
-    ("④ 잠재·샘플링", [
+    ("④ 확장", [
+        ("ext_optimal_scale", "ForgeNeoAnimaOptimalScale", "Optimal Scale"),
+        ("ext_guidance", "ForgeNeoAnimaGuidanceSuite", "가이던스"),
+        ("ext_skim", "ForgeNeoSkimmedCFG", "Skim CFG"),
+        ("ext_dd", "ForgeNeoAnimaDetailDaemon", "Detail Daemon"),
+        ("ext_speed", "ForgeNeoAnimaSpeed", "SPEED"),
+        ("ext_dd_hires", "ForgeNeoAnimaDetailDaemon", "Detail Daemon (Hires)"),
+        ("ext_speed_hires", "ForgeNeoAnimaSpeed", "SPEED (Hires)"),
+        ("ext_dd_sam3", "ForgeNeoAnimaDetailDaemon", "Detail Daemon (SAM3)"),
+    ]),
+    ("⑤ 잠재·샘플링", [
         ("i2i_image", "LoadImage", "i2i 이미지"),
         ("latent", "ForgeNeoLatentInput", "잠재"),
         ("sampler", "ForgeNeoKSamplerCNS", "샘플러"),
     ]),
-    ("⑤ Hires", [
+    ("⑥ Hires", [
         ("hires", "ForgeNeoHiresFix", "Hires"),
+        ("ext_vae_2x", "ForgeNeoAnimaVAE2x", "VAE 2x"),
         ("decode", "VAEDecode", "VAE 디코드"),
+        ("ext_pid", "ForgeNeoAnimaPiD", "PiD"),
     ]),
-    ("⑥ 업스케일", [
+    ("⑦ 업스케일", [
         ("upscale", "AIStudioUpscaleImage", "업스케일"),
     ]),
-    ("⑦ SAM3", [
+    ("⑧ SAM3", [
         ("sam3_mask", "ForgeNeoSAM3Mask", "SAM3 마스크"),
         ("sam3_detailer", "ForgeNeoSAM3Detailer", "SAM3 디테일"),
+        ("ext_sam3_refine", "ForgeNeoSAM3Refine", "SAM3 Refine"),
+        ("ext_sam3_tile", "ForgeNeoSAM3TileRepair", "SAM3 타일"),
     ]),
-    ("⑧ 저장", [
+    ("⑨ 저장", [
+        ("ext_degrid", "ForgeNeoAnimaVAEDeGrid", "VAE DeGrid"),
         ("save", "AIStudioSaveForge", "저장"),
     ]),
-    ("⑨ 후처리", [  # R19: studio_logic.js POST_ROUTES re-link these slot-0 IMAGE links
+    ("⑩ 후처리", [  # R19: studio_logic.js POST_ROUTES re-link these slot-0 IMAGE links
         ("post_image", "LoadImage", "후처리 이미지"),
         ("post_upscale", "AIStudioUpscaleImage", "후처리 업스케일"),
         ("post_encode", "VAEEncode", "후처리 인코드"),
@@ -128,17 +150,17 @@ ROWS = (  # (group title, [(role, class, node title)])
 )
 
 
-def _detailer_links(role: str, image: str) -> list[tuple]:
+def _detailer_links(role: str, image: str, mask: str) -> list[tuple]:
     return [
-        (image, 0, role, "image"), (f"{role[:-len('detailer')]}mask", 0, role, "mask"),
-        ("dora", 0, role, "model"), ("negpip", 1, role, "clip"), ("vae", 0, role, "vae"),
+        (image, 0, role, "image"), (mask, 0, role, "mask"),
+        ("ext_dd_sam3", 0, role, "model"), ("negpip", 1, role, "clip"), ("vae", 0, role, "vae"),
         ("family_switch_pos", 0, role, "positive"), ("family_switch_neg", 0, role, "negative"),
     ]
 
 
 def _hires_links(role: str, samples: str) -> list[tuple]:
     return [
-        ("dora", 0, role, "model"), ("family_switch_pos", 0, role, "positive"),
+        ("ext_speed_hires", 0, role, "model"), ("family_switch_pos", 0, role, "positive"),
         ("family_switch_neg", 0, role, "negative"), (samples, 0, role, "samples"),
         ("vae", 0, role, "base_vae"), ("negpip", 1, role, "base_clip"),
     ]
@@ -151,9 +173,12 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("shift", 0, "sched", "model"),
     ("sched", 0, "lora_stack", "model"),
     ("te", 0, "lora_stack", "clip"),  # R6: one native TE for both families
-    ("lora_stack", 0, "negpip", "model"),
-    ("lora_stack", 1, "negpip", "clip"),
+    ("lora_stack", 0, "ext_lora_block", "model"),
+    ("lora_stack", 1, "ext_lora_block", "clip"),
+    ("ext_lora_block", 0, "negpip", "model"),
+    ("ext_lora_block", 1, "negpip", "clip"),
     ("negpip", 0, "dora", "model"),
+    ("dora", 0, "ext_er_sde", "model"),
     ("negpip", 1, "pos_encode", "clip"),
     ("lora_stack", 2, "pos_encode", "text"),
     ("negpip", 1, "neg_encode", "clip"),
@@ -171,22 +196,40 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("pos_encode38", 0, "family_switch_pos", "b"),
     ("neg_encode", 0, "family_switch_neg", "a"),
     ("neg_encode38", 0, "family_switch_neg", "b"),
+    # ④ extensions: the stack every pass shares, then each pass's own Detail Daemon / SPEED
+    ("ext_er_sde", 0, "ext_optimal_scale", "model"),
+    ("ext_optimal_scale", 0, "ext_guidance", "model"),
+    ("negpip", 1, "ext_guidance", "clip"),
+    ("family_switch_pos", 0, "ext_guidance", "positive"),
+    ("family_switch_neg", 0, "ext_guidance", "negative"),
+    ("ext_guidance", 0, "ext_skim", "model"),
+    ("ext_skim", 0, "ext_dd", "model"),
+    ("ext_dd", 0, "ext_speed", "model"),
+    ("ext_skim", 0, "ext_dd_hires", "model"),
+    ("ext_dd_hires", 0, "ext_speed_hires", "model"),
+    ("ext_skim", 0, "ext_dd_sam3", "model"),
     ("vae", 0, "latent", "vae"),
     ("i2i_image", 0, "latent", "img2img_image"),
     ("i2i_image", 0, "latent", "inpaint_image"),
     ("i2i_image", 1, "latent", "inpaint_mask"),  # the mask editor's alpha
-    ("dora", 0, "sampler", "model"),
+    ("ext_speed", 0, "sampler", "model"),
     ("family_switch_pos", 0, "sampler", "positive"),
     ("family_switch_neg", 0, "sampler", "negative"),
     ("latent", 0, "sampler", "latent_image"),
     *_hires_links("hires", "sampler"),
+    ("hires", 1, "ext_vae_2x", "vae"),
     ("hires", 0, "decode", "samples"),
-    ("hires", 1, "decode", "vae"),
-    ("decode", 0, "upscale", "image"),
+    ("ext_vae_2x", 0, "decode", "vae"),
+    ("decode", 0, "ext_pid", "image"),
+    ("hires", 0, "ext_pid", "latent"),
+    ("ext_pid", 0, "upscale", "image"),
     ("upscale", 0, "sam3_mask", "image"),
-    *_detailer_links("sam3_detailer", "upscale"),
-    ("sam3_detailer", 0, "save", "images"),
-    # ⑨ post-processing of a gallery image; model and conditioning come from the rows above
+    *_detailer_links("sam3_detailer", "upscale", "sam3_mask"),
+    *_detailer_links("ext_sam3_refine", "sam3_detailer", "sam3_mask"),
+    *_detailer_links("ext_sam3_tile", "ext_sam3_refine", "sam3_mask"),
+    ("ext_sam3_tile", 0, "ext_degrid", "image"),
+    ("ext_degrid", 0, "save", "images"),
+    # ⑩ post-processing of a gallery image; model and conditioning come from the rows above
     ("post_image", 0, "post_upscale", "image"),
     ("post_upscale", 0, "post_encode", "pixels"),
     ("vae", 0, "post_encode", "vae"),
@@ -194,7 +237,7 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("post_hires", 0, "post_decode", "samples"),
     ("post_hires", 1, "post_decode", "vae"),
     ("post_decode", 0, "post_sam3_mask", "image"),
-    *_detailer_links("post_sam3_detailer", "post_decode"),
+    *_detailer_links("post_sam3_detailer", "post_decode", "post_sam3_mask"),
     ("post_sam3_detailer", 0, "post_save", "images"),
 )
 
@@ -228,6 +271,12 @@ INSTALL_COMBOS = {
     "AIStudioUpscaleImage": {"model_name"},
     "ForgeNeoSAM3Mask": {"face_crop_detector"},
     "ForgeNeoSAM3Detailer": {"sampler_name", "scheduler"},
+    "ForgeNeoSAM3Refine": {"sampler_name", "scheduler"},
+    "ForgeNeoLoraBlockWeight": {"lora_name"},
+    "ForgeNeoExtraSamplerSettings": {"owned_names"},
+    "ForgeNeoAnimaVAE2x": {"vae_name"},
+    "ForgeNeoAnimaPiD": {"ckpt_name"},
+    "ForgeNeoAnimaVAEDeGrid": {"model_name"},
 }
 
 
@@ -348,6 +397,8 @@ def role_values(state: dict) -> dict[str, dict]:
         "post_sam3_detailer": detailer,
         "save": save,
         "post_save": save,
+        "ext_speed": {"pass_label": "base"},
+        "ext_speed_hires": {"pass_label": "hires"},
     }
 
 
@@ -358,7 +409,7 @@ def default_bypassed(state: dict) -> set[str]:
         bypassed.add("i2i_image")
     if not state["sam3"]["on"]:
         bypassed |= {"sam3_mask", "sam3_detailer"}
-    bypassed |= {role for _, row in ROWS for role, _, _ in row if role.startswith("post_")}
+    bypassed |= {role for _, row in ROWS for role, _, _ in row if role.startswith(("post_", "ext_"))}
     return bypassed
 
 

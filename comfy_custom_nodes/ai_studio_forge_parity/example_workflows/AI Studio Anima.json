@@ -1,6 +1,6 @@
 {
-  "last_node_id": 37,
-  "last_link_id": 71,
+  "last_node_id": 52,
+  "last_link_id": 103,
   "nodes": [
     {
       "id": 1,
@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}}"
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}"
       ]
     },
     {
@@ -200,12 +200,14 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            26,
-            38,
-            48,
-            54,
-            59,
-            68
+            40,
+            52,
+            65,
+            72,
+            79,
+            86,
+            91,
+            100
           ]
         }
       ],
@@ -285,8 +287,8 @@
           "name": "CLIP",
           "type": "CLIP",
           "links": [
-            16,
-            20
+            19,
+            23
           ]
         }
       ],
@@ -568,16 +570,16 @@
           "name": "positive",
           "type": "STRING",
           "links": [
-            11,
-            17
+            14,
+            20
           ]
         },
         {
           "name": "negative",
           "type": "STRING",
           "links": [
-            13,
-            21
+            16,
+            24
           ]
         }
       ],
@@ -592,20 +594,20 @@
     },
     {
       "id": 13,
-      "type": "ForgeNeoNegPip",
+      "type": "ForgeNeoLoraBlockWeight",
       "pos": [
         1140,
         1596
       ],
       "size": [
         340,
-        84
+        400
       ],
       "flags": {
         "collapsed": true
       },
       "order": 12,
-      "mode": 0,
+      "mode": 4,
       "inputs": [
         {
           "name": "model",
@@ -624,6 +626,140 @@
             "name": "enabled"
           },
           "link": null
+        },
+        {
+          "name": "lora_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_name"
+          },
+          "link": null
+        },
+        {
+          "name": "strength_model",
+          "type": "FLOAT",
+          "widget": {
+            "name": "strength_model"
+          },
+          "link": null
+        },
+        {
+          "name": "strength_clip",
+          "type": "FLOAT",
+          "widget": {
+            "name": "strength_clip"
+          },
+          "link": null
+        },
+        {
+          "name": "inverse",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "inverse"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "A",
+          "type": "FLOAT",
+          "widget": {
+            "name": "A"
+          },
+          "link": null
+        },
+        {
+          "name": "B",
+          "type": "FLOAT",
+          "widget": {
+            "name": "B"
+          },
+          "link": null
+        },
+        {
+          "name": "preset",
+          "type": "COMBO",
+          "widget": {
+            "name": "preset"
+          },
+          "link": null
+        },
+        {
+          "name": "block_vector",
+          "type": "STRING",
+          "widget": {
+            "name": "block_vector"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            9
+          ]
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            10
+          ]
+        },
+        {
+          "name": "populated_vector",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "LoRA 블록",
+      "properties": {
+        "aistudio_role": "ext_lora_block"
+      }
+    },
+    {
+      "id": 14,
+      "type": "ForgeNeoNegPip",
+      "pos": [
+        1520,
+        1596
+      ],
+      "size": [
+        340,
+        84
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 9
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 10
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -631,21 +767,24 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            9
+            11
           ]
         },
         {
           "name": "CLIP",
           "type": "CLIP",
           "links": [
-            10,
-            12,
+            13,
             15,
-            19,
-            39,
-            47,
-            60,
-            67
+            18,
+            22,
+            31,
+            53,
+            64,
+            71,
+            78,
+            92,
+            99
           ]
         }
       ],
@@ -658,10 +797,10 @@
       ]
     },
     {
-      "id": 14,
+      "id": 15,
       "type": "ForgeNeoDoraInferenceMode",
       "pos": [
-        1520,
+        1900,
         1596
       ],
       "size": [
@@ -671,13 +810,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 13,
+      "order": 14,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 9
+          "link": 11
         },
         {
           "name": "enabled",
@@ -701,13 +840,9 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            14,
-            18,
-            30,
-            34,
-            46,
-            55,
-            66
+            12,
+            17,
+            21
           ]
         }
       ],
@@ -721,11 +856,96 @@
       ]
     },
     {
-      "id": 15,
+      "id": 16,
+      "type": "ForgeNeoExtraSamplerSettings",
+      "pos": [
+        2280,
+        1596
+      ],
+      "size": [
+        340,
+        184
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 15,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 12
+        },
+        {
+          "name": "max_stage",
+          "type": "INT",
+          "widget": {
+            "name": "max_stage"
+          },
+          "link": null
+        },
+        {
+          "name": "eta",
+          "type": "FLOAT",
+          "widget": {
+            "name": "eta"
+          },
+          "link": null
+        },
+        {
+          "name": "noise_window",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "noise_window"
+          },
+          "link": null
+        },
+        {
+          "name": "noise_start",
+          "type": "FLOAT",
+          "widget": {
+            "name": "noise_start"
+          },
+          "link": null
+        },
+        {
+          "name": "noise_end",
+          "type": "FLOAT",
+          "widget": {
+            "name": "noise_end"
+          },
+          "link": null
+        },
+        {
+          "name": "owned_names",
+          "type": "COMBO",
+          "widget": {
+            "name": "owned_names"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            29
+          ]
+        }
+      ],
+      "title": "ER SDE",
+      "properties": {
+        "aistudio_role": "ext_er_sde"
+      }
+    },
+    {
+      "id": 17,
       "type": "AIStudioPromptEncode",
       "pos": [
         20,
-        1996
+        2136
       ],
       "size": [
         400,
@@ -734,13 +954,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 14,
+      "order": 16,
       "mode": 0,
       "inputs": [
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 10
+          "link": 13
         },
         {
           "name": "text",
@@ -748,7 +968,7 @@
           "widget": {
             "name": "text"
           },
-          "link": 11
+          "link": 14
         },
         {
           "name": "steps",
@@ -772,7 +992,7 @@
           "name": "CONDITIONING",
           "type": "CONDITIONING",
           "links": [
-            22
+            25
           ]
         }
       ],
@@ -787,11 +1007,11 @@
       ]
     },
     {
-      "id": 16,
+      "id": 18,
       "type": "AIStudioPromptEncode",
       "pos": [
         460,
-        1996
+        2136
       ],
       "size": [
         400,
@@ -800,13 +1020,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 15,
+      "order": 17,
       "mode": 0,
       "inputs": [
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 12
+          "link": 15
         },
         {
           "name": "text",
@@ -814,7 +1034,7 @@
           "widget": {
             "name": "text"
           },
-          "link": 13
+          "link": 16
         },
         {
           "name": "steps",
@@ -838,7 +1058,7 @@
           "name": "CONDITIONING",
           "type": "CONDITIONING",
           "links": [
-            24
+            27
           ]
         }
       ],
@@ -853,11 +1073,11 @@
       ]
     },
     {
-      "id": 17,
+      "id": 19,
       "type": "ForgeNeoAnima38V2Prompt",
       "pos": [
         900,
-        1996
+        2136
       ],
       "size": [
         400,
@@ -866,23 +1086,23 @@
       "flags": {
         "collapsed": true
       },
-      "order": 16,
+      "order": 18,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 14
+          "link": 17
         },
         {
           "name": "native_clip",
           "type": "CLIP",
-          "link": 15
+          "link": 18
         },
         {
           "name": "qwen35_clip",
           "type": "CLIP",
-          "link": 16
+          "link": 19
         },
         {
           "name": "prompt",
@@ -890,7 +1110,7 @@
           "widget": {
             "name": "prompt"
           },
-          "link": 17
+          "link": 20
         }
       ],
       "outputs": [
@@ -898,7 +1118,7 @@
           "name": "expanded",
           "type": "CONDITIONING",
           "links": [
-            23
+            26
           ]
         },
         {
@@ -913,11 +1133,11 @@
       }
     },
     {
-      "id": 18,
+      "id": 20,
       "type": "ForgeNeoAnima38V2Prompt",
       "pos": [
         1340,
-        1996
+        2136
       ],
       "size": [
         400,
@@ -926,23 +1146,23 @@
       "flags": {
         "collapsed": true
       },
-      "order": 17,
+      "order": 19,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 18
+          "link": 21
         },
         {
           "name": "native_clip",
           "type": "CLIP",
-          "link": 19
+          "link": 22
         },
         {
           "name": "qwen35_clip",
           "type": "CLIP",
-          "link": 20
+          "link": 23
         },
         {
           "name": "prompt",
@@ -950,7 +1170,7 @@
           "widget": {
             "name": "prompt"
           },
-          "link": 21
+          "link": 24
         }
       ],
       "outputs": [
@@ -958,7 +1178,7 @@
           "name": "expanded",
           "type": "CONDITIONING",
           "links": [
-            25
+            28
           ]
         },
         {
@@ -973,11 +1193,11 @@
       }
     },
     {
-      "id": 19,
+      "id": 21,
       "type": "AIStudioSwitch",
       "pos": [
         1780,
-        1996
+        2136
       ],
       "size": [
         220,
@@ -986,75 +1206,18 @@
       "flags": {
         "collapsed": true
       },
-      "order": 18,
+      "order": 20,
       "mode": 0,
       "inputs": [
         {
           "name": "a",
-          "type": "*",
-          "link": 22
-        },
-        {
-          "name": "b",
-          "type": "*",
-          "link": 23
-        },
-        {
-          "name": "select",
-          "type": "INT",
-          "widget": {
-            "name": "select"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "*",
-          "type": "*",
-          "links": [
-            31,
-            35,
-            49,
-            56,
-            69
-          ]
-        }
-      ],
-      "title": "계열: 프롬프트",
-      "properties": {
-        "aistudio_role": "family_switch_pos"
-      },
-      "widgets_values": [
-        0
-      ]
-    },
-    {
-      "id": 20,
-      "type": "AIStudioSwitch",
-      "pos": [
-        2040,
-        1996
-      ],
-      "size": [
-        220,
-        84
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 19,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "a",
-          "type": "*",
-          "link": 24
-        },
-        {
-          "name": "b",
           "type": "*",
           "link": 25
+        },
+        {
+          "name": "b",
+          "type": "*",
+          "link": 26
         },
         {
           "name": "select",
@@ -1071,10 +1234,73 @@
           "type": "*",
           "links": [
             32,
-            36,
+            45,
+            49,
+            66,
+            73,
+            80,
+            88,
+            101
+          ]
+        }
+      ],
+      "title": "계열: 프롬프트",
+      "properties": {
+        "aistudio_role": "family_switch_pos"
+      },
+      "widgets_values": [
+        0
+      ]
+    },
+    {
+      "id": 22,
+      "type": "AIStudioSwitch",
+      "pos": [
+        2040,
+        2136
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "a",
+          "type": "*",
+          "link": 27
+        },
+        {
+          "name": "b",
+          "type": "*",
+          "link": 28
+        },
+        {
+          "name": "select",
+          "type": "INT",
+          "widget": {
+            "name": "select"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            33,
+            46,
             50,
-            57,
-            70
+            67,
+            74,
+            81,
+            89,
+            102
           ]
         }
       ],
@@ -1087,11 +1313,832 @@
       ]
     },
     {
-      "id": 21,
+      "id": 23,
+      "type": "ForgeNeoAnimaOptimalScale",
+      "pos": [
+        20,
+        2444
+      ],
+      "size": [
+        340,
+        136
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 22,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 29
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "blend",
+          "type": "FLOAT",
+          "widget": {
+            "name": "blend"
+          },
+          "link": null
+        },
+        {
+          "name": "start_percent",
+          "type": "FLOAT",
+          "widget": {
+            "name": "start_percent"
+          },
+          "link": null
+        },
+        {
+          "name": "end_percent",
+          "type": "FLOAT",
+          "widget": {
+            "name": "end_percent"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            30
+          ]
+        }
+      ],
+      "title": "Optimal Scale",
+      "properties": {
+        "aistudio_role": "ext_optimal_scale"
+      },
+      "widgets_values": [
+        false,
+        0.25,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "id": 24,
+      "type": "ForgeNeoAnimaGuidanceSuite",
+      "pos": [
+        400,
+        2444
+      ],
+      "size": [
+        340,
+        204
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 23,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 30
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 31
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 32
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 33
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "settings_json"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            34
+          ]
+        }
+      ],
+      "title": "가이던스",
+      "properties": {
+        "aistudio_role": "ext_guidance"
+      },
+      "widgets_values": [
+        false,
+        "{}"
+      ]
+    },
+    {
+      "id": 25,
+      "type": "ForgeNeoSkimmedCFG",
+      "pos": [
+        780,
+        2444
+      ],
+      "size": [
+        340,
+        208
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 24,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 34
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "skimming_cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "skimming_cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "full_skim_negative",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "full_skim_negative"
+          },
+          "link": null
+        },
+        {
+          "name": "disable_flipping_filter",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "disable_flipping_filter"
+          },
+          "link": null
+        },
+        {
+          "name": "start_percent",
+          "type": "FLOAT",
+          "widget": {
+            "name": "start_percent"
+          },
+          "link": null
+        },
+        {
+          "name": "end_percent",
+          "type": "FLOAT",
+          "widget": {
+            "name": "end_percent"
+          },
+          "link": null
+        },
+        {
+          "name": "flip_percent",
+          "type": "FLOAT",
+          "widget": {
+            "name": "flip_percent"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            35,
+            37,
+            39
+          ]
+        }
+      ],
+      "title": "Skim CFG",
+      "properties": {
+        "aistudio_role": "ext_skim"
+      },
+      "widgets_values": [
+        false,
+        7.0,
+        false,
+        false,
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    {
+      "id": 26,
+      "type": "ForgeNeoAnimaDetailDaemon",
+      "pos": [
+        1160,
+        2444
+      ],
+      "size": [
+        340,
+        168
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 25,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 35
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg_scale_override",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg_scale_override"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            36
+          ]
+        }
+      ],
+      "title": "Detail Daemon",
+      "properties": {
+        "aistudio_role": "ext_dd"
+      },
+      "widgets_values": [
+        false,
+        "{}",
+        0
+      ]
+    },
+    {
+      "id": 27,
+      "type": "ForgeNeoAnimaSpeed",
+      "pos": [
+        1540,
+        2444
+      ],
+      "size": [
+        340,
+        448
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 26,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 36
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "name": "threshold",
+          "type": "COMBO",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "name": "preset",
+          "type": "COMBO",
+          "widget": {
+            "name": "preset"
+          },
+          "link": null
+        },
+        {
+          "name": "scales",
+          "type": "STRING",
+          "widget": {
+            "name": "scales"
+          },
+          "link": null
+        },
+        {
+          "name": "delta",
+          "type": "FLOAT",
+          "widget": {
+            "name": "delta"
+          },
+          "link": null
+        },
+        {
+          "name": "sigma_divisor",
+          "type": "FLOAT",
+          "widget": {
+            "name": "sigma_divisor"
+          },
+          "link": null
+        },
+        {
+          "name": "manual_sigmas",
+          "type": "STRING",
+          "widget": {
+            "name": "manual_sigmas"
+          },
+          "link": null
+        },
+        {
+          "name": "adaptive",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "adaptive"
+          },
+          "link": null
+        },
+        {
+          "name": "transform",
+          "type": "COMBO",
+          "widget": {
+            "name": "transform"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_A",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_A"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_beta",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_beta"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "pass_label",
+          "type": "COMBO",
+          "widget": {
+            "name": "pass_label"
+          },
+          "link": null
+        },
+        {
+          "name": "image_seed",
+          "type": "INT",
+          "widget": {
+            "name": "image_seed"
+          },
+          "link": null
+        },
+        {
+          "name": "img2img_rescale",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "img2img_rescale"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            44
+          ]
+        }
+      ],
+      "title": "SPEED",
+      "properties": {
+        "aistudio_role": "ext_speed"
+      },
+      "widgets_values": [
+        false,
+        "transition",
+        "neo_shift",
+        "anima",
+        "0.5,1.0",
+        0.01,
+        1.03,
+        "0.7",
+        true,
+        "dct",
+        203.615097,
+        1.915461,
+        -1,
+        "fixed",
+        "base",
+        0,
+        true
+      ]
+    },
+    {
+      "id": 28,
+      "type": "ForgeNeoAnimaDetailDaemon",
+      "pos": [
+        1920,
+        2444
+      ],
+      "size": [
+        340,
+        168
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 27,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 37
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg_scale_override",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg_scale_override"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            38
+          ]
+        }
+      ],
+      "title": "Detail Daemon (Hires)",
+      "properties": {
+        "aistudio_role": "ext_dd_hires"
+      },
+      "widgets_values": [
+        false,
+        "{}",
+        0
+      ]
+    },
+    {
+      "id": 29,
+      "type": "ForgeNeoAnimaSpeed",
+      "pos": [
+        2300,
+        2444
+      ],
+      "size": [
+        340,
+        448
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 28,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 38
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "name": "threshold",
+          "type": "COMBO",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "name": "preset",
+          "type": "COMBO",
+          "widget": {
+            "name": "preset"
+          },
+          "link": null
+        },
+        {
+          "name": "scales",
+          "type": "STRING",
+          "widget": {
+            "name": "scales"
+          },
+          "link": null
+        },
+        {
+          "name": "delta",
+          "type": "FLOAT",
+          "widget": {
+            "name": "delta"
+          },
+          "link": null
+        },
+        {
+          "name": "sigma_divisor",
+          "type": "FLOAT",
+          "widget": {
+            "name": "sigma_divisor"
+          },
+          "link": null
+        },
+        {
+          "name": "manual_sigmas",
+          "type": "STRING",
+          "widget": {
+            "name": "manual_sigmas"
+          },
+          "link": null
+        },
+        {
+          "name": "adaptive",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "adaptive"
+          },
+          "link": null
+        },
+        {
+          "name": "transform",
+          "type": "COMBO",
+          "widget": {
+            "name": "transform"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_A",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_A"
+          },
+          "link": null
+        },
+        {
+          "name": "spectrum_beta",
+          "type": "FLOAT",
+          "widget": {
+            "name": "spectrum_beta"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "pass_label",
+          "type": "COMBO",
+          "widget": {
+            "name": "pass_label"
+          },
+          "link": null
+        },
+        {
+          "name": "image_seed",
+          "type": "INT",
+          "widget": {
+            "name": "image_seed"
+          },
+          "link": null
+        },
+        {
+          "name": "img2img_rescale",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "img2img_rescale"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            48,
+            87
+          ]
+        }
+      ],
+      "title": "SPEED (Hires)",
+      "properties": {
+        "aistudio_role": "ext_speed_hires"
+      },
+      "widgets_values": [
+        false,
+        "transition",
+        "neo_shift",
+        "anima",
+        "0.5,1.0",
+        0.01,
+        1.03,
+        "0.7",
+        true,
+        "dct",
+        203.615097,
+        1.915461,
+        -1,
+        "fixed",
+        "hires",
+        0,
+        true
+      ]
+    },
+    {
+      "id": 30,
+      "type": "ForgeNeoAnimaDetailDaemon",
+      "pos": [
+        2680,
+        2444
+      ],
+      "size": [
+        340,
+        168
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 29,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 39
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg_scale_override",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg_scale_override"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            63,
+            70,
+            77,
+            98
+          ]
+        }
+      ],
+      "title": "Detail Daemon (SAM3)",
+      "properties": {
+        "aistudio_role": "ext_dd_sam3"
+      },
+      "widgets_values": [
+        false,
+        "{}",
+        0
+      ]
+    },
+    {
+      "id": 31,
       "type": "LoadImage",
       "pos": [
         20,
-        2304
+        3032
       ],
       "size": [
         340,
@@ -1100,7 +2147,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 20,
+      "order": 30,
       "mode": 4,
       "inputs": [
         {
@@ -1117,15 +2164,15 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            27,
-            28
+            41,
+            42
           ]
         },
         {
           "name": "MASK",
           "type": "MASK",
           "links": [
-            29
+            43
           ]
         }
       ],
@@ -1135,11 +2182,11 @@
       }
     },
     {
-      "id": 22,
+      "id": 32,
       "type": "ForgeNeoLatentInput",
       "pos": [
         400,
-        2304
+        3032
       ],
       "size": [
         340,
@@ -1148,23 +2195,23 @@
       "flags": {
         "collapsed": true
       },
-      "order": 21,
+      "order": 31,
       "mode": 0,
       "inputs": [
         {
           "name": "vae",
           "type": "VAE",
-          "link": 26
+          "link": 40
         },
         {
           "name": "img2img_image",
           "type": "IMAGE",
-          "link": 27
+          "link": 41
         },
         {
           "name": "inpaint_image",
           "type": "IMAGE",
-          "link": 28
+          "link": 42
         },
         {
           "name": "inpaint_mask_image",
@@ -1174,7 +2221,7 @@
         {
           "name": "inpaint_mask",
           "type": "MASK",
-          "link": 29
+          "link": 43
         },
         {
           "name": "reference_image",
@@ -1299,7 +2346,7 @@
           "name": "latent",
           "type": "LATENT",
           "links": [
-            33
+            47
           ]
         }
       ],
@@ -1325,11 +2372,11 @@
       ]
     },
     {
-      "id": 23,
+      "id": 33,
       "type": "ForgeNeoKSamplerCNS",
       "pos": [
         780,
-        2304
+        3032
       ],
       "size": [
         340,
@@ -1338,28 +2385,28 @@
       "flags": {
         "collapsed": true
       },
-      "order": 22,
+      "order": 32,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 30
+          "link": 44
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 31
+          "link": 45
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 32
+          "link": 46
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 33
+          "link": 47
         },
         {
           "name": "seed",
@@ -1583,7 +2630,7 @@
           "name": "output",
           "type": "LATENT",
           "links": [
-            37
+            51
           ]
         }
       ],
@@ -1623,11 +2670,11 @@
       ]
     },
     {
-      "id": 24,
+      "id": 34,
       "type": "ForgeNeoHiresFix",
       "pos": [
         20,
-        3216
+        3944
       ],
       "size": [
         400,
@@ -1636,38 +2683,38 @@
       "flags": {
         "collapsed": true
       },
-      "order": 23,
+      "order": 33,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 34
+          "link": 48
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 35
+          "link": 49
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 36
+          "link": 50
         },
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 37
+          "link": 51
         },
         {
           "name": "base_vae",
           "type": "VAE",
-          "link": 38
+          "link": 52
         },
         {
           "name": "base_clip",
           "type": "CLIP",
-          "link": 39
+          "link": 53
         },
         {
           "name": "seed",
@@ -1915,14 +2962,15 @@
           "name": "output",
           "type": "LATENT",
           "links": [
-            40
+            55,
+            58
           ]
         },
         {
           "name": "decode_vae",
           "type": "VAE",
           "links": [
-            41
+            54
           ]
         }
       ],
@@ -1965,11 +3013,88 @@
       ]
     },
     {
-      "id": 25,
-      "type": "VAEDecode",
+      "id": 35,
+      "type": "ForgeNeoAnimaVAE2x",
       "pos": [
         460,
-        3216
+        3944
+      ],
+      "size": [
+        340,
+        160
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 34,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 54
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        },
+        {
+          "name": "output_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "output_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "blur_sigma",
+          "type": "FLOAT",
+          "widget": {
+            "name": "blur_sigma"
+          },
+          "link": null
+        },
+        {
+          "name": "latent_renorm",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "latent_renorm"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "vae",
+          "type": "VAE",
+          "links": [
+            56
+          ]
+        }
+      ],
+      "title": "VAE 2x",
+      "properties": {
+        "aistudio_role": "ext_vae_2x"
+      }
+    },
+    {
+      "id": 36,
+      "type": "VAEDecode",
+      "pos": [
+        840,
+        3944
       ],
       "size": [
         220,
@@ -1978,18 +3103,18 @@
       "flags": {
         "collapsed": true
       },
-      "order": 24,
+      "order": 35,
       "mode": 0,
       "inputs": [
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 40
+          "link": 55
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 41
+          "link": 56
         }
       ],
       "outputs": [
@@ -1997,7 +3122,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            42
+            57
           ]
         }
       ],
@@ -2007,11 +3132,141 @@
       }
     },
     {
-      "id": 26,
+      "id": 37,
+      "type": "ForgeNeoAnimaPiD",
+      "pos": [
+        1100,
+        3944
+      ],
+      "size": [
+        340,
+        348
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 36,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 57
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "link": 58
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "ckpt_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "ckpt_name"
+          },
+          "link": null
+        },
+        {
+          "name": "dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "dtype"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "sigma",
+          "type": "FLOAT",
+          "widget": {
+            "name": "sigma"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_latent",
+          "type": "INT",
+          "widget": {
+            "name": "tile_latent"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_overlap",
+          "type": "INT",
+          "widget": {
+            "name": "tile_overlap"
+          },
+          "link": null
+        },
+        {
+          "name": "compile",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "compile"
+          },
+          "link": null
+        },
+        {
+          "name": "use_calib",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "use_calib"
+          },
+          "link": null
+        },
+        {
+          "name": "attention",
+          "type": "COMBO",
+          "widget": {
+            "name": "attention"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            59
+          ]
+        }
+      ],
+      "title": "PiD",
+      "properties": {
+        "aistudio_role": "ext_pid"
+      }
+    },
+    {
+      "id": 38,
       "type": "AIStudioUpscaleImage",
       "pos": [
         20,
-        4464
+        5192
       ],
       "size": [
         340,
@@ -2020,13 +3275,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 25,
+      "order": 37,
       "mode": 0,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 42
+          "link": 59
         },
         {
           "name": "enabled",
@@ -2058,8 +3313,8 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            43,
-            44
+            60,
+            61
           ]
         }
       ],
@@ -2069,11 +3324,11 @@
       }
     },
     {
-      "id": 27,
+      "id": 39,
       "type": "ForgeNeoSAM3Mask",
       "pos": [
         20,
-        4716
+        5444
       ],
       "size": [
         400,
@@ -2082,13 +3337,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 26,
+      "order": 38,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 43
+          "link": 60
         },
         {
           "name": "sam3_model",
@@ -2298,7 +3553,9 @@
           "name": "selected_mask",
           "type": "MASK",
           "links": [
-            45
+            62,
+            69,
+            76
           ]
         },
         {
@@ -2338,11 +3595,11 @@
       }
     },
     {
-      "id": 28,
+      "id": 40,
       "type": "ForgeNeoSAM3Detailer",
       "pos": [
         460,
-        4716
+        5444
       ],
       "size": [
         400,
@@ -2351,43 +3608,43 @@
       "flags": {
         "collapsed": true
       },
-      "order": 27,
+      "order": 39,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 44
+          "link": 61
         },
         {
           "name": "mask",
           "type": "MASK",
-          "link": 45
+          "link": 62
         },
         {
           "name": "model",
           "type": "MODEL",
-          "link": 46
+          "link": 63
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 47
+          "link": 64
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 48
+          "link": 65
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 49
+          "link": 66
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 50
+          "link": 67
         },
         {
           "name": "control_net",
@@ -2658,7 +3915,7 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            51
+            68
           ]
         },
         {
@@ -2712,917 +3969,56 @@
       ]
     },
     {
-      "id": 29,
-      "type": "AIStudioSaveForge",
+      "id": 41,
+      "type": "ForgeNeoSAM3Refine",
       "pos": [
-        20,
-        6068
-      ],
-      "size": [
-        400,
-        192
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 28,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 51
-        },
-        {
-          "name": "studio_state",
-          "type": "STRING",
-          "widget": {
-            "name": "studio_state"
-          },
-          "link": null
-        },
-        {
-          "name": "seed",
-          "type": "INT",
-          "widget": {
-            "name": "seed"
-          },
-          "link": null
-        },
-        {
-          "name": "filename_prefix",
-          "type": "STRING",
-          "widget": {
-            "name": "filename_prefix"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [],
-      "title": "저장",
-      "properties": {
-        "aistudio_role": "save"
-      },
-      "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}}",
-        0,
-        "fixed",
-        "AIStudio/anima"
-      ]
-    },
-    {
-      "id": 30,
-      "type": "LoadImage",
-      "pos": [
-        20,
-        6400
+        900,
+        5444
       ],
       "size": [
         340,
-        340
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 29,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "COMBO",
-          "widget": {
-            "name": "image"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            52
-          ]
-        },
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": null
-        }
-      ],
-      "title": "후처리 이미지",
-      "properties": {
-        "aistudio_role": "post_image"
-      }
-    },
-    {
-      "id": 31,
-      "type": "AIStudioUpscaleImage",
-      "pos": [
-        400,
-        6400
-      ],
-      "size": [
-        340,
-        112
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 30,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 52
-        },
-        {
-          "name": "enabled",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "enabled"
-          },
-          "link": null
-        },
-        {
-          "name": "model_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "model_name"
-          },
-          "link": null
-        },
-        {
-          "name": "scale_by",
-          "type": "FLOAT",
-          "widget": {
-            "name": "scale_by"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "links": [
-            53
-          ]
-        }
-      ],
-      "title": "후처리 업스케일",
-      "properties": {
-        "aistudio_role": "post_upscale"
-      }
-    },
-    {
-      "id": 32,
-      "type": "VAEEncode",
-      "pos": [
-        780,
-        6400
-      ],
-      "size": [
-        220,
-        60
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 31,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "pixels",
-          "type": "IMAGE",
-          "link": 53
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 54
-        }
-      ],
-      "outputs": [
-        {
-          "name": "LATENT",
-          "type": "LATENT",
-          "links": [
-            58
-          ]
-        }
-      ],
-      "title": "후처리 인코드",
-      "properties": {
-        "aistudio_role": "post_encode"
-      }
-    },
-    {
-      "id": 33,
-      "type": "ForgeNeoHiresFix",
-      "pos": [
-        1040,
-        6400
-      ],
-      "size": [
-        400,
-        1108
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 32,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 55
-        },
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 56
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 57
-        },
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 58
-        },
-        {
-          "name": "base_vae",
-          "type": "VAE",
-          "link": 59
-        },
-        {
-          "name": "base_clip",
-          "type": "CLIP",
-          "link": 60
-        },
-        {
-          "name": "seed",
-          "type": "INT",
-          "widget": {
-            "name": "seed"
-          },
-          "link": null
-        },
-        {
-          "name": "enabled",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "enabled"
-          },
-          "link": null
-        },
-        {
-          "name": "scale_by",
-          "type": "FLOAT",
-          "widget": {
-            "name": "scale_by"
-          },
-          "link": null
-        },
-        {
-          "name": "upscale_method",
-          "type": "COMBO",
-          "widget": {
-            "name": "upscale_method"
-          },
-          "link": null
-        },
-        {
-          "name": "steps",
-          "type": "INT",
-          "widget": {
-            "name": "steps"
-          },
-          "link": null
-        },
-        {
-          "name": "cfg",
-          "type": "FLOAT",
-          "widget": {
-            "name": "cfg"
-          },
-          "link": null
-        },
-        {
-          "name": "sampler_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "sampler_name"
-          },
-          "link": null
-        },
-        {
-          "name": "scheduler",
-          "type": "COMBO",
-          "widget": {
-            "name": "scheduler"
-          },
-          "link": null
-        },
-        {
-          "name": "denoise",
-          "type": "FLOAT",
-          "widget": {
-            "name": "denoise"
-          },
-          "link": null
-        },
-        {
-          "name": "seed_delta",
-          "type": "INT",
-          "widget": {
-            "name": "seed_delta"
-          },
-          "link": null
-        },
-        {
-          "name": "cns_enabled",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "cns_enabled"
-          },
-          "link": null
-        },
-        {
-          "name": "cns_strength",
-          "type": "FLOAT",
-          "widget": {
-            "name": "cns_strength"
-          },
-          "link": null
-        },
-        {
-          "name": "cns_gamma_power",
-          "type": "FLOAT",
-          "widget": {
-            "name": "cns_gamma_power"
-          },
-          "link": null
-        },
-        {
-          "name": "cns_gamma_scale",
-          "type": "FLOAT",
-          "widget": {
-            "name": "cns_gamma_scale"
-          },
-          "link": null
-        },
-        {
-          "name": "base_steps",
-          "type": "INT",
-          "widget": {
-            "name": "base_steps"
-          },
-          "link": null
-        },
-        {
-          "name": "base_sampler_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "base_sampler_name"
-          },
-          "link": null
-        },
-        {
-          "name": "base_scheduler",
-          "type": "COMBO",
-          "widget": {
-            "name": "base_scheduler"
-          },
-          "link": null
-        },
-        {
-          "name": "resize_width",
-          "type": "INT",
-          "widget": {
-            "name": "resize_width"
-          },
-          "link": null
-        },
-        {
-          "name": "resize_height",
-          "type": "INT",
-          "widget": {
-            "name": "resize_height"
-          },
-          "link": null
-        },
-        {
-          "name": "shift",
-          "type": "FLOAT",
-          "widget": {
-            "name": "shift"
-          },
-          "link": null
-        },
-        {
-          "name": "checkpoint_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "checkpoint_name"
-          },
-          "link": null
-        },
-        {
-          "name": "checkpoint_weight_dtype",
-          "type": "COMBO",
-          "widget": {
-            "name": "checkpoint_weight_dtype"
-          },
-          "link": null
-        },
-        {
-          "name": "text_encoder_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "text_encoder_name"
-          },
-          "link": null
-        },
-        {
-          "name": "vae_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "vae_name"
-          },
-          "link": null
-        },
-        {
-          "name": "positive_text",
-          "type": "STRING",
-          "widget": {
-            "name": "positive_text"
-          },
-          "link": null
-        },
-        {
-          "name": "negative_text",
-          "type": "STRING",
-          "widget": {
-            "name": "negative_text"
-          },
-          "link": null
-        },
-        {
-          "name": "base_positive_text",
-          "type": "STRING",
-          "widget": {
-            "name": "base_positive_text"
-          },
-          "link": null
-        },
-        {
-          "name": "base_negative_text",
-          "type": "STRING",
-          "widget": {
-            "name": "base_negative_text"
-          },
-          "link": null
-        },
-        {
-          "name": "clip_type",
-          "type": "COMBO",
-          "widget": {
-            "name": "clip_type"
-          },
-          "link": null
-        },
-        {
-          "name": "forge_noise",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "forge_noise"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "output",
-          "type": "LATENT",
-          "links": [
-            61
-          ]
-        },
-        {
-          "name": "decode_vae",
-          "type": "VAE",
-          "links": [
-            62
-          ]
-        }
-      ],
-      "title": "후처리 Hires",
-      "properties": {
-        "aistudio_role": "post_hires"
-      },
-      "widgets_values": [
-        -1,
-        "fixed",
-        false,
-        1.5,
-        "4x-UltraSharp.pth",
-        16,
-        3.0,
-        "exp_heun_2_x0_sde",
-        "flow_cosmos_dynamic",
-        0.4,
-        0,
-        false,
-        1.0,
-        0.5,
-        2.0,
-        32,
-        "exp_heun_2_x0_sde",
-        "flow_cosmos_dynamic",
-        0,
-        0,
-        3.0,
-        "Use same checkpoint",
-        "default",
-        "Use same choices",
-        "Use same choices",
-        "",
-        "",
-        "",
-        "",
-        "stable_diffusion",
-        true
-      ]
-    },
-    {
-      "id": 34,
-      "type": "VAEDecode",
-      "pos": [
-        1480,
-        6400
-      ],
-      "size": [
-        220,
-        60
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 33,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 61
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 62
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            63,
-            64
-          ]
-        }
-      ],
-      "title": "후처리 디코드",
-      "properties": {
-        "aistudio_role": "post_decode"
-      }
-    },
-    {
-      "id": 35,
-      "type": "ForgeNeoSAM3Mask",
-      "pos": [
-        1740,
-        6400
-      ],
-      "size": [
-        400,
-        872
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 34,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 63
-        },
-        {
-          "name": "sam3_model",
-          "type": "EASY_SAM3_MODEL",
-          "link": null
-        },
-        {
-          "name": "manual_mask",
-          "type": "MASK",
-          "link": null
-        },
-        {
-          "name": "prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "prompt"
-          },
-          "link": null
-        },
-        {
-          "name": "exclude_prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "exclude_prompt"
-          },
-          "link": null
-        },
-        {
-          "name": "mask_mode",
-          "type": "COMBO",
-          "widget": {
-            "name": "mask_mode"
-          },
-          "link": null
-        },
-        {
-          "name": "mask_source",
-          "type": "COMBO",
-          "widget": {
-            "name": "mask_source"
-          },
-          "link": null
-        },
-        {
-          "name": "threshold",
-          "type": "FLOAT",
-          "widget": {
-            "name": "threshold"
-          },
-          "link": null
-        },
-        {
-          "name": "detection_limit",
-          "type": "INT",
-          "widget": {
-            "name": "detection_limit"
-          },
-          "link": null
-        },
-        {
-          "name": "convex_hull",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "convex_hull"
-          },
-          "link": null
-        },
-        {
-          "name": "mask_dilation",
-          "type": "INT",
-          "widget": {
-            "name": "mask_dilation"
-          },
-          "link": null
-        },
-        {
-          "name": "mask_outline_px",
-          "type": "INT",
-          "widget": {
-            "name": "mask_outline_px"
-          },
-          "link": null
-        },
-        {
-          "name": "mask_blur",
-          "type": "INT",
-          "widget": {
-            "name": "mask_blur"
-          },
-          "link": null
-        },
-        {
-          "name": "invert",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "invert"
-          },
-          "link": null
-        },
-        {
-          "name": "checkpoint",
-          "type": "STRING",
-          "widget": {
-            "name": "checkpoint"
-          },
-          "link": null
-        },
-        {
-          "name": "device",
-          "type": "COMBO",
-          "widget": {
-            "name": "device"
-          },
-          "link": null
-        },
-        {
-          "name": "precision",
-          "type": "COMBO",
-          "widget": {
-            "name": "precision"
-          },
-          "link": null
-        },
-        {
-          "name": "unload_after",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "unload_after"
-          },
-          "link": null
-        },
-        {
-          "name": "save_artifacts",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "save_artifacts"
-          },
-          "link": null
-        },
-        {
-          "name": "artifact_directory",
-          "type": "STRING",
-          "widget": {
-            "name": "artifact_directory"
-          },
-          "link": null
-        },
-        {
-          "name": "seed",
-          "type": "INT",
-          "widget": {
-            "name": "seed"
-          },
-          "link": null
-        },
-        {
-          "name": "enabled",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "enabled"
-          },
-          "link": null
-        },
-        {
-          "name": "cache_model",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "cache_model"
-          },
-          "link": null
-        },
-        {
-          "name": "face_crop",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "face_crop"
-          },
-          "link": null
-        },
-        {
-          "name": "face_crop_model",
-          "type": "STRING",
-          "widget": {
-            "name": "face_crop_model"
-          },
-          "link": null
-        },
-        {
-          "name": "face_crop_confidence",
-          "type": "FLOAT",
-          "widget": {
-            "name": "face_crop_confidence"
-          },
-          "link": null
-        },
-        {
-          "name": "face_crop_detector",
-          "type": "COMBO",
-          "widget": {
-            "name": "face_crop_detector"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "selected_mask",
-          "type": "MASK",
-          "links": [
-            65
-          ]
-        },
-        {
-          "name": "combined_mask",
-          "type": "MASK",
-          "links": null
-        },
-        {
-          "name": "individual_masks",
-          "type": "MASK",
-          "links": null
-        },
-        {
-          "name": "overlay",
-          "type": "IMAGE",
-          "links": null
-        },
-        {
-          "name": "boxes",
-          "type": "BBOX",
-          "links": null
-        },
-        {
-          "name": "scores",
-          "type": "FLOAT",
-          "links": null
-        },
-        {
-          "name": "artifacts_json",
-          "type": "STRING",
-          "links": null
-        }
-      ],
-      "title": "후처리 SAM3 마스크",
-      "properties": {
-        "aistudio_role": "post_sam3_mask"
-      }
-    },
-    {
-      "id": 36,
-      "type": "ForgeNeoSAM3Detailer",
-      "pos": [
-        2180,
-        6400
-      ],
-      "size": [
-        400,
         1212
       ],
       "flags": {
         "collapsed": true
       },
-      "order": 35,
+      "order": 40,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 64
+          "link": 68
         },
         {
           "name": "mask",
           "type": "MASK",
-          "link": 65
+          "link": 69
         },
         {
           "name": "model",
           "type": "MODEL",
-          "link": 66
+          "link": 70
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 67
+          "link": 71
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 68
+          "link": 72
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 69
+          "link": 73
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 70
+          "link": 74
         },
         {
           "name": "control_net",
@@ -3893,7 +4289,1434 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            71
+            75
+          ]
+        },
+        {
+          "name": "applied_mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "SAM3 Refine",
+      "properties": {
+        "aistudio_role": "ext_sam3_refine"
+      }
+    },
+    {
+      "id": 42,
+      "type": "ForgeNeoSAM3TileRepair",
+      "pos": [
+        1280,
+        5444
+      ],
+      "size": [
+        340,
+        324
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 41,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 75
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 76
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 77
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 78
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 79
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 80
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 81
+        },
+        {
+          "name": "control_net",
+          "type": "CONTROL_NET",
+          "link": null
+        },
+        {
+          "name": "control_image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "face_detector",
+          "type": "BBOX_DETECTOR",
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "settings_json"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            82
+          ]
+        },
+        {
+          "name": "applied_mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "SAM3 타일",
+      "properties": {
+        "aistudio_role": "ext_sam3_tile"
+      },
+      "widgets_values": [
+        true,
+        "{\"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"steps\": 28, \"cfg\": 7.0, \"sampler_name\": \"euler\", \"scheduler\": \"normal\", \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"seed\": 0, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\", \"controlnet_enable\": false, \"controlnet_model_name\": \"None\", \"controlnet_module\": \"tile_resample\", \"controlnet_override_external\": false, \"controlnet_strength\": 1.0, \"controlnet_start\": 0.0, \"controlnet_end\": 1.0, \"controlnet_processor_resolution\": 512, \"controlnet_settings\": {\"pixel_perfect\": true, \"override_external\": false, \"control_mode\": \"Balanced\", \"resize_mode\": \"Crop and Resize\", \"threshold_a\": -1.0, \"threshold_b\": -1.0}, \"restore_face\": false, \"restore_face_settings\": {\"detector_model\": \"bbox/face_yolov8m.pt\", \"guide_size\": 512, \"guide_size_for_bbox\": true, \"max_size\": 1024, \"bbox_threshold\": 0.5, \"bbox_dilation\": 10, \"bbox_crop_factor\": 3.0, \"denoise\": 0.4, \"feather\": 5, \"noise_mask\": true, \"force_inpaint\": true, \"drop_size\": 10, \"cycle\": 1}}"
+      ]
+    },
+    {
+      "id": 43,
+      "type": "ForgeNeoAnimaVAEDeGrid",
+      "pos": [
+        20,
+        6796
+      ],
+      "size": [
+        340,
+        276
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 42,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 82
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "model_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name"
+          },
+          "link": null
+        },
+        {
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          },
+          "link": null
+        },
+        {
+          "name": "strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "strength"
+          },
+          "link": null
+        },
+        {
+          "name": "tile",
+          "type": "INT",
+          "widget": {
+            "name": "tile"
+          },
+          "link": null
+        },
+        {
+          "name": "device",
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        },
+        {
+          "name": "precision",
+          "type": "COMBO",
+          "widget": {
+            "name": "precision"
+          },
+          "link": null
+        },
+        {
+          "name": "keep_loaded",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "keep_loaded"
+          },
+          "link": null
+        },
+        {
+          "name": "forge_quantize",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "forge_quantize"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            83
+          ]
+        },
+        {
+          "name": "report_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "VAE DeGrid",
+      "properties": {
+        "aistudio_role": "ext_degrid"
+      }
+    },
+    {
+      "id": 44,
+      "type": "AIStudioSaveForge",
+      "pos": [
+        400,
+        6796
+      ],
+      "size": [
+        400,
+        192
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 43,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 83
+        },
+        {
+          "name": "studio_state",
+          "type": "STRING",
+          "widget": {
+            "name": "studio_state"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [],
+      "title": "저장",
+      "properties": {
+        "aistudio_role": "save"
+      },
+      "widgets_values": [
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
+        0,
+        "fixed",
+        "AIStudio/anima"
+      ]
+    },
+    {
+      "id": 45,
+      "type": "LoadImage",
+      "pos": [
+        20,
+        7212
+      ],
+      "size": [
+        340,
+        340
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 44,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "widget": {
+            "name": "image"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            84
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "title": "후처리 이미지",
+      "properties": {
+        "aistudio_role": "post_image"
+      }
+    },
+    {
+      "id": 46,
+      "type": "AIStudioUpscaleImage",
+      "pos": [
+        400,
+        7212
+      ],
+      "size": [
+        340,
+        112
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 45,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 84
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "model_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scale_by",
+          "type": "FLOAT",
+          "widget": {
+            "name": "scale_by"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            85
+          ]
+        }
+      ],
+      "title": "후처리 업스케일",
+      "properties": {
+        "aistudio_role": "post_upscale"
+      }
+    },
+    {
+      "id": 47,
+      "type": "VAEEncode",
+      "pos": [
+        780,
+        7212
+      ],
+      "size": [
+        220,
+        60
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 46,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "pixels",
+          "type": "IMAGE",
+          "link": 85
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 86
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            90
+          ]
+        }
+      ],
+      "title": "후처리 인코드",
+      "properties": {
+        "aistudio_role": "post_encode"
+      }
+    },
+    {
+      "id": 48,
+      "type": "ForgeNeoHiresFix",
+      "pos": [
+        1040,
+        7212
+      ],
+      "size": [
+        400,
+        1108
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 47,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 87
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 88
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 89
+        },
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 90
+        },
+        {
+          "name": "base_vae",
+          "type": "VAE",
+          "link": 91
+        },
+        {
+          "name": "base_clip",
+          "type": "CLIP",
+          "link": 92
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "scale_by",
+          "type": "FLOAT",
+          "widget": {
+            "name": "scale_by"
+          },
+          "link": null
+        },
+        {
+          "name": "upscale_method",
+          "type": "COMBO",
+          "widget": {
+            "name": "upscale_method"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "name": "seed_delta",
+          "type": "INT",
+          "widget": {
+            "name": "seed_delta"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "cns_enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_strength"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_power",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_power"
+          },
+          "link": null
+        },
+        {
+          "name": "cns_gamma_scale",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cns_gamma_scale"
+          },
+          "link": null
+        },
+        {
+          "name": "base_steps",
+          "type": "INT",
+          "widget": {
+            "name": "base_steps"
+          },
+          "link": null
+        },
+        {
+          "name": "base_sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "base_sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "base_scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "base_scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "resize_width",
+          "type": "INT",
+          "widget": {
+            "name": "resize_width"
+          },
+          "link": null
+        },
+        {
+          "name": "resize_height",
+          "type": "INT",
+          "widget": {
+            "name": "resize_height"
+          },
+          "link": null
+        },
+        {
+          "name": "shift",
+          "type": "FLOAT",
+          "widget": {
+            "name": "shift"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "checkpoint_name"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint_weight_dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "checkpoint_weight_dtype"
+          },
+          "link": null
+        },
+        {
+          "name": "text_encoder_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "text_encoder_name"
+          },
+          "link": null
+        },
+        {
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        },
+        {
+          "name": "positive_text",
+          "type": "STRING",
+          "widget": {
+            "name": "positive_text"
+          },
+          "link": null
+        },
+        {
+          "name": "negative_text",
+          "type": "STRING",
+          "widget": {
+            "name": "negative_text"
+          },
+          "link": null
+        },
+        {
+          "name": "base_positive_text",
+          "type": "STRING",
+          "widget": {
+            "name": "base_positive_text"
+          },
+          "link": null
+        },
+        {
+          "name": "base_negative_text",
+          "type": "STRING",
+          "widget": {
+            "name": "base_negative_text"
+          },
+          "link": null
+        },
+        {
+          "name": "clip_type",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_type"
+          },
+          "link": null
+        },
+        {
+          "name": "forge_noise",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "forge_noise"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            93
+          ]
+        },
+        {
+          "name": "decode_vae",
+          "type": "VAE",
+          "links": [
+            94
+          ]
+        }
+      ],
+      "title": "후처리 Hires",
+      "properties": {
+        "aistudio_role": "post_hires"
+      },
+      "widgets_values": [
+        -1,
+        "fixed",
+        false,
+        1.5,
+        "4x-UltraSharp.pth",
+        16,
+        3.0,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0.4,
+        0,
+        false,
+        1.0,
+        0.5,
+        2.0,
+        32,
+        "exp_heun_2_x0_sde",
+        "flow_cosmos_dynamic",
+        0,
+        0,
+        3.0,
+        "Use same checkpoint",
+        "default",
+        "Use same choices",
+        "Use same choices",
+        "",
+        "",
+        "",
+        "",
+        "stable_diffusion",
+        true
+      ]
+    },
+    {
+      "id": 49,
+      "type": "VAEDecode",
+      "pos": [
+        1480,
+        7212
+      ],
+      "size": [
+        220,
+        60
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 48,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 93
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 94
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            95,
+            96
+          ]
+        }
+      ],
+      "title": "후처리 디코드",
+      "properties": {
+        "aistudio_role": "post_decode"
+      }
+    },
+    {
+      "id": 50,
+      "type": "ForgeNeoSAM3Mask",
+      "pos": [
+        1740,
+        7212
+      ],
+      "size": [
+        400,
+        872
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 49,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 95
+        },
+        {
+          "name": "sam3_model",
+          "type": "EASY_SAM3_MODEL",
+          "link": null
+        },
+        {
+          "name": "manual_mask",
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "exclude_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "exclude_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_source",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_source"
+          },
+          "link": null
+        },
+        {
+          "name": "threshold",
+          "type": "FLOAT",
+          "widget": {
+            "name": "threshold"
+          },
+          "link": null
+        },
+        {
+          "name": "detection_limit",
+          "type": "INT",
+          "widget": {
+            "name": "detection_limit"
+          },
+          "link": null
+        },
+        {
+          "name": "convex_hull",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "convex_hull"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_dilation",
+          "type": "INT",
+          "widget": {
+            "name": "mask_dilation"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_outline_px",
+          "type": "INT",
+          "widget": {
+            "name": "mask_outline_px"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_blur",
+          "type": "INT",
+          "widget": {
+            "name": "mask_blur"
+          },
+          "link": null
+        },
+        {
+          "name": "invert",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "invert"
+          },
+          "link": null
+        },
+        {
+          "name": "checkpoint",
+          "type": "STRING",
+          "widget": {
+            "name": "checkpoint"
+          },
+          "link": null
+        },
+        {
+          "name": "device",
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        },
+        {
+          "name": "precision",
+          "type": "COMBO",
+          "widget": {
+            "name": "precision"
+          },
+          "link": null
+        },
+        {
+          "name": "unload_after",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "unload_after"
+          },
+          "link": null
+        },
+        {
+          "name": "save_artifacts",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_artifacts"
+          },
+          "link": null
+        },
+        {
+          "name": "artifact_directory",
+          "type": "STRING",
+          "widget": {
+            "name": "artifact_directory"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "cache_model",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "cache_model"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "face_crop"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_model",
+          "type": "STRING",
+          "widget": {
+            "name": "face_crop_model"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_confidence",
+          "type": "FLOAT",
+          "widget": {
+            "name": "face_crop_confidence"
+          },
+          "link": null
+        },
+        {
+          "name": "face_crop_detector",
+          "type": "COMBO",
+          "widget": {
+            "name": "face_crop_detector"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "selected_mask",
+          "type": "MASK",
+          "links": [
+            97
+          ]
+        },
+        {
+          "name": "combined_mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "individual_masks",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "overlay",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "boxes",
+          "type": "BBOX",
+          "links": null
+        },
+        {
+          "name": "scores",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "name": "artifacts_json",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "title": "후처리 SAM3 마스크",
+      "properties": {
+        "aistudio_role": "post_sam3_mask"
+      }
+    },
+    {
+      "id": 51,
+      "type": "ForgeNeoSAM3Detailer",
+      "pos": [
+        2180,
+        7212
+      ],
+      "size": [
+        400,
+        1212
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 50,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 96
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 97
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 98
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 99
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 100
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 101
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 102
+        },
+        {
+          "name": "control_net",
+          "type": "CONTROL_NET",
+          "link": null
+        },
+        {
+          "name": "control_image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "face_detector",
+          "type": "BBOX_DETECTOR",
+          "link": null
+        },
+        {
+          "name": "inpaint_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "inpaint_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "negative_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "negative_prompt"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mask_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "name": "denoise",
+          "type": "FLOAT",
+          "widget": {
+            "name": "denoise"
+          },
+          "link": null
+        },
+        {
+          "name": "noise_multiplier",
+          "type": "FLOAT",
+          "widget": {
+            "name": "noise_multiplier"
+          },
+          "link": null
+        },
+        {
+          "name": "fill_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "fill_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "only_masked",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "only_masked"
+          },
+          "link": null
+        },
+        {
+          "name": "mask_padding",
+          "type": "INT",
+          "widget": {
+            "name": "mask_padding"
+          },
+          "link": null
+        },
+        {
+          "name": "use_custom_size",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "use_custom_size"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_width",
+          "type": "INT",
+          "widget": {
+            "name": "custom_width"
+          },
+          "link": null
+        },
+        {
+          "name": "custom_height",
+          "type": "INT",
+          "widget": {
+            "name": "custom_height"
+          },
+          "link": null
+        },
+        {
+          "name": "grow_mask_by",
+          "type": "INT",
+          "widget": {
+            "name": "grow_mask_by"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_enable",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "controlnet_enable"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_model_name",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_model_name"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_module",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_module"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_override_external",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "controlnet_override_external"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_strength",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_strength"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_start",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_start"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_end",
+          "type": "FLOAT",
+          "widget": {
+            "name": "controlnet_end"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_processor_resolution",
+          "type": "INT",
+          "widget": {
+            "name": "controlnet_processor_resolution"
+          },
+          "link": null
+        },
+        {
+          "name": "controlnet_settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "controlnet_settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "restore_face",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "restore_face"
+          },
+          "link": null
+        },
+        {
+          "name": "restore_face_settings_json",
+          "type": "STRING",
+          "widget": {
+            "name": "restore_face_settings_json"
+          },
+          "link": null
+        },
+        {
+          "name": "enabled",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "enabled"
+          },
+          "link": null
+        },
+        {
+          "name": "target_width",
+          "type": "INT",
+          "widget": {
+            "name": "target_width"
+          },
+          "link": null
+        },
+        {
+          "name": "target_height",
+          "type": "INT",
+          "widget": {
+            "name": "target_height"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            103
           ]
         },
         {
@@ -3947,11 +5770,11 @@
       ]
     },
     {
-      "id": 37,
+      "id": 52,
       "type": "AIStudioSaveForge",
       "pos": [
         2620,
-        6400
+        7212
       ],
       "size": [
         400,
@@ -3960,13 +5783,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 36,
+      "order": 51,
       "mode": 4,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 71
+          "link": 103
         },
         {
           "name": "studio_state",
@@ -3999,7 +5822,7 @@
         "aistudio_role": "post_save"
       },
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}}",
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
         0,
         "fixed",
         "AIStudio/anima"
@@ -4083,183 +5906,183 @@
       10,
       13,
       1,
-      15,
-      0,
+      14,
+      1,
       "CLIP"
     ],
     [
       11,
-      12,
-      2,
+      14,
+      0,
       15,
-      1,
-      "STRING"
-    ],
-    [
-      12,
-      13,
-      1,
-      16,
-      0,
-      "CLIP"
-    ],
-    [
-      13,
-      12,
-      3,
-      16,
-      1,
-      "STRING"
-    ],
-    [
-      14,
-      14,
-      0,
-      17,
       0,
       "MODEL"
     ],
     [
+      12,
       15,
+      0,
+      16,
+      0,
+      "MODEL"
+    ],
+    [
       13,
+      14,
       1,
       17,
+      0,
+      "CLIP"
+    ],
+    [
+      14,
+      12,
+      2,
+      17,
       1,
+      "STRING"
+    ],
+    [
+      15,
+      14,
+      1,
+      18,
+      0,
       "CLIP"
     ],
     [
       16,
-      8,
-      0,
-      17,
-      2,
-      "CLIP"
+      12,
+      3,
+      18,
+      1,
+      "STRING"
     ],
     [
       17,
-      12,
-      2,
-      17,
-      3,
-      "STRING"
+      15,
+      0,
+      19,
+      0,
+      "MODEL"
     ],
     [
       18,
       14,
-      0,
-      18,
-      0,
-      "MODEL"
+      1,
+      19,
+      1,
+      "CLIP"
     ],
     [
       19,
-      13,
-      1,
-      18,
-      1,
+      8,
+      0,
+      19,
+      2,
       "CLIP"
     ],
     [
       20,
-      8,
-      0,
-      18,
+      12,
       2,
-      "CLIP"
+      19,
+      3,
+      "STRING"
     ],
     [
       21,
+      15,
+      0,
+      20,
+      0,
+      "MODEL"
+    ],
+    [
+      22,
+      14,
+      1,
+      20,
+      1,
+      "CLIP"
+    ],
+    [
+      23,
+      8,
+      0,
+      20,
+      2,
+      "CLIP"
+    ],
+    [
+      24,
       12,
       3,
-      18,
+      20,
       3,
       "STRING"
     ],
     [
-      22,
-      15,
-      0,
-      19,
-      0,
-      "CONDITIONING"
-    ],
-    [
-      23,
+      25,
       17,
       0,
-      19,
-      1,
-      "CONDITIONING"
-    ],
-    [
-      24,
-      16,
+      21,
       0,
-      20,
-      0,
-      "CONDITIONING"
-    ],
-    [
-      25,
-      18,
-      0,
-      20,
-      1,
       "CONDITIONING"
     ],
     [
       26,
-      6,
+      19,
       0,
-      22,
-      0,
-      "VAE"
+      21,
+      1,
+      "CONDITIONING"
     ],
     [
       27,
-      21,
+      18,
       0,
       22,
-      1,
-      "IMAGE"
+      0,
+      "CONDITIONING"
     ],
     [
       28,
-      21,
+      20,
       0,
       22,
-      2,
-      "IMAGE"
+      1,
+      "CONDITIONING"
     ],
     [
       29,
-      21,
-      1,
-      22,
-      4,
-      "MASK"
+      16,
+      0,
+      23,
+      0,
+      "MODEL"
     ],
     [
       30,
-      14,
-      0,
       23,
+      0,
+      24,
       0,
       "MODEL"
     ],
     [
       31,
-      19,
-      0,
-      23,
+      14,
       1,
-      "CONDITIONING"
+      24,
+      1,
+      "CLIP"
     ],
     [
       32,
-      20,
+      21,
       0,
-      23,
+      24,
       2,
       "CONDITIONING"
     ],
@@ -4267,311 +6090,567 @@
       33,
       22,
       0,
-      23,
+      24,
       3,
-      "LATENT"
+      "CONDITIONING"
     ],
     [
       34,
-      14,
-      0,
       24,
+      0,
+      25,
       0,
       "MODEL"
     ],
     [
       35,
-      19,
-      0,
-      24,
-      1,
-      "CONDITIONING"
-    ],
-    [
-      36,
-      20,
-      0,
-      24,
-      2,
-      "CONDITIONING"
-    ],
-    [
-      37,
-      23,
-      0,
-      24,
-      3,
-      "LATENT"
-    ],
-    [
-      38,
-      6,
-      0,
-      24,
-      4,
-      "VAE"
-    ],
-    [
-      39,
-      13,
-      1,
-      24,
-      5,
-      "CLIP"
-    ],
-    [
-      40,
-      24,
-      0,
-      25,
-      0,
-      "LATENT"
-    ],
-    [
-      41,
-      24,
-      1,
-      25,
-      1,
-      "VAE"
-    ],
-    [
-      42,
       25,
       0,
       26,
       0,
+      "MODEL"
+    ],
+    [
+      36,
+      26,
+      0,
+      27,
+      0,
+      "MODEL"
+    ],
+    [
+      37,
+      25,
+      0,
+      28,
+      0,
+      "MODEL"
+    ],
+    [
+      38,
+      28,
+      0,
+      29,
+      0,
+      "MODEL"
+    ],
+    [
+      39,
+      25,
+      0,
+      30,
+      0,
+      "MODEL"
+    ],
+    [
+      40,
+      6,
+      0,
+      32,
+      0,
+      "VAE"
+    ],
+    [
+      41,
+      31,
+      0,
+      32,
+      1,
+      "IMAGE"
+    ],
+    [
+      42,
+      31,
+      0,
+      32,
+      2,
       "IMAGE"
     ],
     [
       43,
-      26,
-      0,
-      27,
-      0,
-      "IMAGE"
-    ],
-    [
-      44,
-      26,
-      0,
-      28,
-      0,
-      "IMAGE"
-    ],
-    [
-      45,
-      27,
-      0,
-      28,
+      31,
       1,
+      32,
+      4,
       "MASK"
     ],
     [
-      46,
-      14,
+      44,
+      27,
       0,
-      28,
-      2,
+      33,
+      0,
       "MODEL"
     ],
     [
-      47,
-      13,
+      45,
+      21,
+      0,
+      33,
       1,
-      28,
+      "CONDITIONING"
+    ],
+    [
+      46,
+      22,
+      0,
+      33,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      47,
+      32,
+      0,
+      33,
       3,
-      "CLIP"
+      "LATENT"
     ],
     [
       48,
-      6,
+      29,
       0,
-      28,
-      4,
-      "VAE"
+      34,
+      0,
+      "MODEL"
     ],
     [
       49,
-      19,
+      21,
       0,
-      28,
-      5,
+      34,
+      1,
       "CONDITIONING"
     ],
     [
       50,
-      20,
+      22,
       0,
-      28,
-      6,
+      34,
+      2,
       "CONDITIONING"
     ],
     [
       51,
-      28,
+      33,
       0,
-      29,
-      0,
-      "IMAGE"
+      34,
+      3,
+      "LATENT"
     ],
     [
       52,
-      30,
+      6,
       0,
-      31,
-      0,
-      "IMAGE"
+      34,
+      4,
+      "VAE"
     ],
     [
       53,
-      31,
-      0,
-      32,
-      0,
-      "IMAGE"
+      14,
+      1,
+      34,
+      5,
+      "CLIP"
     ],
     [
       54,
-      6,
-      0,
-      32,
+      34,
       1,
+      35,
+      0,
       "VAE"
     ],
     [
       55,
-      14,
+      34,
       0,
-      33,
+      36,
       0,
-      "MODEL"
+      "LATENT"
     ],
     [
       56,
-      19,
+      35,
       0,
-      33,
+      36,
       1,
-      "CONDITIONING"
+      "VAE"
     ],
     [
       57,
-      20,
+      36,
       0,
-      33,
-      2,
-      "CONDITIONING"
+      37,
+      0,
+      "IMAGE"
     ],
     [
       58,
-      32,
+      34,
       0,
-      33,
-      3,
+      37,
+      1,
       "LATENT"
     ],
     [
       59,
-      6,
+      37,
       0,
-      33,
-      4,
-      "VAE"
+      38,
+      0,
+      "IMAGE"
     ],
     [
       60,
-      13,
-      1,
-      33,
-      5,
-      "CLIP"
+      38,
+      0,
+      39,
+      0,
+      "IMAGE"
     ],
     [
       61,
-      33,
+      38,
       0,
-      34,
+      40,
       0,
-      "LATENT"
+      "IMAGE"
     ],
     [
       62,
-      33,
-      1,
-      34,
-      1,
-      "VAE"
-    ],
-    [
-      63,
-      34,
+      39,
       0,
-      35,
-      0,
-      "IMAGE"
-    ],
-    [
-      64,
-      34,
-      0,
-      36,
-      0,
-      "IMAGE"
-    ],
-    [
-      65,
-      35,
-      0,
-      36,
+      40,
       1,
       "MASK"
     ],
     [
-      66,
-      14,
+      63,
+      30,
       0,
-      36,
+      40,
       2,
       "MODEL"
     ],
     [
-      67,
-      13,
+      64,
+      14,
       1,
-      36,
+      40,
       3,
       "CLIP"
     ],
     [
-      68,
+      65,
       6,
       0,
-      36,
+      40,
       4,
       "VAE"
     ],
     [
-      69,
-      19,
+      66,
+      21,
       0,
-      36,
+      40,
       5,
       "CONDITIONING"
     ],
     [
-      70,
-      20,
+      67,
+      22,
       0,
-      36,
+      40,
       6,
       "CONDITIONING"
     ],
     [
-      71,
-      36,
+      68,
+      40,
       0,
-      37,
+      41,
+      0,
+      "IMAGE"
+    ],
+    [
+      69,
+      39,
+      0,
+      41,
+      1,
+      "MASK"
+    ],
+    [
+      70,
+      30,
+      0,
+      41,
+      2,
+      "MODEL"
+    ],
+    [
+      71,
+      14,
+      1,
+      41,
+      3,
+      "CLIP"
+    ],
+    [
+      72,
+      6,
+      0,
+      41,
+      4,
+      "VAE"
+    ],
+    [
+      73,
+      21,
+      0,
+      41,
+      5,
+      "CONDITIONING"
+    ],
+    [
+      74,
+      22,
+      0,
+      41,
+      6,
+      "CONDITIONING"
+    ],
+    [
+      75,
+      41,
+      0,
+      42,
+      0,
+      "IMAGE"
+    ],
+    [
+      76,
+      39,
+      0,
+      42,
+      1,
+      "MASK"
+    ],
+    [
+      77,
+      30,
+      0,
+      42,
+      2,
+      "MODEL"
+    ],
+    [
+      78,
+      14,
+      1,
+      42,
+      3,
+      "CLIP"
+    ],
+    [
+      79,
+      6,
+      0,
+      42,
+      4,
+      "VAE"
+    ],
+    [
+      80,
+      21,
+      0,
+      42,
+      5,
+      "CONDITIONING"
+    ],
+    [
+      81,
+      22,
+      0,
+      42,
+      6,
+      "CONDITIONING"
+    ],
+    [
+      82,
+      42,
+      0,
+      43,
+      0,
+      "IMAGE"
+    ],
+    [
+      83,
+      43,
+      0,
+      44,
+      0,
+      "IMAGE"
+    ],
+    [
+      84,
+      45,
+      0,
+      46,
+      0,
+      "IMAGE"
+    ],
+    [
+      85,
+      46,
+      0,
+      47,
+      0,
+      "IMAGE"
+    ],
+    [
+      86,
+      6,
+      0,
+      47,
+      1,
+      "VAE"
+    ],
+    [
+      87,
+      29,
+      0,
+      48,
+      0,
+      "MODEL"
+    ],
+    [
+      88,
+      21,
+      0,
+      48,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      89,
+      22,
+      0,
+      48,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      90,
+      47,
+      0,
+      48,
+      3,
+      "LATENT"
+    ],
+    [
+      91,
+      6,
+      0,
+      48,
+      4,
+      "VAE"
+    ],
+    [
+      92,
+      14,
+      1,
+      48,
+      5,
+      "CLIP"
+    ],
+    [
+      93,
+      48,
+      0,
+      49,
+      0,
+      "LATENT"
+    ],
+    [
+      94,
+      48,
+      1,
+      49,
+      1,
+      "VAE"
+    ],
+    [
+      95,
+      49,
+      0,
+      50,
+      0,
+      "IMAGE"
+    ],
+    [
+      96,
+      49,
+      0,
+      51,
+      0,
+      "IMAGE"
+    ],
+    [
+      97,
+      50,
+      0,
+      51,
+      1,
+      "MASK"
+    ],
+    [
+      98,
+      30,
+      0,
+      51,
+      2,
+      "MODEL"
+    ],
+    [
+      99,
+      14,
+      1,
+      51,
+      3,
+      "CLIP"
+    ],
+    [
+      100,
+      6,
+      0,
+      51,
+      4,
+      "VAE"
+    ],
+    [
+      101,
+      21,
+      0,
+      51,
+      5,
+      "CONDITIONING"
+    ],
+    [
+      102,
+      22,
+      0,
+      51,
+      6,
+      "CONDITIONING"
+    ],
+    [
+      103,
+      51,
+      0,
+      52,
       0,
       "IMAGE"
     ]
@@ -4607,8 +6686,8 @@
       "bounding": [
         0,
         1516,
-        1880,
-        360
+        2640,
+        500
       ],
       "font_size": 24,
       "flags": {}
@@ -4618,7 +6697,7 @@
       "title": "③ 프롬프트",
       "bounding": [
         0,
-        1916,
+        2056,
         2280,
         268
       ],
@@ -4627,10 +6706,22 @@
     },
     {
       "id": 5,
-      "title": "④ 잠재·샘플링",
+      "title": "④ 확장",
       "bounding": [
         0,
-        2224,
+        2364,
+        3040,
+        548
+      ],
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "id": 6,
+      "title": "⑤ 잠재·샘플링",
+      "bounding": [
+        0,
+        2952,
         1140,
         872
       ],
@@ -4638,23 +6729,23 @@
       "flags": {}
     },
     {
-      "id": 6,
-      "title": "⑤ Hires",
+      "id": 7,
+      "title": "⑥ Hires",
       "bounding": [
         0,
-        3136,
-        700,
+        3864,
+        1460,
         1208
       ],
       "font_size": 24,
       "flags": {}
     },
     {
-      "id": 7,
-      "title": "⑥ 업스케일",
+      "id": 8,
+      "title": "⑦ 업스케일",
       "bounding": [
         0,
-        4384,
+        5112,
         380,
         212
       ],
@@ -4662,35 +6753,35 @@
       "flags": {}
     },
     {
-      "id": 8,
-      "title": "⑦ SAM3",
+      "id": 9,
+      "title": "⑧ SAM3",
       "bounding": [
         0,
-        4636,
-        880,
+        5364,
+        1640,
         1312
       ],
       "font_size": 24,
       "flags": {}
     },
     {
-      "id": 9,
-      "title": "⑧ 저장",
+      "id": 10,
+      "title": "⑨ 저장",
       "bounding": [
         0,
-        5988,
-        440,
-        292
+        6716,
+        820,
+        376
       ],
       "font_size": 24,
       "flags": {}
     },
     {
-      "id": 10,
-      "title": "⑨ 후처리",
+      "id": 11,
+      "title": "⑩ 후처리",
       "bounding": [
         0,
-        6320,
+        7132,
         3040,
         1312
       ],

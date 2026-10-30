@@ -129,6 +129,59 @@ class StudioStateTests(unittest.TestCase):
         st3 = {"prompt": "x <lora:ab:1>", "loras": [{"on": True, "name": "a", "strength": 1}]}
         self.assertEqual(ss.effective_prompt(st3), "x <lora:ab:1> <lora:a:1>")
 
+    def test_ext_defaults_come_from_the_table(self):
+        schema = ss.EXT_SCHEMA["extensions"]
+        self.assertEqual(sorted(ss.DEFAULT_STATE["ext"]), sorted(item["key"] for item in schema))
+        for item in schema:
+            with self.subTest(key=item["key"]):
+                self.assertEqual(ss.DEFAULT_STATE["ext"][item["key"]],
+                                 {"on": False, **{field["key"]: field["default"] for field in item["fields"]}})
+
+    def test_ext_missing_or_junk_gives_defaults(self):
+        for raw in ({}, {"ext": None}, {"ext": "junk"}, {"ext": []}, {"ext": {"skim": 5, "speed": []}}):
+            with self.subTest(raw=raw):
+                self.assertEqual(ss.normalize_state(raw)["ext"], ss.DEFAULT_STATE["ext"])
+
+    def test_ext_normalize_is_idempotent_and_independent(self):
+        out = ss.normalize_state({"ext": {"skim": {"on": True, "skim_skimming_cfg": 3}}})
+        self.assertEqual(ss.normalize_state(out), out)
+        out = ss.normalize_state({})
+        out["ext"]["speed"]["on"] = True
+        self.assertFalse(ss.DEFAULT_STATE["ext"]["speed"]["on"])
+
+    def test_ext_values_coerced_clamped_and_unknown_dropped(self):
+        out = ss.normalize_state({"ext": {
+            "nope": {"on": True},
+            "skim": {"on": "yes", "skim_skimming_cfg": "2.5", "skim_flip_at": 9, "skim_full_skim_negative": 1, "zzz": 1},
+            "guidance": {"on": True, "guid_attn_method": "SEG", "guid_scale": float("nan"), "guid_adg_interval": 99.7,
+                         "guid_rdc_tau": 10 ** 400, "guid_block_indices": 18, "guid_mod_start_layer": True},
+            "speed": {"mode": "nope", "preset": "flux", "seed": "-5", "scales": "1/2,1"},
+            "degrid": {"model": "my.safetensors", "mode": "Full (전체)"},
+        }})["ext"]
+        self.assertNotIn("nope", out)
+        self.assertIs(out["skim"]["on"], False)
+        self.assertEqual(out["skim"]["skim_skimming_cfg"], 2.5)
+        self.assertEqual(out["skim"]["skim_flip_at"], 1.0)
+        self.assertIs(out["skim"]["skim_full_skim_negative"], False)
+        self.assertNotIn("zzz", out["skim"])
+        guidance = out["guidance"]
+        self.assertIs(guidance["on"], True)
+        self.assertEqual(guidance["guid_attn_method"], "SEG")
+        self.assertEqual(guidance["guid_scale"], 4.0)
+        self.assertEqual(guidance["guid_adg_interval"], 10)
+        self.assertEqual(guidance["guid_rdc_tau"], 0.0)
+        self.assertEqual(guidance["guid_block_indices"], "18")
+        self.assertEqual(guidance["guid_mod_start_layer"], 0)
+        self.assertEqual(out["speed"]["mode"], "transition")
+        self.assertEqual(out["speed"]["preset"], "flux")
+        self.assertEqual(out["speed"]["seed"], -1)
+        self.assertEqual(out["speed"]["scales"], "1/2,1")
+        self.assertEqual(out["degrid"]["model"], "my.safetensors")  # a file list has no fixed choices
+        self.assertEqual(out["degrid"]["mode"], "Full")
+
+    def test_huge_integer_is_not_a_crash(self):
+        self.assertEqual(ss.normalize_state({"cfg": 10 ** 400})["cfg"], 3.0)
+
 
 if __name__ == "__main__":
     unittest.main()
