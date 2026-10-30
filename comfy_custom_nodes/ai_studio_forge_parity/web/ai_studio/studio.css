@@ -147,8 +147,8 @@ textarea.ais-f { white-space: pre-wrap; line-height: 1.5; resize: none; width: 1
 .ais-grid3 .span3 { grid-column: span 3; }
 .ais-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
 .ais-grid-i2i { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px; padding: 12px; }
-.ais-prompt { height: 62px; }
-.ais-negative { height: 34px; }
+textarea.ais-prompt { min-height: 62px; overflow: hidden; }
+textarea.ais-negative { min-height: 34px; overflow: hidden; }
 .ais-forge { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px dashed #4a4a4a; border-radius: 6px; }
 .ais-forge.dim { opacity: 0.55; }
 .ais-lora { justify-content: flex-start; gap: 5px; }

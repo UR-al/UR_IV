@@ -85,6 +85,7 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("shift", "ForgeNeoModelSamplingShift", "Shift"),
         ("sched", "ForgeNeoExtraSchedulers", "스케줄러 값"),
         ("lora_stack", "AIStudioLoraStack", "LoRA"),
+        ("negpip", "ForgeNeoNegPip", "NegPiP"),
         ("dora", "ForgeNeoDoraInferenceMode", "DoRA"),
     ]),
     ("③ 프롬프트", [
@@ -130,7 +131,7 @@ ROWS = (  # (group title, [(role, class, node title)])
 def _detailer_links(role: str, image: str) -> list[tuple]:
     return [
         (image, 0, role, "image"), (f"{role[:-len('detailer')]}mask", 0, role, "mask"),
-        ("dora", 0, role, "model"), ("lora_stack", 1, role, "clip"), ("vae", 0, role, "vae"),
+        ("dora", 0, role, "model"), ("negpip", 1, role, "clip"), ("vae", 0, role, "vae"),
         ("family_switch_pos", 0, role, "positive"), ("family_switch_neg", 0, role, "negative"),
     ]
 
@@ -139,7 +140,7 @@ def _hires_links(role: str, samples: str) -> list[tuple]:
     return [
         ("dora", 0, role, "model"), ("family_switch_pos", 0, role, "positive"),
         ("family_switch_neg", 0, role, "negative"), (samples, 0, role, "samples"),
-        ("vae", 0, role, "base_vae"), ("lora_stack", 1, role, "base_clip"),
+        ("vae", 0, role, "base_vae"), ("negpip", 1, role, "base_clip"),
     ]
 
 
@@ -150,18 +151,20 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("shift", 0, "sched", "model"),
     ("sched", 0, "lora_stack", "model"),
     ("te", 0, "lora_stack", "clip"),  # R6: one native TE for both families
-    ("lora_stack", 0, "dora", "model"),
-    ("lora_stack", 1, "pos_encode", "clip"),
+    ("lora_stack", 0, "negpip", "model"),
+    ("lora_stack", 1, "negpip", "clip"),
+    ("negpip", 0, "dora", "model"),
+    ("negpip", 1, "pos_encode", "clip"),
     ("lora_stack", 2, "pos_encode", "text"),
-    ("lora_stack", 1, "neg_encode", "clip"),
+    ("negpip", 1, "neg_encode", "clip"),
     ("lora_stack", 3, "neg_encode", "text"),
     # 3.8B prompts: the pack's own node as it is (no Forge prompt-editing syntax)
     ("dora", 0, "pos_encode38", "model"),
-    ("lora_stack", 1, "pos_encode38", "native_clip"),
+    ("negpip", 1, "pos_encode38", "native_clip"),
     ("qwen35", 0, "pos_encode38", "qwen35_clip"),
     ("lora_stack", 2, "pos_encode38", "prompt"),
     ("dora", 0, "neg_encode38", "model"),
-    ("lora_stack", 1, "neg_encode38", "native_clip"),
+    ("negpip", 1, "neg_encode38", "native_clip"),
     ("qwen35", 0, "neg_encode38", "qwen35_clip"),
     ("lora_stack", 3, "neg_encode38", "prompt"),
     ("pos_encode", 0, "family_switch_pos", "a"),
@@ -331,6 +334,7 @@ def role_values(state: dict) -> dict[str, dict]:
         "family_switch_neg": select,
         "shift": {"shift": state["shift"]},
         "lora_stack": {"positive": effective_prompt(state), "negative": state["negative"]},
+        "negpip": {"enabled": state["negpip"]},
         "dora": {"enabled": True, "mode": DORA_FORGE_MODE if forge["master"] and forge["dora"] else state["dora_mode"]},
         "pos_encode": encode,
         "neg_encode": encode,

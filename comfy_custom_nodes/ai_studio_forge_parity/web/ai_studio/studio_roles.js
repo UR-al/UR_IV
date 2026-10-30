@@ -9,7 +9,7 @@ export const ROLES = Object.freeze([
   "unet", "te", "vae", "unet38", "qwen35", "family_switch_model",
   "shift", "sched",
   // ② LoRA / DoRA
-  "lora_stack", "dora",
+  "lora_stack", "negpip", "dora",
   // ③ prompts
   "pos_encode", "neg_encode", "pos_encode38", "neg_encode38", "family_switch_pos", "family_switch_neg",
   // ④ latent and sampling

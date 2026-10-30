@@ -100,6 +100,9 @@ The Anima studio: a Forge-WebUI-like Anima generation screen inside ComfyUI (t2i
 SAM3 detailer and a Forge-style X/Y/Z plot), opened from `example_workflows/AI Studio Anima.json` (ComfyUI lists it
 under the pack's example workflows). Everything is for custom workflows only: the app compiler emits none of it.
 
+- NegPiP: the studio runs `ForgeNeoNegPip` after the LoRAs (a switch on the prompt card). It needs the separate
+  [ComfyUI-ppm](https://github.com/pamparamm/ComfyUI-ppm) node pack (`CLIPNegPip`, AGPL-3.0, not bundled); without it
+  the switch is greyed out.
 - New nodes `AIStudioLoraStack`, `AIStudioSaveForge`, `AIStudioUpscaleImage`, `AIStudioPromptEncode`, `AIStudioSwitch`
   and the three UI nodes `AIStudioPanel`, `AIStudioResultView`, `AIStudioXYZView` (see "Custom ComfyUI workflows
   only"). The UI nodes have no outputs and are never run.

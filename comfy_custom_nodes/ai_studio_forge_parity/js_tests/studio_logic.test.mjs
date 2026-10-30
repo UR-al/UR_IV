@@ -21,6 +21,7 @@ import {
   withDefaults,
   xyzCellPrompts,
 } from "../web/ai_studio/studio_logic.js";
+import { autoGrow } from "../web/ai_studio/studio_dom.js";
 import { ROLES, ROLE_PROPERTY, roleIdsFromNodes } from "../web/ai_studio/studio_roles.js";
 
 const golden = JSON.parse(readFileSync(new URL("./fixtures/studio_logic_golden.json", import.meta.url), "utf-8"));
@@ -39,7 +40,8 @@ function studioPrompt() {
     shift: ["ForgeNeoModelSamplingShift", { model: ["family_switch_model", 0], shift: 1.0 }],
     sched: ["ForgeNeoExtraSchedulers", { model: ["shift", 0], flow_cosmos_rho: 7.0 }],
     lora_stack: ["AIStudioLoraStack", { model: ["sched", 0], clip: ["te", 0], positive: "", negative: "" }],
-    dora: ["ForgeNeoDoraInferenceMode", { model: ["lora_stack", 0], enabled: false, mode: "DoRA off (no magnitude)" }],
+    negpip: ["ForgeNeoNegPip", { model: ["lora_stack", 0], clip: ["lora_stack", 1], enabled: false }],
+    dora: ["ForgeNeoDoraInferenceMode", { model: ["negpip", 0], enabled: false, mode: "DoRA off (no magnitude)" }],
     pos_encode: ["AIStudioPromptEncode", { clip: ["lora_stack", 1], text: ["lora_stack", 2], steps: 20, forge_syntax: false }],
     neg_encode: ["AIStudioPromptEncode", { clip: ["lora_stack", 1], text: ["lora_stack", 3], steps: 20, forge_syntax: false }],
     pos_encode38: ["ForgeNeoAnima38V2Prompt", { model: ["dora", 0], native_clip: ["lora_stack", 1], qwen35_clip: ["qwen35", 0], prompt: ["lora_stack", 2] }],
@@ -84,10 +86,24 @@ const state = (overrides = {}) => ({ ...structuredClone(DEFAULT_STATE), ...overr
 
 test("ROLES lists every engine role once, without family_switch_clip (R6)", () => {
   assert.equal(new Set(ROLES).size, ROLES.length);
-  assert.equal(ROLES.length, 33);
+  assert.equal(ROLES.length, 34);
   assert.ok(!ROLES.includes("family_switch_clip"));
   const { roleIds } = studioPrompt();
   assert.deepEqual([...ROLES].sort(), Object.keys(roleIds).sort());
+});
+
+test("negpip follows the panel switch", () => {
+  const prompt = { 9: { class_type: "ForgeNeoNegPip", inputs: { enabled: true } } };
+  assert.equal(applyStateToPrompt(prompt, { negpip: "9" }, { ...DEFAULT_STATE, negpip: false })[9].inputs.enabled, false);
+  assert.equal(applyStateToPrompt(prompt, { negpip: "9" }, DEFAULT_STATE)[9].inputs.enabled, true);
+});
+
+test("autoGrow fits the text and keeps the panel scroll position", () => {
+  const box = { scrollTop: 40 };
+  const el = { style: {}, scrollHeight: 120, offsetHeight: 122, clientHeight: 120, closest: () => box };
+  autoGrow(el);
+  assert.equal(el.style.height, "122px");
+  assert.equal(box.scrollTop, 40);
 });
 
 test("roleIdsFromNodes reads properties.aistudio_role", () => {

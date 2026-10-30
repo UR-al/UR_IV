@@ -2,12 +2,13 @@
 // Its state lives as JSON in the node's hidden `state` STRING widget, so it is saved with the workflow.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { DORA_MODES, defaultModel, imageSize, withDefaults } from "./studio_logic.js";
-import { h, numberBox, optionItems, pill, select } from "./studio_dom.js";
+import { autoGrow, h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 
 const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3"];
 // Model picks filled with an Anima default when their list arrives empty-handed (an empty pick would run the
 // loader's first file; the run controller refuses a run while one is still empty).
 const MODEL_KEYS = { unets: "unet", tes: "te", vaes: "vae" };
+const NEGPIP_MISSING = "불가: ComfyUI-ppm 노드 팩(CLIPNegPip)이 설치돼 있지 않음";
 const INPAINT_AREA_REASON =
   "불가: 지금 인페인트는 늘 그림 전체를 이 크기로 다시 그린다 (Forge의 '전체'). '마스크만'(잘라서 크게 그리기)은 아직 없음";
 
@@ -33,6 +34,12 @@ const card = (title, head, body, extraClass = "") =>
 
 const row = (label, ...controls) => h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, label), h("span", { class: "ais-ctl" }, controls));
 
+// Absent LiteGraph (tests) counts as installed; a missing provider greys the switch and runs without it.
+const negpipInstalled = () => {
+  const types = globalThis.LiteGraph?.registered_node_types;
+  return !types || Boolean(types.CLIPNegPip);
+};
+
 export class PanelView {
   /**
    * `widget`: the node's hidden `state` widget. `ctx`: `choices(kind)` -> Promise<{items}>, `generate()`, `stop()`,
@@ -50,6 +57,12 @@ export class PanelView {
     this.element = h("div", { class: "ais-root ais-panel" });
     this.render();
     this.loadChoices();
+    // The first render has no size yet (the DOM widget is attached later).
+    if (globalThis.ResizeObserver) new ResizeObserver(() => this.growPrompts()).observe(this.element);
+  }
+
+  growPrompts() {
+    this.element.querySelectorAll("textarea.ais-prompt, textarea.ais-negative").forEach(autoGrow);
   }
 
   loadChoices() {
@@ -96,6 +109,7 @@ export class PanelView {
     const state = structuredClone(this.state);
     const image = this.ctx.i2i.get();
     if (image) state.i2i.image = image;
+    if (!negpipInstalled()) state.negpip = false;
     return state;
   }
 
@@ -142,6 +156,7 @@ export class PanelView {
     this.thin = h("div", { class: "ais-thin" }, (this.bar = h("div")));
     this.element.replaceChildren(this.top, this.thin, h("div", { class: "ais-scroll" }, this.common(s), this.tabs(s), this.engineBar()));
     this.renderTop();
+    if (globalThis.requestAnimationFrame) requestAnimationFrame(() => this.growPrompts());
   }
 
   renderTop() {
@@ -160,9 +175,17 @@ export class PanelView {
   // ------------------------------------------------------------------------------------------- 공통 설정
 
   common(s) {
-    const prompt = card("프롬프트", null, [
-      h("textarea", { class: "ais-f ais-prompt", placeholder: "프롬프트", value: s.prompt, onInput: (e) => this.set((st) => { st.prompt = e.target.value; }) }),
-      h("textarea", { class: "ais-f ais-negative", placeholder: "네거티브", value: s.negative, onInput: (e) => this.set((st) => { st.negative = e.target.value; }) }),
+    const typed = (key) => (e) => { autoGrow(e.target); this.set((st) => { st[key] = e.target.value; }); };
+    const installed = negpipInstalled();
+    const negpip = pill(s.negpip && installed, () => this.set((st) => { st.negpip = !st.negpip; }, true), {
+      on: "NegPiP",
+      off: "NegPiP",
+      title: installed ? "음수 가중치 (단어:-1.0)" : NEGPIP_MISSING,
+      disabled: !installed,
+    });
+    const prompt = card("프롬프트", negpip, [
+      h("textarea", { class: "ais-f ais-prompt", placeholder: "프롬프트", value: s.prompt, onInput: typed("prompt") }),
+      h("textarea", { class: "ais-f ais-negative", placeholder: "네거티브", value: s.negative, onInput: typed("negative") }),
     ], "span3");
     return group("공통 설정", "#4b6a8f", "", h("div", { class: "ais-grid3" }, prompt, this.modelCard(s), this.loraCard(s), this.postCard(s)));
   }

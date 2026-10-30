@@ -57,6 +57,16 @@ export function pill(on, onToggle, { on: onText = "켬", off: offText = "끔", t
 }
 
 /** `[{value, label}]` from route items (plain strings or `{value, label}`); the current value stays listed even if gone. */
+// Grow a textarea to fit its text (CSS min-height sets the floor), keeping the panel's scroll position.
+export function autoGrow(el) {
+  const box = el.closest?.(".ais-scroll");
+  const top = box?.scrollTop;
+  el.style.height = "auto";
+  const height = el.scrollHeight;
+  el.style.height = height ? `${height + el.offsetHeight - el.clientHeight}px` : "";
+  if (box) box.scrollTop = top;
+}
+
 export function optionItems(items, current, { empty } = {}) {
   const list = (items || []).map((item) => (typeof item === "string" ? { value: item, label: item } : item));
   const known = list.length > 0; // an empty list is still loading (or the route failed): no "(없음)" mark

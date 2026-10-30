@@ -28,6 +28,11 @@ class StudioStateTests(unittest.TestCase):
         self.assertTrue(all(fl[k] for k in ("master", "noise", "prompt_syntax", "dora")))
         self.assertFalse(fl["attention"])
 
+    def test_negpip_defaults_on_and_keeps_only_booleans(self):
+        self.assertIs(ss.normalize_state({})["negpip"], True)
+        self.assertIs(ss.normalize_state({"negpip": False})["negpip"], False)
+        self.assertIs(ss.normalize_state({"negpip": "no"})["negpip"], True)
+
     def test_normalize_default_is_identity_and_independent(self):
         out = ss.normalize_state({})
         self.assertEqual(out, ss.DEFAULT_STATE)

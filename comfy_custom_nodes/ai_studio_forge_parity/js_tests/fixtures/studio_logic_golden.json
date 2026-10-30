@@ -19,6 +19,7 @@
     "height": 1216,
     "batch": 1,
     "loras": [],
+    "negpip": true,
     "dora_mode": "LyCORIS fp32 (as trained)",
     "forge_like": {
       "master": true,

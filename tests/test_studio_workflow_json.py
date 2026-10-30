@@ -124,7 +124,7 @@ class WorkflowFileTests(unittest.TestCase):
 
     def test_every_role_once(self):
         roles = _roles_from_js()
-        self.assertEqual(len(roles), 33)
+        self.assertEqual(len(roles), 34)
         self.assertNotIn("family_switch_clip", roles)  # R6
         found = [node["properties"]["aistudio_role"] for node in self.engine]
         self.assertCountEqual(found, roles)
@@ -132,6 +132,21 @@ class WorkflowFileTests(unittest.TestCase):
         for node in self.workflow["nodes"]:
             if node["type"] in UI_LAYOUT:
                 self.assertNotIn("aistudio_role", node["properties"])
+
+    def test_negpip_sits_after_loras_and_feeds_every_clip_user(self):
+        def source(role, name):
+            entry = next(i for i in self.by_role[role]["inputs"] if i["name"] == name)
+            link = next(l for l in self.workflow["links"] if l[0] == entry["link"])
+            return self.nodes[link[1]]["properties"].get("aistudio_role"), link[2]
+
+        self.assertEqual(self.by_role["negpip"]["type"], "ForgeNeoNegPip")
+        self.assertEqual(source("negpip", "model"), ("lora_stack", 0))
+        self.assertEqual(source("negpip", "clip"), ("lora_stack", 1))
+        self.assertEqual(source("dora", "model"), ("negpip", 0))
+        for role, name in (("pos_encode", "clip"), ("neg_encode", "clip"), ("pos_encode38", "native_clip"),
+                           ("neg_encode38", "native_clip"), ("sam3_detailer", "clip"), ("hires", "base_clip")):
+            with self.subTest(role=role):
+                self.assertEqual(source(role, name), ("negpip", 1))
 
     def test_node_types_known(self):
         known = set(NODE_CLASS_MAPPINGS) | CORE_TYPES
@@ -246,7 +261,7 @@ class WorkflowFileTests(unittest.TestCase):
                     targets = {self.links[link_id][3] for link_id in self.by_role[role]["outputs"][0]["links"]}
                     self.assertEqual(targets, {switch["id"]})
         self.assertEqual(self._source(self.by_role["pos_encode38"], "model")[0], self.by_role["dora"])  # R6
-        self.assertEqual(self._source(self.by_role["pos_encode38"], "native_clip")[0], self.by_role["lora_stack"])
+        self.assertEqual(self._source(self.by_role["pos_encode38"], "native_clip")[0], self.by_role["negpip"])
         self.assertEqual(self._source(self.by_role["lora_stack"], "clip")[0], self.by_role["te"])  # one shared TE
 
     def test_engine_rows_top_to_bottom(self):
