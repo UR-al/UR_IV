@@ -354,7 +354,7 @@ export function stageModes(state, postAction = null, options = {}) {
       : ["unet38", "qwen35", "pos_encode38", "neg_encode38"],
   );
   if (s.tab === "t2i") bypass.add("i2i_image");
-  if (!s.sam3.on) bypass.add("sam3_detailer");
+  if (!s.sam3.on || s.ext.sam3_refine.on) bypass.add("sam3_detailer"); // R22: Refine replaces it, as in the app's post run
   if (!s.sam3.on && !extNeedsSam3Mask(s)) bypass.add("sam3_mask");
   if (!postAction) ROLES.filter((role) => role.startsWith("post_")).forEach((role) => bypass.add(role));
   const ext = extModes(s, null, { postAction });

@@ -150,9 +150,9 @@ ROWS = (  # (group title, [(role, class, node title)])
 )
 
 
-def _detailer_links(role: str, image: str, mask: str) -> list[tuple]:
+def _detailer_links(role: str, image: str, mask: str, mask_slot: int = 0) -> list[tuple]:
     return [
-        (image, 0, role, "image"), (mask, 0, role, "mask"),
+        (image, 0, role, "image"), (mask, mask_slot, role, "mask"),
         ("ext_dd_sam3", 0, role, "model"), ("negpip", 1, role, "clip"), ("vae", 0, role, "vae"),
         ("family_switch_pos", 0, role, "positive"), ("family_switch_neg", 0, role, "negative"),
     ]
@@ -226,7 +226,8 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("upscale", 0, "sam3_mask", "image"),
     *_detailer_links("sam3_detailer", "upscale", "sam3_mask"),
     *_detailer_links("ext_sam3_refine", "sam3_detailer", "sam3_mask"),
-    *_detailer_links("ext_sam3_tile", "ext_sam3_refine", "sam3_mask"),
+    # R22: Refine's applied mask matches the images it returns; a bypassed Refine passes sam3_mask through
+    *_detailer_links("ext_sam3_tile", "ext_sam3_refine", "ext_sam3_refine", 1),
     ("ext_sam3_tile", 0, "ext_degrid", "image"),
     ("ext_degrid", 0, "save", "images"),
     # ⑩ post-processing of a gallery image; model and conditioning come from the rows above

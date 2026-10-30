@@ -3554,8 +3554,7 @@
           "type": "MASK",
           "links": [
             62,
-            69,
-            76
+            69
           ]
         },
         {
@@ -4295,7 +4294,9 @@
         {
           "name": "applied_mask",
           "type": "MASK",
-          "links": null
+          "links": [
+            76
+          ]
         },
         {
           "name": "report_json",
@@ -6432,8 +6433,8 @@
     ],
     [
       76,
-      39,
-      0,
+      41,
+      1,
       42,
       1,
       "MASK"

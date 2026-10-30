@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { deflateSync } from "node:zlib";
 
-import { RunController } from "../web/ai_studio/run_controller.js";
+import { NOTICES, RunController } from "../web/ai_studio/run_controller.js";
 import { DEFAULT_STATE, stageModes, withDefaults } from "../web/ai_studio/studio_logic.js";
 import { readPngText, withExtraParams } from "../web/ai_studio/studio_pnginfo.js";
 import { ROLES } from "../web/ai_studio/studio_roles.js";
@@ -93,7 +93,7 @@ function plan2x2(stateOf = () => ({})) {
 // The panel's model picks (missingPicks refuses a run while any is empty).
 const PICKS = { unet: "anima-2.9b.safetensors", te: "qwen_3_06b_base.safetensors", vae: "qwen_image_vae.safetensors" };
 
-function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined } = {}) {
+function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined, extFiles = undefined } = {}) {
   const api = new FakeApi();
   const emitted = [];
   const routes = [];
@@ -119,6 +119,7 @@ function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state
     families: () => ({}),
     upscalers: () => undefined,
     loras: () => loras,
+    extFiles: () => extFiles,
     emit: (type, payload) => emitted.push([type, payload]),
     now: () => 0,
   });
@@ -601,4 +602,46 @@ test("same seed on a PNG-only image regenerates as t2i even when the panel is on
   const i2iRecord = { state: withDefaults({ ...PICKS, tab: "i2i", seed: 5, i2i: { image: "src.png" } }), seed: 5 };
   await controller.sameSeed({ image: ref("s.png"), record: i2iRecord });
   assert.equal(api.queued[1].data.output[ROLE_IDS.latent].inputs.mode, "img2img");
+});
+
+// ---------------------------------------------------------------------------------------------- idle extensions
+
+const NO_FILES = { ext: { lora_block: { on: true }, vae_2x: { on: true } } };
+const noticesOf = (emitted) => emittedOf(emitted, "notice").map((payload) => payload.text);
+
+test("a switched-on extension without its file warns, and the run still starts", async () => {
+  const { api, controller, emitted } = setup({ state: NO_FILES });
+  const result = await controller.generate();
+  assert.equal(result.queued, 1);
+  assert.equal(api.queued.length, 1);
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.noExtFile}: LoRA 블록, VAE 2x`]);
+});
+
+test("no extension notice when nothing is idle", async () => {
+  const { controller, emitted } = setup({ state: { ext: { skim: { on: true } } } });
+  await controller.generate();
+  assert.deepEqual(noticesOf(emitted), []);
+});
+
+test("DeGrid's notice reads the node's file list", async () => {
+  const lists = new Map([["ForgeNeoAnimaVAEDeGrid", { required: { model_name: [["auto"], {}] } }]]);
+  const { controller, emitted } = setup({ state: { ext: { degrid: { on: true } } }, extFiles: lists });
+  await controller.generate();
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.noExtFile}: VAE DeGrid`]);
+});
+
+test("an X/Y/Z run gets the extension notice too", async () => {
+  const { controller, emitted } = setup({ state: NO_FILES, xyz: XYZ_ON, parameters: golden.infotext.text });
+  await controller.generate();
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.noExtFile}: LoRA 블록, VAE 2x`]);
+});
+
+test("a gallery Hires run warns about the model stack only, an upscale about nothing", async () => {
+  const item = { image: ref("a.png"), record: { state: { ...PICKS, ...NO_FILES }, seed: 1 } };
+  const hires = setup({ state: NO_FILES });
+  await hires.controller.runPost("hires", item);
+  assert.deepEqual(noticesOf(hires.emitted), [`${NOTICES.noExtFile}: LoRA 블록`]);
+  const upscale = setup({ state: { ...NO_FILES, upscale: { ...DEFAULT_STATE.upscale, model: "m.pth" } } });
+  await upscale.controller.runPost("upscale", item);
+  assert.deepEqual(noticesOf(upscale.emitted), []);
 });

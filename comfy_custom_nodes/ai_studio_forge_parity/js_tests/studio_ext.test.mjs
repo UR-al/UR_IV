@@ -8,9 +8,12 @@ import { EXT_SCHEMA } from "../web/ai_studio/ext_schema.js";
 import {
   EXT_DEFAULTS,
   EXT_ROLES,
+  comboItems,
   extCnsInputs,
+  extFieldValue,
   extInputs,
   extModes,
+  idleExtensions,
   normalizeExt,
 } from "../web/ai_studio/studio_ext.js";
 import {
@@ -281,6 +284,51 @@ test("a post run decides the passes by its action, not the state's tab", () => {
   assert.equal(extModes(dd, null, { postAction: "hires" }).ext_dd_sam3, 4);
 });
 
+// ---------------------------------------------------------------------------------------------- file lists and notices
+
+test("comboItems reads both COMBO forms of /object_info", () => {
+  assert.deepEqual(comboItems({ required: { a: [["x", "y"], {}] } }, "a"), ["x", "y"]);
+  assert.deepEqual(comboItems({ optional: { a: [["z"]] } }, "a"), ["z"]);
+  assert.deepEqual(comboItems({ required: { a: ["COMBO", { options: ["v3"] }] } }, "a"), ["v3"]);
+  assert.deepEqual(comboItems({ required: { a: ["INT", {}] } }, "a"), []);
+  assert.deepEqual(comboItems({}, "a"), []);
+  assert.deepEqual(comboItems(undefined, "a"), []);
+});
+
+test("extFieldValue coerces like normalizeExt", () => {
+  const field = { kind: "int", default: 3, min: 1, max: 10 };
+  assert.equal(extFieldValue(field, 99.5), 10);
+  assert.equal(extFieldValue(field, 2.9), 2);
+  assert.equal(extFieldValue(field, "abc"), 3);
+});
+
+const degridFiles = (...names) => new Map([["ForgeNeoAnimaVAEDeGrid", { required: { model_name: [["auto", ...names], {}] } }]]);
+
+test("idleExtensions names a switched-on extension without its file", () => {
+  assert.deepEqual(idleExtensions(state()), []);
+  assert.deepEqual(idleExtensions(withExt("lora_block", {})), ["LoRA 블록"]);
+  assert.deepEqual(idleExtensions(withExt("lora_block", { lora_name: "a.safetensors" })), []);
+  assert.deepEqual(idleExtensions(withExt("vae_2x", { vae_name: "None" })), ["VAE 2x"]);
+  assert.deepEqual(idleExtensions(withExt("pid", { ckpt_name: "(auto-download)" })), ["PiD"]);
+  assert.deepEqual(idleExtensions(withExt("vae_2x", { vae_name: "x.safetensors" })), []);
+});
+
+test("DeGrid is idle only when the node's list is known to hold no model", () => {
+  const on = withExt("degrid", {});
+  assert.deepEqual(idleExtensions(on), []); // the list is not known yet
+  assert.deepEqual(idleExtensions(on, null, degridFiles()), ["VAE DeGrid"]);
+  assert.deepEqual(idleExtensions(on, null, degridFiles("n.safetensors")), []);
+  const i2i = withExt("degrid", {}, { tab: "i2i" });
+  assert.deepEqual(idleExtensions(i2i, null, degridFiles()), []); // it does not run there without its i2i switch
+});
+
+test("a gallery run only asks about the model stack: the VAE and image nodes are not on its path", () => {
+  const ext = { lora_block: { on: true }, vae_2x: { on: true }, pid: { on: true }, degrid: { on: true } };
+  const s = state({ ext });
+  assert.deepEqual(idleExtensions(s, "hires", degridFiles()), ["LoRA 블록"]);
+  assert.deepEqual(idleExtensions(s, null, degridFiles()), ["LoRA 블록", "VAE 2x", "VAE DeGrid", "PiD"]);
+});
+
 // ---------------------------------------------------------------------------------------------- studio_logic
 
 const ROLE_INPUTS = {
@@ -355,6 +403,26 @@ test("Refine and tile repair keep the SAM3 mask running without the SAM3 detaile
   const { api, roleIds } = prompt();
   assert.equal(applyStateToPrompt(api, roleIds, withExt("sam3_tile", {}))[roleIds.sam3_mask].inputs.enabled, true);
   assert.equal(applyStateToPrompt(api, roleIds, state())[roleIds.sam3_mask].inputs.enabled, false);
+});
+
+test("Refine replaces the SAM3 detailer when both are on; alone the detailer runs (R22)", () => {
+  const sam3 = { ...DEFAULT_STATE.sam3, on: true };
+  const both = stageModes(withExt("sam3_refine", {}, { sam3 }));
+  assert.deepEqual([both.sam3_mask, both.sam3_detailer, both.ext_sam3_refine], [0, 4, 0]);
+  const alone = stageModes(state({ sam3 }));
+  assert.deepEqual([alone.sam3_mask, alone.sam3_detailer, alone.ext_sam3_refine], [0, 0, 4]);
+  const tile = stageModes(withExt("sam3_tile", {}, { sam3 }));
+  assert.deepEqual([tile.sam3_detailer, tile.ext_sam3_refine, tile.ext_sam3_tile], [0, 4, 0]);
+});
+
+test("a gallery SAM3 run keeps its own post row with Refine on (R22 leaves POST_ROUTES alone)", () => {
+  const { api, roleIds } = prompt();
+  const current = withExt("sam3_refine", {});
+  const record = { ...current, image: "a.png" };
+  const modes = stageModes(postRunState(record, current, "sam3"), "sam3");
+  assert.deepEqual([modes.post_sam3_mask, modes.post_sam3_detailer, modes.post_save], [0, 0, 0]);
+  const { prompt: out } = postPrompt(api, roleIds, record, "sam3", current);
+  assert.equal(out[roleIds.post_sam3_detailer].inputs.enabled, true);
 });
 
 test("a post run keeps the extensions of its record and turns HiFlow off", () => {

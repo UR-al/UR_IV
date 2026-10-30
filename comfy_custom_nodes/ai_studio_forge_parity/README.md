@@ -106,7 +106,9 @@ under the pack's example workflows). Everything is for custom workflows only: th
 - Extensions: the workflow's "④ 확장" row and its neighbours hold the pack's guidance suite, Optimal Scale, Skimmed CFG,
   Detail Daemon, SPEED, ER SDE values, LoRA block weight, VAE 2x, VAE DeGrid, PiD, SAM3 Refine and SAM3 tile repair in
   the app compiler's order, bypassed until switched on. Detail Daemon has one node per pass and SPEED one per main pass,
-  as the compiler adds them. `web/ai_studio/ext_schema.json` (the table Python reads) and its `ext_schema.js` twin (what
+  as the compiler adds them. SAM3 Refine replaces the SAM3 detailer when on (the app's post run swaps them the same
+  way), and tile repair takes Refine's applied mask. The panel's "확장기능" group is drawn from the table:
+  `web/ai_studio/ext_schema.json` (what Python reads) and its `ext_schema.js` twin (what
   the JS imports) are generated from the app's specs by `tools/build_studio_ext_schema.py`. ADetailer, character
   reference and Colorcraft (its chain is compiled by the app's `core/colorcraft.py`) are not part of the studio.
 - New nodes `AIStudioLoraStack`, `AIStudioSaveForge`, `AIStudioUpscaleImage`, `AIStudioPromptEncode`, `AIStudioSwitch`

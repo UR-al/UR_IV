@@ -86,6 +86,13 @@ function choices(kind) {
   return choiceCache.get(kind).request;
 }
 
+/** A node class's inputs from `/object_info/<class>` (its COMBO file lists); throws on an HTTP error. */
+async function nodeInputs(comfyClass) {
+  const response = await api.fetchApi(`/object_info/${encodeURIComponent(comfyClass)}`);
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return (await response.json())[comfyClass]?.input ?? {};
+}
+
 function imageUrl(ref, thumb = false) {
   const query = new URLSearchParams({ filename: ref.filename, subfolder: ref.subfolder || "", type: ref.type || "output" });
   if (thumb) query.set("preview", "webp;50");
@@ -218,6 +225,7 @@ function contextFor(comfyClass) {
   if (comfyClass === PANEL) {
     return {
       choices,
+      fetchChoices: nodeInputs,
       generate,
       stop: () => controller.stop(),
       changed: () => emit("state", null),
@@ -298,6 +306,7 @@ app.registerExtension({
       families: () => loaded.families,
       upscalers: () => loaded.upscalers,
       loras: () => loaded.loras,
+      extFiles: () => viewOf(PANEL)?.extMemory.lists,
       emit,
     });
     wrapQueue();

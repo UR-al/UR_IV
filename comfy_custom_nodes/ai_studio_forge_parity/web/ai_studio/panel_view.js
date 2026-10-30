@@ -1,6 +1,7 @@
 // Anima studio: the control panel (C4 left column, 790px) drawn into AIStudioPanel's DOM widget.
 // Its state lives as JSON in the node's hidden `state` STRING widget, so it is saved with the workflow.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
+import { dropBlockedExt, extMemory, renderExtensions } from "./ext_view.js";
 import { DORA_MODES, defaultModel, imageSize, withDefaults } from "./studio_logic.js";
 import { autoGrow, h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 
@@ -43,9 +44,9 @@ const negpipInstalled = () => {
 
 export class PanelView {
   /**
-   * `widget`: the node's hidden `state` widget. `ctx`: `choices(kind)` -> Promise<{items}>, `generate()`, `stop()`,
-   * `changed()`, `engineRoom` {collapsed(), toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width,
-   * height}, maskEditor()}.
+   * `widget`: the node's hidden `state` widget. `ctx`: `choices(kind)` -> Promise<{items}>, `fetchChoices(class)` ->
+   * Promise<`/object_info/<class>` input>, `hasRole(role)`, `generate()`, `stop()`, `changed()`, `engineRoom` {collapsed(),
+   * toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width, height}, maskEditor()}.
    */
   constructor(widget, ctx) {
     this.widget = widget;
@@ -53,6 +54,7 @@ export class PanelView {
     this.running = false;
     this.percent = 0;
     this.forgeOpen = false;
+    this.extMemory = extMemory();
     this.choices = {};
     this.state = this.read();
     this.element = h("div", { class: "ais-root ais-panel" });
@@ -117,6 +119,7 @@ export class PanelView {
     const image = this.ctx.i2i.get();
     if (image) state.i2i.image = image;
     if (this.negpipBlock()) state.negpip = false;
+    dropBlockedExt(state.ext, this.ctx.hasRole);
     return state;
   }
 
@@ -159,10 +162,14 @@ export class PanelView {
 
   render() {
     const s = this.state;
+    const scrolled = this.element.querySelector(".ais-scroll")?.scrollTop ?? 0;
     this.top = h("div", { class: "ais-top" });
     this.thin = h("div", { class: "ais-thin" }, (this.bar = h("div")));
-    this.element.replaceChildren(this.top, this.thin, h("div", { class: "ais-scroll" }, this.common(s), this.tabs(s), this.engineBar()));
+    const scroll = h("div", { class: "ais-scroll" }, this.common(s), this.tabs(s), this.extensions(s), this.engineBar());
+    this.element.replaceChildren(this.top, this.thin, scroll);
     this.renderTop();
+    this.growPrompts(); // first: the prompts' height decides how far the column can scroll
+    scroll.scrollTop = scrolled;
     if (globalThis.requestAnimationFrame) requestAnimationFrame(() => this.growPrompts());
   }
 
@@ -342,11 +349,23 @@ export class PanelView {
     ]);
   }
 
+  // ------------------------------------------------------------------------------------------- 확장기능
+
+  extensions(s) {
+    return renderExtensions(s, {
+      set: (mutate, rerender) => this.set(mutate, rerender),
+      hasRole: this.ctx.hasRole,
+      fetchChoices: this.ctx.fetchChoices,
+      memory: this.extMemory,
+      rerender: () => this.scheduleRender(),
+    });
+  }
+
   // ------------------------------------------------------------------------------------------- 엔진룸
 
   engineBar() {
     const collapsed = this.ctx.engineRoom.collapsed();
-    const text = `엔진룸 (${collapsed ? "접힘" : "펼침"} · 위에서 아래로 ①~⑨)`;
+    const text = `엔진룸 (${collapsed ? "접힘" : "펼침"} · 위에서 아래로 ①~⑩)`;
     const label = collapsed ? "펼치기" : "접기";
     return h("div", { class: "ais-engine" }, h("span", {}, text),
       h("button", { type: "button", class: "ais-pill off", "aria-label": `엔진룸 ${label}`, onClick: () => { this.ctx.engineRoom.toggle(); this.render(); } }, label));

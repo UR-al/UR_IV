@@ -11,6 +11,7 @@ const S2_MODE = "Stochastic (S²)";
 const DD_UNSUPPORTED_SAMPLERS = new Set(["dpm_adaptive", "heunpp2"]);
 const UNPICKED_FILES = new Set(["", "None", "(auto-download)"]);
 const PICKED_FIELD = Object.freeze({ lora_block: "lora_name", vae_2x: "vae_name", pid: "ckpt_name" });
+const POST_RUN_KEYS = new Set(["lora_block"]); // the only file pick on a gallery run's path (the post row is R19)
 
 // Detail Daemon and SPEED have one node per pass (the compiler adds them per pass): the table's `role` is the main
 // pass, these are the others.
@@ -35,7 +36,8 @@ function numberValue(field, value) {
   return Math.max(field.min, Math.min(field.max, field.kind === "int" ? Math.trunc(number) : number));
 }
 
-function fieldValue(field, value) {
+/** One field's value coerced and clamped by the table (`field` is a row of ext_schema.js). */
+export function extFieldValue(field, value) {
   if (field.kind === "bool") return typeof value === "boolean" ? value : field.default;
   if (field.kind === "int" || field.kind === "float") return numberValue(field, value);
   if (typeof value !== "string") return field.default;
@@ -49,7 +51,7 @@ export function normalizeExt(raw) {
   for (const item of EXTENSIONS) {
     const values = isObject(source[item.key]) ? source[item.key] : {};
     out[item.key] = { on: values.on === true };
-    for (const field of item.fields) out[item.key][field.key] = fieldValue(field, values[field.key]);
+    for (const field of item.fields) out[item.key][field.key] = extFieldValue(field, values[field.key]);
   }
   return out;
 }
@@ -192,6 +194,32 @@ function roleRuns(s, role, postAction) {
     default:
       return ext.on && !(key in PICKED_FIELD && UNPICKED_FILES.has(ext[PICKED_FIELD[key]]));
   }
+}
+
+/** A COMBO's items from the `input` of `/object_info/<class>` (both the list form and V3's COMBO form); [] when unknown. */
+export function comboItems(inputs, name) {
+  const spec = inputs?.required?.[name] ?? inputs?.optional?.[name];
+  if (!Array.isArray(spec)) return [];
+  if (Array.isArray(spec[0])) return spec[0];
+  return spec[0] === "COMBO" && Array.isArray(spec[1]?.options) ? spec[1].options : [];
+}
+
+function fileMissing(s, key, lists) {
+  if (key in PICKED_FIELD) return UNPICKED_FILES.has(s.ext[key][PICKED_FIELD[key]]);
+  if (key !== "degrid" || !runsOnTab(s, key)) return false;
+  const inputs = lists?.get(BY_KEY.get(key).class); // unknown until the panel has read it: no guess
+  return Boolean(inputs) && comboItems(inputs, "model_name").every((name) => name === "auto");
+}
+
+/**
+ * Labels of the switched-on extensions that will do nothing for want of a file: a pick left empty (roleRuns bypasses
+ * them), DeGrid with no model at all (the node keeps the image and only reports it). `postAction`: as in extInputs.
+ * `lists`: class -> `/object_info/<class>` input, what the panel has read so far.
+ */
+export function idleExtensions(state, postAction = null, lists = null) {
+  const s = complete(state);
+  return EXTENSIONS.filter((item) => s.ext[item.key].on && (!postAction || POST_RUN_KEYS.has(item.key)) && fileMissing(s, item.key, lists))
+    .map((item) => item.label);
 }
 
 /**

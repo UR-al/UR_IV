@@ -13,6 +13,7 @@ import {
   stageModes,
   withDefaults,
 } from "./studio_logic.js";
+import { idleExtensions } from "./studio_ext.js";
 import { withExtraParams } from "./studio_pnginfo.js";
 
 const EVENTS = Object.freeze([
@@ -35,6 +36,7 @@ export const NOTICES = Object.freeze({
   failed: "실행 오류",
   noLora: "LoRA 없음 (빼고 생성)",
   noNegpip: "NegPiP 꺼짐: 음수 가중치가 그림을 망침",
+  noExtFile: "파일 없음 (빼고 생성)",
 });
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -88,7 +90,8 @@ export class RunController {
    * `deps`: `api` (ComfyUI api: queuePrompt, interrupt, deleteItem, addEventListener), `basePrompt(modes)` (graphToPrompt
    * with those node modes -> `{output, workflow}`), `roleIds()`, `getState()`, `getXyz()` (`{on, axes, options}`),
    * `route(path, body)` (studio route JSON; throws on an HTTP error), `readParameters(imageRef)` (PNG `parameters` or
-   * null), `families()`, `upscalers()`, `loras()` (LoRA file list or undefined), `emit(type, payload)` for the views,
+   * null), `families()`, `upscalers()`, `loras()` (LoRA file list or undefined), `extFiles()` (class -> `/object_info`
+   * input, the lists the panel has read), `emit(type, payload)` for the views,
    * `now()` (ms).
    */
   constructor(deps) {
@@ -148,11 +151,20 @@ export class RunController {
     }
   }
 
-  /** Notices that never block: `<lora:…>` tags matching no file (the LoRA node skips them), `(x:-1)` without NegPiP. */
-  warnRun(state) {
+  /**
+   * Notices that never block: `<lora:…>` tags matching no file (the LoRA node skips them), `(x:-1)` without NegPiP,
+   * switched-on extensions without their file. `action`: the gallery post-processing action, if any.
+   */
+  warnRun(state, action = null) {
     const missing = missingLoras(state, this.deps.loras?.());
     if (missing.length) this.notice(`${NOTICES.noLora}: ${missing.join(", ")}`);
     if (!state.negpip && hasNegativeWeights(state)) this.notice(NOTICES.noNegpip);
+    this.warnIdleExtensions(state, action);
+  }
+
+  warnIdleExtensions(state, action = null) {
+    const idle = idleExtensions(state, action, this.deps.extFiles?.());
+    if (idle.length) this.notice(`${NOTICES.noExtFile}: ${idle.join(", ")}`);
   }
 
   /** 생성: the X/Y/Z plot when its panel is on (R17), else one generation of the panel state. */
@@ -161,7 +173,10 @@ export class RunController {
       const state = this.deps.getState();
       const missing = missingPicks(state);
       if (missing) return this.notice(missing);
-      if (this.deps.getXyz?.()?.on) return this.generateXyz(state);
+      if (this.deps.getXyz?.()?.on) {
+        this.warnIdleExtensions(state);
+        return this.generateXyz(state);
+      }
       this.warnRun(state);
       return this.run("single", 1, async (job) => {
         const prompt = await this.panelPrompt(state);
@@ -225,7 +240,7 @@ export class RunController {
     const runState = postRunState(record, current, action);
     const missing = missingPicks(runState, action);
     if (missing) return this.notice(missing);
-    if (action !== "upscale") this.warnRun(runState);
+    if (action !== "upscale") this.warnRun(runState, action);
     return this.run("post", 1, async (job) => {
       const options = this.options();
       const roleIds = this.deps.roleIds();

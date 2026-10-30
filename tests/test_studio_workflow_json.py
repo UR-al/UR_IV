@@ -372,8 +372,9 @@ class WorkflowFileTests(unittest.TestCase):
         self.assertEqual(source("upscale", "image"), ("ext_pid", 0))
         self.assertEqual(source("ext_sam3_refine", "image"), ("sam3_detailer", 0))
         self.assertEqual(source("ext_sam3_tile", "image"), ("ext_sam3_refine", 0))
-        for role in ("ext_sam3_refine", "ext_sam3_tile"):
-            self.assertEqual(source(role, "mask"), ("sam3_mask", 0))
+        self.assertEqual(source("ext_sam3_refine", "mask"), ("sam3_mask", 0))
+        # R22: the tile takes Refine's applied mask; a bypassed Refine passes its own mask input through
+        self.assertEqual(source("ext_sam3_tile", "mask"), ("ext_sam3_refine", 1))
         self.assertEqual(source("ext_degrid", "image"), ("ext_sam3_tile", 0))
         self.assertEqual(source("save", "images"), ("ext_degrid", 0))
 
