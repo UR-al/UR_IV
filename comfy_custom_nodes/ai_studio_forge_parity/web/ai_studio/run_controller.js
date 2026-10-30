@@ -155,8 +155,12 @@ export class RunController {
    * Notices that never block: `<lora:…>` tags matching no file (the LoRA node skips them), `(x:-1)` without NegPiP,
    * switched-on extensions without their file. `action`: the gallery post-processing action, if any.
    */
-  warnRun(state, action = null) {
-    const missing = missingLoras(state, this.deps.loras?.());
+  async warnRun(state, action = null) {
+    let missing = missingLoras(state, this.deps.loras?.());
+    if (missing.length && this.deps.reloadLoras) { // the list may predate a file written since (a training epoch)
+      await this.deps.reloadLoras();
+      missing = missingLoras(state, this.deps.loras?.());
+    }
     if (missing.length) this.notice(`${NOTICES.noLora}: ${missing.join(", ")}`);
     if (!state.negpip && hasNegativeWeights(state)) this.notice(NOTICES.noNegpip);
     this.warnIdleExtensions(state, action);
@@ -169,7 +173,7 @@ export class RunController {
 
   /** 생성: the X/Y/Z plot when its panel is on (R17), else one generation of the panel state. */
   generate() {
-    return this.claim(() => {
+    return this.claim(async () => {
       const state = this.deps.getState();
       const missing = missingPicks(state);
       if (missing) return this.notice(missing);
@@ -177,7 +181,7 @@ export class RunController {
         this.warnIdleExtensions(state);
         return this.generateXyz(state);
       }
-      this.warnRun(state);
+      await this.warnRun(state);
       return this.run("single", 1, async (job) => {
         const prompt = await this.panelPrompt(state);
         await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
@@ -240,7 +244,7 @@ export class RunController {
     const runState = postRunState(record, current, action);
     const missing = missingPicks(runState, action);
     if (missing) return this.notice(missing);
-    if (action !== "upscale") this.warnRun(runState, action);
+    if (action !== "upscale") await this.warnRun(runState, action);
     return this.run("post", 1, async (job) => {
       const options = this.options();
       const roleIds = this.deps.roleIds();
@@ -263,7 +267,7 @@ export class RunController {
       const state = sameSeedState(record, this.deps.getState());
       const missing = missingPicks(state);
       if (missing) return this.notice(missing);
-      this.warnRun(state);
+      await this.warnRun(state);
       const result = await this.run("single", 1, async (job) => {
         const prompt = await this.panelPrompt(state);
         await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));

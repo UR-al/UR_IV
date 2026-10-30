@@ -52,7 +52,7 @@ export const DEFAULT_STATE = deepFreeze({
   sam3: { on: false, checkpoint: "", prompt: "face", denoise: 0.4, steps: 0, cfg: 0.0 },
   // inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture), so the panel shows
   // "전체" greyed out; the key stays so a saved state keeps its shape.
-  i2i: { image: "", denoise: 0.55, mask_blur: 4, inpaint_area: "whole" },
+  i2i: { image: "", width: 832, height: 1216, denoise: 0.55, mask_blur: 4, inpaint_area: "whole" },
   ext: EXT_DEFAULTS, // the table in ext_schema.js: one {on, fields...} per extension
 });
 
@@ -130,17 +130,15 @@ const SIZE_MAX = 4096;
 
 /**
  * The generation size for an i2i / inpaint input image (Forge's send-to carries the image's size): each side rounded
- * to a multiple of 8 and kept in the panel's 64..4096 range; null when the size is unknown.
+ * to a multiple of 8, both shrunk together to fit 4096 so the aspect holds; null when the size is unknown.
  */
 export function imageSize(width, height) {
-  const side = (value) => {
-    const number = Number(value);
-    if (!Number.isFinite(number) || number <= 0) return null;
-    return Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round(number / SIZE_STEP) * SIZE_STEP));
-  };
-  const w = side(width);
-  const h = side(height);
-  return w === null || h === null ? null : { width: w, height: h };
+  const w = Number(width);
+  const h = Number(height);
+  if (!(Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0)) return null;
+  const fit = Math.min(1, SIZE_MAX / Math.max(w, h)); // shrink both sides, or a big image would be cropped to fit
+  const side = (value) => Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round((value * fit) / SIZE_STEP) * SIZE_STEP));
+  return { width: side(w), height: side(h) };
 }
 
 /**
@@ -286,8 +284,8 @@ function mainInputs(s, options) {
     neg_encode: encode,
     latent: {
       mode: !isI2i ? "txt2img" : s.i2i_mode === "inpaint" ? "inpaint" : "img2img",
-      width: s.width,
-      height: s.height,
+      width: (isI2i ? s.i2i : s).width,
+      height: (isI2i ? s.i2i : s).height,
       batch_size: s.batch,
       mask_blur: s.i2i.mask_blur,
     },

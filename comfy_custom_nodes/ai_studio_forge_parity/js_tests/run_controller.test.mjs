@@ -93,7 +93,7 @@ function plan2x2(stateOf = () => ({})) {
 // The panel's model picks (missingPicks refuses a run while any is empty).
 const PICKS = { unet: "anima-2.9b.safetensors", te: "qwen_3_06b_base.safetensors", vae: "qwen_image_vae.safetensors" };
 
-function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined, extFiles = undefined } = {}) {
+function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined, extFiles = undefined, reloadLoras = undefined } = {}) {
   const api = new FakeApi();
   const emitted = [];
   const routes = [];
@@ -118,7 +118,8 @@ function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state
     },
     families: () => ({}),
     upscalers: () => undefined,
-    loras: () => loras,
+    loras: () => (typeof loras === "function" ? loras() : loras),
+    reloadLoras,
     extFiles: () => extFiles,
     emit: (type, payload) => emitted.push([type, payload]),
     now: () => 0,
@@ -574,6 +575,26 @@ test("a LoRA tag that matches no file gives a notice but still generates", async
   const quiet = setup({ loras: undefined, state: { prompt: "<lora:x:1>" } }); // list not loaded yet: no notice
   await quiet.controller.generate();
   assert.deepEqual(emittedOf(quiet.emitted, "notice"), []);
+});
+
+test("a tag missing from the cached LoRA list is looked up once more before the notice", async () => {
+  let list = ["old.safetensors"];
+  let reloads = 0;
+  const fresh = setup({
+    loras: () => list,
+    reloadLoras: async () => { reloads += 1; list = ["old.safetensors", "new-e10.safetensors"]; },
+    state: { prompt: "1boy <lora:new-e10:1>" },
+  });
+  assert.deepEqual(await fresh.controller.generate(), { queued: 1 });
+  assert.equal(reloads, 1);
+  assert.deepEqual(emittedOf(fresh.emitted, "notice"), []);
+  const gone = setup({ loras: () => list, reloadLoras: async () => { reloads += 1; }, state: { prompt: "<lora:gone:1>" } });
+  await gone.controller.generate();
+  assert.deepEqual(emittedOf(gone.emitted, "notice").map((n) => n.text), ["LoRA 없음 (빼고 생성): gone"]);
+  reloads = 0;
+  const known = setup({ loras: () => list, reloadLoras: async () => { reloads += 1; }, state: { prompt: "<lora:old:1>" } });
+  await known.controller.generate();
+  assert.equal(reloads, 0); // no request when nothing is missing
 });
 
 test("negative weights without NegPiP warn but still run; with NegPiP stay quiet", async () => {

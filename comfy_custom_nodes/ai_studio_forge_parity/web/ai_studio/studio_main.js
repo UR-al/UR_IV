@@ -65,10 +65,10 @@ async function route(path, body) {
   return data;
 }
 
-/** `/choices?kind=` JSON, cached for CHOICES_TTL_MS (new LoRA epochs show up without a page reload). */
-function choices(kind) {
+/** `/choices?kind=` JSON, cached for CHOICES_TTL_MS (new LoRA epochs show up without a page reload); `fresh` skips the cache. */
+function choices(kind, fresh = false) {
   const cached = choiceCache.get(kind);
-  if (!cached || Date.now() - cached.at > CHOICES_TTL_MS) {
+  if (fresh || !cached || Date.now() - cached.at > CHOICES_TTL_MS) {
     const request = route(`/choices?kind=${encodeURIComponent(kind)}`)
       .then((data) => {
         if (kind === "unets") loaded.families = data.families || {};
@@ -307,6 +307,7 @@ app.registerExtension({
       families: () => loaded.families,
       upscalers: () => loaded.upscalers,
       loras: () => loaded.loras,
+      reloadLoras: () => choices("loras", true),
       extFiles: () => viewOf(PANEL)?.extMemory.lists,
       emit,
     });

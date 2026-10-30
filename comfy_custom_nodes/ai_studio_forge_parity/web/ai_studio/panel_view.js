@@ -138,13 +138,13 @@ export class PanelView {
     }, true);
   }
 
-  /** Forge's send-to: the image goes to the i2i tab and its size (`{width, height}`) becomes the generation size. */
+  /** Forge's send-to: the image goes to the i2i tab and its size (`{width, height}`) becomes that tab's size. */
   showI2i(image, mode, size = null) {
     this.set((s) => {
       s.tab = "i2i";
       s.i2i_mode = mode === "inpaint" ? "inpaint" : "img2img";
       s.i2i.image = image;
-      Object.assign(s, imageSize(size?.width, size?.height) || {});
+      Object.assign(s.i2i, imageSize(size?.width, size?.height) || {});
     }, true);
   }
 
@@ -298,8 +298,10 @@ export class PanelView {
     return h("div", { class: "ais-tabs-wrap" }, h("div", { class: "ais-tabs" }, tab("t2i"), tab("i2i")), body);
   }
 
-  sizeBox(s, key) {
-    return numberBox(s[key], (value) => this.set((st) => { st[key] = value; }), { min: 64, max: 4096, step: 8, width: 62 });
+  /** `section`: where the size lives, the state itself (t2i) or `i2i`. */
+  sizeBox(s, key, section = null) {
+    const owner = (st) => (section ? st[section] : st);
+    return numberBox(owner(s)[key], (value) => this.set((st) => { owner(st)[key] = value; }), { min: 64, max: 4096, step: 8, width: 62 });
   }
 
   sizeCard(s) {
@@ -333,7 +335,7 @@ export class PanelView {
       if (!uploaded?.name) return;
       this.set((st) => {
         st.i2i.image = uploaded.name;
-        Object.assign(st, imageSize(uploaded.width, uploaded.height) || {});
+        Object.assign(st.i2i, imageSize(uploaded.width, uploaded.height) || {});
       }, true);
     } });
     const picture = value
@@ -354,7 +356,7 @@ export class PanelView {
     const area = h("span", { title: INPAINT_AREA_REASON }, select(areas, "whole", () => {}, { disabled: true, "aria-label": "인페인트 영역" }));
     return card("i2i 설정", null, [
       row("모드", mode("img2img", "i2i"), mode("inpaint", "인페인트")),
-      row("크기", this.sizeBox(s, "width"), "×", this.sizeBox(s, "height")), // the image's size when sent / uploaded
+      row("크기", this.sizeBox(s, "width", "i2i"), "×", this.sizeBox(s, "height", "i2i")), // the image's size when sent / uploaded
       row("디노이즈", numberBox(s.i2i.denoise, (value) => this.set((st) => { st.i2i.denoise = value; }), { min: 0, max: 1, step: 0.05, width: 62 })),
       row("인페인트 영역", area),
       row("마스크 흐림", numberBox(s.i2i.mask_blur, (value) => this.set((st) => { st.i2i.mask_blur = value; }), { min: 0, max: 64, step: 1, width: 62 })),

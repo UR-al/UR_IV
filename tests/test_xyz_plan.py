@@ -212,6 +212,12 @@ class CheckpointTests(unittest.TestCase):
 
 
 class FieldTests(unittest.TestCase):
+    def test_size_axis_on_the_i2i_tab_sets_the_i2i_size(self):
+        plan = _plan({"tab": "i2i"}, _axes(x=("size", "640x960")))
+        state = _cell(plan).state
+        self.assertEqual((state["i2i"]["width"], state["i2i"]["height"]), (640, 960))
+        self.assertEqual((state["width"], state["height"]), (832, 1216))
+
     def test_size_sets_width_and_height(self):
         plan = _plan({}, _axes(("size", "512x768, 1024 x 1024")))
         self.assertEqual([(c.state["width"], c.state["height"]) for c in plan.cells], [(512, 768), (1024, 1024)])

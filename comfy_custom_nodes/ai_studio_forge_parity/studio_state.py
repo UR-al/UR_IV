@@ -48,7 +48,7 @@ DEFAULT_STATE: dict = {
     "sam3": {"on": False, "checkpoint": "", "prompt": "face", "denoise": 0.4, "steps": 0, "cfg": 0.0},
     # inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture); the panel shows
     # "전체" greyed out (studio_forge_parity.md), the key keeps the saved shape.
-    "i2i": {"image": "", "denoise": 0.55, "mask_blur": 4, "inpaint_area": "whole"},
+    "i2i": {"image": "", "width": 832, "height": 1216, "denoise": 0.55, "mask_blur": 4, "inpaint_area": "whole"},
     "ext": {item["key"]: {"on": False, **{field["key"]: field["default"] for field in item["fields"]}}
             for item in EXT_SCHEMA["extensions"]},
 }
@@ -192,6 +192,8 @@ def normalize_state(raw: object) -> dict:
         }),
         "i2i": _section(raw.get("i2i"), d["i2i"], {
             "image": _str,
+            "width": lambda v, df: _int(v, df, 64, 4096, 8),
+            "height": lambda v, df: _int(v, df, 64, 4096, 8),
             "denoise": lambda v, df: _float(v, df, 0.0, 1.0),
             "mask_blur": lambda v, df: _int(v, df, 0, 64),
             "inpaint_area": lambda v, df: _enum(v, df, "inpaint_area"),
@@ -199,6 +201,12 @@ def normalize_state(raw: object) -> dict:
         "ext": _ext(raw.get("ext")),
     }
     return out
+
+
+def generation_size(state: dict) -> tuple[int, int]:
+    """(width, height) of the tab in use: each tab keeps its own size, as in Forge."""
+    size = state["i2i"] if state["tab"] == "i2i" else state
+    return size["width"], size["height"]
 
 
 def effective_prompt(state: dict) -> str:

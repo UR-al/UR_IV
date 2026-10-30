@@ -51,6 +51,8 @@
     },
     "i2i": {
       "image": "",
+      "width": 832,
+      "height": 1216,
       "denoise": 0.55,
       "mask_blur": 4,
       "inpaint_area": "whole"

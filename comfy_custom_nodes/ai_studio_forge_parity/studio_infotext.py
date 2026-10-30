@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 
-from .studio_state import effective_prompt
+from .studio_state import effective_prompt, generation_size
 
 # ComfyUI sampler name -> Forge label.  Unknown names are written as they are.
 SAMPLER_LABELS = {
@@ -89,7 +89,7 @@ def build_infotext(state: dict, *, seed: int, extra: dict[str, str] | None = Non
         "CFG scale": _number(state["cfg"]),
         "Shift": _number(state["shift"]),
         "Seed": str(int(seed)),
-        "Size": f"{state['width']}x{state['height']}",
+        "Size": "x".join(map(str, generation_size(state))),
         "Model": _stem(state["unet"]) if state.get("unet") else None,
         "VAE": _stem(state["vae"]) if state.get("vae") else None,
     }

@@ -237,6 +237,15 @@ test("roles missing from the prompt (bypassed) or from roleIds are skipped", () 
   assert.equal(inputs(out, roleIds, "sampler").steps, 30);
 });
 
+test("the i2i tab keeps its own size; t2i ignores it", () => {
+  const { prompt, roleIds } = studioPrompt();
+  const i2i = { ...DEFAULT_STATE.i2i, width: 1248, height: 1824 };
+  const sent = inputs(applyStateToPrompt(prompt, roleIds, state({ tab: "i2i", i2i }), { rng: fixedRng }), roleIds, "latent");
+  assert.deepEqual([sent.width, sent.height], [1248, 1824]);
+  const main = inputs(applyStateToPrompt(prompt, roleIds, state({ tab: "t2i", i2i }), { rng: fixedRng }), roleIds, "latent");
+  assert.deepEqual([main.width, main.height], [832, 1216]);
+});
+
 test("tab i2i sets latent mode img2img", () => {
   const { prompt, roleIds } = studioPrompt();
   const s = state({ tab: "i2i", i2i: { ...DEFAULT_STATE.i2i, image: "in.png", mask_blur: 8 }, hires: { ...DEFAULT_STATE.hires, on: true } });
@@ -545,15 +554,17 @@ test("imageSize: an i2i image's size, rounded to 8 and kept in 64..4096", () => 
   assert.deepEqual(imageSize(1248, 1824), { width: 1248, height: 1824 });
   assert.deepEqual(imageSize(1023, 1021), { width: 1024, height: 1024 });
   assert.deepEqual(imageSize(10, 9000), { width: 64, height: 4096 });
+  assert.deepEqual(imageSize(4992, 7296), { width: 2800, height: 4096 }); // keeps the aspect, not 4096x4096
+  assert.deepEqual(imageSize(8000, 4000), { width: 4096, height: 2048 });
   assert.equal(imageSize(undefined, 512), null);
   assert.equal(imageSize(0, 512), null);
   assert.equal(imageSize("x", 512), null);
 });
 
-test("i2i runs at the state's size (the image's, once sent) and inpaint_area maps to no input", () => {
+test("i2i runs at its own size (the image's, once sent) and inpaint_area maps to no input", () => {
   const { prompt: api, roleIds } = studioPrompt();
-  const base = { tab: "i2i", i2i_mode: "inpaint", width: 1248, height: 1824 };
-  const prompt = (area) => applyStateToPrompt(api, roleIds, { ...base, i2i: { image: "a.png", inpaint_area: area } }, { rng: fixedRng });
+  const base = { tab: "i2i", i2i_mode: "inpaint" };
+  const prompt = (area) => applyStateToPrompt(api, roleIds, { ...base, i2i: { image: "a.png", width: 1248, height: 1824, inpaint_area: area } }, { rng: fixedRng });
   const latent = inputs(prompt("whole"), roleIds, "latent");
   assert.deepEqual([latent.mode, latent.width, latent.height], ["inpaint", 1248, 1824]);
   const withoutSavedState = (out) => {

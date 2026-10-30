@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 from .dora_infer_mode import MODE_LABELS, mode_key
 from .studio_lora_tags import parse_lora_tags, resolve_lora_name
-from .studio_state import effective_prompt, normalize_state
+from .studio_state import effective_prompt, generation_size, normalize_state
 from .xyz_axes import AxisSpec, axis_by_id
 from .xyz_values import parse_axis_values
 
@@ -242,6 +242,8 @@ def _apply(state: dict, axis: _Axis, value, search) -> None:
         state["forge_like"]["dora"] = False  # otherwise "Forge처럼" would mask the axis value
     else:
         paths = spec.field.split(",")
+        if spec.kind == "size" and state["tab"] == "i2i":
+            paths = ["i2i.width", "i2i.height"]
         parts = value if len(paths) > 1 else (value,)
         for path, part in zip(paths, parts):
             _set_path(state, path, part)
@@ -327,7 +329,8 @@ def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, fami
         counts = {letter: len(axis.values) for letter, axis in zip(LETTERS, parsed)}
         nx, ny, nz = counts["x"], counts["y"], counts["z"]
         resolved = _resolve(parsed, families or {})
-        grid_mp = round(nx * ny * nz * base["width"] * base["height"] / 1e6)
+        width, height = generation_size(base)
+        grid_mp = round(nx * ny * nz * width * height / 1e6)
         if grid_mp >= MAX_GRID_MP:
             raise _PlanError(f"Resulting grid would be too large ({grid_mp} MPixels, max {MAX_GRID_MP})")
         if base["seed"] == -1 and not keep_minus1:

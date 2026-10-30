@@ -28,6 +28,13 @@ class StudioStateTests(unittest.TestCase):
         self.assertTrue(all(fl[k] for k in ("master", "noise", "prompt_syntax", "dora")))
         self.assertFalse(fl["attention"])
 
+    def test_i2i_has_its_own_size(self):
+        state = ss.normalize_state({"width": 640, "i2i": {"width": 1250, "height": 9000}})
+        self.assertEqual(state["width"], 640)
+        self.assertEqual((state["i2i"]["width"], state["i2i"]["height"]), (1248, 4096))
+        self.assertEqual(ss.generation_size(state | {"tab": "t2i"}), (640, 1216))
+        self.assertEqual(ss.generation_size(state | {"tab": "i2i"}), (1248, 4096))
+
     def test_negpip_defaults_on_and_keeps_only_booleans(self):
         self.assertIs(ss.normalize_state({})["negpip"], True)
         self.assertIs(ss.normalize_state({"negpip": False})["negpip"], False)

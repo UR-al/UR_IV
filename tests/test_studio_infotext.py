@@ -58,6 +58,10 @@ class InfotextLayoutTests(unittest.TestCase):
         self.assertNotIn("Hires sampler", studio_infotext.build_infotext(same, seed=1))
         self.assertIn("Hires sampler: Euler a", studio_infotext.build_infotext(other, seed=1))
 
+    def test_size_comes_from_the_tab_in_use(self):
+        text = studio_infotext.build_infotext(_state(tab="i2i", i2i={"width": 1248, "height": 1824}), seed=1)
+        self.assertIn("Size: 1248x1824", text)
+
     def test_hires_off_for_i2i_and_denoise_comes_from_i2i(self):
         state = _state(tab="i2i", hires={"on": True}, i2i={"denoise": 0.55})
         last = studio_infotext.build_infotext(state, seed=1).split("\n")[-1]
