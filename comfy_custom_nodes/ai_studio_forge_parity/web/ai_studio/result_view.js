@@ -3,6 +3,7 @@
 // node's hidden `view` widget; the settings each image was made with are kept for this session only.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { h, icon, refKey } from "./studio_dom.js";
+import { openLightbox } from "./studio_lightbox.js";
 
 const GALLERY_LIMIT = 40;
 const NOTICE_MS = 8000;
@@ -174,13 +175,23 @@ export class ResultView {
   renderStage() {
     if (!this.stage) return;
     let src = "";
+    let zoom = null; // what a click on the image opens big; the live step preview opens nothing
     let text = this.running ? "생성 중 미리보기 (중간 단계)" : "선택한 이미지";
     if (this.running && this.previewUrl && this.view.tab === "preview") src = this.previewUrl;
     else if (this.view.tab === "grid") {
-      if (this.view.grid) src = this.ctx.imageUrl(this.view.grid);
-      else text = "XYZ 격자 없음";
-    } else if (this.view.gallery[this.view.selected]) src = this.ctx.imageUrl(this.view.gallery[this.view.selected]);
-    this.stage.replaceChildren(src ? h("img", { class: "ais-stage-img", src, alt: "결과 이미지" }) : h("div", { class: "ais-stage-empty" }, text));
+      if (this.view.grid) {
+        src = this.ctx.imageUrl(this.view.grid);
+        zoom = { items: [{ url: src }], index: 0 };
+      } else text = "XYZ 격자 없음";
+    } else if (this.view.gallery[this.view.selected]) {
+      src = this.ctx.imageUrl(this.view.gallery[this.view.selected]);
+      zoom = { items: this.view.gallery.map((ref) => ({ url: this.ctx.imageUrl(ref) })), index: this.view.selected };
+    }
+    const img = src
+      ? h("img", { class: `ais-stage-img ${zoom ? "zoomable" : ""}`, src, alt: "결과 이미지", title: zoom ? "클릭하면 확대" : undefined,
+        onClick: zoom ? () => openLightbox(zoom.items, zoom.index) : undefined })
+      : null;
+    this.stage.replaceChildren(img || h("div", { class: "ais-stage-empty" }, text));
   }
 
   gallery() {
