@@ -32,6 +32,7 @@ class FakeElement {
   }
   setAttribute(name, value) { this.attrs[name] = String(value); }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
   fire(type) {
     for (const fn of this.listeners[type] || []) fn({ target: this });
   }
@@ -331,4 +332,70 @@ test("getState leaves out extensions the graph cannot run, and saves their switc
   const state = view.getState();
   assert.deepEqual([state.ext.skim.on, state.ext.detail_daemon.on], [false, true]);
   assert.equal(view.state.ext.skim.on, true);
+});
+
+// ---------------------------------------------------------------------------------------------- prompt tag autocomplete wiring
+
+function withBody(run) {
+  const doc = globalThis.document;
+  const saved = [doc.body, doc.addEventListener, doc.removeEventListener];
+  doc.body = new FakeElement("body");
+  doc.addEventListener = doc.removeEventListener = () => {}; // the popup's click-away listener
+  return Promise.resolve(run(doc.body)).finally(() => { [doc.body, doc.addEventListener, doc.removeEventListener] = saved; });
+}
+
+function panelWithTags(tags, state = {}) {
+  const ctx = {
+    choices: async () => ({ items: [] }),
+    engineRoom: { collapsed: () => true, toggle() {} },
+    i2i: { get: () => "", set() {}, url: () => "", upload: async () => ({}), maskEditor() {} },
+    hasRole: () => true,
+    fetchChoices: async () => ({}),
+    tags,
+  };
+  return new PanelView({ value: JSON.stringify(state) }, ctx);
+}
+
+const later = (ms) => new Promise((done) => setTimeout(done, ms));
+const boxRect = () => ({ left: 10, top: 10, bottom: 60, right: 300, width: 290, height: 50 });
+const boxes = (view, ...names) => names.map((name) => Object.assign(view.element.byClass(name)[0], { getBoundingClientRect: boxRect }));
+
+test("autocomplete: typing in the prompt asks for tags and still saves the text; the negative box is wired too", () => withBody(async (body) => {
+  const asked = [];
+  const view = panelWithTags(async (query, limit) => { asked.push([query, limit]); return [{ name: "long_hair", category: 0, count: 5 }]; });
+  await later(5); // the choice lists arrive and redraw the panel once; type into the boxes that stay
+  const [prompt, negative] = boxes(view, "ais-prompt", "ais-negative");
+  prompt.value = "1girl, lo";
+  prompt.fire("input");
+  assert.equal(view.state.prompt, "1girl, lo"); // the panel's own handler ran
+  await later(220);
+  assert.deepEqual(asked, [["lo", 12]]);
+  assert.equal(body.children.length, 1); // the popup is on document.body
+  assert.equal(view.autocomplete.isOpen(), true);
+  negative.value = "bl";
+  negative.fire("input");
+  assert.equal(view.state.negative, "bl");
+  await later(220);
+  assert.deepEqual(asked.at(-1), ["bl", 12]);
+  view.dispose();
+  assert.equal(body.children.length, 0);
+}));
+
+test("autocomplete: <lora: in the prompt lists the panel's LoRA files; a redraw closes the popup", () => withBody(async () => {
+  const asked = [];
+  const view = panelWithTags(async (query) => { asked.push(query); return []; });
+  await later(5);
+  view.choices.loras = ["meow/meow_e6.safetensors"];
+  const [prompt] = boxes(view, "ais-prompt");
+  prompt.value = "<lora:me";
+  prompt.fire("input");
+  assert.equal(view.autocomplete.isOpen(), true);
+  assert.deepEqual(asked, []); // answered from the list, no request
+  view.render();
+  assert.equal(view.autocomplete.isOpen(), false);
+}));
+
+test("autocomplete: a panel without a tags route simply has no autocomplete", () => {
+  const view = panelView();
+  assert.equal(view.autocomplete, null);
 });

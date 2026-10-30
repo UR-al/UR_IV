@@ -92,7 +92,7 @@ PACK_ID = "ai_studio_forge_parity"
 # Forge-info save, upscale, Forge prompt syntax, the panel / result / X/Y/Z UI nodes, a lazy two-way switch), an
 # optional forge_noise input on ForgeNeoKSamplerCNS / ForgeNeoHiresFix, the web extension under web/ai_studio (.js/.css
 # now installed and fingerprinted, js_tests/ never), HTTP routes under /aistudio/studio, the X/Y/Z grid (Roboto legend
-# font, .ttf installed), SAM3.1 multiplex files in the SAM3 picker, and example_workflows/AI Studio Anima.json.
+# font, .ttf installed; the prompt tag list tags/danbooru_tags.csv, .csv installed), SAM3.1 multiplex files in the SAM3 picker, and example_workflows/AI Studio Anima.json.
 PACK_VERSION = "1.10.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
@@ -105,7 +105,9 @@ OWNER_MARKER = ".aistudio-owned.json"
 # install (fingerprinted) but needs only a browser reload, not a restart.
 # .ttf (fonts/): the X/Y/Z grid legend font is read when a grid is drawn (never imported), so like
 # .js/.css a change refreshes the install without a restart.
-_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors", ".js", ".css", ".ttf"})
+# .csv (tags/): the studio's prompt autocomplete list is read on the first /tags request (never imported), so it
+# too refreshes the install without a restart.
+_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors", ".js", ".css", ".ttf", ".csv"})
 _RUNTIME_SUFFIXES = frozenset({".py", ".json", ".safetensors"})
 # Repo-only folders: never copied into ComfyUI nor fingerprinted.  js_tests/ holds the
 # pack's node:test files and their golden .json fixture (a copied .json would count as a

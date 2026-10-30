@@ -2,6 +2,7 @@
 // Its state lives as JSON in the node's hidden `state` STRING widget, so it is saved with the workflow.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { dropBlockedExt, extMemory, renderExtensions } from "./ext_view.js";
+import { createAutocomplete } from "./studio_autocomplete.js";
 import { DORA_MODES, defaultModel, imageSize, withDefaults } from "./studio_logic.js";
 import { autoGrow, h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 
@@ -45,7 +46,8 @@ const negpipInstalled = () => {
 export class PanelView {
   /**
    * `widget`: the node's hidden `state` widget. `ctx`: `choices(kind)` -> Promise<{items}>, `fetchChoices(class)` ->
-   * Promise<`/object_info/<class>` input>, `hasRole(role)`, `generate()`, `stop()`, `changed()`, `engineRoom` {collapsed(),
+   * Promise<`/object_info/<class>` input>, `hasRole(role)`, `generate()`, `stop()`, `changed()`, optional `tags(query, limit)` ->
+   * Promise<[{name, category, count, alias?, ko?}]> (prompt tag autocomplete), `engineRoom` {collapsed(),
    * toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width, height}, maskEditor()}.
    */
   constructor(widget, ctx) {
@@ -56,12 +58,19 @@ export class PanelView {
     this.forgeOpen = false;
     this.extMemory = extMemory();
     this.choices = {};
+    // One popup for both prompt boxes; the LoRA list (ComfyUI file names) feeds the `<lora:` suggestions.
+    this.autocomplete = ctx.tags ? createAutocomplete({ fetchTags: ctx.tags, loras: () => this.choices.loras || [] }) : null;
     this.state = this.read();
     this.element = h("div", { class: "ais-root ais-panel" });
     this.render();
     this.loadChoices();
     // The first render has no size yet (the DOM widget is attached later).
     if (globalThis.ResizeObserver) new ResizeObserver(() => this.growPrompts()).observe(this.element);
+  }
+
+  /** The node was deleted: the autocomplete popup (on document.body) must not outlive it. */
+  dispose() {
+    this.autocomplete?.dispose();
   }
 
   /** Why NegPiP cannot run here ("" = it can): the provider pack is missing, or this graph predates the NegPiP node. */
@@ -162,6 +171,7 @@ export class PanelView {
 
   render() {
     const s = this.state;
+    this.autocomplete?.close(); // the prompt boxes below are rebuilt
     const scrolled = this.element.querySelector(".ais-scroll")?.scrollTop ?? 0;
     this.top = h("div", { class: "ais-top" });
     this.thin = h("div", { class: "ais-thin" }, (this.bar = h("div")));
@@ -197,10 +207,12 @@ export class PanelView {
       title: blocked || "음수 가중치 (단어:-1.0)",
       disabled: Boolean(blocked),
     });
-    const prompt = card("프롬프트", negpip, [
+    const boxes = [
       h("textarea", { class: "ais-f ais-prompt", placeholder: "프롬프트", value: s.prompt, onInput: typed("prompt") }),
       h("textarea", { class: "ais-f ais-negative", placeholder: "네거티브", value: s.negative, onInput: typed("negative") }),
-    ], "span3");
+    ];
+    boxes.forEach((box) => this.autocomplete?.attach(box)); // after the panel's own input handler: a picked tag is saved too
+    const prompt = card("프롬프트", negpip, boxes, "span3");
     return group("공통 설정", "#4b6a8f", "", h("div", { class: "ais-grid3" }, prompt, this.modelCard(s), this.loraCard(s), this.postCard(s)));
   }
 

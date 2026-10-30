@@ -372,3 +372,33 @@ textarea.ais-negative { min-height: 34px; overflow: hidden; }
   font-size: 12px;
   pointer-events: none;
 }
+
+/* prompt tag autocomplete (studio_autocomplete.js): attached to document.body at the caret's line, so nothing here is
+   inside .ais-root. Name colors follow Forge's tagcomplete on a dark theme (general / artist / copyright / character / meta). */
+.ais-ac {
+  position: fixed;
+  box-sizing: border-box;
+  min-width: 260px;
+  max-width: min(520px, calc(100vw - 16px));
+  max-height: 264px;
+  overflow-y: auto;
+  padding: 3px;
+  border: 1px solid #474747;
+  border-radius: 8px;
+  background: #1d1d1d;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+  color: #e8e8e8;
+  font-family: "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  font-size: 12.5px;
+}
+.ais-ac[hidden] { display: none; }
+.ais-ac-row { display: flex; align-items: baseline; gap: 10px; padding: 3px 8px; border-radius: 5px; cursor: pointer; }
+.ais-ac-row.sel { background: #33425a; }
+.ais-ac-name { flex: none; font-weight: 600; color: #009be6; }
+.ais-ac-c1 { color: #ff8a8b; }
+.ais-ac-c3 { color: #c797ff; }
+.ais-ac-c4 { color: #35c64a; }
+.ais-ac-c5 { color: #ead084; }
+.ais-ac-clora { color: #e0b0ff; }
+.ais-ac-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9a9a9a; }
+.ais-ac-count { flex: none; margin-left: auto; font-size: 10.5px; color: #7d7d7d; }

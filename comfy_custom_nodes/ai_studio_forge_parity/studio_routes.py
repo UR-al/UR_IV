@@ -8,6 +8,7 @@ module imports (``register_studio_handlers`` at the bottom), never lazily after 
 The routes (all JSON; a failure is ``{"error": ...}`` with status 400):
 
 - ``GET  /choices?kind=...``  picker lists (``studio_choices``)
+- ``GET  /tags?q=&limit=``    prompt tag autocomplete (``studio_tags``; ``limit`` 1..30, default 12)
 - ``POST /xyz/plan``          ``{state, axes, options}`` -> the planned X/Y/Z cells (``xyz_plan``)
 - ``POST /xyz/grid``          generated cell images -> grid PNG(s) in ``output/AIStudio/xyz`` (``xyz_grid_draw``)
 - ``POST /open_output``       opens the output folder in the file manager (Windows only)
@@ -28,7 +29,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import studio_choices, xyz_plan
+from . import studio_choices, studio_tags, xyz_plan
 from .compat import folder_paths_module
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -168,6 +169,24 @@ def handle_choices(query) -> tuple[int, dict]:
         return 200, studio_choices.choices(kind or "")
     except ValueError as exc:
         return _error(str(exc))
+
+
+TAG_LIMIT_DEFAULT = 12
+TAG_LIMIT_MAX = 30
+
+
+def handle_tags(query) -> tuple[int, dict]:
+    """Prompt tag candidates for ``q`` (``{"items": [...]}``; an empty ``q`` gives none).  ``limit`` is clamped to 1..30."""
+    query = query if isinstance(query, dict) else {}
+    text = query.get("q")
+    raw_limit = query.get("limit", TAG_LIMIT_DEFAULT)
+    try:
+        limit = max(1, min(TAG_LIMIT_MAX, int(raw_limit)))
+    except (TypeError, ValueError):
+        return _error("limit must be a whole number")
+    if not isinstance(text, str) or not text.strip():
+        return 200, {"items": []}
+    return 200, {"items": studio_tags.search_tags(text, limit)}
 
 
 def handle_plan(body, *, families=None, loras=None) -> tuple[int, dict]:
@@ -384,6 +403,7 @@ def _route(handle, *, read: str = "json"):
 
 def register_studio_handlers() -> None:
     add_handler("GET", "/choices", _route(handle_choices, read="query"))
+    add_handler("GET", "/tags", _route(handle_tags, read="query"))
     add_handler("POST", "/xyz/plan", _route(handle_plan))
     add_handler("POST", "/xyz/grid", _route(handle_grid))
     add_handler("POST", "/open_output", _route(handle_open_output, read="none"))

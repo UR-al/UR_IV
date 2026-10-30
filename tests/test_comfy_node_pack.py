@@ -309,6 +309,44 @@ class TestBundledComfyNodePack(unittest.TestCase):
             self.assertTrue(repaired.changed)
             self.assertEqual((repaired.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v2")
 
+    def test_tag_list_csv_is_installed_fingerprinted_and_needs_no_restart(self):
+        # tags/danbooru_tags.csv (the studio's prompt autocomplete list) is read on the first /tags request, never imported.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            custom_nodes = tmp_path / "custom_nodes"
+            custom_nodes.mkdir()
+            source = _source(tmp_path)
+            without = node_pack_fingerprint(source)
+            (source / "tags").mkdir()
+            tags = source / "tags" / "list.csv"
+            tags.write_text("name,category,count,aliases,ko\nsolo,0,5,,\n", encoding="utf-8")
+            self.assertNotEqual(node_pack_fingerprint(source), without)
+            self.assertEqual([p.name for p in pack_files(source) if p.suffix == ".csv"], ["list.csv"])
+            self.assertEqual([p.name for p in pack_files(source, runtime_only=True)], ["__init__.py"])
+
+            first = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertEqual((first.target / "tags" / "list.csv").read_bytes(), tags.read_bytes())
+
+            tags.write_text("name,category,count,aliases,ko\nsolo,0,6,,\n", encoding="utf-8")
+            refreshed = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(refreshed.changed)
+            self.assertFalse(refreshed.restart_required)
+            self.assertEqual((refreshed.target / "tags" / "list.csv").read_bytes(), tags.read_bytes())
+
+            (refreshed.target / "tags" / "list.csv").write_text("tampered\n", encoding="utf-8")
+            repaired = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(repaired.changed)
+            self.assertEqual((repaired.target / "tags" / "list.csv").read_bytes(), tags.read_bytes())
+
+    def test_the_real_pack_ships_its_tag_list(self):
+        from core.comfy_node_pack import bundled_node_pack_path, pack_files
+
+        root = bundled_node_pack_path()
+        shipped = {p.relative_to(root).as_posix() for p in pack_files(root)}
+        self.assertIn("tags/danbooru_tags.csv", shipped)
+        runtime = {p.relative_to(root).as_posix() for p in pack_files(root, runtime_only=True)}
+        self.assertNotIn("tags/danbooru_tags.csv", runtime)
+
     def test_js_tests_folder_is_neither_installed_nor_fingerprinted(self):
         # R18: the pack's node:test files and their golden JSON fixture are for the repo only. A copied .json would
         # also count as a runtime file and ask for a ComfyUI restart whenever a fixture changes.

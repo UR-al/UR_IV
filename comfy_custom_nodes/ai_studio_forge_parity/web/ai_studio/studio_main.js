@@ -1,6 +1,6 @@
 // Anima studio web extension: draws the three UI nodes (AIStudioPanel / AIStudioResultView / AIStudioXYZView) as
 // fixed-size DOM widgets and wires them to ComfyUI — the run controller, the studio routes (/aistudio/studio/*), the
-// role-tagged engine nodes (engine room, i2i image, mask editor) and the queue (생성 button, Ctrl+Enter).
+// role-tagged engine nodes (engine room, i2i image, mask editor), the prompt tag autocomplete and the queue (생성 button, Ctrl+Enter).
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { PanelView } from "./panel_view.js";
@@ -225,6 +225,7 @@ function contextFor(comfyClass) {
   if (comfyClass === PANEL) {
     return {
       choices,
+      tags: (query, limit) => route(`/tags?q=${encodeURIComponent(query)}&limit=${limit}`).then((data) => data.items || []),
       fetchChoices: nodeInputs,
       generate,
       stop: () => controller.stop(),

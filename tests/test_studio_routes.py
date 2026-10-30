@@ -394,7 +394,7 @@ class StudioHandlerRegistrationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_all_routes_are_registered_at_import(self):
         # They are added while the pack imports (the server mounts what exists); none may be added lazily later.
-        expected = {("GET", "/choices"), ("POST", "/xyz/plan"), ("POST", "/xyz/grid"),
+        expected = {("GET", "/choices"), ("GET", "/tags"), ("POST", "/xyz/plan"), ("POST", "/xyz/grid"),
                     ("POST", "/open_output"), ("POST", "/to_input")}
         self.assertEqual(set(studio_routes._HANDLERS), expected)
         studio_routes._HANDLERS.clear()
