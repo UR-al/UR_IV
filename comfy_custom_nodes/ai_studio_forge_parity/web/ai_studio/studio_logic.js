@@ -11,7 +11,7 @@ export const DORA_MODES = Object.freeze([
   "Forge/Comfy (stock)",
   "DoRA off (no magnitude)",
 ]);
-const DORA_FORGE_MODE = "Forge/Comfy (stock)"; // R2: "Forge처럼" DoRA = ComfyUI's own merge, as in Forge
+const DORA_FORGE_MODE = "LyCORIS fp32 (as trained)"; // "Forge처럼" DoRA = sam-extra's LyCORIS mode, the Forge txt2img setting (stock overshoots adaLN rows)
 const LATENT_FALLBACK_UPSCALER = "latent:bicubic";
 const SEED_RANGE = 4294967294; // Forge: random.randrange(4294967294)
 const MODE_ALWAYS = 0;

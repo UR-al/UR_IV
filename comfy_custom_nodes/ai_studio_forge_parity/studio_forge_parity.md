@@ -23,7 +23,7 @@
 | `noise` 초기 노이즈 | 그림마다 CPU 생성기(시드 = seed + i)에서 뽑는다 | `prepare_noise`가 배치 전체를 seed 하나의 CPU 스트림에서 뽑는다 | 가능 | 배치 1장은 원래 같다. 여러 장일 때는 `ForgeNeoKSamplerCNS` / `ForgeNeoHiresFix`의 `forge_noise`가 그림마다 seed + i로 뽑는다(`studio_forge_noise.py`) |
 | `noise` SDE 단계 노이즈(EXP Heun 2 x0 SDE) | 전역 RNG에서 `torch.randn_like`. 전역 시드는 초기 노이즈를 뽑을 때 `(마지막 그림 시드 + 100000) % 65536`으로 정해진다 | 샘플러 시드로 시드한 생성기 | 가능 | `forge_noise`가 샘플러 시드를 그 값으로 넘긴다. GPU 위에서 두 앱의 뽑기가 같아진다(아래 "노이즈") |
 | `noise` 그 밖의 단계 노이즈(Euler a, DPM++ SDE 등 Forge 내장 샘플러), ENSD | 그림마다 CPU 생성기에서 이어 뽑고(ENSD가 0이 아니면 seed + ENSD로 다시 시드), DPM++ SDE 계열은 그림 시드의 Brownian tree | 샘플러 시드 하나의 GPU 생성기, Brownian tree는 샘플러 시드 | 불가 | `KSampler` 경로에서는 `noise_sampler`를 샘플러 함수에 넘길 수 없다. 넘기려면 `SamplerCustom` 그래프로 바꿔야 해서 이번 버전 범위 밖이다. 사용자 샘플러(EXP Heun 2 x0 SDE)는 위 줄로 맞는다 |
-| `dora` DoRA 합치기 | sam-extra "DoRA 추론 방식"은 기본이 꺼짐 → Forge/ComfyUI 기본 합치기 | 같은 `weight_decompose` | 가능 | `forge_like.master`와 `.dora`가 켜져 있으면 `ForgeNeoDoraInferenceMode`의 모드를 `"Forge/Comfy (stock)"`으로 넣는다(규칙 R2). 끄면 상태의 `dora_mode`(기본 `"LyCORIS fp32 (as trained)"`) |
+| `dora` DoRA 합치기 | sam-extra "DoRA 추론 방식"을 켜 둔 LyCORIS(학습과 동일·fp32)가 txt2img 설정이다(`ui-config.json`) | 기본은 `weight_decompose`(원본 크기로 나눔) | 가능 | `forge_like.master`와 `.dora`가 켜져 있으면 `ForgeNeoDoraInferenceMode`의 모드를 `"LyCORIS fp32 (as trained)"`로 넣는다. 끄면 상태의 `dora_mode` |
 | `attention` 어텐션 | `--use-pytorch-cross-attention`(PyTorch SDPA) | 실행 옵션으로 고른다. 지금은 `--use-sage-attention`(Sage) | 불가 | 이번 버전은 실행 중에 바꾸지 않는다. Forge와 나란히 비교할 때는 ComfyUI를 `run_nvidia_gpu.bat`(기본 PyTorch 어텐션)으로 다시 켠다. Sage는 같은 시드에서 그림이 조금 다시 그려질 뿐 디테일 손실은 아니다 |
 | i2i `inpaint_area` 인페인트 영역 | "Whole picture"(기본) / "Only masked": 마스크 둘레를 잘라 생성 크기로 키워 그리고 제자리에 붙인다 | `ForgeNeoLatentInput`에 그런 입력이 없다. 언제나 그림 전체를 생성 크기로 다시 그린다 | 불가 | 제어판은 "전체"(Forge 기본값)를 회색으로 보이고 이유를 마우스 글로 단다. "마스크만"은 `ForgeNeoSAM3Detailer`의 자르기·붙이기를 마스크 편집기의 MASK에 쓰는 별도 단계가 필요해 이번 버전 범위 밖이다. 상태의 값은 어떤 노드 입력에도 쓰이지 않는다(`studio_logic.test.mjs`가 고정) |
 
@@ -115,9 +115,12 @@ Forge와 같으며, 전역 RNG를 Forge 값으로 시드한 `randn_like` 두 번
 
 ## DoRA
 
-Forge의 sam-extra "DoRA 추론 방식"은 기본이 꺼져 있고, 꺼져 있으면 Forge가 가진 ComfyUI의 `weight_decompose` 그대로 합친다.
-팩 `ForgeNeoDoraInferenceMode`의 `"Forge/Comfy (stock)"`이 바로 그 합치기다. 그래서 "Forge처럼 DoRA"는 이 모드를 넣는 것으로
-충분하다(R2: `forge_like.master and forge_like.dora`면 `"Forge/Comfy (stock)"`, 아니면 `dora_mode`).
+sam-extra "DoRA 추론 방식"의 코드 기본값은 꺼짐이지만, 이 PC의 Forge는 `ui-config.json`으로 txt2img에서 켜 두고 LyCORIS(학습과 동일·fp32)를
+쓴다. 그래서 "Forge처럼 DoRA"는 `"LyCORIS fp32 (as trained)"`를 넣는다.
+
+`"Forge/Comfy (stock)"`은 쓰지 않는다. ComfyUI의 `weight_decompose`는 출력 축에서 합친 가중치가 아니라 원본 `||W0||`로 나눈다. LoRA가 거의 0에서
+키운 행은 그만큼 과하게 커진다. `wd_on_output` LoKr 파일 하나(640층)를 CPU에서 재 보니 `adaln_modulation_cross_attn` 행이 최대 71배, adaLN 층의
+오차 중앙값이 LoRA 변화량의 20~27%였다(어텐션·MLP는 2~3%). 사용자 비교(2026-10-30)에서 stock은 그림에 입자 노이즈가 끼고 LyCORIS는 깨끗했다.
 
 ## 어텐션
 

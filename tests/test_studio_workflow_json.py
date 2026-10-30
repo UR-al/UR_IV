@@ -244,7 +244,7 @@ class WorkflowFileTests(unittest.TestCase):
         self.assertEqual((latent["mode"], latent["width"], latent["height"], latent["batch_size"], latent["mask_blur"]),
                          ("txt2img", 832, 1216, 1, 4))
         self.assertEqual(values["shift"]["shift"], 3.0)
-        self.assertEqual(values["dora"], {"enabled": True, "mode": "Forge/Comfy (stock)"})  # R2: Forge처럼 on
+        self.assertEqual(values["dora"], {"enabled": True, "mode": "LyCORIS fp32 (as trained)"})  # Forge처럼 on
         self.assertEqual((values["pos_encode"]["steps"], values["pos_encode"]["forge_syntax"]), (32, True))
         detailer = values["sam3_detailer"]
         self.assertEqual((detailer["enabled"], detailer["denoise"], detailer["steps"], detailer["cfg"]),

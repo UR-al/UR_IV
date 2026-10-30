@@ -50,7 +50,7 @@ MODE_ALWAYS, MODE_BYPASS = 0, 4
 WIDGET_TYPES = frozenset({"INT", "FLOAT", "STRING", "BOOLEAN"})
 SEED_WIDGETS = frozenset({"seed", "noise_seed"})
 SEED_CONTROL = "fixed"  # the panel owns the seed; the engine widget should not change by itself
-DORA_FORGE_MODE = "Forge/Comfy (stock)"  # R2: "Forge처럼" DoRA
+DORA_FORGE_MODE = "LyCORIS fp32 (as trained)"  # "Forge처럼" DoRA, studio_logic.js
 
 # ---------------------------------------------------------------------------------------------- canvas layout
 

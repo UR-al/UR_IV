@@ -17,7 +17,7 @@ const INPAINT_AREA_REASON =
 const FORGE_ITEMS = [
   { key: "noise", label: "노이즈", title: "초기·SDE 노이즈를 Forge처럼 (그림마다 시드 + i)" },
   { key: "prompt_syntax", label: "프롬프트 편집", title: "[a:b:0.5] · [a|b] 를 Forge처럼 스텝 구간으로" },
-  { key: "dora", label: "DoRA", title: "DoRA 합치기를 Forge 기본(Forge/Comfy stock)으로" },
+  { key: "dora", label: "DoRA", title: "DoRA 합치기를 학습과 같은 LyCORIS로 (실제 Forge 설정)" },
   {
     key: "attention",
     label: "어텐션",

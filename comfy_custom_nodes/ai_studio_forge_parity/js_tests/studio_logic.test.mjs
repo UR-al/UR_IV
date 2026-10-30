@@ -273,7 +273,7 @@ test("Forge-like switches: noise, prompt syntax and the effective DoRA mode (R2,
   const { prompt, roleIds } = studioPrompt();
   const on = applyStateToPrompt(prompt, roleIds, state(), { rng: fixedRng });
   assert.deepEqual(inputs(on, roleIds, "dora").enabled, true);
-  assert.equal(inputs(on, roleIds, "dora").mode, "Forge/Comfy (stock)");
+  assert.equal(inputs(on, roleIds, "dora").mode, "LyCORIS fp32 (as trained)");
   assert.equal(inputs(on, roleIds, "hires").forge_noise, true);
 
   const masterOff = state({ dora_mode: "Forge/Comfy fp32", forge_like: { ...DEFAULT_STATE.forge_like, master: false } });
