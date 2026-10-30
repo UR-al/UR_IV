@@ -88,3 +88,18 @@
 - [ ] **Step 2:** 사용자의 ComfyUI가 켜져 있으면 팩 폴더 교체가 막히므로, 바뀐 파일만 제자리에 덮어쓰고 `.aistudio-owned.json`을 갱신한다(앞선 NegPiP 설치와 같은 방식).
 - [ ] **Step 3:** CPU 전용 ComfyUI(8199, `--cpu`, `CUDA_VISIBLE_DEVICES=-1`)와 헤드리스 Chrome으로: 새 워크플로 열기 → 빠진 노드 0, 확장 칸 표시, 켜고 끄기, `app.graphToPrompt()`에 켠 노드만 포함, 이미지 클릭 확대 동작. 스크린샷을 워크스페이스에 저장. 큐에는 넣지 않는다.
 - [ ] **Step 4:** 커밋(수정이 있으면).
+
+### Task 5: 프롬프트 태그 자동완성 (Task 3 뒤, Task 4 앞에 실행)
+
+**Files:**
+- Create: `tools/build_studio_tag_list.py`, 팩 `tags/danbooru_tags.csv`(앱 `tags_db/autocomplete/danbooru_autocomplete_catalog.csv` = `이름,분류,횟수,별칭`에서 횟수 20 이상만), `studio_tags.py`(순수 검색), `web/ai_studio/studio_autocomplete.js`
+- Modify: `studio_routes.py`(`GET /aistudio/studio/tags?q=&limit=`), `core/comfy_node_pack.py`(`.csv` 복사, 재시작 목록 제외), `web/ai_studio/panel_view.js`, `studio.css`
+- Test: `tests/test_studio_tags.py`, `js_tests/studio_autocomplete.test.mjs`
+
+**Interfaces:**
+- `search_tags(query: str, limit: int = 12) -> list[dict]`: `{name, category, count, alias?}`, 접두 일치 우선·횟수 내림차순, 별칭도 찾는다, 대소문자·밑줄/공백 구분 없음. 처음 부를 때 한 번만 읽어 메모리에 둔다(스레드 안전). 앱 저장소에 한글 표 자료가 있으면(`core/tag_database.py`, `frontend/src/utils/tagSuggest.ts` 확인) 한글 검색도 넣고, 없으면 보고서에 적는다.
+- `studio_autocomplete.js`: 프롬프트·네거티브 칸에 붙는 팝업. 순수 함수 `tokenAtCaret(text, caret) -> {start, end, query}`(쉼표·줄바꿈 경계, 앞 공백·여는 괄호 `(`/`[` 제외), `insertTag(text, token, tag) -> {text, caret}`(밑줄은 공백으로, `(`·`)`는 `\(`·`\)`로 이스케이프, 뒤에 `, ` 붙임), `<lora:` 뒤에서는 `/choices?kind=loras` 목록에서 이름을 찾아 `<lora:이름:1>`로 넣는다. 디바운스 150ms, 옛 응답 무시(요청 번호). ↑↓ 이동, Tab·Enter 수락(후보가 있을 때만), Esc 닫기, 칸 밖 클릭·blur 닫기. 분류 색은 Forge tagcomplete처럼 구분하고 횟수를 작게 표시. `document.body`에 붙여 캔버스 변환에 영향받지 않게, 위치는 textarea 기준으로 계산한다.
+
+- [ ] **Step 1: 실패 테스트** — 검색 접두 우선·별칭·정렬·limit, `tokenAtCaret`(`"1girl, lo"`, 괄호 안, 첫 토큰), `insertTag`(이스케이프·`, `), `<lora:` 분기, 옛 응답 무시.
+- [ ] **Step 2~4: 구현·통과 확인** — `npm run test:pack`, `run_tests.py`
+- [ ] **Step 5: 커밋**
