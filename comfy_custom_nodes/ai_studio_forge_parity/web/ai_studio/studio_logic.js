@@ -202,6 +202,14 @@ export function resolveLoraName(name, available) {
 }
 
 /** The tag names of `state` that match no file of `available` (the LoRA node skips them). */
+const NEGATIVE_WEIGHT = /:\s*-\s*\d[\d.]*\s*\)/;
+
+/** True when the prompt or negative uses a negative attention weight `(x:-1.0)`, which only NegPiP makes sense of. */
+export function hasNegativeWeights(state) {
+  const s = withDefaults(state);
+  return NEGATIVE_WEIGHT.test(s.prompt) || NEGATIVE_WEIGHT.test(s.negative);
+}
+
 export function missingLoras(state, available) {
   if (!Array.isArray(available)) return [];
   return loraTagNames(state).filter((name) => resolveLoraName(name, available) === null);

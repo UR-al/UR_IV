@@ -575,6 +575,18 @@ test("a LoRA tag that matches no file gives a notice but still generates", async
   assert.deepEqual(emittedOf(quiet.emitted, "notice"), []);
 });
 
+test("negative weights without NegPiP warn but still run; with NegPiP stay quiet", async () => {
+  const off = setup({ state: { prompt: "1boy, (crowd, big eyes:-1.0), abs", negpip: false } });
+  assert.deepEqual(await off.controller.generate(), { queued: 1 });
+  assert.deepEqual(emittedOf(off.emitted, "notice").map((n) => n.text), ["NegPiP 꺼짐: 음수 가중치가 그림을 망침"]);
+  const on = setup({ state: { prompt: "1boy, (crowd:-1.0)", negpip: true } });
+  await on.controller.generate();
+  assert.deepEqual(emittedOf(on.emitted, "notice"), []);
+  const plain = setup({ state: { prompt: "1boy, (crowd:1.2), [a:b:0.5]", negative: "x", negpip: false } });
+  await plain.controller.generate();
+  assert.deepEqual(emittedOf(plain.emitted, "notice"), []);
+});
+
 test("same seed on a PNG-only image regenerates as t2i even when the panel is on i2i", async () => {
   const { api, controller, baseCalls } = setup({ parameters: golden.infotext.text, state: { tab: "i2i", i2i_mode: "inpaint", i2i: { image: "box.png" } } });
   await controller.sameSeed({ image: ref("info.png"), record: null });

@@ -9,6 +9,7 @@ const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras",
 // loader's first file; the run controller refuses a run while one is still empty).
 const MODEL_KEYS = { unets: "unet", tes: "te", vaes: "vae" };
 const NEGPIP_MISSING = "불가: ComfyUI-ppm 노드 팩(CLIPNegPip)이 설치돼 있지 않음";
+const NEGPIP_OLD_GRAPH = "불가: 이 워크플로에는 NegPiP 노드가 없음. AI Studio Anima.json 을 새로 여세요";
 const INPAINT_AREA_REASON =
   "불가: 지금 인페인트는 늘 그림 전체를 이 크기로 다시 그린다 (Forge의 '전체'). '마스크만'(잘라서 크게 그리기)은 아직 없음";
 
@@ -61,6 +62,12 @@ export class PanelView {
     if (globalThis.ResizeObserver) new ResizeObserver(() => this.growPrompts()).observe(this.element);
   }
 
+  /** Why NegPiP cannot run here ("" = it can): the provider pack is missing, or this graph predates the NegPiP node. */
+  negpipBlock() {
+    if (!negpipInstalled()) return NEGPIP_MISSING;
+    return this.ctx.hasRole && !this.ctx.hasRole("negpip") ? NEGPIP_OLD_GRAPH : "";
+  }
+
   growPrompts() {
     this.element.querySelectorAll("textarea.ais-prompt, textarea.ais-negative").forEach(autoGrow);
   }
@@ -109,7 +116,7 @@ export class PanelView {
     const state = structuredClone(this.state);
     const image = this.ctx.i2i.get();
     if (image) state.i2i.image = image;
-    if (!negpipInstalled()) state.negpip = false;
+    if (this.negpipBlock()) state.negpip = false;
     return state;
   }
 
@@ -176,12 +183,12 @@ export class PanelView {
 
   common(s) {
     const typed = (key) => (e) => { autoGrow(e.target); this.set((st) => { st[key] = e.target.value; }); };
-    const installed = negpipInstalled();
-    const negpip = pill(s.negpip && installed, () => this.set((st) => { st.negpip = !st.negpip; }, true), {
+    const blocked = this.negpipBlock();
+    const negpip = pill(s.negpip && !blocked, () => this.set((st) => { st.negpip = !st.negpip; }, true), {
       on: "NegPiP",
       off: "NegPiP",
-      title: installed ? "음수 가중치 (단어:-1.0)" : NEGPIP_MISSING,
-      disabled: !installed,
+      title: blocked || "음수 가중치 (단어:-1.0)",
+      disabled: Boolean(blocked),
     });
     const prompt = card("프롬프트", negpip, [
       h("textarea", { class: "ais-f ais-prompt", placeholder: "프롬프트", value: s.prompt, onInput: typed("prompt") }),

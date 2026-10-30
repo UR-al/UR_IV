@@ -4,6 +4,7 @@
 // Pure ES module without side effects (ComfyUI also loads every .js under web/ as an extension).
 import {
   applyStateToPrompt,
+  hasNegativeWeights,
   missingLoras,
   missingPicks,
   postPrompt,
@@ -33,6 +34,7 @@ export const NOTICES = Object.freeze({
   noCells: "격자로 만들 이미지가 없음",
   failed: "실행 오류",
   noLora: "LoRA 없음 (빼고 생성)",
+  noNegpip: "NegPiP 꺼짐: 음수 가중치가 그림을 망침",
 });
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -146,10 +148,11 @@ export class RunController {
     }
   }
 
-  /** A notice for the run's `<lora:…>` tags that match no LoRA file (the LoRA node skips them); never blocks. */
-  warnMissingLoras(state) {
+  /** Notices that never block: `<lora:…>` tags matching no file (the LoRA node skips them), `(x:-1)` without NegPiP. */
+  warnRun(state) {
     const missing = missingLoras(state, this.deps.loras?.());
     if (missing.length) this.notice(`${NOTICES.noLora}: ${missing.join(", ")}`);
+    if (!state.negpip && hasNegativeWeights(state)) this.notice(NOTICES.noNegpip);
   }
 
   /** 생성: the X/Y/Z plot when its panel is on (R17), else one generation of the panel state. */
@@ -159,7 +162,7 @@ export class RunController {
       const missing = missingPicks(state);
       if (missing) return this.notice(missing);
       if (this.deps.getXyz?.()?.on) return this.generateXyz(state);
-      this.warnMissingLoras(state);
+      this.warnRun(state);
       return this.run("single", 1, async (job) => {
         const prompt = await this.panelPrompt(state);
         await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
@@ -222,7 +225,7 @@ export class RunController {
     const runState = postRunState(record, current, action);
     const missing = missingPicks(runState, action);
     if (missing) return this.notice(missing);
-    if (action !== "upscale") this.warnMissingLoras(runState);
+    if (action !== "upscale") this.warnRun(runState);
     return this.run("post", 1, async (job) => {
       const options = this.options();
       const roleIds = this.deps.roleIds();
@@ -245,7 +248,7 @@ export class RunController {
       const state = sameSeedState(record, this.deps.getState());
       const missing = missingPicks(state);
       if (missing) return this.notice(missing);
-      this.warnMissingLoras(state);
+      this.warnRun(state);
       const result = await this.run("single", 1, async (job) => {
         const prompt = await this.panelPrompt(state);
         await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));

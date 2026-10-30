@@ -223,6 +223,7 @@ function contextFor(comfyClass) {
       changed: () => emit("state", null),
       engineRoom,
       i2i,
+      hasRole: (role) => roleNodes().has(role),
     };
   }
   if (comfyClass === RESULT) return { imageUrl, action: galleryAction };
