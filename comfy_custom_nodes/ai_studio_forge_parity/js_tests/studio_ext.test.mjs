@@ -209,6 +209,17 @@ test("SAM3 Refine and tile repair sample with the SAM3 section's values", () => 
   assert.equal(parsed.sampler_name, DEFAULT_STATE.sampler);
 });
 
+test("Refine sends one mask set per image when tile repair takes its applied mask (R23)", () => {
+  const ext = (tileOn, mask_mode = "Individual") => ({ sam3_refine: { on: true, mask_mode }, sam3_tile: { on: tileOn } });
+  const refineMode = (s) => extInputs(s, "ext_sam3_refine").mask_mode;
+  assert.equal(refineMode(state({ ext: ext(true) })), "Combined");
+  assert.equal(refineMode(state({ ext: ext(false) })), "Individual");
+  assert.equal(refineMode(state({ ext: ext(false, "Combined") })), "Combined");
+  const s = state({ ext: ext(true) });
+  assert.equal(s.ext.sam3_refine.mask_mode, "Individual"); // the panel keeps the user's pick for when tile goes off
+  assert.equal(settings(extInputs(s, "ext_sam3_tile")).mask_mode, "Individual"); // tile's own groups stay as set
+});
+
 test("an unknown role has no inputs", () => {
   assert.deepEqual(extInputs(state(), "sampler"), {});
 });

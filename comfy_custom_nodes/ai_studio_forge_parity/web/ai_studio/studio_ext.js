@@ -114,6 +114,13 @@ function tileInputs(s, item) {
   return { ...item.fixed, settings_json: sortedJson({ ...values, ...sam3PassInputs(s) }) };
 }
 
+// R23: Individual Refine outputs one image per mask, and tile needs its mask batch to divide its image batch. Combined gives
+// tile one image per mask set; the panel keeps the user's pick for when tile is off.
+function refineInputs(s, item) {
+  const inputs = { ...item.fixed, ...fieldInputs(item, s.ext.sam3_refine), ...sam3PassInputs(s) };
+  return s.ext.sam3_tile.on ? { ...inputs, mask_mode: "Combined" } : inputs;
+}
+
 const ROLE_INPUTS = Object.freeze({
   ext_guidance: (s, item, extras) => ({ ...item.fixed, settings_json: sortedJson(suiteSettings(s, extras)) }),
   ext_dd: (s, item) => ddInputs(s, item, s.cfg),
@@ -122,7 +129,7 @@ const ROLE_INPUTS = Object.freeze({
   ext_speed: (s, item) => speedInputs(s, item, s.tab === "t2i" ? "base" : "img2img"),
   ext_speed_hires: (s, item) => speedInputs(s, item, "hires"),
   ext_lora_block: (s, item) => ({ ...item.fixed, ...fieldInputs(item, s.ext.lora_block), seed: s.seed }),
-  ext_sam3_refine: (s, item) => ({ ...item.fixed, ...fieldInputs(item, s.ext.sam3_refine), ...sam3PassInputs(s) }),
+  ext_sam3_refine: refineInputs,
   ext_sam3_tile: tileInputs,
 });
 
