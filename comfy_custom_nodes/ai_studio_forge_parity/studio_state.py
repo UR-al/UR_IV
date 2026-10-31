@@ -21,6 +21,7 @@ DORA_MODES = (
     "DoRA off (no magnitude)",
 )
 MEMORY_SLOTS = ("anima", "moss", "krea2", "krea2_turbo")  # Turbo takes other numbers than Raw
+MOSS_SIZE_STEP = 16
 REFERENCE_METHODS = ("snapref", "ref_adapter")
 REFERENCE_MODES = ("cs", "char")
 REFERENCE_CORRECTIONS = ("apg", "rescale", "none")
@@ -285,8 +286,11 @@ def normalize_state(raw: object) -> dict:
 
 
 def generation_size(state: dict) -> tuple[int, int]:
-    """(width, height) of the tab in use: each tab keeps its own size, as in Forge."""
+    """(width, height) of the tab in use: each tab keeps its own size, as in Forge. MOSS latents are 16x, so a saved
+    size off that grid runs snapped (studio_logic.js writes the latent the same way)."""
     size = state["i2i"] if state["tab"] == "i2i" else state
+    if "moss" in state["unet"].lower():
+        return tuple(int(side / MOSS_SIZE_STEP + 0.5) * MOSS_SIZE_STEP for side in (size["width"], size["height"]))
     return size["width"], size["height"]
 
 

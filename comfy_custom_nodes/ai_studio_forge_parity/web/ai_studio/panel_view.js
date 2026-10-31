@@ -5,7 +5,7 @@ import { dropBlockedExt, extMemory, renderExtensions } from "./ext_view.js";
 import { nodeInstalled, referenceBlock, renderReference } from "./reference_view.js";
 import { createAutocomplete } from "./studio_autocomplete.js";
 import { FAMILY_LABELS } from "./studio_ext.js";
-import { DORA_MODES, defaultModel, imageSize, modelFamily, pickCheckpoint, unetFamily, withDefaults } from "./studio_logic.js";
+import { DORA_MODES, defaultModel, imageSize, modelFamily, pickCheckpoint, sizeStep, withDefaults } from "./studio_logic.js";
 import { autoGrow, h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 
 const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3"];
@@ -58,7 +58,6 @@ export class PanelView {
     this.forgeOpen = false;
     this.extMemory = extMemory();
     this.choices = {};
-    this.families = undefined; // `/choices?kind=unets` families
     // One popup for both prompt boxes; the LoRA list (ComfyUI file names) feeds the `<lora:` suggestions.
     this.autocomplete = ctx.tags ? createAutocomplete({ fetchTags: ctx.tags, loras: () => this.choices.loras || [] }) : null;
     this.state = this.read();
@@ -100,11 +99,20 @@ export class PanelView {
     for (const kind of CHOICE_KINDS) {
       this.ctx.choices(kind).then((data) => {
         this.choices[kind] = data?.items || [];
-        if (kind === "unets") this.families = data?.families;
         this.pickDefault(kind, data);
         this.scheduleRender();
       });
     }
+  }
+
+  /** The LoRA list without its cache: an adapter file may have arrived since. */
+  refreshLoras() {
+    return Promise.resolve(this.ctx.choices("loras", true)).then((data) => {
+      const items = data?.items || [];
+      if (JSON.stringify(items) === JSON.stringify(this.choices.loras)) return;
+      this.choices.loras = items;
+      this.scheduleRender();
+    });
   }
 
   pickDefault(kind, data) {
@@ -160,7 +168,7 @@ export class PanelView {
       s.tab = "i2i";
       s.i2i_mode = mode === "inpaint" ? "inpaint" : "img2img";
       s.i2i.image = image;
-      Object.assign(s.i2i, imageSize(size?.width, size?.height) || {});
+      Object.assign(s.i2i, imageSize(size?.width, size?.height, sizeStep(this.family)) || {});
     }, true);
   }
 
@@ -326,7 +334,7 @@ export class PanelView {
   /** `section`: where the size lives, the state itself (t2i) or `i2i`. */
   sizeBox(s, key, section = null) {
     const owner = (st) => (section ? st[section] : st);
-    return numberBox(owner(s)[key], (value) => this.set((st) => { owner(st)[key] = value; }), { min: 64, max: 4096, step: 8, width: 62 });
+    return numberBox(owner(s)[key], (value) => this.set((st) => { owner(st)[key] = value; }), { min: 64, max: 4096, step: sizeStep(this.family), width: 62 });
   }
 
   sizeCard(s) {
@@ -360,7 +368,7 @@ export class PanelView {
       if (!uploaded?.name) return;
       this.set((st) => {
         st.i2i.image = uploaded.name;
-        Object.assign(st.i2i, imageSize(uploaded.width, uploaded.height) || {});
+        Object.assign(st.i2i, imageSize(uploaded.width, uploaded.height, sizeStep(this.family)) || {});
       }, true);
     } });
     const picture = value
@@ -402,10 +410,10 @@ export class PanelView {
         set: (mutate, rerender) => this.set(mutate, rerender),
         hasRole: this.ctx.hasRole,
         family: this.family,
-        unetFamily: unetFamily(s.unet, this.families),
         memory: this.extMemory,
         rerender: () => this.scheduleRender(),
         loras: this.choices.loras || [],
+        refreshLoras: () => this.refreshLoras(),
         image: this.ctx.reference,
       }),
     });

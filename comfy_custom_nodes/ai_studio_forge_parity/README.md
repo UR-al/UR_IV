@@ -82,6 +82,8 @@ inspector recognises them.
   so ComfyUI never runs them)
 - `AIStudioSwitch` (Anima studio: `select` 0 passes `a`, 1 passes `b`; both inputs are optional and lazy, so only the
   chosen model family's nodes (2.9B/base or 3.8B) run)
+- `AIStudioTextEncoderLoader` (Anima studio: `CLIPLoader` for the three families; also reads a MOSS text encoder saved with
+  bare `language_model.` / `visual.` keys)
 - `AIStudioMossStream`, `AIStudioAnimaReference`, `AIStudioKrea2Reference` (Anima studio: thin nodes over the optional
   ComfyUI-MOSS-Toolkit, SnapRef, ComfyUI-Anima-Ref-Adapter and comfyui-krea2edit packs; bypassed unless the panel uses them)
 
@@ -108,12 +110,18 @@ The studio now runs three model families on one workflow, picked by the checkpoi
   families in one grid.
 - `AIStudioMossStream`: MOSS-Image's fp32 residual stream, from the separate
   [ComfyUI-MOSS-Toolkit](https://github.com/sorryhyun/ComfyUI-MOSS-Toolkit) pack (Apache-2.0, not bundled).
+- `AIStudioTextEncoderLoader`: core `CLIPLoader`, plus MOSS text encoders saved with bare key prefixes, which core's
+  detection reads as an empty SD1 CLIP.
 - `AIStudioAnimaReference`: character / style reference, either SnapRef (`SnapRef` node from
   `0ppxnhximxr/snapref-v1a`) or [ComfyUI-Anima-Ref-Adapter](https://github.com/ElectronGirl/ComfyUI-Anima-Ref-Adapter)
-  (Apache-2.0). Their weights are non-commercial, trained on Anima base (28 blocks), and never bundled.
+  (Apache-2.0). Their weights are non-commercial and never bundled. They were trained on Anima base (28 blocks);
+  `reference_layout.py` remaps a file along the block lineage plain LoRAs use for 2.9B / 3.8B and saves the copy once next
+  to the original (`<name>__40b`, `<name>__52b`). SnapRef refuses PAG, and a Ref Adapter v2 file runs without DAVE, SLG and SEG.
 - `AIStudioKrea2Reference`: an edit LoRA (`krea2_identity_edit_v2`, `krea2_general_edit_v2`, `QuadView_krea2_v1`, ...)
   through [comfyui-krea2edit](https://github.com/lbouaraba/comfyui-krea2edit) (Apache-2.0, not bundled).
 - `ForgeNeoModelSamplingShift` keeps a flux-type predictor (Krea2 has no timestep multiplier).
+- MOSS LoRAs from other trainers are converted through ComfyUI-MOSS-Toolkit's `lora_compat` when it is installed; a MOSS
+  LoRA that patches nothing stops the run. The panel's size step is 16 on MOSS (16x latents).
 
 ## 1.10.0 changes
 

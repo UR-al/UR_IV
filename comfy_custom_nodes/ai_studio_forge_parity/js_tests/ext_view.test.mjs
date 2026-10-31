@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import { EXT_SCHEMA } from "../web/ai_studio/ext_schema.js";
 import { dropBlockedExt, extMemory, renderExtensions } from "../web/ai_studio/ext_view.js";
+import { referenceBlock } from "../web/ai_studio/reference_view.js";
 import { PanelView } from "../web/ai_studio/panel_view.js";
 import { withDefaults } from "../web/ai_studio/studio_logic.js";
 
@@ -413,5 +414,11 @@ test("a family greys the extensions it cannot run and turns them off for the run
   anima.guidance.on = true;
   dropBlockedExt(anima, null);
   assert.equal(anima.guidance.on, true);
+});
+
+test("a reference runs on Anima and Krea2, MOSS has none", () => {
+  assert.equal(referenceBlock("anima", "snapref", null), "");
+  assert.equal(referenceBlock("krea2", "snapref", null), "");
+  assert.match(referenceBlock("moss", "snapref", null), /MOSS/);
 });
 

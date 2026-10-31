@@ -78,7 +78,7 @@ LOAD_IMAGE_HEIGHT = 340  # room for the preview
 ROWS = (  # (group title, [(role, class, node title)])
     ("① 모델", [
         ("unet", "UNETLoader", "UNet (2.9B·base)"),
-        ("te", "CLIPLoader", "TE"),
+        ("te", "AIStudioTextEncoderLoader", "TE"),
         ("vae", "VAELoader", "VAE"),
     ]),
     ("①b 3.8B·MOSS", [
@@ -269,8 +269,6 @@ COMBO = []  # a choice list from the user's ComfyUI (only the slot matters here)
 # (vendor/comfyui_anima_3_8b v2.py / loader.py). (spec, outputs as (name, type)).
 LOCAL_SPECS = {
     "UNETLoader": ({"required": {"unet_name": (COMBO,), "weight_dtype": (COMBO,)}}, (("MODEL", "MODEL"),)),
-    "CLIPLoader": ({"required": {"clip_name": (COMBO,), "type": (COMBO,)}, "optional": {"device": (COMBO,)}},
-                   (("CLIP", "CLIP"),)),
     "VAELoader": ({"required": {"vae_name": (COMBO,)}}, (("VAE", "VAE"),)),
     "LoadImage": ({"required": {"image": (COMBO, {"image_upload": True})}}, (("IMAGE", "IMAGE"), ("MASK", "MASK"))),
     "VAEDecode": ({"required": {"samples": ("LATENT",), "vae": ("VAE",)}}, (("IMAGE", "IMAGE"),)),
@@ -285,6 +283,7 @@ LOCAL_SPECS = {
 # COMBO inputs whose choices depend on the user's ComfyUI (files, registered samplers/schedulers, detected
 # features): a node gets widgets_values only when every one of these has a value from role_values().
 INSTALL_COMBOS = {
+    "AIStudioTextEncoderLoader": {"clip_name"},
     "ForgeNeoExtraSchedulers": {"owned_names"},
     "ForgeNeoKSamplerCNS": {"sampler_name", "scheduler"},
     "ForgeNeoHiresFix": {"upscale_method", "sampler_name", "scheduler", "base_sampler_name", "base_scheduler",
@@ -408,6 +407,7 @@ def role_values(state: dict) -> dict[str, dict]:
         "dora": {"enabled": True, "mode": DORA_FORGE_MODE if forge["master"] and forge["dora"] else state["dora_mode"]},
         "pos_encode": encode,
         "neg_encode": encode,
+        "krea2_ref": encode,
         "latent": {"mode": "txt2img", "width": state["width"], "height": state["height"],
                    "batch_size": state["batch"], "mask_blur": state["i2i"]["mask_blur"]},
         "sampler": {"steps": state["steps"], "cfg": state["cfg"], "sampler_name": sampler, "scheduler": scheduler,

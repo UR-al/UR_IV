@@ -93,7 +93,7 @@ function plan2x2(stateOf = () => ({})) {
 // The panel's model picks (missingPicks refuses a run while any is empty).
 const PICKS = { unet: "anima-2.9b.safetensors", te: "qwen_3_06b_base.safetensors", vae: "qwen_image_vae.safetensors" };
 
-function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined, extFiles = undefined, reloadLoras = undefined } = {}) {
+function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined, extFiles = undefined, reloadLoras = undefined, roleClass = undefined } = {}) {
   const api = new FakeApi();
   const emitted = [];
   const routes = [];
@@ -103,6 +103,7 @@ function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state
     api,
     basePrompt: fakeBasePrompt(baseCalls),
     roleIds: () => ROLE_IDS,
+    roleClass,
     getState: () => withDefaults({ ...structuredClone(DEFAULT_STATE), ...PICKS, ...state }),
     getXyz: () => xyz,
     route: async (path, body) => {
@@ -665,4 +666,55 @@ test("a gallery Hires run warns about the model stack only, an upscale about not
   const upscale = setup({ state: { ...NO_FILES, upscale: { ...DEFAULT_STATE.upscale, model: "m.pth" } } });
   await upscale.controller.runPost("upscale", item);
   assert.deepEqual(noticesOf(upscale.emitted), []);
+});
+
+// ---------------------------------------------------------------------------------------------- model families
+
+const MOSS = { unet: "moss_image_sft_bf16.safetensors", te: "qwen3.5_9b_moss_image_sft_bf16.safetensors", vae: "moss_image_vae_fp32.safetensors" };
+const oldGraph = () => "CLIPLoader";
+
+test("MOSS on an older workflow's core CLIPLoader is refused with what to do", async () => {
+  const { api, controller, emitted } = setup({ state: MOSS, roleClass: oldGraph });
+  await controller.generate();
+  assert.equal(api.queued.length, 0);
+  assert.deepEqual(noticesOf(emitted), [NOTICES.oldTeNode]);
+});
+
+test("the studio's own loader runs MOSS, and an older workflow still runs Anima", async () => {
+  const moss = setup({ state: MOSS, roleClass: () => "AIStudioTextEncoderLoader" });
+  await moss.controller.generate();
+  assert.equal(moss.api.queued.length, 1);
+  const anima = setup({ roleClass: oldGraph });
+  await anima.controller.generate();
+  assert.equal(anima.api.queued.length, 1);
+});
+
+test("the warnings of a run share one notice, so none hides another", async () => {
+  const { controller, emitted } = setup({
+    state: { ...MOSS, prompt: "(detailed:1.2) <lora:typo:1>", ext: { vae_2x: { on: false }, skim: { on: true } } },
+    loras: () => ["other.safetensors"],
+    roleClass: () => "AIStudioTextEncoderLoader",
+  });
+  await controller.generate();
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.noLora}: typo · ${NOTICES.noWeights}`]);
+});
+
+test("an X/Y/Z run gets the state's warnings too", async () => {
+  const { controller, emitted } = setup({ state: { ...MOSS, prompt: "(detailed:1.2)" }, xyz: XYZ_ON, parameters: golden.infotext.text });
+  await controller.generate();
+  assert.deepEqual(noticesOf(emitted), [NOTICES.noWeights]);
+});
+
+test("Same seed and Hires refuse an image another family made, upscaling does not care", async () => {
+  const krea = "Steps: 8, Seed: 1, Size: 1024x1024, Model: krea2_turbo_bf16";
+  const same = setup({ parameters: krea });
+  await same.controller.sameSeed({ image: ref("k.png"), record: null });
+  assert.equal(same.api.queued.length, 0);
+  assert.deepEqual(noticesOf(same.emitted), [NOTICES.otherFamily]);
+  const hires = setup({ parameters: krea });
+  await hires.controller.runPost("hires", { image: ref("k.png"), record: null });
+  assert.equal(hires.api.queued.length, 0);
+  const upscale = setup({ parameters: krea, state: { upscale: { ...DEFAULT_STATE.upscale, model: "x.pth" } } });
+  await upscale.controller.runPost("upscale", { image: ref("k.png"), record: null });
+  assert.equal(upscale.api.queued.length, 1);
 });

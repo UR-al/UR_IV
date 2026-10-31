@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 
 from .dora_infer_mode import MODE_LABELS, mode_key
 from .studio_lora_tags import parse_lora_tags, resolve_lora_name
+from .studio_choices import unet_family
 from .studio_state import effective_prompt, generation_size, normalize_state
 from .xyz_axes import AxisSpec, axis_by_id
 from .xyz_values import parse_axis_values
@@ -123,6 +124,22 @@ def _dora_mode(text: str) -> str:
         if wanted and (plain == wanted or plain.startswith(wanted + " (")):
             return label
     raise _PlanError(f"Unknown DoRA mode: {text}")
+
+
+def _model_family(family: str) -> str:
+    return family if family in ("moss", "krea2") else "anima"
+
+
+def _check_panel_family(base: dict, axes: list[_Axis], resolved: list[list], families: dict) -> None:
+    """A checkpoint axis stays in the panel's family: a cell takes only its UNET from the axis, the TE, VAE, sampler and
+    extensions stay the panel's."""
+    unet = base["unet"]
+    if not unet:
+        return
+    panel = _model_family(families.get(unet) or unet_family(unet))
+    for axis, values in zip(axes, resolved):
+        if axis.spec.id == "checkpoint" and any(_model_family(families[value]) != panel for value in values):
+            raise _PlanError(MIXED_FAMILIES)
 
 
 def _resolve(axes: list[_Axis], families: dict) -> list[list]:
@@ -329,6 +346,7 @@ def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, fami
         counts = {letter: len(axis.values) for letter, axis in zip(LETTERS, parsed)}
         nx, ny, nz = counts["x"], counts["y"], counts["z"]
         resolved = _resolve(parsed, families or {})
+        _check_panel_family(base, parsed, resolved, families or {})
         width, height = generation_size(base)
         grid_mp = round(nx * ny * nz * width * height / 1e6)
         if grid_mp >= MAX_GRID_MP:

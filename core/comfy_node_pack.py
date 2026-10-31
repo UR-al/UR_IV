@@ -94,8 +94,9 @@ PACK_ID = "ai_studio_forge_parity"
 # now installed and fingerprinted, js_tests/ never), HTTP routes under /aistudio/studio, the X/Y/Z grid (Roboto legend
 # font, .ttf installed; the prompt tag list tags/danbooru_tags.csv, .csv installed), SAM3.1 multiplex files in the SAM3 picker, and example_workflows/AI Studio Anima.json.
 # 1.11.0: the studio picks its model family from the checkpoint name (Anima, MOSS-Image, Krea2): TE type, default
-# settings, extensions per family; three AIStudio* nodes over optional packs (MOSS fp32 stream, Anima and Krea2
-# references; web/ai_studio/reference_view.js); ForgeNeoModelSamplingShift keeps a flux-type predictor (Krea2).
+# settings, extensions per family; four AIStudio* nodes (a text encoder loader, and three over optional packs: MOSS fp32
+# stream, Anima and Krea2 references; web/ai_studio/reference_view.js); ForgeNeoModelSamplingShift keeps a flux-type
+# predictor (Krea2); moss_lora_layout.py.
 PACK_VERSION = "1.11.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"

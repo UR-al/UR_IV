@@ -136,5 +136,7 @@ xformers > PyTorch 순, 실행 옵션으로 정함). 사용자는 `run_nvidia_gp
 
 - 계열은 체크포인트 이름으로 정한다: `moss` → MOSS-Image, `krea` → Krea2, 나머지 → Anima. Forge 대응이 없는 항목이다.
 - MOSS fp32: ComfyUI-MOSS-Toolkit `MOSSStreamFP32`. 코어 로더로 읽은 모델에서만 된다.
-- Anima 레퍼런스: SnapRef 또는 ComfyUI-Anima-Ref-Adapter. 가중치는 Anima base(28블록) 기준이라 2.9B·3.8B 는 미검증이다.
+- Anima 레퍼런스: SnapRef 또는 ComfyUI-Anima-Ref-Adapter. 가중치는 Anima base(28블록) 기준이고, 2.9B·3.8B 는 일반 LoRA 와
+  같은 블록 계보 표로 변환한 사본을 쓴다(실측 확인). 변환 없이 쓰면 SnapRef 는 참조 그림을 베끼고 Ref Adapter 는 노이즈가
+  나온다. SnapRef 는 PAG 와 같이 못 쓴다.
 - Krea2 레퍼런스: comfyui-krea2edit 노드 + 편집 LoRA(identity, general, QuadView 등).

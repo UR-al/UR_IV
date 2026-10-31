@@ -5,11 +5,14 @@
 import {
   applyStateToPrompt,
   hasNegativeWeights,
+  hasPromptWeights,
   missingLoras,
   missingPicks,
+  modelFamily,
   postPrompt,
   postRunState,
   recordFromParameters,
+  refAdapterDrops,
   stageModes,
   withDefaults,
 } from "./studio_logic.js";
@@ -37,7 +40,12 @@ export const NOTICES = Object.freeze({
   noLora: "LoRA 없음 (빼고 생성)",
   noNegpip: "NegPiP 꺼짐: 음수 가중치가 그림을 망침",
   noExtFile: "파일 없음 (빼고 생성)",
+  noWeights: "MOSS·Krea2 는 (단어:1.2) 가중치를 못 읽음: 글자 그대로 들어감",
+  refAdapterDrops: "Ref Adapter v2 에서는 꺼짐",
+  otherFamily: "다른 모델 계열로 만든 그림: 그 체크포인트로 바꾼 뒤 다시",
+  oldTeNode: "불가: 이 워크플로의 TE 노드는 MOSS 를 못 읽음. AI Studio Anima.json 을 새로 여세요",
 });
+const TE_LOADER = "AIStudioTextEncoderLoader";
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -82,6 +90,9 @@ function sameSeedState(record, currentState) {
   state.batch = 1; // the picked image only
   return state;
 }
+
+/** A PNG's `Model` of another family than the run's checkpoint (a session record brings its own checkpoint instead). */
+const otherFamily = (record, state) => Boolean(record.model) && modelFamily(record.model) !== modelFamily(state.unet);
 
 const imageRef = (image) => ({ filename: image.filename, subfolder: image.subfolder || "", type: image.type || "output" });
 
@@ -151,9 +162,33 @@ export class RunController {
     }
   }
 
+  /** Why `state` must not run on this graph, else "": an empty pick, or MOSS on an older workflow's core CLIPLoader. */
+  refusal(state, action = null) {
+    const te = this.deps.roleClass?.("te");
+    const oldTe = action !== "upscale" && te && te !== TE_LOADER && modelFamily(state.unet) === "moss";
+    return missingPicks(state, action) || (oldTe ? NOTICES.oldTeNode : "");
+  }
+
+  /** The notices `state` alone gives: `(x:-1)` without NegPiP, `(x:1.2)` on MOSS or Krea2, what Ref Adapter drops, files of switched-on extensions. */
+  stateWarnings(state, action = null) {
+    const texts = [];
+    if (!state.negpip && hasNegativeWeights(state)) texts.push(NOTICES.noNegpip);
+    if (modelFamily(state.unet) !== "anima" && hasPromptWeights(state)) texts.push(NOTICES.noWeights);
+    const dropped = refAdapterDrops(state);
+    if (dropped.length) texts.push(`${NOTICES.refAdapterDrops}: ${dropped.join(", ")}`);
+    const idle = idleExtensions(state, action, this.deps.extFiles?.());
+    if (idle.length) texts.push(`${NOTICES.noExtFile}: ${idle.join(", ")}`);
+    return texts;
+  }
+
+  /** One notice at a time stays on screen, so the warnings of a run share it. */
+  warn(texts) {
+    if (texts.length) this.notice(texts.join(" · "));
+  }
+
   /**
-   * Notices that never block: `<lora:…>` tags matching no file (the LoRA node skips them), `(x:-1)` without NegPiP,
-   * switched-on extensions without their file. `action`: the gallery post-processing action, if any.
+   * Notices that never block: `<lora:…>` tags matching no file (the LoRA node skips them) and `stateWarnings`.
+   * `action`: the gallery post-processing action, if any.
    */
   async warnRun(state, action = null) {
     let missing = missingLoras(state, this.deps.loras?.());
@@ -161,24 +196,17 @@ export class RunController {
       await this.deps.reloadLoras();
       missing = missingLoras(state, this.deps.loras?.());
     }
-    if (missing.length) this.notice(`${NOTICES.noLora}: ${missing.join(", ")}`);
-    if (!state.negpip && hasNegativeWeights(state)) this.notice(NOTICES.noNegpip);
-    this.warnIdleExtensions(state, action);
-  }
-
-  warnIdleExtensions(state, action = null) {
-    const idle = idleExtensions(state, action, this.deps.extFiles?.());
-    if (idle.length) this.notice(`${NOTICES.noExtFile}: ${idle.join(", ")}`);
+    this.warn([...(missing.length ? [`${NOTICES.noLora}: ${missing.join(", ")}`] : []), ...this.stateWarnings(state, action)]);
   }
 
   /** 생성: the X/Y/Z plot when its panel is on (R17), else one generation of the panel state. */
   generate() {
     return this.claim(async () => {
       const state = this.deps.getState();
-      const missing = missingPicks(state);
+      const missing = this.refusal(state);
       if (missing) return this.notice(missing);
       if (this.deps.getXyz?.()?.on) {
-        this.warnIdleExtensions(state);
+        this.warn(this.stateWarnings(state));
         return this.generateXyz(state);
       }
       await this.warnRun(state);
@@ -242,7 +270,8 @@ export class RunController {
     const record = { ...flat, image: item.image };
     const current = this.deps.getState();
     const runState = postRunState(record, current, action);
-    const missing = missingPicks(runState, action);
+    if (action !== "upscale" && otherFamily(record, runState)) return this.notice(NOTICES.otherFamily);
+    const missing = this.refusal(runState, action);
     if (missing) return this.notice(missing);
     if (action !== "upscale") await this.warnRun(runState, action);
     return this.run("post", 1, async (job) => {
@@ -265,7 +294,8 @@ export class RunController {
       const record = await this.imageRecord(item);
       if (!record) return this.notice(NOTICES.noInfo);
       const state = sameSeedState(record, this.deps.getState());
-      const missing = missingPicks(state);
+      if (otherFamily(record, state)) return this.notice(NOTICES.otherFamily);
+      const missing = this.refusal(state);
       if (missing) return this.notice(missing);
       await this.warnRun(state);
       const result = await this.run("single", 1, async (job) => {

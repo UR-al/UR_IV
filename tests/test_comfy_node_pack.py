@@ -103,6 +103,7 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "AIStudioPanel",              # Anima studio UI nodes: drawn by the studio JS, no outputs, never run
     "AIStudioResultView",
     "AIStudioXYZView",
+    "AIStudioTextEncoderLoader",  # studio: CLIPLoader of the three families
     "AIStudioMossStream",         # studio: MOSS fp32 stream (ComfyUI-MOSS-Toolkit)
     "AIStudioAnimaReference",     # studio: Anima reference (SnapRef / Anima Ref Adapter)
     "AIStudioKrea2Reference",     # studio: Krea2 reference (comfyui-krea2edit)
@@ -118,7 +119,7 @@ def _source(root: Path, body: str = "VALUE = 1\n") -> Path:
     return source
 
 
-MODEL_NODES_1_11 = ("AIStudioMossStream", "AIStudioAnimaReference", "AIStudioKrea2Reference")
+MODEL_NODES_1_11 = ("AIStudioTextEncoderLoader", "AIStudioMossStream", "AIStudioAnimaReference", "AIStudioKrea2Reference")
 
 
 class TestBundledComfyNodePack(unittest.TestCase):
@@ -188,7 +189,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 55)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 56)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):

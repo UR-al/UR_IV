@@ -40,6 +40,10 @@ class StudioStateTests(unittest.TestCase):
         self.assertIs(ss.normalize_state({"moss_stream": False})["moss_stream"], False)
         self.assertIs(ss.normalize_state({"moss_stream": "no"})["moss_stream"], True)
 
+    def test_a_moss_size_runs_on_the_16_grid(self):
+        self.assertEqual(ss.generation_size(ss.normalize_state({"unet": "moss_sft.safetensors", "width": 856, "height": 840})), (864, 848))
+        self.assertEqual(ss.generation_size(ss.normalize_state({"unet": "anima.safetensors", "width": 856, "height": 840})), (856, 840))
+
     def test_family_memory_keeps_known_families_only(self):
         memory = ss.normalize_state({"family_memory": {
             "moss": {"te": "a", "vae": "b", "sampler": "euler", "scheduler": "simple", "steps": 999, "cfg": 3, "shift": 5,

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .anima_lora import PreparedAnimaLora, prepare_anima_lora_for_model
+from .moss_lora_layout import is_moss_model, prepare_moss_lora
 from .compat import filename_choices, folder_paths_module, node_result, provider_class
 
 
@@ -417,6 +418,8 @@ def load_lora_for_models(
         _comfy_lora, state_dict, _model_map, _clip_map = (
             _prepare_comfy_lora_payload(model, clip, state_dict)
         )
+    elif is_moss_model(model):
+        state_dict = prepare_moss_lora(model, clip, state_dict, lora_name)
     comfy_sd = importlib.import_module("comfy.sd")
     result = comfy_sd.load_lora_for_models(
         model,

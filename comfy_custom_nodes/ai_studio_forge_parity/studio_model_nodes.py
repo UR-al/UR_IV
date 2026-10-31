@@ -6,13 +6,61 @@ panel greys the switch (``web/ai_studio/reference_view.js``). Off, each of these
 """
 from __future__ import annotations
 
-from .compat import invoke_provider, require_torch
+import importlib
+import json
+
+from .compat import filename_choices, folder_paths_module, invoke_provider, require_torch
+from .guidance_common import ASYM_REFERENCE_KEY
+from .reference_layout import adapter_for_model
+from .studio_nodes import scheduled_encode
 from .studio_state import KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_METHODS, REFERENCE_MODES
 
 CATEGORY = "AI Studio/모델"
+TE_TYPES = ("stable_diffusion", "moss_image", "krea2")
+SPLIT_WRAPPER_KEY = "ai_studio_snapref_split"
+DIFFUSION_MODEL_WRAPPERS = "diffusion_model"  # comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL
 KREA2_LATENT_CHANNELS = 16
 KREA2_LATENT_SCALE = 8
 KREA2_NEGATIVE_GROUNDING = 768  # both of the packs' example workflows ground the empty negative at 768
+
+
+def _read_moss_te(path):
+    """The Qwen3.5 weights under the prefixes core's detection reads; the moss-image node's single file has bare ones."""
+    utils = importlib.import_module("comfy.utils")
+    state, metadata = utils.load_torch_file(path, safe_load=True, return_metadata=True)
+    state, _ = utils.convert_old_quants(state, model_prefix="", metadata=metadata)
+    return utils.state_dict_prefix_replace(state, {"language_model.": "model.language_model.", "visual.": "model.visual."})
+
+
+def load_moss_te(path, disable_dynamic=False):
+    sd = importlib.import_module("comfy.sd")
+    clip = sd.load_text_encoder_state_dicts(
+        [_read_moss_te(path)], embedding_directory=folder_paths_module().get_folder_paths("embeddings"),
+        clip_type=sd.CLIPType.MOSS_IMAGE, disable_dynamic=disable_dynamic)
+    clip.patcher.cached_patcher_init = (load_moss_te_patcher, (path,))  # how dynamic VRAM rebuilds it after eviction
+    return clip
+
+
+def load_moss_te_patcher(path, disable_dynamic=False):
+    return load_moss_te(path, disable_dynamic).patcher
+
+
+class AIStudioTextEncoderLoader:
+    """``CLIPLoader`` of the studio's families, which also reads a MOSS text encoder saved with bare key prefixes."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"clip_name": (filename_choices("text_encoders"),), "type": (list(TE_TYPES),)}}
+
+    RETURN_TYPES = ("CLIP",)
+    FUNCTION = "load"
+    CATEGORY = CATEGORY
+    DESCRIPTION = "Loads a text encoder for Anima, MOSS-Image or Krea2."
+
+    def load(self, clip_name, type="stable_diffusion"):
+        if type != "moss_image":
+            return invoke_provider("CLIPLoader", method="load_clip", feature="Text encoder", args=(clip_name, type))[:1]
+        return (load_moss_te(folder_paths_module().get_full_path_or_raise("text_encoders", clip_name)),)
 
 
 class AIStudioMossStream:
@@ -29,6 +77,46 @@ class AIStudioMossStream:
 
     def patch(self, model):
         return invoke_provider("MOSSStreamFP32", method="patch", feature="MOSS fp32 stream", args=(model,))[:1]
+
+
+def _split_mixed_batch(executor, x, timesteps, context, fps=None, padding_mask=None, **kwargs):
+    """One call per cond / uncond chunk, kwargs included. SnapRef splits a mixed batch itself but leaves per-batch kwargs
+    whole, so NegPiP's mask for both rows would meet one row of context."""
+    torch = require_torch()
+    options = kwargs.get("transformer_options") or {}
+    flags = options.get("cond_or_uncond") or [0]
+    if len(set(flags)) < 2 or x.shape[0] % len(flags):
+        return executor(x, timesteps, context, fps, padding_mask, **kwargs)
+    rows = x.shape[0] // len(flags)
+    outs = []
+    for index, flag in enumerate(flags):
+        part = slice(index * rows, (index + 1) * rows)
+        chunk = {key: value[part] if torch.is_tensor(value) and value.shape[:1] == x.shape[:1] else value
+                 for key, value in kwargs.items()}
+        chunk["transformer_options"] = {**options, "cond_or_uncond": [flag]}
+        if len(options.get("uuids") or ()) == len(flags):
+            chunk["transformer_options"]["uuids"] = [options["uuids"][index]]
+        outs.append(executor(x[part], timesteps[part], context[part], fps, padding_mask, **chunk))
+    return torch.cat(outs, 0)
+
+
+def _outermost_wrapper(model, key, wrapper):
+    """A clone with ``wrapper`` around every other diffusion-model wrapper (the first key runs first)."""
+    patched = model.clone()
+    patched.add_wrapper_with_key(DIFFUSION_MODEL_WRAPPERS, key, wrapper)
+    wrappers = patched.wrappers[DIFFUSION_MODEL_WRAPPERS]
+    patched.wrappers[DIFFUSION_MODEL_WRAPPERS] = {key: wrappers.pop(key), **wrappers}
+    return patched
+
+
+def _adapter_is_asym(path) -> bool:
+    """Whether a Ref Adapter file runs the blocks itself (``arch`` in its metadata, as the pack reads it)."""
+    try:
+        safetensors = importlib.import_module("safetensors")
+        with safetensors.safe_open(path, "pt") as handle:
+            return json.loads((handle.metadata() or {}).get("anima_ref_adapter", "{}")).get("arch") == "asym"
+    except Exception:
+        return False
 
 
 class AIStudioAnimaReference:
@@ -63,16 +151,23 @@ class AIStudioAnimaReference:
               megapixels, caption):
         if not file:
             raise ValueError("레퍼런스 파일이 비어 있음")
+        file = adapter_for_model(model, file)
         if method == "snapref":
-            return invoke_provider("SnapRef", method="apply", feature="SnapRef", kwargs={
+            patched = invoke_provider("SnapRef", method="apply", feature="SnapRef", kwargs={
                 "model": model, "clip": clip, "vae": vae, "image": image, "adapter": file, "mode": mode,
                 "ref_in_uncond": False, "ref_megapixels": megapixels, "strength": strength, "ref_caption": caption,
                 "ref_guidance_on": guidance_on, "ref_guidance": guidance, "correction": correction, "ref_end": ref_end,
-            })[:1]
-        return invoke_provider("AnimaRefAdapter", method="apply", feature="Anima Ref Adapter", kwargs={
+            })[0]
+            # with its guidance on SnapRef keeps the batch whole; off, only the positive row reads the reference
+            return (patched if guidance_on else _outermost_wrapper(patched, SPLIT_WRAPPER_KEY, _split_mixed_batch),)
+        patched = invoke_provider("AnimaRefAdapter", method="apply", feature="Anima Ref Adapter", kwargs={
             "model": model, "vae": vae, "image": image, "lora_name": file, "ref_guidance": guidance,
             "correction": correction, "strength": strength, "ref_end": ref_end, "ref_megapixels": megapixels,
-        })[:1]
+        })[0]
+        if _adapter_is_asym(folder_paths_module().get_full_path_or_raise("loras", file)):
+            patched = patched.clone()
+            patched.model_options["transformer_options"][ASYM_REFERENCE_KEY] = True  # read by the guidance suite
+        return (patched,)
 
 
 class AIStudioKrea2Reference:
@@ -101,6 +196,8 @@ class AIStudioKrea2Reference:
             "position": (list(KREA2_POSITIONS),),
             "width": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8}),
             "height": ("INT", {"default": 1024, "min": 16, "max": 16384, "step": 8}),
+            "steps": ("INT", {"default": 32, "min": 1, "max": 10000}),
+            "forge_syntax": ("BOOLEAN", {"default": True}),
         }}
 
     RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING")
@@ -113,7 +210,7 @@ class AIStudioKrea2Reference:
         return []
 
     def apply(self, model, clip, vae, image, text, negative_text, file, strength, grounding_px, boost, position, width,
-              height, positive=None, negative=None):
+              height, steps=32, forge_syntax=True, positive=None, negative=None):
         if not file:
             raise ValueError("레퍼런스 파일이 비어 있음")
         torch = require_torch()
@@ -130,18 +227,22 @@ class AIStudioKrea2Reference:
         })[0]
 
         def encode(prompt, pixels):
-            return invoke_provider("Krea2EditGroundedEncode", method="encode", feature=feature, kwargs={
-                "clip": clip, "prompt": prompt, "image": image, "grounding_px": pixels})[0]
+            return scheduled_encode(
+                lambda segment: invoke_provider("Krea2EditGroundedEncode", method="encode", feature=feature, kwargs={
+                    "clip": clip, "prompt": segment, "image": image, "grounding_px": pixels})[0],
+                prompt, steps, forge_syntax)
 
         return patched, encode(text, grounding_px), encode(negative_text, KREA2_NEGATIVE_GROUNDING)
 
 
 NODE_CLASS_MAPPINGS = {
+    "AIStudioTextEncoderLoader": AIStudioTextEncoderLoader,
     "AIStudioMossStream": AIStudioMossStream,
     "AIStudioAnimaReference": AIStudioAnimaReference,
     "AIStudioKrea2Reference": AIStudioKrea2Reference,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "AIStudioTextEncoderLoader": "AI Studio Text Encoder Loader",
     "AIStudioMossStream": "AI Studio MOSS fp32 Stream",
     "AIStudioAnimaReference": "AI Studio Anima Reference",
     "AIStudioKrea2Reference": "AI Studio Krea2 Reference",

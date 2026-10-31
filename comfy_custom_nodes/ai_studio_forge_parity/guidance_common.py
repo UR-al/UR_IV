@@ -62,6 +62,8 @@ SAMPLER_BASE_ATTR = "_forge_neo_base"
 # Dy sub-steps under SPEED and passes ``STEP_OFFSET_KWARG`` instead.
 DY_SUBSTEPS_OFF_KEY = "ai_studio_dy_substeps_off"
 
+ASYM_REFERENCE_KEY = "ai_studio_asym_reference"  # transformer option: a reference that runs the blocks itself
+
 
 def parse_indices(spec: str, count: int, *, default: str = "") -> set[int]:
     """Parse ``8-18,22`` and clamp it to the available block count.

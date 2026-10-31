@@ -206,19 +206,24 @@ export function pickCheckpoint(state, unet, lists = {}) {
 }
 
 const SIZE_STEP = 8;
+const MOSS_SIZE_STEP = 16;
 const SIZE_MIN = 64;
 const SIZE_MAX = 4096;
 
+/** The size grid of `family`: MOSS latents are 16x, a size off that grid would change without notice. */
+export const sizeStep = (family) => (family === "moss" ? MOSS_SIZE_STEP : SIZE_STEP);
+const familySide = (value, family) => (family === "moss" ? Math.floor(value / MOSS_SIZE_STEP + 0.5) * MOSS_SIZE_STEP : value);
+
 /**
  * The generation size for an i2i / inpaint input image (Forge's send-to carries the image's size): each side rounded
- * to a multiple of 8, both shrunk together to fit 4096 so the aspect holds; null when the size is unknown.
+ * to a multiple of `step`, both shrunk together to fit 4096 so the aspect holds; null when the size is unknown.
  */
-export function imageSize(width, height) {
+export function imageSize(width, height, step = SIZE_STEP) {
   const w = Number(width);
   const h = Number(height);
   if (!(Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0)) return null;
   const fit = Math.min(1, SIZE_MAX / Math.max(w, h)); // shrink both sides, or a big image would be cropped to fit
-  const side = (value) => Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round((value * fit) / SIZE_STEP) * SIZE_STEP));
+  const side = (value) => Math.max(SIZE_MIN, Math.min(SIZE_MAX, Math.round((value * fit) / step) * step));
   return { width: side(w), height: side(h) };
 }
 
@@ -244,11 +249,30 @@ export function referenceFile(state, family) {
 
 const referenceRuns = (s, family) => s.reference.on && family !== "moss";
 
+/** The guidance suite when its row is on, else null. */
+const guidanceOn = (s) => (s.ext.guidance.on ? s.ext.guidance : null);
+
+function snaprefPagClash(s, family) {
+  const guidance = guidanceOn(s);
+  return Boolean(guidance) && family === "anima" && s.reference.method === "snapref" && guidance.guid_enabled
+    && guidance.guid_attn_method === "PAG" && Number(guidance.guid_scale) !== 0;
+}
+
+/** What the guidance suite loses under Ref Adapter: a v2 file runs the blocks itself, past these three patches. */
+export function refAdapterDrops(state) {
+  const s = withDefaults(state);
+  const guidance = guidanceOn(s);
+  if (!guidance || modelFamily(s.unet) !== "anima" || !s.reference.on || s.reference.method !== "ref_adapter") return [];
+  const seg = guidance.guid_enabled && guidance.guid_attn_method === "SEG";
+  return [guidance.guid_dave_enabled && "DAVE", guidance.guid_slg_on && "SLG", seg && "SEG"].filter(Boolean);
+}
+
 export const PICK_NOTICES = Object.freeze({
   models: "체크포인트·TE·VAE 고르기",
   upscale: "업스케일 모델 고르기",
   referenceImage: "레퍼런스 이미지 고르기",
   referenceFile: "레퍼런스 파일 고르기",
+  snaprefPag: "SnapRef 는 PAG 와 같이 못 씀: Ref Adapter 로 바꾸거나 PAG 끄기",
 });
 
 /**
@@ -264,6 +288,7 @@ export function missingPicks(state, action = null) {
   if (action !== "upscale" && referenceRuns(s, family)) {
     if (!s.reference.image) return PICK_NOTICES.referenceImage;
     if (!referenceFile(s, family)) return PICK_NOTICES.referenceFile;
+    if (snaprefPagClash(s, family)) return PICK_NOTICES.snaprefPag;
   }
   return "";
 }
@@ -306,6 +331,15 @@ const NEGATIVE_WEIGHT = /:\s*-\s*\d[\d.]*\s*\)/;
 export function hasNegativeWeights(state) {
   const s = withDefaults(state);
   return NEGATIVE_WEIGHT.test(s.prompt) || NEGATIVE_WEIGHT.test(s.negative);
+}
+
+const PROMPT_WEIGHT = /\((?:[^()]|\([^()]*\))*:\s*-?(?:\d+\.?\d*|\.\d+)\s*\)/; // a tag's own `(series)` may sit inside
+const hasWeight = (text) => PROMPT_WEIGHT.test(text.replace(/\\[()]/g, ""));
+
+/** True when a prompt has an explicit `(x:1.2)`: MOSS's and Krea2's encoders read it as words. */
+export function hasPromptWeights(state) {
+  const s = withDefaults(state);
+  return hasWeight(s.prompt) || hasWeight(s.negative);
 }
 
 export function missingLoras(state, available) {
@@ -367,6 +401,7 @@ function mainInputs(s, options) {
   const family = modelFamily(s.unet);
   const isI2i = s.tab === "i2i";
   const select = { select: is38 ? 1 : 0 };
+  const size = isI2i ? s.i2i : s;
   const encode = { steps: s.steps, forge_syntax: s.forge_like.master && s.forge_like.prompt_syntax };
   return {
     unet: is38 ? {} : { unet_name: choice(s.unet) },
@@ -384,11 +419,11 @@ function mainInputs(s, options) {
     neg_encode: encode,
     reference_image: { image: choice(s.reference.image) },
     anima_ref: animaRefInputs(s.reference),
-    krea2_ref: { ...s.reference.krea2, width: (isI2i ? s.i2i : s).width, height: (isI2i ? s.i2i : s).height },
+    krea2_ref: { ...s.reference.krea2, width: size.width, height: size.height, ...encode },
     latent: {
       mode: !isI2i ? "txt2img" : s.i2i_mode === "inpaint" ? "inpaint" : "img2img",
-      width: (isI2i ? s.i2i : s).width,
-      height: (isI2i ? s.i2i : s).height,
+      width: familySide(size.width, family),
+      height: familySide(size.height, family),
       batch_size: s.batch,
       mask_blur: s.i2i.mask_blur,
     },
@@ -558,6 +593,7 @@ export function recordFromParameters(text) {
   const promptLines = negativeAt < 0 ? lines : lines.slice(0, negativeAt);
   const negativeLines = negativeAt < 0 ? [] : [lines[negativeAt].slice("Negative prompt:".length), ...lines.slice(negativeAt + 1)];
   const record = { prompt: promptLines.join("\n").trim(), negative: negativeLines.join("\n").trim(), seed, steps };
+  if (params.Model) record.model = params.Model; // not a state key: it only tells which family made the image
   const cfg = Number.parseFloat(params["CFG scale"]);
   if (Number.isFinite(cfg)) record.cfg = cfg;
   const size = /^(\d+)x(\d+)$/.exec(params.Size ?? "");

@@ -215,6 +215,16 @@ class CheckpointTests(unittest.TestCase):
             with self.subTest(pair=pair):
                 self.assertEqual(_plan({}, _axes(("checkpoint", pair)), families=families).errors, errors)
 
+    def test_checkpoint_axis_stays_in_the_panels_family(self):
+        families = {"anima-2.9b.safetensors": "2.9b", "anima-3.8b.safetensors": "3.8b", "moss_sft.safetensors": "moss",
+                    "krea2.safetensors": "krea2"}
+        for panel, value, errors in (("anima-2.9b.safetensors", "moss_sft", [xp.MIXED_FAMILIES]),
+                                     ("krea2.safetensors", "anima-2.9b", [xp.MIXED_FAMILIES]),
+                                     ("moss_sft.safetensors", "moss_sft", []),
+                                     ("anima-3.8b.safetensors", "anima-2.9b", [])):
+            with self.subTest(panel=panel, value=value):
+                self.assertEqual(_plan({"unet": panel}, _axes(("checkpoint", value)), families=families).errors, errors)
+
     def test_families_checked_across_axes(self):
         plan = _plan({}, _axes(("checkpoint", "anima-2.9b"), ("checkpoint", "anima-3.8b")))
         self.assertEqual(plan.errors, [xp.MIXED_FAMILIES])

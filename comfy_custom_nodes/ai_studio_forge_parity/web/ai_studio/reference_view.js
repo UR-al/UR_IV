@@ -21,11 +21,11 @@ const QUADVIEW_CAPTION = "Convert the character in the image to a Character Shee
 const DEFAULT_GROUNDING = 768;
 const SHEET_GROUNDING = 1024; // the CharacterSheet workflows feed the text encoder a 1024 px reference
 const CARD_KEY = "reference";
-const UNTESTED = "가중치는 Anima base(28블록) 기준. 2.9B·3.8B 는 충돌 없이 돌지만 결과는 아직 미검증";
 const MOSS_NONE = "불가: MOSS 에는 레퍼런스가 없음";
 const OLD_GRAPH = "불가: 이 워크플로에는 레퍼런스 노드가 없음. AI Studio Anima.json 을 새로 여세요";
 
 const fileName = (entry) => entry.replace(/\\/g, "/").split("/").pop();
+const REMAPPED_COPY = /__\d+b\.[^.]+$/; // reference_layout.py's copies for 2.9B / 3.8B: picked for the model at run time
 
 /** Absent LiteGraph (tests) counts as installed; a missing provider greys the switch and runs without it. */
 export function nodeInstalled(name) {
@@ -64,7 +64,7 @@ const field = (label, control) =>
 
 /** The picks of `key`'s adapter files in the LoRA list; the current pick stays listed even when its file is gone. */
 function filePick(key, current, view, pick) {
-  const entries = view.loras.filter((entry) => FILE_PATTERNS[key].test(fileName(entry)));
+  const entries = view.loras.filter((entry) => FILE_PATTERNS[key].test(fileName(entry)) && !REMAPPED_COPY.test(entry));
   return select(optionItems(entries, current, { empty: entries.length ? "[파일]" : "[파일 없음: LoRA 폴더에 받기]" }), current, pick);
 }
 
@@ -98,22 +98,23 @@ function adapterFields(values, view) {
   ];
 }
 
-function krea2Fields(values, prompt, view) {
+function krea2Fields(values, view) {
   const write = (key) => (value) => view.set((s) => { s.reference.krea2[key] = value; });
   const pickFile = (value) => view.set((s) => {
     s.reference.krea2.file = value;
     s.reference.krea2.grounding_px = SHEET_FILE.test(value) ? SHEET_GROUNDING : DEFAULT_GROUNDING;
   }, true);
   const positions = KREA2_POSITIONS.map((value) => ({ value, label: POSITION_LABELS[value] }));
-  const canTrigger = QUADVIEW_FILE.test(values.file) && !prompt.includes(QUADVIEW_CAPTION);
   return [
     field("LoRA", filePick("krea2", values.file, view, pickFile)),
     field("LoRA 세기", number(values.strength, write("strength"), { min: -10, max: 10, step: 0.05 })),
     field("참조 세기", number(values.boost, write("boost"), { min: 0, max: 1000, step: 0.05 })),
     field("참조 크기", number(values.grounding_px, write("grounding_px"), { min: 0, max: 4096, step: 64, title: "TE 에 넣는 이미지의 긴 변" })),
     field("위치", select(positions, values.position, write("position"))),
-    canTrigger
-      ? h("button", { type: "button", class: "ais-add", onClick: () => view.set((s) => { s.prompt = [QUADVIEW_CAPTION, s.prompt].filter(Boolean).join(" "); }, true) }, "트리거 넣기")
+    QUADVIEW_FILE.test(values.file)
+      ? h("button", { type: "button", class: "ais-add", onClick: () => view.set((s) => { // typing does not redraw this card
+        if (!s.prompt.includes(QUADVIEW_CAPTION)) s.prompt = [QUADVIEW_CAPTION, s.prompt].filter(Boolean).join(" ");
+      }, true) }, "트리거 넣기")
       : null,
   ];
 }
@@ -127,32 +128,37 @@ function animaFields(reference, view) {
     blocked ? h("div", { class: "ais-note" }, blocked) : null,
     ...(reference.method === "snapref" ? snaprefFields(reference.snapref, view) : adapterFields(reference.ref_adapter, view)),
     field("참조 픽셀", number(reference.megapixels, (value) => view.set((s) => { s.reference.megapixels = value; }), { min: 0.25, max: 2, step: 0.05, title: "메가픽셀" })),
-    view.unetFamily === "base" ? null : h("div", { class: "ais-note" }, UNTESTED),
   ];
 }
 
 function fields(state, view) {
   const { reference } = state;
   return h("div", { class: "ais-ext-body ais-ref-body" }, imageBox(reference, view), h("div", { class: "ais-ext-fields" },
-    view.family === "krea2" ? krea2Fields(reference.krea2, state.prompt, view) : animaFields(reference, view)));
+    view.family === "krea2" ? krea2Fields(reference.krea2, view) : animaFields(reference, view)));
 }
 
 /**
- * The card. `view`: `set(mutate, rerender)`, `hasRole(role)` (optional), `family`, `unetFamily`, `memory` (extMemory()),
- * `rerender()`, `loras` (file names), `image` {url(value), upload(file) -> {name}}.
+ * The card. `view`: `set(mutate, rerender)`, `hasRole(role)` (optional), `family`, `memory` (extMemory()),
+ * `rerender()`, `loras` (file names), `refreshLoras()` (optional), `image` {url(value), upload(file) -> {name}}.
  */
 export function renderReference(state, view) {
   const { reference } = state;
   const reason = referenceBlock(view.family, reference.method, view.hasRole); // the caret still opens: the other method may run
   const open = view.memory.open.has(CARD_KEY) && view.family !== "moss";
   const flipOpen = () => {
-    if (!view.memory.open.delete(CARD_KEY)) view.memory.open.add(CARD_KEY);
+    if (!view.memory.open.delete(CARD_KEY)) {
+      view.memory.open.add(CARD_KEY);
+      view.refreshLoras?.();
+    }
     view.rerender();
   };
-  const toggle = () => view.set((s) => {
-    s.reference.on = !s.reference.on;
-    if (s.reference.on) view.memory.open.add(CARD_KEY); // what it needs is below the switch
-  }, true);
+  const toggle = () => {
+    view.set((s) => {
+      s.reference.on = !s.reference.on;
+      if (s.reference.on) view.memory.open.add(CARD_KEY); // what it needs is below the switch
+    }, true);
+    view.refreshLoras?.();
+  };
   const ready = reference.image && referenceFile(state, view.family);
   const title = `레퍼런스 (${FAMILY_LABELS[view.family]})`;
   return h("div", { class: `ais-node ais-ext-group ${open ? "ais-ext-wide" : ""}` },

@@ -181,6 +181,28 @@ def _plain_encode(clip, text: str):
     return invoke_provider("CLIPTextEncode", method="encode", feature="Studio prompt", args=(clip, text))[0]
 
 
+def scheduled_encode(encode_one, text, steps, forge_syntax=True):
+    """``encode_one(text)`` as Forge reads the prompt: each ``[a:b:w]`` / ``[a|b]`` segment on its own timestep range."""
+    if not forge_syntax:
+        return encode_one(text)
+    steps = int(steps)
+    segments = schedule_prompt(text, steps)
+    if len(segments) == 1:
+        return encode_one(segments[0][1])
+    encoded: dict = {}
+    combined = []
+    start = 0
+    for end, segment in segments:
+        if segment not in encoded:
+            encoded[segment] = encode_one(segment)
+        combined += invoke_provider(
+            "ConditioningSetTimestepRange", method="set_range", feature="Studio prompt editing",
+            args=(encoded[segment], start / steps, end / steps),
+        )[0]
+        start = end
+    return combined
+
+
 class AIStudioPromptEncode:
     """CLIPTextEncode with Forge prompt editing: each ``[a:b:w]`` / ``[a|b]`` segment becomes a timestep range."""
 
@@ -203,24 +225,7 @@ class AIStudioPromptEncode:
                    "ranges over the given steps (off = the same as CLIP Text Encode).")
 
     def encode(self, clip, text, steps, forge_syntax=True):
-        if not forge_syntax:
-            return (_plain_encode(clip, text),)
-        steps = int(steps)
-        segments = schedule_prompt(text, steps)
-        if len(segments) == 1:
-            return (_plain_encode(clip, segments[0][1]),)
-        encoded: dict = {}
-        combined = []
-        start = 0
-        for end, segment in segments:
-            if segment not in encoded:
-                encoded[segment] = _plain_encode(clip, segment)
-            combined += invoke_provider(
-                "ConditioningSetTimestepRange", method="set_range", feature="Studio prompt editing",
-                args=(encoded[segment], start / steps, end / steps),
-            )[0]
-            start = end
-        return (combined,)
+        return (scheduled_encode(lambda segment: _plain_encode(clip, segment), text, steps, forge_syntax),)
 
 
 def _ui_node(class_name: str, widget: str, description: str) -> type:

@@ -12,13 +12,16 @@ import {
   effectivePrompt,
   imageSize,
   missingLoras,
+  hasPromptWeights,
   missingPicks,
   modelFamily,
   pickCheckpoint,
   postPrompt,
   postRunState,
   recordFromParameters,
+  refAdapterDrops,
   referenceFile,
+  sizeStep,
   stageModes,
   unetFamily,
   withDefaults,
@@ -491,13 +494,14 @@ test("recordFromParameters parses forge text", () => {
     cfg: 3,
     width: 832,
     height: 1216,
+    model: "anima-preview2",
   });
 });
 
 test("recordFromParameters reads multi-line prompts, quoted values and no negative", () => {
   const text = 'line one\nline two\nSteps: 20, Sampler: "DPM++ 2M, Karras", CFG scale: 4.5, Seed: 123, Size: 512x768, Model: "a:b"';
   assert.deepEqual(recordFromParameters(text), {
-    prompt: "line one\nline two", negative: "", seed: 123, steps: 20, cfg: 4.5, width: 512, height: 768,
+    prompt: "line one\nline two", negative: "", seed: 123, steps: 20, cfg: 4.5, width: 512, height: 768, model: "a:b",
   });
   const multiNeg = "p\nNegative prompt: n1\nn2\nSteps: 10, Seed: 1";
   assert.deepEqual(recordFromParameters(multiNeg), { prompt: "p", negative: "n1\nn2", seed: 1, steps: 10 });
@@ -716,4 +720,53 @@ test("a family's default TE and VAE", () => {
   assert.equal(defaultModel("vaes", vaes, null, "moss"), "moss_image_vae_fp32.safetensors");
   assert.equal(defaultModel("vaes", vaes, null, "krea2"), "sub/qwen_image_vae.safetensors");
   assert.equal(defaultModel("tes", ["krea2UncensoredLLMCLIP_v10.safetensors"], null, "krea2"), "");
+});
+
+test("MOSS sizes snap to its 16x grid at run time and in the send-to size", () => {
+  const roles = { latent: "1", krea2_ref: "2" };
+  const prompt = { 1: { inputs: {} }, 2: { inputs: {} } };
+  const out = (unet) => applyStateToPrompt(prompt, roles, ready({ unet, width: 856, height: 840 }), { rng: fixedRng })[1].inputs;
+  assert.deepEqual([out("moss_sft.safetensors").width, out("moss_sft.safetensors").height], [864, 848]);
+  assert.deepEqual([out("anima.safetensors").width, out("anima.safetensors").height], [856, 840]);
+  assert.equal(sizeStep("moss"), 16);
+  assert.equal(sizeStep("krea2"), 8);
+  assert.deepEqual(imageSize(1000, 1000, sizeStep("moss")), { width: 1008, height: 1008 });
+  assert.deepEqual(imageSize(1000, 1000), { width: 1000, height: 1000 });
+});
+
+test("Krea2's reference node gets the prompt editing settings", () => {
+  const prompt = { 2: { inputs: {} } };
+  const out = applyStateToPrompt(prompt, { krea2_ref: "2" }, ready({ unet: "krea2.safetensors", steps: 12 }), { rng: fixedRng })[2].inputs;
+  assert.deepEqual([out.steps, out.forge_syntax], [12, true]);
+});
+
+test("SnapRef refuses PAG, Ref Adapter names what it loses", () => {
+  const ext = structuredClone(DEFAULT_STATE.ext);
+  Object.assign(ext.guidance, { on: true, guid_enabled: true, guid_attn_method: "PAG", guid_scale: 3, guid_dave_enabled: true, guid_slg_on: true });
+  const reference = { ...structuredClone(DEFAULT_STATE.reference), on: true, image: "a.png" };
+  reference.snapref.file = "s.safetensors";
+  reference.ref_adapter.file = "a.safetensors";
+  const anima = (ref, extState = ext) => ready({ unet: "anima-base.safetensors", reference: ref, ext: extState });
+  assert.equal(missingPicks(anima(reference)), PICK_NOTICES.snaprefPag);
+  assert.equal(missingPicks(anima({ ...reference, on: false })), "");
+  const adapter = { ...reference, method: "ref_adapter" };
+  assert.equal(missingPicks(anima(adapter)), "");
+  assert.deepEqual(refAdapterDrops(anima(adapter)), ["DAVE", "SLG"]);
+  const seg = structuredClone(ext);
+  Object.assign(seg.guidance, { guid_attn_method: "SEG", guid_dave_enabled: false, guid_slg_on: false });
+  assert.equal(missingPicks(anima(reference, seg)), "");
+  assert.deepEqual(refAdapterDrops(anima(adapter, seg)), ["SEG"]);
+  assert.deepEqual(refAdapterDrops(anima(reference, seg)), []); // SnapRef keeps SEG
+  const parked = structuredClone(ext);
+  parked.guidance.guid_scale = 0;
+  assert.equal(missingPicks(anima(reference, parked)), ""); // PAG at scale 0 installs nothing
+});
+
+test("hasPromptWeights finds explicit weights, not plain parentheses", () => {
+  assert.equal(hasPromptWeights(ready({ prompt: "(red hair:1.3), girl" })), true);
+  assert.equal(hasPromptWeights(ready({ negative: "(blurry:0.7)" })), true);
+  assert.equal(hasPromptWeights(ready({ prompt: "saber_(fate), \\(x:1.2\\)" })), false);
+  assert.equal(hasPromptWeights(ready({ prompt: "(saber_(fate):1.3), (blue hair:.8)" })), true);
+  assert.equal(hasPromptWeights(ready({ prompt: "(hatsune_miku_\\(vocaloid\\):1.2)" })), true);
+  assert.equal(hasPromptWeights(ready({ prompt: "plain (word) 10:30" })), false);
 });

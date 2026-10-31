@@ -300,6 +300,7 @@ app.registerExtension({
       api,
       basePrompt,
       roleIds,
+      roleClass: (role) => roleNodes().get(role)?.comfyClass,
       getState: () => {
         const panel = viewOf(PANEL);
         if (!panel) throw new Error("제어판(AI Studio Panel) 노드가 없음");
