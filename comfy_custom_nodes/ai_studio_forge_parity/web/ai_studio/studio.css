@@ -201,6 +201,9 @@ textarea.ais-negative { min-height: 34px; overflow: hidden; }
 .ais-ext-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .ais-ext-count { font-size: 11.5px; }
 .ais-ext-wide { grid-column: span 2; }
+.ais-ext-body.ais-ref-body { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 8px; align-items: start; }
+.ais-ref-body .ais-i2i-box { min-height: 128px; width: 100%; }
+.ais-note { color: #a8a8a8; font-size: 11px; line-height: 1.35; }
 .ais-ext { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ais-ext-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ais-ext-name { flex: 1; min-width: 0; color: #d8d8d8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

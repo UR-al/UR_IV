@@ -5,8 +5,8 @@ Output: ``comfy_custom_nodes/ai_studio_forge_parity/example_workflows/AI Studio 
 ``tests/test_studio_workflow_json.py`` checks that this script reproduces the saved file.
 
 Layout: the three studio UI nodes on top (panel, result view, XYZ view); below them the engine room, one group per
-row from top to bottom (① models, ①b 3.8B, ② LoRA, ③ prompts, ④ extensions, ⑤ latent/sampling, ⑥ Hires, ⑦ upscale,
-⑧ SAM3, ⑨ save, ⑩ gallery post-processing), nodes left to right, every link left->right in a row or from an upper row
+row from top to bottom (① models, ①b 3.8B / MOSS, ② LoRA, ③ prompts, ③b reference, ④ extensions, ⑤ latent/sampling,
+⑥ Hires, ⑦ upscale, ⑧ SAM3, ⑨ save, ⑩ gallery post-processing), nodes left to right, every link left->right in a row or from an upper row
 to a lower one (R6). Engine nodes are saved folded (the panel's engine-room button unfolds them); groups are sized for
 the unfolded layout. Each engine node carries ``properties.aistudio_role``; the roles come from
 ``web/ai_studio/studio_roles.js`` (R20, single source).
@@ -81,10 +81,11 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("te", "CLIPLoader", "TE"),
         ("vae", "VAELoader", "VAE"),
     ]),
-    ("①b 3.8B", [
+    ("①b 3.8B·MOSS", [
         ("unet38", "ForgeNeoAnima38V2Loader", "UNet 3.8B"),
         ("qwen35", "ForgeNeoAnimaQwen35Loader", "Qwen3.5 TE (3.8B)"),
         ("family_switch_model", "AIStudioSwitch", "계열: 모델"),
+        ("moss_stream", "AIStudioMossStream", "MOSS fp32"),
     ]),
     ("② 시프트·LoRA", [
         ("shift", "ForgeNeoModelSamplingShift", "Shift"),
@@ -102,6 +103,11 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("neg_encode38", "ForgeNeoAnima38V2Prompt", "네거티브 (3.8B)"),
         ("family_switch_pos", "AIStudioSwitch", "계열: 프롬프트"),
         ("family_switch_neg", "AIStudioSwitch", "계열: 네거티브"),
+    ]),
+    ("③b 레퍼런스", [
+        ("reference_image", "LoadImage", "레퍼런스 이미지"),
+        ("anima_ref", "AIStudioAnimaReference", "Anima 레퍼런스"),
+        ("krea2_ref", "AIStudioKrea2Reference", "Krea2 레퍼런스"),
     ]),
     ("④ 확장", [
         ("ext_optimal_scale", "ForgeNeoAnimaOptimalScale", "Optimal Scale"),
@@ -154,14 +160,14 @@ def _detailer_links(role: str, image: str, mask: str, mask_slot: int = 0) -> lis
     return [
         (image, 0, role, "image"), (mask, mask_slot, role, "mask"),
         ("ext_dd_sam3", 0, role, "model"), ("negpip", 1, role, "clip"), ("vae", 0, role, "vae"),
-        ("family_switch_pos", 0, role, "positive"), ("family_switch_neg", 0, role, "negative"),
+        ("krea2_ref", 1, role, "positive"), ("krea2_ref", 2, role, "negative"),
     ]
 
 
 def _hires_links(role: str, samples: str) -> list[tuple]:
     return [
-        ("ext_speed_hires", 0, role, "model"), ("family_switch_pos", 0, role, "positive"),
-        ("family_switch_neg", 0, role, "negative"), (samples, 0, role, "samples"),
+        ("ext_speed_hires", 0, role, "model"), ("krea2_ref", 1, role, "positive"),
+        ("krea2_ref", 2, role, "negative"), (samples, 0, role, "samples"),
         ("vae", 0, role, "base_vae"), ("negpip", 1, role, "base_clip"),
     ]
 
@@ -169,7 +175,8 @@ def _hires_links(role: str, samples: str) -> list[tuple]:
 LINKS = (  # (source role, output slot, target role, input name); ids follow this order
     ("unet", 0, "family_switch_model", "a"),
     ("unet38", 0, "family_switch_model", "b"),
-    ("family_switch_model", 0, "shift", "model"),
+    ("family_switch_model", 0, "moss_stream", "model"),
+    ("moss_stream", 0, "shift", "model"),
     ("shift", 0, "sched", "model"),
     ("sched", 0, "lora_stack", "model"),
     ("te", 0, "lora_stack", "clip"),  # R6: one native TE for both families
@@ -196,12 +203,25 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("pos_encode38", 0, "family_switch_pos", "b"),
     ("neg_encode", 0, "family_switch_neg", "a"),
     ("neg_encode38", 0, "family_switch_neg", "b"),
+    # ③b the reference. Everything after it reads the prompts from krea2_ref: bypassed, it passes the family's prompts
+    ("ext_er_sde", 0, "anima_ref", "model"),
+    ("negpip", 1, "anima_ref", "clip"),
+    ("vae", 0, "anima_ref", "vae"),
+    ("reference_image", 0, "anima_ref", "image"),
+    ("anima_ref", 0, "krea2_ref", "model"),
+    ("family_switch_pos", 0, "krea2_ref", "positive"),
+    ("family_switch_neg", 0, "krea2_ref", "negative"),
+    ("negpip", 1, "krea2_ref", "clip"),
+    ("vae", 0, "krea2_ref", "vae"),
+    ("reference_image", 0, "krea2_ref", "image"),
+    ("lora_stack", 2, "krea2_ref", "text"),
+    ("lora_stack", 3, "krea2_ref", "negative_text"),
     # ④ extensions: the stack every pass shares, then each pass's own Detail Daemon / SPEED
-    ("ext_er_sde", 0, "ext_optimal_scale", "model"),
+    ("krea2_ref", 0, "ext_optimal_scale", "model"),
     ("ext_optimal_scale", 0, "ext_guidance", "model"),
     ("negpip", 1, "ext_guidance", "clip"),
-    ("family_switch_pos", 0, "ext_guidance", "positive"),
-    ("family_switch_neg", 0, "ext_guidance", "negative"),
+    ("krea2_ref", 1, "ext_guidance", "positive"),
+    ("krea2_ref", 2, "ext_guidance", "negative"),
     ("ext_guidance", 0, "ext_skim", "model"),
     ("ext_skim", 0, "ext_dd", "model"),
     ("ext_dd", 0, "ext_speed", "model"),
@@ -213,8 +233,8 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("i2i_image", 0, "latent", "inpaint_image"),
     ("i2i_image", 1, "latent", "inpaint_mask"),  # the mask editor's alpha
     ("ext_speed", 0, "sampler", "model"),
-    ("family_switch_pos", 0, "sampler", "positive"),
-    ("family_switch_neg", 0, "sampler", "negative"),
+    ("krea2_ref", 1, "sampler", "positive"),
+    ("krea2_ref", 2, "sampler", "negative"),
     ("latent", 0, "sampler", "latent_image"),
     *_hires_links("hires", "sampler"),
     ("hires", 1, "ext_vae_2x", "vae"),
@@ -405,7 +425,9 @@ def role_values(state: dict) -> dict[str, dict]:
 
 def default_bypassed(state: dict) -> set[str]:
     """studio_logic.js stageModes(DEFAULT_STATE) roles that are bypassed (R7): saved that way as a safe default."""
-    bypassed = {"unet38", "qwen35", "pos_encode38", "neg_encode38"}  # the default unet is not a 3.8B file
+    # the default unet is neither a 3.8B nor a MOSS file; the reference is off
+    bypassed = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "anima_ref",
+                "krea2_ref"}
     if state["tab"] == "t2i":
         bypassed.add("i2i_image")
     if not state["sam3"]["on"]:

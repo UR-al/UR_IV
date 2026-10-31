@@ -39,7 +39,7 @@ from .xyz_values import parse_axis_values
 LETTERS = ("x", "y", "z")
 SEED_RANGE = 4294967294  # random seeds are drawn from [0, SEED_RANGE)
 MAX_GRID_MP = 100
-MIXED_FAMILIES = "2.9B·base와 3.8B는 한 격자에 섞을 수 없음"
+MIXED_FAMILIES = "모델 계열이 다르면 한 격자에 섞을 수 없음 (2.9B·base / 3.8B / MOSS / Krea2)"
 SCRIPT_NAME = "X/Y/Z plot"
 
 
@@ -141,7 +141,7 @@ def _resolve(axes: list[_Axis], families: dict) -> list[list]:
         resolved.append(values)
     if errors:
         raise _PlanError(*errors)
-    if "3.8b" in seen and seen - {"3.8b"}:
+    if len({"anima" if family in ("2.9b", "base") else family for family in seen}) > 1:
         raise _PlanError(MIXED_FAMILIES)
     return resolved
 
@@ -319,7 +319,7 @@ def _check_loras(cells: list, loras) -> None:
 
 def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, families: dict, loras=None) -> XyzPlan:
     """Plan an X/Y/Z grid: ``axes`` is ``[{"axis": AxisSpec.id, "text": value box}]`` for X, Y, Z (missing = Nothing),
-    ``families`` maps every UNET file to ``"2.9b" | "base" | "3.8b"``, ``loras`` is the LoRA file list (or a callable
+    ``families`` maps every UNET file to ``"2.9b" | "base" | "3.8b" | "moss" | "krea2"``, ``loras`` is the LoRA file list (or a callable
     returning it; None skips the LoRA check).  See the module docstring for the rules."""
     options = options if isinstance(options, dict) else {}
     keep_minus1 = bool(options.get("keep_minus1"))

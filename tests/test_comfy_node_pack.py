@@ -103,6 +103,9 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "AIStudioPanel",              # Anima studio UI nodes: drawn by the studio JS, no outputs, never run
     "AIStudioResultView",
     "AIStudioXYZView",
+    "AIStudioMossStream",         # studio: MOSS fp32 stream (ComfyUI-MOSS-Toolkit)
+    "AIStudioAnimaReference",     # studio: Anima reference (SnapRef / Anima Ref Adapter)
+    "AIStudioKrea2Reference",     # studio: Krea2 reference (comfyui-krea2edit)
     "AIStudioSwitch",             # Anima studio: lazy a/b switch between the 2.9B/base and 3.8B paths
 })
 EXPECTED_BUNDLED_NODES = COMPILER_BUILT_NODES | CUSTOM_WORKFLOW_NODES
@@ -113,6 +116,9 @@ def _source(root: Path, body: str = "VALUE = 1\n") -> Path:
     source.mkdir()
     (source / "__init__.py").write_text(body, encoding="utf-8")
     return source
+
+
+MODEL_NODES_1_11 = ("AIStudioMossStream", "AIStudioAnimaReference", "AIStudioKrea2Reference")
 
 
 class TestBundledComfyNodePack(unittest.TestCase):
@@ -182,7 +188,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 52)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 55)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
@@ -230,16 +236,28 @@ class TestBundledComfyNodePack(unittest.TestCase):
     def test_pack_version_matches_package_version(self):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
+    def test_model_families_release_is_1_11_0(self):
+        self.assertEqual(bundled_pack.__version__, "1.11.0")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.11.0: the studio picks its model family", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.11.0 changes"), readme.index("## 1.10.0 changes"))
+        changes = " ".join(readme.split("## 1.11.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for name in MODEL_NODES_1_11:
+            with self.subTest(name=name):
+                self.assertIn(name, NODE_CLASS_MAPPINGS)
+                self.assertIn(f"`{name}`", changes)
+
     def test_anima_studio_release_is_1_10_0(self):
         # 팩 1.10.0 = Anima 스튜디오(노드·웹 확장·라우트·예제 워크플로). 버전·변경 주석·README 변경 절이 같이 간다.
-        self.assertEqual(bundled_pack.__version__, "1.10.0")
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# 1.10.0: the Anima studio", source)
         readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
         self.assertLess(readme.index("## 1.10.0 changes"), readme.index("## 1.9.0 changes"))
         changes = " ".join(readme.split("## 1.10.0 changes", 1)[1].split("\n## ", 1)[0].split())
-        studio_nodes = sorted(name for name in NODE_CLASS_MAPPINGS if name.startswith("AIStudio") and name != "AIStudioRelight")
+        studio_nodes = sorted(name for name in NODE_CLASS_MAPPINGS if name.startswith("AIStudio") and name != "AIStudioRelight" and name not in MODEL_NODES_1_11)
         self.assertEqual(len(studio_nodes), 8)
         for text in (*(f"`{name}`" for name in studio_nodes),
                      "`example_workflows/AI Studio Anima.json`", "`tools/build_anima_studio_workflow.py`",

@@ -197,7 +197,7 @@ class CheckpointTests(unittest.TestCase):
 
     def test_mixed_families_rejected(self):
         plan = _plan({}, _axes(("checkpoint", "anima-2.9b, anima-3.8b")))
-        self.assertEqual(plan.errors, ["2.9B·base와 3.8B는 한 격자에 섞을 수 없음"])
+        self.assertEqual(plan.errors, [xp.MIXED_FAMILIES])
         self.assertEqual(plan.cells, [])
 
     def test_2_9b_and_base_may_mix(self):
@@ -206,9 +206,18 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual([c.state["unet"] for c in plan.cells],
                          ["anima-2.9b.safetensors", "anima-base.safetensors"])
 
+    def test_moss_and_krea2_mix_with_nothing_but_their_own_family(self):
+        families = {"anima-2.9b.safetensors": "2.9b", "anima-base.safetensors": "base",
+                    "moss_sft.safetensors": "moss", "moss_base.safetensors": "moss", "krea2.safetensors": "krea2"}
+        for pair, errors in (("anima-2.9b, anima-base", []), ("moss_sft, moss_base", []),
+                             ("anima-2.9b, moss_sft", [xp.MIXED_FAMILIES]),
+                             ("krea2, moss_sft", [xp.MIXED_FAMILIES])):
+            with self.subTest(pair=pair):
+                self.assertEqual(_plan({}, _axes(("checkpoint", pair)), families=families).errors, errors)
+
     def test_families_checked_across_axes(self):
         plan = _plan({}, _axes(("checkpoint", "anima-2.9b"), ("checkpoint", "anima-3.8b")))
-        self.assertEqual(plan.errors, ["2.9B·base와 3.8B는 한 격자에 섞을 수 없음"])
+        self.assertEqual(plan.errors, [xp.MIXED_FAMILIES])
 
 
 class FieldTests(unittest.TestCase):

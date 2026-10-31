@@ -3,7 +3,7 @@
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { EXT_SCHEMA } from "./ext_schema.js";
 import { h, numberBox, optionItems, pill, select } from "./studio_dom.js";
-import { comboItems, extFieldValue } from "./studio_ext.js";
+import { comboItems, extFamilyBlock, extFieldValue } from "./studio_ext.js";
 
 const EXTENSIONS = EXT_SCHEMA.extensions;
 const GROUP_COLOR = "#6b5f8a";
@@ -12,11 +12,12 @@ const missingNode = (label) => `불가: 이 워크플로에는 ${label} 노드�
 /** What the panel remembers between redraws, never saved: unfolded rows and sections, the file lists read so far. */
 export const extMemory = () => ({ open: new Set(), lists: new Map(), asked: new Set() });
 
-const blockReason = (item, hasRole) => (hasRole && !hasRole(item.role) ? missingNode(item.label) : "");
+const blockReason = (item, hasRole, family = "anima") =>
+  (hasRole && !hasRole(item.role) ? missingNode(item.label) : extFamilyBlock(item.key, family));
 
-/** Turns off, in a run's state, the extensions whose node this graph lacks (their switch is greyed). */
-export function dropBlockedExt(ext, hasRole) {
-  for (const item of EXTENSIONS) if (blockReason(item, hasRole)) ext[item.key].on = false;
+/** Turns off, in a run's state, the extensions this graph lacks or `family` cannot run (their switch is greyed). */
+export function dropBlockedExt(ext, hasRole, family = "anima") {
+  for (const item of EXTENSIONS) if (blockReason(item, hasRole, family)) ext[item.key].on = false;
 }
 
 const hasFileList = (item) => item.fields.some((field) => field.kind === "choice" && !field.choices.length);
@@ -94,16 +95,29 @@ function fieldsBody(item, values, view) {
 
 function extRow(item, state, view) {
   const values = state.ext[item.key];
-  const reason = blockReason(item, view.hasRole);
+  const reason = blockReason(item, view.hasRole, view.family);
   const open = view.memory.open.has(item.key);
   if (open || values.on) askLists(item, view); // a switched-on one too: the run notices read its list
-  const toggle = () => view.set((s) => { s.ext[item.key].on = !s.ext[item.key].on; }, true);
+  return extLine({
+    key: item.key,
+    label: item.label,
+    on: values.on,
+    reason,
+    open,
+    toggle: () => view.set((s) => { s.ext[item.key].on = !s.ext[item.key].on; }, true),
+    flipOpen: () => flip(view, item.key),
+    body: () => fieldsBody(item, values, view),
+  });
+}
+
+/** One switch-name-caret line with its fields below it, the shape of every extension row (`reference_view.js` too). */
+export function extLine({ key, label, on, reason, open, toggle, flipOpen, body }) {
   const line = h("div", { class: "ais-ext-line" },
-    pill(values.on && !reason, toggle, { title: reason || undefined, disabled: Boolean(reason) }),
-    h("span", { class: "ais-ext-name" }, item.label),
-    h("button", { type: "button", class: "ais-caret", "aria-label": `${item.label} 설정`, "aria-expanded": open ? "true" : "false", title: "설정", onClick: () => flip(view, item.key) },
+    pill(on && !reason, toggle, { title: reason || undefined, disabled: Boolean(reason) }),
+    h("span", { class: "ais-ext-name" }, label),
+    h("button", { type: "button", class: "ais-caret", "aria-label": `${label} 설정`, "aria-expanded": open ? "true" : "false", title: "설정", onClick: flipOpen },
       open ? "▴" : "▾"));
-  return h("div", { class: "ais-ext", "data-ext": item.key }, line, open ? fieldsBody(item, values, view) : null);
+  return h("div", { class: "ais-ext", "data-ext": key }, line, open ? body() : null);
 }
 
 function groupCard(name, items, state, view) {
@@ -115,13 +129,14 @@ function groupCard(name, items, state, view) {
 
 /**
  * The "확장기능" group. `ctx`: `set(mutate, rerender)`, `hasRole(role)` (optional), `fetchChoices(class)` -> Promise of the
- * `/object_info/<class>` input (optional), `memory` (extMemory()), `rerender()` (a redraw without a state change).
+ * `/object_info/<class>` input (optional), `memory` (extMemory()), `rerender()` (a redraw without a state change),
+ * `family` (`modelFamily`, optional), `leading` (optional card shown before the groups).
  */
 export function renderExtensions(state, ctx) {
   const view = { memory: extMemory(), rerender: () => {}, ...ctx };
-  const count = EXTENSIONS.filter((item) => state.ext[item.key].on && !blockReason(item, view.hasRole)).length;
+  const count = EXTENSIONS.filter((item) => state.ext[item.key].on && !blockReason(item, view.hasRole, view.family)).length;
   const groups = [...new Set(EXTENSIONS.map((item) => item.group))];
   return h("div", { class: "ais-grp ais-ext-root", style: `--c:${GROUP_COLOR}` },
     h("div", { class: "ais-gh ais-ext-head" }, h("span", {}, "확장기능"), count ? h("span", { class: "ais-ext-count" }, `${count}개 켬`) : null),
-    h("div", { class: "ais-grid2" }, groups.map((name) => groupCard(name, EXTENSIONS.filter((item) => item.group === name), state, view))));
+    h("div", { class: "ais-grid2" }, view.leading || null, groups.map((name) => groupCard(name, EXTENSIONS.filter((item) => item.group === name), state, view))));
 }

@@ -28,7 +28,7 @@ UI_LAYOUT = {
     "AIStudioResultView": ([806, 0], [680, 960]),
     "AIStudioXYZView": ([1502, 0], [400, 960]),
 }
-ROW_PREFIXES = ["①", "①b", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
+ROW_PREFIXES = ["①", "①b", "②", "③", "③b", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
 POST_ROW = [
     ("post_image", "LoadImage"),
     ("post_upscale", "AIStudioUpscaleImage"),
@@ -43,12 +43,14 @@ POST_ROW = [
 EXT_ROLES = {"ext_lora_block", "ext_er_sde", "ext_optimal_scale", "ext_guidance", "ext_skim", "ext_dd", "ext_speed",
              "ext_dd_hires", "ext_speed_hires", "ext_dd_sam3", "ext_vae_2x", "ext_pid", "ext_sam3_refine", "ext_sam3_tile",
              "ext_degrid"}
-DEFAULT_BYPASSED = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "i2i_image", "sam3_mask", "sam3_detailer",
+DEFAULT_BYPASSED = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "anima_ref",
+                    "krea2_ref", "i2i_image", "sam3_mask", "sam3_detailer",
                     *(role for role, _ in POST_ROW), *EXT_ROLES}
 # Each pass's MODEL, sampler side first (the app compiler's order; the same tail from ext_skim up).
-GUIDED_CHAIN = ["ext_skim", "ext_guidance", "ext_optimal_scale", "ext_er_sde", "dora", "negpip", "ext_lora_block",
-                "lora_stack", "sched", "shift", "family_switch_model"]
+GUIDED_CHAIN = ["ext_skim", "ext_guidance", "ext_optimal_scale", "krea2_ref", "anima_ref", "ext_er_sde", "dora", "negpip",
+                "ext_lora_block", "lora_stack", "sched", "shift", "moss_stream", "family_switch_model"]
 NODE_TITLE_HEIGHT = 30
+FORCED_INPUTS = {"AIStudioKrea2Reference": ("text", "negative_text")}  # STRING sockets, never widgets
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN"}
 
 
@@ -70,7 +72,8 @@ def _frontend_slots(class_type: str):
     """(input names in slot order, widget names in widgets_values order) as the 1.57.4 frontend builds them."""
     spec = NODE_CLASS_MAPPINGS[class_type].INPUT_TYPES()
     entries = [*spec.get("required", {}).items(), *spec.get("optional", {}).items()]
-    is_widget = [isinstance(value[0], list) or value[0] in WIDGET_TYPES for _, value in entries]
+    is_widget = [(isinstance(value[0], list) or value[0] in WIDGET_TYPES)
+                 and not (value[1] if len(value) > 1 else {}).get("forceInput") for _, value in entries]
     sockets = [name for (name, _), widget in zip(entries, is_widget) if not widget]
     widget_inputs = [name for (name, value), widget in zip(entries, is_widget)
                      if widget and not (value[1] if len(value) > 1 else {}).get("socketless")]
@@ -130,7 +133,7 @@ class WorkflowFileTests(unittest.TestCase):
 
     def test_every_role_once(self):
         roles = _roles_from_js()
-        self.assertEqual(len(roles), 34 + len(EXT_ROLES))
+        self.assertEqual(len(roles), 38 + len(EXT_ROLES))
         self.assertNotIn("family_switch_clip", roles)  # R6
         found = [node["properties"]["aistudio_role"] for node in self.engine]
         self.assertCountEqual(found, roles)
@@ -204,7 +207,8 @@ class WorkflowFileTests(unittest.TestCase):
                 self.assertEqual([entry["name"] for entry in node["inputs"]], names)
                 for entry in node["inputs"]:
                     spec_widget = "widget" in entry
-                    self.assertEqual(spec_widget, entry["type"] in WIDGET_TYPES | {"COMBO"})
+                    forced = entry["name"] in FORCED_INPUTS.get(node["type"], ())
+                    self.assertEqual(spec_widget, entry["type"] in WIDGET_TYPES | {"COMBO"} and not forced)
                     if spec_widget:
                         self.assertEqual(entry["widget"], {"name": entry["name"]})
 
@@ -291,7 +295,7 @@ class WorkflowFileTests(unittest.TestCase):
             self.assertTrue(row, prefix)
             for left, right in zip(row, row[1:]):
                 self.assertLess(left["pos"][0] + left["size"][0], right["pos"][0])
-        self.assertEqual([node["properties"]["aistudio_role"] for node in rows["①b"]][-1], "family_switch_model")  # R6
+        self.assertEqual([node["properties"]["aistudio_role"] for node in rows["①b"]][-2:], ["family_switch_model", "moss_stream"])  # R6
         self.assertEqual([node["properties"]["aistudio_role"] for node in rows["③"]][-2:],
                          ["family_switch_pos", "family_switch_neg"])
 
@@ -357,8 +361,22 @@ class WorkflowFileTests(unittest.TestCase):
         self.assertEqual(self._model_chain("post_sam3_detailer"), self._model_chain("sam3_detailer"))
 
     def test_guidance_suite_gets_the_prompts(self):
-        for name, role in (("positive", "family_switch_pos"), ("negative", "family_switch_neg")):
-            self.assertEqual(self._source(self.by_role["ext_guidance"], name)[0], self.by_role[role])
+        for name, slot in (("positive", 1), ("negative", 2)):
+            node, out_slot = self._source(self.by_role["ext_guidance"], name)[:2]
+            self.assertEqual((node, out_slot), (self.by_role["krea2_ref"], slot))
+
+    def test_krea2_reference_bypassed_hands_each_prompt_through(self):
+        node = self.by_role["krea2_ref"]
+        self.assertEqual(node["mode"], 4)
+        self.assertEqual([entry["type"] for entry in node["inputs"][:3]], ["MODEL", "CONDITIONING", "CONDITIONING"])
+        self.assertEqual(self._source(node, "positive")[0], self.by_role["family_switch_pos"])
+        self.assertEqual(self._source(node, "negative")[0], self.by_role["family_switch_neg"])
+
+    def test_every_prompt_user_reads_krea2_reference(self):
+        for role in ("sampler", "hires", "post_hires", "sam3_detailer", "ext_sam3_refine", "ext_sam3_tile", "post_sam3_detailer"):
+            with self.subTest(role=role):
+                self.assertEqual(self._source(self.by_role[role], "positive")[0], self.by_role["krea2_ref"])
+                self.assertEqual(self._source(self.by_role[role], "negative")[0], self.by_role["krea2_ref"])
 
     def test_image_and_vae_chain(self):
         def source(role, name):

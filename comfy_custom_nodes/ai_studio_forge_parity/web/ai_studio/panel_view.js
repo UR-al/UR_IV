@@ -2,8 +2,10 @@
 // Its state lives as JSON in the node's hidden `state` STRING widget, so it is saved with the workflow.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { dropBlockedExt, extMemory, renderExtensions } from "./ext_view.js";
+import { nodeInstalled, referenceBlock, renderReference } from "./reference_view.js";
 import { createAutocomplete } from "./studio_autocomplete.js";
-import { DORA_MODES, defaultModel, imageSize, withDefaults } from "./studio_logic.js";
+import { FAMILY_LABELS } from "./studio_ext.js";
+import { DORA_MODES, defaultModel, imageSize, modelFamily, pickCheckpoint, unetFamily, withDefaults } from "./studio_logic.js";
 import { autoGrow, h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 
 const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3"];
@@ -12,6 +14,9 @@ const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras",
 const MODEL_KEYS = { unets: "unet", tes: "te", vaes: "vae" };
 const NEGPIP_MISSING = "불가: ComfyUI-ppm 노드 팩(CLIPNegPip)이 설치돼 있지 않음";
 const NEGPIP_OLD_GRAPH = "불가: 이 워크플로에는 NegPiP 노드가 없음. AI Studio Anima.json 을 새로 여세요";
+const NEGPIP_ANIMA_ONLY = "불가: Anima 전용";
+const STREAM_MISSING = "불가: ComfyUI-MOSS-Toolkit 노드 팩(MOSSStreamFP32)이 설치돼 있지 않음";
+const STREAM_OLD_GRAPH = "불가: 이 워크플로에는 fp32 노드가 없음. AI Studio Anima.json 을 새로 여세요";
 const INPAINT_AREA_REASON =
   "불가: 지금 인페인트는 늘 그림 전체를 이 크기로 다시 그린다 (Forge의 '전체'). '마스크만'(잘라서 크게 그리기)은 아직 없음";
 
@@ -37,18 +42,13 @@ const card = (title, head, body, extraClass = "") =>
 
 const row = (label, ...controls) => h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, label), h("span", { class: "ais-ctl" }, controls));
 
-// Absent LiteGraph (tests) counts as installed; a missing provider greys the switch and runs without it.
-const negpipInstalled = () => {
-  const types = globalThis.LiteGraph?.registered_node_types;
-  return !types || Boolean(types.CLIPNegPip);
-};
-
 export class PanelView {
   /**
    * `widget`: the node's hidden `state` widget. `ctx`: `choices(kind)` -> Promise<{items}>, `fetchChoices(class)` ->
    * Promise<`/object_info/<class>` input>, `hasRole(role)`, `generate()`, `stop()`, `changed()`, optional `tags(query, limit)` ->
    * Promise<[{name, category, count, alias?, ko?}]> (prompt tag autocomplete), `engineRoom` {collapsed(),
-   * toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width, height}, maskEditor()}.
+   * toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width, height}, maskEditor()},
+   * `reference` {url(value), upload(file) -> {name}} (the reference image's node).
    */
   constructor(widget, ctx) {
     this.widget = widget;
@@ -58,6 +58,7 @@ export class PanelView {
     this.forgeOpen = false;
     this.extMemory = extMemory();
     this.choices = {};
+    this.families = undefined; // `/choices?kind=unets` families
     // One popup for both prompt boxes; the LoRA list (ComfyUI file names) feeds the `<lora:` suggestions.
     this.autocomplete = ctx.tags ? createAutocomplete({ fetchTags: ctx.tags, loras: () => this.choices.loras || [] }) : null;
     this.state = this.read();
@@ -73,10 +74,22 @@ export class PanelView {
     this.autocomplete?.dispose();
   }
 
-  /** Why NegPiP cannot run here ("" = it can): the provider pack is missing, or this graph predates the NegPiP node. */
+  /** The checkpoint's family: `"anima" | "moss" | "krea2"`. */
+  get family() {
+    return modelFamily(this.state.unet);
+  }
+
+  /** Why NegPiP cannot run here ("" = it can): not Anima, the provider pack is missing, or this graph predates the node. */
   negpipBlock() {
-    if (!negpipInstalled()) return NEGPIP_MISSING;
+    if (this.family !== "anima") return NEGPIP_ANIMA_ONLY;
+    if (!nodeInstalled("CLIPNegPip")) return NEGPIP_MISSING;
     return this.ctx.hasRole && !this.ctx.hasRole("negpip") ? NEGPIP_OLD_GRAPH : "";
+  }
+
+  /** Why MOSS's fp32 stream cannot run here ("" = it can). */
+  streamBlock() {
+    if (!nodeInstalled("MOSSStreamFP32")) return STREAM_MISSING;
+    return this.ctx.hasRole && !this.ctx.hasRole("moss_stream") ? STREAM_OLD_GRAPH : "";
   }
 
   growPrompts() {
@@ -87,6 +100,7 @@ export class PanelView {
     for (const kind of CHOICE_KINDS) {
       this.ctx.choices(kind).then((data) => {
         this.choices[kind] = data?.items || [];
+        if (kind === "unets") this.families = data?.families;
         this.pickDefault(kind, data);
         this.scheduleRender();
       });
@@ -96,7 +110,7 @@ export class PanelView {
   pickDefault(kind, data) {
     const key = MODEL_KEYS[kind];
     if (!key || this.state[key]) return;
-    const name = defaultModel(kind, data?.items, data?.families);
+    const name = defaultModel(kind, data?.items, data?.families, this.family);
     if (name) this.set((s) => { s[key] = name; });
   }
 
@@ -128,7 +142,9 @@ export class PanelView {
     const image = this.ctx.i2i.get();
     if (image) state.i2i.image = image;
     if (this.negpipBlock()) state.negpip = false;
-    dropBlockedExt(state.ext, this.ctx.hasRole);
+    if (this.streamBlock()) state.moss_stream = false;
+    if (referenceBlock(this.family, state.reference.method, this.ctx.hasRole)) state.reference.on = false;
+    dropBlockedExt(state.ext, this.ctx.hasRole, this.family);
     return state;
   }
 
@@ -191,7 +207,7 @@ export class PanelView {
       { type: "button", class: `ais-run ${this.running ? "stop" : ""}`, "aria-label": label, onClick: () => (this.running ? this.ctx.stop() : this.ctx.generate()) },
       label,
     );
-    this.top.replaceChildren(h("strong", {}, "Anima 생성"), button);
+    this.top.replaceChildren(h("strong", {}, `${FAMILY_LABELS[this.family]} 생성`), button);
     this.thin.hidden = !this.running;
     this.bar.style.width = `${Math.min(100, this.percent)}%`;
   }
@@ -226,10 +242,19 @@ export class PanelView {
       pill(s.forge_like.master, () => this.set((st) => { st.forge_like.master = !st.forge_like.master; }, true), { on: "Forge처럼", off: "Forge처럼", title: "Forge처럼 맞추기 (전체)" }),
       h("button", { type: "button", class: "ais-caret", "aria-label": "Forge처럼 항목", title: "Forge처럼 항목", onClick: () => { this.forgeOpen = !this.forgeOpen; this.render(); } }, this.forgeOpen ? "▴" : "▾"),
     );
+    const unet = select(optionItems(this.choices.unets, s.unet, { empty: "[체크포인트]" }), s.unet,
+      (value) => this.set((st) => pickCheckpoint(st, value, { tes: this.choices.tes, vaes: this.choices.vaes }), true), { title: "[체크포인트]" });
+    const stream = this.streamBlock();
     return card("모델 · 샘플링", head, [
-      pick("unets", "unet", "[체크포인트]"),
+      unet,
       pick("tes", "te", "[TE]"),
       pick("vaes", "vae", "[VAE]"),
+      this.family === "moss"
+        ? row("fp32 stream", pill(s.moss_stream && !stream, () => this.set((st) => { st.moss_stream = !st.moss_stream; }, true), {
+          title: stream || "손가락·글자 오차 감소. VRAM 약 0.6GB 더, 속도 약 1.5~10% 느림",
+          disabled: Boolean(stream),
+        }))
+        : null,
       this.forgeOpen ? this.forgeItems(s) : null,
       row("샘플러", pick("samplers", "sampler")),
       row("스케줄러", pick("schedulers", "scheduler")),
@@ -372,6 +397,17 @@ export class PanelView {
       fetchChoices: this.ctx.fetchChoices,
       memory: this.extMemory,
       rerender: () => this.scheduleRender(),
+      family: this.family,
+      leading: renderReference(s, {
+        set: (mutate, rerender) => this.set(mutate, rerender),
+        hasRole: this.ctx.hasRole,
+        family: this.family,
+        unetFamily: unetFamily(s.unet, this.families),
+        memory: this.extMemory,
+        rerender: () => this.scheduleRender(),
+        loras: this.choices.loras || [],
+        image: this.ctx.reference,
+      }),
     });
   }
 

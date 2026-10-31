@@ -123,16 +123,17 @@ async function basePrompt(modes) {
   }
 }
 
-// ---------------------------------------------------------------------------------------------- the i2i image
+// ---------------------------------------------------------------------------------------------- the i2i and reference images
 
-function i2iWidget() {
-  return roleNodes().get("i2i_image")?.widgets?.find((widget) => widget.name === "image") || null;
+function imageWidget(role) {
+  return roleNodes().get(role)?.widgets?.find((widget) => widget.name === "image") || null;
 }
 
-const i2i = {
-  get: () => String(i2iWidget()?.value || ""),
+/** `role`'s LoadImage as the panel's image box uses it. */
+const imageNode = (role) => ({
+  get: () => String(imageWidget(role)?.value || ""),
   set(value) {
-    const widget = i2iWidget();
+    const widget = imageWidget(role);
     if (!widget) return;
     widget.value = value;
     widget.callback?.(value); // LoadImage loads its preview (node.imgs) from the new value
@@ -149,11 +150,13 @@ const i2i = {
     }
     const data = await response.json();
     const value = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
-    i2i.set(value);
+    this.set(value);
     return { name: value, ...(await fileImageSize(file)) };
   },
-  maskEditor: () => openMaskEditor(),
-};
+});
+
+const i2i = { ...imageNode("i2i_image"), maskEditor: () => openMaskEditor() };
+const reference = imageNode("reference_image");
 
 /** `{width, height}` of a picked image file (Forge's send-to size), or `{}` when the browser cannot decode it. */
 async function fileImageSize(file) {
@@ -232,6 +235,7 @@ function contextFor(comfyClass) {
       changed: () => emit("state", null),
       engineRoom,
       i2i,
+      reference,
       hasRole: (role) => roleNodes().has(role),
     };
   }

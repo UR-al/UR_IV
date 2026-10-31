@@ -399,3 +399,19 @@ test("autocomplete: a panel without a tags route simply has no autocomplete", ()
   const view = panelView();
   assert.equal(view.autocomplete, null);
 });
+
+test("a family greys the extensions it cannot run and turns them off for the run", () => {
+  const ext = withDefaults({}).ext;
+  for (const key of ["guidance", "skim", "vae_2x"]) ext[key].on = true;
+  dropBlockedExt(ext, null, "moss");
+  assert.deepEqual([ext.guidance.on, ext.skim.on, ext.vae_2x.on], [false, true, false]);
+  const krea2 = withDefaults({}).ext;
+  for (const key of ["guidance", "skim", "vae_2x"]) krea2[key].on = true;
+  dropBlockedExt(krea2, null, "krea2");
+  assert.deepEqual([krea2.guidance.on, krea2.skim.on, krea2.vae_2x.on], [false, true, true]);
+  const anima = withDefaults({}).ext;
+  anima.guidance.on = true;
+  dropBlockedExt(anima, null);
+  assert.equal(anima.guidance.on, true);
+});
+

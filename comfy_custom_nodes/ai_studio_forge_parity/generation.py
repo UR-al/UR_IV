@@ -414,6 +414,20 @@ class ForgeNeoKSamplerCNS:
         return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise, forge_noise=bool(forge_noise))
 
 
+def _is_flux_sampling(sampling: Any) -> bool:
+    """Flux-type sampling (Krea2) has no ``multiplier``: its timestep is sigma, and its shift is an exponent ``mu``."""
+    return any(klass.__name__ == "ModelSamplingFlux" for klass in type(sampling).__mro__)
+
+
+def _patch_flux_shift(model: Any, original: Any, shift: float):
+    """``ModelSamplingSD3`` would make Krea2's timesteps 1000 times too large; keep the model's own predictor class."""
+    patched = model.clone()
+    sampling = type(original)(model.model.model_config)
+    sampling.set_parameters(shift=float(shift))
+    patched.add_object_patch("model_sampling", sampling)
+    return hires_carry.copy_sampling_attrs(original, patched)
+
+
 def _patch_flow_shift(model: Any, shift: float):
     """Patch a discrete-flow shift without changing its timestep unit.
 
@@ -433,6 +447,8 @@ def _patch_flow_shift(model: Any, shift: float):
     get_model_object = getattr(model, "get_model_object", None)
     if callable(get_model_object):
         original = get_model_object("model_sampling")
+        if _is_flux_sampling(original):
+            return _patch_flux_shift(model, original, shift)
         current = getattr(original, "multiplier", None)
         if current is not None:
             multiplier = float(current)

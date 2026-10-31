@@ -82,6 +82,8 @@ inspector recognises them.
   so ComfyUI never runs them)
 - `AIStudioSwitch` (Anima studio: `select` 0 passes `a`, 1 passes `b`; both inputs are optional and lazy, so only the
   chosen model family's nodes (2.9B/base or 3.8B) run)
+- `AIStudioMossStream`, `AIStudioAnimaReference`, `AIStudioKrea2Reference` (Anima studio: thin nodes over the optional
+  ComfyUI-MOSS-Toolkit, SnapRef, ComfyUI-Anima-Ref-Adapter and comfyui-krea2edit packs; bypassed unless the panel uses them)
 
 `ForgeNeoKSamplerCNS` and `ForgeNeoHiresFix` also take an optional `forge_noise` input (default off; the app compiler
 never sets it) for the Anima studio's "Forge-like noise": each image's initial noise from its own seed (`seed + i`), as
@@ -93,6 +95,25 @@ When the app generates from an ANIMA custom workflow it keeps
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.11.0 changes
+
+The studio now runs three model families on one workflow, picked by the checkpoint's file name: `moss` -> MOSS-Image,
+`krea` -> Krea2, anything else -> Anima. Models load through core `UNETLoader` / `CLIPLoader` (`type` follows the family).
+
+- Changing family keeps the old family's TE, VAE, sampler, scheduler, steps, CFG and Shift in `family_memory` and brings
+  back the new family's, or its defaults (MOSS: euler, sgm_uniform, 50 steps, CFG 3, Shift 5; Krea2: euler, simple,
+  Shift 1.15, Raw 20 steps CFG 3, Turbo 8 steps CFG 1).
+- NegPiP and the extensions that reach into Anima's blocks are greyed out on the other families; X/Y/Z refuses to mix
+  families in one grid.
+- `AIStudioMossStream`: MOSS-Image's fp32 residual stream, from the separate
+  [ComfyUI-MOSS-Toolkit](https://github.com/sorryhyun/ComfyUI-MOSS-Toolkit) pack (Apache-2.0, not bundled).
+- `AIStudioAnimaReference`: character / style reference, either SnapRef (`SnapRef` node from
+  `0ppxnhximxr/snapref-v1a`) or [ComfyUI-Anima-Ref-Adapter](https://github.com/ElectronGirl/ComfyUI-Anima-Ref-Adapter)
+  (Apache-2.0). Their weights are non-commercial, trained on Anima base (28 blocks), and never bundled.
+- `AIStudioKrea2Reference`: an edit LoRA (`krea2_identity_edit_v2`, `krea2_general_edit_v2`, `QuadView_krea2_v1`, ...)
+  through [comfyui-krea2edit](https://github.com/lbouaraba/comfyui-krea2edit) (Apache-2.0, not bundled).
+- `ForgeNeoModelSamplingShift` keeps a flux-type predictor (Krea2 has no timestep multiplier).
 
 ## 1.10.0 changes
 

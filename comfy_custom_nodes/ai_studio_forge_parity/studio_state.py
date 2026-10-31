@@ -20,6 +20,11 @@ DORA_MODES = (
     "Forge/Comfy (stock)",
     "DoRA off (no magnitude)",
 )
+MEMORY_SLOTS = ("anima", "moss", "krea2", "krea2_turbo")  # Turbo takes other numbers than Raw
+REFERENCE_METHODS = ("snapref", "ref_adapter")
+REFERENCE_MODES = ("cs", "char")
+REFERENCE_CORRECTIONS = ("apg", "rescale", "none")
+KREA2_POSITIONS = ("aligned (trained)", "beside (right of target)")
 
 DEFAULT_STATE: dict = {
     "version": 1,
@@ -41,6 +46,8 @@ DEFAULT_STATE: dict = {
     "batch": 1,
     "loras": [],
     "negpip": True,
+    "moss_stream": True,  # MOSS-Image only: the fp32 residual stream
+    "family_memory": {},  # family -> the model picks and sampling numbers it had when the checkpoint left it
     "dora_mode": DORA_MODES[0],
     "forge_like": {"master": True, "noise": True, "prompt_syntax": True, "dora": True, "attention": False},
     "hires": {"on": False, "upscaler": "4x-UltraSharp.pth", "sampler": "", "scale": 1.5, "steps": 16, "denoise": 0.4},
@@ -49,6 +56,17 @@ DEFAULT_STATE: dict = {
     # inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture); the panel shows
     # "전체" greyed out (studio_forge_parity.md), the key keeps the saved shape.
     "i2i": {"image": "", "width": 832, "height": 1216, "denoise": 0.55, "mask_blur": 4, "inpaint_area": "whole"},
+    "reference": {
+        "on": False,
+        "image": "",
+        "method": REFERENCE_METHODS[0],  # Anima's two adapters; Krea2 has its own section
+        "megapixels": 1.0,
+        "snapref": {"file": "", "mode": REFERENCE_MODES[0], "strength": 0.0, "guidance_on": True, "guidance": 4.5,
+                    "correction": REFERENCE_CORRECTIONS[0], "ref_end": 1.0, "caption": ""},
+        "ref_adapter": {"file": "", "strength": 1.0, "guidance": 4.5, "correction": REFERENCE_CORRECTIONS[0],
+                        "ref_end": 1.0},
+        "krea2": {"file": "", "strength": 1.0, "grounding_px": 768, "boost": 1.0, "position": KREA2_POSITIONS[0]},
+    },
     "ext": {item["key"]: {"on": False, **{field["key"]: field["default"] for field in item["fields"]}}
             for item in EXT_SCHEMA["extensions"]},
 }
@@ -58,6 +76,10 @@ _ENUMS = {
     "i2i_mode": ("img2img", "inpaint"),
     "dora_mode": DORA_MODES,
     "inpaint_area": ("masked", "whole"),
+    "method": REFERENCE_METHODS,
+    "mode": REFERENCE_MODES,
+    "correction": REFERENCE_CORRECTIONS,
+    "position": KREA2_POSITIONS,
 }
 _LORA_TAG = re.compile(r"<lora:([^:>]*)[:>]")
 
@@ -141,6 +163,62 @@ def _ext(raw) -> dict:
     return out
 
 
+def _family_memory(raw) -> dict:
+    """The known families' saved picks, coerced like the top-level keys of the same name."""
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for slot in MEMORY_SLOTS:
+        if isinstance(raw.get(slot), dict):
+            out[slot] = _section(raw[slot], DEFAULT_STATE, {
+                "te": _str,
+                "vae": _str,
+                "sampler": lambda v, df: _str(v, df, allow_empty=False),
+                "scheduler": lambda v, df: _str(v, df, allow_empty=False),
+                "steps": lambda v, df: _int(v, df, 1, 150),
+                "cfg": lambda v, df: _float(v, df, 0.0, 30.0),
+                "shift": lambda v, df: _float(v, df, 0.0, 100.0),
+            })
+    return out
+
+
+def _reference(raw) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    d = DEFAULT_STATE["reference"]
+    enum = lambda key: (lambda v, df: _enum(v, df, key))
+    guidance = lambda v, df: _float(v, df, 0.0, 20.0)
+    unit = lambda v, df: _float(v, df, 0.0, 1.0)
+    return {
+        "on": _bool(raw.get("on"), d["on"]),
+        "image": _str(raw.get("image"), d["image"]),
+        "method": _enum(raw.get("method"), d["method"], "method"),
+        "megapixels": _float(raw.get("megapixels"), d["megapixels"], 0.25, 2.0),
+        "snapref": _section(raw.get("snapref"), d["snapref"], {
+            "file": _str,
+            "mode": enum("mode"),
+            "strength": lambda v, df: _float(v, df, -3.0, 3.0),
+            "guidance_on": _bool,
+            "guidance": guidance,
+            "correction": enum("correction"),
+            "ref_end": unit,
+            "caption": _str,
+        }),
+        "ref_adapter": _section(raw.get("ref_adapter"), d["ref_adapter"], {
+            "file": _str,
+            "strength": lambda v, df: _float(v, df, 0.0, 2.0),
+            "guidance": guidance,
+            "correction": enum("correction"),
+            "ref_end": unit,
+        }),
+        "krea2": _section(raw.get("krea2"), d["krea2"], {
+            "file": _str,
+            "strength": lambda v, df: _float(v, df, -10.0, 10.0),
+            "grounding_px": lambda v, df: _int(v, df, 0, 4096),
+            "boost": lambda v, df: _float(v, df, 0.0, 1000.0),
+            "position": enum("position"),
+        }),
+    }
+
+
 def normalize_state(raw: object) -> dict:
     """Return a complete, clamped copy of the state; unknown keys are dropped."""
     raw = raw if isinstance(raw, dict) else {}
@@ -166,6 +244,8 @@ def normalize_state(raw: object) -> dict:
         "batch": _int(raw.get("batch"), d["batch"], 1, 16),
         "loras": [x for x in map(_lora, loras) if x] if isinstance(loras, list) else [],
         "negpip": _bool(raw.get("negpip"), d["negpip"]),
+        "moss_stream": _bool(raw.get("moss_stream"), d["moss_stream"]),
+        "family_memory": _family_memory(raw.get("family_memory")),
         "dora_mode": _enum(raw.get("dora_mode"), d["dora_mode"], "dora_mode"),
         "forge_like": _section(raw.get("forge_like"), d["forge_like"],
                                {k: _bool for k in d["forge_like"]}),
@@ -198,6 +278,7 @@ def normalize_state(raw: object) -> dict:
             "mask_blur": lambda v, df: _int(v, df, 0, 64),
             "inpaint_area": lambda v, df: _enum(v, df, "inpaint_area"),
         }),
+        "reference": _reference(raw.get("reference")),
         "ext": _ext(raw.get("ext")),
     }
     return out

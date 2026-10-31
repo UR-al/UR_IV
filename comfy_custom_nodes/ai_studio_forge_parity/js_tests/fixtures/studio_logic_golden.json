@@ -20,6 +20,8 @@
     "batch": 1,
     "loras": [],
     "negpip": true,
+    "moss_stream": true,
+    "family_memory": {},
     "dora_mode": "LyCORIS fp32 (as trained)",
     "forge_like": {
       "master": true,
@@ -56,6 +58,36 @@
       "denoise": 0.55,
       "mask_blur": 4,
       "inpaint_area": "whole"
+    },
+    "reference": {
+      "on": false,
+      "image": "",
+      "method": "snapref",
+      "megapixels": 1.0,
+      "snapref": {
+        "file": "",
+        "mode": "cs",
+        "strength": 0.0,
+        "guidance_on": true,
+        "guidance": 4.5,
+        "correction": "apg",
+        "ref_end": 1.0,
+        "caption": ""
+      },
+      "ref_adapter": {
+        "file": "",
+        "strength": 1.0,
+        "guidance": 4.5,
+        "correction": "apg",
+        "ref_end": 1.0
+      },
+      "krea2": {
+        "file": "",
+        "strength": 1.0,
+        "grounding_px": 768,
+        "boost": 1.0,
+        "position": "aligned (trained)"
+      }
     },
     "ext": {
       "guidance": {
@@ -452,6 +484,22 @@
     {
       "name": "anima-3-8B.safetensors",
       "expected": "3.8b"
+    },
+    {
+      "name": "moss_image_sft_bf16.safetensors",
+      "expected": "moss"
+    },
+    {
+      "name": "MOSS-Image-Base.safetensors",
+      "expected": "moss"
+    },
+    {
+      "name": "krea2_turbo_bf16.safetensors",
+      "expected": "krea2"
+    },
+    {
+      "name": "krea2Anime_v15.safetensors",
+      "expected": "krea2"
     }
   ],
   "infotext": {

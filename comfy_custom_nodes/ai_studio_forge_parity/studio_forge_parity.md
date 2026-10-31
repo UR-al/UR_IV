@@ -131,3 +131,10 @@ xformers > PyTorch 순, 실행 옵션으로 정함). 사용자는 `run_nvidia_gp
 - 참고: ComfyUI v0.43.1에는 MODEL마다 어텐션 함수를 바꾸는 `ModelPatcher.set_model_optimized_attention`이 있고 Anima(Cosmos
   predict2)의 어텐션도 그 경로를 지난다. 다음 버전에서 샘플러 노드 옵션으로 실행 중에 PyTorch 어텐션을 고르게 할 수 있다.
   이번 버전에는 넣지 않았으므로 표에서는 불가다.
+
+## 모델 계열과 외부 팩 (1.11.0)
+
+- 계열은 체크포인트 이름으로 정한다: `moss` → MOSS-Image, `krea` → Krea2, 나머지 → Anima. Forge 대응이 없는 항목이다.
+- MOSS fp32: ComfyUI-MOSS-Toolkit `MOSSStreamFP32`. 코어 로더로 읽은 모델에서만 된다.
+- Anima 레퍼런스: SnapRef 또는 ComfyUI-Anima-Ref-Adapter. 가중치는 Anima base(28블록) 기준이라 2.9B·3.8B 는 미검증이다.
+- Krea2 레퍼런스: comfyui-krea2edit 노드 + 편집 LoRA(identity, general, QuadView 등).

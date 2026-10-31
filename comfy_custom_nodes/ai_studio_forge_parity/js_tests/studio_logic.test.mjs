@@ -13,9 +13,12 @@ import {
   imageSize,
   missingLoras,
   missingPicks,
+  modelFamily,
+  pickCheckpoint,
   postPrompt,
   postRunState,
   recordFromParameters,
+  referenceFile,
   stageModes,
   unetFamily,
   withDefaults,
@@ -37,7 +40,8 @@ function studioPrompt() {
     unet38: ["ForgeNeoAnima38V2Loader", { model_name: "workflow38.safetensors" }],
     qwen35: ["ForgeNeoAnimaQwen35Loader", { qwen35_model: "qwen35_4b.safetensors" }],
     family_switch_model: ["AIStudioSwitch", { select: 0, a: ["unet", 0], b: ["unet38", 0] }],
-    shift: ["ForgeNeoModelSamplingShift", { model: ["family_switch_model", 0], shift: 1.0 }],
+    moss_stream: ["AIStudioMossStream", { model: ["family_switch_model", 0] }],
+    shift: ["ForgeNeoModelSamplingShift", { model: ["moss_stream", 0], shift: 1.0 }],
     sched: ["ForgeNeoExtraSchedulers", { model: ["shift", 0], flow_cosmos_rho: 7.0 }],
     lora_stack: ["AIStudioLoraStack", { model: ["sched", 0], clip: ["te", 0], positive: "", negative: "" }],
     negpip: ["ForgeNeoNegPip", { model: ["lora_stack", 0], clip: ["lora_stack", 1], enabled: false }],
@@ -48,6 +52,9 @@ function studioPrompt() {
     neg_encode38: ["ForgeNeoAnima38V2Prompt", { model: ["dora", 0], native_clip: ["lora_stack", 1], qwen35_clip: ["qwen35", 0], prompt: ["lora_stack", 3] }],
     family_switch_pos: ["AIStudioSwitch", { select: 0, a: ["pos_encode", 0], b: ["pos_encode38", 0] }],
     family_switch_neg: ["AIStudioSwitch", { select: 0, a: ["neg_encode", 0], b: ["neg_encode38", 0] }],
+    reference_image: ["LoadImage", { image: "example.png", upload: "image" }],
+    anima_ref: ["AIStudioAnimaReference", { model: ["dora", 0], clip: ["lora_stack", 1], vae: ["vae", 0], image: ["reference_image", 0], method: "snapref", file: "" }],
+    krea2_ref: ["AIStudioKrea2Reference", { model: ["anima_ref", 0], positive: ["family_switch_pos", 0], negative: ["family_switch_neg", 0], file: "", width: 1024, height: 1024 }],
     i2i_image: ["LoadImage", { image: "example.png", upload: "image" }],
     latent: ["ForgeNeoLatentInput", { vae: ["vae", 0], mode: "txt2img", width: 1536, height: 1536, batch_size: 1, fit: "crop", mask_blur: 0, img2img_image: ["i2i_image", 0] }],
     sampler: ["ForgeNeoKSamplerCNS", { model: ["dora", 0], positive: ["family_switch_pos", 0], negative: ["family_switch_neg", 0], latent_image: ["latent", 0], seed: 0, steps: 30, cfg: 5.0, sampler_name: "euler", scheduler: "simple", denoise: 1.0, forge_noise: false }],
@@ -86,7 +93,7 @@ const state = (overrides = {}) => ({ ...structuredClone(DEFAULT_STATE), ...overr
 
 test("ROLES lists every engine role once, without family_switch_clip (R6)", () => {
   assert.equal(new Set(ROLES).size, ROLES.length);
-  assert.equal(ROLES.length, 49);
+  assert.equal(ROLES.length, 53);
   assert.ok(!ROLES.includes("family_switch_clip"));
   const { roleIds } = studioPrompt(); // a workflow without extension nodes: studio_ext.test.mjs covers those roles
   assert.deepEqual(ROLES.filter((role) => !role.startsWith("ext_")).sort(), Object.keys(roleIds).sort());
@@ -363,8 +370,9 @@ test("stageModes bypasses the unused family, i2i input, SAM3 and post nodes (R7)
   assert.deepEqual(Object.keys(modes).sort(), [...ROLES].sort());
   const bypassed = Object.keys(modes).filter((role) => modes[role] === 4 && !role.startsWith("ext_")).sort();
   assert.deepEqual(bypassed, [
-    "i2i_image", "neg_encode38", "pos_encode38", "post_decode", "post_encode", "post_hires", "post_image",
-    "post_sam3_detailer", "post_sam3_mask", "post_save", "post_upscale", "qwen35", "sam3_detailer", "sam3_mask", "unet38",
+    "anima_ref", "i2i_image", "krea2_ref", "moss_stream", "neg_encode38", "pos_encode38", "post_decode", "post_encode",
+    "post_hires", "post_image", "post_sam3_detailer", "post_sam3_mask", "post_save", "post_upscale", "qwen35", "reference_image",
+    "sam3_detailer", "sam3_mask", "unet38",
   ]);
   assert.ok(Object.values(modes).every((mode) => mode === 0 || mode === 4));
 });
@@ -573,4 +581,139 @@ test("i2i runs at its own size (the image's, once sent) and inpaint_area maps to
   };
   assert.deepEqual(withoutSavedState(prompt("masked")), withoutSavedState(prompt("whole"))); // the greyed setting changes nothing
   assert.equal(DEFAULT_STATE.i2i.inpaint_area, "whole"); // and the panel says so (Forge's default too)
+});
+
+// ---------------------------------------------------------------------------------------------- model families
+
+const FAMILY_ROLES = {
+  te: "1", negpip: "2", moss_stream: "3", reference_image: "4", anima_ref: "5", krea2_ref: "6", unet: "7", family_switch_model: "8",
+};
+const familyPrompt = () => Object.fromEntries(Object.values(FAMILY_ROLES).map((id) => [id, { inputs: {} }]));
+const ready = (overrides) => state({ te: "te", vae: "vae", ...overrides });
+
+test("modelFamily reads the checkpoint name", () => {
+  assert.equal(modelFamily("moss_image_sft_bf16.safetensors"), "moss");
+  assert.equal(modelFamily("sub/krea2Anime_v15.safetensors"), "krea2");
+  for (const name of ["anima-2.9b.safetensors", "anima-base.safetensors", "Anima-3.8B.safetensors", ""]) assert.equal(modelFamily(name), "anima");
+});
+
+test("the TE type follows the family, and NegPiP runs on Anima only", () => {
+  const out = (unet) => applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ unet, negpip: true }), { rng: fixedRng });
+  assert.equal(out("anima.safetensors")[1].inputs.type, "stable_diffusion");
+  assert.equal(out("moss_sft.safetensors")[1].inputs.type, "moss_image");
+  assert.equal(out("krea2_raw.safetensors")[1].inputs.type, "krea2");
+  assert.equal(out("anima.safetensors")[2].inputs.enabled, true);
+  assert.equal(out("moss_sft.safetensors")[2].inputs.enabled, false);
+  assert.equal(out("krea2_raw.safetensors")[2].inputs.enabled, false);
+  assert.equal(out("moss_sft.safetensors")[7].inputs.unet_name, "moss_sft.safetensors"); // the core loader, as Anima's
+  assert.equal(out("moss_sft.safetensors")[8].inputs.select, 0);
+});
+
+test("the fp32 stream runs on MOSS with its switch on", () => {
+  const mode = (overrides) => stageModes(state(overrides)).moss_stream;
+  assert.equal(mode({ unet: "moss_sft.safetensors" }), 0);
+  assert.equal(mode({ unet: "moss_sft.safetensors", moss_stream: false }), 4);
+  assert.equal(mode({ unet: "anima.safetensors" }), 4);
+  assert.equal(mode({ unet: "krea2.safetensors" }), 4);
+});
+
+test("the reference runs its family's node only", () => {
+  const reference = { ...structuredClone(DEFAULT_STATE.reference), on: true, image: "ref.png" };
+  const modes = (unet, on = true) => {
+    const { anima_ref, krea2_ref, reference_image } = stageModes(state({ unet, reference: { ...reference, on } }));
+    return [anima_ref, krea2_ref, reference_image];
+  };
+  assert.deepEqual(modes("anima.safetensors"), [0, 4, 0]);
+  assert.deepEqual(modes("krea2.safetensors"), [4, 0, 0]);
+  assert.deepEqual(modes("moss.safetensors"), [4, 4, 4]);
+  assert.deepEqual(modes("anima.safetensors", false), [4, 4, 4]);
+});
+
+test("the reference nodes get their method's settings and the tab's size", () => {
+  const reference = structuredClone(DEFAULT_STATE.reference);
+  reference.snapref = { ...reference.snapref, file: "snapref_v1a.safetensors", mode: "char", strength: 0.5 };
+  reference.ref_adapter = { ...reference.ref_adapter, file: "anima_ref_adapter_v2_r64.safetensors", strength: 1.25 };
+  reference.krea2 = { ...reference.krea2, file: "QuadView_krea2_v1.safetensors", grounding_px: 1024 };
+  const out = (changes, overrides = {}) =>
+    applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ reference: { ...reference, image: "ref.png", ...changes }, ...overrides }), { rng: fixedRng });
+  const snapref = out({})[5].inputs;
+  assert.equal(snapref.method, "snapref");
+  assert.equal(snapref.file, "snapref_v1a.safetensors");
+  assert.equal(snapref.mode, "char");
+  assert.equal(snapref.strength, 0.5);
+  assert.equal(snapref.guidance_on, true);
+  assert.equal(snapref.on, undefined);
+  const adapter = out({ method: "ref_adapter" })[5].inputs;
+  assert.equal(adapter.file, "anima_ref_adapter_v2_r64.safetensors");
+  assert.equal(adapter.strength, 1.25);
+  assert.equal(adapter.caption, undefined);
+  assert.equal(out({})[4].inputs.image, "ref.png");
+  const i2i = { ...DEFAULT_STATE.i2i, width: 512, height: 640 };
+  assert.deepEqual([out({})[6].inputs.width, out({})[6].inputs.height], [832, 1216]);
+  const krea2 = out({}, { tab: "i2i", i2i })[6].inputs;
+  assert.deepEqual([krea2.file, krea2.grounding_px, krea2.width, krea2.height], ["QuadView_krea2_v1.safetensors", 1024, 512, 640]);
+});
+
+test("a reference run needs its image and file", () => {
+  const reference = (changes) => ({ ...structuredClone(DEFAULT_STATE.reference), on: true, ...changes });
+  const picks = (unet, ref) => missingPicks(ready({ unet, reference: ref }));
+  assert.equal(picks("anima.safetensors", reference({})), PICK_NOTICES.referenceImage);
+  assert.equal(picks("anima.safetensors", reference({ image: "a.png" })), PICK_NOTICES.referenceFile);
+  const snapref = reference({ image: "a.png", snapref: { ...DEFAULT_STATE.reference.snapref, file: "s.safetensors" } });
+  assert.equal(picks("anima.safetensors", snapref), "");
+  assert.equal(referenceFile({ reference: snapref }, "anima"), "s.safetensors");
+  assert.equal(picks("anima.safetensors", { ...snapref, method: "ref_adapter" }), PICK_NOTICES.referenceFile); // each method has its own file
+  assert.equal(picks("krea2.safetensors", snapref), PICK_NOTICES.referenceFile);
+  assert.equal(picks("moss.safetensors", reference({})), ""); // MOSS has no reference: the switch does nothing
+  assert.equal(missingPicks(ready({ unet: "anima.safetensors", reference: reference({}), upscale: { ...DEFAULT_STATE.upscale, model: "x" } }), "upscale"), "");
+});
+
+test("pickCheckpoint keeps each family's picks", () => {
+  const lists = {
+    tes: ["qwen_3_06b_base.safetensors", "qwen3.5_9b_moss_image_sft_bf16.safetensors", "qwen3vl_4b_bf16.safetensors"],
+    vaes: ["moss_image_vae_fp32.safetensors", "qwen_image_vae.safetensors", "qwen_image_vae_HDR_fp32.safetensors"],
+  };
+  const s = state({ unet: "anima.safetensors", te: "qwen_3_06b_base.safetensors", vae: "my_vae.safetensors", steps: 28, cfg: 4 });
+  pickCheckpoint(s, "moss_image_sft_bf16.safetensors", lists);
+  assert.deepEqual([s.te, s.vae], ["qwen3.5_9b_moss_image_sft_bf16.safetensors", "moss_image_vae_fp32.safetensors"]);
+  assert.deepEqual([s.sampler, s.scheduler, s.steps, s.cfg, s.shift], ["euler", "sgm_uniform", 50, 3, 5]);
+  s.steps = 40;
+  pickCheckpoint(s, "moss_image_base_bf16.safetensors", lists); // same family: nothing moves
+  assert.equal(s.steps, 40);
+  pickCheckpoint(s, "krea2_turbo_bf16.safetensors", lists);
+  assert.deepEqual([s.te, s.vae], ["qwen3vl_4b_bf16.safetensors", "qwen_image_vae.safetensors"]);
+  assert.deepEqual([s.sampler, s.scheduler, s.steps, s.cfg, s.shift], ["euler", "simple", 8, 1, 1.15]);
+  pickCheckpoint(s, "anima.safetensors", lists);
+  assert.deepEqual([s.te, s.vae, s.steps, s.cfg], ["qwen_3_06b_base.safetensors", "my_vae.safetensors", 28, 4]);
+  pickCheckpoint(s, "moss_image_sft_bf16.safetensors", lists);
+  assert.equal(s.steps, 40);
+  const raw = state({ unet: "anima.safetensors" });
+  pickCheckpoint(raw, "krea2_raw_bf16.safetensors", lists);
+  assert.deepEqual([raw.steps, raw.cfg], [20, 3]);
+});
+
+test("Krea2 Raw and Turbo keep their own numbers and share the model picks", () => {
+  const s = state({ unet: "krea2_raw_bf16.safetensors", te: "uncensored.safetensors", vae: "v.safetensors", steps: 24, cfg: 3.5 });
+  pickCheckpoint(s, "krea2_turbo_bf16.safetensors");
+  assert.deepEqual([s.steps, s.cfg, s.te, s.vae], [8, 1, "uncensored.safetensors", "v.safetensors"]);
+  s.steps = 6;
+  pickCheckpoint(s, "krea2_raw_bf16.safetensors");
+  assert.deepEqual([s.steps, s.cfg], [24, 3.5]);
+  pickCheckpoint(s, "krea2_turbo_bf16.safetensors");
+  assert.equal(s.steps, 6);
+});
+
+test("withDefaults fills a reference saved with fewer keys", () => {
+  const s = withDefaults({ reference: { on: true, snapref: { file: "a.safetensors" } } });
+  assert.equal(s.reference.on, true);
+  assert.equal(s.reference.snapref.file, "a.safetensors");
+  assert.equal(s.reference.snapref.guidance, 4.5);
+  assert.equal(s.reference.krea2.grounding_px, 768);
+});
+
+test("a family's default TE and VAE", () => {
+  const vaes = ["moss_image_vae_fp32.safetensors", "qwen_image_vae_HDR_fp32.safetensors", "sub/qwen_image_vae.safetensors"];
+  assert.equal(defaultModel("vaes", vaes, null, "moss"), "moss_image_vae_fp32.safetensors");
+  assert.equal(defaultModel("vaes", vaes, null, "krea2"), "sub/qwen_image_vae.safetensors");
+  assert.equal(defaultModel("tes", ["krea2UncensoredLLMCLIP_v10.safetensors"], null, "krea2"), "");
 });

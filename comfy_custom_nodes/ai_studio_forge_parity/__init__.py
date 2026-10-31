@@ -59,6 +59,10 @@ from .dora_infer_mode_nodes import (
     NODE_DISPLAY_NAME_MAPPINGS as _DORA_MODE_DISPLAY_NAMES,
 )
 
+from .studio_model_nodes import (
+    NODE_CLASS_MAPPINGS as _STUDIO_MODEL_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _STUDIO_MODEL_DISPLAY_NAMES,
+)
 from .studio_nodes import (
     NODE_CLASS_MAPPINGS as _STUDIO_NODES,
     NODE_DISPLAY_NAME_MAPPINGS as _STUDIO_DISPLAY_NAMES,
@@ -66,7 +70,7 @@ from .studio_nodes import (
 from .studio_routes import register_routes as _register_studio_routes
 
 
-__version__ = "1.10.0"
+__version__ = "1.11.0"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside
@@ -113,6 +117,7 @@ NODE_CLASS_MAPPINGS = _merge_node_maps(
     _MOSS_SPECTRUM_NODES,
     _DORA_MODE_NODES,
     _STUDIO_NODES,
+    _STUDIO_MODEL_NODES,
 )
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -130,6 +135,7 @@ NODE_DISPLAY_NAME_MAPPINGS.update(_COLORCRAFT_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_MOSS_SPECTRUM_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_DORA_MODE_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_STUDIO_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_STUDIO_MODEL_DISPLAY_NAMES)
 
 
 # Anima studio web extension: ComfyUI serves every *.js under this folder (keep tests out of it).

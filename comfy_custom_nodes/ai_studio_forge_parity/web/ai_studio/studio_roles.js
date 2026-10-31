@@ -6,12 +6,14 @@ export const ROLE_PROPERTY = "aistudio_role";
 
 export const ROLES = Object.freeze([
   // ① models (2.9B / base) and ①b 3.8B; the switches pick one family (R6: the TE is shared, no clip switch)
-  "unet", "te", "vae", "unet38", "qwen35", "family_switch_model",
+  "unet", "te", "vae", "unet38", "qwen35", "family_switch_model", "moss_stream",
   "shift", "sched",
   // ② LoRA / DoRA
   "lora_stack", "ext_lora_block", "negpip", "dora", "ext_er_sde",
   // ③ prompts
   "pos_encode", "neg_encode", "pos_encode38", "neg_encode38", "family_switch_pos", "family_switch_neg",
+  // ③b the reference image and the node of the family that uses it
+  "reference_image", "anima_ref", "krea2_ref",
   // ④ extensions: the guidance stack, then each pass's Detail Daemon and SPEED
   "ext_optimal_scale", "ext_guidance", "ext_skim", "ext_dd", "ext_speed", "ext_dd_hires", "ext_speed_hires", "ext_dd_sam3",
   // ⑤ latent and sampling

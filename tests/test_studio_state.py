@@ -35,6 +35,34 @@ class StudioStateTests(unittest.TestCase):
         self.assertEqual(ss.generation_size(state | {"tab": "t2i"}), (640, 1216))
         self.assertEqual(ss.generation_size(state | {"tab": "i2i"}), (1248, 4096))
 
+    def test_moss_stream_defaults_on_and_keeps_only_booleans(self):
+        self.assertIs(ss.normalize_state({})["moss_stream"], True)
+        self.assertIs(ss.normalize_state({"moss_stream": False})["moss_stream"], False)
+        self.assertIs(ss.normalize_state({"moss_stream": "no"})["moss_stream"], True)
+
+    def test_family_memory_keeps_known_families_only(self):
+        memory = ss.normalize_state({"family_memory": {
+            "moss": {"te": "a", "vae": "b", "sampler": "euler", "scheduler": "simple", "steps": 999, "cfg": 3, "shift": 5,
+                     "extra": 1},
+            "other": {"te": "x"}, "krea2": "bad"}})["family_memory"]
+        self.assertEqual(memory, {"moss": {"te": "a", "vae": "b", "sampler": "euler", "scheduler": "simple", "steps": 150,
+                                           "cfg": 3.0, "shift": 5.0}})
+        self.assertEqual(ss.normalize_state({"family_memory": "bad"})["family_memory"], {})
+
+    def test_reference_defaults_and_clamps(self):
+        self.assertEqual(ss.normalize_state({})["reference"], ss.DEFAULT_STATE["reference"])
+        reference = ss.normalize_state({"reference": {
+            "on": True, "image": "a.png", "method": "bad", "megapixels": 9,
+            "snapref": {"mode": "bad", "strength": 9, "correction": "rescale", "extra": 1},
+            "ref_adapter": {"strength": 5}, "krea2": {"position": "bad", "grounding_px": -1}}})["reference"]
+        self.assertEqual((reference["on"], reference["image"], reference["method"], reference["megapixels"]),
+                         (True, "a.png", "snapref", 2.0))
+        self.assertEqual((reference["snapref"]["mode"], reference["snapref"]["strength"], reference["snapref"]["correction"]),
+                         ("cs", 3.0, "rescale"))
+        self.assertNotIn("extra", reference["snapref"])
+        self.assertEqual(reference["ref_adapter"]["strength"], 2.0)
+        self.assertEqual((reference["krea2"]["position"], reference["krea2"]["grounding_px"]), ("aligned (trained)", 0))
+
     def test_negpip_defaults_on_and_keeps_only_booleans(self):
         self.assertIs(ss.normalize_state({})["negpip"], True)
         self.assertIs(ss.normalize_state({"negpip": False})["negpip"], False)

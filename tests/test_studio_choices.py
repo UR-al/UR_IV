@@ -86,6 +86,13 @@ class UnetFamilyTests(unittest.TestCase):
             "Anima_3.8B_v2.safetensors": "3.8b", "x/anima-3_8b.safetensors": "3.8b",
             "anima38-ep38.safetensors": "2.9b", "bundle-without-size.safetensors": "3.8b"})
 
+    def test_moss_and_krea_come_from_the_name(self):
+        for name, family in (("moss_image_sft_bf16.safetensors", "moss"), ("MOSS-Image-Base.safetensors", "moss"),
+                             ("krea2_turbo_bf16.safetensors", "krea2"), ("krea2Anime_v15.safetensors", "krea2"),
+                             ("homofidelisKrea2NSFW_v10.safetensors", "krea2"), ("krea/base_3.8b.safetensors", "krea2")):
+            with self.subTest(name=name):
+                self.assertEqual(studio_choices.unet_family(name), family)
+
     def test_bundle_names_are_empty_outside_comfyui(self):
         self.assertEqual(studio_choices.anima38_bundle_names(), frozenset())
 

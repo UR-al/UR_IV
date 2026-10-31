@@ -57,12 +57,18 @@ def anima38_bundle_names() -> frozenset:
 
 
 def unet_family(name: str, bundle_names=frozenset()) -> str:
-    """``"3.8b"`` for a v2 bundle or a name like ``3.8b`` / ``3_8B``; ``"base"`` if the name says base; else ``"2.9b"``."""
-    if name in bundle_names or _NAME_38.search(name):
+    """``"3.8b"`` for a v2 bundle; ``"moss"`` / ``"krea2"`` if the name says MOSS / KREA; ``"3.8b"`` for a name like
+    ``3.8b`` / ``3_8B``; ``"base"`` if the name says base; else ``"2.9b"``."""
+    if name in bundle_names:
         return "3.8b"
-    if "base" in name.lower():
-        return "base"
-    return "2.9b"
+    lowered = name.lower()
+    if "moss" in lowered:
+        return "moss"
+    if "krea" in lowered:
+        return "krea2"
+    if _NAME_38.search(name):
+        return "3.8b"
+    return "base" if "base" in lowered else "2.9b"
 
 
 def unet_names(folder_paths=None) -> list[str]:

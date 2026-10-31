@@ -16,6 +16,9 @@ const LATENT_FALLBACK_UPSCALER = "latent:bicubic";
 const SEED_RANGE = 4294967294; // Forge: random.randrange(4294967294)
 const MODE_ALWAYS = 0;
 const MODE_BYPASS = 4;
+export const REFERENCE_METHODS = Object.freeze(["snapref", "ref_adapter"]);
+export const REFERENCE_CORRECTIONS = Object.freeze(["apg", "rescale", "none"]);
+export const KREA2_POSITIONS = Object.freeze(["aligned (trained)", "beside (right of target)"]);
 
 function deepFreeze(value) {
   if (value && typeof value === "object") {
@@ -45,6 +48,8 @@ export const DEFAULT_STATE = deepFreeze({
   batch: 1,
   loras: [],
   negpip: true,
+  moss_stream: true, // MOSS-Image only: the fp32 residual stream
+  family_memory: {}, // family -> the model picks and sampling numbers it had when the checkpoint left it
   dora_mode: DORA_MODES[0],
   forge_like: { master: true, noise: true, prompt_syntax: true, dora: true, attention: false },
   hires: { on: false, upscaler: "4x-UltraSharp.pth", sampler: "", scale: 1.5, steps: 16, denoise: 0.4 },
@@ -53,10 +58,20 @@ export const DEFAULT_STATE = deepFreeze({
   // inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture), so the panel shows
   // "전체" greyed out; the key stays so a saved state keeps its shape.
   i2i: { image: "", width: 832, height: 1216, denoise: 0.55, mask_blur: 4, inpaint_area: "whole" },
+  reference: {
+    on: false,
+    image: "",
+    method: REFERENCE_METHODS[0], // Anima's two adapters; Krea2 has its own section
+    megapixels: 1.0,
+    snapref: { file: "", mode: "cs", strength: 0.0, guidance_on: true, guidance: 4.5, correction: "apg", ref_end: 1.0, caption: "" },
+    ref_adapter: { file: "", strength: 1.0, guidance: 4.5, correction: "apg", ref_end: 1.0 },
+    krea2: { file: "", strength: 1.0, grounding_px: 768, boost: 1.0, position: KREA2_POSITIONS[0] },
+  },
   ext: EXT_DEFAULTS, // the table in ext_schema.js: one {on, fields...} per extension
 });
 
 const SECTIONS = new Set(["forge_like", "hires", "upscale", "sam3", "i2i"]);
+const REFERENCE_SECTIONS = ["snapref", "ref_adapter", "krea2"];
 const POST_SECTIONS = Object.freeze({ upscale: "upscale", hires: "hires", sam3: "sam3" });
 // Post runs route the image around the stages they do not use, so e.g. an upscale never takes a VAE round trip.
 const POST_ROUTES = Object.freeze({
@@ -76,6 +91,13 @@ function normalizeLora(item) {
   };
 }
 
+function normalizeReference(raw) {
+  const value = isObject(raw) ? raw : {};
+  const out = { ...structuredClone(DEFAULT_STATE.reference), ...value };
+  for (const key of REFERENCE_SECTIONS) out[key] = { ...DEFAULT_STATE.reference[key], ...(isObject(value[key]) ? value[key] : {}) };
+  return out;
+}
+
 /** A complete copy of `state`: missing keys (an older saved state) come from DEFAULT_STATE, unknown keys are dropped. */
 export function withDefaults(state) {
   const raw = isObject(state) ? state : {};
@@ -86,6 +108,7 @@ export function withDefaults(state) {
     if (SECTIONS.has(key)) out[key] = { ...out[key], ...(isObject(value) ? value : {}) };
     else if (key === "loras") out.loras = Array.isArray(value) ? value.filter(isObject).map(normalizeLora) : [];
     else if (key === "ext") out.ext = normalizeExt(value);
+    else if (key === "reference") out.reference = normalizeReference(value);
     else out[key] = structuredClone(value);
   }
   return out;
@@ -115,13 +138,71 @@ export function effectivePrompt(state) {
   return [...(prompt ? [prompt] : []), ...tags].join(" ");
 }
 
-/** `"2.9b" | "base" | "3.8b"`: the `/choices?kind=unets` families map when it knows the file, else the R5 name rule. */
+/** `"2.9b" | "base" | "3.8b" | "moss" | "krea2"`: the `/choices?kind=unets` families map when it knows the file, else the R5 name rule. */
 export function unetFamily(name, families) {
   const file = typeof name === "string" ? name : "";
   if (isObject(families) && Object.prototype.hasOwnProperty.call(families, file)) return families[file];
+  const lowered = file.toLowerCase();
+  if (lowered.includes("moss")) return "moss";
+  if (lowered.includes("krea")) return "krea2";
   if (/(?<!\d)3[._-]?8b/i.test(file)) return "3.8b";
-  if (file.toLowerCase().includes("base")) return "base";
-  return "2.9b";
+  return lowered.includes("base") ? "base" : "2.9b";
+}
+
+/** `"anima" | "moss" | "krea2"`, by file name alone: which TE type, nodes and default settings a checkpoint runs on. */
+export function modelFamily(name) {
+  const family = unetFamily(name);
+  return family === "moss" || family === "krea2" ? family : "anima";
+}
+
+// te / vae: the file picked when a family has no remembered pick. Numbers: the MOSS AI Studio workflow, comfyui-krea2edit's
+// README (Turbo 8 steps CFG 1; Raw 20 steps CFG 3) and the core models' default shift (Krea2's is an exponent, mu).
+const FAMILY_PROFILES = Object.freeze({
+  anima: {
+    clip_type: "stable_diffusion",
+    te: /qwen.*0[._-]?6b/i,
+    vae: /qwen[_-]?image/i,
+    settings: { sampler: DEFAULT_STATE.sampler, scheduler: DEFAULT_STATE.scheduler, steps: DEFAULT_STATE.steps, cfg: DEFAULT_STATE.cfg, shift: DEFAULT_STATE.shift },
+  },
+  moss: {
+    clip_type: "moss_image",
+    te: /qwen3\.?5.*9b/i,
+    vae: /moss_image_vae/i,
+    settings: { sampler: "euler", scheduler: "sgm_uniform", steps: 50, cfg: 3.0, shift: 5.0 },
+  },
+  krea2: {
+    clip_type: "krea2",
+    te: /qwen3vl_4b/i,
+    vae: /(^|[\\/])qwen_image_vae\.safetensors$/i,
+    settings: { sampler: "euler", scheduler: "simple", steps: 20, cfg: 3.0, shift: 1.15 },
+  },
+});
+const FAMILY_MEMORY_KEYS = ["te", "vae", "sampler", "scheduler", "steps", "cfg", "shift"];
+
+const isKrea2Turbo = (unet) => modelFamily(unet) === "krea2" && /turbo/i.test(unet);
+/** Turbo is distilled and takes other numbers than Raw, so it keeps its own picks. */
+const memorySlot = (unet) => (isKrea2Turbo(unet) ? "krea2_turbo" : modelFamily(unet));
+
+function familySettings(family, unet) {
+  const settings = FAMILY_PROFILES[family].settings;
+  return isKrea2Turbo(unet) ? { ...settings, steps: 8, cfg: 1.0 } : settings;
+}
+
+/**
+ * Picks checkpoint `unet` in `state`. Leaving a family keeps its model picks and sampling numbers in `family_memory`;
+ * entering one brings back its own, or its defaults with the first matching file of `lists` ({tes, vaes}).
+ */
+export function pickCheckpoint(state, unet, lists = {}) {
+  const from = memorySlot(state.unet);
+  const to = memorySlot(unet);
+  const sameFamily = modelFamily(state.unet) === modelFamily(unet);
+  const family = modelFamily(unet);
+  state.unet = unet;
+  if (from === to) return;
+  state.family_memory = { ...state.family_memory, [from]: Object.fromEntries(FAMILY_MEMORY_KEYS.map((key) => [key, state[key]])) };
+  Object.assign(state, familySettings(family, unet), sameFamily ? {} : { te: "", vae: "" }, state.family_memory[to]);
+  state.te ||= defaultModel("tes", lists.tes, null, family);
+  state.vae ||= defaultModel("vaes", lists.vaes, null, family);
 }
 
 const SIZE_STEP = 8;
@@ -145,18 +226,29 @@ export function imageSize(width, height) {
  * The model file the panel picks when its list arrives and nothing is chosen yet (an empty pick would leave the
  * loader on whatever file sorts first): a 2.9B-family Anima UNET, the Qwen3 0.6B TE, the Qwen-Image / Anima VAE.
  */
-export function defaultModel(kind, items, families) {
+export function defaultModel(kind, items, families, family = "anima") {
   const names = (Array.isArray(items) ? items : []).filter((item) => typeof item === "string");
   const find = (pattern) => names.find((name) => pattern.test(name)) || "";
   if (kind === "unets") return names.find((name) => /anima/i.test(name) && unetFamily(name, families) === "2.9b") || "";
-  if (kind === "tes") return find(/qwen.*0[._-]?6b/i);
-  if (kind === "vaes") return find(/qwen[_-]?image/i) || find(/anima/i);
+  if (kind === "tes") return find(FAMILY_PROFILES[family].te);
+  if (kind === "vaes") return find(FAMILY_PROFILES[family].vae) || (family === "anima" ? find(/anima/i) : "");
   return "";
 }
+
+/** The adapter or edit-LoRA file a reference run of `family` reads, "" where the family has no reference. */
+export function referenceFile(state, family) {
+  const { reference } = state;
+  if (family === "krea2") return reference.krea2.file;
+  return family === "anima" ? reference[reference.method].file : "";
+}
+
+const referenceRuns = (s, family) => s.reference.on && family !== "moss";
 
 export const PICK_NOTICES = Object.freeze({
   models: "체크포인트·TE·VAE 고르기",
   upscale: "업스케일 모델 고르기",
+  referenceImage: "레퍼런스 이미지 고르기",
+  referenceFile: "레퍼런스 파일 고르기",
 });
 
 /**
@@ -168,6 +260,11 @@ export function missingPicks(state, action = null) {
   const upscale = action === "upscale" || (action === null && s.upscale.on);
   if (action !== "upscale" && (!s.unet || !s.te || !s.vae)) return PICK_NOTICES.models;
   if (upscale && !s.upscale.model) return PICK_NOTICES.upscale;
+  const family = modelFamily(s.unet);
+  if (action !== "upscale" && referenceRuns(s, family)) {
+    if (!s.reference.image) return PICK_NOTICES.referenceImage;
+    if (!referenceFile(s, family)) return PICK_NOTICES.referenceFile;
+  }
   return "";
 }
 
@@ -262,26 +359,32 @@ function sam3DetailerInputs(s, enabled) {
 
 const saveInputs = (s) => ({ studio_state: JSON.stringify(s), seed: s.seed });
 
+const animaRefInputs = ({ method, megapixels, ...sections }) => ({ method, megapixels, ...sections[method] });
+
 /** role -> {input: value} for the generation graph; `s` is complete and its seed concrete. */
 function mainInputs(s, options) {
   const is38 = unetFamily(s.unet, options.families) === "3.8b";
+  const family = modelFamily(s.unet);
   const isI2i = s.tab === "i2i";
   const select = { select: is38 ? 1 : 0 };
   const encode = { steps: s.steps, forge_syntax: s.forge_like.master && s.forge_like.prompt_syntax };
   return {
     unet: is38 ? {} : { unet_name: choice(s.unet) },
     unet38: is38 ? { model_name: choice(s.unet) } : {},
-    te: { clip_name: choice(s.te) },
+    te: { clip_name: choice(s.te), type: FAMILY_PROFILES[family].clip_type },
     vae: { vae_name: choice(s.vae) },
     family_switch_model: select,
     family_switch_pos: select,
     family_switch_neg: select,
     shift: { shift: s.shift },
     lora_stack: { positive: effectivePrompt(s), negative: s.negative },
-    negpip: { enabled: Boolean(s.negpip) },
+    negpip: { enabled: Boolean(s.negpip) && family === "anima" },
     dora: { enabled: true, mode: effectiveDoraMode(s) },
     pos_encode: encode,
     neg_encode: encode,
+    reference_image: { image: choice(s.reference.image) },
+    anima_ref: animaRefInputs(s.reference),
+    krea2_ref: { ...s.reference.krea2, width: (isI2i ? s.i2i : s).width, height: (isI2i ? s.i2i : s).height },
     latent: {
       mode: !isI2i ? "txt2img" : s.i2i_mode === "inpaint" ? "inpaint" : "img2img",
       width: (isI2i ? s.i2i : s).width,
@@ -346,11 +449,17 @@ export function applyStateToPrompt(apiPrompt, roleIds, state, options = {}) {
  */
 export function stageModes(state, postAction = null, options = {}) {
   const s = withDefaults(state);
+  const family = modelFamily(s.unet);
   const bypass = new Set(
     unetFamily(s.unet, options.families) === "3.8b"
       ? ["unet", "pos_encode", "neg_encode"]
       : ["unet38", "qwen35", "pos_encode38", "neg_encode38"],
   );
+  if (family !== "moss" || !s.moss_stream) bypass.add("moss_stream");
+  const reference = referenceRuns(s, family);
+  if (!reference) bypass.add("reference_image");
+  if (!reference || family !== "anima") bypass.add("anima_ref");
+  if (!reference || family !== "krea2") bypass.add("krea2_ref");
   if (s.tab === "t2i") bypass.add("i2i_image");
   if (!s.sam3.on || s.ext.sam3_refine.on) bypass.add("sam3_detailer"); // R22: Refine replaces it, as in the app's post run
   if (!s.sam3.on && !extNeedsSam3Mask(s)) bypass.add("sam3_mask");
