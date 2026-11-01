@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}"
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": false, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4, \"scheduler\": \"\", \"cfg\": 0.0, \"shift\": 0.0, \"resize_width\": 0, \"resize_height\": 0, \"size_step\": 64, \"tile_size\": 512, \"tile_overlap\": 32, \"vae\": \"\", \"prompt\": \"\", \"negative\": \"\"}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0, \"mode\": \"Scale by\", \"max_side\": 0, \"width\": 1024, \"height\": 1024, \"crop\": true, \"model_2\": \"\", \"visibility\": 0.0, \"color_correction\": false, \"tile_size\": 512, \"tile_overlap\": 32}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"mode\": \"Inpaint\", \"exclude_prompt\": \"\", \"threshold\": 0.4, \"detection_limit\": -1, \"mask_mode\": \"Individual\", \"mask_dilation\": 0, \"convex_hull\": false, \"mask_outline_px\": 0, \"mask_blur\": 4, \"invert\": false, \"face_crop\": false, \"face_crop_model\": \"\", \"face_crop_confidence\": 0.3, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"steps\": 0, \"cfg\": 0.0, \"sampler\": \"\", \"scheduler\": \"\", \"seed\": -1, \"noise_multiplier\": 1.0, \"cn_enable\": false, \"cn_model\": \"\", \"cn_module\": \"inpaint_only\", \"cn_strength\": 1.0, \"cn_start\": 0.0, \"cn_end\": 1.0, \"cn_pixel_perfect\": true, \"cn_control_mode\": \"Balanced\", \"cn_processor_res\": 512, \"cn_threshold_a\": -1.0, \"cn_threshold_b\": -1.0, \"device\": \"auto\", \"precision\": \"bf16\", \"unload_after\": true, \"keep_in_ram\": true, \"save_artifacts\": true, \"overlay\": false}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}"
       ]
     },
     {
@@ -1060,7 +1060,7 @@
       "widgets_values": [
         "",
         32,
-        true
+        false
       ]
     },
     {
@@ -1126,7 +1126,7 @@
       "widgets_values": [
         "",
         32,
-        true
+        false
       ]
     },
     {
@@ -1802,7 +1802,7 @@
         1024,
         1024,
         32,
-        true
+        false
       ]
     },
     {
@@ -3159,7 +3159,7 @@
         0.5,
         0.7,
         0.0,
-        true
+        false
       ]
     },
     {
@@ -3171,7 +3171,7 @@
       ],
       "size": [
         400,
-        1108
+        1180
       ],
       "flags": {
         "collapsed": true
@@ -3448,6 +3448,30 @@
             "name": "forge_noise"
           },
           "link": null
+        },
+        {
+          "name": "tile_size",
+          "type": "INT",
+          "widget": {
+            "name": "tile_size"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_overlap",
+          "type": "INT",
+          "widget": {
+            "name": "tile_overlap"
+          },
+          "link": null
+        },
+        {
+          "name": "size_step",
+          "type": "INT",
+          "widget": {
+            "name": "size_step"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -3502,7 +3526,10 @@
         "",
         "",
         "stable_diffusion",
-        true
+        false,
+        512,
+        32,
+        64
       ]
     },
     {
@@ -3759,11 +3786,11 @@
       "type": "AIStudioUpscaleImage",
       "pos": [
         20,
-        5796
+        5868
       ],
       "size": [
         340,
-        112
+        352
       ],
       "flags": {
         "collapsed": true
@@ -3799,6 +3826,86 @@
             "name": "scale_by"
           },
           "link": null
+        },
+        {
+          "name": "resize_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "resize_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "max_side_length",
+          "type": "INT",
+          "widget": {
+            "name": "max_side_length"
+          },
+          "link": null
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "name": "crop",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "crop"
+          },
+          "link": null
+        },
+        {
+          "name": "model_name_2",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name_2"
+          },
+          "link": null
+        },
+        {
+          "name": "upscaler_2_visibility",
+          "type": "FLOAT",
+          "widget": {
+            "name": "upscaler_2_visibility"
+          },
+          "link": null
+        },
+        {
+          "name": "color_correction",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "color_correction"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_size",
+          "type": "INT",
+          "widget": {
+            "name": "tile_size"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_overlap",
+          "type": "INT",
+          "widget": {
+            "name": "tile_overlap"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -3821,11 +3928,11 @@
       "type": "ForgeNeoSAM3Mask",
       "pos": [
         20,
-        6048
+        6360
       ],
       "size": [
         400,
-        872
+        896
       ],
       "flags": {
         "collapsed": true
@@ -4009,6 +4116,14 @@
           "link": null
         },
         {
+          "name": "plain_overlay",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "plain_overlay"
+          },
+          "link": null
+        },
+        {
           "name": "face_crop",
           "type": "BOOLEAN",
           "widget": {
@@ -4091,11 +4206,11 @@
       "type": "ForgeNeoSAM3Detailer",
       "pos": [
         460,
-        6048
+        6360
       ],
       "size": [
         400,
-        1212
+        1236
       ],
       "flags": {
         "collapsed": true
@@ -4400,6 +4515,14 @@
             "name": "target_height"
           },
           "link": null
+        },
+        {
+          "name": "target_image_size",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "target_image_size"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -4457,7 +4580,8 @@
         "{\"detector_model\": \"bbox/face_yolov8m.pt\", \"guide_size\": 512, \"guide_size_for_bbox\": true, \"max_size\": 1024, \"bbox_threshold\": 0.5, \"bbox_dilation\": 10, \"bbox_crop_factor\": 3.0, \"denoise\": 0.4, \"feather\": 5, \"noise_mask\": true, \"force_inpaint\": true, \"drop_size\": 10, \"cycle\": 1}",
         false,
         0,
-        0
+        0,
+        false
       ]
     },
     {
@@ -4465,11 +4589,11 @@
       "type": "ForgeNeoSAM3Refine",
       "pos": [
         900,
-        6048
+        6360
       ],
       "size": [
         340,
-        1212
+        1236
       ],
       "flags": {
         "collapsed": true
@@ -4774,6 +4898,14 @@
             "name": "target_height"
           },
           "link": null
+        },
+        {
+          "name": "target_image_size",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "target_image_size"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -4807,7 +4939,7 @@
       "type": "ForgeNeoSAM3TileRepair",
       "pos": [
         1280,
-        6048
+        6360
       ],
       "size": [
         340,
@@ -4919,7 +5051,7 @@
       "type": "ForgeNeoAnimaVAEDeGrid",
       "pos": [
         20,
-        7400
+        7736
       ],
       "size": [
         340,
@@ -5033,7 +5165,7 @@
       "type": "AIStudioSaveForge",
       "pos": [
         400,
-        7400
+        7736
       ],
       "size": [
         400,
@@ -5081,7 +5213,7 @@
         "aistudio_role": "save"
       },
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": false, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4, \"scheduler\": \"\", \"cfg\": 0.0, \"shift\": 0.0, \"resize_width\": 0, \"resize_height\": 0, \"size_step\": 64, \"tile_size\": 512, \"tile_overlap\": 32, \"vae\": \"\", \"prompt\": \"\", \"negative\": \"\"}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0, \"mode\": \"Scale by\", \"max_side\": 0, \"width\": 1024, \"height\": 1024, \"crop\": true, \"model_2\": \"\", \"visibility\": 0.0, \"color_correction\": false, \"tile_size\": 512, \"tile_overlap\": 32}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"mode\": \"Inpaint\", \"exclude_prompt\": \"\", \"threshold\": 0.4, \"detection_limit\": -1, \"mask_mode\": \"Individual\", \"mask_dilation\": 0, \"convex_hull\": false, \"mask_outline_px\": 0, \"mask_blur\": 4, \"invert\": false, \"face_crop\": false, \"face_crop_model\": \"\", \"face_crop_confidence\": 0.3, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"steps\": 0, \"cfg\": 0.0, \"sampler\": \"\", \"scheduler\": \"\", \"seed\": -1, \"noise_multiplier\": 1.0, \"cn_enable\": false, \"cn_model\": \"\", \"cn_module\": \"inpaint_only\", \"cn_strength\": 1.0, \"cn_start\": 0.0, \"cn_end\": 1.0, \"cn_pixel_perfect\": true, \"cn_control_mode\": \"Balanced\", \"cn_processor_res\": 512, \"cn_threshold_a\": -1.0, \"cn_threshold_b\": -1.0, \"device\": \"auto\", \"precision\": \"bf16\", \"unload_after\": true, \"keep_in_ram\": true, \"save_artifacts\": true, \"overlay\": false}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
         0,
         "fixed",
         "AIStudio/anima"
@@ -5092,7 +5224,7 @@
       "type": "LoadImage",
       "pos": [
         20,
-        7816
+        8152
       ],
       "size": [
         340,
@@ -5137,11 +5269,11 @@
       "type": "AIStudioUpscaleImage",
       "pos": [
         400,
-        7816
+        8152
       ],
       "size": [
         340,
-        112
+        352
       ],
       "flags": {
         "collapsed": true
@@ -5177,6 +5309,86 @@
             "name": "scale_by"
           },
           "link": null
+        },
+        {
+          "name": "resize_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "resize_mode"
+          },
+          "link": null
+        },
+        {
+          "name": "max_side_length",
+          "type": "INT",
+          "widget": {
+            "name": "max_side_length"
+          },
+          "link": null
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": null
+        },
+        {
+          "name": "crop",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "crop"
+          },
+          "link": null
+        },
+        {
+          "name": "model_name_2",
+          "type": "COMBO",
+          "widget": {
+            "name": "model_name_2"
+          },
+          "link": null
+        },
+        {
+          "name": "upscaler_2_visibility",
+          "type": "FLOAT",
+          "widget": {
+            "name": "upscaler_2_visibility"
+          },
+          "link": null
+        },
+        {
+          "name": "color_correction",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "color_correction"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_size",
+          "type": "INT",
+          "widget": {
+            "name": "tile_size"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_overlap",
+          "type": "INT",
+          "widget": {
+            "name": "tile_overlap"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -5198,7 +5410,7 @@
       "type": "VAEEncode",
       "pos": [
         780,
-        7816
+        8152
       ],
       "size": [
         220,
@@ -5240,11 +5452,11 @@
       "type": "ForgeNeoHiresFix",
       "pos": [
         1040,
-        7816
+        8152
       ],
       "size": [
         400,
-        1108
+        1180
       ],
       "flags": {
         "collapsed": true
@@ -5521,6 +5733,30 @@
             "name": "forge_noise"
           },
           "link": null
+        },
+        {
+          "name": "tile_size",
+          "type": "INT",
+          "widget": {
+            "name": "tile_size"
+          },
+          "link": null
+        },
+        {
+          "name": "tile_overlap",
+          "type": "INT",
+          "widget": {
+            "name": "tile_overlap"
+          },
+          "link": null
+        },
+        {
+          "name": "size_step",
+          "type": "INT",
+          "widget": {
+            "name": "size_step"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -5574,7 +5810,10 @@
         "",
         "",
         "stable_diffusion",
-        true
+        false,
+        512,
+        32,
+        64
       ]
     },
     {
@@ -5582,7 +5821,7 @@
       "type": "VAEDecode",
       "pos": [
         1480,
-        7816
+        8152
       ],
       "size": [
         220,
@@ -5625,11 +5864,11 @@
       "type": "ForgeNeoSAM3Mask",
       "pos": [
         1740,
-        7816
+        8152
       ],
       "size": [
         400,
-        872
+        896
       ],
       "flags": {
         "collapsed": true
@@ -5813,6 +6052,14 @@
           "link": null
         },
         {
+          "name": "plain_overlay",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "plain_overlay"
+          },
+          "link": null
+        },
+        {
           "name": "face_crop",
           "type": "BOOLEAN",
           "widget": {
@@ -5894,11 +6141,11 @@
       "type": "ForgeNeoSAM3Detailer",
       "pos": [
         2180,
-        7816
+        8152
       ],
       "size": [
         400,
-        1212
+        1236
       ],
       "flags": {
         "collapsed": true
@@ -6203,6 +6450,14 @@
             "name": "target_height"
           },
           "link": null
+        },
+        {
+          "name": "target_image_size",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "target_image_size"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -6260,7 +6515,8 @@
         "{\"detector_model\": \"bbox/face_yolov8m.pt\", \"guide_size\": 512, \"guide_size_for_bbox\": true, \"max_size\": 1024, \"bbox_threshold\": 0.5, \"bbox_dilation\": 10, \"bbox_crop_factor\": 3.0, \"denoise\": 0.4, \"feather\": 5, \"noise_mask\": true, \"force_inpaint\": true, \"drop_size\": 10, \"cycle\": 1}",
         false,
         0,
-        0
+        0,
+        false
       ]
     },
     {
@@ -6268,7 +6524,7 @@
       "type": "AIStudioSaveForge",
       "pos": [
         2620,
-        7816
+        8152
       ],
       "size": [
         400,
@@ -6316,7 +6572,7 @@
         "aistudio_role": "post_save"
       },
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": false, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4, \"scheduler\": \"\", \"cfg\": 0.0, \"shift\": 0.0, \"resize_width\": 0, \"resize_height\": 0, \"size_step\": 64, \"tile_size\": 512, \"tile_overlap\": 32, \"vae\": \"\", \"prompt\": \"\", \"negative\": \"\"}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0, \"mode\": \"Scale by\", \"max_side\": 0, \"width\": 1024, \"height\": 1024, \"crop\": true, \"model_2\": \"\", \"visibility\": 0.0, \"color_correction\": false, \"tile_size\": 512, \"tile_overlap\": 32}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"mode\": \"Inpaint\", \"exclude_prompt\": \"\", \"threshold\": 0.4, \"detection_limit\": -1, \"mask_mode\": \"Individual\", \"mask_dilation\": 0, \"convex_hull\": false, \"mask_outline_px\": 0, \"mask_blur\": 4, \"invert\": false, \"face_crop\": false, \"face_crop_model\": \"\", \"face_crop_confidence\": 0.3, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"steps\": 0, \"cfg\": 0.0, \"sampler\": \"\", \"scheduler\": \"\", \"seed\": -1, \"noise_multiplier\": 1.0, \"cn_enable\": false, \"cn_model\": \"\", \"cn_module\": \"inpaint_only\", \"cn_strength\": 1.0, \"cn_start\": 0.0, \"cn_end\": 1.0, \"cn_pixel_perfect\": true, \"cn_control_mode\": \"Balanced\", \"cn_processor_res\": 512, \"cn_threshold_a\": -1.0, \"cn_threshold_b\": -1.0, \"device\": \"auto\", \"precision\": \"bf16\", \"unload_after\": true, \"keep_in_ram\": true, \"save_artifacts\": true, \"overlay\": false}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
         0,
         "fixed",
         "AIStudio/anima"
@@ -7353,7 +7609,7 @@
         0,
         4468,
         1460,
-        1208
+        1280
       ],
       "font_size": 24,
       "flags": {}
@@ -7363,9 +7619,9 @@
       "title": "⑦ 업스케일",
       "bounding": [
         0,
-        5716,
+        5788,
         380,
-        212
+        452
       ],
       "font_size": 24,
       "flags": {}
@@ -7375,9 +7631,9 @@
       "title": "⑧ SAM3",
       "bounding": [
         0,
-        5968,
+        6280,
         1640,
-        1312
+        1336
       ],
       "font_size": 24,
       "flags": {}
@@ -7387,7 +7643,7 @@
       "title": "⑨ 저장",
       "bounding": [
         0,
-        7320,
+        7656,
         820,
         376
       ],
@@ -7399,9 +7655,9 @@
       "title": "⑩ 후처리",
       "bounding": [
         0,
-        7736,
+        8072,
         3040,
-        1312
+        1336
       ],
       "font_size": 24,
       "flags": {}

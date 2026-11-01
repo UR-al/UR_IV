@@ -87,8 +87,12 @@ export function select(items, value, onChange, props = {}) {
   return element;
 }
 
-/** A number box; `onChange` gets a finite number (an empty or bad entry is ignored). */
-export function numberBox(value, onChange, { min, max, step = "any", width, title } = {}) {
+/** A number box; `onChange` gets a finite number (an empty or bad entry is ignored). `live`: on every key, not only when it is left. */
+export function numberBox(value, onChange, { min, max, step = "any", width, title, live = false } = {}) {
+  const write = (event) => {
+    const number = Number(event.target.value);
+    if (event.target.value !== "" && Number.isFinite(number)) onChange(number);
+  };
   return h("input", {
     type: "number",
     class: "ais-f ais-num",
@@ -98,12 +102,15 @@ export function numberBox(value, onChange, { min, max, step = "any", width, titl
     step,
     title,
     style: width ? `width:${width}px` : undefined,
-    onChange: (event) => {
-      const number = Number(event.target.value);
-      if (event.target.value !== "" && Number.isFinite(number)) onChange(number);
-    },
+    onChange: write,
+    onInput: live ? write : undefined,
   });
 }
+
+export const card = (title, head, body, extraClass = "") =>
+  h("div", { class: `ais-node ${extraClass}` }, h("div", { class: "ais-nt" }, h("span", {}, title), head), h("div", { class: "ais-nb" }, body));
+
+export const row = (label, ...controls) => h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, label), h("span", { class: "ais-ctl" }, controls));
 
 /** `{filename, subfolder, type}` from a LoadImage value such as `sub/name.png [output]` (default type input). */
 export function refFromValue(value) {

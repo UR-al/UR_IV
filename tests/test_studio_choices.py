@@ -1,4 +1,6 @@
 """Anima studio choice lists: SAM3 files, unet families, folder_paths / comfy.samplers kinds (no ComfyUI needed)."""
+import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +30,12 @@ def _fake_folder_paths(base: Path, lists: dict, sam3_paths=None):
     return SimpleNamespace(base_path=str(base), get_filename_list=get_filename_list, get_folder_paths=get_folder_paths)
 
 
+def _safetensors(path: Path, *keys: str) -> None:
+    """A file with only the header a reader of the key names opens."""
+    header = json.dumps({key: {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]} for key in keys}).encode("utf-8")
+    path.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0\0\0")
+
+
 class Sam3ChoicesTests(unittest.TestCase):
     def test_sam3_choices_filter_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -37,6 +45,15 @@ class Sam3ChoicesTests(unittest.TestCase):
             self.assertEqual([item["label"] for item in items], ["sam3.1_multiplex_fp16.safetensors", "sam3.pt"])
             self.assertEqual(items[1]["value"], str(root / "sam3.pt"))
             self.assertTrue(all(Path(item["value"]).is_absolute() for item in items))
+
+    def test_sam3_list_leaves_out_the_transformers_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _safetensors(root / "sam3.safetensors", "detector_model.vision_encoder.a", "tracker_model.b")
+            _safetensors(root / "sam3.1_multiplex_fp16.safetensors", "detector.backbone.a", "tracker.model.b")
+            _touch(root, "sam3.pt")
+            labels = [item["label"] for item in studio_choices.sam3_items([str(root)])]
+            self.assertEqual(labels, ["sam3.1_multiplex_fp16.safetensors", "sam3.pt"])
 
     def test_missing_directory_and_first_folder_wins(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -146,12 +163,39 @@ class ChoicesKindTests(unittest.TestCase):
         self.assertEqual(items[:2], ["latent:bislerp", "latent:bicubic"])
         self.assertIn("4x-UltraSharp.pth", items)
 
+    def test_an_empty_upscale_folder_offers_only_what_needs_no_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder_paths = _fake_folder_paths(Path(directory), {"upscale_models": []})
+            with mock.patch.dict("sys.modules", {"folder_paths": folder_paths}):
+                items = studio_choices.choices("upscalers")["items"]
+        self.assertNotIn("None", items)
+        self.assertIn("Lanczos", items)
+
     def test_dora_modes_are_the_node_choices(self):
         self.assertEqual(self._run("dora_modes"), {"items": list(dora_infer_mode.MODE_CHOICES)})
 
     def test_sam3_items_are_objects(self):
         items = self._run("sam3")["items"]
         self.assertEqual(items, [])
+
+    def test_controlnets_are_the_controlnet_files(self):
+        self.assertEqual(self._run("controlnets", {"controlnet": ["lllite.safetensors"]}), {"items": ["lllite.safetensors"]})
+
+    def test_face_models_read_forge_adetailer_and_keep_the_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            forge = root / "forge"
+            (forge / "models" / "adetailer").mkdir(parents=True)
+            (forge / "models" / "adetailer" / "face_yolov8n.pt").write_bytes(b"x")
+            (forge / "models" / "adetailer" / "yolov8s-world.pt").write_bytes(b"x")
+            (root / studio_choices.EXTRA_PATHS_FILE).write_text(f"forge:\n  base_path: {forge.as_posix()}\n", encoding="utf-8")
+            folder_paths = _fake_folder_paths(root, {})
+            folder_paths.base_path = str(root)
+            with mock.patch.dict("sys.modules", {"folder_paths": folder_paths}):
+                items = studio_choices.choices("face_models")["items"]
+        self.assertEqual([item["label"] for item in items], ["face_yolov8n.pt"])
+        self.assertTrue(items[0]["value"].endswith("face_yolov8n.pt"))
+        self.assertTrue(Path(items[0]["value"]).is_absolute())
 
     def test_unknown_kind_raises(self):
         with self.assertRaises(ValueError):

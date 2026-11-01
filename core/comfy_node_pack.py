@@ -99,7 +99,10 @@ PACK_ID = "ai_studio_forge_parity"
 # predictor (Krea2); moss_lora_layout.py.
 # 1.12.0: the studio's EXIF panel (AIStudioExifView, web/ai_studio/exif_view.js + studio_exif.js), 갤러리 자동 비우기 and
 # 걸린 시간 in the result column.
-PACK_VERSION = "1.12.0"
+# 1.13.0: the studio's post-processing settings (studio_post_schema.py, web/ai_studio/post_view.js + studio_post.js): SAM3 in
+# full, Hires' own CFG / Shift / scheduler / size / VAE / prompts, Extras' Scale to, second upscaler, colour correction and
+# tiles (studio_upscale.py); a SAM3 file in the transformers layout is refused, an empty mask is told.
+PACK_VERSION = "1.13.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

@@ -11,6 +11,8 @@ import math
 import re
 from pathlib import Path
 
+from .studio_post_schema import POST_SCHEMA, post_defaults
+
 EXT_SCHEMA: dict = json.loads(
     (Path(__file__).resolve().parent / "web" / "ai_studio" / "ext_schema.json").read_text(encoding="utf-8"))
 
@@ -21,6 +23,7 @@ DORA_MODES = (
     "DoRA off (no magnitude)",
 )
 MEMORY_SLOTS = ("anima", "moss", "krea2", "krea2_turbo")  # Turbo takes other numbers than Raw
+SIZE_STEP = 8
 MOSS_SIZE_STEP = 16
 REFERENCE_METHODS = ("snapref", "ref_adapter")
 REFERENCE_MODES = ("cs", "char")
@@ -50,10 +53,12 @@ DEFAULT_STATE: dict = {
     "moss_stream": True,  # MOSS-Image only: the fp32 residual stream
     "family_memory": {},  # family -> the model picks and sampling numbers it had when the checkpoint left it
     "dora_mode": DORA_MODES[0],
-    "forge_like": {"master": True, "noise": True, "prompt_syntax": True, "dora": True, "attention": False},
-    "hires": {"on": False, "upscaler": "4x-UltraSharp.pth", "sampler": "", "scale": 1.5, "steps": 16, "denoise": 0.4},
-    "upscale": {"on": False, "model": "", "scale": 2.0},
-    "sam3": {"on": False, "checkpoint": "", "prompt": "face", "denoise": 0.4, "steps": 0, "cfg": 0.0},
+    "forge_like": {"master": False, "noise": True, "prompt_syntax": True, "dora": True, "attention": False},
+    # steps: 0 = the main steps; the rest of these three sections is the table in studio_post_schema.py
+    "hires": {"on": False, "upscaler": "4x-UltraSharp.pth", "sampler": "", "scale": 1.5, "steps": 16, "denoise": 0.4,
+              **post_defaults("hires")},
+    "upscale": {"on": False, "model": "", "scale": 2.0, **post_defaults("upscale")},
+    "sam3": {"on": False, "checkpoint": "", "prompt": "face", "denoise": 0.4, **post_defaults("sam3")},
     # inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture); the panel shows
     # "전체" greyed out (studio_forge_parity.md), the key keeps the saved shape.
     "i2i": {"image": "", "width": 832, "height": 1216, "denoise": 0.55, "mask_blur": 4, "inpaint_area": "whole"},
@@ -152,6 +157,11 @@ def _ext_field(field: dict, value):
         return _str(value, default)
     choices = field["choices"]  # empty: a file list of the user's ComfyUI, any name goes
     return value if isinstance(value, str) and (not choices or value in choices) else default
+
+
+def _post_fields(section: str) -> dict:
+    """The ``_section`` entries of one ``POST_SCHEMA`` section."""
+    return {field["key"]: (lambda value, _default, field=field: _ext_field(field, value)) for field in POST_SCHEMA[section]}
 
 
 def _ext(raw) -> dict:
@@ -262,21 +272,22 @@ def normalize_state(raw: object) -> dict:
             "upscaler": lambda v, df: _str(v, df, allow_empty=False),
             "sampler": _str,
             "scale": lambda v, df: _float(v, df, 1.0, 8.0),
-            "steps": lambda v, df: _int(v, df, 1, 150),
+            "steps": lambda v, df: _int(v, df, 0, 150),
             "denoise": lambda v, df: _float(v, df, 0.0, 1.0),
+            **_post_fields("hires"),
         }),
         "upscale": _section(raw.get("upscale"), d["upscale"], {
             "on": _bool,
             "model": _str,
             "scale": lambda v, df: _float(v, df, 1.0, 8.0),
+            **_post_fields("upscale"),
         }),
         "sam3": _section(raw.get("sam3"), d["sam3"], {
             "on": _bool,
             "checkpoint": _str,
             "prompt": lambda v, df: _str(v, df, allow_empty=False),
             "denoise": lambda v, df: _float(v, df, 0.0, 1.0),
-            "steps": lambda v, df: _int(v, df, 0, 150),
-            "cfg": lambda v, df: _float(v, df, 0.0, 30.0),
+            **_post_fields("sam3"),
         }),
         "i2i": _section(raw.get("i2i"), d["i2i"], {
             "image": _str,
@@ -292,11 +303,16 @@ def normalize_state(raw: object) -> dict:
     return out
 
 
+def size_grid(state: dict) -> int:
+    """The latent's cell in pixels (the panel's ``sizeStep``)."""
+    return MOSS_SIZE_STEP if "moss" in state["unet"].lower() else SIZE_STEP
+
+
 def generation_size(state: dict) -> tuple[int, int]:
     """(width, height) of the tab in use: each tab keeps its own size, as in Forge. MOSS latents are 16x, so a saved
     size off that grid runs snapped (studio_logic.js writes the latent the same way)."""
     size = state["i2i"] if state["tab"] == "i2i" else state
-    if "moss" in state["unet"].lower():
+    if size_grid(state) == MOSS_SIZE_STEP:
         return tuple(int(side / MOSS_SIZE_STEP + 0.5) * MOSS_SIZE_STEP for side in (size["width"], size["height"]))
     return size["width"], size["height"]
 

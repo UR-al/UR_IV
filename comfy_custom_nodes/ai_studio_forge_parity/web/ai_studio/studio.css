@@ -96,7 +96,7 @@ textarea.ais-f { white-space: pre-wrap; line-height: 1.5; resize: none; width: 1
 }
 .ais-label { white-space: nowrap; flex-shrink: 0; }
 .ais-ctl { display: flex; flex: 1; align-items: center; gap: 5px; min-width: 0; justify-content: flex-end; }
-.ais-ctl select.ais-f { flex: 1; width: auto; max-width: 180px; }
+.ais-ctl select.ais-f { flex: 1; width: auto; max-width: 360px; }
 .ais-head-ctl { display: flex; align-items: center; gap: 6px; }
 .ais-caret { background: none; border: 0; color: #f0f0f0; padding: 0 2px; font-size: 12px; }
 .ais-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -143,8 +143,7 @@ textarea.ais-f { white-space: pre-wrap; line-height: 1.5; resize: none; width: 1
 .ais-thin { height: 4px; background: #2a2a2a; flex-shrink: 0; }
 .ais-thin > div { height: 4px; width: 0; background: #3b82f6; transition: width 0.2s; }
 .ais-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
-.ais-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 10px; }
-.ais-grid3 .span3 { grid-column: span 3; }
+.ais-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 10px; }
 .ais-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
 .ais-grid-i2i { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px; padding: 12px; }
 textarea.ais-prompt { min-height: 62px; overflow: hidden; }
@@ -200,7 +199,6 @@ textarea.ais-negative { min-height: 34px; overflow: hidden; }
 /* control panel: 확장기능 */
 .ais-ext-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .ais-ext-count { font-size: 11.5px; }
-.ais-ext-wide { grid-column: span 2; }
 .ais-ext-body.ais-ref-body { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 8px; align-items: start; }
 .ais-ref-body .ais-i2i-box { min-height: 128px; width: 100%; position: relative; }
 .ais-ref-images { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

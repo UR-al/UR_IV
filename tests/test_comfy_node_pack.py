@@ -238,15 +238,16 @@ class TestBundledComfyNodePack(unittest.TestCase):
     def test_pack_version_matches_package_version(self):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
-    def test_result_tools_release_is_1_12_0(self):
-        self.assertEqual(bundled_pack.__version__, "1.12.0")
+    def test_post_settings_release_is_1_13_0(self):
+        self.assertEqual(bundled_pack.__version__, "1.13.0")
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
-        self.assertIn("# 1.12.0: the studio's EXIF panel", source)
+        self.assertIn("# 1.13.0: the studio's post-processing settings", source)
         readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
-        self.assertLess(readme.index("## 1.12.0 changes"), readme.index("## 1.11.0 changes"))
-        changes = " ".join(readme.split("## 1.12.0 changes", 1)[1].split("\n## ", 1)[0].split())
-        self.assertIn("`AIStudioExifView`", changes)
+        self.assertLess(readme.index("## 1.13.0 changes"), readme.index("## 1.12.0 changes"))
+        changes = " ".join(readme.split("## 1.13.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("`studio_post_schema.py`", changes)
+        self.assertIn("`AIStudioExifView`", " ".join(readme.split("## 1.12.0 changes", 1)[1].split("\n## ", 1)[0].split()))
 
     def test_model_families_release_is_1_11_0(self):
         root = Path(__file__).resolve().parent.parent
@@ -709,6 +710,8 @@ class TestPackNotices(unittest.TestCase):
         ``modules/masking.py`` function since pack 1.3.0 and the notices named no Forge code. The pack's own code now
         follows only the rule (``TestPackCarriesNoForgeCode``); the notices say which rule and that no Forge code is
         included."""
+        upscale = _flat(_section(self.notices, "## Forge upscale rules (`studio_upscale.py`)"))
+        self.assertIn("No Forge code is included", upscale)
         section = _flat(_section(self.notices, "## Forge inpaint crop rule (`mask_ops.py`)"))
         for text in ("`mask_ops.py`", "`expand_crop_region`", "`modules/masking.py`", "AGPL-3.0",
                      "No Forge code is included", "`tests/test_comfy_sam3_nodes.py`", "`tests/test_comfy_node_pack.py`"):
@@ -814,13 +817,14 @@ class TestPackCarriesNoForgeCode(unittest.TestCase):
         root = require_forge()
         forge: dict = {}
         unreadable = []
-        for sub in ("modules", "modules_forge", "backend"):
+        for sub in ("modules", "modules_forge", "backend", "scripts"):
             for path, relative in similarity.python_files(root / sub, excluded=similarity.EXCLUDED_DIRS | {"packages"}):
                 try:
                     forge.update(similarity.function_tokens(path, f"{sub}/{relative}"))
                 except (SyntaxError, UnicodeDecodeError, ValueError):
                     unreadable.append(f"{sub}/{relative}")
         self.assertIn("modules/masking.py:expand_crop_region", forge)
+        self.assertIn("scripts/postprocessing_upscale.py:limit_size_by_one_dimension", forge)
         self.assertGreater(len(forge), 2000)                     # 2,594 functions in the installed Forge (2026-10-05)
         self.assertLessEqual(len(unreadable), 5, unreadable)
         copies = similarity.near_copies(similarity.collect(PACK_DIR), forge)

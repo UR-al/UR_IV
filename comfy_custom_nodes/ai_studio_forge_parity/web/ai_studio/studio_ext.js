@@ -80,16 +80,20 @@ function fieldInputs(item, values) {
   return Object.fromEntries(item.fields.filter((field) => field.input).map((field) => [field.input, values[field.key]]));
 }
 
-const sam3Cfg = (s) => (s.sam3.cfg > 0 ? s.sam3.cfg : s.cfg);
+/** Forge's Mask only: the mask is made and saved, nothing is drawn. */
+export const sam3MaskOnly = (s) => s.sam3.mode === "Mask only";
 
-/** What a SAM3 pass samples with: its own steps and cfg (0 = the main values), the main sampler, scheduler and seed. */
+const sam3Cfg = (s) => (s.sam3.cfg > 0 ? s.sam3.cfg : s.cfg);
+const sam3Sampler = (s) => s.sam3.sampler || s.sampler;
+
+/** What a SAM3 pass samples with: its own settings, where 0, "" and a seed of -1 mean the main values. */
 export function sam3PassInputs(s) {
   return {
     steps: s.sam3.steps > 0 ? s.sam3.steps : s.steps,
     cfg: sam3Cfg(s),
-    sampler_name: s.sampler,
-    scheduler: s.scheduler,
-    seed: s.seed,
+    sampler_name: sam3Sampler(s),
+    scheduler: s.sam3.scheduler || s.scheduler,
+    seed: s.sam3.seed >= 0 ? s.sam3.seed : s.seed,
   };
 }
 
@@ -132,7 +136,7 @@ function tileInputs(s, item) {
 // R23: Individual Refine outputs one image per mask, and tile needs its mask batch to divide its image batch. Combined gives
 // tile one image per mask set; the panel keeps the user's pick for when tile is off.
 function refineInputs(s, item) {
-  const inputs = { ...item.fixed, ...fieldInputs(item, s.ext.sam3_refine), ...sam3PassInputs(s) };
+  const inputs = { ...item.fixed, ...fieldInputs(item, s.ext.sam3_refine), ...sam3PassInputs(s), target_image_size: true }; // Forge: an img2img at the image's size
   return s.ext.sam3_tile.on ? { ...inputs, mask_mode: "Combined" } : inputs;
 }
 
@@ -206,13 +210,16 @@ function roleRuns(s, role, postAction) {
     case "ext_dd_hires":
       return ddRuns(s, s.sampler, s.cfg) && ext.dd_hires && hiresRuns;
     case "ext_dd_sam3":
-      return ddRuns(s, s.sampler, sam3Cfg(s)) && !ext.dd_hires && sam3Runs;
+      return ddRuns(s, sam3Sampler(s), sam3Cfg(s)) && !ext.dd_hires && sam3Runs;
     case "ext_speed": // the compiler leaves SPEED out of an inpaint pass (the mask is bound to the full-size grid)
       return speed.on && runsOnTab(s, "speed") && !(s.tab === "i2i" && s.i2i_mode === "inpaint");
     case "ext_speed_hires":
       return speed.on && speed.hires && hiresRuns;
     case "ext_degrid":
       return ext.on && runsOnTab(s, "degrid");
+    case "ext_sam3_refine":
+    case "ext_sam3_tile":
+      return ext.on && !(s.sam3.on && sam3MaskOnly(s));
     default:
       return ext.on && !(key in PICKED_FIELD && UNPICKED_FILES.has(ext[PICKED_FIELD[key]]));
   }

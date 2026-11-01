@@ -25,7 +25,8 @@ class StudioStateTests(unittest.TestCase):
         self.assertEqual((d["sam3"]["steps"], d["sam3"]["cfg"]), (0, 0.0))
         self.assertEqual(d["dora_mode"], "LyCORIS fp32 (as trained)")
         fl = d["forge_like"]
-        self.assertTrue(all(fl[k] for k in ("master", "noise", "prompt_syntax", "dora")))
+        self.assertFalse(fl["master"])
+        self.assertTrue(all(fl[k] for k in ("noise", "prompt_syntax", "dora")))
         self.assertFalse(fl["attention"])
 
     def test_i2i_has_its_own_size(self):
@@ -129,7 +130,8 @@ class StudioStateTests(unittest.TestCase):
         self.assertEqual(out["hires"]["steps"], 16)
         self.assertNotIn("zzz", out["hires"])
         self.assertNotIn("q", out["forge_like"])
-        self.assertTrue(out["forge_like"]["attention"] and out["forge_like"]["master"])
+        self.assertTrue(out["forge_like"]["attention"])
+        self.assertFalse(out["forge_like"]["master"])
         self.assertEqual(out["sam3"], ss.DEFAULT_STATE["sam3"])
 
     def test_dora_mode_unknown_falls_back(self):

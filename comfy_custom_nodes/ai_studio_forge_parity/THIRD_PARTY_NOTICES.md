@@ -195,6 +195,17 @@ included: the function is this pack's own code (one helper, `_grow_span`, for ei
 `tests/test_comfy_node_pack.py` also checks that no pack function is a near-copy of the code in Forge's `modules/`,
 `modules_forge/` (without its third-party `packages/`) or `backend/`.
 
+## Forge upscale rules (`studio_upscale.py`)
+
+`ForgeNeoHiresFix` and `AIStudioUpscaleImage` upscale by the rules of Forge's `modules/upscaler.py` (the model again until the
+picture covers the target, 4 passes at most, then Lanczos to a multiple of 8), `modules/processing.py` (the Hires target size,
+Color Correction), `modules/images.py` (the upscaler only when the picture must grow) and `scripts/postprocessing_upscale.py`
+(Scale by, Scale to, Max Side Length, the second upscaler), which are A1111 stable-diffusion-webui and Forge code under
+AGPL-3.0. Only those rules are shared. No Forge code is included; `studio_upscale.py` is this pack's own code.
+`match_channel` does what scikit-image's `match_histograms` does for uint8 pictures, written for this pack so that ComfyUI needs
+no scikit-image; `tests/test_studio_upscale.py` compares the two. `tests/test_comfy_node_pack.py` also checks that no pack
+function is a near-copy of the code in Forge's `modules/`, `modules_forge/`, `backend/` and `scripts/`.
+
 ## Code shared with the sam-extra Forge extension (MIT, by its author)
 
 The sam-extra Forge extension ([UR-al/sam-extra](https://github.com/UR-al/sam-extra), installed as
@@ -236,7 +247,7 @@ for the pack first. Either way, the author wrote both copies.
 | `sam3_face_crop.py` (pack 1.8.0) | All of it: `CropBox`, `_finite_box`, `clip_box`, `expand_box`, `_fit_axis`, `square_crop`, `face_crop_box`, `grow_crop`, `box_to_image`, `box_to_crop`, `paste_mask`, `mask_centroid`, `assign_owner` (its `score`), `_spread`, `edge_contact`, `assign_owners`, `touching_sides`, `_grow_axis`, `grow_toward`, `enclosing_crop`, `growth_requests`, `continuing_pieces`, `order_faces`, `CropGrowth`, `_crop_text`, `FaceCropInfo`, `box_iou`, `_centre_inside`, `same_face`, `dedupe_faces`, `plan_face_crops` | `sam3ext/face_crop.py` (same names; installed v0.34.0, and the crop growth — `touching_sides`, `_grow_axis`, `grow_toward`, `enclosing_crop`, `growth_requests`, `continuing_pieces`, `CropGrowth` — from v0.34.1 as fixed before its release, sam-extra commit `b815f68`) |
 | `sam3_face_crop_run.py` (pack 1.8.0) | `run_face_crop` (the face-crop branch of `run_sam3_on_pil`, with the v0.34.1 crop growth), `_continuing_result`, `_split_masks`, `_mask_bbox`, `_intersection_area`, `_restrict_mask_to_box`, `_clean_split_masks` | `sam3ext/core.py` `run_sam3_on_pil` and the helpers of the same names |
 | `sam3_nodes.py` (pack 1.8.0) | `_copy_image_state` and the one-backbone-per-region rule of `_CropBackbone` | `sam3ext/core.py` `run_sam3_on_pil` (`_run_prompt`: `set_image` once per region, a shallow copy of the state and its `backbone_out` per token) |
-| `sam3_face_detect.py` (pack 1.8.0) | `FaceDetectorUnavailable`, `FaceDetection`, `_is_box_model`, `_scan`, `resolve_face_model`, `missing_model_message`, `_guard_no_download`, `ultralytics_device`, `_to_list`, `detect_faces` (`detect_faces_many`, `_detection`) | `sam3ext/face_detect.py` (same names; the pack looks in ComfyUI's model folders instead of Forge's `models/adetailer`) |
+| `sam3_face_detect.py` (pack 1.8.0) | `FaceDetectorUnavailable`, `FaceDetection`, `_is_box_model`, `scan_models`, `resolve_face_model`, `missing_model_message`, `_guard_no_download`, `ultralytics_device`, `_to_list`, `detect_faces` (`detect_faces_many`, `_detection`) | `sam3ext/face_detect.py` (same names, `scan_models` is its `_scan`; the pack looks in ComfyUI's model folders instead of Forge's `models/adetailer`) |
 | `dora_infer_mode.py` (pack 1.9.0) | `decompose` (adapted: LyCORIS' operations in its LyCORIS branch, the delta merged in place), `_can_return_fp32`, `_is_oom`, `_soft_empty_cache` | `sam3ext/dora_infer_mode.py` (same names; installed v0.34.0) |
 
 Formulas shared with GPL-3.0 hosts. Each item is the formula only: the code around it is sam-extra's or the pack's,

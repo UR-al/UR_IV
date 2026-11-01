@@ -154,7 +154,6 @@ test("unfolding draws the fields by kind", () => {
   assert.equal(tag("text"), "input");
   assert.equal(fieldOf(view, "speed", kinds.float.key).attrs.type, "number");
   assert.equal(rowOf(view, "speed").byClass("ais-label").length, item("speed").fields.length);
-  assert.equal(view.element.byClass("ais-ext-wide").length, 1); // its card takes the whole width
   expand(view, "speed");
   assert.equal(view.element.byClass("ais-ext-fields").length, 0);
 });
@@ -333,6 +332,207 @@ test("getState leaves out extensions the graph cannot run, and saves their switc
   const state = view.getState();
   assert.deepEqual([state.ext.skim.on, state.ext.detail_daemon.on], [false, true]);
   assert.equal(view.state.ext.skim.on, true);
+});
+
+// ---------------------------------------------------------------------------------------------- 후처리 card, Hires card
+
+const LISTS = {
+  samplers: ["euler", "heun"], schedulers: ["simple", "karras"], vaes: ["a.safetensors"], sam3: [{ value: "C:/sam3.pt", label: "sam3.pt" }],
+  upscalers: ["latent:bicubic", "Lanczos", "4x-UltraSharp.pth", "2x.pth"], controlnets: ["lllite.safetensors"],
+  face_models: [{ value: "C:/face_yolov8n.pt", label: "face_yolov8n.pt" }],
+};
+
+async function listedPanel(state = {}, extra = {}) {
+  const ctx = {
+    ...extra,
+    choices: async (kind) => ({ items: LISTS[kind] || [] }),
+    engineRoom: { collapsed: () => true, toggle() {} },
+    i2i: { get: () => "", set() {}, url: () => "", upload: async () => ({}), maskEditor() {} },
+    hasRole: () => true,
+    fetchChoices: async () => ({}),
+  };
+  const view = new PanelView({ value: JSON.stringify(state) }, ctx);
+  await flush();
+  return view;
+}
+
+const caret = (view, label) => view.element.all((element) => element.attrs["aria-label"] === `${label} 세부 설정`)[0];
+const section = (view, name) => view.element.byClass("ais-ext-sec").find((button) => button.text.includes(name));
+const field = (view, key) => view.element.all((element) => element.attrs["data-field"] === key)[0];
+const rowLabelled = (view, label) => view.element.byClass("ais-row").find((row) => row.byClass("ais-label")[0]?.text === label);
+const postNode = (view) => view.element.byClass("ais-node").find((node) => node.byClass("ais-nt")[0].text.startsWith("후처리"));
+const hiresNode = (view) => view.element.byClass("ais-node").find((node) => node.byClass("ais-nt")[0].text === "Hires fix");
+
+test("the SAM3 caret unfolds its sections in the card", async () => {
+  const view = await listedPanel();
+  assert.equal(postNode(view).byClass("ais-ext-sec").length, 0);
+  caret(view, "SAM3").fire("click");
+  await flush();
+  assert.deepEqual(postNode(view).byClass("ais-ext-sec").map((button) => button.text.slice(2)), ["찾기", "마스크", "얼굴", "인페인트", "샘플링", "ControlNet", "실행"]);
+  caret(view, "SAM3").fire("click");
+  await flush();
+  assert.equal(postNode(view).byClass("ais-ext-sec").length, 0);
+});
+
+test("the common cards and the extension groups stack one per line", async () => {
+  const view = await listedPanel();
+  const stacks = view.element.byClass("ais-stack");
+  assert.equal(stacks.length, 2);
+  assert.deepEqual(stacks[0].children.map((node) => node.byClass("ais-nt")[0].children[0].text), ["프롬프트", "모델 · 샘플링", "LoRA", "후처리 (켜면 바로 적용)"]);
+  assert.match(stacks[1].parent.className, /ais-ext-root/);
+  assert.equal(view.element.byClass("ais-grid3").length, 0);
+});
+
+const seedButton = (view, label) => view.element.all((element) => element.attrs["aria-label"] === label)[0];
+
+test("♻ takes the picked image's seed, 랜덤 puts -1 back", async () => {
+  const view = await listedPanel({ seed: 5 }, { pickedSeed: async () => 1234 });
+  assert.equal(seedButton(view, "현재 이미지 시드 가져오기").text, "♻");
+  seedButton(view, "현재 이미지 시드 가져오기").fire("click");
+  await flush();
+  assert.equal(view.state.seed, 1234);
+  seedButton(view, "랜덤 시드").fire("click");
+  assert.equal(view.state.seed, -1);
+});
+
+test("♻ without a picked image leaves the seed", async () => {
+  const view = await listedPanel({ seed: 5 }, { pickedSeed: async () => null });
+  seedButton(view, "현재 이미지 시드 가져오기").fire("click");
+  await flush();
+  assert.equal(view.state.seed, 5);
+});
+
+test("a typed seed counts before the box is left: Ctrl+Enter comes first", async () => {
+  const view = await listedPanel();
+  const box = rowLabelled(view, "시드").byClass("ais-num")[0];
+  box.value = "777";
+  box.fire("input");
+  assert.equal(view.state.seed, 777);
+});
+
+test("SAM3's prompt takes two lines and says its grammar", async () => {
+  const view = await listedPanel({ sam3: { on: true } });
+  const box = postNode(view).byClass("ais-negative")[0];
+  assert.equal(box.tag, "textarea");
+  box.value = "eyes, hair / hand";
+  box.fire("input");
+  assert.equal(view.state.sam3.prompt, "eyes, hair / hand");
+  box.value = "";
+  box.fire("input");
+  assert.equal(view.state.sam3.prompt, "face");
+  assert.match(postNode(view).byClass("ais-note")[0].text, /쉼표.*슬래시.*eyes, hair \/ hand/);
+});
+
+test("the gallery's SAM3 settings are reachable with the switch off", async () => {
+  const view = await listedPanel();
+  assert.equal(rowLabelled(view, "찾을 것"), undefined);
+  caret(view, "SAM3").fire("click");
+  await flush();
+  assert.ok(rowLabelled(view, "찾을 것"));
+});
+
+test("a SAM3 field writes the sam3 section, clamped by the table", async () => {
+  const view = await listedPanel({ sam3: { on: true } });
+  caret(view, "SAM3").fire("click");
+  await flush();
+  section(view, "찾기").fire("click");
+  await flush();
+  const threshold = field(view, "threshold");
+  threshold.value = "7";
+  threshold.fire("change");
+  assert.equal(view.state.sam3.threshold, 1);
+  assert.equal(threshold.value, "1");
+  assert.equal(JSON.parse(view.widget.value).sam3.threshold, 1);
+});
+
+test("a section with a changed value is lit", async () => {
+  const view = await listedPanel({ sam3: { threshold: 0.2 } });
+  caret(view, "SAM3").fire("click");
+  await flush();
+  assert.match(section(view, "찾기").className, /lit/);
+  assert.doesNotMatch(section(view, "마스크").className, /lit/);
+});
+
+test("the sampling picks say what empty means and list the route's items", async () => {
+  const view = await listedPanel();
+  caret(view, "SAM3").fire("click");
+  await flush();
+  section(view, "샘플링").fire("click");
+  await flush();
+  const labels = field(view, "sampler").children.map((option) => option.text);
+  assert.deepEqual(labels, ["메인과 같음", "euler", "heun"]);
+  const sampler = field(view, "sampler");
+  sampler.value = "heun";
+  sampler.fire("change");
+  assert.equal(view.state.sam3.sampler, "heun");
+});
+
+test("file picks with objects show the name and store the path", async () => {
+  const view = await listedPanel();
+  caret(view, "SAM3").fire("click");
+  await flush();
+  section(view, "얼굴").fire("click");
+  await flush();
+  assert.deepEqual(field(view, "face_crop_model").children.map((option) => [option.value, option.text]),
+    [["", "[얼굴 모델]"], ["C:/face_yolov8n.pt", "face_yolov8n.pt"]]);
+});
+
+test("the upscale caret shows Scale by's row or Scale to's rows", async () => {
+  const view = await listedPanel({ upscale: { on: true } });
+  caret(view, "업스케일").fire("click");
+  await flush();
+  assert.ok(rowLabelled(view, "최대 변"));
+  const mode = rowLabelled(view, "방식").all((element) => element.tag === "select")[0];
+  mode.value = "Scale to";
+  mode.fire("change");
+  await flush();
+  assert.equal(view.state.upscale.mode, "Scale to");
+  assert.equal(rowLabelled(view, "최대 변"), undefined);
+  assert.equal(postNode(view).byClass("ais-row").find((row) => row.byClass("ais-label")[0]?.text === "배율"), undefined);
+  const pick = postNode(view).byClass("ais-row").find((row) => row.byClass("ais-label")[0]?.text === "크기");
+  assert.ok(pick);
+  const before = [view.state.upscale.width, view.state.upscale.height];
+  view.state.upscale.width = 2048;
+  pick.byClass("ais-mini")[0].fire("click");
+  assert.deepEqual([view.state.upscale.width, view.state.upscale.height], [before[1], 2048]);
+});
+
+test("picking an upscaler sets the factor in its name, and leaves latent methods out", async () => {
+  const view = await listedPanel({ upscale: { on: true } });
+  const model = postNode(view).all((element) => element.tag === "select")[0];
+  assert.deepEqual(model.children.map((option) => option.text), ["[업스케일 모델]", "Lanczos", "4x-UltraSharp.pth", "2x.pth"]);
+  model.value = "4x-UltraSharp.pth";
+  model.fire("change");
+  assert.deepEqual([view.state.upscale.model, view.state.upscale.scale], ["4x-UltraSharp.pth", 4]);
+  const again = postNode(view).all((element) => element.tag === "select")[0];
+  again.value = "Lanczos";
+  again.fire("change");
+  assert.deepEqual([view.state.upscale.model, view.state.upscale.scale], ["Lanczos", 4]);
+});
+
+test("the Hires card shows its result size and follows the size boxes without a redraw", async () => {
+  const view = await listedPanel({ width: 832, height: 1216, hires: { scale: 1.5 } });
+  const size = hiresNode(view).byClass("ais-hires-size")[0];
+  assert.equal(size.text, "1280 × 1856");
+  const width = rowLabelled(view, "폭").byClass("ais-num")[0];
+  width.value = "1024";
+  width.fire("change");
+  assert.equal(view.state.hires.resize_width, 1024);
+  assert.equal(hiresNode(view).byClass("ais-hires-size")[0], size);
+  assert.equal(size.text, "1024 × 1472");
+});
+
+test("the Hires card writes its new fields", async () => {
+  const view = await listedPanel();
+  const scheduler = hiresNode(view).byClass("ais-row").find((row) => row.byClass("ais-label")[0]?.text === "스케줄러");
+  const pick = scheduler.all((element) => element.tag === "select")[0];
+  pick.value = "karras";
+  pick.fire("change");
+  assert.equal(view.state.hires.scheduler, "karras");
+  const prompt = hiresNode(view).byClass("ais-negative")[0];
+  prompt.value = "detail";
+  prompt.fire("input");
+  assert.equal(view.state.hires.prompt, "detail");
 });
 
 // ---------------------------------------------------------------------------------------------- prompt tag autocomplete wiring

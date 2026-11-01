@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 
+from . import studio_upscale
 from .compat import filename_choices, invoke_provider
 from .studio_infotext import build_infotext
 from .studio_lora_tags import collapse_duplicates, parse_lora_tags, resolve_lora_name
@@ -137,44 +138,60 @@ class AIStudioSaveForge:
 
 
 class AIStudioUpscaleImage:
-    """Model upscale (UpscaleModelLoader + ImageUpscaleWithModel), then resized to the input size x ``scale_by``."""
+    """Forge's Extras upscale (scripts/postprocessing_upscale.py): one or two upscalers, by a factor or to a size."""
 
     @classmethod
     def INPUT_TYPES(cls):
+        files = studio_upscale.model_files()
         return {
             "required": {
                 "image": ("IMAGE",),
                 "enabled": ("BOOLEAN", {"default": False}),
-                "model_name": (filename_choices("upscale_models"),),
+                "model_name": ([*files, *studio_upscale.PIXEL_RESIZERS],),
                 "scale_by": ("FLOAT", {"default": 2.0, "min": 1.0, "max": 8.0, "step": 0.05}),
-            }
+            },
+            "optional": {
+                "resize_mode": (["Scale by", studio_upscale.SCALE_TO],),
+                "max_side_length": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
+                "width": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
+                "height": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8}),
+                "crop": ("BOOLEAN", {"default": True}),
+                "model_name_2": ([studio_upscale.NO_SECOND_MODEL, *files, *studio_upscale.PIXEL_RESIZERS],),
+                "upscaler_2_visibility": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "color_correction": ("BOOLEAN", {"default": False}),
+                "tile_size": ("INT", {"default": studio_upscale.DEFAULT_TILE, "min": 0, "max": 4096, "step": 16}),
+                "tile_overlap": ("INT", {"default": studio_upscale.DEFAULT_OVERLAP, "min": 0, "max": 512, "step": 4}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "upscale"
     CATEGORY = CATEGORY
-    DESCRIPTION = "Upscales with an upscale model and fits the result to the original size x scale_by (off = unchanged)."
+    DESCRIPTION = "Forge's Extras upscale: by a factor or to a size, a second upscaler, colour correction (off = unchanged)."
 
-    def upscale(self, image, enabled, model_name, scale_by):
+    def upscale(self, image, enabled, model_name, scale_by, resize_mode="Scale by", max_side_length=0, width=1024, height=1024,
+                crop=True, model_name_2=studio_upscale.NO_SECOND_MODEL, upscaler_2_visibility=0.0, color_correction=False,
+                tile_size=studio_upscale.DEFAULT_TILE, tile_overlap=studio_upscale.DEFAULT_OVERLAP):
         if not enabled:
             return (image,)
         if not model_name:
             raise ValueError("Upscale is on but no upscale model is chosen.")
-        import comfy.utils
+        if color_correction:
+            studio_upscale.require_opencv()
+        plan = studio_upscale.extras_plan(
+            int(image.shape[2]), int(image.shape[1]), resize_mode, float(scale_by), int(max_side_length),
+            int(width), int(height), bool(crop),
+        )
 
-        height, width = int(image.shape[1]), int(image.shape[2])
-        model = invoke_provider(
-            "UpscaleModelLoader", method="load_model", feature="Studio upscale", args=(model_name,)
-        )[0]
-        upscaled = invoke_provider(
-            "ImageUpscaleWithModel", method="upscale", feature="Studio upscale", args=(model, image)
-        )[0]
-        target_w, target_h = max(1, round(width * float(scale_by))), max(1, round(height * float(scale_by)))
-        if (int(upscaled.shape[2]), int(upscaled.shape[1])) != (target_w, target_h):
-            resized = comfy.utils.common_upscale(upscaled.movedim(-1, 1), target_w, target_h, "lanczos", "disabled")
-            upscaled = resized.movedim(1, -1)
-        return (upscaled,)
+        def upscaled(name):
+            result = studio_upscale.upscale(image, name, plan.scale, int(tile_size), int(tile_overlap))
+            return studio_upscale.paste_centered(result, *plan.crop_to) if plan.crop_to else result
+
+        result = upscaled(model_name)
+        if model_name_2 not in ("", studio_upscale.NO_SECOND_MODEL) and float(upscaler_2_visibility) > 0:
+            result = studio_upscale.blend(result, upscaled(model_name_2), float(upscaler_2_visibility))
+        return (studio_upscale.match_colors(result, image) if color_correction else result,)
 
 
 def _plain_encode(clip, text: str):

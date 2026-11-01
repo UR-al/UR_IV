@@ -8,7 +8,10 @@ import {
   hasPromptWeights,
   missingLoras,
   missingPicks,
+  missingSam3Picks,
   modelFamily,
+  ownPromptOn38,
+  postDraws,
   postPrompt,
   postRunState,
   recordFromParameters,
@@ -19,6 +22,7 @@ import {
 import { idleExtensions } from "./studio_ext.js";
 import { withExtraParams } from "./studio_pnginfo.js";
 
+const SAM3_EMPTY = "aistudio.sam3_empty"; // sam3_nodes.py
 const EVENTS = Object.freeze([
   "execution_start",
   "executed",
@@ -28,6 +32,7 @@ const EVENTS = Object.freeze([
   "progress",
   "executing",
   "b_preview",
+  SAM3_EMPTY,
 ]);
 const EARLY_EVENT_LIMIT = 500; // events of prompts whose id the queue call has not returned yet
 
@@ -44,6 +49,9 @@ export const NOTICES = Object.freeze({
   refAdapterDrops: "Ref Adapter v2 에서는 꺼짐",
   otherFamily: "다른 모델 계열로 만든 그림: 그 체크포인트로 바꾼 뒤 다시",
   oldTeNode: "불가: 이 워크플로의 TE 노드는 MOSS 를 못 읽음. AI Studio Anima.json 을 새로 여세요",
+  sam3Empty: "SAM3 가 찾은 것이 없어 건너뜀: 찾을 것·임계값·SAM3 모델을 확인",
+  sam3Face: "SAM3 건너뜀: 얼굴 검출기를 못 씀",
+  ownPrompt38: "3.8B: Hires·SAM3 프롬프트는 v2 커넥터 없이 들어감. 비워 두면 메인 프롬프트를 그대로 씀",
 });
 const TE_LOADER = "AIStudioTextEncoderLoader";
 
@@ -86,7 +94,7 @@ function sameSeedState(record, currentState) {
   const current = withDefaults(currentState);
   const state = postRunState(record, current, null);
   if (!record?.tab) state.tab = "t2i";
-  for (const section of POST_SETTINGS) state[section] = { ...current[section] };
+  for (const section of POST_SETTINGS) state[section].on = current[section].on;
   state.batch = 1; // the picked image only
   return state;
 }
@@ -162,18 +170,19 @@ export class RunController {
     }
   }
 
-  /** Why `state` must not run on this graph, else "": an empty pick, or MOSS on an older workflow's core CLIPLoader. */
-  refusal(state, action = null) {
+  /** Why `state` must not run on this graph, else "": an empty pick, or MOSS on an older workflow's core CLIPLoader. `picks`: as in missingPicks. */
+  refusal(state, action = null, picks = undefined) {
     const te = this.deps.roleClass?.("te");
-    const oldTe = action !== "upscale" && te && te !== TE_LOADER && modelFamily(state.unet) === "moss";
-    return missingPicks(state, action) || (oldTe ? NOTICES.oldTeNode : "");
+    const oldTe = postDraws(state, action) && te && te !== TE_LOADER && modelFamily(state.unet) === "moss";
+    return missingPicks(state, action, picks) || (oldTe ? NOTICES.oldTeNode : "");
   }
 
   /** The notices `state` alone gives: `(x:-1)` without NegPiP, `(x:1.2)` on MOSS or Krea2, what Ref Adapter drops, files of switched-on extensions. */
   stateWarnings(state, action = null) {
     const texts = [];
     if (!state.negpip && hasNegativeWeights(state)) texts.push(NOTICES.noNegpip);
-    if (modelFamily(state.unet) !== "anima" && hasPromptWeights(state)) texts.push(NOTICES.noWeights);
+    if (modelFamily(state.unet) !== "anima" && hasPromptWeights(state, action)) texts.push(NOTICES.noWeights);
+    if (ownPromptOn38(state, this.deps.families?.(), action)) texts.push(NOTICES.ownPrompt38);
     const dropped = refAdapterDrops(state);
     if (dropped.length) texts.push(`${NOTICES.refAdapterDrops}: ${dropped.join(", ")}`);
     const idle = idleExtensions(state, action, this.deps.extFiles?.());
@@ -203,9 +212,10 @@ export class RunController {
   generate() {
     return this.claim(async () => {
       const state = this.deps.getState();
-      const missing = this.refusal(state);
+      const plot = Boolean(this.deps.getXyz?.()?.on);
+      const missing = this.refusal(state, null, { sam3: !plot }); // a plot's cells may bring the SAM3 file (generateXyz)
       if (missing) return this.notice(missing);
-      if (this.deps.getXyz?.()?.on) {
+      if (plot) {
         this.warn(this.stateWarnings(state));
         return this.generateXyz(state);
       }
@@ -229,6 +239,8 @@ export class RunController {
     if (plan?.errors?.length) return this.notice(plan.errors.join("\n")); // R13: a rejected plan is a 200 with errors
     const cells = plan?.cells || [];
     if (!cells.length) return this.notice(NOTICES.noCells);
+    const missing = cells.map((cell) => missingSam3Picks(cell.state)).find(Boolean);
+    if (missing) return this.notice(missing);
     return this.run("xyz", cells.length, async (job) => {
       job.plan = plan;
       job.xyzOptions = xyz.options || {};
@@ -270,10 +282,11 @@ export class RunController {
     const record = { ...flat, image: item.image };
     const current = this.deps.getState();
     const runState = postRunState(record, current, action);
-    if (action !== "upscale" && otherFamily(record, runState)) return this.notice(NOTICES.otherFamily);
+    const draws = postDraws(runState, action);
+    if (draws && otherFamily(record, runState)) return this.notice(NOTICES.otherFamily);
     const missing = this.refusal(runState, action);
     if (missing) return this.notice(missing);
-    if (action !== "upscale") await this.warnRun(runState, action);
+    if (draws) await this.warnRun(runState, action);
     return this.run("post", 1, async (job) => {
       const options = this.options();
       const roleIds = this.deps.roleIds();
@@ -353,7 +366,7 @@ export class RunController {
       resolve = done;
     });
     const job = { kind, slots, results: new Array(slots).fill(undefined), remaining: slots, entries: new Map() };
-    Object.assign(job, { finished, resolve, stopped: false, notice: "", durations: [], startedAt: this.now(), replaceGallery: kind !== "post" });
+    Object.assign(job, { finished, resolve, stopped: false, notice: "", sam3Empty: false, durations: [], startedAt: this.now(), replaceGallery: kind !== "post" });
     this.job = job;
     this.early.clear();
     this.progressBase = null;
@@ -474,6 +487,12 @@ export class RunController {
     }
     if (name === "executing") {
       this.progressBase = null; // a new node: its own progress rate
+      return;
+    }
+    if (name === SAM3_EMPTY) {
+      const text = detail?.reason ? `${NOTICES.sam3Face}: ${detail.reason}` : NOTICES.sam3Empty;
+      if (!job.sam3Empty && !job.notice) this.emit("notice", { text }); // not noticeOnce: an error after it must still show
+      job.sam3Empty = true;
       return;
     }
     const id = detail?.prompt_id === undefined || detail?.prompt_id === null ? "" : String(detail.prompt_id);

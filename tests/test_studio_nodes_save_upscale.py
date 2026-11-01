@@ -10,7 +10,7 @@ from unittest import mock
 import numpy as np
 from PIL import Image
 
-from comfy_custom_nodes.ai_studio_forge_parity import studio_nodes
+from comfy_custom_nodes.ai_studio_forge_parity import studio_nodes, studio_upscale
 
 
 class _FolderPaths:
@@ -82,8 +82,8 @@ class SaveForgeTests(unittest.TestCase):
         return seeds
 
     def test_batch_with_forge_like_noise_writes_each_images_own_seed(self):
-        # Forge-like noise (the default) drew image i from seed + i; Forge writes each image's own seed.
-        self._save(_images(3))
+        # Forge-like noise drew image i from seed + i; Forge writes each image's own seed.
+        self._save(_images(3), studio_state=_state_json(forge_like={"master": True}))
         self.assertEqual(self._seeds(3), [42, 43, 44])
 
     def test_batch_without_forge_like_noise_keeps_the_batch_seed(self):
@@ -153,20 +153,67 @@ class UpscaleImageTests(unittest.TestCase):
 
         def provider(name, **kwargs):
             calls.append((name, kwargs["args"]))
-            return ("model",) if name == "UpscaleModelLoader" else (_FakeImage(400, 200),)
+            return ("model",)
 
         def common_upscale(samples, width, height, method, crop):
             calls.append(("resize", width, height, method, crop))
             return samples
 
+        def model_pass(model, source, tile, overlap):
+            calls.append(("model", model, tile, overlap))
+            return _FakeImage(400, 200)
+
         comfy_utils = SimpleNamespace(common_upscale=common_upscale)
-        with mock.patch.object(studio_nodes, "invoke_provider", side_effect=provider), \
+        with mock.patch.object(studio_upscale, "invoke_provider", side_effect=provider), \
+                mock.patch.object(studio_upscale, "model_pass", side_effect=model_pass), \
                 mock.patch.dict(sys.modules, {"comfy": SimpleNamespace(utils=comfy_utils), "comfy.utils": comfy_utils}):
             out = studio_nodes.AIStudioUpscaleImage().upscale(image, True, "4x.pth", 2.0)
         self.assertEqual(calls[0], ("UpscaleModelLoader", ("4x.pth",)))
-        self.assertEqual(calls[1][0], "ImageUpscaleWithModel")
-        self.assertEqual(calls[2], ("resize", 200, 100, "lanczos", "disabled"))
+        self.assertEqual(calls[1], ("model", "model", 512, 32))
+        self.assertEqual(calls[2], ("resize", 200, 96, "lanczos", "disabled"))
         self.assertEqual(len(out), 1)
+
+    def test_a_second_upscaler_is_blended_from_the_same_source(self):
+        image = _FakeImage(100, 50)
+        calls = []
+
+        def upscale(source, name, scale, tile, overlap):
+            calls.append((source, name, scale, tile, overlap))
+            return 10.0 if name == "4x.pth" else 20.0
+
+        with mock.patch.object(studio_upscale, "upscale", side_effect=upscale):
+            out = studio_nodes.AIStudioUpscaleImage().upscale(
+                image, True, "4x.pth", 2.0, model_name_2="2x.pth", upscaler_2_visibility=0.25, tile_size=256, tile_overlap=16)
+        self.assertEqual(calls, [(image, "4x.pth", 2.0, 256, 16), (image, "2x.pth", 2.0, 256, 16)])
+        self.assertEqual(out, (12.5,))
+
+    def test_a_second_upscaler_at_zero_visibility_never_runs(self):
+        with mock.patch.object(studio_upscale, "upscale", return_value=1.0) as upscale:
+            studio_nodes.AIStudioUpscaleImage().upscale(_FakeImage(100, 50), True, "4x.pth", 2.0, model_name_2="2x.pth")
+        self.assertEqual(upscale.call_count, 1)
+
+    def test_scale_to_pastes_into_the_box(self):
+        with mock.patch.object(studio_upscale, "upscale", return_value="big") as upscale, \
+                mock.patch.object(studio_upscale, "paste_centered", return_value="boxed") as paste:
+            out = studio_nodes.AIStudioUpscaleImage().upscale(
+                _FakeImage(100, 50), True, "Lanczos", 2.0, resize_mode="Scale to", width=300, height=300)
+        self.assertEqual(upscale.call_args.args[2], 6.0)
+        paste.assert_called_once_with("big", 300, 300)
+        self.assertEqual(out, ("boxed",))
+
+    def test_a_missing_opencv_stops_colour_correction_before_any_upscale(self):
+        with mock.patch.object(studio_upscale, "require_opencv", side_effect=RuntimeError("opencv-python")), \
+                mock.patch.object(studio_upscale, "upscale", side_effect=AssertionError("must not run")), \
+                self.assertRaisesRegex(RuntimeError, "opencv-python"):
+            studio_nodes.AIStudioUpscaleImage().upscale(_FakeImage(100, 50), True, "Lanczos", 2.0, color_correction=True)
+
+    def test_colour_correction_uses_the_picture_before_the_upscale(self):
+        image = _FakeImage(100, 50)
+        with mock.patch.object(studio_upscale, "upscale", return_value="big"), \
+                mock.patch.object(studio_upscale, "match_colors", return_value="matched") as match:
+            out = studio_nodes.AIStudioUpscaleImage().upscale(image, True, "Lanczos", 2.0, color_correction=True)
+        match.assert_called_once_with("big", image)
+        self.assertEqual(out, ("matched",))
 
     def test_enabled_without_a_model_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "upscale model"):
@@ -177,7 +224,7 @@ class UpscaleImageTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"folder_paths": _FolderPaths(".", ["4x.pth", "2x.pth"])}):
             spec = cls.INPUT_TYPES()["required"]
         self.assertEqual(list(spec), ["image", "enabled", "model_name", "scale_by"])
-        self.assertEqual(spec["model_name"][0], ["4x.pth", "2x.pth"])
+        self.assertEqual(spec["model_name"][0], ["4x.pth", "2x.pth", "Lanczos", "Nearest"])
         self.assertEqual(spec["scale_by"][1], {"default": 2.0, "min": 1.0, "max": 8.0, "step": 0.05})
         self.assertEqual(spec["enabled"][1]["default"], False)
         self.assertEqual(cls.RETURN_TYPES, ("IMAGE",))

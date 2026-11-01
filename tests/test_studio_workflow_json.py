@@ -239,7 +239,7 @@ class WorkflowFileTests(unittest.TestCase):
         self.assertEqual((sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"]),
                          (32, 3.0, "exp_heun_2_x0_sde", "flow_cosmos_dynamic"))
         self.assertEqual((sampler["denoise"], sampler["forge_noise"], sampler["control_after_generate"]),
-                         (1.0, True, "fixed"))
+                         (1.0, False, "fixed"))
         for role in ("hires", "post_hires"):
             hires = values[role]
             self.assertEqual((hires["enabled"], hires["scale_by"], hires["upscale_method"], hires["steps"],
@@ -249,8 +249,8 @@ class WorkflowFileTests(unittest.TestCase):
         self.assertEqual((latent["mode"], latent["width"], latent["height"], latent["batch_size"], latent["mask_blur"]),
                          ("txt2img", 832, 1216, 1, 4))
         self.assertEqual(values["shift"]["shift"], 3.0)
-        self.assertEqual(values["dora"], {"enabled": True, "mode": "LyCORIS fp32 (as trained)"})  # Forge처럼 on
-        self.assertEqual((values["pos_encode"]["steps"], values["pos_encode"]["forge_syntax"]), (32, True))
+        self.assertEqual(values["dora"], {"enabled": True, "mode": "LyCORIS fp32 (as trained)"})  # the state's dora_mode
+        self.assertEqual((values["pos_encode"]["steps"], values["pos_encode"]["forge_syntax"]), (32, False))  # Forge처럼 off
         detailer = values["sam3_detailer"]
         self.assertEqual((detailer["enabled"], detailer["denoise"], detailer["steps"], detailer["cfg"]),
                          (False, 0.4, 32, 3.0))

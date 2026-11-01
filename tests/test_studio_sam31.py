@@ -4,6 +4,8 @@ torch 없이 가짜 로더·가짜 torch 네임스페이스만 쓴다(모델 파
 """
 from __future__ import annotations
 
+import json
+import struct
 import sys
 import tempfile
 import unittest
@@ -11,13 +13,43 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from comfy_custom_nodes.ai_studio_forge_parity import sam3_nodes
+from comfy_custom_nodes.ai_studio_forge_parity import sam3_files, sam3_nodes
 
 SAM31_NAME = "sam3.1_multiplex_fp16.safetensors"
 _FAKE_TORCH = SimpleNamespace(
     bfloat16="BF16", float16="FP16", float32="FP32",
     cuda=SimpleNamespace(is_available=lambda: False),
 )
+
+
+class TransformersLayoutTests(unittest.TestCase):
+    """Easy SAM3 loads with strict=False: such a file would run on random weights and find nothing, without an error."""
+
+    def _file(self, directory, *keys):
+        path = Path(directory) / "sam3.safetensors"
+        header = json.dumps({key: {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]} for key in keys}).encode("utf-8")
+        path.write_bytes(struct.pack("<Q", len(header)) + header + b"\0\0\0\0")
+        return path
+
+    def test_the_transformers_layout_stops_before_loading(self):
+        with tempfile.TemporaryDirectory() as directory,                 mock.patch.object(sam3_nodes, "_invoke_sam3_loader") as loader, mock.patch.object(sam3_nodes, "_torch", return_value=_FAKE_TORCH):
+            path = self._file(directory, "detector_model.vision_encoder.a")
+            with self.assertRaisesRegex(ValueError, "Hugging Face"):
+                sam3_nodes._acquire_sam3(str(path), "cpu", "fp32", use_cache=False)
+            loader.assert_not_called()
+
+    def test_the_native_layout_loads(self):
+        with tempfile.TemporaryDirectory() as directory,                 mock.patch.object(sam3_nodes, "_invoke_sam3_loader", return_value={"model": None}) as loader,                 mock.patch.object(sam3_nodes, "_torch", return_value=_FAKE_TORCH):
+            path = self._file(directory, "detector.backbone.a")
+            sam3_nodes._acquire_sam3(str(path), "cpu", "fp32", use_cache=False)
+            loader.assert_called_once()
+
+    def test_a_pt_file_or_an_unreadable_header_is_left_to_the_loader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertFalse(sam3_files.is_transformers_layout(Path(directory) / "sam3.pt"))
+            broken = Path(directory) / "broken.safetensors"
+            broken.write_bytes(b"abc")
+            self.assertFalse(sam3_files.is_transformers_layout(broken))
 
 
 class Sam31LoaderTests(unittest.TestCase):

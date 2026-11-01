@@ -2,7 +2,7 @@
 // One switch-name-caret line per extension; a caret unfolds its fields, and the suite's fields fold again by section.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { EXT_SCHEMA } from "./ext_schema.js";
-import { h, numberBox, optionItems, pill, select } from "./studio_dom.js";
+import { autoGrow, h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 import { comboItems, extFamilyBlock, extFieldValue } from "./studio_ext.js";
 
 const EXTENSIONS = EXT_SCHEMA.extensions;
@@ -43,34 +43,43 @@ function numberField(field, value, write) {
     const clamped = extFieldValue(field, number);
     box.value = String(clamped);
     write(clamped);
-  }, { min: field.min, max: field.max, step: field.kind === "int" ? 1 : "any", width: 72 });
+  }, { min: field.min, max: field.max, step: field.step ?? (field.kind === "int" ? 1 : "any"), width: 72, title: field.title });
   return box;
 }
 
-function choiceField(item, field, value, write, memory) {
-  const items = field.choices.length ? field.choices : comboItems(memory.lists.get(item.class), field.input);
-  const empty = field.default === "" ? `[${field.label}]` : undefined; // a file pick may stay empty
-  return select(optionItems(items, value, { empty }), value, write);
+function choiceField(item, field, value, write, view) {
+  const items = field.list ? view.lists(field.list) : field.choices.length ? field.choices : comboItems(view.memory.lists.get(item.class), field.input);
+  const empty = field.empty ?? (field.default === "" ? `[${field.label}]` : undefined); // a file pick may stay empty
+  return select(optionItems(items, value, { empty }), value, write, { title: field.title });
 }
 
-function fieldControl(item, field, values, view) {
+function textField(field, value, write, view) {
+  if (!field.multiline) return h("input", { class: "ais-f ais-grow", value, title: field.title, onChange: (event) => write(event.target.value) });
+  const box = h("textarea", { class: "ais-f ais-negative", value, title: field.title, onInput: (event) => { autoGrow(event.target); write(event.target.value); } });
+  view.attachText?.(box);
+  return box;
+}
+
+/** One field's control. `item.stateKey`: the state section it writes, else the extension's own (`ext.<key>`). */
+export function fieldControl(item, field, values, view) {
   const value = values[field.key];
-  const write = (next, rerender = false) => view.set((s) => { s.ext[item.key][field.key] = next; }, rerender);
-  if (field.kind === "bool") return pill(value, () => write(!value, true));
+  const owner = (s) => (item.stateKey ? s[item.stateKey] : s.ext[item.key]);
+  const write = (next, rerender = false) => view.set((s) => { owner(s)[field.key] = next; }, rerender || field.redraw);
+  if (field.kind === "bool") return pill(value, () => write(!value, true), { title: field.title });
   if (field.kind === "int" || field.kind === "float") return numberField(field, value, write);
-  if (field.kind === "choice") return choiceField(item, field, value, write, view.memory);
-  return h("input", { class: "ais-f ais-grow", value, onChange: (event) => write(event.target.value) });
+  if (field.kind === "choice") return choiceField(item, field, value, write, view);
+  return textField(field, value, write, view);
 }
 
 function fieldGrid(item, fields, values, view) {
   return h("div", { class: "ais-ext-fields" }, fields.map((field) => {
     const control = fieldControl(item, field, values, view);
     control.setAttribute("data-field", field.key);
-    return h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, field.label), h("span", { class: "ais-ctl" }, control));
+    return h("div", { class: "ais-row" }, h("span", { class: "ais-label", title: field.title }, field.label), h("span", { class: "ais-ctl" }, control));
   }));
 }
 
-const flip = (view, key) => {
+export const flip = (view, key) => {
   const { open } = view.memory;
   if (!open.delete(key)) open.add(key);
   view.rerender();
@@ -80,13 +89,13 @@ function section(item, name, values, view) {
   const key = `${item.key}/${name}`;
   const open = view.memory.open.has(key);
   const fields = item.fields.filter((field) => field.section === name);
-  const lit = fields.some((field) => item.active_keys?.includes(field.key) && values[field.key]);
+  const lit = fields.some((field) => (item.stateKey ? values[field.key] !== field.default : item.active_keys?.includes(field.key) && values[field.key]));
   const head = h("button", { type: "button", class: `ais-ext-sec ${lit ? "lit" : ""}`, "aria-expanded": open ? "true" : "false", onClick: () => flip(view, key) },
     `${open ? "▴" : "▾"} ${name}`);
   return [head, open ? fieldGrid(item, fields, values, view) : null];
 }
 
-function fieldsBody(item, values, view) {
+export function fieldsBody(item, values, view) {
   const plain = item.fields.filter((field) => !field.section);
   const sections = [...new Set(item.fields.map((field) => field.section).filter(Boolean))];
   return h("div", { class: "ais-ext-body" }, plain.length ? fieldGrid(item, plain, values, view) : null,
@@ -121,8 +130,7 @@ export function extLine({ key, label, on, reason, open, toggle, flipOpen, body }
 }
 
 function groupCard(name, items, state, view) {
-  const wide = items.some((item) => view.memory.open.has(item.key));
-  return h("div", { class: `ais-node ais-ext-group ${wide ? "ais-ext-wide" : ""}` },
+  return h("div", { class: "ais-node ais-ext-group" },
     h("div", { class: "ais-nt" }, h("span", {}, name)),
     h("div", { class: "ais-nb" }, items.map((item) => extRow(item, state, view))));
 }
@@ -138,5 +146,5 @@ export function renderExtensions(state, ctx) {
   const groups = [...new Set(EXTENSIONS.map((item) => item.group))];
   return h("div", { class: "ais-grp ais-ext-root", style: `--c:${GROUP_COLOR}` },
     h("div", { class: "ais-gh ais-ext-head" }, h("span", {}, "확장기능"), count ? h("span", { class: "ais-ext-count" }, `${count}개 켬`) : null),
-    h("div", { class: "ais-grid2" }, view.leading || null, groups.map((name) => groupCard(name, EXTENSIONS.filter((item) => item.group === name), state, view))));
+    h("div", { class: "ais-stack" }, view.leading || null, groups.map((name) => groupCard(name, EXTENSIONS.filter((item) => item.group === name), state, view))));
 }

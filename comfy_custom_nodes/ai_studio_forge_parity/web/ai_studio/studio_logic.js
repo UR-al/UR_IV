@@ -2,7 +2,8 @@
 // No `window`, no ComfyUI imports, no side effects (ComfyUI also loads this file as an extension).
 // Mirrors studio_state.py (defaults, effective prompt), studio_choices.py (unet family) and reads
 // studio_infotext.py's text; js_tests/fixtures/studio_logic_golden.json pins both sides.
-import { EXT_DEFAULTS, EXT_ROLES, extCnsInputs, extInputs, extModes, extNeedsSam3Mask, normalizeExt, sam3PassInputs } from "./studio_ext.js";
+import { EXT_DEFAULTS, EXT_ROLES, extCnsInputs, extInputs, extModes, extNeedsSam3Mask, normalizeExt, sam3MaskOnly, sam3PassInputs } from "./studio_ext.js";
+import { postDefaults, postInputs } from "./studio_post.js";
 import { ROLES } from "./studio_roles.js";
 
 export const DORA_MODES = Object.freeze([
@@ -13,9 +14,16 @@ export const DORA_MODES = Object.freeze([
 ]);
 const DORA_FORGE_MODE = "LyCORIS fp32 (as trained)"; // "Forge처럼" DoRA = sam-extra's LyCORIS mode, the Forge txt2img setting (stock overshoots adaLN rows)
 const LATENT_FALLBACK_UPSCALER = "latent:bicubic";
+const HIRES_SAME_VAE = "Use same choices"; // ForgeNeoHiresFix's first vae_name choice
+const NO_SECOND_UPSCALER = "None"; // AIStudioUpscaleImage's first model_name_2 choice
+const IDLE_UPSCALER = "Lanczos"; // always in AIStudioUpscaleImage's list: a moved file of a switched-off stage must not stop a run
+const CPU = "cpu";
+const CN_RESIZE_MODE = "Crop and Resize"; // no effect without a control_image, which the studio never links
+const INDIVIDUAL_MASKS = "Individual";
 const SEED_RANGE = 4294967294; // Forge: random.randrange(4294967294)
 const MODE_ALWAYS = 0;
 const MODE_BYPASS = 4;
+const MASK_OVERLAY_SLOT = 3; // ForgeNeoSAM3Mask's overlay output
 export const REFERENCE_METHODS = Object.freeze(["snapref", "ref_adapter"]);
 export const REFERENCE_CORRECTIONS = Object.freeze(["apg", "rescale", "none"]);
 export const KREA2_POSITIONS = Object.freeze(["aligned (trained)", "beside (right of target)"]);
@@ -51,10 +59,11 @@ export const DEFAULT_STATE = deepFreeze({
   moss_stream: true, // MOSS-Image only: the fp32 residual stream
   family_memory: {}, // family -> the model picks and sampling numbers it had when the checkpoint left it
   dora_mode: DORA_MODES[0],
-  forge_like: { master: true, noise: true, prompt_syntax: true, dora: true, attention: false },
-  hires: { on: false, upscaler: "4x-UltraSharp.pth", sampler: "", scale: 1.5, steps: 16, denoise: 0.4 },
-  upscale: { on: false, model: "", scale: 2.0 },
-  sam3: { on: false, checkpoint: "", prompt: "face", denoise: 0.4, steps: 0, cfg: 0.0 },
+  forge_like: { master: false, noise: true, prompt_syntax: true, dora: true, attention: false },
+  // steps: 0 = the main steps; the rest of these three sections is the table in post_schema.js
+  hires: { on: false, upscaler: "4x-UltraSharp.pth", sampler: "", scale: 1.5, steps: 16, denoise: 0.4, ...postDefaults("hires") },
+  upscale: { on: false, model: "", scale: 2.0, ...postDefaults("upscale") },
+  sam3: { on: false, checkpoint: "", prompt: "face", denoise: 0.4, ...postDefaults("sam3") },
   // inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture), so the panel shows
   // "전체" greyed out; the key stays so a saved state keeps its shape.
   i2i: { image: "", width: 832, height: 1216, denoise: 0.55, mask_blur: 4, inpaint_area: "whole" },
@@ -202,6 +211,7 @@ export function pickCheckpoint(state, unet, lists = {}) {
   if (from === to) return;
   state.family_memory = { ...state.family_memory, [from]: Object.fromEntries(FAMILY_MEMORY_KEYS.map((key) => [key, state[key]])) };
   Object.assign(state, familySettings(family, unet), sameFamily ? {} : { te: "", vae: "" }, state.family_memory[to]);
+  if (!sameFamily && state.hires) state.hires = { ...state.hires, vae: "" };
   state.te ||= defaultModel("tes", lists.tes, null, family);
   state.vae ||= defaultModel("vaes", lists.vaes, null, family);
 }
@@ -271,22 +281,46 @@ export function refAdapterDrops(state) {
 export const PICK_NOTICES = Object.freeze({
   models: "체크포인트·TE·VAE 고르기",
   upscale: "업스케일 모델 고르기",
+  sam3: "SAM3 모델 고르기",
+  faceModel: "얼굴 모델 고르기",
+  controlnet: "ControlNet 모델 고르기",
   referenceImage: "레퍼런스 이미지 고르기",
   referenceFile: "레퍼런스 파일 고르기",
   snaprefPag: "SnapRef 는 PAG 와 같이 못 씀: Ref Adapter 로 바꾸거나 PAG 끄기",
 });
 
+/** A gallery run that loads a model: upscale and Mask only draw nothing. */
+export function postDraws(state, action) {
+  return action !== "upscale" && !(action === "sam3" && sam3MaskOnly(withDefaults(state)));
+}
+
+/** What a SAM3 run lacks, else "". ControlNet belongs to the detailer alone, which Refine replaces (R22). `action`: as in missingPicks. */
+export function missingSam3Picks(state, action = null) {
+  const s = withDefaults(state);
+  if (action !== null && action !== "sam3") return "";
+  if (action === "sam3" || s.sam3.on || extNeedsSam3Mask(s)) {
+    if (!s.sam3.checkpoint) return PICK_NOTICES.sam3;
+    if (s.sam3.face_crop && !s.sam3.face_crop_model) return PICK_NOTICES.faceModel;
+  }
+  const detailer = action === "sam3" || (s.sam3.on && !s.ext.sam3_refine.on);
+  return detailer && !sam3MaskOnly(s) && s.sam3.cn_enable && !s.sam3.cn_model ? PICK_NOTICES.controlnet : "";
+}
+
 /**
  * Why a run of `state` must not start (an empty pick would run the loader's first file), else "". `action` is a
- * gallery post-processing run ("upscale" needs only the upscale model), null for a generation.
+ * gallery post-processing run ("upscale" needs only the upscale model), null for a generation. `sam3: false` leaves the
+ * SAM3 picks out: a plot's cells may bring them (run_controller.js checks the cells).
  */
-export function missingPicks(state, action = null) {
+export function missingPicks(state, action = null, { sam3 = true } = {}) {
   const s = withDefaults(state);
   const upscale = action === "upscale" || (action === null && s.upscale.on);
-  if (action !== "upscale" && (!s.unet || !s.te || !s.vae)) return PICK_NOTICES.models;
+  const draws = postDraws(s, action);
+  if (draws && (!s.unet || !s.te || !s.vae)) return PICK_NOTICES.models;
   if (upscale && !s.upscale.model) return PICK_NOTICES.upscale;
+  const sam3Pick = sam3 ? missingSam3Picks(s, action) : "";
+  if (sam3Pick) return sam3Pick;
   const family = modelFamily(s.unet);
-  if (action !== "upscale" && referenceRuns(s, family)) {
+  if (draws && referenceRuns(s, family)) {
     if (!s.reference.image) return PICK_NOTICES.referenceImage;
     if (!referenceFile(s, family)) return PICK_NOTICES.referenceFile;
     if (snaprefPagClash(s, family)) return PICK_NOTICES.snaprefPag;
@@ -337,10 +371,32 @@ export function hasNegativeWeights(state) {
 const PROMPT_WEIGHT = /\((?:[^()]|\([^()]*\))*:\s*-?(?:\d+\.?\d*|\.\d+)\s*\)/; // a tag's own `(series)` may sit inside
 const hasWeight = (text) => PROMPT_WEIGHT.test(text.replace(/\\[()]/g, ""));
 
-/** True when a prompt has an explicit `(x:1.2)`: MOSS's and Krea2's encoders read it as words. */
-export function hasPromptWeights(state) {
+/** The prompts of their own that a run's Hires and SAM3 passes encode (only passes that run). `action`: as in missingPicks. */
+function passPrompts(s, action) {
+  const hires = [s.hires.prompt, s.hires.negative];
+  const detailer = [s.sam3.inpaint_prompt, s.sam3.negative_prompt];
+  const draws = !sam3MaskOnly(s);
+  if (action) return action === "hires" ? hires : action === "sam3" && draws ? detailer : [];
+  const { sam3_refine: refine, sam3_tile: tile } = s.ext;
+  const stopped = s.sam3.on && !draws; // Mask only stops Refine and tile too
+  return [
+    ...(s.hires.on && s.tab === "t2i" ? hires : []),
+    ...(s.sam3.on && draws && !refine.on ? detailer : []),
+    ...(refine.on && !stopped ? [refine.inpaint_prompt, refine.negative_prompt] : []),
+    ...(tile.on && !stopped ? [tile.inpaint_prompt, tile.negative_prompt] : []),
+  ].filter(Boolean);
+}
+
+/** True when a prompt has an explicit `(x:1.2)`: MOSS's and Krea2's encoders read it as words. `action`: as in missingPicks. */
+export function hasPromptWeights(state, action = null) {
   const s = withDefaults(state);
-  return hasWeight(s.prompt) || hasWeight(s.negative);
+  return [s.prompt, s.negative, ...passPrompts(s, action)].filter(Boolean).some(hasWeight);
+}
+
+/** True when a Hires or SAM3 pass has a prompt of its own on 3.8B: the node encodes it without the v2 connector. */
+export function ownPromptOn38(state, families, action = null) {
+  const s = withDefaults(state);
+  return unetFamily(s.unet, families) === "3.8b" && passPrompts(s, action).some(Boolean);
 }
 
 export function missingLoras(state, available) {
@@ -348,9 +404,10 @@ export function missingLoras(state, available) {
   return loraTagNames(state).filter((name) => resolveLoraName(name, available) === null);
 }
 
+/** Only a negative or unreadable seed is drawn at random: any other value stays what the panel says. */
 function concreteSeed(seed, rng) {
-  const value = Number(seed);
-  return Number.isInteger(value) && value >= 0 ? value : Math.floor(rng() * SEED_RANGE);
+  const value = Math.trunc(Number(seed));
+  return Number.isFinite(value) && value >= 0 ? value : Math.floor(rng() * SEED_RANGE);
 }
 
 /** A choice the state may leave empty ("" = keep the workflow's own widget value). */
@@ -374,27 +431,80 @@ function hiresInputs(s, enabled, options) {
     steps: s.hires.steps,
     denoise: s.hires.denoise,
     seed: s.seed,
-    shift: s.shift,
+    shift: s.hires.shift > 0 ? s.hires.shift : s.shift,
     sampler_name: s.hires.sampler || s.sampler,
-    scheduler: s.scheduler,
-    cfg: s.cfg,
+    scheduler: s.hires.scheduler || s.scheduler,
+    cfg: s.hires.cfg > 0 ? s.hires.cfg : s.cfg,
     base_steps: s.steps,
+    vae_name: (enabled && s.hires.vae) || HIRES_SAME_VAE,
     forge_noise: s.forge_like.master && s.forge_like.noise,
+    ...postInputs("hires", s.hires),
     ...extCnsInputs(s),
   };
 }
 
-const upscaleInputs = (s, enabled) => ({ enabled, model_name: choice(s.upscale.model), scale_by: s.upscale.scale });
+const upscaleInputs = (s, enabled) => ({
+  enabled,
+  model_name: enabled ? choice(s.upscale.model) : IDLE_UPSCALER,
+  scale_by: s.upscale.scale,
+  model_name_2: (enabled && s.upscale.visibility > 0 && s.upscale.model_2) || NO_SECOND_UPSCALER,
+  ...postInputs("upscale", s.upscale),
+});
 
-const sam3MaskInputs = (s, enabled) => ({ enabled, checkpoint: choice(s.sam3.checkpoint), prompt: s.sam3.prompt });
+/** Forge's Mask only: the row after the detailer reads the mask node's image output, so nothing loads a model for it. */
+const sam3MaskRuns = (s) => s.sam3.on && sam3MaskOnly(s);
 
-function sam3DetailerInputs(s, enabled) {
-  return { enabled, denoise: s.sam3.denoise, ...sam3PassInputs(s) };
+const sam3MaskInputs = (s, enabled) => ({
+  enabled,
+  checkpoint: choice(s.sam3.checkpoint),
+  prompt: s.sam3.prompt,
+  seed: s.seed, // the saved files' name and metadata
+  precision: s.sam3.device === CPU ? "fp32" : s.sam3.precision, // Easy SAM3 runs fp32 only there
+  cache_model: !s.sam3.unload_after || s.sam3.keep_in_ram, // the app compiler's rule
+  plain_overlay: !s.sam3.overlay,
+  ...postInputs("sam3", s.sam3, "mask"),
+  ...(extNeedsSam3Mask(s) ? { mask_mode: INDIVIDUAL_MASKS } : {}), // Refine and tile choose for themselves from the groups
+});
+
+function sam3ControlInputs(s) {
+  const { cn_start: start, cn_end: end } = s.sam3;
+  return {
+    controlnet_enable: s.sam3.cn_enable && start !== end, // an empty range does nothing in Forge, the node refuses one
+    controlnet_start: Math.min(start, end), // Forge swaps a reversed pair, the node refuses one
+    controlnet_end: Math.max(start, end),
+    controlnet_settings_json: JSON.stringify({
+      pixel_perfect: s.sam3.cn_pixel_perfect,
+      override_external: false,
+      control_mode: s.sam3.cn_control_mode,
+      resize_mode: CN_RESIZE_MODE,
+      threshold_a: s.sam3.cn_threshold_a,
+      threshold_b: s.sam3.cn_threshold_b,
+    }),
+  };
+}
+
+/** `size`: Forge's `p.width/p.height`, what an "only masked" crop is drawn at. */
+function sam3DetailerInputs(s, enabled, size) {
+  return {
+    ...postInputs("sam3", s.sam3, "detailer"),
+    enabled: enabled && !sam3MaskOnly(s),
+    denoise: s.sam3.denoise,
+    ...size,
+    ...sam3ControlInputs(s),
+    ...sam3PassInputs(s),
+  };
 }
 
 const saveInputs = (s) => ({ studio_state: JSON.stringify(s), seed: s.seed });
 
 const animaRefInputs = ({ method, megapixels, ...sections }) => ({ method, megapixels, ...sections[method] });
+
+/** The tab's size, as the latent gets it (MOSS's 16x grid). */
+export function generationSize(state) {
+  const size = state.tab === "i2i" ? state.i2i : state;
+  const family = modelFamily(state.unet);
+  return { width: familySide(size.width, family), height: familySide(size.height, family) };
+}
 
 /** role -> {input: value} for the generation graph; `s` is complete and its seed concrete. */
 function mainInputs(s, options) {
@@ -403,6 +513,7 @@ function mainInputs(s, options) {
   const isI2i = s.tab === "i2i";
   const select = { select: is38 ? 1 : 0 };
   const size = isI2i ? s.i2i : s;
+  const generation = generationSize(s);
   const encode = { steps: s.steps, forge_syntax: s.forge_like.master && s.forge_like.prompt_syntax };
   return {
     unet: is38 ? {} : { unet_name: choice(s.unet) },
@@ -424,8 +535,7 @@ function mainInputs(s, options) {
     krea2_ref: { ...s.reference.krea2, width: size.width, height: size.height, ...encode },
     latent: {
       mode: !isI2i ? "txt2img" : s.i2i_mode === "inpaint" ? "inpaint" : "img2img",
-      width: familySide(size.width, family),
-      height: familySide(size.height, family),
+      ...generation,
       batch_size: s.batch,
       mask_blur: s.i2i.mask_blur,
     },
@@ -443,10 +553,20 @@ function mainInputs(s, options) {
     hires: hiresInputs(s, s.hires.on && !isI2i, options), // Forge's img2img has no hires pass
     upscale: upscaleInputs(s, s.upscale.on),
     sam3_mask: sam3MaskInputs(s, s.sam3.on || extNeedsSam3Mask(s)),
-    sam3_detailer: sam3DetailerInputs(s, s.sam3.on),
+    sam3_detailer: sam3DetailerInputs(s, s.sam3.on, { target_width: generation.width, target_height: generation.height }),
     save: saveInputs(s),
     ...Object.fromEntries(EXT_ROLES.map((role) => [role, extInputs(s, role, { postAction: options.postAction })])),
   };
+}
+
+/** Every input fed by slot 0 of node `from` takes slot `slot` of node `to` instead; nothing happens if either is absent. */
+function relink(prompt, from, to, slot = 0) {
+  if (from === undefined || to === undefined || !prompt[String(from)] || !prompt[String(to)]) return;
+  for (const node of Object.values(prompt)) {
+    for (const [name, value] of Object.entries(node.inputs || {})) {
+      if (Array.isArray(value) && String(value[0]) === String(from) && value[1] === 0) node.inputs[name] = [String(to), slot];
+    }
+  }
 }
 
 /** Writes `table` into the prompt's role nodes; skips absent (bypassed) nodes, linked inputs and undefined values. */
@@ -477,6 +597,7 @@ export function applyStateToPrompt(apiPrompt, roleIds, state, options = {}) {
   const s = prepared(state, options.rng);
   const out = structuredClone(apiPrompt);
   writeRoles(out, roleIds, mainInputs(s, options));
+  if (sam3MaskRuns(s)) relink(out, roleIds.sam3_detailer, roleIds.sam3_mask, MASK_OVERLAY_SLOT);
   return out;
 }
 
@@ -499,7 +620,8 @@ export function stageModes(state, postAction = null, options = {}) {
   if (!reference || family !== "anima") bypass.add("anima_ref");
   if (!reference || family !== "krea2") bypass.add("krea2_ref");
   if (s.tab === "t2i") bypass.add("i2i_image");
-  if (!s.sam3.on || s.ext.sam3_refine.on) bypass.add("sam3_detailer"); // R22: Refine replaces it, as in the app's post run
+  // R22: Refine replaces it, as in the app's post run. Mask only keeps it in the prompt: relink needs its links, and then nothing reads it.
+  if (!s.sam3.on || (s.ext.sam3_refine.on && !sam3MaskOnly(s))) bypass.add("sam3_detailer");
   if (!s.sam3.on && !extNeedsSam3Mask(s)) bypass.add("sam3_mask");
   if (!postAction) ROLES.filter((role) => role.startsWith("post_")).forEach((role) => bypass.add(role));
   const ext = extModes(s, null, { postAction });
@@ -519,6 +641,7 @@ export function postRunState(record, currentState, action) {
   for (const section of Object.values(POST_SECTIONS)) {
     merged[section] = { ...current[section], on: POST_SECTIONS[action] === section };
   }
+  if (modelFamily(merged.unet) !== modelFamily(current.unet)) merged.hires.vae = ""; // a VAE of the panel's family, as pickCheckpoint
   return merged;
 }
 
@@ -531,16 +654,7 @@ function loadImageValue(ref) {
 }
 
 function routeAround(prompt, roleIds, action) {
-  for (const [fromRole, toRole] of POST_ROUTES[action]) {
-    const from = roleIds[fromRole];
-    const to = roleIds[toRole];
-    if (from === undefined || to === undefined || !prompt[String(from)] || !prompt[String(to)]) continue;
-    for (const node of Object.values(prompt)) {
-      for (const [name, value] of Object.entries(node.inputs || {})) {
-        if (Array.isArray(value) && String(value[0]) === String(from) && value[1] === 0) node.inputs[name] = [String(to), 0];
-      }
-    }
-  }
+  for (const [fromRole, toRole] of POST_ROUTES[action]) relink(prompt, roleIds[fromRole], roleIds[toRole]);
 }
 
 /**
@@ -559,10 +673,11 @@ export function postPrompt(apiPrompt, roleIds, record, action, currentState = re
     post_upscale: upscaleInputs(s, action === "upscale"),
     post_hires: hiresInputs(s, action === "hires", options),
     post_sam3_mask: sam3MaskInputs(s, action === "sam3"),
-    post_sam3_detailer: sam3DetailerInputs(s, action === "sam3"),
+    post_sam3_detailer: sam3DetailerInputs(s, action === "sam3", { target_image_size: true }),
     post_save: saveInputs(s),
   });
   routeAround(out, roleIds, action);
+  if (action === "sam3" && sam3MaskRuns(s)) relink(out, roleIds.post_sam3_detailer, roleIds.post_sam3_mask, MASK_OVERLAY_SLOT);
   return { prompt: out, outputNodeIds: [String(roleIds.post_save)] };
 }
 

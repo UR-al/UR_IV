@@ -9,6 +9,7 @@ import secrets
 from typing import Any
 
 from . import hires_carry
+from . import studio_upscale
 from .extra_samplers_register import impact_scheduler_func
 from .compat import (
     clone_model,
@@ -491,7 +492,9 @@ def upscale_method_choices() -> list[str]:
     return list(dict.fromkeys([
         "latent:bislerp", "latent:bicubic", "latent:bilinear",
         "latent:nearest-exact", "latent:area",
-        *filename_choices("upscale_models"),
+        *(f"latent:{method}" for method in studio_upscale.LATENT_METHODS),
+        *studio_upscale.PIXEL_RESIZERS,
+        *studio_upscale.model_files(),
     ]))
 
 
@@ -525,6 +528,10 @@ class ForgeNeoHiresFix:
         }, "optional": {
             "clip_type": (["stable_diffusion", "cosmos", "sd3", "qwen_image", "wan", "krea2"],),
             "forge_noise": FORGE_NOISE_INPUT,
+            # Forge's Tile Size / Overlap for Upscalers and Resolution Step; 0 = one latent cell.
+            "tile_size": ("INT", {"default": studio_upscale.DEFAULT_TILE, "min": 0, "max": 4096, "step": 16}),
+            "tile_overlap": ("INT", {"default": studio_upscale.DEFAULT_OVERLAP, "min": 0, "max": 512, "step": 4}),
+            "size_step": ("INT", {"default": 0, "min": 0, "max": 256, "step": 8}),
         }}
 
     RETURN_TYPES = ("LATENT", "VAE")
@@ -532,7 +539,7 @@ class ForgeNeoHiresFix:
     FUNCTION = "run"
     CATEGORY = CATEGORY
 
-    def run(self, model, positive, negative, samples, seed=-1, enabled=False, scale_by=1.5, upscale_method="latent:bislerp", steps=0, cfg=5.0, sampler_name="euler", scheduler="simple", denoise=0.35, seed_delta=0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, base_vae=None, base_clip=None, base_steps=30, base_sampler_name="euler", base_scheduler="simple", resize_width=0, resize_height=0, shift=3.0, checkpoint_name="Use same checkpoint", checkpoint_weight_dtype="default", text_encoder_name="Use same choices", vae_name="Use same choices", positive_text="", negative_text="", base_positive_text="", base_negative_text="", clip_type="stable_diffusion", forge_noise=False):
+    def run(self, model, positive, negative, samples, seed=-1, enabled=False, scale_by=1.5, upscale_method="latent:bislerp", steps=0, cfg=5.0, sampler_name="euler", scheduler="simple", denoise=0.35, seed_delta=0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, base_vae=None, base_clip=None, base_steps=30, base_sampler_name="euler", base_scheduler="simple", resize_width=0, resize_height=0, shift=3.0, checkpoint_name="Use same checkpoint", checkpoint_weight_dtype="default", text_encoder_name="Use same choices", vae_name="Use same choices", positive_text="", negative_text="", base_positive_text="", base_negative_text="", clip_type="stable_diffusion", forge_noise=False, tile_size=studio_upscale.DEFAULT_TILE, tile_overlap=studio_upscale.DEFAULT_OVERLAP, size_step=0):
         if not enabled:
             return samples, base_vae
         import comfy.utils
@@ -595,14 +602,15 @@ class ForgeNeoHiresFix:
             spatial_ratio = max(1, int(ratio_method())) if callable(ratio_method) else 8
         except Exception:
             spatial_ratio = 8
-        target_w = int(resize_width) // spatial_ratio if int(resize_width) > 0 else max(1, int(round(tensor.shape[-1] * float(scale_by))))
-        target_h = int(resize_height) // spatial_ratio if int(resize_height) > 0 else max(1, int(round(tensor.shape[-2] * float(scale_by))))
+        pixel_width, pixel_height = studio_upscale.hires_size(
+            tensor.shape[-1] * spatial_ratio, tensor.shape[-2] * spatial_ratio, float(scale_by),
+            int(resize_width), int(resize_height), int(size_step) or spatial_ratio, spatial_ratio,
+        )
+        target_w, target_h = pixel_width // spatial_ratio, pixel_height // spatial_ratio
         if str(upscale_method).startswith("latent:"):
             method = str(upscale_method).split(":", 1)[1]
             resized = dict(samples)
-            resized["samples"] = comfy.utils.common_upscale(
-                tensor, target_w, target_h, method, "disabled"
-            )
+            resized["samples"] = studio_upscale.resize_latent(tensor, target_w, target_h, method)
         else:
             if base_vae is None or active_vae is None:
                 raise RuntimeError("Pixel-space Hi-res upscaling requires both base_vae and active VAE inputs.")
@@ -610,17 +618,10 @@ class ForgeNeoHiresFix:
                 "VAEDecode", method="decode", feature="Hi-res pixel decode",
                 args=(base_vae, samples),
             )[0]
-            upscale_model = invoke_provider(
-                "UpscaleModelLoader", method="load_model", feature="Hi-res pixel upscaler",
-                args=(upscale_method,),
-            )[0]
-            upscaled = invoke_provider(
-                "ImageUpscaleWithModel", method="upscale", feature="Hi-res pixel upscaler",
-                args=(upscale_model, decoded),
-            )[0]
-            pixel_width = int(resize_width) if int(resize_width) > 0 else target_w * spatial_ratio
-            pixel_height = int(resize_height) if int(resize_height) > 0 else target_h * spatial_ratio
-            upscaled = resize_image(upscaled, pixel_width, pixel_height, "stretch")
+            upscaled = studio_upscale.upscale_to(
+                decoded, str(upscale_method), target_w * spatial_ratio, target_h * spatial_ratio,
+                int(tile_size), int(tile_overlap),
+            )
             resized = _encode(active_vae, upscaled)
         actual_seed = secrets.randbits(64) if int(seed) < 0 else (int(seed) + int(seed_delta)) & 0xFFFFFFFFFFFFFFFF
         actual_steps = int(steps) if int(steps) > 0 else int(base_steps)

@@ -58,6 +58,75 @@ class InfotextLayoutTests(unittest.TestCase):
         self.assertNotIn("Hires sampler", studio_infotext.build_infotext(same, seed=1))
         self.assertIn("Hires sampler: Euler a", studio_infotext.build_infotext(other, seed=1))
 
+    def test_hires_settings_of_its_own_are_written_only_when_set(self):
+        plain = studio_infotext.build_infotext(_state(hires={"on": True}), seed=1)
+        for key in ("Hires CFG Scale", "Hires Shift", "Hires schedule type", "Hires prompt", "Hires Module 1", "Hires resize"):
+            self.assertNotIn(key, plain)
+        own = studio_infotext.build_infotext(_state(hires={
+            "on": True, "cfg": 5, "shift": 4, "scheduler": "karras", "prompt": "a, b", "negative": "c", "vae": "x/y.safetensors",
+        }), seed=1)
+        self.assertIn("Hires CFG Scale: 5", own)
+        self.assertIn("Hires Shift: 4", own)
+        self.assertIn("Hires schedule type: Karras", own)
+        self.assertIn('Hires prompt: "a, b"', own)
+        self.assertIn("Hires negative prompt: c", own)
+        self.assertIn("Hires Module 1: y", own)
+
+    def test_hires_steps_0_means_the_main_steps_and_is_left_out(self):
+        self.assertNotIn("Hires steps", studio_infotext.build_infotext(_state(hires={"on": True, "steps": 0}), seed=1))
+
+    def test_hires_resize_replaces_the_scale(self):
+        text = studio_infotext.build_infotext(_state(hires={"on": True, "resize_width": 1024, "size_step": 8}), seed=1)
+        self.assertIn("Hires resize: 1024x1496", text)
+        self.assertNotIn("Hires upscale:", text)
+
+    def test_hires_resize_is_the_size_the_node_makes_on_moss(self):
+        text = studio_infotext.build_infotext(
+            _state(unet="moss-image.safetensors", hires={"on": True, "resize_width": 1000, "resize_height": 1000, "size_step": 8}), seed=1)
+        self.assertIn("Hires resize: 992x992", text)
+
+    def test_sam3_writes_forge_keys_only_when_on(self):
+        self.assertNotIn("SAM3", studio_infotext.build_infotext(_state(), seed=1))
+        text = studio_infotext.build_infotext(_state(sam3={"on": True, "prompt": "face", "threshold": 0.25, "checkpoint": r"C:\m\sam3.pt"}), seed=1)
+        self.assertIn("SAM3 Enable: True, SAM3 Mode: Inpaint, SAM3 Mask Mode: Individual, SAM3 Prompt: face, SAM3 Threshold: 0.25, SAM3 Checkpoint: sam3.pt, SAM3 Device: auto", text)
+        self.assertNotIn("SAM3 Mask Blur", text)
+        self.assertNotIn("SAM3 Use", text)
+        self.assertNotIn("C:", text.split("Size:")[1])
+
+    def test_sam3_writes_forge_switch_beside_each_value_of_its_own(self):
+        text = studio_infotext.build_infotext(_state(sam3={
+            "on": True, "steps": 12, "cfg": 5, "sampler": "euler", "scheduler": "karras", "seed": 3141592653, "noise_multiplier": 1.5,
+            "use_custom_size": True, "custom_width": 768, "custom_height": 640, "overlay": True,
+        }), seed=1)
+        for part in ("SAM3 Use Separate Steps: True, SAM3 Steps: 12", "SAM3 Use Separate CFG Scale: True, SAM3 CFG Scale: 5",
+                     "SAM3 Use Separate Sampler: True, SAM3 Sampler: Euler", "SAM3 Use Separate Scheduler: True, SAM3 Scheduler: Karras",
+                     "SAM3 Use Seed: True, SAM3 Seed: 3141592653", "SAM3 Use Noise Multiplier: True, SAM3 Noise Multiplier: 1.5",
+                     "SAM3 Use Inpaint Width Height: True, SAM3 Inpaint Width: 768, SAM3 Inpaint Height: 640", "SAM3 Preview Overlay: True"):
+            self.assertIn(part, text)
+
+    def test_sam3_controlnet_and_face_crop_keys(self):
+        text = studio_infotext.build_infotext(_state(sam3={
+            "on": True, "cn_enable": True, "cn_model": "x/lllite.safetensors", "cn_strength": 0.8, "face_crop": True,
+            "face_crop_model": r"C:\m\face_yolov8n.pt", "face_crop_confidence": 0.25,
+        }), seed=1)
+        self.assertIn("SAM3 CN Enable: True, SAM3 CN Model: lllite, SAM3 CN Module: inpaint_only, SAM3 CN Weight: 0.8", text)
+        self.assertIn("SAM3 Face Crop: True, SAM3 Face Crop Model: face_yolov8n.pt, SAM3 Face Crop Confidence: 0.25", text)
+
+    def test_latent_upscalers_carry_forge_names(self):
+        text = lambda name: studio_infotext.build_infotext(_state(hires={"on": True, "upscaler": name}), seed=1)
+        self.assertIn("Hires upscaler: Latent (bicubic antialiased)", text("latent:bicubic antialiased"))
+        self.assertIn("Hires upscaler: Latent,", text("latent:bilinear") + ",")
+        self.assertIn('Hires upscaler: "latent:bislerp"', text("latent:bislerp"))
+
+    def test_upscale_writes_forge_extras_keys(self):
+        self.assertNotIn("Postprocess", studio_infotext.build_infotext(_state(upscale={"on": True}), seed=1))
+        by = studio_infotext.build_infotext(_state(upscale={"on": True, "model": "4x.pth", "scale": 2, "max_side": 4096}), seed=1)
+        self.assertIn("Postprocess upscale by: 2, Max side length: 4096, Postprocess upscaler: 4x", by)
+        to = studio_infotext.build_infotext(_state(upscale={
+            "on": True, "model": "4x.pth", "mode": "Scale to", "width": 2048, "height": 1024, "model_2": "2x.pth", "visibility": 0.5,
+        }), seed=1)
+        self.assertIn("Postprocess upscale to: 2048x1024, Postprocess crop to: 2048x1024, Postprocess upscaler: 4x, Postprocess upscaler 2: 2x", to)
+
     def test_size_comes_from_the_tab_in_use(self):
         text = studio_infotext.build_infotext(_state(tab="i2i", i2i={"width": 1248, "height": 1824}), seed=1)
         self.assertIn("Size: 1248x1824", text)

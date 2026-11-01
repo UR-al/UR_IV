@@ -2,7 +2,7 @@
 
 스튜디오 제어판의 "Forge처럼" 스위치(`forge_like.master` · `noise` · `prompt_syntax` · `dora` · `attention`)가 무엇을 바꾸는지,
 무엇은 같게 만들 수 없는지를 적은 조사 결과다. 아래 첫 표의 **가능/불가** 칸이 제어판 스위치를 켤 수 있게 둘지(가능),
-회색으로 두고 마우스를 올리면 이유를 보일지(불가)를 정한다.
+회색으로 두고 마우스를 올리면 이유를 보일지(불가)를 정한다. `forge_like.master` 의 기본값은 1.13.0 부터 꺼짐이다.
 
 조사 기준(2026-10-29, 읽기만 했고 GPU는 쓰지 않음):
 
@@ -149,3 +149,27 @@ xformers > PyTorch 순, 실행 옵션으로 정함). 위 비교의 ComfyUI는 Sa
 - 걸린 시간: Forge 의 Time taken 대응. 생성을 누른 때부터 마지막 이미지까지, X/Y/Z 는 전체 시간이다. 대기열에서 기다린 시간도 든다.
 - EXIF 패널: Forge 의 PNG Info 대응. 갤러리에서 고른 이미지를 따라가고, 파일을 끌어다 놓거나 열어도 된다. PNG 는 text chunk,
   JPEG·WebP 는 EXIF(Forge 는 UserComment 에 parameters 를 넣는다)를 읽는다. 파일은 올리지 않고 브라우저에서 읽는다.
+
+## 후처리 세부 설정 (1.13.0)
+
+Hires, 업스케일, SAM3 의 Forge 설정을 패널에 넣었다. 표는 `studio_post_schema.py` 하나다. Forge 와 다른 점:
+
+- SAM3 스텝: 적은 수만큼 그대로 돈다. Forge 는 스텝 × 디노이즈를 돈다(`img2img_fix_steps` 꺼짐, 기본값). 32스텝·디노이즈 0.4 면
+  Forge 는 12스텝, 스튜디오는 32스텝이다.
+- SAM3 마스크 흐림: Forge 와 폭이 다르다(`mask_ops.gaussian_blur` 가 약 3분의 1). 같은 숫자에서 가장자리가 더 좁다.
+- SAM3 시드: -1 은 메인 시드다. Forge 처럼 따로 랜덤을 뽑는 값은 없다. 디테일러에는 `forge_noise` 가 없어 같은 시드라도 노이즈가 다르다.
+- SAM3·Hires 프롬프트: 일반 `CLIPTextEncode` 로 들어간다. `<lora:>` 와 `[a:b:0.5]` 는 읽지 않고, 3.8B 에서는 v2 커넥터를 거치지 않는다
+  (스튜디오가 생성 때 알려 준다). 비워 두면 메인 프롬프트를 그대로 쓴다.
+- Nearest: 이름대로 최근접으로 키운다. Forge 는 `Upscaler.scale` 이 1로 남아 실제로는 Lanczos 다.
+- ControlNet: 이 PC 의 LLLite 파일 셋은 base(28블록)로 학습한 것이라 2.9B·3.8B 에서는 블록 수 오류로 멈춘다. Forge 도 같다.
+- Mask only: Refine·타일도 돌지 않는다. 마스크만 만들어 저장하고 그림은 그대로다.
+- 타일 기본값: 512 / 32(ComfyUI 값). 이 PC 의 Forge 는 256 / 16 이다. 이음매 처리가 달라 숫자를 맞춰도 픽셀은 같지 않다.
+- 크기 단위: 기본값 64(Forge 기본값이자 이 PC 값). 832×1216 ×1.5 는 Forge 처럼 1280×1856 이 된다.
+
+넣지 않은 것과 이유:
+
+- Hires 체크포인트·TE 바꾸기: 새로 읽은 모델에는 LoRA, NegPiP, DoRA, 가이던스가 없어 조용히 다른 그림이 된다. Forge 도 기본으로 숨긴 항목이다.
+- 얼굴 복원: 이 ComfyUI 에 CodeFormer·GFPGAN 노드가 없고, 노드의 대체 경로는 Impact Subpack 이 있어야 한다.
+- Extra noise: 샘플링 안쪽에 넣어야 하고, Forge 설정도 꺼짐(0)이다.
+- ControlNet 의 Resize Mode, Override External: 이 그래프에서는 효과가 없다(`control_image` 를 잇지 않고, 앞단 ControlNet 도 없다).
+- SAM3 Refine 의 수동 마스크와 메인 프롬프트 물려받기, Anima Tile-Repair 패널, Extras 의 일괄 처리, 저장 폴더: 후처리 카드의 설정이 아니라 별도 기능이다.

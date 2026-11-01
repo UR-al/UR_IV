@@ -7,7 +7,7 @@ import { api } from "../../../scripts/api.js";
 import { ExifView } from "./exif_view.js";
 import { PanelView } from "./panel_view.js";
 import { ResultView } from "./result_view.js";
-import { RunController } from "./run_controller.js";
+import { NOTICES, RunController } from "./run_controller.js";
 import { refFromValue } from "./studio_dom.js";
 import { engineRoomCollapsed, toggleEngineRoom } from "./studio_engine_room.js";
 import { readPngText } from "./studio_pnginfo.js";
@@ -234,6 +234,14 @@ async function galleryAction(name, item) {
 
 const generate = () => controller.generate().catch((error) => notice(String(error?.message || error)));
 
+/** The seed of the image picked in the gallery: its session record, else its PNG `parameters`. */
+async function pickedSeed() {
+  const item = viewOf(RESULT)?.selectedItem();
+  if (!item) return notice(NOTICES.noImage);
+  const record = await controller.imageRecord(item);
+  return record ? record.seed : notice(NOTICES.noInfo);
+}
+
 function contextFor(comfyClass) {
   if (comfyClass === PANEL) {
     return {
@@ -241,6 +249,7 @@ function contextFor(comfyClass) {
       tags: (query, limit) => route(`/tags?q=${encodeURIComponent(query)}&limit=${limit}`).then((data) => data.items || []),
       fetchChoices: nodeInputs,
       generate,
+      pickedSeed,
       stop: () => controller.stop(),
       changed: () => emit("state", null),
       engineRoom,

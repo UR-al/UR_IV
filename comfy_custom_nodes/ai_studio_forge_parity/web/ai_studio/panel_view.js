@@ -4,11 +4,12 @@
 import { dropBlockedExt, extMemory, renderExtensions } from "./ext_view.js";
 import { nodeInstalled, referenceBlock, renderReference } from "./reference_view.js";
 import { createAutocomplete } from "./studio_autocomplete.js";
+import { hiresCard, hiresSizeText, postCard } from "./post_view.js";
 import { FAMILY_LABELS } from "./studio_ext.js";
 import { DORA_MODES, defaultModel, imageSize, modelFamily, pickCheckpoint, sizeStep, withDefaults } from "./studio_logic.js";
-import { autoGrow, h, numberBox, optionItems, pill, select } from "./studio_dom.js";
+import { autoGrow, card, h, numberBox, optionItems, pill, row, select } from "./studio_dom.js";
 
-const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3"];
+const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3", "controlnets", "face_models"];
 // Model picks filled with an Anima default when their list arrives empty-handed (an empty pick would run the
 // loader's first file; the run controller refuses a run while one is still empty).
 const MODEL_KEYS = { unets: "unet", tes: "te", vaes: "vae" };
@@ -37,16 +38,12 @@ const fileStem = (entry) => entry.replace(/\\/g, "/").split("/").pop().replace(/
 const group = (title, color, extraClass, ...children) =>
   h("div", { class: `ais-grp ${extraClass}`, style: `--c:${color}` }, title ? h("div", { class: "ais-gh" }, title) : null, children);
 
-const card = (title, head, body, extraClass = "") =>
-  h("div", { class: `ais-node ${extraClass}` }, h("div", { class: "ais-nt" }, h("span", {}, title), head), h("div", { class: "ais-nb" }, body));
-
-const row = (label, ...controls) => h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, label), h("span", { class: "ais-ctl" }, controls));
-
 export class PanelView {
   /**
    * `widget`: the node's hidden `state` widget. `ctx`: `choices(kind)` -> Promise<{items}>, `fetchChoices(class)` ->
    * Promise<`/object_info/<class>` input>, `hasRole(role)`, `generate()`, `stop()`, `changed()`, optional `tags(query, limit)` ->
-   * Promise<[{name, category, count, alias?, ko?}]> (prompt tag autocomplete), `engineRoom` {collapsed(),
+   * Promise<[{name, category, count, alias?, ko?}]> (prompt tag autocomplete), `pickedSeed()` -> Promise<seed of the image
+   * picked in the gallery, or null>, `engineRoom` {collapsed(),
    * toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width, height}, maskEditor()},
    * `reference`, `reference2` {url(value), upload(file) -> {name}} (the reference images' nodes).
    */
@@ -142,6 +139,7 @@ export class PanelView {
     if (this.widget) this.widget.value = JSON.stringify(this.state);
     this.ctx.changed?.();
     if (rerender) this.render();
+    else this.sizeText?.replaceChildren(hiresSizeText(this.state)); // no redraw: it would take the focus from the size boxes
   }
 
   /** The complete panel state; the i2i image is the LoadImage node's value (the mask editor writes there). */
@@ -160,6 +158,12 @@ export class PanelView {
     this.set((s) => {
       s.seed = seed;
     }, true);
+  }
+
+  /** Forge's ♻: the seed of the image picked in the gallery. `ctx.pickedSeed` says so itself when there is none. */
+  async pinSeed() {
+    const seed = await this.ctx.pickedSeed?.();
+    if (Number.isInteger(seed)) this.setSeed(seed);
   }
 
   /** Forge's send-to: the image goes to the i2i tab and its size (`{width, height}`) becomes that tab's size. */
@@ -196,6 +200,7 @@ export class PanelView {
   render() {
     const s = this.state;
     this.autocomplete?.close(); // the prompt boxes below are rebuilt
+    this.sizeText = null; // drawn again with the t2i tab
     const scrolled = this.element.querySelector(".ais-scroll")?.scrollTop ?? 0;
     this.top = h("div", { class: "ais-top" });
     this.thin = h("div", { class: "ais-thin" }, (this.bar = h("div")));
@@ -236,8 +241,8 @@ export class PanelView {
       h("textarea", { class: "ais-f ais-negative", placeholder: "네거티브", value: s.negative, onInput: typed("negative") }),
     ];
     boxes.forEach((box) => this.autocomplete?.attach(box)); // after the panel's own input handler: a picked tag is saved too
-    const prompt = card("프롬프트", negpip, boxes, "span3");
-    return group("공통 설정", "#4b6a8f", "", h("div", { class: "ais-grid3" }, prompt, this.modelCard(s), this.loraCard(s), this.postCard(s)));
+    const prompt = card("프롬프트", negpip, boxes);
+    return group("공통 설정", "#4b6a8f", "", h("div", { class: "ais-stack" }, prompt, this.modelCard(s), this.loraCard(s), postCard(s, this.postView())));
   }
 
   modelCard(s) {
@@ -268,8 +273,9 @@ export class PanelView {
       row("스케줄러", pick("schedulers", "scheduler")),
       row("스텝", num("steps", { min: 1, max: 150, step: 1, width: 46 }), "CFG", num("cfg", { min: 0, max: 30, step: 0.5, width: 44 }),
         "Shift", num("shift", { min: 0, max: 100, step: 0.5, width: 44 })),
-      row("시드", num("seed", { min: -1, step: 1, width: 120, title: "-1 = 랜덤" }),
-        h("button", { type: "button", class: "ais-mini", title: "랜덤 (-1)", "aria-label": "랜덤 시드", onClick: () => this.setSeed(-1) }, "-1")),
+      row("시드", num("seed", { min: -1, step: 1, width: 120, title: "-1 = 랜덤, 그 밖의 값은 그대로 유지", live: true }), // Ctrl+Enter comes before the box is left
+        h("button", { type: "button", class: "ais-mini", title: "현재 이미지의 시드 가져오기", "aria-label": "현재 이미지 시드 가져오기", onClick: () => this.pinSeed() }, "♻"),
+        h("button", { type: "button", class: "ais-mini", title: "랜덤 (-1)", "aria-label": "랜덤 시드", onClick: () => this.setSeed(-1) }, "랜덤")),
     ]);
   }
 
@@ -300,23 +306,20 @@ export class PanelView {
     return card("LoRA", null, [rows, add]);
   }
 
-  postCard(s) {
-    const toggle = (section) => pill(s[section].on, () => this.set((st) => { st[section].on = !st[section].on; }, true));
-    const models = optionItems((this.choices.upscalers || []).filter((name) => !name.startsWith("latent:")), s.upscale.model, { empty: "[업스케일 모델]" });
-    const upscale = s.upscale.on
-      ? [select(models, s.upscale.model, (value) => this.set((st) => { st.upscale.model = value; })),
-        row("배율", numberBox(s.upscale.scale, (value) => this.set((st) => { st.upscale.scale = value; }), { min: 1, max: 8, step: 0.25, width: 50 }))]
-      : null;
-    const sam3 = s.sam3.on
-      ? [select(optionItems(this.choices.sam3, s.sam3.checkpoint, { empty: "[SAM3 모델]" }), s.sam3.checkpoint, (value) => this.set((st) => { st.sam3.checkpoint = value; })),
-        row("찾을 것", h("input", { class: "ais-f", value: s.sam3.prompt, onChange: (e) => this.set((st) => { st.sam3.prompt = e.target.value || "face"; }) })),
-        row("디노이즈", numberBox(s.sam3.denoise, (value) => this.set((st) => { st.sam3.denoise = value; }), { min: 0, max: 1, step: 0.05, width: 50 }))]
-      : null;
-    return card("후처리 (켜면 바로 적용)", null, [
-      row("Hires fix", toggle("hires")),
-      row("업스케일", toggle("upscale")), upscale,
-      row("SAM3 디테일러", toggle("sam3")), sam3,
-    ]);
+  /** What post_view.js draws with. */
+  postView() {
+    const lists = {
+      upscalers: () => (this.choices.upscalers || []).filter((name) => !name.startsWith("latent:")),
+      upscaler_methods: () => this.choices.upscalers,
+    };
+    return {
+      set: (mutate, rerender) => this.set(mutate, rerender),
+      memory: this.extMemory,
+      rerender: () => this.scheduleRender(),
+      lists: (kind) => (lists[kind] ? lists[kind]() : this.choices[kind]),
+      attachText: (box) => this.autocomplete?.attach(box),
+      keepSizeText: (element) => { this.sizeText = element; },
+    };
   }
 
   // ------------------------------------------------------------------------------------------- t2i | i2i
@@ -326,7 +329,7 @@ export class PanelView {
       h("button", { type: "button", class: `ais-tab ${s.tab === name ? "active" : ""}`, "aria-pressed": s.tab === name ? "true" : "false",
         onClick: () => this.set((st) => { st.tab = name; }, true) }, name);
     const body = s.tab === "t2i"
-      ? group(null, "#3f7a52", "ais-tabgrp", h("div", { class: "ais-grid2" }, this.sizeCard(s), this.hiresCard(s)))
+      ? group(null, "#3f7a52", "ais-tabgrp", h("div", { class: "ais-grid2" }, this.sizeCard(s), hiresCard(s, this.postView())))
       : group(null, "#8a5a7a", "ais-tabgrp", h("div", { class: "ais-grid-i2i" }, this.imageBox(), this.i2iCard(s)));
     return h("div", { class: "ais-tabs-wrap" }, h("div", { class: "ais-tabs" }, tab("t2i"), tab("i2i")), body);
   }
@@ -344,18 +347,6 @@ export class PanelView {
     return card("크기", null, [
       row("크기", size("width"), "×", size("height"), swap),
       row("장수", numberBox(s.batch, (value) => this.set((st) => { st.batch = value; }), { min: 1, max: 16, step: 1, width: 62 })),
-    ]);
-  }
-
-  hiresCard(s) {
-    const hires = s.hires;
-    const num = (key, opts) => numberBox(hires[key], (value) => this.set((st) => { st.hires[key] = value; }), opts);
-    const samplers = optionItems(this.choices.samplers, hires.sampler, { empty: "메인과 같음" });
-    return card("Hires fix", null, [
-      row("업스케일러", select(optionItems(this.choices.upscalers, hires.upscaler), hires.upscaler, (value) => this.set((st) => { st.hires.upscaler = value; }))),
-      row("배율", num("scale", { min: 1, max: 8, step: 0.05, width: 46 }), "디노이즈", num("denoise", { min: 0, max: 1, step: 0.05, width: 46 }),
-        "스텝", num("steps", { min: 1, max: 150, step: 1, width: 42 })),
-      row("샘플러", select(samplers, hires.sampler, (value) => this.set((st) => { st.hires.sampler = value; }))),
     ]);
   }
 

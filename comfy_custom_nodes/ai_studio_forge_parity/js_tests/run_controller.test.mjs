@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { deflateSync } from "node:zlib";
 
 import { NOTICES, RunController } from "../web/ai_studio/run_controller.js";
-import { DEFAULT_STATE, stageModes, withDefaults } from "../web/ai_studio/studio_logic.js";
+import { DEFAULT_STATE, PICK_NOTICES, stageModes, withDefaults } from "../web/ai_studio/studio_logic.js";
 import { readPngText, withExtraParams } from "../web/ai_studio/studio_pnginfo.js";
 import { ROLES } from "../web/ai_studio/studio_roles.js";
 
@@ -248,7 +248,7 @@ test("xyz plan errors are shown and nothing is queued (R13)", async () => {
 });
 
 test("xyz cells get the stage modes of their own state (R16)", async () => {
-  const plan = plan2x2((index) => ({ sam3: { on: index % 2 === 1 } }));
+  const plan = plan2x2((index) => ({ sam3: { on: index % 2 === 1, checkpoint: "C:/sam3.pt" } }));
   const { api, controller, baseCalls } = setup({ plan, xyz: XYZ_ON });
   await controller.generate();
   assert.equal(baseCalls.length, 2); // one base prompt per stage-mode signature
@@ -276,7 +276,8 @@ test("cell images go to the gallery when include_images is on", async () => {
 // ---------------------------------------------------------------------------------------------- single run
 
 test("generate queues the panel state with its stage modes and records each image's seed", async () => {
-  const { api, controller, emitted, baseCalls } = setup({ state: { seed: 7, batch: 2, steps: 20 } });
+  const forge_like = { ...DEFAULT_STATE.forge_like, master: true };
+  const { api, controller, emitted, baseCalls } = setup({ state: { seed: 7, batch: 2, steps: 20, forge_like } });
   const result = await controller.generate();
   assert.deepEqual(result, { queued: 1 });
   assert.deepEqual(baseCalls, [stageModes(withDefaults({ ...PICKS, seed: 7, batch: 2, steps: 20 }), null, { families: {} })]);
@@ -396,7 +397,7 @@ test("same seed regenerates the picked image's settings with the current post se
     seed: 1,
     batch: 4,
     hires: { on: true, denoise: 0.3 },
-    sam3: { on: true, prompt: "hands" },
+    sam3: { on: true, prompt: "hands", checkpoint: "C:/sam3.pt" },
   };
   const { api, controller, emitted, routes, baseCalls, readCalls } = setup({ state: current, xyz: XYZ_ON });
   const state = withDefaults({ ...PICKS, prompt: "from the session", seed: 9, steps: 20, batch: 2, hires: { on: false, denoise: 0.7 } });
@@ -825,4 +826,101 @@ test("a gallery post-processing run keeps the other images", async () => {
   api.fire("execution_success", { prompt_id: "p0" });
   await controller.whenIdle();
   assert.deepEqual(replaceFlags(emitted), [["images", false]]);
+});
+
+test("a typed seed is the seed of every run", async () => {
+  const { api, controller } = setup({ state: { seed: 123 } });
+  await controller.generate();
+  finishCell(api, "p0", "one.png");
+  await controller.whenIdle();
+  await controller.generate();
+  finishCell(api, "p1", "two.png");
+  await controller.whenIdle();
+  assert.deepEqual(api.queued.map((entry) => entry.data.output[ROLE_IDS.sampler].inputs.seed), [123, 123]);
+});
+
+test("a real error is not hidden by an earlier SAM3 notice", async () => {
+  const { api, controller, emitted } = setup();
+  await controller.generate();
+  api.fire("execution_start", { prompt_id: "p0" });
+  api.fire("aistudio.sam3_empty", {});
+  api.fire("execution_error", { prompt_id: "p0", exception_message: "out of memory" });
+  await controller.whenIdle();
+  assert.deepEqual(noticesOf(emitted), [NOTICES.sam3Empty, "out of memory"]);
+});
+
+test("the SAM3 notice comes once per run and never covers an error", async () => {
+  const plan = plan2x2();
+  const { api, controller, emitted } = setup({ plan, xyz: XYZ_ON });
+  await controller.generate();
+  api.fire("execution_start", { prompt_id: "p0" });
+  api.fire("aistudio.sam3_empty", {});
+  api.fire("aistudio.sam3_empty", {});
+  api.fire("execution_error", { prompt_id: "p0", exception_message: "out of memory" });
+  api.fire("aistudio.sam3_empty", {});
+  assert.deepEqual(noticesOf(emitted), [NOTICES.sam3Empty, "out of memory"]);
+  await controller.stop();
+  await controller.whenIdle();
+});
+
+test("a plot takes the SAM3 file from its cells: the panel's may stay empty", async () => {
+  const sam3 = { ...DEFAULT_STATE.sam3, on: true };
+  const plan = plan2x2(() => ({ ...PICKS, sam3: { ...sam3, checkpoint: "C:/sam3.pt" } }));
+  const { api, controller } = setup({ plan, xyz: XYZ_ON, state: { sam3 } });
+  const result = await controller.generate();
+  assert.equal(result.notice, undefined);
+  assert.equal(api.queued.length, 4);
+  await controller.stop();
+  await controller.whenIdle();
+});
+
+test("a plot cell without a SAM3 file is refused before anything is queued", async () => {
+  const sam3 = { ...DEFAULT_STATE.sam3, on: true };
+  const plan = plan2x2((index) => ({ ...PICKS, sam3: { ...sam3, checkpoint: index === 3 ? "" : "C:/sam3.pt" } }));
+  const { api, controller, emitted } = setup({ plan, xyz: XYZ_ON, state: { sam3 } });
+  await controller.generate();
+  assert.equal(api.queued.length, 0);
+  assert.deepEqual(noticesOf(emitted), [PICK_NOTICES.sam3]);
+});
+
+test("a face detector that cannot run says why, not that nothing was found", async () => {
+  const { api, controller, emitted } = setup();
+  await controller.generate();
+  api.fire("execution_start", { prompt_id: "p0" });
+  api.fire("aistudio.sam3_empty", { reason: "FaceDetectorUnavailable: no ultralytics" });
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.sam3Face}: FaceDetectorUnavailable: no ultralytics`]);
+  api.fire("execution_success", { prompt_id: "p0" });
+  await controller.whenIdle();
+});
+
+test("same seed on another family's image drops the panel's Hires VAE", async () => {
+  const hires = { on: true, vae: "anima.safetensors" };
+  const { api, controller } = setup({ state: { hires } });
+  const state = withDefaults({ ...PICKS, unet: "moss.safetensors", te: "m", vae: "m" });
+  await controller.sameSeed({ image: ref("s.png"), record: { state, seed: 10 } });
+  assert.equal(api.queued[0].data.output[ROLE_IDS.hires].inputs.vae_name, "Use same choices");
+  assert.equal(api.queued[0].data.output[ROLE_IDS.hires].inputs.enabled, true);
+  await controller.stop();
+  await controller.whenIdle();
+});
+
+test("a gallery Mask only run takes an image of any family and needs no model", async () => {
+  const sam3 = { ...DEFAULT_STATE.sam3, mode: "Mask only", checkpoint: "C:/sam3.pt" };
+  const moss = `x\nSteps: 20, Seed: 1, Model: moss_image`;
+  const { api, controller } = setup({ state: { sam3, unet: "", te: "", vae: "" }, parameters: moss });
+  const result = await controller.runPost("sam3", { image: ref("old.png") });
+  assert.equal(result.notice, undefined);
+  assert.equal(api.queued.length, 1);
+  await controller.stop();
+  await controller.whenIdle();
+});
+
+test("SAM3 finding nothing says so instead of ending without a word", async () => {
+  const { api, controller, emitted } = setup();
+  await controller.generate();
+  api.fire("execution_start", { prompt_id: "p0" });
+  api.fire("aistudio.sam3_empty", {});
+  assert.deepEqual(noticesOf(emitted), [NOTICES.sam3Empty]);
+  api.fire("execution_success", { prompt_id: "p0" });
+  await controller.whenIdle();
 });

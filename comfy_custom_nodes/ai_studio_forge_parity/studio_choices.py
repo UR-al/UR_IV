@@ -1,7 +1,7 @@
 """Choice lists for the Anima studio's pickers (samplers, models, LoRAs, SAM3 checkpoints, ...).
 
 No ComfyUI import at module level: ``folder_paths`` / ``comfy.samplers`` are read when a list is asked for, and a
-missing host just gives an empty list.  Every kind returns plain strings except ``sam3``, which returns
+missing host just gives an empty list.  Every kind returns plain strings except ``sam3`` and ``face_models``, which return
 ``{"value": absolute path, "label": file name}`` objects (the Forge ``[SAM3] Checkpoint`` axis and the SAM3 node take the
 path; the picker shows the file name).
 """
@@ -13,8 +13,10 @@ import re
 from pathlib import Path
 
 from .dora_infer_mode import MODE_CHOICES
+from .sam3_face_detect import model_dirs as face_model_dirs, scan_models as scan_face_models
+from .sam3_files import is_transformers_layout
 
-KINDS = ("samplers", "schedulers", "unets", "vaes", "tes", "loras", "upscalers", "sam3", "dora_modes")
+KINDS = ("samplers", "schedulers", "unets", "vaes", "tes", "loras", "upscalers", "sam3", "dora_modes", "controlnets", "face_models")
 SAM3_PREFIX = "sam3"
 SAM3_SUFFIXES = (".pt", ".safetensors")  # what sam-extra's find_checkpoint_options accepts
 EXTRA_PATHS_FILE = "extra_model_paths.yaml"
@@ -94,8 +96,8 @@ def lora_names(folder_paths=None) -> list[str]:
 
 # ------------------------------------------------------------------------------------------------- SAM3 files
 
-def _forge_sam3_directories(base_path: str) -> list[str]:
-    """``<base_path>/models/sam3`` of every ``extra_model_paths.yaml`` entry (a ``sam3:`` key overrides the folder)."""
+def _forge_directories(base_path: str, key: str) -> list[str]:
+    """``<base_path>/models/<key>`` of every ``extra_model_paths.yaml`` entry (an entry's own ``key:`` overrides the folder)."""
     config = Path(base_path) / EXTRA_PATHS_FILE
     try:
         import yaml
@@ -110,11 +112,18 @@ def _forge_sam3_directories(base_path: str) -> list[str]:
         root = Path(entry["base_path"]).expanduser()
         if not root.is_absolute():
             root = config.parent / root
-        sam3 = entry.get("sam3")
-        lines = [line.strip() for line in sam3.splitlines()] if isinstance(sam3, str) else []
-        for line in [line for line in lines if line] or ["models/sam3"]:
+        folder = entry.get(key)
+        lines = [line.strip() for line in folder.splitlines()] if isinstance(folder, str) else []
+        for line in [line for line in lines if line] or [f"models/{key}"]:
             found.append(str(root / line))
     return found
+
+
+def _unique_paths(paths) -> list[str]:
+    unique = {}
+    for path in paths:
+        unique.setdefault(os.path.normcase(os.path.abspath(path)), os.path.abspath(path))
+    return list(unique.values())
 
 
 def sam3_directories(folder_paths=None) -> list[str]:
@@ -130,17 +139,14 @@ def sam3_directories(folder_paths=None) -> list[str]:
     base_path = getattr(folder_paths, "base_path", None)
     if base_path:
         found.append(os.path.join(str(base_path), "models", "sam3"))
-        found += _forge_sam3_directories(str(base_path))
-    unique = {}
-    for path in found:
-        unique.setdefault(os.path.normcase(os.path.abspath(path)), os.path.abspath(path))
-    return list(unique.values())
+        found += _forge_directories(str(base_path), "sam3")
+    return _unique_paths(found)
 
 
 def sam3_items(directories) -> list[dict]:
     """SAM3 checkpoints (file name starting with ``sam3``, ``.pt`` / ``.safetensors``) as ``{value: path, label: name}``.
 
-    The first folder wins when two folders hold the same file name."""
+    The first folder wins when two folders hold the same file name. A file Easy SAM3 cannot read is left out."""
     items, seen = [], set()
     for directory in directories:
         try:
@@ -151,10 +157,29 @@ def sam3_items(directories) -> list[dict]:
             lowered = name.lower()
             path = os.path.join(directory, name)
             if (not lowered.startswith(SAM3_PREFIX) or not lowered.endswith(SAM3_SUFFIXES)
-                    or lowered in seen or not os.path.isfile(path)):
+                    or lowered in seen or not os.path.isfile(path) or is_transformers_layout(path)):
                 continue
             seen.add(lowered)
             items.append({"value": path, "label": name})
+    return items
+
+
+def face_model_directories(folder_paths=None) -> list[str]:
+    """The folders ``sam3_face_detect`` reads a bare name from, then Forge's ``models/adetailer`` (it never looks there)."""
+    folder_paths = folder_paths if folder_paths is not None else _folder_paths()
+    base_path = getattr(folder_paths, "base_path", None)
+    forge = _forge_directories(str(base_path), "adetailer") if base_path else []
+    return _unique_paths([*(str(path) for path in face_model_dirs()), *forge])
+
+
+def face_model_items(directories) -> list[dict]:
+    """The ultralytics box models of ``directories`` as ``{value: path, label: name}``; the first folder wins a name."""
+    items, seen = [], set()
+    for directory in directories:
+        for path in scan_face_models(Path(directory)):
+            if path.name.lower() not in seen:
+                seen.add(path.name.lower())
+                items.append({"value": str(path), "label": path.name})
     return items
 
 
@@ -188,4 +213,8 @@ def choices(kind: str) -> dict:
         return {"items": upscaler_items()}
     if kind == "sam3":
         return {"items": sam3_items(sam3_directories(folder_paths))}
+    if kind == "controlnets":
+        return {"items": _file_list(folder_paths, "controlnet")}
+    if kind == "face_models":
+        return {"items": face_model_items(face_model_directories(folder_paths))}
     return {"items": list(MODE_CHOICES)}

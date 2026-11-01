@@ -383,6 +383,7 @@ def role_values(state: dict) -> dict[str, dict]:
         "base_steps": state["steps"],
         "base_sampler_name": sampler,
         "base_scheduler": scheduler,
+        "size_step": state["hires"]["size_step"],
         # the fixed first choices of these file lists (generation.py ForgeNeoHiresFix)
         "checkpoint_name": "Use same checkpoint",
         "text_encoder_name": "Use same choices",
@@ -397,6 +398,7 @@ def role_values(state: dict) -> dict[str, dict]:
         "sampler_name": sampler,
         "scheduler": scheduler,
     }
+    mask = {"device": state["sam3"]["device"], "precision": state["sam3"]["precision"]}
     encode = {"steps": state["steps"], "forge_syntax": forge["master"] and forge["prompt_syntax"]}
     save = {"studio_state": json.dumps(state)}
     select = {"select": 0}  # the default state's unet is not a 3.8B file
@@ -417,6 +419,8 @@ def role_values(state: dict) -> dict[str, dict]:
                     "denoise": 1.0, "forge_noise": noise},
         "hires": hires,
         "post_hires": hires,
+        "sam3_mask": mask,
+        "post_sam3_mask": mask,
         "sam3_detailer": detailer,
         "post_sam3_detailer": detailer,
         "save": save,

@@ -163,7 +163,7 @@ test("applyStateToPrompt sets sampler inputs", () => {
   assert.equal(sampler.sampler_name, "exp_heun_2_x0_sde");
   assert.equal(sampler.scheduler, "flow_cosmos_dynamic");
   assert.equal(sampler.denoise, 1.0);
-  assert.equal(sampler.forge_noise, true);
+  assert.equal(sampler.forge_noise, false);
   assert.equal(sampler.seed, 2147483647);
   assert.deepEqual(sampler.model, [roleIds.dora, 0]);
 });
@@ -203,7 +203,7 @@ test("applyStateToPrompt maps models, shift, latent, prompts and save", () => {
   for (const role of ["pos_encode", "neg_encode"]) {
     const encode = inputs(out, roleIds, role);
     assert.equal(encode.steps, 32);
-    assert.equal(encode.forge_syntax, true);
+    assert.equal(encode.forge_syntax, false);
     assert.deepEqual(encode.text, prompt[roleIds[role]].inputs.text); // a link stays a link
   }
   for (const role of ["family_switch_model", "family_switch_pos", "family_switch_neg"]) {
@@ -233,7 +233,6 @@ test("empty model choices keep the workflow's values", () => {
   const out = applyStateToPrompt(prompt, roleIds, state(), { rng: fixedRng });
   assert.equal(inputs(out, roleIds, "unet").unet_name, "workflow.safetensors");
   assert.equal(inputs(out, roleIds, "vae").vae_name, "workflow_vae.safetensors");
-  assert.equal(inputs(out, roleIds, "upscale").model_name, "workflow_up.pth");
   assert.equal(inputs(out, roleIds, "sam3_mask").checkpoint, "sam3.pt");
   assert.equal(inputs(out, roleIds, "i2i_image").image, "example.png");
 });
@@ -291,7 +290,8 @@ test("3.8b unet selects switch 1", () => {
 
 test("Forge-like switches: noise, prompt syntax and the effective DoRA mode (R2, R15)", () => {
   const { prompt, roleIds } = studioPrompt();
-  const on = applyStateToPrompt(prompt, roleIds, state(), { rng: fixedRng });
+  const forge = { ...DEFAULT_STATE.forge_like, master: true };
+  const on = applyStateToPrompt(prompt, roleIds, state({ forge_like: forge }), { rng: fixedRng });
   assert.deepEqual(inputs(on, roleIds, "dora").enabled, true);
   assert.equal(inputs(on, roleIds, "dora").mode, "LyCORIS fp32 (as trained)");
   assert.equal(inputs(on, roleIds, "hires").forge_noise, true);
@@ -303,8 +303,9 @@ test("Forge-like switches: noise, prompt syntax and the effective DoRA mode (R2,
   assert.equal(inputs(off, roleIds, "sampler").forge_noise, false);
   assert.equal(inputs(off, roleIds, "hires").forge_noise, false);
   assert.equal(inputs(off, roleIds, "pos_encode").forge_syntax, false);
+  assert.equal(DEFAULT_STATE.forge_like.master, false); // off until the user asks for it
 
-  const partial = state({ forge_like: { ...DEFAULT_STATE.forge_like, noise: false, dora: false } });
+  const partial = state({ forge_like: { ...forge, noise: false, dora: false } });
   const p = applyStateToPrompt(prompt, roleIds, partial, { rng: fixedRng });
   assert.equal(inputs(p, roleIds, "sampler").forge_noise, false);
   assert.equal(inputs(p, roleIds, "neg_encode").forge_syntax, true);
@@ -345,8 +346,8 @@ test("upscale and SAM3 inputs; SAM3 steps/cfg 0 use the main values (R8)", () =>
   });
   const out = applyStateToPrompt(prompt, roleIds, s);
   assert.deepEqual(
-    { ...inputs(out, roleIds, "upscale"), image: undefined },
-    { image: undefined, enabled: true, model_name: "2x.pth", scale_by: 1.5 },
+    [inputs(out, roleIds, "upscale").enabled, inputs(out, roleIds, "upscale").model_name, inputs(out, roleIds, "upscale").scale_by],
+    [true, "2x.pth", 1.5],
   );
   const mask = inputs(out, roleIds, "sam3_mask");
   assert.deepEqual([mask.enabled, mask.checkpoint, mask.prompt], [true, "C:/m/sam3.1_multiplex_fp16.safetensors", "hand"]);
@@ -431,10 +432,8 @@ test("postPrompt upscale and sam3 skip the VAE round trip", () => {
   const { prompt, roleIds } = studioPrompt();
   const current = state({ upscale: { on: false, model: "2x.pth", scale: 3 }, sam3: { ...DEFAULT_STATE.sam3, prompt: "hand" } });
   const up = postPrompt(prompt, roleIds, record(), "upscale", current).prompt;
-  assert.deepEqual(
-    { ...inputs(up, roleIds, "post_upscale"), image: undefined },
-    { image: undefined, enabled: true, model_name: "2x.pth", scale_by: 3 },
-  );
+  const posted = inputs(up, roleIds, "post_upscale");
+  assert.deepEqual([posted.enabled, posted.model_name, posted.scale_by], [true, "2x.pth", 3]);
   assert.equal(inputs(up, roleIds, "post_hires").enabled, false);
   assert.deepEqual(inputs(up, roleIds, "post_save").images, [roleIds.post_upscale, 0]);
 
@@ -759,7 +758,8 @@ test("MOSS sizes snap to its 16x grid at run time and in the send-to size", () =
 
 test("Krea2's reference node gets the prompt editing settings", () => {
   const prompt = { 2: { inputs: {} } };
-  const out = applyStateToPrompt(prompt, { krea2_ref: "2" }, ready({ unet: "krea2.safetensors", steps: 12 }), { rng: fixedRng })[2].inputs;
+  const forge_like = { ...DEFAULT_STATE.forge_like, master: true };
+  const out = applyStateToPrompt(prompt, { krea2_ref: "2" }, ready({ unet: "krea2.safetensors", steps: 12, forge_like }), { rng: fixedRng })[2].inputs;
   assert.deepEqual([out.steps, out.forge_syntax], [12, true]);
 });
 

@@ -70,8 +70,8 @@ inspector recognises them.
 - `AIStudioSaveForge` (Anima studio: saves PNGs with a Forge-style `parameters` chunk built from the studio state
   (`Steps, Sampler, Schedule type, CFG scale, Shift, Seed, Size, Model, VAE`, plus `Denoising strength` and the `Hires …`
   keys when they apply) next to ComfyUI's `prompt` / `workflow` chunks, so the app's PNG Info and Forge read the files)
-- `AIStudioUpscaleImage` (Anima studio: `enabled` off passes the image through; on runs the chosen upscale model
-  through ComfyUI's `UpscaleModelLoader` / `ImageUpscaleWithModel` and resizes to the input size x `scale_by`)
+- `AIStudioUpscaleImage` (Anima studio: `enabled` off passes the image through; on runs Forge's Extras upscale from
+  `studio_upscale.py`: by a factor or to a size, up to two upscale models or Lanczos / Nearest, colour correction, tiles)
 - `AIStudioPromptEncode` (Anima studio: `forge_syntax` off is `CLIPTextEncode`; on, Forge's prompt editing
   `[a:b:step]` / `[a::step]` / `[:b:step]` / `[a|b]` (nested, `\[` escapes) is worked out for `steps` and each segment
   is encoded once and set to its share of the steps with `ConditioningSetTimestepRange`; weights `(x:1.2)` are left to
@@ -97,6 +97,44 @@ When the app generates from an ANIMA custom workflow it keeps
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.13.0 changes
+
+The studio's post-processing cards now hold Forge's settings. `studio_post_schema.py` is one table of the Hires, upscale and
+SAM3 fields (key, label, range, node input); `studio_state.py` adds and clamps them, `tools/build_studio_post_schema.py`
+writes the table as `web/ai_studio/post_schema.js`, and `tests/test_studio_post_schema.py` checks that every named input
+exists on its node.
+
+- SAM3: a caret on the 후처리 card unfolds seven sections in the shape of the extension rows (`web/ai_studio/post_view.js`):
+  찾기, 마스크, 얼굴, 인페인트, 샘플링, ControlNet, 실행. Mask only moves the row after the detailer to the mask node's image
+  output (its overlay, or with the new `plain_overlay` the picture itself), so nothing draws and a gallery run loads no model;
+  Refine and tile stay out. The panel now writes
+  `target_width` / `target_height` (Forge's `p.width/p.height`): an "only masked" crop is drawn at the generation size instead of
+  at crop size. `ForgeNeoSAM3Detailer` and `ForgeNeoSAM3Refine` gain the optional `target_image_size`: a gallery pass and Refine
+  are an img2img at the input image's size in Forge, which only the node knows. `/choices` gains `controlnets` and
+  `face_models` (absolute paths, Forge's `models/adetailer` included).
+- SAM3 runs in bf16 by default, as Forge does on CUDA; `auto` on a machine without CUDA falls back to fp32.
+- A `.safetensors` SAM3 file in the Hugging Face transformers layout (`detector_model.*`) is left out of the list and refused:
+  Easy SAM3 loads with `strict=False`, so it ran on random weights, found nothing and finished in a blink. An empty mask now
+  sends `aistudio.sam3_empty`, and the studio says so.
+- `ForgeNeoHiresFix`: the optional `tile_size`, `tile_overlap` and `size_step` (Forge's Resolution Step; 0 = one latent cell, and
+  halves now round up as in Forge, so a size can differ by a cell from 1.12.0), `latent:nearest`, `latent:bilinear antialiased`, `latent:bicubic antialiased`, `Lanczos` and `Nearest`. One size box alone
+  keeps the aspect. The panel adds the pass's own CFG, Shift, scheduler, size, VAE, prompt and negative, steps 0 = the main steps,
+  and shows the size the run ends at.
+- `AIStudioUpscaleImage`: the optional `resize_mode` (Scale by / Scale to), `max_side_length`, `width`, `height`, `crop`,
+  `model_name_2`, `upscaler_2_visibility`, `color_correction`, `tile_size` and `tile_overlap`; `Lanczos` and `Nearest` need no model
+  file. Picking an upscaler sets the factor in its name, as Forge does. Colour correction needs opencv-python, which ComfyUI does
+  not ship; the node says so before it upscales.
+- `studio_upscale.py` holds both nodes' upscaling: the model runs again until the picture reaches the target (4 passes at most),
+  then Lanczos, to a multiple of 8. Core's `ImageUpscaleWithModel` hard-codes its tiles, so `model_pass` repeats that node with
+  them as arguments; an older ComfyUI without `upscale_model.patcher` still goes through the core node.
+- The panel: the prompt, model, LoRA and 후처리 cards and the extension groups stack one per line, so a long LoRA name fits. 시드
+  gains ♻ (the seed of the image picked in the gallery, as in Forge) and 랜덤; only -1 draws a seed. SAM3's prompt box takes two
+  lines and states sam-extra's grammar (`,` merges into one mask, `/` is a pass of its own). Forge처럼 now starts off; a saved
+  panel keeps its own switch.
+- `parameters` gains Forge's keys for all of this (`Hires CFG Scale`, `Hires resize`, `Postprocess upscaler`, `SAM3 Enable`, the
+  `SAM3 Use ...` switches, ...), and latent upscalers carry Forge's names (`Latent (bicubic)`).
+- A ControlNet preprocessor without a threshold input now ignores the thresholds, as Forge's do, instead of stopping the run.
 
 ## 1.12.0 changes
 

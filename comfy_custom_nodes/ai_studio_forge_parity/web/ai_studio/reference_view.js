@@ -181,7 +181,7 @@ export function renderReference(state, view) {
   };
   const ready = reference.image && referenceFile(state, view.family);
   const title = `레퍼런스 (${FAMILY_LABELS[view.family]})`;
-  return h("div", { class: `ais-node ais-ext-group ${open ? "ais-ext-wide" : ""}` },
+  return h("div", { class: "ais-node ais-ext-group" },
     h("div", { class: "ais-nt" }, h("span", {}, "레퍼런스")),
     h("div", { class: "ais-nb" }, extLine({
       key: CARD_KEY,

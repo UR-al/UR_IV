@@ -19,6 +19,7 @@ import threading
 from pathlib import Path
 from typing import Any, Sequence
 
+from .sam3_files import is_transformers_layout
 from .mask_ops import (
     empty_mask_like,
     ensure_image,
@@ -41,6 +42,7 @@ from .extra_samplers_register import impact_scheduler_func
 
 
 CATEGORY = "AI Studio/Forge parity/SAM3"
+SAM3_EMPTY_EVENT = "aistudio.sam3_empty"  # run_controller.js
 _EASY_SEGMENTATION_KEYS = (
     "easy sam3ImageSegmentation",
     "EasySam3ImageSegmentation",
@@ -256,6 +258,8 @@ def _resolve_sam3_request(checkpoint: str, device: str, precision: str):
     resolved_precision = str(precision or "fp32").lower()
     if resolved_precision not in {"fp32", "fp16", "bf16"}:
         raise ValueError("precision must be fp32, fp16, or bf16")
+    if resolved_device == "cpu" and str(device or "").lower() == "auto":
+        resolved_precision = "fp32"  # the precision was meant for a GPU this machine does not have
     if resolved_device == "cpu" and resolved_precision != "fp32":
         raise ValueError("Easy SAM3 does not support fp16/bf16 on CPU")
     checkpoint_value = str(checkpoint or "sam3.pt").strip()
@@ -408,10 +412,12 @@ def _acquire_sam3(checkpoint: str, device: str, precision: str, *, use_cache: bo
     resolved_device, resolved_precision, checkpoint_path, model_name = _resolve_sam3_request(
         checkpoint, device, precision,
     )
-    key = _sam3_cache_key(
-        _sam3_checkpoint_file(checkpoint_path, model_name),
-        resolved_device, resolved_precision,
-    ) if use_cache else None
+    checkpoint_file = _sam3_checkpoint_file(checkpoint_path, model_name)
+    if checkpoint_file is not None and is_transformers_layout(checkpoint_file):
+        raise ValueError(
+            f"{checkpoint_file.name} 는 Hugging Face 형식이라 Easy SAM3 가 읽지 못함: sam3.pt 나 sam3.1_multiplex 를 고르세요"
+        )
+    key = _sam3_cache_key(checkpoint_file, resolved_device, resolved_precision) if use_cache else None
     with _SAM3_CACHE_LOCK:
         cached = dict(_SAM3_CACHE) if key is not None and _SAM3_CACHE.get("key") == key else None
     if cached is not None:
@@ -620,6 +626,17 @@ def _detect_token_instances(provider: Any, model: Any, image: Any, token: str,
     return pieces, boxes, scores
 
 
+def _tell_nothing_found(reason: str = "") -> None:
+    """A run with an empty mask ends in a blink with nothing changed: the studio says why. Elsewhere only the log tells.
+    ``reason``: the face detector's error when it could not run."""
+    try:
+        import server
+
+        server.PromptServer.instance.send_sync(SAM3_EMPTY_EVENT, {"reason": reason})
+    except Exception:
+        pass
+
+
 def _copy_image_state(state: dict) -> dict:
     """sam-extra ``_run_prompt``: a shallow copy of a ``set_image`` state, with its own ``backbone_out`` dict.
 
@@ -803,6 +820,9 @@ class ForgeNeoSAM3Mask:
                 # The app compiler sets it from its "keep SAM3 in RAM"
                 # setting; ComfyUI's unload-all-models (/free) also frees it.
                 "cache_model": ("BOOLEAN", {"default": True}),
+                # The overlay output gives the picture itself: Forge's Mask only without its preview. The saved
+                # overlay file stays the overlay.
+                "plain_overlay": ("BOOLEAN", {"default": False}),
                 # SAM3 "search inside faces only" (sam-extra 0.34.0 face crop with the 0.34.1 crop growth; pack
                 # 1.8.0): ultralytics face boxes -> SAM3 on each widened square crop (sam3_face_crop_run). Off, or
                 # left out, is the run without it. The app sends the three only when the feature is on.
@@ -863,6 +883,7 @@ class ForgeNeoSAM3Mask:
         face_crop_model=_face_detect.DEFAULT_MODEL,
         face_crop_confidence=_face_detect.DEFAULT_CONFIDENCE,
         face_crop_detector=None,
+        plain_overlay=False,
     ):
         image_value = ensure_image(image)
         mode = str(mask_mode).strip().casefold()
@@ -1027,6 +1048,8 @@ class ForgeNeoSAM3Mask:
             if needs_provider and loaded_here and unload_after and model_bundle is not None:
                 _offload_sam3(model_bundle)
 
+        if needs_main_detection and not bool((combined > 0.0).any()):
+            _tell_nothing_found(face_error or "")
         selected = combined if mode == "combined" else individuals
         overlay = make_overlay(
             image_value, combined, all_boxes, all_scores, regions=_face_crop_overlay_regions(face_plans),
@@ -1071,7 +1094,8 @@ class ForgeNeoSAM3Mask:
                 seed=int(seed),
                 metadata=report,
             )
-        return selected, combined, individuals, overlay, all_boxes, all_scores, json.dumps(
+        image_output = image_value[..., :3] if plain_overlay else overlay
+        return selected, combined, individuals, image_output, all_boxes, all_scores, json.dumps(
             report, ensure_ascii=False
         )
 
@@ -1503,7 +1527,6 @@ def _preprocessor_kwargs(node_type: Any, image: Any, mask: Any, resolution: int,
     required = dict(schema.get("required", {}))
     optional = dict(schema.get("optional", {}))
     parameters: dict[str, Any] = {}
-    consumed_a = consumed_b = False
     low_names = {"low_threshold", "threshold_a", "thr_a", "value_threshold"}
     high_names = {"high_threshold", "threshold_b", "thr_b", "distance_threshold"}
     for name, descriptor in {**required, **optional}.items():
@@ -1518,11 +1541,9 @@ def _preprocessor_kwargs(node_type: Any, image: Any, mask: Any, resolution: int,
             continue
         if name in low_names and float(threshold_a) >= 0:
             parameters[name] = int(threshold_a) if descriptor[0] == "INT" else float(threshold_a)
-            consumed_a = True
             continue
         if name in high_names and float(threshold_b) >= 0:
             parameters[name] = int(threshold_b) if descriptor[0] == "INT" else float(threshold_b)
-            consumed_b = True
             continue
         options = descriptor[0] if isinstance(descriptor, (tuple, list)) and descriptor else descriptor
         config = descriptor[1] if isinstance(descriptor, (tuple, list)) and len(descriptor) > 1 and isinstance(descriptor[1], dict) else {}
@@ -1540,11 +1561,7 @@ def _preprocessor_kwargs(node_type: Any, image: Any, mask: Any, resolution: int,
             raise RuntimeError(
                 f"ControlNet preprocessor requires unsupported input {name!r}; connect/use it explicitly."
             )
-    if float(threshold_a) >= 0 and not consumed_a:
-        raise ValueError("controlnet threshold_a is set but the selected preprocessor has no compatible threshold input")
-    if float(threshold_b) >= 0 and not consumed_b:
-        raise ValueError("controlnet threshold_b is set but the selected preprocessor has no compatible threshold input")
-    return parameters
+    return parameters  # a threshold no input takes is ignored, as Forge's preprocessors ignore it
 
 
 def _control_module_name(module: Any) -> str:
@@ -1565,8 +1582,6 @@ def _prepare_control_hint(image: Any, mask: Any, module: str, resolution: int,
             "installed, semantically matching Comfy preprocessor."
         )
     if name in {"none", "raw"}:
-        if float(threshold_a) >= 0 or float(threshold_b) >= 0:
-            raise ValueError("ControlNet thresholds cannot be applied when controlnet_module is none")
         return ensure_image(image)[..., :3], "none"
     provider_id = _CONTROL_PREPROCESSORS.get(name)
     if provider_id is None:
@@ -1968,6 +1983,9 @@ class ForgeNeoSAM3Detailer:
                 # crop-size sampling of saved workflows. Custom size wins.
                 "target_width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
                 "target_height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
+                # Forge's standalone passes (post-processing, Refine) are an img2img at the input image's size,
+                # which a graph does not know when it is built. Wins over the target above; custom size wins over it.
+                "target_image_size": ("BOOLEAN", {"default": False}),
             },
         }
 
@@ -2019,6 +2037,7 @@ class ForgeNeoSAM3Detailer:
         face_detector=None,
         target_width=0,
         target_height=0,
+        target_image_size=False,
     ):
         image_value = ensure_image(image)[..., :3]
         mask_value = ensure_mask(mask, height=image_value.shape[1], width=image_value.shape[2])
@@ -2051,6 +2070,9 @@ class ForgeNeoSAM3Detailer:
             raise ValueError("SAM3 detailer custom size must be between 64 and 8192.")
         target_width_value = int(target_width or 0)
         target_height_value = int(target_height or 0)
+        if target_image_size:
+            target_height_value = max(64, min(8192, int(image_value.shape[1])))
+            target_width_value = max(64, min(8192, int(image_value.shape[2])))
         if (target_width_value, target_height_value) != (0, 0) and not (
             64 <= target_width_value <= 8192 and 64 <= target_height_value <= 8192
         ):
@@ -2493,6 +2515,7 @@ class ForgeNeoSAM3Refine(ForgeNeoSAM3Detailer):
         face_detector=None,
         target_width=0,
         target_height=0,
+        target_image_size=False,
     ):
         image_value = ensure_image(image)[..., :3]
         shared_control_net = control_net
@@ -2541,6 +2564,7 @@ class ForgeNeoSAM3Refine(ForgeNeoSAM3Detailer):
                 face_detector=face_detector,
                 target_width=target_width,
                 target_height=target_height,
+                target_image_size=target_image_size,
             )
 
         if not enabled or str(mask_mode).casefold() == "combined":
