@@ -64,6 +64,10 @@ class StudioStateTests(unittest.TestCase):
         self.assertEqual((reference["snapref"]["mode"], reference["snapref"]["strength"], reference["snapref"]["correction"]),
                          ("cs", 3.0, "rescale"))
         self.assertNotIn("extra", reference["snapref"])
+        second = ss.normalize_state({"reference": {"image_2": "b.png", "snapref": {
+            "fidelity": 3, "weight_1": -1, "weight_2": 9}}})["reference"]
+        self.assertEqual((second["image_2"], second["snapref"]["fidelity"], second["snapref"]["weight_1"],
+                          second["snapref"]["weight_2"]), ("b.png", 1.0, 0.0, 2.0))
         self.assertEqual(reference["ref_adapter"]["strength"], 2.0)
         self.assertEqual((reference["krea2"]["position"], reference["krea2"]["grounding_px"]), ("aligned (trained)", 0))
 

@@ -60,9 +60,11 @@ DEFAULT_STATE: dict = {
     "reference": {
         "on": False,
         "image": "",
+        "image_2": "",  # SnapRef only: another picture of the same character
         "method": REFERENCE_METHODS[0],  # Anima's two adapters; Krea2 has its own section
         "megapixels": 1.0,
-        "snapref": {"file": "", "mode": REFERENCE_MODES[0], "strength": 0.0, "guidance_on": True, "guidance": 4.5,
+        "snapref": {"file": "", "mode": REFERENCE_MODES[0], "strength": 0.0, "fidelity": 1.0, "weight_1": 1.0, "weight_2": 1.0,
+                    "guidance_on": True, "guidance": 4.5,
                     "correction": REFERENCE_CORRECTIONS[0], "ref_end": 1.0, "caption": ""},
         "ref_adapter": {"file": "", "strength": 1.0, "guidance": 4.5, "correction": REFERENCE_CORRECTIONS[0],
                         "ref_end": 1.0},
@@ -188,15 +190,20 @@ def _reference(raw) -> dict:
     enum = lambda key: (lambda v, df: _enum(v, df, key))
     guidance = lambda v, df: _float(v, df, 0.0, 20.0)
     unit = lambda v, df: _float(v, df, 0.0, 1.0)
+    weight = lambda v, df: _float(v, df, 0.0, 2.0)
     return {
         "on": _bool(raw.get("on"), d["on"]),
         "image": _str(raw.get("image"), d["image"]),
+        "image_2": _str(raw.get("image_2"), d["image_2"]),
         "method": _enum(raw.get("method"), d["method"], "method"),
         "megapixels": _float(raw.get("megapixels"), d["megapixels"], 0.25, 2.0),
         "snapref": _section(raw.get("snapref"), d["snapref"], {
             "file": _str,
             "mode": enum("mode"),
             "strength": lambda v, df: _float(v, df, -3.0, 3.0),
+            "fidelity": unit,
+            "weight_1": weight,
+            "weight_2": weight,
             "guidance_on": _bool,
             "guidance": guidance,
             "correction": enum("correction"),

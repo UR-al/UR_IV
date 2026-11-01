@@ -140,6 +140,12 @@ class AIStudioAnimaReference:
             "ref_end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
             "megapixels": ("FLOAT", {"default": 1.0, "min": 0.25, "max": 2.0, "step": 0.05}),
             "caption": ("STRING", {"default": "", "multiline": True, "tooltip": "SnapRef: the reference's appearance tags"}),
+        }, "optional": {
+            "image_2": ("IMAGE", {"tooltip": "SnapRef: another picture of the same character"}),
+            "weight_1": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": "SnapRef: how much image counts"}),
+            "weight_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": "SnapRef: how much image_2 counts"}),
+            "fidelity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                                   "tooltip": "SnapRef: 1 keeps the picture's details, lower follows the prompt; off with guidance_on"}),
         }}
 
     RETURN_TYPES = ("MODEL",)
@@ -148,16 +154,26 @@ class AIStudioAnimaReference:
     DESCRIPTION = "Character / style reference for Anima through SnapRef or Anima Ref Adapter."
 
     def apply(self, model, clip, vae, image, method, file, mode, strength, guidance_on, guidance, correction, ref_end,
-              megapixels, caption):
+              megapixels, caption, image_2=None, weight_1=1.0, weight_2=1.0, fidelity=1.0):
         if not file:
             raise ValueError("레퍼런스 파일이 비어 있음")
         file = adapter_for_model(model, file)
         if method == "snapref":
-            patched = invoke_provider("SnapRef", method="apply", feature="SnapRef", kwargs={
-                "model": model, "clip": clip, "vae": vae, "image": image, "adapter": file, "mode": mode,
-                "ref_in_uncond": False, "ref_megapixels": megapixels, "strength": strength, "ref_caption": caption,
-                "ref_guidance_on": guidance_on, "ref_guidance": guidance, "correction": correction, "ref_end": ref_end,
-            })[0]
+            # defaults stay out of the call, so an older SnapRef node keeps working
+            newer = {} if image_2 is None else {"image_2": image_2, "weight_1": weight_1, "weight_2": weight_2}
+            if fidelity < 1.0:
+                newer["fidelity"] = fidelity
+            try:
+                patched = invoke_provider("SnapRef", method="apply", feature="SnapRef", kwargs={
+                    "model": model, "clip": clip, "vae": vae, "image": image, "adapter": file, "mode": mode,
+                    "ref_in_uncond": False, "ref_megapixels": megapixels, "strength": strength, "ref_caption": caption,
+                    "ref_guidance_on": guidance_on, "ref_guidance": guidance, "correction": correction, "ref_end": ref_end,
+                    **newer,
+                })[0]
+            except TypeError as error:
+                if newer and "unexpected keyword" in str(error):
+                    raise RuntimeError("SnapRef 노드가 옛 버전이라 충실도·두 번째 이미지를 못 씀: 노드를 새로 받으세요") from error
+                raise
             # with its guidance on SnapRef keeps the batch whole; off, only the positive row reads the reference
             return (patched if guidance_on else _outermost_wrapper(patched, SPLIT_WRAPPER_KEY, _split_mixed_batch),)
         patched = invoke_provider("AnimaRefAdapter", method="apply", feature="Anima Ref Adapter", kwargs={

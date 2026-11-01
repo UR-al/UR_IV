@@ -20,46 +20,64 @@ export function withExtraParams(text, extra) {
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 const LATIN1 = new TextDecoder("latin1");
+const MAX_INFLATED = 32 * 1024 * 1024; // all compressed text of one file: a few KB can unfold into gigabytes
 
-async function inflate(bytes) {
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+/** The inflated bytes; throws when `budget.left` runs out, which skips the chunk. */
+async function inflate(bytes, budget) {
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate")).getReader();
+  const parts = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return new Uint8Array(await new Blob(parts).arrayBuffer());
+    budget.left -= value.length;
+    if (budget.left < 0) {
+      await reader.cancel();
+      throw new Error("compressed text too long");
+    }
+    parts.push(value);
+  }
 }
 
-async function textChunk(type, data) {
+async function textChunk(type, data, budget) {
   const keyEnd = data.indexOf(0);
   if (keyEnd < 1) return null;
   const key = LATIN1.decode(data.subarray(0, keyEnd));
   if (type === "tEXt") return [key, LATIN1.decode(data.subarray(keyEnd + 1))];
-  if (type === "zTXt") return [key, LATIN1.decode(await inflate(data.subarray(keyEnd + 2)))];
+  if (type === "zTXt") return [key, LATIN1.decode(await inflate(data.subarray(keyEnd + 2), budget))];
   const compressed = data[keyEnd + 1] === 1; // iTXt: flag, method, language\0, translated keyword\0, UTF-8 text
   const languageEnd = data.indexOf(0, keyEnd + 3);
   const translatedEnd = languageEnd < 0 ? -1 : data.indexOf(0, languageEnd + 1);
   if (translatedEnd < 0) return null;
   const body = data.subarray(translatedEnd + 1);
-  return [key, new TextDecoder("utf-8").decode(compressed ? await inflate(body) : body)];
+  return [key, new TextDecoder("utf-8").decode(compressed ? await inflate(body, budget) : body)];
 }
 
-/** `{keyword: text}` of a PNG's tEXt / zTXt / iTXt chunks (first one wins); `{}` for anything that is not a PNG. */
-export async function readPngText(buffer) {
-  const bytes = new Uint8Array(buffer);
-  const out = {};
-  if (bytes.length < 8 || PNG_SIGNATURE.some((value, i) => bytes[i] !== value)) return out;
+/** `[type, data]` of each PNG chunk up to IEND; nothing for anything that is not a PNG. */
+export function* pngChunks(bytes) {
+  if (bytes.length < 8 || PNG_SIGNATURE.some((value, i) => bytes[i] !== value)) return;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   for (let at = 8; at + 8 <= bytes.length; ) {
     const length = view.getUint32(at);
     const type = LATIN1.decode(bytes.subarray(at + 4, at + 8));
     const start = at + 8;
-    if (start + length > bytes.length || type === "IEND") break;
-    if (type === "tEXt" || type === "zTXt" || type === "iTXt") {
-      try {
-        const pair = await textChunk(type, bytes.subarray(start, start + length));
-        if (pair && !(pair[0] in out)) out[pair[0]] = pair[1];
-      } catch {
-        // a broken chunk is skipped
-      }
-    }
+    if (start + length > bytes.length || type === "IEND") return;
+    yield [type, bytes.subarray(start, start + length)];
     at = start + length + 4; // + CRC
+  }
+}
+
+/** `{keyword: text}` of a PNG's tEXt / zTXt / iTXt chunks (first one wins); `{}` for anything that is not a PNG. */
+export async function readPngText(buffer) {
+  const out = {};
+  const budget = { left: MAX_INFLATED };
+  for (const [type, data] of pngChunks(new Uint8Array(buffer))) {
+    if (type !== "tEXt" && type !== "zTXt" && type !== "iTXt") continue;
+    try {
+      const pair = await textChunk(type, data, budget);
+      if (pair && !(pair[0] in out)) out[pair[0]] = pair[1];
+    } catch {
+      // a broken chunk is skipped
+    }
   }
   return out;
 }

@@ -56,6 +56,7 @@ function studioPrompt() {
     family_switch_pos: ["AIStudioSwitch", { select: 0, a: ["pos_encode", 0], b: ["pos_encode38", 0] }],
     family_switch_neg: ["AIStudioSwitch", { select: 0, a: ["neg_encode", 0], b: ["neg_encode38", 0] }],
     reference_image: ["LoadImage", { image: "example.png", upload: "image" }],
+    reference_image_2: ["LoadImage", { image: "example.png", upload: "image" }],
     anima_ref: ["AIStudioAnimaReference", { model: ["dora", 0], clip: ["lora_stack", 1], vae: ["vae", 0], image: ["reference_image", 0], method: "snapref", file: "" }],
     krea2_ref: ["AIStudioKrea2Reference", { model: ["anima_ref", 0], positive: ["family_switch_pos", 0], negative: ["family_switch_neg", 0], file: "", width: 1024, height: 1024 }],
     i2i_image: ["LoadImage", { image: "example.png", upload: "image" }],
@@ -96,7 +97,7 @@ const state = (overrides = {}) => ({ ...structuredClone(DEFAULT_STATE), ...overr
 
 test("ROLES lists every engine role once, without family_switch_clip (R6)", () => {
   assert.equal(new Set(ROLES).size, ROLES.length);
-  assert.equal(ROLES.length, 53);
+  assert.equal(ROLES.length, 54);
   assert.ok(!ROLES.includes("family_switch_clip"));
   const { roleIds } = studioPrompt(); // a workflow without extension nodes: studio_ext.test.mjs covers those roles
   assert.deepEqual(ROLES.filter((role) => !role.startsWith("ext_")).sort(), Object.keys(roleIds).sort());
@@ -374,7 +375,7 @@ test("stageModes bypasses the unused family, i2i input, SAM3 and post nodes (R7)
   const bypassed = Object.keys(modes).filter((role) => modes[role] === 4 && !role.startsWith("ext_")).sort();
   assert.deepEqual(bypassed, [
     "anima_ref", "i2i_image", "krea2_ref", "moss_stream", "neg_encode38", "pos_encode38", "post_decode", "post_encode",
-    "post_hires", "post_image", "post_sam3_detailer", "post_sam3_mask", "post_save", "post_upscale", "qwen35", "reference_image",
+    "post_hires", "post_image", "post_sam3_detailer", "post_sam3_mask", "post_save", "post_upscale", "qwen35", "reference_image", "reference_image_2",
     "sam3_detailer", "sam3_mask", "unet38",
   ]);
   assert.ok(Object.values(modes).every((mode) => mode === 0 || mode === 4));
@@ -591,6 +592,7 @@ test("i2i runs at its own size (the image's, once sent) and inpaint_area maps to
 
 const FAMILY_ROLES = {
   te: "1", negpip: "2", moss_stream: "3", reference_image: "4", anima_ref: "5", krea2_ref: "6", unet: "7", family_switch_model: "8",
+  reference_image_2: "9",
 };
 const familyPrompt = () => Object.fromEntries(Object.values(FAMILY_ROLES).map((id) => [id, { inputs: {} }]));
 const ready = (overrides) => state({ te: "te", vae: "vae", ...overrides });
@@ -656,6 +658,27 @@ test("the reference nodes get their method's settings and the tab's size", () =>
   assert.deepEqual([out({})[6].inputs.width, out({})[6].inputs.height], [832, 1216]);
   const krea2 = out({}, { tab: "i2i", i2i })[6].inputs;
   assert.deepEqual([krea2.file, krea2.grounding_px, krea2.width, krea2.height], ["QuadView_krea2_v1.safetensors", 1024, 512, 640]);
+});
+
+test("the second reference runs only on Anima's SnapRef, with its own picture", () => {
+  const reference = { ...structuredClone(DEFAULT_STATE.reference), on: true, image: "ref.png", image_2: "two.png" };
+  const mode = (unet, changes = {}) => stageModes(state({ unet, reference: { ...reference, ...changes } })).reference_image_2;
+  assert.equal(mode("anima.safetensors"), 0);
+  assert.equal(mode("anima.safetensors", { image_2: "" }), 4);
+  assert.equal(mode("anima.safetensors", { method: "ref_adapter" }), 4);
+  assert.equal(mode("anima.safetensors", { on: false }), 4);
+  assert.equal(mode("krea2.safetensors"), 4);
+  assert.equal(mode("moss.safetensors"), 4);
+});
+
+test("the second picture, Fidelity and the weights reach their nodes", () => {
+  const base = structuredClone(DEFAULT_STATE.reference);
+  const reference = { ...base, on: true, image: "ref.png", image_2: "two.png",
+    snapref: { ...base.snapref, file: "snapref_v2a_pre2.safetensors", fidelity: 0.7, weight_1: 0.8, weight_2: 0.4 } };
+  const out = applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ unet: "anima.safetensors", reference }), { rng: fixedRng });
+  const node = (role) => out[FAMILY_ROLES[role]].inputs;
+  assert.equal(node("reference_image_2").image, "two.png");
+  assert.deepEqual([node("anima_ref").fidelity, node("anima_ref").weight_1, node("anima_ref").weight_2], [0.7, 0.8, 0.4]);
 });
 
 test("a reference run needs its image and file", () => {

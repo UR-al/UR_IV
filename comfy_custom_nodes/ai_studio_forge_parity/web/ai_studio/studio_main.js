@@ -1,8 +1,10 @@
-// Anima studio web extension: draws the three UI nodes (AIStudioPanel / AIStudioResultView / AIStudioXYZView) as
-// fixed-size DOM widgets and wires them to ComfyUI — the run controller, the studio routes (/aistudio/studio/*), the
-// role-tagged engine nodes (engine room, i2i image, mask editor), the prompt tag autocomplete and the queue (생성 button, Ctrl+Enter).
+// Anima studio web extension: draws the four UI nodes (AIStudioPanel / AIStudioResultView / AIStudioXYZView /
+// AIStudioExifView) as fixed-size DOM widgets and wires them to ComfyUI — the run controller, the studio routes
+// (/aistudio/studio/*), the role-tagged engine nodes (engine room, i2i image, mask editor), the prompt tag autocomplete and
+// the queue (생성 button, Ctrl+Enter).
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
+import { ExifView } from "./exif_view.js";
 import { PanelView } from "./panel_view.js";
 import { ResultView } from "./result_view.js";
 import { RunController } from "./run_controller.js";
@@ -17,11 +19,13 @@ const CSS_ID = "aistudio-studio-css";
 const PANEL = "AIStudioPanel";
 const RESULT = "AIStudioResultView";
 const XYZ = "AIStudioXYZView";
+const EXIF = "AIStudioExifView";
 // Node sizes of the studio workflow (canvas units); the DOM widget fills the node body (R11: pixel heights).
 const UI_NODES = {
   [PANEL]: { widget: "state", width: 790, height: 960, View: PanelView },
   [RESULT]: { widget: "view", width: 680, height: 960, View: ResultView },
   [XYZ]: { widget: "xyz", width: 400, height: 960, View: XyzView },
+  [EXIF]: { widget: "exif", width: 400, height: 960, View: ExifView },
 };
 const BODY_INSET = 16; // node body height - DOM widget height (widget margins)
 const MASK_EDITOR_WAIT_MS = 3000;
@@ -99,11 +103,16 @@ function imageUrl(ref, thumb = false) {
   return api.apiURL(`/view?${query}`);
 }
 
-async function readParameters(ref) {
+/** The file's bytes, null when the server has no such image. */
+async function readImage(ref) {
   const query = new URLSearchParams({ filename: ref.filename, subfolder: ref.subfolder || "", type: ref.type || "output" });
   const response = await api.fetchApi(`/view?${query}`);
-  if (!response.ok) return null;
-  return (await readPngText(await response.arrayBuffer())).parameters || null;
+  return response.ok ? response.arrayBuffer() : null;
+}
+
+async function readParameters(ref) {
+  const buffer = await readImage(ref);
+  return buffer ? (await readPngText(buffer)).parameters || null : null;
 }
 
 /** graphToPrompt with the role nodes set to `modes` (R7 bypass) for this one call; the graph keeps its own modes. */
@@ -157,6 +166,7 @@ const imageNode = (role) => ({
 
 const i2i = { ...imageNode("i2i_image"), maskEditor: () => openMaskEditor() };
 const reference = imageNode("reference_image");
+const reference2 = imageNode("reference_image_2");
 
 /** `{width, height}` of a picked image file (Forge's send-to size), or `{}` when the browser cannot decode it. */
 async function fileImageSize(file) {
@@ -236,10 +246,12 @@ function contextFor(comfyClass) {
       engineRoom,
       i2i,
       reference,
+      reference2,
       hasRole: (role) => roleNodes().has(role),
     };
   }
-  if (comfyClass === RESULT) return { imageUrl, action: galleryAction };
+  if (comfyClass === RESULT) return { imageUrl, action: galleryAction, selected: (image) => emit("selected", { image }) };
+  if (comfyClass === EXIF) return { imageUrl, readImage };
   return { choices, plan: (body) => route("/xyz/plan", body), getState: () => viewOf(PANEL)?.getState() || {} };
 }
 
@@ -321,6 +333,7 @@ app.registerExtension({
 
   afterConfigureGraph() {
     viewOf(PANEL)?.render(); // the engine-room button and the i2i image depend on nodes configured after the panel
+    viewOf(RESULT)?.announce(); // the EXIF panel may be configured after the result view
   },
 
   nodeCreated(node) {
@@ -341,7 +354,7 @@ app.registerExtension({
     views.set(node, view);
     fixSize(node, spec);
     chain(node, "onConfigure", () => {
-      view.load(); // widgets_values were just restored into the hidden widget
+      view.load?.(); // widgets_values were just restored into the hidden widget
       fixSize(node, spec);
     });
     chain(node, "onRemoved", () => {

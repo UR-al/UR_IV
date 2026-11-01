@@ -7,6 +7,7 @@ UI_NODES = {
     "AIStudioPanel": "state",
     "AIStudioResultView": "view",
     "AIStudioXYZView": "xyz",
+    "AIStudioExifView": "exif",
 }
 
 

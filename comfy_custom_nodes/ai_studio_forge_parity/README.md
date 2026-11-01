@@ -77,8 +77,8 @@ inspector recognises them.
   is encoded once and set to its share of the steps with `ConditioningSetTimestepRange`; weights `(x:1.2)` are left to
   the Anima tokenizer, which reads them as Forge's Anima path does. What matches Forge and what does not:
   `studio_forge_parity.md`)
-- `AIStudioPanel`, `AIStudioResultView`, `AIStudioXYZView` (Anima studio: the control panel, the result/gallery view and
-  the X/Y/Z panel; the studio JS in `web/ai_studio` draws them, each keeps its state in one hidden `STRING`; no outputs,
+- `AIStudioPanel`, `AIStudioResultView`, `AIStudioXYZView`, `AIStudioExifView` (Anima studio: the control panel, the
+  result/gallery view, the X/Y/Z panel and the EXIF panel; the studio JS in `web/ai_studio` draws them, each keeps its state in one hidden `STRING`; no outputs,
   so ComfyUI never runs them)
 - `AIStudioSwitch` (Anima studio: `select` 0 passes `a`, 1 passes `b`; both inputs are optional and lazy, so only the
   chosen model family's nodes (2.9B/base or 3.8B) run)
@@ -97,6 +97,28 @@ When the app generates from an ANIMA custom workflow it keeps
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.12.0 changes
+
+Three additions to the studio's result side, all from Forge:
+
+- 갤러리 자동 비우기 (a pill under the gallery buttons, saved in the result view's `view` widget, off by default): a
+  generation's images replace the gallery, once per run, when the first of them arrive. A stopped or failed run leaves the
+  last images in place, the 업스케일 / Hires / SAM3 buttons keep the other images, the XYZ 격자 tab keeps its grid. No file is
+  deleted.
+- 걸린 시간 in the result header (Forge's Time taken): from the 생성 click to the run's last image, for one image or a whole
+  X/Y/Z plot. The `running: false` event of `run_controller.js` carries it as `elapsed` (ms; null when no image was made).
+- `AIStudioExifView`, a fourth UI node right of the X/Y/Z panel (Forge's PNG Info): the gallery's picked image, or a file
+  dropped on the panel or opened with its button, and the text that file carries. `web/ai_studio/studio_exif.js` reads PNG
+  text chunks and the EXIF block of JPEG, WebP and PNG files (`UserComment` with Forge's `UNICODE` prefix, `Comment`, the
+  text tags of IFD 0). Files are read in the browser and never uploaded. An older workflow gets the panel by adding the node
+  by hand or opening `example_workflows/AI Studio Anima.json` again.
+- SnapRef v2a previews (`snapref_v2a_pre1`, `snapref_v2a_pre2`, from `0ppxnhximxr`) work like v1a in the panel's file list and
+  get the same block-layout copies. The panel adds 충실도 (`fidelity`, shown with SnapRef's guidance off, which the node
+  ignores otherwise), a second picture of the same character (role `reference_image_2`, node input `image_2`) and each
+  picture's weight (`weight_1`, `weight_2`). These need the SnapRef node published with v2a; an older node still runs
+  everything else and names itself as too old when one of them is set. A workflow from before this version shows one
+  picture box.
 
 ## 1.11.0 changes
 

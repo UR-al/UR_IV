@@ -48,7 +48,7 @@ export class PanelView {
    * Promise<`/object_info/<class>` input>, `hasRole(role)`, `generate()`, `stop()`, `changed()`, optional `tags(query, limit)` ->
    * Promise<[{name, category, count, alias?, ko?}]> (prompt tag autocomplete), `engineRoom` {collapsed(),
    * toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width, height}, maskEditor()},
-   * `reference` {url(value), upload(file) -> {name}} (the reference image's node).
+   * `reference`, `reference2` {url(value), upload(file) -> {name}} (the reference images' nodes).
    */
   constructor(widget, ctx) {
     this.widget = widget;
@@ -415,6 +415,7 @@ export class PanelView {
         loras: this.choices.loras || [],
         refreshLoras: () => this.refreshLoras(),
         image: this.ctx.reference,
+        image2: this.ctx.reference2,
       }),
     });
   }

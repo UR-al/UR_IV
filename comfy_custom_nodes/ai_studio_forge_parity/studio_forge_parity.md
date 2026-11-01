@@ -6,10 +6,10 @@
 
 조사 기준(2026-10-29, 읽기만 했고 GPU는 쓰지 않음):
 
-- Forge Neo `C:\sd-webui-forge-classic` 2.31-9 (d880e8b8). 사용자 설정: Random Number Generator `CPU`(기본값),
+- Forge Neo 2.31-9 (d880e8b8). 비교한 설정: Random Number Generator `CPU`(기본값),
   Eta noise seed delta `0`(기본값), Emphasis `Original`, 실행 옵션 `--use-pytorch-cross-attention`.
   샘플러 "EXP Heun 2 x0 SDE"는 `extensions/sd_forge_neo_extra_samplers`가 등록한다.
-- ComfyUI v0.43.1 `C:\ComfyUI_windows_portable\ComfyUI`, `run_nvidia_gpu_sage.bat`(`--use-sage-attention`)로 실행.
+- ComfyUI v0.43.1, `--use-sage-attention`으로 실행.
 - Forge 코드는 AGPL-3.0이라 팩에 옮기지 않았다. 동작만 따라 새로 썼다(`TestPackCarriesNoForgeCode`).
 
 ## 표
@@ -125,7 +125,7 @@ sam-extra "DoRA 추론 방식"의 코드 기본값은 꺼짐이지만, 이 PC의
 ## 어텐션
 
 ComfyUI는 시작할 때 어텐션 함수를 하나 고른다(`comfy/ldm/modules/attention.py`의 `optimized_attention`; Sage > Flash >
-xformers > PyTorch 순, 실행 옵션으로 정함). 사용자는 `run_nvidia_gpu_sage.bat`(Sage)로 켜고, Forge는 PyTorch SDPA다.
+xformers > PyTorch 순, 실행 옵션으로 정함). 위 비교의 ComfyUI는 Sage, Forge는 PyTorch SDPA다.
 
 - 지금 할 수 있는 것: Forge와 나란히 비교할 때 ComfyUI를 `run_nvidia_gpu.bat`(NVIDIA 기본 = PyTorch 어텐션)으로 다시 켠다.
 - 참고: ComfyUI v0.43.1에는 MODEL마다 어텐션 함수를 바꾸는 `ModelPatcher.set_model_optimized_attention`이 있고 Anima(Cosmos
@@ -138,5 +138,14 @@ xformers > PyTorch 순, 실행 옵션으로 정함). 사용자는 `run_nvidia_gp
 - MOSS fp32: ComfyUI-MOSS-Toolkit `MOSSStreamFP32`. 코어 로더로 읽은 모델에서만 된다.
 - Anima 레퍼런스: SnapRef 또는 ComfyUI-Anima-Ref-Adapter. 가중치는 Anima base(28블록) 기준이고, 2.9B·3.8B 는 일반 LoRA 와
   같은 블록 계보 표로 변환한 사본을 쓴다(실측 확인). 변환 없이 쓰면 SnapRef 는 참조 그림을 베끼고 Ref Adapter 는 노이즈가
-  나온다. SnapRef 는 PAG 와 같이 못 쓴다.
+  나온다. SnapRef 는 PAG 와 같이 못 쓴다. v2a 프리뷰는 v1a 와 같은 방식으로 쓰며 캐릭터만 모드가 나아졌고, 둘째 그림과 충실도는
+  v2a 와 함께 나온 SnapRef 노드가 필요하다. 충실도는 SnapRef 가이던스를 끈 때만 듣는다.
 - Krea2 레퍼런스: comfyui-krea2edit 노드 + 편집 LoRA(identity, general, QuadView 등).
+
+## 결과 쪽 도구 (1.12.0)
+
+- 갤러리 자동 비우기: Forge 갤러리는 새 결과로 바뀐다. 켜면 같게, 끄면 앞에 쌓인다(ComfyUI 기본). Forge 처럼 생성이 끝나 이미지가
+  나올 때 바뀌므로 정지·오류에는 지난 이미지가 남고, 업스케일·Hires·SAM3 버튼은 다른 이미지를 남긴다. 파일은 지우지 않는다.
+- 걸린 시간: Forge 의 Time taken 대응. 생성을 누른 때부터 마지막 이미지까지, X/Y/Z 는 전체 시간이다. 대기열에서 기다린 시간도 든다.
+- EXIF 패널: Forge 의 PNG Info 대응. 갤러리에서 고른 이미지를 따라가고, 파일을 끌어다 놓거나 열어도 된다. PNG 는 text chunk,
+  JPEG·WebP 는 EXIF(Forge 는 UserComment 에 parameters 를 넣는다)를 읽는다. 파일은 올리지 않고 브라우저에서 읽는다.

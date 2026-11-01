@@ -251,6 +251,7 @@ def _ui_node(class_name: str, widget: str, description: str) -> type:
 AIStudioPanel = _ui_node("AIStudioPanel", "state", "Anima studio control panel (drawn by the studio JS; never runs).")
 AIStudioResultView = _ui_node("AIStudioResultView", "view", "Anima studio result / gallery view (drawn by the studio JS).")
 AIStudioXYZView = _ui_node("AIStudioXYZView", "xyz", "Anima studio X/Y/Z plot panel (drawn by the studio JS).")
+AIStudioExifView = _ui_node("AIStudioExifView", "exif", "Anima studio EXIF panel (drawn by the studio JS; never runs).")
 
 
 class AIStudioSwitch:
@@ -284,6 +285,7 @@ NODE_CLASS_MAPPINGS = {
     "AIStudioPanel": AIStudioPanel,
     "AIStudioResultView": AIStudioResultView,
     "AIStudioXYZView": AIStudioXYZView,
+    "AIStudioExifView": AIStudioExifView,
     "AIStudioSwitch": AIStudioSwitch,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -294,11 +296,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AIStudioPanel": "AI Studio Panel",
     "AIStudioResultView": "AI Studio Result View",
     "AIStudioXYZView": "AI Studio XYZ View",
+    "AIStudioExifView": "AI Studio EXIF View",
     "AIStudioSwitch": "AI Studio Switch",
 }
 
 __all__ = [
-    "AIStudioLoraStack", "AIStudioPanel", "AIStudioPromptEncode", "AIStudioResultView", "AIStudioSaveForge",
+    "AIStudioExifView", "AIStudioLoraStack", "AIStudioPanel", "AIStudioPromptEncode", "AIStudioResultView", "AIStudioSaveForge",
     "AIStudioSwitch", "AIStudioUpscaleImage", "AIStudioXYZView",
     "NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS",
 ]

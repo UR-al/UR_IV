@@ -61,9 +61,10 @@ export const DEFAULT_STATE = deepFreeze({
   reference: {
     on: false,
     image: "",
+    image_2: "", // SnapRef only: another picture of the same character
     method: REFERENCE_METHODS[0], // Anima's two adapters; Krea2 has its own section
     megapixels: 1.0,
-    snapref: { file: "", mode: "cs", strength: 0.0, guidance_on: true, guidance: 4.5, correction: "apg", ref_end: 1.0, caption: "" },
+    snapref: { file: "", mode: "cs", strength: 0.0, fidelity: 1.0, weight_1: 1.0, weight_2: 1.0, guidance_on: true, guidance: 4.5, correction: "apg", ref_end: 1.0, caption: "" },
     ref_adapter: { file: "", strength: 1.0, guidance: 4.5, correction: "apg", ref_end: 1.0 },
     krea2: { file: "", strength: 1.0, grounding_px: 768, boost: 1.0, position: KREA2_POSITIONS[0] },
   },
@@ -418,6 +419,7 @@ function mainInputs(s, options) {
     pos_encode: encode,
     neg_encode: encode,
     reference_image: { image: choice(s.reference.image) },
+    reference_image_2: { image: choice(s.reference.image_2) },
     anima_ref: animaRefInputs(s.reference),
     krea2_ref: { ...s.reference.krea2, width: size.width, height: size.height, ...encode },
     latent: {
@@ -493,6 +495,7 @@ export function stageModes(state, postAction = null, options = {}) {
   if (family !== "moss" || !s.moss_stream) bypass.add("moss_stream");
   const reference = referenceRuns(s, family);
   if (!reference) bypass.add("reference_image");
+  if (!reference || family !== "anima" || s.reference.method !== "snapref" || !s.reference.image_2) bypass.add("reference_image_2");
   if (!reference || family !== "anima") bypass.add("anima_ref");
   if (!reference || family !== "krea2") bypass.add("krea2_ref");
   if (s.tab === "t2i") bypass.add("i2i_image");

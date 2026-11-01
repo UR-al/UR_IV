@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import { EXT_SCHEMA } from "../web/ai_studio/ext_schema.js";
 import { dropBlockedExt, extMemory, renderExtensions } from "../web/ai_studio/ext_view.js";
-import { referenceBlock } from "../web/ai_studio/reference_view.js";
+import { referenceBlock, renderReference } from "../web/ai_studio/reference_view.js";
 import { PanelView } from "../web/ai_studio/panel_view.js";
 import { withDefaults } from "../web/ai_studio/studio_logic.js";
 
@@ -35,7 +35,7 @@ class FakeElement {
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   remove() { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
   fire(type) {
-    for (const fn of this.listeners[type] || []) fn({ target: this });
+    for (const fn of this.listeners[type] || []) fn({ target: this, stopPropagation() {} });
   }
   get text() {
     return this.children.map((child) => (typeof child === "string" ? child : child.text)).join("");
@@ -414,6 +414,55 @@ test("a family greys the extensions it cannot run and turns them off for the run
   anima.guidance.on = true;
   dropBlockedExt(anima, null);
   assert.equal(anima.guidance.on, true);
+});
+
+function referenceCard(reference = {}, { family = "anima", hasRole = () => true } = {}) {
+  const state = withDefaults({ reference: { on: true, image: "one.png", ...reference } });
+  const sets = [];
+  const view = {
+    set: (mutate) => { mutate(state); sets.push(state.reference); },
+    hasRole,
+    family,
+    memory: { open: new Set(["reference"]), lists: {} },
+    rerender: () => {},
+    loras: ["snapref_v2a_pre2.safetensors", "snapref_v2a_pre2__40b.safetensors"],
+    image: { url: (value) => `/one/${value}`, upload: async () => ({ name: "up1.png" }) },
+    image2: { url: (value) => `/two/${value}`, upload: async () => ({ name: "up2.png" }) },
+  };
+  return { card: renderReference(state, view), state, sets };
+}
+
+const labelsOf = (card) => card.byClass("ais-label").map((label) => label.text);
+const imageBoxes = (card) => card.byClass("ais-i2i-box");
+
+test("충실도 shows with SnapRef's guidance off: the node ignores it with guidance on", () => {
+  assert.ok(!labelsOf(referenceCard({ snapref: { guidance_on: true } }).card).includes("충실도"));
+  assert.ok(labelsOf(referenceCard({ snapref: { guidance_on: false } }).card).includes("충실도"));
+});
+
+test("SnapRef has a second picture box, Ref Adapter and Krea2 do not", () => {
+  assert.equal(imageBoxes(referenceCard().card).length, 2);
+  assert.equal(imageBoxes(referenceCard({ method: "ref_adapter" }).card).length, 1);
+  assert.equal(imageBoxes(referenceCard({}, { family: "krea2" }).card).length, 1);
+});
+
+test("a workflow without the second image node has one box", () => {
+  const { card } = referenceCard({}, { hasRole: (role) => role !== "reference_image_2" });
+  assert.equal(imageBoxes(card).length, 1);
+});
+
+test("the weights show once a second picture is in", () => {
+  assert.ok(!labelsOf(referenceCard().card).includes("비중 2"));
+  const labels = labelsOf(referenceCard({ image_2: "two.png" }).card);
+  assert.ok(labels.includes("비중 1") && labels.includes("비중 2"));
+});
+
+test("the second box shows its own picture and clears without touching the first", () => {
+  const { card, state } = referenceCard({ image_2: "two.png" });
+  assert.equal(imageBoxes(card)[1].all((element) => element.tag === "img")[0].attrs.src, "/two/two.png");
+  card.byClass("ais-ref-clear")[0].fire("click");
+  assert.equal(state.reference.image_2, "");
+  assert.equal(state.reference.image, "one.png");
 });
 
 test("a reference runs on Anima and Krea2, MOSS has none", () => {

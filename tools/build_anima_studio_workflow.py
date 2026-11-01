@@ -58,6 +58,7 @@ UI_NODES = (  # (class, pos, size, saved widget value or None for the panel stat
     ("AIStudioPanel", (0, 0), (790, 960), None),
     ("AIStudioResultView", (806, 0), (680, 960), "{}"),
     ("AIStudioXYZView", (1502, 0), (400, 960), "{}"),
+    ("AIStudioExifView", (1918, 0), (400, 960), "{}"),
 )
 ENGINE_TOP = 1040
 GROUP_HEADER = 80  # group title band + the node's own title bar above its pos
@@ -106,6 +107,7 @@ ROWS = (  # (group title, [(role, class, node title)])
     ]),
     ("③b 레퍼런스", [
         ("reference_image", "LoadImage", "레퍼런스 이미지"),
+        ("reference_image_2", "LoadImage", "레퍼런스 이미지 2"),
         ("anima_ref", "AIStudioAnimaReference", "Anima 레퍼런스"),
         ("krea2_ref", "AIStudioKrea2Reference", "Krea2 레퍼런스"),
     ]),
@@ -208,6 +210,7 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("negpip", 1, "anima_ref", "clip"),
     ("vae", 0, "anima_ref", "vae"),
     ("reference_image", 0, "anima_ref", "image"),
+    ("reference_image_2", 0, "anima_ref", "image_2"),
     ("anima_ref", 0, "krea2_ref", "model"),
     ("family_switch_pos", 0, "krea2_ref", "positive"),
     ("family_switch_neg", 0, "krea2_ref", "negative"),
@@ -426,7 +429,7 @@ def role_values(state: dict) -> dict[str, dict]:
 def default_bypassed(state: dict) -> set[str]:
     """studio_logic.js stageModes(DEFAULT_STATE) roles that are bypassed (R7): saved that way as a safe default."""
     # the default unet is neither a 3.8B nor a MOSS file; the reference is off
-    bypassed = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "anima_ref",
+    bypassed = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "reference_image_2", "anima_ref",
                 "krea2_ref"}
     if state["tab"] == "t2i":
         bypassed.add("i2i_image")
@@ -536,7 +539,7 @@ def build_workflow() -> dict:
         "groups": groups,
         "config": {},
         # 0.9: the three C4 columns (790 + 680 + 400 px, 960 px tall) fit ComfyUI at 1920x1080 (at 1 they are cut off)
-        "extra": {"ds": {"scale": 0.9, "offset": [40, 60]}},
+        "extra": {"ds": {"scale": 0.75, "offset": [40, 60]}},
         "version": 0.4,
     }
 

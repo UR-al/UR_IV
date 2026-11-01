@@ -27,6 +27,7 @@ UI_LAYOUT = {
     "AIStudioPanel": ([0, 0], [790, 960]),
     "AIStudioResultView": ([806, 0], [680, 960]),
     "AIStudioXYZView": ([1502, 0], [400, 960]),
+    "AIStudioExifView": ([1918, 0], [400, 960]),
 }
 ROW_PREFIXES = ["①", "①b", "②", "③", "③b", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
 POST_ROW = [
@@ -43,7 +44,7 @@ POST_ROW = [
 EXT_ROLES = {"ext_lora_block", "ext_er_sde", "ext_optimal_scale", "ext_guidance", "ext_skim", "ext_dd", "ext_speed",
              "ext_dd_hires", "ext_speed_hires", "ext_dd_sam3", "ext_vae_2x", "ext_pid", "ext_sam3_refine", "ext_sam3_tile",
              "ext_degrid"}
-DEFAULT_BYPASSED = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "anima_ref",
+DEFAULT_BYPASSED = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "reference_image_2", "anima_ref",
                     "krea2_ref", "i2i_image", "sam3_mask", "sam3_detailer",
                     *(role for role, _ in POST_ROW), *EXT_ROLES}
 # Each pass's MODEL, sampler side first (the app compiler's order; the same tail from ext_skim up).
@@ -133,7 +134,7 @@ class WorkflowFileTests(unittest.TestCase):
 
     def test_every_role_once(self):
         roles = _roles_from_js()
-        self.assertEqual(len(roles), 38 + len(EXT_ROLES))
+        self.assertEqual(len(roles), 39 + len(EXT_ROLES))
         self.assertNotIn("family_switch_clip", roles)  # R6
         found = [node["properties"]["aistudio_role"] for node in self.engine]
         self.assertCountEqual(found, roles)
@@ -167,11 +168,11 @@ class WorkflowFileTests(unittest.TestCase):
                 self.assertIn(node["type"], known)
 
     def test_opens_zoomed_to_fit_1920x1080(self):
-        # spec section 7: the workflow opens in the C4 layout; at scale 1 the three columns (790 + 680 + 400 px,
-        # 960 px tall) are cut off inside ComfyUI's chrome at 1920x1080 (final review M2), 0.9 fits.
+        # spec section 7: the workflow opens in the C4 layout; at scale 1 the columns, 960 px tall and ending with
+        # the EXIF panel at x = 2318, are cut off inside ComfyUI's chrome at 1920x1080 (final review M2), 0.75 fits.
         scale = self.workflow["extra"]["ds"]["scale"]
-        self.assertTrue(0.85 <= scale <= 0.9, scale)
-        self.assertLessEqual((790 + 680 + 400) * scale + self.workflow["extra"]["ds"]["offset"][0], 1920 - 120)
+        self.assertTrue(0.7 <= scale <= 0.9, scale)
+        self.assertLessEqual((1918 + 400) * scale + self.workflow["extra"]["ds"]["offset"][0], 1920 - 120)
 
     def test_links_consistent(self):
         workflow = self.workflow

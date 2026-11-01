@@ -97,7 +97,9 @@ PACK_ID = "ai_studio_forge_parity"
 # settings, extensions per family; four AIStudio* nodes (a text encoder loader, and three over optional packs: MOSS fp32
 # stream, Anima and Krea2 references; web/ai_studio/reference_view.js); ForgeNeoModelSamplingShift keeps a flux-type
 # predictor (Krea2); moss_lora_layout.py.
-PACK_VERSION = "1.11.0"
+# 1.12.0: the studio's EXIF panel (AIStudioExifView, web/ai_studio/exif_view.js + studio_exif.js), 갤러리 자동 비우기 and
+# 걸린 시간 in the result column.
+PACK_VERSION = "1.12.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

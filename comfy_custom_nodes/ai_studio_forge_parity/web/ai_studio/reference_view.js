@@ -44,20 +44,30 @@ export function referenceBlock(family, method, hasRole) {
   return hasRole && !hasRole(role) ? OLD_GRAPH : "";
 }
 
-function imageBox(reference, view) {
-  const value = reference.image; // not the node's value: a fresh LoadImage holds the first file of input/
+/** A picture box of `key` ("image" | "image_2"), read and uploaded through `node`; `clear` adds a remove button. */
+function imageBox(reference, view, { key, node, label, clear = false }) {
+  const value = reference[key]; // not the node's value: a fresh LoadImage holds the first file of input/
   const file = h("input", { type: "file", accept: "image/*", hidden: true, onChange: async (event) => {
     const chosen = event.target.files?.[0];
     if (!chosen) return;
-    const uploaded = await view.image?.upload(chosen);
-    if (uploaded?.name) view.set((s) => { s.reference.image = uploaded.name; }, true);
+    const uploaded = await node?.upload(chosen);
+    if (uploaded?.name) view.set((s) => { s.reference[key] = uploaded.name; }, true);
   } });
   const picture = value
-    ? h("img", { class: "ais-i2i-img", src: view.image?.url(value), alt: "레퍼런스 이미지" })
-    : h("span", {}, "레퍼런스 이미지");
-  const box = h("div", { class: "ais-i2i-box", title: "눌러서 이미지 고르기", onClick: () => file.click() }, picture, file);
-  return box;
+    ? h("img", { class: "ais-i2i-img", src: node?.url(value), alt: label })
+    : h("span", {}, label);
+  const remove = clear && value
+    ? h("button", { type: "button", class: "ais-mini ais-ref-clear", title: "빼기", onClick: (event) => {
+      event.stopPropagation();
+      view.set((s) => { s.reference[key] = ""; }, true);
+    } }, "×")
+    : null;
+  return h("div", { class: "ais-i2i-box", title: "눌러서 이미지 고르기", onClick: () => file.click() }, picture, remove, file);
 }
+
+/** SnapRef reads a second picture of the same character; a workflow from before 1.12.0 has no node for it. */
+const hasSecondImage = (reference, view) =>
+  view.family === "anima" && reference.method === "snapref" && (!view.hasRole || view.hasRole("reference_image_2"));
 
 const field = (label, control) =>
   h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, label), h("span", { class: "ais-ctl" }, control));
@@ -74,15 +84,21 @@ function number(value, write, options) {
 
 const corrections = REFERENCE_CORRECTIONS.map((value) => ({ value, label: value }));
 
-function snaprefFields(values, view) {
+function snaprefFields(reference, view) {
+  const values = reference.snapref;
   const write = (key) => (value) => view.set((s) => { s.reference.snapref[key] = value; });
+  const weight = (key, label, title) => field(label, number(values[key], write(key), { min: 0, max: 2, step: 0.05, title }));
   return [
     field("파일", filePick("snapref", values.file, view, (value) => view.set((s) => { s.reference.snapref.file = value; }, true))),
     field("모드", select(MODE_ITEMS, values.mode, write("mode"))),
-    field("세기", number(values.strength, write("strength"), { min: -3, max: 3, step: 0.1, title: "로그 눈금. 0 = 학습값, 0 이 아니면 약 1.3배 느림" })),
+    field("세기", number(values.strength, write("strength"), { min: -3, max: 3, step: 0.1, title: "로그 눈금. 0 = 학습값, +1 = 약 2.7배" })),
+    reference.image_2 ? weight("weight_1", "비중 1", "첫 그림이 얼마나 반영되는지. 1 = 학습값") : null,
+    reference.image_2 ? weight("weight_2", "비중 2", "둘째 그림이 얼마나 반영되는지. 0 = 안 씀") : null,
     field("가이던스", [pill(values.guidance_on, () => view.set((s) => { s.reference.snapref.guidance_on = !values.guidance_on; }, true)),
       values.guidance_on ? number(values.guidance, write("guidance"), { min: 0, max: 20, step: 0.1, title: "스텝마다 모델 호출 한 번 더" }) : null]),
-    values.guidance_on ? field("보정", select(corrections, values.correction, write("correction"))) : null,
+    values.guidance_on
+      ? field("보정", select(corrections, values.correction, write("correction")))
+      : field("충실도", number(values.fidelity, write("fidelity"), { min: 0, max: 1, step: 0.05, title: "1 = 그림의 디테일을 살림, 낮출수록 프롬프트를 더 따름. 1 미만이면 느려짐" })),
     field("캡션", h("input", { class: "ais-f ais-grow", value: values.caption, placeholder: "외형 태그 (비워도 됨)", onChange: (event) => write("caption")(event.target.value) })),
   ];
 }
@@ -126,20 +142,24 @@ function animaFields(reference, view) {
   return [
     field("방식", methods),
     blocked ? h("div", { class: "ais-note" }, blocked) : null,
-    ...(reference.method === "snapref" ? snaprefFields(reference.snapref, view) : adapterFields(reference.ref_adapter, view)),
+    ...(reference.method === "snapref" ? snaprefFields(reference, view) : adapterFields(reference.ref_adapter, view)),
     field("참조 픽셀", number(reference.megapixels, (value) => view.set((s) => { s.reference.megapixels = value; }), { min: 0.25, max: 2, step: 0.05, title: "메가픽셀" })),
   ];
 }
 
 function fields(state, view) {
   const { reference } = state;
-  return h("div", { class: "ais-ext-body ais-ref-body" }, imageBox(reference, view), h("div", { class: "ais-ext-fields" },
+  const pictures = [imageBox(reference, view, { key: "image", node: view.image, label: "레퍼런스 이미지" })];
+  if (hasSecondImage(reference, view)) {
+    pictures.push(imageBox(reference, view, { key: "image_2", node: view.image2, label: "같은 캐릭터 2장째 (선택)", clear: true }));
+  }
+  return h("div", { class: "ais-ext-body ais-ref-body" }, h("div", { class: "ais-ref-images" }, pictures), h("div", { class: "ais-ext-fields" },
     view.family === "krea2" ? krea2Fields(reference.krea2, view) : animaFields(reference, view)));
 }
 
 /**
  * The card. `view`: `set(mutate, rerender)`, `hasRole(role)` (optional), `family`, `memory` (extMemory()),
- * `rerender()`, `loras` (file names), `refreshLoras()` (optional), `image` {url(value), upload(file) -> {name}}.
+ * `rerender()`, `loras` (file names), `refreshLoras()` (optional), `image` and `image2` {url(value), upload(file) -> {name}}.
  */
 export function renderReference(state, view) {
   const { reference } = state;

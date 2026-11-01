@@ -353,7 +353,7 @@ export class RunController {
       resolve = done;
     });
     const job = { kind, slots, results: new Array(slots).fill(undefined), remaining: slots, entries: new Map() };
-    Object.assign(job, { finished, resolve, stopped: false, notice: "", durations: [] });
+    Object.assign(job, { finished, resolve, stopped: false, notice: "", durations: [], startedAt: this.now(), replaceGallery: kind !== "post" });
     this.job = job;
     this.early.clear();
     this.progressBase = null;
@@ -367,6 +367,13 @@ export class RunController {
     }
     if (!job.entries.size && job.notice) return { notice: job.notice };
     return { queued: job.entries.size };
+  }
+
+  /** True once per generation: its first images replace the gallery; Forge's upscale / Hires buttons keep the others. */
+  takeReplace(job) {
+    const replace = job.replaceGallery;
+    job.replaceGallery = false;
+    return replace;
   }
 
   noticeOnce(job, text) {
@@ -417,7 +424,8 @@ export class RunController {
         this.job = null;
         this.early.clear();
       }
-      this.emit("running", { running: false, kind: job.kind });
+      const elapsed = job.results.some(Boolean) ? this.now() - job.startedAt : null;
+      this.emit("running", { running: false, kind: job.kind, elapsed });
       job.resolve();
     }
   }
@@ -452,7 +460,7 @@ export class RunController {
       infotext: withExtraParams(await this.readParameters(first), plan.infotext_extra),
     });
     const subgrids = (result.subgrids || []).map((image) => ({ image, record: null }));
-    this.emit("grid", { item: { image: result.grid, record: null }, subgrids });
+    this.emit("grid", { item: { image: result.grid, record: null }, subgrids, replace: this.takeReplace(job) });
   }
 
   // ------------------------------------------------------------------------------------------- events
@@ -512,7 +520,7 @@ export class RunController {
         const seed = imageSeed(entry.state, index);
         return { image, record: { state: { ...entry.state, seed }, seed } };
       });
-      this.emit("images", { items });
+      this.emit("images", { items, replace: this.takeReplace(job) });
     }
     this.resolveSlot(job, entry.slot, images);
   }

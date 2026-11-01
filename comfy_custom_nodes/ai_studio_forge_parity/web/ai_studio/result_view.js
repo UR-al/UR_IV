@@ -1,12 +1,13 @@
 // Anima studio: the result column (C4 middle, 680px) drawn into AIStudioResultView's DOM widget — image, 미리보기 /
-// XYZ 격자 tabs, progress, gallery and the seven gallery buttons. The gallery's image refs are kept as JSON in the
-// node's hidden `view` widget; the settings each image was made with are kept for this session only.
+// XYZ 격자 tabs, progress, gallery, the seven gallery buttons and 갤러리 자동 비우기. The gallery's image refs are kept as
+// JSON in the node's hidden `view` widget; the settings each image was made with are kept for this session only.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
-import { h, icon, refKey } from "./studio_dom.js";
+import { h, icon, pill, refKey } from "./studio_dom.js";
 import { openLightbox } from "./studio_lightbox.js";
 
 const GALLERY_LIMIT = 40;
 const NOTICE_MS = 8000;
+const AUTO_CLEAR = "갤러리 자동 비우기";
 // Forge's order under the gallery (Global Constraints): name -> label.
 export const GALLERY_BUTTONS = Object.freeze([
   ["folder", "폴더"],
@@ -26,6 +27,9 @@ function duration(seconds) {
   return total < 60 ? `${total}초` : `${Math.floor(total / 60)}분 ${total % 60}초`;
 }
 
+/** A finished run's time: tenths of a second are worth showing only under a minute (Forge's Time taken). */
+const tookText = (ms) => (ms < 59950 ? `${(ms / 1000).toFixed(1)}초` : duration(ms / 1000));
+
 export class ResultView {
   /** `ctx`: `imageUrl(ref, thumb?)`, `action(name, item)` (a gallery button), `changed()`. */
   constructor(widget, ctx) {
@@ -33,6 +37,7 @@ export class ResultView {
     this.ctx = ctx;
     this.records = new Map(); // refKey -> {state, seed} of images made in this session
     this.running = false;
+    this.elapsed = null; // ms of the last run that made images
     this.progress = null;
     this.previewUrl = "";
     this.notice = "";
@@ -50,7 +55,7 @@ export class ResultView {
     }
     const gallery = (Array.isArray(raw.gallery) ? raw.gallery : []).filter(isRef).map(cleanRef).slice(0, GALLERY_LIMIT);
     const selected = Number.isInteger(raw.selected) && raw.selected >= 0 && raw.selected < gallery.length ? raw.selected : 0;
-    return { tab: raw.tab === "grid" ? "grid" : "preview", gallery, selected, grid: isRef(raw.grid) ? cleanRef(raw.grid) : null };
+    return { tab: raw.tab === "grid" ? "grid" : "preview", gallery, selected, grid: isRef(raw.grid) ? cleanRef(raw.grid) : null, auto_clear: raw.auto_clear === true };
   }
 
   load() {
@@ -69,21 +74,31 @@ export class ResultView {
     return image ? { image, record: this.records.get(refKey(image)) || null } : null;
   }
 
-  /** New images go in front, in their own order; the first of them is picked. */
-  add(items) {
+  /**
+   * New images go in front, in their own order; the first of them is picked. `replace` (RunController: a generation's
+   * first images) empties the gallery first with 갤러리 자동 비우기 on, so a stopped or failed run leaves the last images (Forge).
+   */
+  add(items, replace = false) {
     const fresh = items.filter((item) => isRef(item.image));
     if (!fresh.length) return;
     for (const item of fresh) if (item.record) this.records.set(refKey(item.image), item.record);
     const keys = new Set(fresh.map((item) => refKey(item.image)));
-    const rest = this.view.gallery.filter((ref) => !keys.has(refKey(ref)));
+    const rest = replace && this.view.auto_clear ? [] : this.view.gallery.filter((ref) => !keys.has(refKey(ref)));
     this.view.gallery = [...fresh.map((item) => cleanRef(item.image)), ...rest].slice(0, GALLERY_LIMIT);
     this.view.selected = 0;
     this.save();
+    this.announce();
+  }
+
+  /** Tells the EXIF panel which image is picked now. */
+  announce() {
+    this.ctx.selected?.(this.view.gallery[this.view.selected] || null);
   }
 
   onStudioEvent(type, payload) {
     if (type === "running") {
       this.running = payload.running;
+      this.elapsed = payload.elapsed ?? this.elapsed;
       this.progress = null;
       this.setPreview(null);
       this.render();
@@ -95,12 +110,12 @@ export class ResultView {
       this.renderStage();
     } else if (type === "images") {
       this.view.tab = "preview";
-      this.add(payload.items);
+      this.add(payload.items, payload.replace);
       this.render();
     } else if (type === "grid") {
       this.view.grid = cleanRef(payload.item.image);
       this.view.tab = "grid";
-      this.add([payload.item, ...(payload.subgrids || [])]);
+      this.add([payload.item, ...(payload.subgrids || [])], payload.replace);
       this.render();
     } else if (type === "notice") {
       this.showNotice(payload.text);
@@ -139,13 +154,19 @@ export class ResultView {
     this.noticeEl = h("div", { class: "ais-notice", role: "status" });
     this.stage = h("div", { class: "ais-stage" });
     this.element.replaceChildren(
-      h("div", { class: "ais-nt" }, h("span", {}, "결과"), h("span", { class: "ais-head-ctl" }, tab("preview", "미리보기"), tab("grid", "XYZ 격자"))),
+      h("div", { class: "ais-nt" },
+        h("span", { class: "ais-head-ctl" }, h("span", {}, "결과"),
+          this.running || this.elapsed === null ? null : h("span", { class: "ais-took", title: "생성을 누른 때부터 끝날 때까지" }, `걸린 시간 ${tookText(this.elapsed)}`)),
+        h("span", { class: "ais-head-ctl" }, tab("preview", "미리보기"), tab("grid", "XYZ 격자"))),
       this.progressEl,
       this.noticeEl,
       this.stage,
       this.gallery(),
       h("div", { class: "ais-buttons" }, GALLERY_BUTTONS.map(([name, label]) =>
         h("button", { type: "button", class: "ais-ib", "aria-label": label, title: label, onClick: () => this.ctx.action(name, this.selectedItem()) }, icon(name)))),
+      h("div", { class: "ais-gallery-opts" },
+        pill(this.view.auto_clear, () => { this.view.auto_clear = !this.view.auto_clear; this.save(); this.render(); }, {
+          on: AUTO_CLEAR, off: AUTO_CLEAR, title: "켜면 Forge처럼 생성할 때마다 새 이미지로 바꿈 (파일은 그대로)" })),
     );
     this.renderProgress();
     this.renderNotice();
@@ -197,7 +218,7 @@ export class ResultView {
   gallery() {
     return h("div", { class: "ais-gallery" }, this.view.gallery.map((ref, index) =>
       h("button", { type: "button", class: `ais-thumb ${index === this.view.selected ? "sel" : ""}`, title: ref.filename, "aria-label": ref.filename,
-        onClick: () => { this.view.selected = index; this.view.tab = "preview"; this.save(); this.render(); } },
+        onClick: () => { this.view.selected = index; this.view.tab = "preview"; this.save(); this.render(); this.announce(); } },
       h("img", { src: this.ctx.imageUrl(ref, true), loading: "lazy", alt: "" }))));
   }
 }

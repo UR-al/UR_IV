@@ -62,12 +62,16 @@
     "reference": {
       "on": false,
       "image": "",
+      "image_2": "",
       "method": "snapref",
       "megapixels": 1.0,
       "snapref": {
         "file": "",
         "mode": "cs",
         "strength": 0.0,
+        "fidelity": 1.0,
+        "weight_1": 1.0,
+        "weight_2": 1.0,
         "guidance_on": true,
         "guidance": 4.5,
         "correction": "apg",

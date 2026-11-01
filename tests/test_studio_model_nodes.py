@@ -62,6 +62,42 @@ class AnimaReferenceTests(unittest.TestCase):
             "ref_in_uncond": False, "ref_megapixels": 1.25, "strength": 0.5, "ref_caption": "1girl",
             "ref_guidance_on": True, "ref_guidance": 4.5, "correction": "apg", "ref_end": 0.6})
 
+    def test_fidelity_below_one_goes_to_snapref(self):
+        _, calls = self._apply("snapref", values={**self.values, "guidance_on": False, "fidelity": 0.6}, SnapRef=(FakeWrapped(),))
+        self.assertEqual(calls[0]["kwargs"]["fidelity"], 0.6)
+
+    def test_a_second_reference_goes_with_both_weights(self):
+        values = {**self.values, "image_2": "second", "weight_1": 0.8, "weight_2": 0.4}
+        _, calls = self._apply("snapref", values=values, SnapRef=("patched",))
+        kwargs = calls[0]["kwargs"]
+        self.assertEqual((kwargs["image_2"], kwargs["weight_1"], kwargs["weight_2"]), ("second", 0.8, 0.4))
+
+    def test_weights_stay_out_without_a_second_reference(self):
+        _, calls = self._apply("snapref", values={**self.values, "weight_1": 0.8, "weight_2": 0.4}, SnapRef=("patched",))
+        self.assertFalse({"weight_1", "weight_2", "image_2"} & set(calls[0]["kwargs"]))
+
+    def test_ref_adapter_takes_neither_second_image_nor_fidelity(self):
+        values = {**self.values, "image_2": "second", "weight_2": 0.4, "fidelity": 0.5}
+        _, calls = self._apply("ref_adapter", values=values, AnimaRefAdapter=(FakeWrapped(),))
+        self.assertFalse({"image_2", "weight_2", "fidelity"} & set(calls[0]["kwargs"]))
+
+    def test_an_old_snapref_node_gets_a_clear_message_for_the_new_settings(self):
+        def old_node(_call):
+            raise TypeError("SnapRef.apply() got an unexpected keyword argument 'fidelity'")
+        with self.assertRaisesRegex(RuntimeError, "옛 버전"):
+            self._apply("snapref", values={**self.values, "fidelity": 0.6}, SnapRef=old_node)
+
+    def test_a_typeerror_from_snapref_itself_is_not_blamed_on_its_version(self):
+        def broken(_call):
+            raise TypeError("unsupported operand")
+        with self.assertRaisesRegex(TypeError, "unsupported operand"):
+            self._apply("snapref", values={**self.values, "fidelity": 0.6}, SnapRef=broken)
+
+    def test_the_second_reference_input_stays_optional(self):
+        spec = nodes.AIStudioAnimaReference.INPUT_TYPES()
+        self.assertEqual(spec["optional"]["image_2"][0], "IMAGE")
+        self.assertNotIn("image_2", spec["required"])
+
     def test_ref_adapter_arguments(self):
         result, calls = self._apply("ref_adapter", AnimaRefAdapter=("patched",))
         self.assertEqual(result, ("patched",))

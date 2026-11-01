@@ -93,7 +93,7 @@ function plan2x2(stateOf = () => ({})) {
 // The panel's model picks (missingPicks refuses a run while any is empty).
 const PICKS = { unet: "anima-2.9b.safetensors", te: "qwen_3_06b_base.safetensors", vae: "qwen_image_vae.safetensors" };
 
-function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined, extFiles = undefined, reloadLoras = undefined, roleClass = undefined } = {}) {
+function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state = {}, route = null, loras = undefined, extFiles = undefined, reloadLoras = undefined, roleClass = undefined, now = () => 0 } = {}) {
   const api = new FakeApi();
   const emitted = [];
   const routes = [];
@@ -123,7 +123,7 @@ function setup({ plan = plan2x2(), xyz = { on: false }, parameters = null, state
     reloadLoras,
     extFiles: () => extFiles,
     emit: (type, payload) => emitted.push([type, payload]),
-    now: () => 0,
+    now,
   });
   return { api, controller, emitted, routes, baseCalls, readCalls };
 }
@@ -717,4 +717,112 @@ test("Same seed and Hires refuse an image another family made, upscaling does no
   const upscale = setup({ parameters: krea, state: { upscale: { ...DEFAULT_STATE.upscale, model: "x.pth" } } });
   await upscale.controller.runPost("upscale", { image: ref("k.png"), record: null });
   assert.equal(upscale.api.queued.length, 1);
+});
+
+// ---------------------------------------------------------------------------------------------- how long a run took
+
+test("the run's end says how long it took, from the click to the last image", async () => {
+  let clock = 1000;
+  const { api, controller, emitted } = setup({ now: () => clock });
+  await controller.generate();
+  clock = 4000; // waiting in ComfyUI's queue counts, like Forge's Time taken
+  api.fire("execution_start", { prompt_id: "p0" });
+  clock = 13500;
+  api.fire("executed", { prompt_id: "p0", node: SAVE, display_node: SAVE, output: { images: [ref("a.png")] } });
+  api.fire("execution_success", { prompt_id: "p0" });
+  await controller.whenIdle();
+  assert.deepEqual(emittedOf(emitted, "running"), [{ running: true, kind: "single" }, { running: false, kind: "single", elapsed: 12500 }]);
+});
+
+test("an X/Y/Z run's time covers all its cells", async () => {
+  let clock = 0;
+  const { api, controller, emitted } = setup({ xyz: XYZ_ON, now: () => clock });
+  await controller.generate();
+  for (const id of ["p0", "p1", "p2", "p3"]) {
+    clock += 2000;
+    finishCell(api, id, `${id}.png`);
+  }
+  await controller.whenIdle();
+  assert.equal(emittedOf(emitted, "running").at(-1).elapsed, 8000);
+});
+
+test("a run that made no image reports no time", async () => {
+  let clock = 0;
+  const { api, controller, emitted } = setup({ now: () => clock });
+  await controller.generate();
+  clock = 5000;
+  api.fire("execution_error", { prompt_id: "p0", exception_message: "boom" });
+  await controller.whenIdle();
+  assert.equal(emittedOf(emitted, "running").at(-1).elapsed, null);
+});
+
+test("a stopped X/Y/Z run with finished cells still reports its time", async () => {
+  let clock = 0;
+  const { api, controller, emitted } = setup({ xyz: XYZ_ON, now: () => clock });
+  await controller.generate();
+  clock = 3000;
+  finishCell(api, "p0", "p0.png");
+  await controller.stop();
+  await controller.whenIdle();
+  assert.equal(emittedOf(emitted, "running").at(-1).elapsed, 3000);
+});
+
+// ---------------------------------------------------------------------------------------------- 갤러리 자동 비우기
+
+const replaceFlags = (emitted) => emitted.filter(([kind]) => kind === "images" || kind === "grid").map(([kind, payload]) => [kind, payload.replace]);
+
+test("a generation's first images carry the replace flag", async () => {
+  const { api, controller, emitted } = setup();
+  await controller.generate();
+  finishCell(api, "p0", "a.png");
+  await controller.whenIdle();
+  assert.deepEqual(replaceFlags(emitted), [["images", true]]);
+});
+
+test("the next generation carries it again", async () => {
+  const { api, controller, emitted } = setup();
+  await controller.generate();
+  finishCell(api, "p0", "a.png");
+  await controller.whenIdle();
+  await controller.generate();
+  finishCell(api, "p1", "b.png");
+  await controller.whenIdle();
+  assert.deepEqual(replaceFlags(emitted), [["images", true], ["images", true]]);
+});
+
+test("an X/Y/Z run with cell images replaces once, its later cells and the grid join them", async () => {
+  const xyz = { ...XYZ_ON, options: { ...XYZ_ON.options, include_images: true } };
+  const { api, controller, emitted } = setup({ xyz });
+  await controller.generate();
+  for (const id of ["p0", "p1", "p2", "p3"]) finishCell(api, id, `${id}.png`);
+  await controller.whenIdle();
+  assert.deepEqual(replaceFlags(emitted), [["images", true], ["images", false], ["images", false], ["images", false], ["grid", false]]);
+});
+
+test("an X/Y/Z run without cell images replaces with its grid", async () => {
+  const { api, controller, emitted } = setup({ xyz: XYZ_ON });
+  await controller.generate();
+  for (const id of ["p0", "p1", "p2", "p3"]) finishCell(api, id, `${id}.png`);
+  await controller.whenIdle();
+  assert.deepEqual(replaceFlags(emitted), [["grid", true]]);
+});
+
+test("같은 시드 is a generation and replaces", async () => {
+  const item = { image: ref("a.png"), record: { state: { ...PICKS }, seed: 5 } };
+  const { api, controller, emitted } = setup();
+  await controller.sameSeed(item);
+  finishCell(api, "p0", "again.png");
+  await controller.whenIdle();
+  assert.deepEqual(replaceFlags(emitted), [["images", true]]);
+});
+
+test("a gallery post-processing run keeps the other images", async () => {
+  const item = { image: ref("a.png"), record: { state: { ...PICKS }, seed: 5 } };
+  const { api, controller, emitted } = setup();
+  await controller.runPost("hires", item);
+  api.fire("execution_start", { prompt_id: "p0" });
+  api.fire("executed", { prompt_id: "p0", node: POST_SAVE, display_node: POST_SAVE, output: { images: [ref("post.png")] } });
+  api.fire("execution_success", { prompt_id: "p0" });
+  await controller.whenIdle();
+  assert.deepEqual(replaceFlags(emitted), [["images", false]]);
 });

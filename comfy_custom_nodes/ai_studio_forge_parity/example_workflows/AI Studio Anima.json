@@ -1,6 +1,6 @@
 {
-  "last_node_id": 56,
-  "last_link_id": 116,
+  "last_node_id": 58,
+  "last_link_id": 117,
   "nodes": [
     {
       "id": 1,
@@ -20,7 +20,7 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}"
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}"
       ]
     },
     {
@@ -67,6 +67,27 @@
     },
     {
       "id": 4,
+      "type": "AIStudioExifView",
+      "pos": [
+        1918,
+        0
+      ],
+      "size": [
+        400,
+        960
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "{}"
+      ]
+    },
+    {
+      "id": 5,
       "type": "UNETLoader",
       "pos": [
         20,
@@ -79,7 +100,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 3,
+      "order": 4,
       "mode": 0,
       "inputs": [
         {
@@ -114,7 +135,7 @@
       }
     },
     {
-      "id": 5,
+      "id": 6,
       "type": "AIStudioTextEncoderLoader",
       "pos": [
         400,
@@ -127,7 +148,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 4,
+      "order": 5,
       "mode": 0,
       "inputs": [
         {
@@ -162,7 +183,7 @@
       }
     },
     {
-      "id": 6,
+      "id": 7,
       "type": "VAELoader",
       "pos": [
         780,
@@ -175,7 +196,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 5,
+      "order": 6,
       "mode": 0,
       "inputs": [
         {
@@ -193,15 +214,15 @@
           "type": "VAE",
           "links": [
             32,
-            38,
-            53,
-            65,
-            78,
-            85,
-            92,
-            99,
-            104,
-            113
+            39,
+            54,
+            66,
+            79,
+            86,
+            93,
+            100,
+            105,
+            114
           ]
         }
       ],
@@ -211,7 +232,7 @@
       }
     },
     {
-      "id": 7,
+      "id": 8,
       "type": "ForgeNeoAnima38V2Loader",
       "pos": [
         20,
@@ -224,7 +245,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 6,
+      "order": 7,
       "mode": 4,
       "inputs": [
         {
@@ -251,7 +272,7 @@
       }
     },
     {
-      "id": 8,
+      "id": 9,
       "type": "ForgeNeoAnimaQwen35Loader",
       "pos": [
         400,
@@ -264,7 +285,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 7,
+      "order": 8,
       "mode": 4,
       "inputs": [
         {
@@ -292,7 +313,7 @@
       }
     },
     {
-      "id": 9,
+      "id": 10,
       "type": "AIStudioSwitch",
       "pos": [
         780,
@@ -305,7 +326,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 8,
+      "order": 9,
       "mode": 0,
       "inputs": [
         {
@@ -345,7 +366,7 @@
       ]
     },
     {
-      "id": 10,
+      "id": 11,
       "type": "AIStudioMossStream",
       "pos": [
         1040,
@@ -358,7 +379,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 9,
+      "order": 10,
       "mode": 4,
       "inputs": [
         {
@@ -383,7 +404,7 @@
       "widgets_values": []
     },
     {
-      "id": 11,
+      "id": 12,
       "type": "ForgeNeoModelSamplingShift",
       "pos": [
         20,
@@ -396,7 +417,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 10,
+      "order": 11,
       "mode": 0,
       "inputs": [
         {
@@ -431,7 +452,7 @@
       ]
     },
     {
-      "id": 12,
+      "id": 13,
       "type": "ForgeNeoExtraSchedulers",
       "pos": [
         320,
@@ -444,7 +465,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 11,
+      "order": 12,
       "mode": 0,
       "inputs": [
         {
@@ -540,7 +561,7 @@
       }
     },
     {
-      "id": 13,
+      "id": 14,
       "type": "AIStudioLoraStack",
       "pos": [
         700,
@@ -553,7 +574,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 12,
+      "order": 13,
       "mode": 0,
       "inputs": [
         {
@@ -604,7 +625,7 @@
           "links": [
             15,
             21,
-            40
+            41
           ]
         },
         {
@@ -613,7 +634,7 @@
           "links": [
             17,
             25,
-            41
+            42
           ]
         }
       ],
@@ -627,7 +648,7 @@
       ]
     },
     {
-      "id": 14,
+      "id": 15,
       "type": "ForgeNeoLoraBlockWeight",
       "pos": [
         1140,
@@ -640,7 +661,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 13,
+      "order": 14,
       "mode": 4,
       "inputs": [
         {
@@ -761,7 +782,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 16,
       "type": "ForgeNeoNegPip",
       "pos": [
         1520,
@@ -774,7 +795,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 14,
+      "order": 15,
       "mode": 0,
       "inputs": [
         {
@@ -813,14 +834,14 @@
             19,
             23,
             31,
-            37,
-            44,
-            66,
-            77,
-            84,
-            91,
-            105,
-            112
+            38,
+            45,
+            67,
+            78,
+            85,
+            92,
+            106,
+            113
           ]
         }
       ],
@@ -833,7 +854,7 @@
       ]
     },
     {
-      "id": 16,
+      "id": 17,
       "type": "ForgeNeoDoraInferenceMode",
       "pos": [
         1900,
@@ -846,7 +867,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 15,
+      "order": 16,
       "mode": 0,
       "inputs": [
         {
@@ -892,7 +913,7 @@
       ]
     },
     {
-      "id": 17,
+      "id": 18,
       "type": "ForgeNeoExtraSamplerSettings",
       "pos": [
         2280,
@@ -905,7 +926,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 16,
+      "order": 17,
       "mode": 4,
       "inputs": [
         {
@@ -977,7 +998,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 19,
       "type": "AIStudioPromptEncode",
       "pos": [
         20,
@@ -990,7 +1011,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 17,
+      "order": 18,
       "mode": 0,
       "inputs": [
         {
@@ -1043,7 +1064,7 @@
       ]
     },
     {
-      "id": 19,
+      "id": 20,
       "type": "AIStudioPromptEncode",
       "pos": [
         460,
@@ -1056,7 +1077,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 18,
+      "order": 19,
       "mode": 0,
       "inputs": [
         {
@@ -1109,7 +1130,7 @@
       ]
     },
     {
-      "id": 20,
+      "id": 21,
       "type": "ForgeNeoAnima38V2Prompt",
       "pos": [
         900,
@@ -1122,7 +1143,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 19,
+      "order": 20,
       "mode": 4,
       "inputs": [
         {
@@ -1169,7 +1190,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 22,
       "type": "ForgeNeoAnima38V2Prompt",
       "pos": [
         1340,
@@ -1182,7 +1203,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 20,
+      "order": 21,
       "mode": 4,
       "inputs": [
         {
@@ -1229,7 +1250,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 23,
       "type": "AIStudioSwitch",
       "pos": [
         1780,
@@ -1242,7 +1263,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 21,
+      "order": 22,
       "mode": 0,
       "inputs": [
         {
@@ -1269,7 +1290,7 @@
           "name": "*",
           "type": "*",
           "links": [
-            35
+            36
           ]
         }
       ],
@@ -1282,7 +1303,7 @@
       ]
     },
     {
-      "id": 23,
+      "id": 24,
       "type": "AIStudioSwitch",
       "pos": [
         2040,
@@ -1295,7 +1316,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 22,
+      "order": 23,
       "mode": 0,
       "inputs": [
         {
@@ -1322,7 +1343,7 @@
           "name": "*",
           "type": "*",
           "links": [
-            36
+            37
           ]
         }
       ],
@@ -1335,7 +1356,7 @@
       ]
     },
     {
-      "id": 24,
+      "id": 25,
       "type": "LoadImage",
       "pos": [
         20,
@@ -1348,7 +1369,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 23,
+      "order": 24,
       "mode": 4,
       "inputs": [
         {
@@ -1366,7 +1387,7 @@
           "type": "IMAGE",
           "links": [
             33,
-            39
+            40
           ]
         },
         {
@@ -1381,20 +1402,65 @@
       }
     },
     {
-      "id": 25,
-      "type": "AIStudioAnimaReference",
+      "id": 26,
+      "type": "LoadImage",
       "pos": [
         400,
         2420
       ],
       "size": [
         340,
-        396
+        340
       ],
       "flags": {
         "collapsed": true
       },
-      "order": 24,
+      "order": 25,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "widget": {
+            "name": "image"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            34
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "title": "레퍼런스 이미지 2",
+      "properties": {
+        "aistudio_role": "reference_image_2"
+      }
+    },
+    {
+      "id": 27,
+      "type": "AIStudioAnimaReference",
+      "pos": [
+        780,
+        2420
+      ],
+      "size": [
+        340,
+        488
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 26,
       "mode": 4,
       "inputs": [
         {
@@ -1416,6 +1482,11 @@
           "name": "image",
           "type": "IMAGE",
           "link": 33
+        },
+        {
+          "name": "image_2",
+          "type": "IMAGE",
+          "link": 34
         },
         {
           "name": "method",
@@ -1496,6 +1567,30 @@
             "name": "caption"
           },
           "link": null
+        },
+        {
+          "name": "weight_1",
+          "type": "FLOAT",
+          "widget": {
+            "name": "weight_1"
+          },
+          "link": null
+        },
+        {
+          "name": "weight_2",
+          "type": "FLOAT",
+          "widget": {
+            "name": "weight_2"
+          },
+          "link": null
+        },
+        {
+          "name": "fidelity",
+          "type": "FLOAT",
+          "widget": {
+            "name": "fidelity"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -1503,7 +1598,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            34
+            35
           ]
         }
       ],
@@ -1521,14 +1616,17 @@
         "apg",
         1.0,
         1.0,
-        ""
+        "",
+        1.0,
+        1.0,
+        1.0
       ]
     },
     {
-      "id": 26,
+      "id": 28,
       "type": "AIStudioKrea2Reference",
       "pos": [
-        780,
+        1160,
         2420
       ],
       "size": [
@@ -1538,48 +1636,48 @@
       "flags": {
         "collapsed": true
       },
-      "order": 25,
+      "order": 27,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 34
+          "link": 35
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 35
+          "link": 36
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 36
+          "link": 37
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 37
+          "link": 38
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 38
+          "link": 39
         },
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 39
+          "link": 40
         },
         {
           "name": "text",
           "type": "STRING",
-          "link": 40
+          "link": 41
         },
         {
           "name": "negative_text",
           "type": "STRING",
-          "link": 41
+          "link": 42
         },
         {
           "name": "file",
@@ -1659,25 +1757,11 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            42
+            43
           ]
         },
         {
           "name": "positive",
-          "type": "CONDITIONING",
-          "links": [
-            45,
-            58,
-            62,
-            79,
-            86,
-            93,
-            101,
-            114
-          ]
-        },
-        {
-          "name": "negative",
           "type": "CONDITIONING",
           "links": [
             46,
@@ -1688,6 +1772,20 @@
             94,
             102,
             115
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": [
+            47,
+            60,
+            64,
+            81,
+            88,
+            95,
+            103,
+            116
           ]
         }
       ],
@@ -1708,11 +1806,11 @@
       ]
     },
     {
-      "id": 27,
+      "id": 29,
       "type": "ForgeNeoAnimaOptimalScale",
       "pos": [
         20,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -1721,13 +1819,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 26,
+      "order": 28,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 42
+          "link": 43
         },
         {
           "name": "enabled",
@@ -1767,7 +1865,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            43
+            44
           ]
         }
       ],
@@ -1783,11 +1881,11 @@
       ]
     },
     {
-      "id": 28,
+      "id": 30,
       "type": "ForgeNeoAnimaGuidanceSuite",
       "pos": [
         400,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -1796,28 +1894,28 @@
       "flags": {
         "collapsed": true
       },
-      "order": 27,
+      "order": 29,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 43
+          "link": 44
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 44
+          "link": 45
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 45
+          "link": 46
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 46
+          "link": 47
         },
         {
           "name": "enabled",
@@ -1841,7 +1939,7 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            47
+            48
           ]
         }
       ],
@@ -1855,11 +1953,11 @@
       ]
     },
     {
-      "id": 29,
+      "id": 31,
       "type": "ForgeNeoSkimmedCFG",
       "pos": [
         780,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -1868,13 +1966,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 28,
+      "order": 30,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 47
+          "link": 48
         },
         {
           "name": "enabled",
@@ -1938,9 +2036,9 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            48,
-            50,
-            52
+            49,
+            51,
+            53
           ]
         }
       ],
@@ -1959,11 +2057,11 @@
       ]
     },
     {
-      "id": 30,
+      "id": 32,
       "type": "ForgeNeoAnimaDetailDaemon",
       "pos": [
         1160,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -1972,13 +2070,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 29,
+      "order": 31,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 48
+          "link": 49
         },
         {
           "name": "enabled",
@@ -2010,7 +2108,7 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            49
+            50
           ]
         }
       ],
@@ -2025,11 +2123,11 @@
       ]
     },
     {
-      "id": 31,
+      "id": 33,
       "type": "ForgeNeoAnimaSpeed",
       "pos": [
         1540,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -2038,13 +2136,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 30,
+      "order": 32,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 49
+          "link": 50
         },
         {
           "name": "enabled",
@@ -2180,7 +2278,7 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            57
+            58
           ]
         }
       ],
@@ -2209,11 +2307,11 @@
       ]
     },
     {
-      "id": 32,
+      "id": 34,
       "type": "ForgeNeoAnimaDetailDaemon",
       "pos": [
         1920,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -2222,13 +2320,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 31,
+      "order": 33,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 50
+          "link": 51
         },
         {
           "name": "enabled",
@@ -2260,7 +2358,7 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            51
+            52
           ]
         }
       ],
@@ -2275,11 +2373,11 @@
       ]
     },
     {
-      "id": 33,
+      "id": 35,
       "type": "ForgeNeoAnimaSpeed",
       "pos": [
         2300,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -2288,13 +2386,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 32,
+      "order": 34,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 51
+          "link": 52
         },
         {
           "name": "enabled",
@@ -2430,8 +2528,8 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            61,
-            100
+            62,
+            101
           ]
         }
       ],
@@ -2460,11 +2558,11 @@
       ]
     },
     {
-      "id": 34,
+      "id": 36,
       "type": "ForgeNeoAnimaDetailDaemon",
       "pos": [
         2680,
-        2956
+        3048
       ],
       "size": [
         340,
@@ -2473,13 +2571,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 33,
+      "order": 35,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 52
+          "link": 53
         },
         {
           "name": "enabled",
@@ -2511,10 +2609,10 @@
           "name": "model",
           "type": "MODEL",
           "links": [
-            76,
-            83,
-            90,
-            111
+            77,
+            84,
+            91,
+            112
           ]
         }
       ],
@@ -2529,11 +2627,11 @@
       ]
     },
     {
-      "id": 35,
+      "id": 37,
       "type": "LoadImage",
       "pos": [
         20,
-        3544
+        3636
       ],
       "size": [
         340,
@@ -2542,7 +2640,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 34,
+      "order": 36,
       "mode": 4,
       "inputs": [
         {
@@ -2559,15 +2657,15 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            54,
-            55
+            55,
+            56
           ]
         },
         {
           "name": "MASK",
           "type": "MASK",
           "links": [
-            56
+            57
           ]
         }
       ],
@@ -2577,11 +2675,11 @@
       }
     },
     {
-      "id": 36,
+      "id": 38,
       "type": "ForgeNeoLatentInput",
       "pos": [
         400,
-        3544
+        3636
       ],
       "size": [
         340,
@@ -2590,23 +2688,23 @@
       "flags": {
         "collapsed": true
       },
-      "order": 35,
+      "order": 37,
       "mode": 0,
       "inputs": [
         {
           "name": "vae",
           "type": "VAE",
-          "link": 53
+          "link": 54
         },
         {
           "name": "img2img_image",
           "type": "IMAGE",
-          "link": 54
+          "link": 55
         },
         {
           "name": "inpaint_image",
           "type": "IMAGE",
-          "link": 55
+          "link": 56
         },
         {
           "name": "inpaint_mask_image",
@@ -2616,7 +2714,7 @@
         {
           "name": "inpaint_mask",
           "type": "MASK",
-          "link": 56
+          "link": 57
         },
         {
           "name": "reference_image",
@@ -2741,7 +2839,7 @@
           "name": "latent",
           "type": "LATENT",
           "links": [
-            60
+            61
           ]
         }
       ],
@@ -2767,11 +2865,11 @@
       ]
     },
     {
-      "id": 37,
+      "id": 39,
       "type": "ForgeNeoKSamplerCNS",
       "pos": [
         780,
-        3544
+        3636
       ],
       "size": [
         340,
@@ -2780,28 +2878,28 @@
       "flags": {
         "collapsed": true
       },
-      "order": 36,
+      "order": 38,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 57
+          "link": 58
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 58
+          "link": 59
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 59
+          "link": 60
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 60
+          "link": 61
         },
         {
           "name": "seed",
@@ -3025,7 +3123,7 @@
           "name": "output",
           "type": "LATENT",
           "links": [
-            64
+            65
           ]
         }
       ],
@@ -3065,11 +3163,11 @@
       ]
     },
     {
-      "id": 38,
+      "id": 40,
       "type": "ForgeNeoHiresFix",
       "pos": [
         20,
-        4456
+        4548
       ],
       "size": [
         400,
@@ -3078,38 +3176,38 @@
       "flags": {
         "collapsed": true
       },
-      "order": 37,
+      "order": 39,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 61
+          "link": 62
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 62
+          "link": 63
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 63
+          "link": 64
         },
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 64
+          "link": 65
         },
         {
           "name": "base_vae",
           "type": "VAE",
-          "link": 65
+          "link": 66
         },
         {
           "name": "base_clip",
           "type": "CLIP",
-          "link": 66
+          "link": 67
         },
         {
           "name": "seed",
@@ -3357,15 +3455,15 @@
           "name": "output",
           "type": "LATENT",
           "links": [
-            68,
-            71
+            69,
+            72
           ]
         },
         {
           "name": "decode_vae",
           "type": "VAE",
           "links": [
-            67
+            68
           ]
         }
       ],
@@ -3408,11 +3506,11 @@
       ]
     },
     {
-      "id": 39,
+      "id": 41,
       "type": "ForgeNeoAnimaVAE2x",
       "pos": [
         460,
-        4456
+        4548
       ],
       "size": [
         340,
@@ -3421,13 +3519,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 38,
+      "order": 40,
       "mode": 4,
       "inputs": [
         {
           "name": "vae",
           "type": "VAE",
-          "link": 67
+          "link": 68
         },
         {
           "name": "enabled",
@@ -3475,7 +3573,7 @@
           "name": "vae",
           "type": "VAE",
           "links": [
-            69
+            70
           ]
         }
       ],
@@ -3485,11 +3583,11 @@
       }
     },
     {
-      "id": 40,
+      "id": 42,
       "type": "VAEDecode",
       "pos": [
         840,
-        4456
+        4548
       ],
       "size": [
         220,
@@ -3498,18 +3596,18 @@
       "flags": {
         "collapsed": true
       },
-      "order": 39,
+      "order": 41,
       "mode": 0,
       "inputs": [
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 68
+          "link": 69
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 69
+          "link": 70
         }
       ],
       "outputs": [
@@ -3517,7 +3615,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            70
+            71
           ]
         }
       ],
@@ -3527,11 +3625,11 @@
       }
     },
     {
-      "id": 41,
+      "id": 43,
       "type": "ForgeNeoAnimaPiD",
       "pos": [
         1100,
-        4456
+        4548
       ],
       "size": [
         340,
@@ -3540,18 +3638,18 @@
       "flags": {
         "collapsed": true
       },
-      "order": 40,
+      "order": 42,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 70
+          "link": 71
         },
         {
           "name": "latent",
           "type": "LATENT",
-          "link": 71
+          "link": 72
         },
         {
           "name": "enabled",
@@ -3647,7 +3745,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            72
+            73
           ]
         }
       ],
@@ -3657,11 +3755,11 @@
       }
     },
     {
-      "id": 42,
+      "id": 44,
       "type": "AIStudioUpscaleImage",
       "pos": [
         20,
-        5704
+        5796
       ],
       "size": [
         340,
@@ -3670,13 +3768,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 41,
+      "order": 43,
       "mode": 0,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 72
+          "link": 73
         },
         {
           "name": "enabled",
@@ -3708,8 +3806,8 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            73,
-            74
+            74,
+            75
           ]
         }
       ],
@@ -3719,11 +3817,11 @@
       }
     },
     {
-      "id": 43,
+      "id": 45,
       "type": "ForgeNeoSAM3Mask",
       "pos": [
         20,
-        5956
+        6048
       ],
       "size": [
         400,
@@ -3732,13 +3830,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 42,
+      "order": 44,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 73
+          "link": 74
         },
         {
           "name": "sam3_model",
@@ -3948,8 +4046,8 @@
           "name": "selected_mask",
           "type": "MASK",
           "links": [
-            75,
-            82
+            76,
+            83
           ]
         },
         {
@@ -3989,11 +4087,11 @@
       }
     },
     {
-      "id": 44,
+      "id": 46,
       "type": "ForgeNeoSAM3Detailer",
       "pos": [
         460,
-        5956
+        6048
       ],
       "size": [
         400,
@@ -4002,43 +4100,43 @@
       "flags": {
         "collapsed": true
       },
-      "order": 43,
+      "order": 45,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 74
+          "link": 75
         },
         {
           "name": "mask",
           "type": "MASK",
-          "link": 75
+          "link": 76
         },
         {
           "name": "model",
           "type": "MODEL",
-          "link": 76
+          "link": 77
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 77
+          "link": 78
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 78
+          "link": 79
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 79
+          "link": 80
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 80
+          "link": 81
         },
         {
           "name": "control_net",
@@ -4309,7 +4407,7 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            81
+            82
           ]
         },
         {
@@ -4363,11 +4461,11 @@
       ]
     },
     {
-      "id": 45,
+      "id": 47,
       "type": "ForgeNeoSAM3Refine",
       "pos": [
         900,
-        5956
+        6048
       ],
       "size": [
         340,
@@ -4376,43 +4474,43 @@
       "flags": {
         "collapsed": true
       },
-      "order": 44,
+      "order": 46,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 81
+          "link": 82
         },
         {
           "name": "mask",
           "type": "MASK",
-          "link": 82
+          "link": 83
         },
         {
           "name": "model",
           "type": "MODEL",
-          "link": 83
+          "link": 84
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 84
+          "link": 85
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 85
+          "link": 86
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 86
+          "link": 87
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 87
+          "link": 88
         },
         {
           "name": "control_net",
@@ -4683,14 +4781,14 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            88
+            89
           ]
         },
         {
           "name": "applied_mask",
           "type": "MASK",
           "links": [
-            89
+            90
           ]
         },
         {
@@ -4705,11 +4803,11 @@
       }
     },
     {
-      "id": 46,
+      "id": 48,
       "type": "ForgeNeoSAM3TileRepair",
       "pos": [
         1280,
-        5956
+        6048
       ],
       "size": [
         340,
@@ -4718,43 +4816,43 @@
       "flags": {
         "collapsed": true
       },
-      "order": 45,
+      "order": 47,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 88
+          "link": 89
         },
         {
           "name": "mask",
           "type": "MASK",
-          "link": 89
+          "link": 90
         },
         {
           "name": "model",
           "type": "MODEL",
-          "link": 90
+          "link": 91
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 91
+          "link": 92
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 92
+          "link": 93
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 93
+          "link": 94
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 94
+          "link": 95
         },
         {
           "name": "control_net",
@@ -4793,7 +4891,7 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            95
+            96
           ]
         },
         {
@@ -4817,11 +4915,11 @@
       ]
     },
     {
-      "id": 47,
+      "id": 49,
       "type": "ForgeNeoAnimaVAEDeGrid",
       "pos": [
         20,
-        7308
+        7400
       ],
       "size": [
         340,
@@ -4830,13 +4928,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 46,
+      "order": 48,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 95
+          "link": 96
         },
         {
           "name": "enabled",
@@ -4916,7 +5014,7 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            96
+            97
           ]
         },
         {
@@ -4931,11 +5029,11 @@
       }
     },
     {
-      "id": 48,
+      "id": 50,
       "type": "AIStudioSaveForge",
       "pos": [
         400,
-        7308
+        7400
       ],
       "size": [
         400,
@@ -4944,13 +5042,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 47,
+      "order": 49,
       "mode": 0,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 96
+          "link": 97
         },
         {
           "name": "studio_state",
@@ -4983,18 +5081,18 @@
         "aistudio_role": "save"
       },
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
         0,
         "fixed",
         "AIStudio/anima"
       ]
     },
     {
-      "id": 49,
+      "id": 51,
       "type": "LoadImage",
       "pos": [
         20,
-        7724
+        7816
       ],
       "size": [
         340,
@@ -5003,7 +5101,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 48,
+      "order": 50,
       "mode": 4,
       "inputs": [
         {
@@ -5020,7 +5118,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            97
+            98
           ]
         },
         {
@@ -5035,11 +5133,11 @@
       }
     },
     {
-      "id": 50,
+      "id": 52,
       "type": "AIStudioUpscaleImage",
       "pos": [
         400,
-        7724
+        7816
       ],
       "size": [
         340,
@@ -5048,13 +5146,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 49,
+      "order": 51,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 97
+          "link": 98
         },
         {
           "name": "enabled",
@@ -5086,7 +5184,7 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            98
+            99
           ]
         }
       ],
@@ -5096,11 +5194,11 @@
       }
     },
     {
-      "id": 51,
+      "id": 53,
       "type": "VAEEncode",
       "pos": [
         780,
-        7724
+        7816
       ],
       "size": [
         220,
@@ -5109,18 +5207,18 @@
       "flags": {
         "collapsed": true
       },
-      "order": 50,
+      "order": 52,
       "mode": 4,
       "inputs": [
         {
           "name": "pixels",
           "type": "IMAGE",
-          "link": 98
+          "link": 99
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 99
+          "link": 100
         }
       ],
       "outputs": [
@@ -5128,7 +5226,7 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            103
+            104
           ]
         }
       ],
@@ -5138,11 +5236,11 @@
       }
     },
     {
-      "id": 52,
+      "id": 54,
       "type": "ForgeNeoHiresFix",
       "pos": [
         1040,
-        7724
+        7816
       ],
       "size": [
         400,
@@ -5151,38 +5249,38 @@
       "flags": {
         "collapsed": true
       },
-      "order": 51,
+      "order": 53,
       "mode": 4,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 100
+          "link": 101
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 101
+          "link": 102
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 102
+          "link": 103
         },
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 103
+          "link": 104
         },
         {
           "name": "base_vae",
           "type": "VAE",
-          "link": 104
+          "link": 105
         },
         {
           "name": "base_clip",
           "type": "CLIP",
-          "link": 105
+          "link": 106
         },
         {
           "name": "seed",
@@ -5430,14 +5528,14 @@
           "name": "output",
           "type": "LATENT",
           "links": [
-            106
+            107
           ]
         },
         {
           "name": "decode_vae",
           "type": "VAE",
           "links": [
-            107
+            108
           ]
         }
       ],
@@ -5480,11 +5578,11 @@
       ]
     },
     {
-      "id": 53,
+      "id": 55,
       "type": "VAEDecode",
       "pos": [
         1480,
-        7724
+        7816
       ],
       "size": [
         220,
@@ -5493,18 +5591,18 @@
       "flags": {
         "collapsed": true
       },
-      "order": 52,
+      "order": 54,
       "mode": 4,
       "inputs": [
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 106
+          "link": 107
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 107
+          "link": 108
         }
       ],
       "outputs": [
@@ -5512,8 +5610,8 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            108,
-            109
+            109,
+            110
           ]
         }
       ],
@@ -5523,11 +5621,11 @@
       }
     },
     {
-      "id": 54,
+      "id": 56,
       "type": "ForgeNeoSAM3Mask",
       "pos": [
         1740,
-        7724
+        7816
       ],
       "size": [
         400,
@@ -5536,13 +5634,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 53,
+      "order": 55,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 108
+          "link": 109
         },
         {
           "name": "sam3_model",
@@ -5752,7 +5850,7 @@
           "name": "selected_mask",
           "type": "MASK",
           "links": [
-            110
+            111
           ]
         },
         {
@@ -5792,11 +5890,11 @@
       }
     },
     {
-      "id": 55,
+      "id": 57,
       "type": "ForgeNeoSAM3Detailer",
       "pos": [
         2180,
-        7724
+        7816
       ],
       "size": [
         400,
@@ -5805,43 +5903,43 @@
       "flags": {
         "collapsed": true
       },
-      "order": 54,
+      "order": 56,
       "mode": 4,
       "inputs": [
         {
           "name": "image",
           "type": "IMAGE",
-          "link": 109
+          "link": 110
         },
         {
           "name": "mask",
           "type": "MASK",
-          "link": 110
+          "link": 111
         },
         {
           "name": "model",
           "type": "MODEL",
-          "link": 111
+          "link": 112
         },
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 112
+          "link": 113
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 113
+          "link": 114
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 114
+          "link": 115
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 115
+          "link": 116
         },
         {
           "name": "control_net",
@@ -6112,7 +6210,7 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            116
+            117
           ]
         },
         {
@@ -6166,11 +6264,11 @@
       ]
     },
     {
-      "id": 56,
+      "id": 58,
       "type": "AIStudioSaveForge",
       "pos": [
         2620,
-        7724
+        7816
       ],
       "size": [
         400,
@@ -6179,13 +6277,13 @@
       "flags": {
         "collapsed": true
       },
-      "order": 55,
+      "order": 57,
       "mode": 4,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 116
+          "link": 117
         },
         {
           "name": "studio_state",
@@ -6218,7 +6316,7 @@
         "aistudio_role": "post_save"
       },
       "widgets_values": [
-        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
+        "{\"version\": 1, \"tab\": \"t2i\", \"i2i_mode\": \"img2img\", \"prompt\": \"\", \"negative\": \"\", \"unet\": \"\", \"te\": \"\", \"vae\": \"\", \"sampler\": \"exp_heun_2_x0_sde\", \"scheduler\": \"flow_cosmos_dynamic\", \"steps\": 32, \"cfg\": 3.0, \"shift\": 3.0, \"seed\": -1, \"width\": 832, \"height\": 1216, \"batch\": 1, \"loras\": [], \"negpip\": true, \"moss_stream\": true, \"family_memory\": {}, \"dora_mode\": \"LyCORIS fp32 (as trained)\", \"forge_like\": {\"master\": true, \"noise\": true, \"prompt_syntax\": true, \"dora\": true, \"attention\": false}, \"hires\": {\"on\": false, \"upscaler\": \"4x-UltraSharp.pth\", \"sampler\": \"\", \"scale\": 1.5, \"steps\": 16, \"denoise\": 0.4}, \"upscale\": {\"on\": false, \"model\": \"\", \"scale\": 2.0}, \"sam3\": {\"on\": false, \"checkpoint\": \"\", \"prompt\": \"face\", \"denoise\": 0.4, \"steps\": 0, \"cfg\": 0.0}, \"i2i\": {\"image\": \"\", \"width\": 832, \"height\": 1216, \"denoise\": 0.55, \"mask_blur\": 4, \"inpaint_area\": \"whole\"}, \"reference\": {\"on\": false, \"image\": \"\", \"image_2\": \"\", \"method\": \"snapref\", \"megapixels\": 1.0, \"snapref\": {\"file\": \"\", \"mode\": \"cs\", \"strength\": 0.0, \"fidelity\": 1.0, \"weight_1\": 1.0, \"weight_2\": 1.0, \"guidance_on\": true, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0, \"caption\": \"\"}, \"ref_adapter\": {\"file\": \"\", \"strength\": 1.0, \"guidance\": 4.5, \"correction\": \"apg\", \"ref_end\": 1.0}, \"krea2\": {\"file\": \"\", \"strength\": 1.0, \"grounding_px\": 768, \"boost\": 1.0, \"position\": \"aligned (trained)\"}}, \"ext\": {\"guidance\": {\"on\": false, \"guid_enabled\": false, \"guid_attn_method\": \"PAG\", \"guid_scale\": 4.0, \"guid_block_indices\": \"18\", \"guid_head_indices\": \"\", \"guid_official_strength\": 0.75, \"guid_legacy_attn\": false, \"guid_legacy_strength\": 0.75, \"guid_seg_sigma\": 100.0, \"guid_start_percent\": 0.0, \"guid_end_percent\": 0.7, \"guid_rescale\": 0.2, \"guid_rescale_mode\": \"full\", \"guid_auto_decay\": false, \"guid_slg_on\": false, \"guid_slg_scale\": 3.0, \"guid_slg_blocks\": \"18\", \"guid_slg_mode\": \"Fixed\", \"guid_s2_scale\": 0.25, \"guid_s2_ratio\": 0.05, \"guid_s2_blocks\": \"\", \"guid_s2_start\": 0.1, \"guid_s2_end\": 0.9, \"guid_cfg_mode\": \"Preserve incoming\", \"guid_experimental_stack\": false, \"guid_apg_enabled\": false, \"guid_apg_eta\": 0.0, \"guid_apg_norm\": 15.0, \"guid_apg_momentum\": 0.0, \"guid_apg_autooff\": true, \"guid_adg_enabled\": false, \"guid_adg_start\": 0.5, \"guid_adg_interval\": 0, \"guid_smc_master_enabled\": false, \"guid_smc_enabled\": false, \"guid_smc_preset\": \"Auto\", \"guid_smc_lambda\": 6.0, \"guid_smc_k\": 0.1, \"guid_smc_mode\": \"Unit-L2\", \"guid_smc_adaptive_alpha\": 0.2, \"guid_smc_adaptive_lambda\": 5.0, \"guid_cwm_enabled\": false, \"guid_cwm_alpha_low\": 0.0, \"guid_cwm_alpha_high\": 0.0, \"guid_dcw_enabled\": false, \"guid_dcw_lambda_low\": 0.05, \"guid_dcw_lambda_high\": 0.01, \"guid_rdc_enabled\": false, \"guid_rdc_tau\": 0.0, \"guid_rdc_alpha_ll\": 0.03, \"guid_rdc_alpha_hh\": 0.0, \"guid_dave_enabled\": false, \"guid_dave_strength\": 0.3, \"guid_dave_tau\": 0.1, \"guid_dave_blocks\": \"8-18\", \"guid_cns_enabled\": false, \"guid_cns_strength\": 1.0, \"guid_cns_gamma_power\": 0.5, \"guid_cns_gamma_scale\": 2.0, \"guid_mod_enabled\": false, \"guid_mod_clip_model\": \"\", \"guid_mod_weight\": 3.0, \"guid_mod_start_layer\": 0, \"guid_mod_end_layer\": -1, \"guid_mod_base_source\": \"Main positive\", \"guid_mod_base_prompt\": \"\", \"guid_mod_positive_prompt\": \"masterpiece, best quality, highres\", \"guid_mod_negative_source\": \"Main negative\", \"guid_mod_negative_prompt\": \"worst quality, low quality\", \"guid_mod_adapter_mode\": \"Auto-download official\", \"guid_mod_adapter_path\": \"\", \"guid_tsr_enabled\": false, \"guid_tsr_k\": 0.95, \"guid_tsr_sigma\": 1.0, \"guid_mg_enabled\": false, \"guid_mg_alpha\": 0.5, \"guid_mg_beta\": 0.6, \"guid_mg_normalize\": false, \"guid_mg_min\": 0.3, \"guid_mg_max\": 0.95, \"guid_higs_enabled\": false, \"guid_higs_weight\": 1.75, \"guid_higs_eta\": 0.0, \"guid_higs_alpha\": 0.75, \"guid_higs_cutoff\": 0.05, \"guid_higs_t_min\": 0.4, \"guid_higs_t_max\": 1.0, \"guid_hiflow_enabled\": false, \"guid_hiflow_alpha\": 1.0, \"guid_hiflow_beta\": 0.5, \"guid_hiflow_cutoff\": 0.2}, \"optimal_scale\": {\"on\": false, \"ocfg_blend\": 0.25, \"ocfg_start\": 0.0, \"ocfg_end\": 1.0}, \"skim\": {\"on\": false, \"skim_skimming_cfg\": 7.0, \"skim_full_skim_negative\": false, \"skim_disable_flipping_filter\": false, \"skim_start_percent\": 0.0, \"skim_end_percent\": 1.0, \"skim_flip_at\": 0.0}, \"detail_daemon\": {\"on\": false, \"dd_amount\": 0.1, \"dd_start\": 0.2, \"dd_end\": 0.8, \"dd_bias\": 0.5, \"dd_exponent\": 1.0, \"dd_start_offset\": 0.0, \"dd_end_offset\": 0.0, \"dd_fade\": 0.0, \"dd_smooth\": true, \"dd_hires\": false}, \"lora_block\": {\"on\": false, \"lora_name\": \"\", \"strength_model\": 1.0, \"strength_clip\": 1.0, \"inverse\": false, \"A\": 4.0, \"B\": 1.0, \"block_vector\": \"\"}, \"speed\": {\"on\": false, \"mode\": \"transition\", \"threshold\": \"neo_shift\", \"preset\": \"anima\", \"scales\": \"0.5,1.0\", \"delta\": 0.01, \"sigma_divisor\": 1.03, \"manual_sigmas\": \"0.7\", \"adaptive\": true, \"transform\": \"dct\", \"spectrum_A\": 203.615097, \"spectrum_beta\": 1.915461, \"seed\": -1, \"hires\": false, \"apply_img2img\": false}, \"er_sde\": {\"on\": false, \"xsamp_max_stage\": 3, \"xsamp_eta\": 1.0, \"xsamp_noise_window\": false, \"xsamp_noise_start\": 0.2, \"xsamp_noise_end\": 0.8}, \"vae_2x\": {\"on\": false, \"vae_name\": \"\", \"output_mode\": \"1x refined (downsample)\", \"blur_sigma\": 0.5, \"latent_renorm\": false}, \"degrid\": {\"on\": false, \"model\": \"auto\", \"mode\": \"Full\", \"strength\": 1.0, \"tile\": 512, \"apply_img2img\": false}, \"pid\": {\"on\": false, \"ckpt_name\": \"\", \"steps\": 4, \"sigma\": 0.0, \"seed\": -1}, \"sam3_refine\": {\"on\": false, \"denoise\": 0.4, \"mask_mode\": \"Individual\", \"fill_mode\": \"original\", \"only_masked\": true, \"mask_padding\": 32, \"grow_mask_by\": 6, \"noise_multiplier\": 1.0, \"use_custom_size\": false, \"custom_width\": 512, \"custom_height\": 512, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}, \"sam3_tile\": {\"on\": false, \"mask_mode\": \"Individual\", \"tile_width\": 512, \"tile_height\": 512, \"tile_padding\": 64, \"denoise\": 0.4, \"noise_multiplier\": 1.0, \"fill_mode\": \"original\", \"grow_mask_by\": 6, \"inpaint_prompt\": \"\", \"negative_prompt\": \"\"}}}",
         0,
         "fixed",
         "AIStudio/anima"
@@ -6228,222 +6326,206 @@
   "links": [
     [
       1,
-      4,
+      5,
       0,
-      9,
+      10,
       0,
       "MODEL"
     ],
     [
       2,
-      7,
+      8,
       0,
-      9,
+      10,
       1,
       "MODEL"
     ],
     [
       3,
-      9,
-      0,
       10,
+      0,
+      11,
       0,
       "MODEL"
     ],
     [
       4,
-      10,
-      0,
       11,
+      0,
+      12,
       0,
       "MODEL"
     ],
     [
       5,
-      11,
-      0,
       12,
+      0,
+      13,
       0,
       "MODEL"
     ],
     [
       6,
-      12,
-      0,
       13,
+      0,
+      14,
       0,
       "MODEL"
     ],
     [
       7,
-      5,
+      6,
       0,
-      13,
+      14,
       1,
       "CLIP"
     ],
     [
       8,
-      13,
-      0,
       14,
+      0,
+      15,
       0,
       "MODEL"
     ],
     [
       9,
-      13,
-      1,
       14,
+      1,
+      15,
       1,
       "CLIP"
     ],
     [
       10,
-      14,
-      0,
       15,
+      0,
+      16,
       0,
       "MODEL"
     ],
     [
       11,
-      14,
-      1,
       15,
+      1,
+      16,
       1,
       "CLIP"
     ],
     [
       12,
-      15,
-      0,
       16,
+      0,
+      17,
       0,
       "MODEL"
     ],
     [
       13,
-      16,
-      0,
       17,
+      0,
+      18,
       0,
       "MODEL"
     ],
     [
       14,
-      15,
+      16,
       1,
-      18,
+      19,
       0,
       "CLIP"
     ],
     [
       15,
-      13,
+      14,
       2,
-      18,
+      19,
       1,
       "STRING"
     ],
     [
       16,
-      15,
+      16,
       1,
-      19,
+      20,
       0,
       "CLIP"
     ],
     [
       17,
-      13,
+      14,
       3,
-      19,
+      20,
       1,
       "STRING"
     ],
     [
       18,
-      16,
+      17,
       0,
-      20,
+      21,
       0,
       "MODEL"
     ],
     [
       19,
-      15,
+      16,
       1,
-      20,
+      21,
       1,
       "CLIP"
     ],
     [
       20,
-      8,
+      9,
       0,
-      20,
+      21,
       2,
       "CLIP"
     ],
     [
       21,
-      13,
+      14,
       2,
-      20,
+      21,
       3,
       "STRING"
     ],
     [
       22,
-      16,
+      17,
       0,
-      21,
+      22,
       0,
       "MODEL"
     ],
     [
       23,
-      15,
+      16,
       1,
-      21,
+      22,
       1,
       "CLIP"
     ],
     [
       24,
-      8,
+      9,
       0,
-      21,
+      22,
       2,
       "CLIP"
     ],
     [
       25,
-      13,
+      14,
       3,
-      21,
+      22,
       3,
       "STRING"
     ],
     [
       26,
-      18,
-      0,
-      22,
-      0,
-      "CONDITIONING"
-    ],
-    [
-      27,
-      20,
-      0,
-      22,
-      1,
-      "CONDITIONING"
-    ],
-    [
-      28,
       19,
       0,
       23,
@@ -6451,7 +6533,7 @@
       "CONDITIONING"
     ],
     [
-      29,
+      27,
       21,
       0,
       23,
@@ -6459,538 +6541,554 @@
       "CONDITIONING"
     ],
     [
-      30,
-      17,
+      28,
+      20,
       0,
-      25,
+      24,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      29,
+      22,
+      0,
+      24,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      30,
+      18,
+      0,
+      27,
       0,
       "MODEL"
     ],
     [
       31,
-      15,
+      16,
       1,
-      25,
+      27,
       1,
       "CLIP"
     ],
     [
       32,
-      6,
+      7,
       0,
-      25,
+      27,
       2,
       "VAE"
     ],
     [
       33,
-      24,
-      0,
       25,
+      0,
+      27,
       3,
       "IMAGE"
     ],
     [
       34,
-      25,
-      0,
       26,
       0,
-      "MODEL"
+      27,
+      4,
+      "IMAGE"
     ],
     [
       35,
-      22,
+      27,
       0,
-      26,
-      1,
-      "CONDITIONING"
+      28,
+      0,
+      "MODEL"
     ],
     [
       36,
       23,
       0,
-      26,
-      2,
+      28,
+      1,
       "CONDITIONING"
     ],
     [
       37,
-      15,
+      24,
+      0,
+      28,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      38,
+      16,
       1,
-      26,
+      28,
       3,
       "CLIP"
     ],
     [
-      38,
-      6,
+      39,
+      7,
       0,
-      26,
+      28,
       4,
       "VAE"
     ],
     [
-      39,
-      24,
+      40,
+      25,
       0,
-      26,
+      28,
       5,
       "IMAGE"
     ],
     [
-      40,
-      13,
+      41,
+      14,
       2,
-      26,
+      28,
       6,
       "STRING"
     ],
     [
-      41,
-      13,
+      42,
+      14,
       3,
-      26,
+      28,
       7,
       "STRING"
     ],
     [
-      42,
-      26,
-      0,
-      27,
-      0,
-      "MODEL"
-    ],
-    [
       43,
-      27,
-      0,
       28,
+      0,
+      29,
       0,
       "MODEL"
     ],
     [
       44,
-      15,
+      29,
+      0,
+      30,
+      0,
+      "MODEL"
+    ],
+    [
+      45,
+      16,
       1,
-      28,
+      30,
       1,
       "CLIP"
     ],
     [
-      45,
-      26,
-      1,
-      28,
-      2,
-      "CONDITIONING"
-    ],
-    [
       46,
-      26,
-      2,
       28,
-      3,
+      1,
+      30,
+      2,
       "CONDITIONING"
     ],
     [
       47,
       28,
-      0,
-      29,
-      0,
-      "MODEL"
+      2,
+      30,
+      3,
+      "CONDITIONING"
     ],
     [
       48,
-      29,
-      0,
       30,
+      0,
+      31,
       0,
       "MODEL"
     ],
     [
       49,
-      30,
-      0,
       31,
+      0,
+      32,
       0,
       "MODEL"
     ],
     [
       50,
-      29,
-      0,
       32,
+      0,
+      33,
       0,
       "MODEL"
     ],
     [
       51,
-      32,
+      31,
       0,
-      33,
+      34,
       0,
       "MODEL"
     ],
     [
       52,
-      29,
-      0,
       34,
+      0,
+      35,
       0,
       "MODEL"
     ],
     [
       53,
-      6,
+      31,
       0,
       36,
+      0,
+      "MODEL"
+    ],
+    [
+      54,
+      7,
+      0,
+      38,
       0,
       "VAE"
     ],
     [
-      54,
-      35,
-      0,
-      36,
-      1,
-      "IMAGE"
-    ],
-    [
       55,
-      35,
+      37,
       0,
-      36,
-      2,
+      38,
+      1,
       "IMAGE"
     ],
     [
       56,
-      35,
+      37,
+      0,
+      38,
+      2,
+      "IMAGE"
+    ],
+    [
+      57,
+      37,
       1,
-      36,
+      38,
       4,
       "MASK"
     ],
     [
-      57,
-      31,
+      58,
+      33,
       0,
-      37,
+      39,
       0,
       "MODEL"
     ],
     [
-      58,
-      26,
-      1,
-      37,
-      1,
-      "CONDITIONING"
-    ],
-    [
       59,
-      26,
-      2,
-      37,
-      2,
+      28,
+      1,
+      39,
+      1,
       "CONDITIONING"
     ],
     [
       60,
-      36,
+      28,
+      2,
+      39,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      61,
+      38,
       0,
-      37,
+      39,
       3,
       "LATENT"
     ],
     [
-      61,
-      33,
+      62,
+      35,
       0,
-      38,
+      40,
       0,
       "MODEL"
     ],
     [
-      62,
-      26,
-      1,
-      38,
-      1,
-      "CONDITIONING"
-    ],
-    [
       63,
-      26,
-      2,
-      38,
-      2,
+      28,
+      1,
+      40,
+      1,
       "CONDITIONING"
     ],
     [
       64,
-      37,
+      28,
+      2,
+      40,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      65,
+      39,
       0,
-      38,
+      40,
       3,
       "LATENT"
     ],
     [
-      65,
-      6,
+      66,
+      7,
       0,
-      38,
+      40,
       4,
       "VAE"
     ],
     [
-      66,
-      15,
+      67,
+      16,
       1,
-      38,
+      40,
       5,
       "CLIP"
     ],
     [
-      67,
-      38,
+      68,
+      40,
       1,
-      39,
+      41,
       0,
       "VAE"
-    ],
-    [
-      68,
-      38,
-      0,
-      40,
-      0,
-      "LATENT"
     ],
     [
       69,
-      39,
-      0,
       40,
+      0,
+      42,
+      0,
+      "LATENT"
+    ],
+    [
+      70,
+      41,
+      0,
+      42,
       1,
       "VAE"
     ],
     [
-      70,
-      40,
+      71,
+      42,
       0,
-      41,
+      43,
       0,
       "IMAGE"
     ],
     [
-      71,
-      38,
+      72,
+      40,
       0,
-      41,
+      43,
       1,
       "LATENT"
     ],
     [
-      72,
-      41,
-      0,
-      42,
-      0,
-      "IMAGE"
-    ],
-    [
       73,
-      42,
-      0,
       43,
+      0,
+      44,
       0,
       "IMAGE"
     ],
     [
       74,
-      42,
-      0,
       44,
+      0,
+      45,
       0,
       "IMAGE"
     ],
     [
       75,
-      43,
-      0,
       44,
+      0,
+      46,
+      0,
+      "IMAGE"
+    ],
+    [
+      76,
+      45,
+      0,
+      46,
       1,
       "MASK"
     ],
     [
-      76,
-      34,
+      77,
+      36,
       0,
-      44,
+      46,
       2,
       "MODEL"
     ],
     [
-      77,
-      15,
+      78,
+      16,
       1,
-      44,
+      46,
       3,
       "CLIP"
     ],
     [
-      78,
-      6,
+      79,
+      7,
       0,
-      44,
+      46,
       4,
       "VAE"
     ],
     [
-      79,
-      26,
-      1,
-      44,
-      5,
-      "CONDITIONING"
-    ],
-    [
       80,
-      26,
-      2,
-      44,
-      6,
+      28,
+      1,
+      46,
+      5,
       "CONDITIONING"
     ],
     [
       81,
-      44,
+      28,
+      2,
+      46,
+      6,
+      "CONDITIONING"
+    ],
+    [
+      82,
+      46,
       0,
-      45,
+      47,
       0,
       "IMAGE"
     ],
     [
-      82,
-      43,
-      0,
+      83,
       45,
+      0,
+      47,
       1,
       "MASK"
     ],
     [
-      83,
-      34,
+      84,
+      36,
       0,
-      45,
+      47,
       2,
       "MODEL"
     ],
     [
-      84,
-      15,
+      85,
+      16,
       1,
-      45,
+      47,
       3,
       "CLIP"
     ],
     [
-      85,
-      6,
+      86,
+      7,
       0,
-      45,
+      47,
       4,
       "VAE"
     ],
     [
-      86,
-      26,
-      1,
-      45,
-      5,
-      "CONDITIONING"
-    ],
-    [
       87,
-      26,
-      2,
-      45,
-      6,
+      28,
+      1,
+      47,
+      5,
       "CONDITIONING"
     ],
     [
       88,
-      45,
+      28,
+      2,
+      47,
+      6,
+      "CONDITIONING"
+    ],
+    [
+      89,
+      47,
       0,
-      46,
+      48,
       0,
       "IMAGE"
     ],
     [
-      89,
-      45,
+      90,
+      47,
       1,
-      46,
+      48,
       1,
       "MASK"
     ],
     [
-      90,
-      34,
+      91,
+      36,
       0,
-      46,
+      48,
       2,
       "MODEL"
     ],
     [
-      91,
-      15,
+      92,
+      16,
       1,
-      46,
+      48,
       3,
       "CLIP"
     ],
     [
-      92,
-      6,
+      93,
+      7,
       0,
-      46,
+      48,
       4,
       "VAE"
     ],
     [
-      93,
-      26,
+      94,
+      28,
       1,
-      46,
+      48,
       5,
       "CONDITIONING"
     ],
     [
-      94,
-      26,
+      95,
+      28,
       2,
-      46,
+      48,
       6,
       "CONDITIONING"
     ],
     [
-      95,
-      46,
-      0,
-      47,
-      0,
-      "IMAGE"
-    ],
-    [
       96,
-      47,
-      0,
       48,
+      0,
+      49,
       0,
       "IMAGE"
     ],
@@ -7004,153 +7102,161 @@
     ],
     [
       98,
-      50,
-      0,
       51,
+      0,
+      52,
       0,
       "IMAGE"
     ],
     [
       99,
-      6,
-      0,
-      51,
-      1,
-      "VAE"
-    ],
-    [
-      100,
-      33,
-      0,
-      52,
-      0,
-      "MODEL"
-    ],
-    [
-      101,
-      26,
-      1,
-      52,
-      1,
-      "CONDITIONING"
-    ],
-    [
-      102,
-      26,
-      2,
-      52,
-      2,
-      "CONDITIONING"
-    ],
-    [
-      103,
-      51,
-      0,
-      52,
-      3,
-      "LATENT"
-    ],
-    [
-      104,
-      6,
-      0,
-      52,
-      4,
-      "VAE"
-    ],
-    [
-      105,
-      15,
-      1,
-      52,
-      5,
-      "CLIP"
-    ],
-    [
-      106,
       52,
       0,
       53,
-      0,
-      "LATENT"
-    ],
-    [
-      107,
-      52,
-      1,
-      53,
-      1,
-      "VAE"
-    ],
-    [
-      108,
-      53,
-      0,
-      54,
       0,
       "IMAGE"
     ],
     [
-      109,
+      100,
+      7,
+      0,
+      53,
+      1,
+      "VAE"
+    ],
+    [
+      101,
+      35,
+      0,
+      54,
+      0,
+      "MODEL"
+    ],
+    [
+      102,
+      28,
+      1,
+      54,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      103,
+      28,
+      2,
+      54,
+      2,
+      "CONDITIONING"
+    ],
+    [
+      104,
       53,
       0,
+      54,
+      3,
+      "LATENT"
+    ],
+    [
+      105,
+      7,
+      0,
+      54,
+      4,
+      "VAE"
+    ],
+    [
+      106,
+      16,
+      1,
+      54,
+      5,
+      "CLIP"
+    ],
+    [
+      107,
+      54,
+      0,
       55,
+      0,
+      "LATENT"
+    ],
+    [
+      108,
+      54,
+      1,
+      55,
+      1,
+      "VAE"
+    ],
+    [
+      109,
+      55,
+      0,
+      56,
       0,
       "IMAGE"
     ],
     [
       110,
-      54,
-      0,
       55,
+      0,
+      57,
+      0,
+      "IMAGE"
+    ],
+    [
+      111,
+      56,
+      0,
+      57,
       1,
       "MASK"
     ],
     [
-      111,
-      34,
+      112,
+      36,
       0,
-      55,
+      57,
       2,
       "MODEL"
     ],
     [
-      112,
-      15,
+      113,
+      16,
       1,
-      55,
+      57,
       3,
       "CLIP"
     ],
     [
-      113,
-      6,
+      114,
+      7,
       0,
-      55,
+      57,
       4,
       "VAE"
     ],
     [
-      114,
-      26,
+      115,
+      28,
       1,
-      55,
+      57,
       5,
       "CONDITIONING"
     ],
     [
-      115,
-      26,
+      116,
+      28,
       2,
-      55,
+      57,
       6,
       "CONDITIONING"
     ],
     [
-      116,
-      55,
+      117,
+      57,
       0,
-      56,
+      58,
       0,
       "IMAGE"
     ]
@@ -7210,8 +7316,8 @@
       "bounding": [
         0,
         2340,
-        1140,
-        496
+        1520,
+        588
       ],
       "font_size": 24,
       "flags": {}
@@ -7221,7 +7327,7 @@
       "title": "④ 확장",
       "bounding": [
         0,
-        2876,
+        2968,
         3040,
         548
       ],
@@ -7233,7 +7339,7 @@
       "title": "⑤ 잠재·샘플링",
       "bounding": [
         0,
-        3464,
+        3556,
         1140,
         872
       ],
@@ -7245,7 +7351,7 @@
       "title": "⑥ Hires",
       "bounding": [
         0,
-        4376,
+        4468,
         1460,
         1208
       ],
@@ -7257,7 +7363,7 @@
       "title": "⑦ 업스케일",
       "bounding": [
         0,
-        5624,
+        5716,
         380,
         212
       ],
@@ -7269,7 +7375,7 @@
       "title": "⑧ SAM3",
       "bounding": [
         0,
-        5876,
+        5968,
         1640,
         1312
       ],
@@ -7281,7 +7387,7 @@
       "title": "⑨ 저장",
       "bounding": [
         0,
-        7228,
+        7320,
         820,
         376
       ],
@@ -7293,7 +7399,7 @@
       "title": "⑩ 후처리",
       "bounding": [
         0,
-        7644,
+        7736,
         3040,
         1312
       ],
@@ -7304,7 +7410,7 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.9,
+      "scale": 0.75,
       "offset": [
         40,
         60
