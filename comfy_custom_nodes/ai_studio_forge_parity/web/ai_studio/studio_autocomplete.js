@@ -1,7 +1,8 @@
 // Anima studio: tag autocomplete for the prompt / negative text boxes (like Forge's tagcomplete). One instance per panel:
 // `createAutocomplete({fetchTags, loras})` -> `attach(textarea)` after each render, `close()`, `dispose()`.
 // Typing asks `GET /aistudio/studio/tags` (through `fetchTags(query, limit)`, 150ms debounce, a numbered request so a late answer
-// for an older query is dropped); after `<lora:` the panel's own LoRA list is searched instead and `<lora:stem:1>` is inserted.
+// for an older query is dropped); after `<lora:` the panel's own LoRA list is searched instead and `<lora:stem:1>` is inserted,
+// after `__` the wildcard names and `__name__`.
 // The popup lives on document.body (the canvas transforms everything inside a node's DOM widget) at the caret's line.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 
@@ -9,6 +10,7 @@ const HANGUL = /[ㄱ-ㆎ가-힣]/;
 const SEPARATOR = /[,\n]/;
 const WEIGHT_SUFFIX = /:-?\d*\.?\d+$/;
 const LORA_QUERY = /^<lora:([^:>]*)$/i;
+const WILDCARD_QUERY = /^__(?!.*__$)([^,]*)$/; // a finished `__name__` asks for nothing
 const RESULT_LIMIT = 12;
 const POPUP_Z = 99990; // above the DOM widgets, below the lightbox (100000)
 
@@ -115,6 +117,24 @@ export function matchLoras(entries, name, limit = RESULT_LIMIT) {
   }));
 }
 
+/** The wildcard name typed after `__` (`""` right after it), or null when it is not one. */
+export function wildcardQuery(query) {
+  const match = WILDCARD_QUERY.exec(String(query ?? "").trim());
+  return match ? match[1] : null;
+}
+
+/** Wildcard candidates for `name`: prefix first, then contains. */
+export function matchWildcards(names, name, limit = RESULT_LIMIT) {
+  const wanted = normalize(name).trim();
+  const tier = (key) => (key.startsWith(wanted) ? 0 : key.includes(wanted) ? 1 : -1);
+  return (names || [])
+    .map((entry) => ({ entry: String(entry), tier: tier(normalize(String(entry))) }))
+    .filter((item) => item.tier >= 0)
+    .sort((a, b) => a.tier - b.tier || a.entry.localeCompare(b.entry))
+    .slice(0, limit)
+    .map(({ entry }) => ({ kind: "wildcard", name: entry, hint: "", count: 0, category: "wildcard", insert: `__${entry}__`, verbatim: true }));
+}
+
 /** A popup row from a `/tags` item `{name, category, count, alias?, ko?}`. */
 export function tagCandidate(item) {
   const hint = [item.alias ? `← ${item.alias}` : "", item.ko || ""].filter(Boolean).join(" · ");
@@ -152,8 +172,8 @@ export function formatCount(count) {
  * `onItems(candidates, query)` unless a newer `ask` / `cancel` came first. A LoRA query is answered at once from `loras()`.
  */
 export class Suggester {
-  constructor({ fetchTags, loras = () => [], onItems, delay = 150, limit = RESULT_LIMIT, setTimer = (run, ms) => setTimeout(run, ms), clearTimer = (id) => clearTimeout(id) }) {
-    Object.assign(this, { fetchTags, loras, onItems, delay, limit, setTimer, clearTimer });
+  constructor({ fetchTags, loras = () => [], wildcards = () => [], onItems, delay = 150, limit = RESULT_LIMIT, setTimer = (run, ms) => setTimeout(run, ms), clearTimer = (id) => clearTimeout(id) }) {
+    Object.assign(this, { fetchTags, loras, wildcards, onItems, delay, limit, setTimer, clearTimer });
     this.seq = 0;
     this.timer = null;
   }
@@ -170,6 +190,8 @@ export class Suggester {
     const seq = this.seq;
     const lora = loraQuery(query);
     if (lora !== null) return this.onItems(matchLoras(this.loras(), lora, this.limit), query);
+    const wildcard = wildcardQuery(query);
+    if (wildcard !== null) return this.onItems(matchWildcards(this.wildcards(), wildcard, this.limit), query);
     const text = String(query ?? "").trim();
     if (text.startsWith("<") || text.length < minQueryLength(text) || !this.fetchTags) return this.onItems([], query);
     this.timer = this.setTimer(() => {
@@ -226,11 +248,12 @@ export function caretPoint(box, pos, doc, win) {
 // ------------------------------------------------------------------------------------------------- popup + keys
 
 /**
- * `fetchTags(query, limit) -> Promise<[{name, category, count, alias?, ko?}]>`, `loras() -> [ComfyUI LoRA file names]`.
+ * `fetchTags(query, limit) -> Promise<[{name, category, count, alias?, ko?}]>`, `loras() -> [ComfyUI LoRA file names]`,
+ * `wildcards() -> [wildcard names]`.
  * Keys while the popup is open: ↑ ↓ move, Tab / Enter accept (only then: otherwise they keep their meaning, and Ctrl+Enter
  * still queues), Esc closes. Clicking outside, blur, moving the caret and a re-render close it.
  */
-export function createAutocomplete({ fetchTags, loras, delay = 150, doc = globalThis.document, win = globalThis.window, setTimer, clearTimer } = {}) {
+export function createAutocomplete({ fetchTags, loras, wildcards, delay = 150, doc = globalThis.document, win = globalThis.window, setTimer, clearTimer } = {}) {
   let popup = null;
   let owner = null; // the text box the shown rows belong to
   let asked = null; // {text, start, query} when the shown (or awaited) rows were asked for
@@ -239,7 +262,7 @@ export function createAutocomplete({ fetchTags, loras, delay = 150, doc = global
   let outsideBound = false; // the document-wide pointerdown listener is on while the popup is open
   let disposed = false;
 
-  const suggester = new Suggester({ fetchTags, loras, delay, setTimer, clearTimer, onItems: (rows, query) => show(rows, query) });
+  const suggester = new Suggester({ fetchTags, loras, wildcards, delay, setTimer, clearTimer, onItems: (rows, query) => show(rows, query) });
   const isOpen = () => items.length > 0 && popup !== null && !popup.hidden;
 
   function make(tag, className, text) {

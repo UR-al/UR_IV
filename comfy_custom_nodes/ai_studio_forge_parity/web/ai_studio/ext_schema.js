@@ -817,6 +817,9 @@ export const EXT_SCHEMA = {
      "max": 1.0,
      "section": "HiFlow"
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -858,6 +861,9 @@ export const EXT_SCHEMA = {
      "max": 1.0,
      "input": "end_percent"
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -922,6 +928,11 @@ export const EXT_SCHEMA = {
      "max": 1.0,
      "input": "flip_percent"
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1012,6 +1023,11 @@ export const EXT_SCHEMA = {
      "kind": "bool",
      "default": false
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1083,6 +1099,9 @@ export const EXT_SCHEMA = {
      "default": "",
      "input": "block_vector"
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -1228,6 +1247,9 @@ export const EXT_SCHEMA = {
      "kind": "bool",
      "default": false
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -1282,6 +1304,11 @@ export const EXT_SCHEMA = {
      "max": 1.0,
      "input": "noise_end"
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1330,6 +1357,10 @@ export const EXT_SCHEMA = {
      "default": false,
      "input": "latent_renorm"
     }
+   ],
+   "families": [
+    "anima",
+    "krea2"
    ]
   },
   {
@@ -1392,6 +1423,10 @@ export const EXT_SCHEMA = {
      "kind": "bool",
      "default": false
     }
+   ],
+   "families": [
+    "anima",
+    "krea2"
    ]
   },
   {
@@ -1446,6 +1481,10 @@ export const EXT_SCHEMA = {
      "max": 9007199254740991,
      "input": "seed"
     }
+   ],
+   "families": [
+    "anima",
+    "krea2"
    ]
   },
   {
@@ -1565,6 +1604,11 @@ export const EXT_SCHEMA = {
      "default": "",
      "input": "negative_prompt"
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1660,6 +1704,11 @@ export const EXT_SCHEMA = {
      "kind": "text",
      "default": ""
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   }
  ]

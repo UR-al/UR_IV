@@ -105,6 +105,8 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "AIStudioXYZView",
     "AIStudioExifView",           # 1.12.0: the EXIF panel next to the XYZ panel
     "AIStudioTextEncoderLoader",  # studio: CLIPLoader of the three families
+    "AIStudioAttention",          # 1.15.0: the attention backend without a restart
+    "AIStudioInpaintDetailer",    # 1.15.0: inpaint "only masked" from the mask editor's mask
     "AIStudioMossStream",         # studio: MOSS fp32 stream (ComfyUI-MOSS-Toolkit)
     "AIStudioAnimaReference",     # studio: Anima reference (SnapRef / Anima Ref Adapter)
     "AIStudioKrea2Reference",     # studio: Krea2 reference (comfyui-krea2edit)
@@ -121,6 +123,7 @@ def _source(root: Path, body: str = "VALUE = 1\n") -> Path:
 
 
 MODEL_NODES_1_11 = ("AIStudioTextEncoderLoader", "AIStudioMossStream", "AIStudioAnimaReference", "AIStudioKrea2Reference")
+NODES_AFTER_1_10 = ("AIStudioRelight", "AIStudioExifView", "AIStudioAttention", "AIStudioInpaintDetailer")
 
 
 class TestBundledComfyNodePack(unittest.TestCase):
@@ -190,7 +193,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 57)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 59)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
@@ -238,8 +241,28 @@ class TestBundledComfyNodePack(unittest.TestCase):
     def test_pack_version_matches_package_version(self):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
+    def test_studio_tools_release_is_1_15_0(self):
+        self.assertEqual(bundled_pack.__version__, "1.15.0")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.15.0: the studio picks its attention", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.15.0 changes"), readme.index("## 1.14.0 changes"))
+        changes = " ".join(readme.split("## 1.15.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`AIStudioAttention`", "`studio_wildcards.py`", "`inpaint_detailer`", "`EXT_AXES`", "`CLIPNegPip`"):
+            self.assertIn(text, changes)
+
+    def test_lora_axis_release_is_1_14_0(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.14.0: the X/Y/Z plot's LoRA axis", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.14.0 changes"), readme.index("## 1.13.0 changes"))
+        changes = " ".join(readme.split("## 1.14.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("`xyz_lora.py`", changes)
+        self.assertIn("`web/ai_studio/xyz_lora_view.js`", changes)
+
     def test_post_settings_release_is_1_13_0(self):
-        self.assertEqual(bundled_pack.__version__, "1.13.0")
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# 1.13.0: the studio's post-processing settings", source)
@@ -269,7 +292,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
         readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
         self.assertLess(readme.index("## 1.10.0 changes"), readme.index("## 1.9.0 changes"))
         changes = " ".join(readme.split("## 1.10.0 changes", 1)[1].split("\n## ", 1)[0].split())
-        studio_nodes = sorted(name for name in NODE_CLASS_MAPPINGS if name.startswith("AIStudio") and name not in ("AIStudioRelight", "AIStudioExifView") and name not in MODEL_NODES_1_11)
+        studio_nodes = sorted(name for name in NODE_CLASS_MAPPINGS if name.startswith("AIStudio") and name not in NODES_AFTER_1_10 and name not in MODEL_NODES_1_11)
         self.assertEqual(len(studio_nodes), 8)
         for text in (*(f"`{name}`" for name in studio_nodes),
                      "`example_workflows/AI Studio Anima.json`", "`tools/build_anima_studio_workflow.py`",

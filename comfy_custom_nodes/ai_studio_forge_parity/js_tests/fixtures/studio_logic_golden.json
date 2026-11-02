@@ -6,6 +6,12 @@
     "i2i_mode": "img2img",
     "prompt": "",
     "negative": "",
+    "prompt_prefix": "",
+    "prompt_char_count": "",
+    "prompt_character": "",
+    "prompt_copyright": "",
+    "prompt_artist": "",
+    "prompt_suffix": "",
     "unet": "",
     "te": "",
     "vae": "",
@@ -20,6 +26,8 @@
     "batch": 1,
     "loras": [],
     "negpip": true,
+    "moss_negpip": false,
+    "attention": "launch",
     "moss_stream": true,
     "family_memory": {},
     "dora_mode": "LyCORIS fp32 (as trained)",
@@ -28,7 +36,7 @@
       "noise": true,
       "prompt_syntax": true,
       "dora": true,
-      "attention": false
+      "attention": true
     },
     "hires": {
       "on": false,
@@ -121,7 +129,9 @@
       "height": 1216,
       "denoise": 0.55,
       "mask_blur": 4,
-      "inpaint_area": "whole"
+      "inpaint_area": "whole",
+      "inpaint_padding": 32,
+      "inpaint_fill": "original"
     },
     "reference": {
       "on": false,
@@ -365,7 +375,9 @@
         "inpaint_prompt": "",
         "negative_prompt": ""
       }
-    }
+    },
+    "prompt_template": "",
+    "negative_template": ""
   },
   "effective_prompt": [
     {
@@ -522,6 +534,71 @@
         "loras": []
       },
       "expected": "no loras"
+    },
+    {
+      "state": {
+        "prompt": "1girl",
+        "prompt_prefix": "best",
+        "prompt_suffix": "highres",
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "best, 1girl, highres <lora:meow:0.7>"
+    },
+    {
+      "state": {
+        "prompt": "1girl,\n",
+        "prompt_prefix": " a, b, ",
+        "prompt_suffix": ""
+      },
+      "expected": "a, b, 1girl"
+    },
+    {
+      "state": {
+        "prompt": "",
+        "prompt_prefix": "a",
+        "prompt_suffix": "<lora:meow:1>",
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "a, <lora:meow:1>"
+    },
+    {
+      "state": {
+        "prompt": "1girl, \n",
+        "prompt_prefix": " ,",
+        "prompt_suffix": "\t"
+      },
+      "expected": "1girl, \n"
+    },
+    {
+      "state": {
+        "prompt": "main",
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt_suffix": "post",
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "pre, 1boy, hero, game, @a, main, post <lora:meow:0.7>"
     }
   ],
   "unet_family": [
@@ -1188,5 +1265,1277 @@
         }
       }
     }
+  ],
+  "ext_axes": [
+    [
+      "ext.guidance.on",
+      "[가이던스] 켜기",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_enabled",
+      "[가이던스 PAG·SEG] 켜기",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_attn_method",
+      "[가이던스 PAG·SEG] 방식",
+      "choice",
+      [
+        "PAG",
+        "SEG",
+        "None"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_scale",
+      "[가이던스 PAG·SEG] 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_block_indices",
+      "[가이던스 PAG·SEG] 블록",
+      "lines",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_head_indices",
+      "[가이던스 PAG·SEG] 헤드",
+      "lines",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_official_strength",
+      "[가이던스 PAG·SEG] 공식 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_legacy_attn",
+      "[가이던스 PAG·SEG] Legacy",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_legacy_strength",
+      "[가이던스 PAG·SEG] Legacy 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_seg_sigma",
+      "[가이던스 PAG·SEG] SEG σ",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_start_percent",
+      "[가이던스 스케줄] 시작",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_end_percent",
+      "[가이던스 스케줄] 끝",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_rescale",
+      "[가이던스 스케줄] Rescale",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_rescale_mode",
+      "[가이던스 스케줄] Rescale 방식",
+      "choice",
+      [
+        "full",
+        "partial"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_auto_decay",
+      "[가이던스 스케줄] 자동 감쇠",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_slg_on",
+      "[가이던스 SLG·S²] SLG",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_slg_scale",
+      "[가이던스 SLG·S²] 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_slg_blocks",
+      "[가이던스 SLG·S²] 블록",
+      "lines",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_slg_mode",
+      "[가이던스 SLG·S²] 방식",
+      "choice",
+      [
+        "Fixed",
+        "Stochastic (S²)"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_s2_scale",
+      "[가이던스 SLG·S²] S² 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_s2_ratio",
+      "[가이던스 SLG·S²] S² 비율",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_s2_blocks",
+      "[가이던스 SLG·S²] S² 블록",
+      "lines",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_s2_start",
+      "[가이던스 SLG·S²] S² 시작",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_s2_end",
+      "[가이던스 SLG·S²] S² 끝",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cfg_mode",
+      "[가이던스 CFG 기준] 방식",
+      "choice",
+      [
+        "Preserve incoming",
+        "APG",
+        "CWM",
+        "SMC",
+        "SMC + CWM"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_experimental_stack",
+      "[가이던스 CFG 기준] 실험 스택",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_apg_enabled",
+      "[가이던스 APG] APG",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_apg_eta",
+      "[가이던스 APG] η",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_apg_norm",
+      "[가이던스 APG] Norm",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_apg_momentum",
+      "[가이던스 APG] Momentum",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_apg_autooff",
+      "[가이던스 APG] 자동 끔",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_adg_enabled",
+      "[가이던스 ADG] ADG",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_adg_start",
+      "[가이던스 ADG] 시작",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_adg_interval",
+      "[가이던스 ADG] 간격",
+      "int",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_master_enabled",
+      "[가이던스 SMC] SMC",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_enabled",
+      "[가이던스 SMC] SMC 보조",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_preset",
+      "[가이던스 SMC] 프리셋",
+      "choice",
+      [
+        "Auto",
+        "SD1.5 / SD2",
+        "SDXL",
+        "SD3 / SD3.5",
+        "Flux",
+        "Qwen-Image",
+        "Cosmos / Wan",
+        "Custom"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_lambda",
+      "[가이던스 SMC] λ",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_k",
+      "[가이던스 SMC] k",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_mode",
+      "[가이던스 SMC] 방식",
+      "choice",
+      [
+        "Unit-L2",
+        "Adaptive sign"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_adaptive_alpha",
+      "[가이던스 SMC] 적응 α",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_smc_adaptive_lambda",
+      "[가이던스 SMC] 적응 λ",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cwm_enabled",
+      "[가이던스 CWM] CWM",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cwm_alpha_low",
+      "[가이던스 CWM] α 저주파",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cwm_alpha_high",
+      "[가이던스 CWM] α 고주파",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_dcw_enabled",
+      "[가이던스 DCW·RDC] DCW",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_dcw_lambda_low",
+      "[가이던스 DCW·RDC] λ 저주파",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_dcw_lambda_high",
+      "[가이던스 DCW·RDC] λ 고주파",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_rdc_enabled",
+      "[가이던스 DCW·RDC] RDC",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_rdc_tau",
+      "[가이던스 DCW·RDC] τ",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_rdc_alpha_ll",
+      "[가이던스 DCW·RDC] α LL",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_rdc_alpha_hh",
+      "[가이던스 DCW·RDC] α HH",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_dave_enabled",
+      "[가이던스 DAVE] DAVE",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_dave_strength",
+      "[가이던스 DAVE] 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_dave_tau",
+      "[가이던스 DAVE] τ",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_dave_blocks",
+      "[가이던스 DAVE] 블록",
+      "lines",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cns_enabled",
+      "[가이던스 CNS] CNS",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cns_strength",
+      "[가이던스 CNS] 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cns_gamma_power",
+      "[가이던스 CNS] γ 지수",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_cns_gamma_scale",
+      "[가이던스 CNS] γ 배율",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mod_enabled",
+      "[가이던스 Mod] Mod",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mod_weight",
+      "[가이던스 Mod] 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mod_start_layer",
+      "[가이던스 Mod] 시작 층",
+      "int",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mod_end_layer",
+      "[가이던스 Mod] 끝 층",
+      "int",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mod_base_source",
+      "[가이던스 Mod] 기준",
+      "choice",
+      [
+        "Main positive",
+        "Custom"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mod_negative_source",
+      "[가이던스 Mod] 네거티브 기준",
+      "choice",
+      [
+        "Main negative",
+        "Custom"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mod_adapter_mode",
+      "[가이던스 Mod] 어댑터",
+      "choice",
+      [
+        "Auto-download official",
+        "Local file"
+      ],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_tsr_enabled",
+      "[가이던스 TSR] TSR",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_tsr_k",
+      "[가이던스 TSR] k",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_tsr_sigma",
+      "[가이던스 TSR] σ",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mg_enabled",
+      "[가이던스 MG] MG",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mg_alpha",
+      "[가이던스 MG] α",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mg_beta",
+      "[가이던스 MG] β",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mg_normalize",
+      "[가이던스 MG] 정규화",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mg_min",
+      "[가이던스 MG] 최소",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_mg_max",
+      "[가이던스 MG] 최대",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_higs_enabled",
+      "[가이던스 HiGS] HiGS",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_higs_weight",
+      "[가이던스 HiGS] 강도",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_higs_eta",
+      "[가이던스 HiGS] η",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_higs_alpha",
+      "[가이던스 HiGS] α",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_higs_cutoff",
+      "[가이던스 HiGS] Cutoff",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_higs_t_min",
+      "[가이던스 HiGS] t 최소",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_higs_t_max",
+      "[가이던스 HiGS] t 최대",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_hiflow_enabled",
+      "[가이던스 HiFlow] HiFlow",
+      "bool",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_hiflow_alpha",
+      "[가이던스 HiFlow] α",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_hiflow_beta",
+      "[가이던스 HiFlow] β",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.guidance.guid_hiflow_cutoff",
+      "[가이던스 HiFlow] Cutoff",
+      "float",
+      [],
+      "가이던스"
+    ],
+    [
+      "ext.optimal_scale.on",
+      "[Optimal Scale] 켜기",
+      "bool",
+      [],
+      "Optimal Scale"
+    ],
+    [
+      "ext.optimal_scale.ocfg_blend",
+      "[Optimal Scale] Blend",
+      "float",
+      [],
+      "Optimal Scale"
+    ],
+    [
+      "ext.optimal_scale.ocfg_start",
+      "[Optimal Scale] 시작",
+      "float",
+      [],
+      "Optimal Scale"
+    ],
+    [
+      "ext.optimal_scale.ocfg_end",
+      "[Optimal Scale] 끝",
+      "float",
+      [],
+      "Optimal Scale"
+    ],
+    [
+      "ext.skim.on",
+      "[Skim CFG] 켜기",
+      "bool",
+      [],
+      "Skim CFG"
+    ],
+    [
+      "ext.skim.skim_skimming_cfg",
+      "[Skim CFG] Skim CFG",
+      "float",
+      [],
+      "Skim CFG"
+    ],
+    [
+      "ext.skim.skim_full_skim_negative",
+      "[Skim CFG] 네거티브 전부",
+      "bool",
+      [],
+      "Skim CFG"
+    ],
+    [
+      "ext.skim.skim_disable_flipping_filter",
+      "[Skim CFG] 반전 필터 끔",
+      "bool",
+      [],
+      "Skim CFG"
+    ],
+    [
+      "ext.skim.skim_start_percent",
+      "[Skim CFG] 시작",
+      "float",
+      [],
+      "Skim CFG"
+    ],
+    [
+      "ext.skim.skim_end_percent",
+      "[Skim CFG] 끝",
+      "float",
+      [],
+      "Skim CFG"
+    ],
+    [
+      "ext.skim.skim_flip_at",
+      "[Skim CFG] 반전 지점",
+      "float",
+      [],
+      "Skim CFG"
+    ],
+    [
+      "ext.detail_daemon.on",
+      "[Detail Daemon] 켜기",
+      "bool",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_amount",
+      "[Detail Daemon] 강도",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_start",
+      "[Detail Daemon] 시작",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_end",
+      "[Detail Daemon] 끝",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_bias",
+      "[Detail Daemon] Bias",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_exponent",
+      "[Detail Daemon] 지수",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_start_offset",
+      "[Detail Daemon] 시작 오프셋",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_end_offset",
+      "[Detail Daemon] 끝 오프셋",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_fade",
+      "[Detail Daemon] Fade",
+      "float",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_smooth",
+      "[Detail Daemon] Smooth",
+      "bool",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.detail_daemon.dd_hires",
+      "[Detail Daemon] Hires 패스만",
+      "bool",
+      [],
+      "Detail Daemon"
+    ],
+    [
+      "ext.lora_block.on",
+      "[LoRA 블록] 켜기",
+      "bool",
+      [],
+      "LoRA 블록"
+    ],
+    [
+      "ext.lora_block.strength_model",
+      "[LoRA 블록] 모델 강도",
+      "float",
+      [],
+      "LoRA 블록"
+    ],
+    [
+      "ext.lora_block.strength_clip",
+      "[LoRA 블록] CLIP 강도",
+      "float",
+      [],
+      "LoRA 블록"
+    ],
+    [
+      "ext.lora_block.inverse",
+      "[LoRA 블록] 반전",
+      "bool",
+      [],
+      "LoRA 블록"
+    ],
+    [
+      "ext.lora_block.A",
+      "[LoRA 블록] A",
+      "float",
+      [],
+      "LoRA 블록"
+    ],
+    [
+      "ext.lora_block.B",
+      "[LoRA 블록] B",
+      "float",
+      [],
+      "LoRA 블록"
+    ],
+    [
+      "ext.lora_block.block_vector",
+      "[LoRA 블록] 블록 값",
+      "lines",
+      [],
+      "LoRA 블록"
+    ],
+    [
+      "ext.speed.on",
+      "[SPEED] 켜기",
+      "bool",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.mode",
+      "[SPEED] 방식",
+      "choice",
+      [
+        "transition",
+        "respace"
+      ],
+      "SPEED"
+    ],
+    [
+      "ext.speed.threshold",
+      "[SPEED] 전환 σ",
+      "choice",
+      [
+        "neo_shift",
+        "delta_optimal",
+        "manual"
+      ],
+      "SPEED"
+    ],
+    [
+      "ext.speed.preset",
+      "[SPEED] 프리셋",
+      "choice",
+      [
+        "anima",
+        "flux",
+        "flux2",
+        "krea-2",
+        "krea-2-raw",
+        "z-image",
+        "wan21",
+        "custom"
+      ],
+      "SPEED"
+    ],
+    [
+      "ext.speed.scales",
+      "[SPEED] 해상도 비율",
+      "lines",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.delta",
+      "[SPEED] δ",
+      "float",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.sigma_divisor",
+      "[SPEED] σ 나눔값",
+      "float",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.manual_sigmas",
+      "[SPEED] 수동 σ",
+      "lines",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.adaptive",
+      "[SPEED] 적응형",
+      "bool",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.transform",
+      "[SPEED] 변환",
+      "choice",
+      [
+        "dct",
+        "dwt",
+        "fft"
+      ],
+      "SPEED"
+    ],
+    [
+      "ext.speed.spectrum_A",
+      "[SPEED] A",
+      "float",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.spectrum_beta",
+      "[SPEED] β",
+      "float",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.seed",
+      "[SPEED] 시드",
+      "int",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.hires",
+      "[SPEED] Hires에도",
+      "bool",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.speed.apply_img2img",
+      "[SPEED] i2i에도",
+      "bool",
+      [],
+      "SPEED"
+    ],
+    [
+      "ext.er_sde.on",
+      "[ER SDE] 켜기",
+      "bool",
+      [],
+      "ER SDE"
+    ],
+    [
+      "ext.er_sde.xsamp_max_stage",
+      "[ER SDE] 차수",
+      "int",
+      [],
+      "ER SDE"
+    ],
+    [
+      "ext.er_sde.xsamp_eta",
+      "[ER SDE] η",
+      "float",
+      [],
+      "ER SDE"
+    ],
+    [
+      "ext.er_sde.xsamp_noise_window",
+      "[ER SDE] 잡음 구간",
+      "bool",
+      [],
+      "ER SDE"
+    ],
+    [
+      "ext.er_sde.xsamp_noise_start",
+      "[ER SDE] 구간 시작",
+      "float",
+      [],
+      "ER SDE"
+    ],
+    [
+      "ext.er_sde.xsamp_noise_end",
+      "[ER SDE] 구간 끝",
+      "float",
+      [],
+      "ER SDE"
+    ],
+    [
+      "ext.vae_2x.on",
+      "[VAE 2x] 켜기",
+      "bool",
+      [],
+      "VAE 2x"
+    ],
+    [
+      "ext.vae_2x.output_mode",
+      "[VAE 2x] 출력",
+      "choice",
+      [
+        "1x refined (downsample)",
+        "2x upscaled"
+      ],
+      "VAE 2x"
+    ],
+    [
+      "ext.vae_2x.blur_sigma",
+      "[VAE 2x] Blur σ",
+      "float",
+      [],
+      "VAE 2x"
+    ],
+    [
+      "ext.vae_2x.latent_renorm",
+      "[VAE 2x] Latent 재정규화",
+      "bool",
+      [],
+      "VAE 2x"
+    ],
+    [
+      "ext.degrid.on",
+      "[VAE DeGrid] 켜기",
+      "bool",
+      [],
+      "VAE DeGrid"
+    ],
+    [
+      "ext.degrid.mode",
+      "[VAE DeGrid] 방식",
+      "choice",
+      [
+        "Full",
+        "Dark Pixels Mainly",
+        "Bright Pixels Mainly"
+      ],
+      "VAE DeGrid"
+    ],
+    [
+      "ext.degrid.strength",
+      "[VAE DeGrid] 강도",
+      "float",
+      [],
+      "VAE DeGrid"
+    ],
+    [
+      "ext.degrid.tile",
+      "[VAE DeGrid] 타일",
+      "int",
+      [],
+      "VAE DeGrid"
+    ],
+    [
+      "ext.degrid.apply_img2img",
+      "[VAE DeGrid] i2i에도",
+      "bool",
+      [],
+      "VAE DeGrid"
+    ],
+    [
+      "ext.pid.on",
+      "[PiD] 켜기",
+      "bool",
+      [],
+      "PiD"
+    ],
+    [
+      "ext.pid.steps",
+      "[PiD] 스텝",
+      "int",
+      [],
+      "PiD"
+    ],
+    [
+      "ext.pid.sigma",
+      "[PiD] σ",
+      "float",
+      [],
+      "PiD"
+    ],
+    [
+      "ext.pid.seed",
+      "[PiD] 시드",
+      "int",
+      [],
+      "PiD"
+    ],
+    [
+      "ext.sam3_refine.on",
+      "[SAM3 Refine] 켜기",
+      "bool",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.denoise",
+      "[SAM3 Refine] 디노이즈",
+      "float",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.mask_mode",
+      "[SAM3 Refine] 마스크",
+      "choice",
+      [
+        "Combined",
+        "Individual"
+      ],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.fill_mode",
+      "[SAM3 Refine] 채우기",
+      "choice",
+      [
+        "fill",
+        "original",
+        "latent noise",
+        "latent nothing"
+      ],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.only_masked",
+      "[SAM3 Refine] 마스크 영역만",
+      "bool",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.mask_padding",
+      "[SAM3 Refine] 패딩",
+      "int",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.grow_mask_by",
+      "[SAM3 Refine] 마스크 확장",
+      "int",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.noise_multiplier",
+      "[SAM3 Refine] 노이즈 배율",
+      "float",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.use_custom_size",
+      "[SAM3 Refine] 크기 지정",
+      "bool",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.custom_width",
+      "[SAM3 Refine] 폭",
+      "int",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_refine.custom_height",
+      "[SAM3 Refine] 높이",
+      "int",
+      [],
+      "SAM3 Refine"
+    ],
+    [
+      "ext.sam3_tile.on",
+      "[SAM3 타일] 켜기",
+      "bool",
+      [],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.mask_mode",
+      "[SAM3 타일] 마스크",
+      "choice",
+      [
+        "Combined",
+        "Individual"
+      ],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.tile_width",
+      "[SAM3 타일] 타일 폭",
+      "int",
+      [],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.tile_height",
+      "[SAM3 타일] 타일 높이",
+      "int",
+      [],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.tile_padding",
+      "[SAM3 타일] 패딩",
+      "int",
+      [],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.denoise",
+      "[SAM3 타일] 디노이즈",
+      "float",
+      [],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.noise_multiplier",
+      "[SAM3 타일] 노이즈 배율",
+      "float",
+      [],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.fill_mode",
+      "[SAM3 타일] 채우기",
+      "choice",
+      [
+        "fill",
+        "original",
+        "latent noise",
+        "latent nothing"
+      ],
+      "SAM3 타일"
+    ],
+    [
+      "ext.sam3_tile.grow_mask_by",
+      "[SAM3 타일] 마스크 확장",
+      "int",
+      [],
+      "SAM3 타일"
+    ]
   ]
 }

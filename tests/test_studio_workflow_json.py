@@ -45,10 +45,11 @@ EXT_ROLES = {"ext_lora_block", "ext_er_sde", "ext_optimal_scale", "ext_guidance"
              "ext_dd_hires", "ext_speed_hires", "ext_dd_sam3", "ext_vae_2x", "ext_pid", "ext_sam3_refine", "ext_sam3_tile",
              "ext_degrid"}
 DEFAULT_BYPASSED = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "reference_image_2", "anima_ref",
+                    "inpaint_detailer",
                     "krea2_ref", "i2i_image", "sam3_mask", "sam3_detailer",
                     *(role for role, _ in POST_ROW), *EXT_ROLES}
 # Each pass's MODEL, sampler side first (the app compiler's order; the same tail from ext_skim up).
-GUIDED_CHAIN = ["ext_skim", "ext_guidance", "ext_optimal_scale", "krea2_ref", "anima_ref", "ext_er_sde", "dora", "negpip",
+GUIDED_CHAIN = ["ext_skim", "ext_guidance", "ext_optimal_scale", "krea2_ref", "anima_ref", "ext_er_sde", "attention", "dora", "negpip",
                 "ext_lora_block", "lora_stack", "sched", "shift", "moss_stream", "family_switch_model"]
 NODE_TITLE_HEIGHT = 30
 FORCED_INPUTS = {"AIStudioKrea2Reference": ("text", "negative_text")}  # STRING sockets, never widgets
@@ -134,7 +135,7 @@ class WorkflowFileTests(unittest.TestCase):
 
     def test_every_role_once(self):
         roles = _roles_from_js()
-        self.assertEqual(len(roles), 39 + len(EXT_ROLES))
+        self.assertEqual(len(roles), 42 + len(EXT_ROLES))
         self.assertNotIn("family_switch_clip", roles)  # R6
         found = [node["properties"]["aistudio_role"] for node in self.engine]
         self.assertCountEqual(found, roles)
@@ -356,6 +357,19 @@ class WorkflowFileTests(unittest.TestCase):
         # SPEED never reaches a detailer; each pass re-decides Detail Daemon with its own cfg
         for role in ("sam3_detailer", "ext_sam3_refine", "ext_sam3_tile"):
             self.assertEqual(self._model_chain(role), ["ext_dd_sam3", *tail], role)
+        self.assertEqual(self._model_chain("inpaint_detailer"), ["ext_speed", "ext_dd", *tail])  # the main pass
+
+    def test_the_inpaint_detailer_stands_in_for_the_sampler(self):
+        def source(role, name):
+            found, slot = self._source(self.by_role[role], name)
+            return found["properties"]["aistudio_role"], slot
+
+        self.assertEqual(source("inpaint_detailer", "image"), ("i2i_image", 0))
+        self.assertEqual(source("inpaint_detailer", "mask"), ("i2i_image", 1))
+        self.assertEqual(source("inpaint_detailer", "positive"), ("krea2_ref", 1))
+        self.assertEqual(source("inpaint_detailer", "negative"), ("krea2_ref", 2))
+        self.assertEqual(source("inpaint_switch", "a"), ("ext_pid", 0))
+        self.assertEqual(source("inpaint_switch", "b"), ("inpaint_detailer", 0))
 
     def test_post_runs_get_the_main_pass_models(self):
         self.assertEqual(self._model_chain("post_hires"), self._model_chain("hires"))
@@ -388,7 +402,7 @@ class WorkflowFileTests(unittest.TestCase):
         self.assertEqual(source("decode", "vae"), ("ext_vae_2x", 0))
         self.assertEqual(source("ext_pid", "image"), ("decode", 0))
         self.assertEqual(source("ext_pid", "latent"), ("hires", 0))
-        self.assertEqual(source("upscale", "image"), ("ext_pid", 0))
+        self.assertEqual(source("upscale", "image"), ("inpaint_switch", 0))
         self.assertEqual(source("ext_sam3_refine", "image"), ("sam3_detailer", 0))
         self.assertEqual(source("ext_sam3_tile", "image"), ("ext_sam3_refine", 0))
         self.assertEqual(source("ext_sam3_refine", "mask"), ("sam3_mask", 0))

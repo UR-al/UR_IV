@@ -24,8 +24,8 @@
 | `noise` SDE 단계 노이즈(EXP Heun 2 x0 SDE) | 전역 RNG에서 `torch.randn_like`. 전역 시드는 초기 노이즈를 뽑을 때 `(마지막 그림 시드 + 100000) % 65536`으로 정해진다 | 샘플러 시드로 시드한 생성기 | 가능 | `forge_noise`가 샘플러 시드를 그 값으로 넘긴다. GPU 위에서 두 앱의 뽑기가 같아진다(아래 "노이즈") |
 | `noise` 그 밖의 단계 노이즈(Euler a, DPM++ SDE 등 Forge 내장 샘플러), ENSD | 그림마다 CPU 생성기에서 이어 뽑고(ENSD가 0이 아니면 seed + ENSD로 다시 시드), DPM++ SDE 계열은 그림 시드의 Brownian tree | 샘플러 시드 하나의 GPU 생성기, Brownian tree는 샘플러 시드 | 불가 | `KSampler` 경로에서는 `noise_sampler`를 샘플러 함수에 넘길 수 없다. 넘기려면 `SamplerCustom` 그래프로 바꿔야 해서 이번 버전 범위 밖이다. 사용자 샘플러(EXP Heun 2 x0 SDE)는 위 줄로 맞는다 |
 | `dora` DoRA 합치기 | sam-extra "DoRA 추론 방식"을 켜 둔 LyCORIS(학습과 동일·fp32)가 txt2img 설정이다(`ui-config.json`) | 기본은 `weight_decompose`(원본 크기로 나눔) | 가능 | `forge_like.master`와 `.dora`가 켜져 있으면 `ForgeNeoDoraInferenceMode`의 모드를 `"LyCORIS fp32 (as trained)"`로 넣는다. 끄면 상태의 `dora_mode` |
-| `attention` 어텐션 | `--use-pytorch-cross-attention`(PyTorch SDPA) | 실행 옵션으로 고른다. 지금은 `--use-sage-attention`(Sage) | 불가 | 이번 버전은 실행 중에 바꾸지 않는다. Forge와 나란히 비교할 때는 ComfyUI를 `run_nvidia_gpu.bat`(기본 PyTorch 어텐션)으로 다시 켠다. Sage는 같은 시드에서 그림이 조금 다시 그려질 뿐 디테일 손실은 아니다 |
-| i2i `inpaint_area` 인페인트 영역 | "Whole picture"(기본) / "Only masked": 마스크 둘레를 잘라 생성 크기로 키워 그리고 제자리에 붙인다 | `ForgeNeoLatentInput`에 그런 입력이 없다. 언제나 그림 전체를 생성 크기로 다시 그린다 | 불가 | 제어판은 "전체"(Forge 기본값)를 회색으로 보이고 이유를 마우스 글로 단다. "마스크만"은 `ForgeNeoSAM3Detailer`의 자르기·붙이기를 마스크 편집기의 MASK에 쓰는 별도 단계가 필요해 이번 버전 범위 밖이다. 상태의 값은 어떤 노드 입력에도 쓰이지 않는다(`studio_logic.test.mjs`가 고정) |
+| `attention` 어텐션 | `--use-pytorch-cross-attention`(PyTorch SDPA) | 실행 옵션으로 고른다 | 가능 | `AIStudioAttention`이 MODEL에 PyTorch 어텐션을 건다(아래 "어텐션") |
+| i2i `inpaint_area` 인페인트 영역 | "Whole picture"(기본) / "Only masked": 마스크 둘레를 잘라 생성 크기로 키워 그리고 제자리에 붙인다 | `ForgeNeoLatentInput`은 언제나 그림 전체를 생성 크기로 다시 그린다 | 가능 | `AIStudioInpaintDetailer`가 두 영역을 모두 그린다(아래 "인페인트") |
 
 ## 프롬프트 편집
 
@@ -65,8 +65,8 @@ Forge 파서를 직접 돌린 무작위 비교(괄호를 많이 섞은 프롬프
 나아질 수 있는 방법(이번 버전 아님): 조건에 스텝 비율을 표시해 두고 샘플러가 실제 sigma 목록으로 범위를 다시 계산하면
 1번은 Forge와 스텝 단위로 맞출 수 있다.
 
-Forge 확장이 프롬프트를 고치는 것(Dynamic Prompts의 `{a|b}`·와일드카드 등)은 따르지 않는다.
-`AIStudioPromptEncode`의 글 칸은 `dynamicPrompts`를 끄고 있어 ComfyUI 프런트엔드도 `{a|b}`를 바꾸지 않는다.
+`AIStudioPromptEncode`의 글 칸은 `dynamicPrompts`를 끄고 있어 ComfyUI 프런트엔드는 `{a|b}`를 바꾸지 않는다. 와일드카드는
+생성을 시작할 때 스튜디오가 푼다(아래 "와일드카드").
 
 ## 가중치
 
@@ -127,10 +127,10 @@ sam-extra "DoRA 추론 방식"의 코드 기본값은 꺼짐이지만, 이 PC의
 ComfyUI는 시작할 때 어텐션 함수를 하나 고른다(`comfy/ldm/modules/attention.py`의 `optimized_attention`; Sage > Flash >
 xformers > PyTorch 순, 실행 옵션으로 정함). 위 비교의 ComfyUI는 Sage, Forge는 PyTorch SDPA다.
 
-- 지금 할 수 있는 것: Forge와 나란히 비교할 때 ComfyUI를 `run_nvidia_gpu.bat`(NVIDIA 기본 = PyTorch 어텐션)으로 다시 켠다.
-- 참고: ComfyUI v0.43.1에는 MODEL마다 어텐션 함수를 바꾸는 `ModelPatcher.set_model_optimized_attention`이 있고 Anima(Cosmos
-  predict2)의 어텐션도 그 경로를 지난다. 다음 버전에서 샘플러 노드 옵션으로 실행 중에 PyTorch 어텐션을 고르게 할 수 있다.
-  이번 버전에는 넣지 않았으므로 표에서는 불가다.
+- 1.15.0부터 제어판의 어텐션 칸이 실행 중에 고른다. ComfyUI v0.43.1의 `ModelPatcher.set_model_optimized_attention`을 쓰며, Anima·
+  MOSS·Krea2의 어텐션이 모두 그 경로를 지난다. 다시 켤 필요가 없고 X/Y/Z 축으로도 비교한다.
+- "Forge처럼" 어텐션은 PyTorch다. 켜면 어텐션 칸이 잠긴다. `parameters`에는 고른 경우만 `Attention`을 적는다.
+- 고르지 않으면(`launch`) 노드가 MODEL을 그대로 넘겨 1.14.0과 같다.
 
 ## 모델 계열과 외부 팩 (1.11.0)
 
@@ -173,3 +173,59 @@ Hires, 업스케일, SAM3 의 Forge 설정을 패널에 넣었다. 표는 `studi
 - Extra noise: 샘플링 안쪽에 넣어야 하고, Forge 설정도 꺼짐(0)이다.
 - ControlNet 의 Resize Mode, Override External: 이 그래프에서는 효과가 없다(`control_image` 를 잇지 않고, 앞단 ControlNet 도 없다).
 - SAM3 Refine 의 수동 마스크와 메인 프롬프트 물려받기, Anima Tile-Repair 패널, Extras 의 일괄 처리, 저장 폴더: 후처리 카드의 설정이 아니라 별도 기능이다.
+
+## 인페인트 (1.15.0)
+
+인페인트는 영역과 상관없이 `AIStudioInpaintDetailer`가 그리고 메인 샘플러는 돌지 않는다. 마스크 내용의 기본은 Forge처럼 원본이라 디노이즈가 1보다 작아도 원본에서 시작하고,
+마스크 바깥 픽셀은 그대로 남는다. 1.14.0까지의 전체 인페인트는 `VAEEncodeForInpaint`가 마스크 칸을 회색으로 지우고 시작했다.
+
+- 마스크만: Forge의 Only masked. `ForgeNeoSAM3Detailer`의 규칙대로 마스크 경계에 패딩을 더하고(`mask_bounds`), 생성 크기의 비율로 넓히고(`expand_crop_region`), 잘라서 그 크기로
+  그린 뒤 원본에 붙인다. 그림 크기는 원본 그대로이고 `Size`는 Forge처럼 생성 크기다.
+- 전체: Forge처럼 그림을 먼저 생성 크기로 바꾸고 그린다. 결과도 생성 크기다.
+
+Forge와 다른 점:
+
+- 스텝: 적은 수만큼 그대로 돈다. Forge는 스텝 × 디노이즈를 돈다(메인 i2i와 같다).
+- 배치: 마스크 하나로 여러 장을 한 번에 그린다. 시드는 하나고, Forge처럼 시드 + i가 아니다(디테일러에 `forge_noise`가 없다). 저장 시드도 하나다.
+- 마스크 흐림은 Forge처럼 시그마다. SAM3 마스크 흐림과 폭이 다르다. 생성 크기가 아니라 원본 크기에서 흐린다.
+- 메인 패스에만 있는 것은 돌지 않는다: VAE 2x, PiD, CNS, SPEED(인페인트에는 원래 없다). Detail Daemon은 메인 패스 것을 쓴다. 전체 인페인트의 노이즈도 이제 Forge처럼 만들 수 없지만, Forge의
+  인페인트 단계 노이즈는 원래 순서가 달라 같은 그림이 나오지 않았다.
+
+## XYZ 확장기능 축 (1.15.0)
+
+Forge에는 없다. 확장 표(`ext_schema.json`)의 설정마다 축이 하나 있고, 축 목록에서 확장별로 묶인다. 프롬프트, 경로, 파일 목록은 축이 없다.
+값을 넣으면 그 설정이 듣는 데 필요한 스위치도 그 칸에서 켠다(`xyz_axes._SECTION_SWITCHES`). 스위치 자체의 축은 칸마다 켜고 끄며, 다른 축이 덮어쓰지 않는다.
+글 설정(블록 목록 등)은 쉼표가 값의 일부라 한 줄에 한 값이다. 범위 밖 값은 패널처럼 잘린다. 고정 목록에 없는 값이나 이 모델 계열이 못 쓰는 확장은 격자를 만들지
+않는다. 칸들이 같은 프롬프트로 만들어지는 축(스위치 꺼짐, 파일 미선택, 탭에서 안 도는 확장, 옛 워크플로)은 생성할 때 알려 준다.
+
+## 와일드카드 (1.15.0)
+
+앱의 문법이다. `__이름__`·`~/이름/~`는 `이름.txt`를 읽고, 한 줄이 그룹이며 그룹마다 쉼표로 나뉜 항목 하나를 고른다. `__이름:2__`는 그룹 2개만 쓴다. 고른 항목의
+`[a|b]`와 다른 와일드카드도 푼다. 여기에 Dynamic Prompts의 `{a|b}`와 `{2::a|b}`를 더했다. 프롬프트에 직접 쓴 `[a|b]`는 앱과 달리 그대로 둔다. Forge의 프롬프트 편집이다.
+
+- 파일: `<ComfyUI>/wildcards`와 `extra_model_paths.yaml`의 `wildcards:` 항목. 이름은 경로가 될 수 없다.
+- 시드: 그림의 시드로 칸마다 따로 뽑는다. 같은 시드는 같은 프롬프트다. X/Y/Z는 칸의 시드로 뽑아서 같은 시드끼리 같은 선택을 비교한다.
+- 이름: 글자, 숫자, 공백, `.`, `:`, `-`, `_`만 이름으로 읽는다(앱보다 좁다). `o__o ^__^`나 `<lora:a__b__c:1>`는 와일드카드가 아니다.
+- 장수: 와일드카드가 있으면 그림마다 따로 뽑으려고 한 장씩 시드 + i로 돈다.
+- 저장: 풀린 프롬프트가 들어가고, 쓴 글은 Dynamic Prompts처럼 `Template`, `Negative Template`에 남는다.
+- 대상: 메인 프롬프트와 네거티브, 켜져 있는 Hires·SAM3·Refine·타일 자체 프롬프트. 갤러리 Hires·SAM3와 같은 시드도 그 그림의 시드로 뽑는다. 파일이 없으면 글자
+  그대로 두고 알려 준다.
+
+## 프롬프트 칸 (1.14.0)
+
+Forge 에는 없고 앱의 프롬프트 섹션과 같다. 선행 고정, 인물 수, 캐릭터, 작품, 작가, 프롬프트, 후행 고정 순으로 쉼표로 잇고, 빈 칸은 건너뛰며, 이어지는
+끝의 쉼표는 지운다. 순서는 사용자가 정한 앱 설정과 같고 패널에서 바꾸지는 않는다. 프롬프트 칸만 쓰면 글자 하나 바뀌지 않는다. 메인 프롬프트만 대상이고
+Hires·SAM3 의 자체 프롬프트에는 붙지 않는다. PNG `parameters` 에는 합친 글이 저장된다. XYZ 의 Prompt S/R, Prompt order, LoRA 축은 합친 글에서 찾는다.
+
+## XYZ LoRA 축 (1.14.0)
+
+Forge 에는 없는 축이다. Forge 에서는 Prompt S/R 로 `<lora:...>` 글자를 바꾼다. 이 축은 같은 일을 드롭다운으로 하고 에폭 범위를 펼친다.
+
+- LoRA: 기준 줄의 태그를 정확히 찾아 바꾼다. 프롬프트의 다른 LoRA 는 그대로다.
+- 같은 LoRA 두 번: 칸이 열의 파일을 기준 LoRA 보다 더 많이 부르면 생성하지 않는다. 이름이 같으면 마지막 강도만 쓰이고, 표기가 다르면 파일이 두 번 올라가서 제목과 다른 그림이 된다. 다른 축이 넣은 태그도 센다.
+- 찾을 말: 긍정 프롬프트에 있어야 한다. Prompt S/R 처럼 프롬프트와 네거티브를 다 바꾸지만 `<lora:...>` 태그 안은 건드리지 않는다. 트리거가 파일 이름의 앞부분인 경우가 많기 때문이다.
+- 지우기(`-`): 찾을 말만 있는 자리는 쉼표까지 지운다(`(말:1.2)` 포함, `(말, 다른 말:1.1)` 은 묶음이 남는다). 긴 항목의 일부면 그 글자만 지우고 앞뒤 항목은 붙이지 않는다.
+- 뒤에 넣기: 긍정 프롬프트의 첫 위치, 그 쉼표 항목의 끝에 넣는다. 항목 끝의 `<lora:...>` 는 뒤로 남는다. 찾을 말을 비우면 프롬프트 맨 앞에 넣는다.
+- 트리거에 `<` 나 `:` 가 있어 프롬프트의 태그가 바뀌면 생성하지 않는다.
+- 에폭: 번호 없는 파일이 마지막이다. 번호는 파일 헤더의 `ss_epoch` 를 읽고, 없으면 가장 큰 번호에 저장 간격을 더한 값으로 친다.
+- 순서: 비용 0.5 라 스텝·CFG 보다 바깥에서 돈다. LoRA 를 바꾸면 모델을 다시 패치하기 때문이다.

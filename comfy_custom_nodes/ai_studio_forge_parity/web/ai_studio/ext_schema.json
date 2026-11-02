@@ -815,6 +815,9 @@
      "max": 1.0,
      "section": "HiFlow"
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -856,6 +859,9 @@
      "max": 1.0,
      "input": "end_percent"
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -920,6 +926,11 @@
      "max": 1.0,
      "input": "flip_percent"
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1010,6 +1021,11 @@
      "kind": "bool",
      "default": false
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1081,6 +1097,9 @@
      "default": "",
      "input": "block_vector"
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -1226,6 +1245,9 @@
      "kind": "bool",
      "default": false
     }
+   ],
+   "families": [
+    "anima"
    ]
   },
   {
@@ -1280,6 +1302,11 @@
      "max": 1.0,
      "input": "noise_end"
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1328,6 +1355,10 @@
      "default": false,
      "input": "latent_renorm"
     }
+   ],
+   "families": [
+    "anima",
+    "krea2"
    ]
   },
   {
@@ -1390,6 +1421,10 @@
      "kind": "bool",
      "default": false
     }
+   ],
+   "families": [
+    "anima",
+    "krea2"
    ]
   },
   {
@@ -1444,6 +1479,10 @@
      "max": 9007199254740991,
      "input": "seed"
     }
+   ],
+   "families": [
+    "anima",
+    "krea2"
    ]
   },
   {
@@ -1563,6 +1602,11 @@
      "default": "",
      "input": "negative_prompt"
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   },
   {
@@ -1658,6 +1702,11 @@
      "kind": "text",
      "default": ""
     }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
    ]
   }
  ]

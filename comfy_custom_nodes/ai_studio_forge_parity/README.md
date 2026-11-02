@@ -84,6 +84,10 @@ inspector recognises them.
   chosen model family's nodes (2.9B/base or 3.8B) run)
 - `AIStudioTextEncoderLoader` (Anima studio: `CLIPLoader` for the three families; also reads a MOSS text encoder saved with
   bare `language_model.` / `visual.` keys)
+- `AIStudioAttention` (Anima studio: the attention backend of a MODEL through core's `set_model_optimized_attention`, `launch`
+  = what ComfyUI was started with)
+- `AIStudioInpaintDetailer` (Anima studio: `ForgeNeoSAM3Detailer` for the mask editor's mask, with `mask_blur`, `batch_size` and
+  `tell_empty_mask`)
 - `AIStudioMossStream`, `AIStudioAnimaReference`, `AIStudioKrea2Reference` (Anima studio: thin nodes over the optional
   ComfyUI-MOSS-Toolkit, SnapRef, ComfyUI-Anima-Ref-Adapter and comfyui-krea2edit packs; bypassed unless the panel uses them)
 
@@ -97,6 +101,54 @@ When the app generates from an ANIMA custom workflow it keeps
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.15.0 changes
+
+Five additions to the studio, all saved in the panel state and all off by default.
+
+- Attention: a row on the model card picks the backend without restarting ComfyUI. `AIStudioAttention` sets it on the MODEL
+  after DoRA, so every pass runs it and a change redoes no LoRA. `launch` passes the MODEL through. `/choices?kind=attentions`
+  lists what this ComfyUI has and names what it was started with. "Forge처럼" 어텐션 now works and means PyTorch.
+- Inpaint: `AIStudioInpaintDetailer`, a `ForgeNeoSAM3Detailer` in the `inpaint_detailer` role, runs every inpaint from the mask
+  editor's MASK. "마스크만" is Forge's Only masked: it crops around the mask, draws at the tab's size and pastes the result into the
+  picture, which keeps its size. "전체" resizes the picture to the tab's size first. Both start from the original pixels by default
+  (마스크 내용) and keep every pixel outside the mask; before, an inpaint went through `VAEEncodeForInpaint`, which greys the masked
+  pixels, so a denoise below 1 started from grey. The role is bypassed unless it runs; `inpaint_switch` (a lazy `AIStudioSwitch`)
+  then takes its image in place of the main pass, so the main sampler does not run. `mask_blur`, `batch_size` and `tell_empty_mask`
+  are that node's alone: Refine and tile take their widgets as named arguments, an inherited input would stop them.
+- X/Y/Z: `EXT_AXES` in `xyz_axes.py` is one axis per setting of the extension table, grouped by extension in the axis list
+  (`studio_ext.js` lists them the same way, the golden `ext_axes` pins both). A value also turns on what the setting needs, and
+  an extension the family cannot run refuses the plan. Prompts, paths and file lists have no axis, and a text setting takes one
+  value per line (`lines`), since its commas belong to it. `[Attention] Backend` is an axis too. An axis whose columns all build
+  one prompt is named in a notice.
+- Wildcards: `studio_wildcards.py` draws `__name__`, `~/name/~` and `__name:n__` by the app's rules, and `{a|b}`, `{2::a|b}`
+  by Dynamic Prompts'. `POST /wildcards/expand` gives a run one state per image, each drawn from its own seed; the file list is
+  `<ComfyUI>/wildcards` plus `wildcards:` entries of `extra_model_paths.yaml`. The prompts' `Template` and `Negative Template` go
+  into `parameters`. `__` in a prompt box lists the names.
+- NegPiP on MOSS: `CLIPNegPip` patches MOSS as well, so the switch opens there. MOSS has its own switch, `moss_negpip`, off by
+  default, because its tokenizer then reads every parenthesis as a weight. Krea2 stays greyed: no pack patches it.
+
+## 1.14.0 changes
+
+The X/Y/Z plot has a LoRA axis (`xyz_lora.py`, `web/ai_studio/xyz_lora_view.js`), which takes a block of rows instead of a
+value box. The first row names the `<lora:...>` tag to look for, exactly, so other LoRAs of the prompt stay as they are. Every
+row gives a column, or one column per epoch: from the row's file to a given number, or to the run's last file, the one
+without a number. A row can set its strength and a new trigger, which replaces the 찾을 말 text, goes behind the prompt tag
+holding that text, or to the front of the prompt when the box is empty; `-` removes the text. Extra-network tags are left
+out of that search: a trigger is usually also the start of the LoRA's file name. The last file's epoch number is the
+`ss_epoch` of its header, else one saving interval after the others. A problem comes back in the plan's `errors` and no cell
+is made: an epoch before the row's file or past the run, a tag, text or file that is not there, a name a tag cannot hold,
+two axes on one tag, a trigger that changes the prompt's tags, or a finished cell that loads a column's file more often
+than the prompt loaded the base (a name loads once with its last strength, and a second spelling loads the file again). The
+plan's `lora_preview` lists the columns for the panel. The axis costs 0.5, so a grid changes its LoRA less often than its
+steps or CFG. `/xyz/plan` no longer opens every model file on each call: `studio_choices.py` scans again only when a file
+changed. `resolve_lora_name` also finds a file whose stem ends in an extension or a space, and knows `.sft`, `.pt2`, `.pkl`.
+
+The prompt card has the app's sections, each box with its name: 선행 고정, 인물 수, 캐릭터, 작품, 작가, 프롬프트, 후행 고정
+(`PROMPT_SECTIONS` in `studio_state.py`). `assembled_prompt` (twin `assembledPrompt` in `studio_logic.js`) joins them in that
+order as the app joins its sections, empty ones skipped; with only the main box the prompt stays exactly as written. X/Y/Z
+cells carry the joined text with empty boxes, so an axis sees all of it, and a record read from a PNG's `parameters` does
+not take the panel's boxes.
 
 ## 1.13.0 changes
 
@@ -166,8 +218,8 @@ The studio now runs three model families on one workflow, picked by the checkpoi
 - Changing family keeps the old family's TE, VAE, sampler, scheduler, steps, CFG and Shift in `family_memory` and brings
   back the new family's, or its defaults (MOSS: euler, sgm_uniform, 50 steps, CFG 3, Shift 5; Krea2: euler, simple,
   Shift 1.15, Raw 20 steps CFG 3, Turbo 8 steps CFG 1).
-- NegPiP and the extensions that reach into Anima's blocks are greyed out on the other families; X/Y/Z refuses to mix
-  families in one grid.
+- The extensions that reach into Anima's blocks are greyed out on the other families; X/Y/Z refuses to mix families in one
+  grid. NegPiP stayed Anima-only here until 1.15.0.
 - `AIStudioMossStream`: MOSS-Image's fp32 residual stream, from the separate
   [ComfyUI-MOSS-Toolkit](https://github.com/sorryhyun/ComfyUI-MOSS-Toolkit) pack (Apache-2.0, not bundled).
 - `AIStudioTextEncoderLoader`: core `CLIPLoader`, plus MOSS text encoders saved with bare key prefixes, which core's

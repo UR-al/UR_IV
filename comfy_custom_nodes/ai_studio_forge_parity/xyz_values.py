@@ -19,8 +19,8 @@ import math
 import re
 from typing import Literal
 
-Kind = Literal["int", "float", "str", "choice", "permutations", "size", "nothing", "bool"]
-KINDS: tuple[str, ...] = ("int", "float", "str", "choice", "permutations", "size", "nothing", "bool")
+Kind = Literal["int", "float", "str", "lines", "choice", "permutations", "size", "nothing", "bool", "lora"]
+KINDS: tuple[str, ...] = ("int", "float", "str", "lines", "choice", "permutations", "size", "nothing", "bool", "lora")
 
 _INT_NUM = r"[+-]?\s*\d+"
 _FLOAT_NUM = r"[+-]?\s*\d+(?:\.\d*)?"
@@ -136,12 +136,16 @@ def _capped(values) -> list:
 def parse_axis_values(kind: Kind, text: str) -> list:
     """Parse one axis' value box.
 
-    int/float -> numbers (blank fields skipped, ranges expanded); str/choice -> strings (blanks kept);
-    permutations -> tuples, every ordering of the tokens; size -> ``(width, height)`` tuples;
-    bool -> bools; nothing -> one ignored value.  Raises ``ValueError`` for anything unparsable.
+    int/float -> numbers (blank fields skipped, ranges expanded); str/choice -> strings (blanks kept); lines -> one string
+    per line, commas kept (a block list is a comma list); permutations -> tuples, every ordering of the tokens;
+    size -> ``(width, height)`` tuples;
+    bool -> bools; nothing and lora -> one ignored value (a LoRA axis has its block, see ``xyz_lora``).  Raises
+    ``ValueError`` for anything unparsable.
     """
-    if kind == "nothing":
+    if kind in ("nothing", "lora"):
         return [""]
+    if kind == "lines":
+        return [line.strip() for line in (text or "").splitlines() if line.strip()]
     fields = split_values(text)
     if kind in ("str", "choice"):
         return fields

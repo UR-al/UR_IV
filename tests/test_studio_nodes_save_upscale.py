@@ -86,6 +86,12 @@ class SaveForgeTests(unittest.TestCase):
         self._save(_images(3), studio_state=_state_json(forge_like={"master": True}))
         self.assertEqual(self._seeds(3), [42, 43, 44])
 
+    def test_an_inpaint_batch_keeps_the_batch_seed(self):
+        # The inpaint detailer draws a batch from one seed, Forge-like noise or not.
+        inpaint = {"tab": "i2i", "i2i_mode": "inpaint"}
+        self._save(_images(2), studio_state=_state_json(forge_like={"master": True}, **inpaint))
+        self.assertEqual(self._seeds(2), [42, 42])
+
     def test_batch_without_forge_like_noise_keeps_the_batch_seed(self):
         cases = {"noise_off": {"master": True, "noise": False}, "master_off": {"master": False, "noise": True}}
         for stem, forge_like in cases.items():
@@ -233,7 +239,3 @@ class UpscaleImageTests(unittest.TestCase):
         for name in ("AIStudioSaveForge", "AIStudioUpscaleImage"):
             self.assertIn(name, studio_nodes.NODE_CLASS_MAPPINGS)
             self.assertIn(name, studio_nodes.NODE_DISPLAY_NAME_MAPPINGS)
-
-
-if __name__ == "__main__":
-    unittest.main()

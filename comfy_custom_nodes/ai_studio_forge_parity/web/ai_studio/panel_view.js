@@ -6,34 +6,44 @@ import { nodeInstalled, referenceBlock, renderReference } from "./reference_view
 import { createAutocomplete } from "./studio_autocomplete.js";
 import { hiresCard, hiresSizeText, postCard } from "./post_view.js";
 import { FAMILY_LABELS } from "./studio_ext.js";
-import { DORA_MODES, defaultModel, imageSize, modelFamily, pickCheckpoint, sizeStep, withDefaults } from "./studio_logic.js";
+import { DORA_MODES, INPAINT_FILLS, PROMPT_SECTIONS, defaultModel, familyHasNegpip, fileStem, imageSize, modelFamily, negpipKey, pickCheckpoint, sizeStep, withDefaults } from "./studio_logic.js";
 import { autoGrow, card, h, numberBox, optionItems, pill, row, select } from "./studio_dom.js";
 
-const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3", "controlnets", "face_models"];
+const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3", "controlnets", "face_models", "attentions", "wildcards"];
 // Model picks filled with an Anima default when their list arrives empty-handed (an empty pick would run the
 // loader's first file; the run controller refuses a run while one is still empty).
 const MODEL_KEYS = { unets: "unet", tes: "te", vaes: "vae" };
 const NEGPIP_MISSING = "불가: ComfyUI-ppm 노드 팩(CLIPNegPip)이 설치돼 있지 않음";
 const NEGPIP_OLD_GRAPH = "불가: 이 워크플로에는 NegPiP 노드가 없음. AI Studio Anima.json 을 새로 여세요";
-const NEGPIP_ANIMA_ONLY = "불가: Anima 전용";
+const NEGPIP_NO_FAMILY = "불가: Krea2 는 가중치를 못 읽음. 빼고 싶은 것은 네거티브에";
+const NEGPIP_TITLE = { anima: "음수 가중치 (단어:-1.0)", moss: "음수 가중치 (단어:-1.0). 켜면 (단어:1.2) 도 읽고, 글의 괄호도 가중치가 됨: 글자 괄호는 \\( \\)" };
 const STREAM_MISSING = "불가: ComfyUI-MOSS-Toolkit 노드 팩(MOSSStreamFP32)이 설치돼 있지 않음";
 const STREAM_OLD_GRAPH = "불가: 이 워크플로에는 fp32 노드가 없음. AI Studio Anima.json 을 새로 여세요";
-const INPAINT_AREA_REASON =
-  "불가: 지금 인페인트는 늘 그림 전체를 이 크기로 다시 그린다 (Forge의 '전체'). '마스크만'(잘라서 크게 그리기)은 아직 없음";
+const INPAINT_OLD_GRAPH = "불가: 이 워크플로에는 인페인트 노드가 없음. AI Studio Anima.json 을 새로 여세요";
+const INPAINT_AREA_TITLE = "전체: 그림 전체를 위 크기로 다시 그림. 마스크만: 마스크 둘레를 잘라 위 크기로 그리고 원본에 붙임 (Forge의 Only masked)";
+const ATTENTION_OLD_GRAPH = "불가: 이 워크플로에는 어텐션 노드가 없음. AI Studio Anima.json 을 새로 여세요";
+const ATTENTION_FORGE = "Forge처럼: PyTorch 어텐션";
+const ATTENTION_LABELS = { launch: "실행 옵션대로", pytorch: "PyTorch", sage: "Sage", flash: "Flash", comfy_kitchen_int8: "Kitchen" };
+const FILL_LABELS = { original: "원본", fill: "채우기", "latent noise": "latent noise", "latent nothing": "latent nothing" };
 
 // "Forge처럼" items; greyed ones follow studio_forge_parity.md (불가 rows).
 const FORGE_ITEMS = [
   { key: "noise", label: "노이즈", title: "초기·SDE 노이즈를 Forge처럼 (그림마다 시드 + i)" },
   { key: "prompt_syntax", label: "프롬프트 편집", title: "[a:b:0.5] · [a|b] 를 Forge처럼 스텝 구간으로" },
   { key: "dora", label: "DoRA", title: "DoRA 합치기를 학습과 같은 LyCORIS로 (실제 Forge 설정)" },
-  {
-    key: "attention",
-    label: "어텐션",
-    disabled: "불가: 어텐션은 ComfyUI 실행 옵션이라 여기서 못 바꿈. Forge와 비교할 땐 run_nvidia_gpu.bat(PyTorch 어텐션)으로 다시 켜기",
-  },
+  { key: "attention", label: "어텐션", title: "실행 옵션과 상관없이 PyTorch 어텐션으로 (실제 Forge 설정)" },
 ];
 
-const fileStem = (entry) => entry.replace(/\\/g, "/").split("/").pop().replace(/\.[^.]+$/, "");
+const PROMPT_LABELS = {
+  prompt_prefix: "선행 고정",
+  prompt_char_count: "인물 수",
+  prompt_character: "캐릭터",
+  prompt_copyright: "작품",
+  prompt_artist: "작가",
+  prompt: "프롬프트",
+  prompt_suffix: "후행 고정",
+  negative: "네거티브",
+};
 
 const group = (title, color, extraClass, ...children) =>
   h("div", { class: `ais-grp ${extraClass}`, style: `--c:${color}` }, title ? h("div", { class: "ais-gh" }, title) : null, children);
@@ -56,7 +66,9 @@ export class PanelView {
     this.extMemory = extMemory();
     this.choices = {};
     // One popup for both prompt boxes; the LoRA list (ComfyUI file names) feeds the `<lora:` suggestions.
-    this.autocomplete = ctx.tags ? createAutocomplete({ fetchTags: ctx.tags, loras: () => this.choices.loras || [] }) : null;
+    this.autocomplete = ctx.tags
+      ? createAutocomplete({ fetchTags: ctx.tags, loras: () => this.choices.loras || [], wildcards: () => this.choices.wildcards || [] })
+      : null;
     this.state = this.read();
     this.element = h("div", { class: "ais-root ais-panel" });
     this.render();
@@ -75,11 +87,21 @@ export class PanelView {
     return modelFamily(this.state.unet);
   }
 
-  /** Why NegPiP cannot run here ("" = it can): not Anima, the provider pack is missing, or this graph predates the node. */
+  /** Why NegPiP cannot run here ("" = it can): the family has no NegPiP, the provider pack is missing, or this graph predates the node. */
   negpipBlock() {
-    if (this.family !== "anima") return NEGPIP_ANIMA_ONLY;
+    if (!familyHasNegpip(this.family)) return NEGPIP_NO_FAMILY;
     if (!nodeInstalled("CLIPNegPip")) return NEGPIP_MISSING;
     return this.ctx.hasRole && !this.ctx.hasRole("negpip") ? NEGPIP_OLD_GRAPH : "";
+  }
+
+  /** Why the attention cannot be picked here ("" = it can): this graph predates the node. */
+  attentionBlock() {
+    return this.ctx.hasRole && !this.ctx.hasRole("attention") ? ATTENTION_OLD_GRAPH : "";
+  }
+
+  /** Why the inpaint settings cannot run here ("" = they can): this graph predates the nodes. */
+  inpaintBlock() {
+    return this.ctx.hasRole && !this.ctx.hasRole("inpaint_detailer") ? INPAINT_OLD_GRAPH : "";
   }
 
   /** Why MOSS's fp32 stream cannot run here ("" = it can). */
@@ -96,6 +118,7 @@ export class PanelView {
     for (const kind of CHOICE_KINDS) {
       this.ctx.choices(kind).then((data) => {
         this.choices[kind] = data?.items || [];
+        if (kind === "attentions") this.launchAttention = data?.launch || "";
         this.pickDefault(kind, data);
         this.scheduleRender();
       });
@@ -147,8 +170,13 @@ export class PanelView {
     const state = structuredClone(this.state);
     const image = this.ctx.i2i.get();
     if (image) state.i2i.image = image;
-    if (this.negpipBlock()) state.negpip = false;
+    if (this.negpipBlock()) Object.assign(state, { negpip: false, moss_negpip: false });
     if (this.streamBlock()) state.moss_stream = false;
+    if (this.attentionBlock()) {
+      state.attention = "launch";
+      state.forge_like.attention = false;
+    }
+    if (this.inpaintBlock()) state.i2i.inpaint_area = "whole";
     if (referenceBlock(this.family, state.reference.method, this.ctx.hasRole)) state.reference.on = false;
     dropBlockedExt(state.ext, this.ctx.hasRole, this.family);
     return state;
@@ -230,18 +258,18 @@ export class PanelView {
   common(s) {
     const typed = (key) => (e) => { autoGrow(e.target); this.set((st) => { st[key] = e.target.value; }); };
     const blocked = this.negpipBlock();
-    const negpip = pill(s.negpip && !blocked, () => this.set((st) => { st.negpip = !st.negpip; }, true), {
+    const key = negpipKey(this.family);
+    const negpip = pill(s[key] && !blocked, () => this.set((st) => { st[key] = !st[key]; }, true), {
       on: "NegPiP",
       off: "NegPiP",
-      title: blocked || "음수 가중치 (단어:-1.0)",
+      title: blocked || NEGPIP_TITLE[this.family],
       disabled: Boolean(blocked),
     });
-    const boxes = [
-      h("textarea", { class: "ais-f ais-prompt", placeholder: "프롬프트", value: s.prompt, onInput: typed("prompt") }),
-      h("textarea", { class: "ais-f ais-negative", placeholder: "네거티브", value: s.negative, onInput: typed("negative") }),
-    ];
+    const keys = [...PROMPT_SECTIONS, "negative"];
+    const boxes = keys.map((key) =>
+      h("textarea", { class: `ais-f ${key === "prompt" ? "ais-prompt" : "ais-negative"}`, "aria-label": PROMPT_LABELS[key], value: s[key], onInput: typed(key) }));
     boxes.forEach((box) => this.autocomplete?.attach(box)); // after the panel's own input handler: a picked tag is saved too
-    const prompt = card("프롬프트", negpip, boxes);
+    const prompt = card("프롬프트", negpip, boxes.map((box, index) => row(PROMPT_LABELS[keys[index]], box)), "ais-prompts");
     return group("공통 설정", "#4b6a8f", "", h("div", { class: "ais-stack" }, prompt, this.modelCard(s), this.loraCard(s), postCard(s, this.postView())));
   }
 
@@ -271,12 +299,25 @@ export class PanelView {
       this.forgeOpen ? this.forgeItems(s) : null,
       row("샘플러", pick("samplers", "sampler")),
       row("스케줄러", pick("schedulers", "scheduler")),
+      row("어텐션", this.attentionPick(s)),
       row("스텝", num("steps", { min: 1, max: 150, step: 1, width: 46 }), "CFG", num("cfg", { min: 0, max: 30, step: 0.5, width: 44 }),
         "Shift", num("shift", { min: 0, max: 100, step: 0.5, width: 44 })),
       row("시드", num("seed", { min: -1, step: 1, width: 120, title: "-1 = 랜덤, 그 밖의 값은 그대로 유지", live: true }), // Ctrl+Enter comes before the box is left
         h("button", { type: "button", class: "ais-mini", title: "현재 이미지의 시드 가져오기", "aria-label": "현재 이미지 시드 가져오기", onClick: () => this.pinSeed() }, "♻"),
         h("button", { type: "button", class: "ais-mini", title: "랜덤 (-1)", "aria-label": "랜덤 시드", onClick: () => this.setSeed(-1) }, "랜덤")),
     ]);
+  }
+
+  attentionPick(s) {
+    const blocked = this.attentionBlock();
+    const forge = s.forge_like.master && s.forge_like.attention;
+    const label = (mode) => {
+      const started = ATTENTION_LABELS[this.launchAttention];
+      return mode === "launch" && started ? `${ATTENTION_LABELS.launch} (${started})` : ATTENTION_LABELS[mode];
+    };
+    const items = (this.choices.attentions || ["launch"]).map((mode) => ({ value: mode, label: label(mode) }));
+    return select(optionItems(items, s.attention), forge ? "pytorch" : s.attention, (value) => this.set((st) => { st.attention = value; }),
+      { disabled: Boolean(blocked || forge), title: blocked || (forge ? ATTENTION_FORGE : "ComfyUI 를 다시 켜지 않고 바꾼다"), "aria-label": "어텐션" });
   }
 
   forgeItems(s) {
@@ -375,14 +416,19 @@ export class PanelView {
   i2iCard(s) {
     const mode = (name, text) =>
       pill(s.i2i_mode === name, () => this.set((st) => { st.i2i_mode = name; }, true), { on: text, off: text });
-    // Greyed like 어텐션: no node input takes the area, every inpaint is whole-picture (studio_forge_parity.md).
+    const blocked = this.inpaintBlock();
     const areas = [{ value: "whole", label: "전체" }, { value: "masked", label: "마스크만" }];
-    const area = h("span", { title: INPAINT_AREA_REASON }, select(areas, "whole", () => {}, { disabled: true, "aria-label": "인페인트 영역" }));
+    const area = select(areas, blocked ? "whole" : s.i2i.inpaint_area, (value) => this.set((st) => { st.i2i.inpaint_area = value; }, true),
+      { disabled: Boolean(blocked), title: blocked || INPAINT_AREA_TITLE, "aria-label": "인페인트 영역" });
+    const inpainting = !blocked && s.i2i_mode === "inpaint";
+    const fills = INPAINT_FILLS.map((value) => ({ value, label: FILL_LABELS[value] }));
     return card("i2i 설정", null, [
       row("모드", mode("img2img", "i2i"), mode("inpaint", "인페인트")),
       row("크기", this.sizeBox(s, "width", "i2i"), "×", this.sizeBox(s, "height", "i2i")), // the image's size when sent / uploaded
       row("디노이즈", numberBox(s.i2i.denoise, (value) => this.set((st) => { st.i2i.denoise = value; }), { min: 0, max: 1, step: 0.05, width: 62 })),
       row("인페인트 영역", area),
+      inpainting && s.i2i.inpaint_area === "masked" ? row("패딩", numberBox(s.i2i.inpaint_padding, (value) => this.set((st) => { st.i2i.inpaint_padding = value; }), { min: 0, max: 2048, step: 4, width: 62, title: "마스크 둘레에 함께 자를 픽셀" })) : null,
+      inpainting ? row("마스크 내용", select(fills, s.i2i.inpaint_fill, (value) => this.set((st) => { st.i2i.inpaint_fill = value; }), { "aria-label": "마스크 내용" })) : null,
       row("마스크 흐림", numberBox(s.i2i.mask_blur, (value) => this.set((st) => { st.i2i.mask_blur = value; }), { min: 0, max: 64, step: 1, width: 62 })),
     ]);
   }

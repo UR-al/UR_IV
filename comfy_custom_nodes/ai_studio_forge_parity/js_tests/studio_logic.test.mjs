@@ -5,11 +5,19 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  resolveLoraName,
+  mayHaveWildcards,
+  negpipKey,
+  negpipOn,
+  PROMPT_SECTIONS,
+  assembledPrompt,
+  hasNegativeWeights,
   DEFAULT_STATE,
   PICK_NOTICES,
   applyStateToPrompt,
   defaultModel,
   effectivePrompt,
+  loraTagNames,
   imageSize,
   missingLoras,
   hasPromptWeights,
@@ -28,11 +36,13 @@ import {
   xyzCellPrompts,
 } from "../web/ai_studio/studio_logic.js";
 import { autoGrow } from "../web/ai_studio/studio_dom.js";
+import { extAxes } from "../web/ai_studio/studio_ext.js";
 import { ROLES, ROLE_PROPERTY, roleIdsFromNodes } from "../web/ai_studio/studio_roles.js";
 
 const golden = JSON.parse(readFileSync(new URL("./fixtures/studio_logic_golden.json", import.meta.url), "utf-8"));
 
 const fixedRng = () => 0.5; // -> seed 2147483647
+const NEW_ROLES = new Set(["attention", "inpaint_detailer", "inpaint_switch"]); // their own tests below
 
 // A small API prompt shaped like the studio workflow's (graphToPrompt output): role -> node.
 function studioPrompt() {
@@ -97,10 +107,10 @@ const state = (overrides = {}) => ({ ...structuredClone(DEFAULT_STATE), ...overr
 
 test("ROLES lists every engine role once, without family_switch_clip (R6)", () => {
   assert.equal(new Set(ROLES).size, ROLES.length);
-  assert.equal(ROLES.length, 54);
+  assert.equal(ROLES.length, 57);
   assert.ok(!ROLES.includes("family_switch_clip"));
   const { roleIds } = studioPrompt(); // a workflow without extension nodes: studio_ext.test.mjs covers those roles
-  assert.deepEqual(ROLES.filter((role) => !role.startsWith("ext_")).sort(), Object.keys(roleIds).sort());
+  assert.deepEqual(ROLES.filter((role) => !role.startsWith("ext_") && !NEW_ROLES.has(role)).sort(), Object.keys(roleIds).sort());
 });
 
 test("negpip follows the panel switch", () => {
@@ -375,7 +385,7 @@ test("stageModes bypasses the unused family, i2i input, SAM3 and post nodes (R7)
   assert.deepEqual(Object.keys(modes).sort(), [...ROLES].sort());
   const bypassed = Object.keys(modes).filter((role) => modes[role] === 4 && !role.startsWith("ext_")).sort();
   assert.deepEqual(bypassed, [
-    "anima_ref", "i2i_image", "krea2_ref", "moss_stream", "neg_encode38", "pos_encode38", "post_decode", "post_encode",
+    "anima_ref", "i2i_image", "inpaint_detailer", "krea2_ref", "moss_stream", "neg_encode38", "pos_encode38", "post_decode", "post_encode",
     "post_hires", "post_image", "post_sam3_detailer", "post_sam3_mask", "post_save", "post_upscale", "qwen35", "reference_image", "reference_image_2",
     "sam3_detailer", "sam3_mask", "unet38",
   ]);
@@ -602,16 +612,92 @@ test("modelFamily reads the checkpoint name", () => {
   for (const name of ["anima-2.9b.safetensors", "anima-base.safetensors", "Anima-3.8B.safetensors", ""]) assert.equal(modelFamily(name), "anima");
 });
 
-test("the TE type follows the family, and NegPiP runs on Anima only", () => {
-  const out = (unet) => applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ unet, negpip: true }), { rng: fixedRng });
+test("the TE type follows the family, and NegPiP runs on Anima and MOSS", () => {
+  const out = (unet) => applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ unet, negpip: true, moss_negpip: true }), { rng: fixedRng });
   assert.equal(out("anima.safetensors")[1].inputs.type, "stable_diffusion");
   assert.equal(out("moss_sft.safetensors")[1].inputs.type, "moss_image");
   assert.equal(out("krea2_raw.safetensors")[1].inputs.type, "krea2");
   assert.equal(out("anima.safetensors")[2].inputs.enabled, true);
-  assert.equal(out("moss_sft.safetensors")[2].inputs.enabled, false);
+  assert.equal(out("moss_sft.safetensors")[2].inputs.enabled, true);
   assert.equal(out("krea2_raw.safetensors")[2].inputs.enabled, false);
   assert.equal(out("moss_sft.safetensors")[7].inputs.unet_name, "moss_sft.safetensors"); // the core loader, as Anima's
   assert.equal(out("moss_sft.safetensors")[8].inputs.select, 0);
+});
+
+test("MOSS has its own NegPiP switch, off by default, so a panel saved on MOSS stays as it was", () => {
+  const enabled = (overrides) => applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ unet: "moss_sft.safetensors", ...overrides }), { rng: fixedRng })[2].inputs.enabled;
+  assert.equal(enabled({ negpip: true }), false);
+  assert.equal(enabled({ moss_negpip: true }), true);
+  assert.equal(negpipKey("moss"), "moss_negpip");
+  assert.equal(negpipKey("anima"), "negpip");
+  assert.equal(negpipOn(ready({ unet: "krea2_raw.safetensors", negpip: true, moss_negpip: true })), false);
+});
+
+const NEW_ROLE_IDS = { attention: "1", inpaint_detailer: "2", inpaint_switch: "3" };
+const newRolePrompt = () => ({ 1: { inputs: {} }, 2: { inputs: {} }, 3: { inputs: {} } });
+const masked = (overrides = {}) => ready({
+  unet: "anima.safetensors", tab: "i2i", i2i_mode: "inpaint", seed: 9,
+  i2i: { ...DEFAULT_STATE.i2i, width: 640, height: 512, inpaint_area: "masked", inpaint_padding: 48, mask_blur: 6, denoise: 0.4, inpaint_fill: "fill" },
+  ...overrides,
+});
+
+test("the attention node gets the panel's pick, and Forge처럼 means PyTorch", () => {
+  const mode = (overrides) => applyStateToPrompt(newRolePrompt(), NEW_ROLE_IDS, ready({ unet: "anima.safetensors", ...overrides }), { rng: fixedRng })[1].inputs.mode;
+  assert.equal(mode({}), "launch");
+  assert.equal(mode({ attention: "sage" }), "sage");
+  const forge = { ...DEFAULT_STATE.forge_like, master: true };
+  assert.equal(mode({ attention: "sage", forge_like: forge }), "pytorch");
+  assert.equal(mode({ attention: "sage", forge_like: { ...forge, attention: false } }), "sage");
+});
+
+test("only masked: the detailer draws at the tab's size and the switch takes its image", () => {
+  const out = applyStateToPrompt(newRolePrompt(), NEW_ROLE_IDS, masked({ batch: 3 }), { rng: fixedRng });
+  assert.equal(out[3].inputs.select, 1);
+  const { inputs } = out[2];
+  assert.deepEqual([inputs.enabled, inputs.only_masked, inputs.mask_mode], [true, true, "Combined"]);
+  assert.deepEqual([inputs.target_width, inputs.target_height, inputs.mask_padding, inputs.mask_blur], [640, 512, 48, 6]);
+  assert.deepEqual([inputs.denoise, inputs.fill_mode, inputs.batch_size, inputs.seed], [0.4, "fill", 3, 9]);
+  assert.deepEqual([inputs.steps, inputs.cfg, inputs.sampler_name, inputs.scheduler], [32, 3, DEFAULT_STATE.sampler, DEFAULT_STATE.scheduler]);
+  assert.equal(inputs.tell_empty_mask, true);
+});
+
+test("only masked: MOSS draws at its 16x grid", () => {
+  const out = applyStateToPrompt(newRolePrompt(), NEW_ROLE_IDS, masked({ unet: "moss_sft.safetensors" }), { rng: fixedRng });
+  assert.deepEqual([out[2].inputs.target_width, out[2].inputs.target_height], [640, 512]);
+  const off = masked({ unet: "moss_sft.safetensors", i2i: { ...masked().i2i, width: 650, height: 520 } });
+  const snapped = applyStateToPrompt(newRolePrompt(), NEW_ROLE_IDS, off, { rng: fixedRng });
+  assert.deepEqual([snapped[2].inputs.target_width, snapped[2].inputs.target_height], [656, 528]);
+});
+
+test("the whole picture goes through the detailer too, from the original pixels", () => {
+  const whole = masked({ i2i: { ...masked().i2i, inpaint_area: "whole", inpaint_fill: "original" } });
+  const out = applyStateToPrompt(newRolePrompt(), NEW_ROLE_IDS, whole, { rng: fixedRng });
+  assert.equal(out[3].inputs.select, 1);
+  assert.deepEqual([out[2].inputs.only_masked, out[2].inputs.fill_mode], [false, "original"]);
+  assert.deepEqual([out[2].inputs.target_width, out[2].inputs.target_height], [640, 512]);
+});
+
+test("the detailer runs for every inpaint, never on a gallery run", () => {
+  const mode = (overrides, action = null) => stageModes(masked(overrides), action).inpaint_detailer;
+  assert.equal(mode({}), 0);
+  assert.equal(mode({ i2i: { ...DEFAULT_STATE.i2i, inpaint_area: "whole" } }), 0);
+  assert.equal(mode({ i2i_mode: "img2img" }), 4);
+  assert.equal(mode({ tab: "t2i" }), 4);
+  assert.equal(mode({}, "hires"), 4);
+  const whole = applyStateToPrompt(newRolePrompt(), NEW_ROLE_IDS, masked({ i2i_mode: "img2img" }), { rng: fixedRng });
+  assert.equal(whole[3].inputs.select, 0);
+});
+
+test("mayHaveWildcards looks at every prompt a run can encode", () => {
+  assert.equal(mayHaveWildcards(state({ prompt: "1girl, [a|b], (x:1.2), hair_style" })), false);
+  for (const overrides of [{ prompt: "__a__" }, { prompt_artist: "~/a/~" }, { negative: "{a|b}" }, { hires: { ...DEFAULT_STATE.hires, prompt: "__a__" } },
+    { sam3: { ...DEFAULT_STATE.sam3, inpaint_prompt: "{a|b}" } }]) {
+    assert.equal(mayHaveWildcards(state(overrides)), true, JSON.stringify(Object.keys(overrides)));
+  }
+});
+
+test("extAxes lists what xyz_axes.EXT_AXES does", () => {
+  assert.deepEqual(extAxes().map(({ id, label, kind, values, group }) => [id, label, kind, values, group]), golden.ext_axes);
 });
 
 test("the fp32 stream runs on MOSS with its switch on", () => {
@@ -792,4 +878,59 @@ test("hasPromptWeights finds explicit weights, not plain parentheses", () => {
   assert.equal(hasPromptWeights(ready({ prompt: "(saber_(fate):1.3), (blue hair:.8)" })), true);
   assert.equal(hasPromptWeights(ready({ prompt: "(hatsune_miku_\\(vocaloid\\):1.2)" })), true);
   assert.equal(hasPromptWeights(ready({ prompt: "plain (word) 10:30" })), false);
+});
+
+test("a file-list name always finds its file, as in studio_lora_tags.resolve_lora_name", () => {
+  const cases = [["LoRA\\krea2\\v2.safetensors.safetensors", "v2.safetensors"], ["x.pt.safetensors", "x.pt"],
+    ["LoRA\\ise14\\remover .safetensors", "remover "], ["a.sft", "a"], ["a.pt2", "a"], ["a.pkl", "a"]];
+  for (const [entry, name] of cases) assert.equal(resolveLoraName(name, ["other.safetensors", entry]), entry);
+  assert.equal(resolveLoraName("ee", ["tree.safetensors"]), null);
+});
+
+test("the prompt sits between the 선행 고정 and 후행 고정 boxes", () => {
+  const state = { prompt: "1boy, solo", prompt_prefix: "masterpiece", prompt_suffix: "highres" };
+  assert.equal(assembledPrompt(state), "masterpiece, 1boy, solo, highres");
+  assert.equal(assembledPrompt({ prompt: "1boy,\n", prompt_prefix: " a, b, \n", prompt_suffix: ",z," }), "a, b, 1boy, z");
+  assert.equal(assembledPrompt({ prompt: "", prompt_prefix: "a", prompt_suffix: "z" }), "a, z");
+  assert.equal(assembledPrompt({ prompt: "1boy, \n" }), "1boy, \n");
+  assert.equal(assembledPrompt({ prompt: "1boy, \n", prompt_prefix: " , ", prompt_suffix: "\n" }), "1boy, \n");
+});
+
+test("the boxes join in the card's order, the same as studio_state.PROMPT_SECTIONS", () => {
+  assert.deepEqual([...PROMPT_SECTIONS], ["prompt_prefix", "prompt_char_count", "prompt_character", "prompt_copyright", "prompt_artist", "prompt", "prompt_suffix"]);
+  const state = { prompt_suffix: "post", prompt: "main", prompt_artist: "@a", prompt_copyright: "game", prompt_character: "hero", prompt_char_count: "1boy", prompt_prefix: "pre" };
+  assert.equal(assembledPrompt(state), "pre, 1boy, hero, game, @a, main, post");
+  for (const key of PROMPT_SECTIONS.filter((name) => name !== "prompt")) {
+    assert.equal(assembledPrompt({ prompt: "main,\n", [key]: "x," }), key === "prompt_suffix" ? "main, x" : "x, main");
+  }
+});
+
+test("what a run writes holds the boxes", () => {
+  const api = { 1: { class_type: "AIStudioLoraStack", inputs: {} } };
+  const state = { prompt: "1boy", prompt_prefix: "best", prompt_suffix: "highres", loras: [{ on: true, name: "l", strength: 1 }], seed: 5 };
+  const out = applyStateToPrompt(api, { lora_stack: "1" }, state);
+  assert.equal(out[1].inputs.positive, "best, 1boy, highres <lora:l:1>");
+});
+
+test("a weight in a box counts", () => {
+  assert.equal(hasNegativeWeights({ prompt: "1boy", prompt_prefix: "(bad:-1.0)" }), true);
+  assert.equal(hasNegativeWeights({ prompt: "1boy", prompt_suffix: "(bad:-1.0)" }), true);
+  assert.equal(hasPromptWeights({ prompt: "1boy", prompt_suffix: "(good:1.2)" }), true);
+  assert.equal(hasPromptWeights({ prompt: "1boy", prompt_prefix: "good" }), false);
+});
+
+test("a tag in a box is a tag the run loads", () => {
+  assert.deepEqual(loraTagNames({ prompt: "1boy", prompt_suffix: "<lora:l:1>" }), ["l"]);
+});
+
+test("a PNG's prompt already holds the boxes, so the panel's are not added again", () => {
+  const panel = Object.fromEntries(PROMPT_SECTIONS.map((key) => [key, "panel"]));
+  const merged = postRunState(recordFromParameters("best, 1boy, highres\nSteps: 20, Seed: 5"), panel, "upscale");
+  assert.equal(effectivePrompt(merged), "best, 1boy, highres");
+});
+
+test("a session record keeps the boxes it was made with", () => {
+  const panel = { prompt: "now", prompt_prefix: "panel", prompt_suffix: "boxes" };
+  const merged = postRunState({ prompt: "1boy", prompt_prefix: "best", prompt_suffix: "highres" }, panel, "upscale");
+  assert.equal(effectivePrompt(merged), "best, 1boy, highres");
 });

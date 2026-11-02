@@ -449,5 +449,40 @@ class ReferenceDocsTests(unittest.TestCase):
         self.assertTrue(json.dumps(notes))
 
 
+class AttentionNodeTests(unittest.TestCase):
+    class Model:
+        def __init__(self):
+            self.attention = None
+
+        def clone(self):
+            return type(self)()
+
+        def set_model_optimized_attention(self, function):
+            self.attention = function
+
+    def module(self, known):
+        return mock.Mock(get_attention_function=lambda name, default=None: known.get(name, default))
+
+    def test_launch_leaves_the_model_alone(self):
+        model = self.Model()
+        self.assertIs(nodes.AIStudioAttention().patch(model, "launch")[0], model)
+
+    def test_a_backend_goes_on_a_clone(self):
+        model = self.Model()
+        with mock.patch.object(nodes.importlib, "import_module", return_value=self.module({"pytorch": "function"})) as loader:
+            patched = nodes.AIStudioAttention().patch(model, "pytorch")[0]
+        loader.assert_called_once_with("comfy.ldm.modules.attention")
+        self.assertIsNot(patched, model)
+        self.assertEqual((patched.attention, model.attention), ("function", None))
+
+    def test_a_backend_this_comfyui_lacks_stops_the_run(self):
+        with mock.patch.object(nodes.importlib, "import_module", return_value=self.module({})):
+            with self.assertRaisesRegex(ValueError, "sage"):
+                nodes.AIStudioAttention().patch(self.Model(), "sage")
+
+    def test_the_mode_list_is_the_states(self):
+        self.assertEqual(tuple(nodes.AIStudioAttention.INPUT_TYPES()["required"]["mode"][0]), nodes.ATTENTION_MODES)
+
+
 if __name__ == "__main__":
     unittest.main()

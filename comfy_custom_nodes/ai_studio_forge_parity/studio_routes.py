@@ -9,6 +9,7 @@ The routes (all JSON; a failure is ``{"error": ...}`` with status 400):
 
 - ``GET  /choices?kind=...``  picker lists (``studio_choices``)
 - ``GET  /tags?q=&limit=``    prompt tag autocomplete (``studio_tags``; ``limit`` 1..30, default 12)
+- ``POST /wildcards/expand``  ``{state}`` -> ``{states, missing}``, one state per image (``studio_wildcards``)
 - ``POST /xyz/plan``          ``{state, axes, options}`` -> the planned X/Y/Z cells (``xyz_plan``)
 - ``POST /xyz/grid``          generated cell images -> grid PNG(s) in ``output/AIStudio/xyz`` (``xyz_grid_draw``)
 - ``POST /open_output``       opens the output folder in the file manager (Windows only)
@@ -29,7 +30,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import studio_choices, studio_tags, xyz_plan
+from . import studio_choices, studio_tags, studio_wildcards, xyz_plan
 from .compat import folder_paths_module
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -189,9 +190,17 @@ def handle_tags(query) -> tuple[int, dict]:
     return 200, {"items": studio_tags.search_tags(text, limit)}
 
 
-def handle_plan(body, *, families=None, loras=None) -> tuple[int, dict]:
+def handle_wildcards_expand(body, *, lookup=None) -> tuple[int, dict]:
+    """The run of ``state`` with its wildcards drawn; ``states`` is empty when it has none."""
+    if not isinstance(body, dict) or not isinstance(body.get("state"), dict):
+        return _error("body must be {state}")
+    return 200, studio_wildcards.expand_run(body["state"], lookup or studio_wildcards.FILES.groups)
+
+
+def handle_plan(body, *, families=None, loras=None, lora_epoch=None, wildcards=None) -> tuple[int, dict]:
     """Plan an X/Y/Z grid.  ``families`` (file -> "2.9b" | "base" | "3.8b") defaults to the installed UNET files,
-    ``loras`` to ComfyUI's LoRA list (read only when a cell has a ``<lora:...>`` tag; a tag no file matches is an error).
+    ``loras`` to ComfyUI's LoRA list (read only when a cell has a ``<lora:...>`` tag; a tag no file matches is an error),
+    ``lora_epoch`` to the epoch a LoRA file holds (the LoRA axis' last file), ``wildcards`` to the wildcard files.
 
     A plan the planner rejects (bad values, mixed families, ...) is still a 200 answer: ``cells`` is empty and
     ``errors`` lists the reasons.  400 is for a body that is not ``{state, axes, options}`` at all."""
@@ -208,7 +217,10 @@ def handle_plan(body, *, families=None, loras=None) -> tuple[int, dict]:
         families = studio_choices.unet_families()
     if loras is None:
         loras = studio_choices.lora_names
-    plan = xyz_plan.plan_xyz(state, axes, options, rng=random.Random(), families=families, loras=loras)
+    if lora_epoch is None:
+        lora_epoch = studio_choices.lora_epoch
+    plan = xyz_plan.plan_xyz(state, axes, options, rng=random.Random(), families=families, loras=loras, lora_epoch=lora_epoch,
+                             wildcards=wildcards or studio_wildcards.FILES.groups)
     return 200, dataclasses.asdict(plan)
 
 
@@ -404,6 +416,7 @@ def _route(handle, *, read: str = "json"):
 def register_studio_handlers() -> None:
     add_handler("GET", "/choices", _route(handle_choices, read="query"))
     add_handler("GET", "/tags", _route(handle_tags, read="query"))
+    add_handler("POST", "/wildcards/expand", _route(handle_wildcards_expand))
     add_handler("POST", "/xyz/plan", _route(handle_plan))
     add_handler("POST", "/xyz/grid", _route(handle_grid))
     add_handler("POST", "/open_output", _route(handle_open_output, read="none"))

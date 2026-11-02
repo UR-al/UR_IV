@@ -70,6 +70,12 @@ class ResolveLoraNameTests(unittest.TestCase):
         self.assertIsNone(slt.resolve_lora_name("", self.FILES))
         self.assertIsNone(slt.resolve_lora_name("ee", self.FILES))  # no partial-stem matches
 
+    def test_a_file_list_name_always_finds_its_file(self):
+        for entry, name in (("LoRA\\krea2\\v2.safetensors.safetensors", "v2.safetensors"), ("x.pt.safetensors", "x.pt"),
+                            ("LoRA\\ise14\\remover .safetensors", "remover "), ("a.sft", "a"), ("a.pt2", "a"), ("a.pkl", "a")):
+            with self.subTest(entry=entry):
+                self.assertEqual(slt.resolve_lora_name(name, ["other.safetensors", entry]), entry)
+
 
 if __name__ == "__main__":
     unittest.main()

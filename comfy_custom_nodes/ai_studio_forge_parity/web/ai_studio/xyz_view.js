@@ -2,9 +2,12 @@
 // JSON in the node's hidden `xyz` widget. The grid itself is shown in the result column's "XYZ 격자" tab.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { h, numberBox, optionItems, pill, select } from "./studio_dom.js";
+import { extAxes } from "./studio_ext.js";
+import { baseItems, columnList, fileItems, loraAxisBody, loraWithDefaults, newLoraBlock, refillFiles } from "./xyz_lora_view.js";
 
-// Mirror of xyz_axes.py AXES (id, Forge label, value kind, /choices kind); js_tests/xyz_view.test.mjs pins it.
-export const XYZ_AXES = Object.freeze([
+// Mirror of xyz_axes.py AXES (id, Forge label, value kind, /choices kind); js_tests/xyz_view.test.mjs pins it. The extension
+// table's axes follow (the golden `ext_axes` pins them).
+const FORGE_AXES = Object.freeze([
   ["nothing", "Nothing", "nothing", null],
   ["seed", "Seed", "int", null],
   ["steps", "Steps", "int", null],
@@ -14,6 +17,7 @@ export const XYZ_AXES = Object.freeze([
   ["shift", "Shift", "float", null],
   ["prompt_sr", "Prompt S/R", "str", null],
   ["prompt_order", "Prompt order", "permutations", null],
+  ["lora", "LoRA", "lora", null],
   ["sampler", "Sampler", "choice", "samplers"],
   ["hires_sampler", "Hires sampler", "choice", "samplers"],
   ["scheduler", "Schedule type", "choice", "schedulers"],
@@ -23,13 +27,16 @@ export const XYZ_AXES = Object.freeze([
   ["hires_upscaler", "Hires upscaler", "choice", "upscalers"],
   ["text_encoder", "[Modules] Text Encoder", "choice", "tes"],
   ["dora_mode", "[DoRA] Inference mode", "choice", "dora_modes"],
+  ["attention", "[Attention] Backend", "choice", "attentions"],
   ["sam3_enable", "[SAM3] Enable", "bool", null],
   ["sam3_checkpoint", "[SAM3] Checkpoint", "choice", "sam3"],
   ["sam3_prompt", "[SAM3] Detect Prompt", "str", null],
   ["sam3_denoise", "[SAM3] Denoising Strength", "float", null],
   ["sam3_steps", "[SAM3] Steps", "int", null],
   ["sam3_cfg", "[SAM3] CFG Scale", "float", null],
-].map(([id, label, kind, choices]) => Object.freeze({ id, label, kind, choices })));
+].map(([id, label, kind, choices]) => Object.freeze({ id, label, kind, choices, values: [], group: "" })));
+
+export const XYZ_AXES = Object.freeze([...FORGE_AXES, ...extAxes().map(Object.freeze)]);
 
 const AXIS_BY_ID = new Map(XYZ_AXES.map((axis) => [axis.id, axis]));
 const LETTERS = ["X", "Y", "Z"];
@@ -39,6 +46,7 @@ const PLACEHOLDERS = {
   float: "0.5, 1-2 [3]",
   size: "832x1216, 1216x832",
   str: "첫 값 = 찾을 글\n바꿀 글",
+  lines: "한 줄에 한 값 (쉼표는 값의 일부)",
   permutations: "a, b, c",
   choice: "한 줄에 하나 (고르기)",
   bool: "True, False",
@@ -70,7 +78,8 @@ export function xyzWithDefaults(raw) {
   const axes = DEFAULT_XYZ.axes.map((fallback, index) => {
     const entry = Array.isArray(source.axes) ? source.axes[index] : null;
     const axis = AXIS_BY_ID.has(entry?.axis) ? entry.axis : fallback.axis;
-    return { axis, text: typeof entry?.text === "string" ? entry.text : "" };
+    const block = axis === "lora" || entry?.lora ? { lora: loraWithDefaults(entry?.lora) } : {};
+    return { axis, text: typeof entry?.text === "string" ? entry.text : "", ...block };
   });
   const options = { ...DEFAULT_XYZ.options };
   const given = source.options && typeof source.options === "object" ? source.options : {};
@@ -118,10 +127,12 @@ export class XyzView {
     this.picker = -1;
     this.estimate = "";
     this.error = "";
+    this.loraColumns = {};
     this.settings = this.read();
     this.element = h("div", { class: "ais-root ais-xyz" });
     this.render();
     this.refreshEstimate();
+    this.loadLoraFiles();
   }
 
   read() {
@@ -136,6 +147,7 @@ export class XyzView {
     this.settings = this.read();
     this.render();
     this.refreshEstimate();
+    this.loadLoraFiles();
   }
 
   getXyz() {
@@ -151,7 +163,9 @@ export class XyzView {
   }
 
   onStudioEvent(type) {
-    if (type === "state") this.refreshEstimate();
+    if (type !== "state") return;
+    this.syncBaseLoras();
+    this.refreshEstimate();
   }
 
   dispose() {
@@ -167,25 +181,65 @@ export class XyzView {
     if (!this.settings.on) {
       this.estimate = "";
       this.error = "";
+      this.loraColumns = {};
       this.renderEstimate();
       return;
     }
     this.estimateTimer = setTimeout(async () => {
+      this.estimateRequest = (this.estimateRequest || 0) + 1;
+      const request = this.estimateRequest;
       const { axes, options } = this.settings;
       let error = "";
       let estimate = "";
+      let loraColumns = {};
       try {
         const plan = await this.ctx.plan({ state: this.ctx.getState(), axes, options });
         error = plan?.errors?.length ? plan.errors.join("\n") : "";
         estimate = error ? "" : estimateText(axes, plan?.labels);
+        loraColumns = error ? {} : plan?.lora_preview || {};
       } catch (failure) {
         error = String(failure?.message || failure);
       }
-      if (!this.settings.on) return; // switched off while the request ran
+      if (!this.settings.on || request !== this.estimateRequest) return; // switched off, or a newer request ran, meanwhile
       this.error = error;
       this.estimate = estimate;
+      this.loraColumns = loraColumns;
       this.renderEstimate();
     }, ESTIMATE_DELAY_MS);
+  }
+
+  hasLoraAxis() {
+    return this.settings.axes.some((entry) => entry.axis === "lora");
+  }
+
+  /** A LoRA axis' drop-downs list the LoRA files; `fresh` skips the cache (a new epoch may have arrived). */
+  async loadLoraFiles(fresh = false) {
+    if (!this.hasLoraAxis()) return;
+    const items = (await this.ctx.choices("loras", fresh))?.items || [];
+    if (JSON.stringify(items) !== JSON.stringify(this.choices.loras)) {
+      this.choices.loras = items;
+      refillFiles(this.element, fileItems(items));
+    }
+    this.syncBaseLoras();
+  }
+
+  /** The base rows list the panel's LoRAs, which change while this view stays drawn. */
+  syncBaseLoras() {
+    if (this.hasLoraAxis() && JSON.stringify(baseItems(this.ctx.getState())) !== JSON.stringify(this.baseLoras)) this.render();
+  }
+
+  pickAxis(index, value) {
+    this.picker = -1;
+    this.set((s) => {
+      s.axes[index].axis = value;
+      if (value === "lora") s.axes[index].lora ??= newLoraBlock(baseItems(this.ctx.getState())[0]?.value);
+    }, { rerender: true });
+    this.loadLoraFiles(true);
+  }
+
+  swapAxes(a, b) {
+    this.picker = -1;
+    this.set((s) => { [s.axes[a], s.axes[b]] = [s.axes[b], s.axes[a]]; }, { rerender: true });
   }
 
   async openPicker(index) {
@@ -199,6 +253,8 @@ export class XyzView {
 
   render() {
     const { settings } = this;
+    const scrolled = this.element.querySelector(".ais-xb")?.scrollTop ?? 0;
+    this.baseLoras = baseItems(this.ctx.getState());
     const option = (key, text) =>
       h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, text),
         pill(settings.options[key], () => this.set((s) => { s.options[key] = !s.options[key]; }, { rerender: true, estimate: key === "keep_minus1" })));
@@ -211,41 +267,59 @@ export class XyzView {
         numberBox(settings.options[key], (value) => this.set((s) => { s.options[key] = Math.round(Math.max(min, Math.min(max, value))); }, { estimate: false }), { min, max, step, width: 60 }));
     const swap = (a, b) =>
       h("button", { type: "button", class: "ais-mini ais-swap", "aria-label": `${LETTERS[a]} ${LETTERS[b]} 축 바꾸기`,
-        onClick: () => this.set((s) => { [s.axes[a], s.axes[b]] = [s.axes[b], s.axes[a]]; }, { rerender: true }) }, `${LETTERS[a]}↔${LETTERS[b]}`);
+        onClick: () => this.swapAxes(a, b) }, `${LETTERS[a]}↔${LETTERS[b]}`);
     this.estimateEl = h("span", { class: "ais-f ais-estimate" });
+    this.columnsEl = h("div", { class: "ais-lx-lists" });
     this.errorEl = h("div", { class: "ais-xyz-error", role: "status" });
+    const body = h("div", { class: "ais-xb" },
+      settings.axes.map((_, index) => this.axisBlock(index)),
+      h("div", { class: "ais-row ais-swaps" }, h("span", { class: "ais-label" }, "축 바꾸기"), h("span", { class: "ais-ctl" }, swap(0, 1), swap(1, 2), swap(0, 2))),
+      h("div", { class: "ais-xopts" },
+        option("draw_legend", "범례 그리기"),
+        option("keep_minus1", "-1 시드 유지"),
+        vary,
+        option("include_images", "개별 이미지 포함"),
+        option("include_sub_grids", "하위 격자 포함"),
+        number("margin", "여백 (px)", 0, 500, 2),
+        number("row_count", "Row Count (0 = 자동)", 0, 8, 1),
+        h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, "예상 장수"), this.estimateEl),
+        this.columnsEl,
+        this.errorEl));
     this.element.replaceChildren(
       h("div", { class: "ais-xh" }, h("span", {}, "XYZ 비교"),
         pill(settings.on, () => this.set((s) => { s.on = !s.on; }, { rerender: true }), { title: "켜면 생성 버튼이 XYZ로 돈다" })),
-      h("div", { class: "ais-xb" },
-        settings.axes.map((_, index) => this.axisBlock(index)),
-        h("div", { class: "ais-row ais-swaps" }, h("span", { class: "ais-label" }, "축 바꾸기"), h("span", { class: "ais-ctl" }, swap(0, 1), swap(1, 2), swap(0, 2))),
-        h("div", { class: "ais-xopts" },
-          option("draw_legend", "범례 그리기"),
-          option("keep_minus1", "-1 시드 유지"),
-          vary,
-          option("include_images", "개별 이미지 포함"),
-          option("include_sub_grids", "하위 격자 포함"),
-          number("margin", "여백 (px)", 0, 500, 2),
-          number("row_count", "Row Count (0 = 자동)", 0, 8, 1),
-          h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, "예상 장수"), this.estimateEl),
-          this.errorEl)),
+      body,
     );
     this.renderEstimate();
+    body.scrollTop = scrolled;
   }
 
   renderEstimate() {
     if (!this.estimateEl) return;
     this.estimateEl.textContent = this.estimate || "-";
+    this.columnsEl.replaceChildren(...LETTERS.flatMap((letter) => {
+      const columns = this.loraColumns[letter.toLowerCase()];
+      return columns ? [columnList(letter, columns)] : [];
+    }));
     this.errorEl.hidden = !this.error;
     this.errorEl.textContent = this.error;
+  }
+
+  loraBody(index) {
+    return loraAxisBody({
+      block: this.settings.axes[index].lora,
+      baseItems: this.baseLoras,
+      fileItems: fileItems(this.choices.loras),
+      change: (mutate, rerender = false) => this.set((s) => mutate(s.axes[index].lora), { rerender }),
+      refreshFiles: () => this.loadLoraFiles(true),
+    });
   }
 
   axisBlock(index) {
     const entry = this.settings.axes[index];
     const spec = AXIS_BY_ID.get(entry.axis);
-    const pickable = Boolean(spec.choices) || spec.kind === "bool";
-    const types = XYZ_AXES.map((axis) => ({ value: axis.id, label: axis.label }));
+    const pickable = Boolean(spec.choices) || spec.values.length > 0 || spec.kind === "bool";
+    const types = XYZ_AXES.map((axis) => ({ value: axis.id, label: axis.label, group: axis.group }));
     const box = h("textarea", {
       class: `ais-f ais-values ${index === 0 ? "tall" : ""}`,
       value: entry.text,
@@ -256,16 +330,15 @@ export class XyzView {
     });
     return h("div", { class: "ais-ax" },
       h("div", { class: "ais-axh" }, h("span", {}, LETTERS[index]),
-        select(types, entry.axis, (value) => { this.picker = -1; this.set((s) => { s.axes[index].axis = value; }, { rerender: true }); },
-          { class: "ais-f ais-grow", "aria-label": `${LETTERS[index]} 종류` }),
+        select(types, entry.axis, (value) => this.pickAxis(index, value), { class: "ais-f ais-grow", "aria-label": `${LETTERS[index]} 종류` }),
         pickable ? h("button", { type: "button", class: `ais-pill ${this.picker === index ? "on" : "off"}`, onClick: () => this.openPicker(index) }, "고르기") : null),
-      box,
+      spec.kind === "lora" ? this.loraBody(index) : box,
       this.picker === index ? this.pickerList(index, spec) : null);
   }
 
   pickerList(index, spec) {
     const text = this.settings.axes[index].text;
-    const items = optionItems(spec.kind === "bool" ? BOOL_ITEMS : this.choices[spec.choices] || []);
+    const items = optionItems(spec.kind === "bool" ? BOOL_ITEMS : spec.values.length ? spec.values : this.choices[spec.choices] || []);
     const picked = new Set(text.split("\n").map(unquote));
     const toggle = (value) => this.set((s) => { s.axes[index].text = toggleLine(s.axes[index].text, value); }, { rerender: true });
     const all = () => this.set((s) => { s.axes[index].text = items.map((item) => csvField(item.value)).join("\n"); }, { rerender: true });

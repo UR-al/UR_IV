@@ -28,18 +28,33 @@ const KEY_OF_ROLE = new Map([...EXTENSIONS.map((item) => [item.role, item.key]),
 export const EXT_ROLES = Object.freeze([...KEY_OF_ROLE.keys()]);
 
 export const FAMILY_LABELS = Object.freeze({ anima: "Anima", moss: "MOSS", krea2: "Krea2" });
-// What runs outside Anima: the sampling helpers and SAM3 work on any model, the VAE ones on Krea2 because it shares
-// Anima's VAE and latents. The rest (guidance suite, SPEED, LoRA blocks, ...) reach into Anima's blocks or are tuned to it.
-const ANY_MODEL = ["anima", "moss", "krea2"];
-const QWEN_VAE = ["anima", "krea2"];
-const EXT_FAMILIES = Object.freeze({
-  skim: ANY_MODEL, detail_daemon: ANY_MODEL, er_sde: ANY_MODEL, sam3_refine: ANY_MODEL, sam3_tile: ANY_MODEL,
-  vae_2x: QWEN_VAE, degrid: QWEN_VAE, pid: QWEN_VAE,
-});
 
 /** Why extension `key` cannot run on `family` ("" = it can). */
 export function extFamilyBlock(key, family) {
-  return (EXT_FAMILIES[key] || ["anima"]).includes(family) ? "" : `불가: ${FAMILY_LABELS[family]} 에서는 못 씀`;
+  return BY_KEY.get(key).families.includes(family) ? "" : `불가: ${FAMILY_LABELS[family]} 에서는 못 씀`;
+}
+
+const LEFT_OUT_TEXT = /prompt|path|clip_model/; // text boxes that hold prompts or file paths
+
+/** The X/Y/Z axes of the table: xyz_axes.EXT_AXES, pinned by the golden `ext_axes`. */
+export function extAxes() {
+  const axes = [];
+  for (const item of EXTENSIONS) {
+    axes.push({ id: `ext.${item.key}.on`, label: `[${item.label}] 켜기`, kind: "bool", choices: null, values: [], group: item.label });
+    for (const field of item.fields) {
+      if ((field.kind === "choice" && !field.choices.length) || (field.kind === "text" && LEFT_OUT_TEXT.test(field.key))) continue;
+      const section = field.section ? ` ${field.section}` : "";
+      axes.push({
+        id: `ext.${item.key}.${field.key}`,
+        label: `[${item.label}${section}] ${field.label}`,
+        kind: field.kind === "text" ? "lines" : field.kind,
+        choices: null,
+        values: field.choices || [],
+        group: item.label,
+      });
+    }
+  }
+  return axes;
 }
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);

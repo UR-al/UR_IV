@@ -13,7 +13,7 @@ from .compat import filename_choices, folder_paths_module, invoke_provider, requ
 from .guidance_common import ASYM_REFERENCE_KEY
 from .reference_layout import adapter_for_model
 from .studio_nodes import scheduled_encode
-from .studio_state import KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_METHODS, REFERENCE_MODES
+from .studio_state import ATTENTION_MODES, KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_METHODS, REFERENCE_MODES
 
 CATEGORY = "AI Studio/모델"
 TE_TYPES = ("stable_diffusion", "moss_image", "krea2")
@@ -61,6 +61,29 @@ class AIStudioTextEncoderLoader:
         if type != "moss_image":
             return invoke_provider("CLIPLoader", method="load_clip", feature="Text encoder", args=(clip_name, type))[:1]
         return (load_moss_te(folder_paths_module().get_full_path_or_raise("text_encoders", clip_name)),)
+
+
+class AIStudioAttention:
+    """The attention function of this MODEL, for every pass after it; ``launch`` keeps what ComfyUI was started with."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"model": ("MODEL",), "mode": (list(ATTENTION_MODES),)}}
+
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+    CATEGORY = CATEGORY
+    DESCRIPTION = "Picks the attention backend without restarting ComfyUI (launch = ComfyUI's own)."
+
+    def patch(self, model, mode):
+        if mode == "launch":
+            return (model,)
+        function = importlib.import_module("comfy.ldm.modules.attention").get_attention_function(mode, None)
+        if function is None:
+            raise ValueError(f"Attention backend {mode} is not available in this ComfyUI.")
+        patched = model.clone()
+        patched.set_model_optimized_attention(function)
+        return (patched,)
 
 
 class AIStudioMossStream:
@@ -253,12 +276,14 @@ class AIStudioKrea2Reference:
 
 NODE_CLASS_MAPPINGS = {
     "AIStudioTextEncoderLoader": AIStudioTextEncoderLoader,
+    "AIStudioAttention": AIStudioAttention,
     "AIStudioMossStream": AIStudioMossStream,
     "AIStudioAnimaReference": AIStudioAnimaReference,
     "AIStudioKrea2Reference": AIStudioKrea2Reference,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "AIStudioTextEncoderLoader": "AI Studio Text Encoder Loader",
+    "AIStudioAttention": "AI Studio Attention",
     "AIStudioMossStream": "AI Studio MOSS fp32 Stream",
     "AIStudioAnimaReference": "AI Studio Anima Reference",
     "AIStudioKrea2Reference": "AI Studio Krea2 Reference",

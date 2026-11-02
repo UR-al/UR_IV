@@ -4,7 +4,7 @@
 import { extLine } from "./ext_view.js";
 import { h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 import { FAMILY_LABELS } from "./studio_ext.js";
-import { KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_METHODS, referenceFile } from "./studio_logic.js";
+import { KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_METHODS, assembledPrompt, referenceFile } from "./studio_logic.js";
 
 const METHOD_LABELS = Object.freeze({ snapref: "SnapRef", ref_adapter: "Ref Adapter" });
 const MODE_ITEMS = [{ value: "cs", label: "캐릭터+그림체" }, { value: "char", label: "캐릭터만" }];
@@ -129,7 +129,7 @@ function krea2Fields(values, view) {
     field("위치", select(positions, values.position, write("position"))),
     QUADVIEW_FILE.test(values.file)
       ? h("button", { type: "button", class: "ais-add", onClick: () => view.set((s) => { // typing does not redraw this card
-        if (!s.prompt.includes(QUADVIEW_CAPTION)) s.prompt = [QUADVIEW_CAPTION, s.prompt].filter(Boolean).join(" ");
+        if (!assembledPrompt(s).includes(QUADVIEW_CAPTION)) s.prompt = [QUADVIEW_CAPTION, s.prompt].filter(Boolean).join(" ");
       }, true) }, "트리거 넣기")
       : null,
   ];

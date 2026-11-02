@@ -139,11 +139,12 @@ def resize(image, width: int, height: int, method: str):
 def resize_latent(samples, width: int, height: int, method: str):
     """``comfy.utils.common_upscale`` plus Forge's antialiased latent modes (a 5-D latent is folded the same way)."""
     import comfy.utils
-    import torch
 
     mode = LATENT_ANTIALIASED.get(method)
     if mode is None:
         return comfy.utils.common_upscale(samples, width, height, method, "disabled")
+    import torch
+
     shape = tuple(samples.shape)
     flat = samples if len(shape) == 4 else samples.movedim(2, 1).reshape(-1, shape[1], shape[-2], shape[-1])
     resized = torch.nn.functional.interpolate(flat, size=(height, width), mode=mode, antialias=True)

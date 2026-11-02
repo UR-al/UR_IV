@@ -12,7 +12,7 @@ from .compat import filename_choices, invoke_provider
 from .studio_infotext import build_infotext
 from .studio_lora_tags import collapse_duplicates, parse_lora_tags, resolve_lora_name
 from .studio_prompt_schedule import schedule_prompt
-from .studio_state import normalize_state
+from .studio_state import inpaint_by_detailer, normalize_state
 
 CATEGORY = "AI Studio/Studio"
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -115,8 +115,9 @@ class AIStudioSaveForge:
         from .compat import folder_paths_module
 
         state = _parse_state(studio_state)
-        # Forge-like noise drew image i of a batch from seed + i, and Forge writes each image's own seed.
-        per_image = state["forge_like"]["master"] and state["forge_like"]["noise"]
+        # Forge-like noise drew image i of a batch from seed + i, and Forge writes each image's own seed. The inpaint
+        # detailer draws a batch from one seed.
+        per_image = state["forge_like"]["master"] and state["forge_like"]["noise"] and not inpaint_by_detailer(state)
         folder_paths = folder_paths_module()
         full_folder, stem, counter, subfolder, _ = folder_paths.get_save_image_path(
             filename_prefix, folder_paths.get_output_directory(), images[0].shape[1], images[0].shape[0]

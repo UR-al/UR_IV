@@ -19,7 +19,8 @@ function pythonAxes() {
 test("XYZ_AXES mirrors xyz_axes.py (ids, Forge labels, kinds, choices, order)", () => {
   const python = pythonAxes();
   assert.ok(python.length >= 20);
-  assert.deepEqual(XYZ_AXES.map((axis) => ({ ...axis })), python);
+  const forge = XYZ_AXES.filter((axis) => !axis.group).map(({ id, label, kind, choices }) => ({ id, label, kind, choices }));
+  assert.deepEqual(forge, python);
 });
 
 test("xyzWithDefaults fills an old or broken saved setting", () => {

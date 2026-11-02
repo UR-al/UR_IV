@@ -18,7 +18,7 @@ from typing import Iterable, Optional
 
 _EXTRA_NET_RE = re.compile(r"<(\w+):([^>]+)>")
 _NEGATIVE_LORA_RE = re.compile(r"<(lora):([^>]+)>", re.IGNORECASE)
-_LORA_EXTENSIONS = (".safetensors", ".ckpt", ".pt", ".pth", ".bin")
+_LORA_EXTENSIONS = (".safetensors", ".sft", ".ckpt", ".pt", ".pt2", ".pth", ".bin", ".pkl")  # folder_paths.supported_pt_extensions
 
 
 @dataclass(frozen=True)
@@ -106,18 +106,21 @@ def resolve_lora_name(name: str, available: Iterable[str]) -> Optional[str]:
     """The file-list entry a tag name means, or None.
 
     Like Forge: the name as written, then with a LoRA extension added, then the file stem anywhere
-    (also inside subfolders) — all case-insensitive.  Only whole stems match, never part of one.
+    (also inside subfolders) — all case-insensitive.  Only whole stems match, never part of one.  A tag cannot
+    hold a space around its name, so a file's stem counts without one; a stem can end like an extension itself.
     """
-    wanted = _strip_extension(str(name or "").strip().replace("\\", "/")).casefold()
+    written = str(name or "").strip().replace("\\", "/").casefold()
+    wanted = {written, _strip_extension(written)} - {""}
     if not wanted:
         return None
     entries = [str(entry) for entry in available]
-    stems = [(_strip_extension(entry.replace("\\", "/")).casefold(), entry) for entry in entries]
+    stems = [(_strip_extension(entry.replace("\\", "/")).strip().casefold(), entry) for entry in entries]
     for stem, entry in stems:                      # exact name (with or without the extension)
-        if stem == wanted:
+        if stem in wanted:
             return entry
+    subfolder = tuple(f"/{item}" for item in wanted)
     for stem, entry in stems:                      # file stem inside a subfolder; "sub/name" keeps its folder
-        if stem.endswith("/" + wanted):
+        if stem.endswith(subfolder):
             return entry
     return None
 

@@ -27,7 +27,34 @@ class StudioStateTests(unittest.TestCase):
         fl = d["forge_like"]
         self.assertFalse(fl["master"])
         self.assertTrue(all(fl[k] for k in ("noise", "prompt_syntax", "dora")))
-        self.assertFalse(fl["attention"])
+        self.assertTrue(fl["attention"])
+        self.assertEqual(d["attention"], "launch")
+
+    def test_attention_is_a_known_mode_and_forge_like_means_pytorch(self):
+        self.assertEqual(ss.normalize_state({"attention": "bad"})["attention"], "launch")
+        self.assertEqual(ss.effective_attention(ss.normalize_state({"attention": "sage"})), "sage")
+        forge = {"attention": "sage", "forge_like": {"master": True}}
+        self.assertEqual(ss.effective_attention(ss.normalize_state(forge)), "pytorch")
+        forge["forge_like"]["attention"] = False
+        self.assertEqual(ss.effective_attention(ss.normalize_state(forge)), "sage")
+
+    def test_moss_has_its_own_negpip_switch(self):
+        self.assertIs(ss.DEFAULT_STATE["moss_negpip"], False)
+        self.assertIs(ss.normalize_state({"moss_negpip": True})["moss_negpip"], True)
+        self.assertIs(ss.normalize_state({"moss_negpip": "yes"})["moss_negpip"], False)
+
+    def test_every_inpaint_goes_by_the_detailer(self):
+        state = {"tab": "i2i", "i2i_mode": "inpaint"}
+        self.assertTrue(ss.inpaint_by_detailer(ss.normalize_state(state)))
+        self.assertTrue(ss.inpaint_by_detailer(ss.normalize_state({**state, "i2i": {"inpaint_area": "masked"}})))
+        self.assertFalse(ss.inpaint_by_detailer(ss.normalize_state({**state, "tab": "t2i"})))
+        self.assertFalse(ss.inpaint_by_detailer(ss.normalize_state({**state, "i2i_mode": "img2img"})))
+
+    def test_inpaint_only_masked_settings(self):
+        d = ss.DEFAULT_STATE["i2i"]
+        self.assertEqual((d["inpaint_area"], d["inpaint_padding"], d["inpaint_fill"]), ("whole", 32, "original"))
+        i2i = ss.normalize_state({"i2i": {"inpaint_area": "masked", "inpaint_padding": 9999, "inpaint_fill": "bad"}})["i2i"]
+        self.assertEqual((i2i["inpaint_area"], i2i["inpaint_padding"], i2i["inpaint_fill"]), ("masked", 2048, "original"))
 
     def test_i2i_has_its_own_size(self):
         state = ss.normalize_state({"width": 640, "i2i": {"width": 1250, "height": 9000}})
@@ -152,6 +179,55 @@ class StudioStateTests(unittest.TestCase):
             {"on": True, "name": "b", "strength": 1.0},
         ])
         self.assertEqual(ss.normalize_state({"loras": "x"})["loras"], [])
+
+    def test_prompt_boxes_default_to_empty_and_stay_text(self):
+        self.assertEqual(ss.PROMPT_SECTIONS, ("prompt_prefix", "prompt_char_count", "prompt_character", "prompt_copyright",
+                                              "prompt_artist", "prompt", "prompt_suffix"))
+        for key in ss.PROMPT_BOXES:
+            with self.subTest(key=key):
+                self.assertEqual(ss.normalize_state({})[key], "")
+                self.assertEqual(ss.normalize_state({key: 5})[key], "")
+                self.assertEqual(ss.normalize_state({key: "a"})[key], "a")
+
+    def test_the_boxes_join_in_the_card_order(self):
+        state = {"prompt_suffix": "post", "prompt": "main", "prompt_artist": "@a", "prompt_copyright": "game",
+                 "prompt_character": "hero", "prompt_char_count": "1boy", "prompt_prefix": "pre"}
+        self.assertEqual(ss.assembled_prompt(state), "pre, 1boy, hero, game, @a, main, post")
+
+    def test_any_box_alone_is_joined_with_the_prompt(self):
+        for key in ss.PROMPT_BOXES:
+            with self.subTest(key=key):
+                wanted = "main, x" if key == "prompt_suffix" else "x, main"
+                self.assertEqual(ss.assembled_prompt({"prompt": "main,\n", key: "x,"}), wanted)
+
+    def test_the_prompt_sits_between_the_boxes(self):
+        state = {"prompt": "1boy, solo", "prompt_prefix": "masterpiece", "prompt_suffix": "highres"}
+        self.assertEqual(ss.assembled_prompt(state), "masterpiece, 1boy, solo, highres")
+
+    def test_an_empty_box_is_skipped(self):
+        self.assertEqual(ss.assembled_prompt({"prompt": "1boy", "prompt_prefix": "a"}), "a, 1boy")
+        self.assertEqual(ss.assembled_prompt({"prompt": "1boy", "prompt_suffix": "z"}), "1boy, z")
+        self.assertEqual(ss.assembled_prompt({"prompt": "", "prompt_prefix": "a", "prompt_suffix": "z"}), "a, z")
+        self.assertEqual(ss.assembled_prompt({"prompt": "", "prompt_prefix": " , ", "prompt_suffix": "\n"}), "")
+
+    def test_joined_edges_lose_their_commas(self):
+        state = {"prompt": "1boy,\n", "prompt_prefix": " masterpiece, best quality, \n", "prompt_suffix": ",highres,"}
+        self.assertEqual(ss.assembled_prompt(state), "masterpiece, best quality, 1boy, highres")
+
+    def test_without_the_boxes_the_prompt_stays_as_it_is(self):
+        self.assertEqual(ss.assembled_prompt({"prompt": "1boy, \n"}), "1boy, \n")
+        self.assertEqual(ss.assembled_prompt({"prompt": "1boy, \n", "prompt_prefix": "", "prompt_suffix": " "}), "1boy, \n")
+
+    def test_a_box_keeps_its_lines(self):
+        self.assertEqual(ss.assembled_prompt({"prompt": "c", "prompt_prefix": "a,\nb"}), "a,\nb, c")
+
+    def test_effective_prompt_puts_list_loras_after_the_suffix(self):
+        state = {"prompt": "1boy", "prompt_prefix": "a", "prompt_suffix": "z", "loras": [{"on": True, "name": "l", "strength": 0.7}]}
+        self.assertEqual(ss.effective_prompt(state), "a, 1boy, z <lora:l:0.7>")
+
+    def test_a_tag_in_a_box_counts_as_tagged(self):
+        state = {"prompt": "1boy", "prompt_suffix": "<lora:l:0.5>", "loras": [{"on": True, "name": "l", "strength": 1}]}
+        self.assertEqual(ss.effective_prompt(state), "1boy, <lora:l:0.5>")
 
     def test_effective_prompt_appends_enabled_loras(self):
         st = {"prompt": "1boy", "loras": [{"on": True, "name": "a", "strength": 0.9},

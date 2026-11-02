@@ -6,10 +6,13 @@ import {
   applyStateToPrompt,
   hasNegativeWeights,
   hasPromptWeights,
+  inpaintByDetailer,
+  mayHaveWildcards,
   missingLoras,
   missingPicks,
   missingSam3Picks,
   modelFamily,
+  negpipOn,
   ownPromptOn38,
   postDraws,
   postPrompt,
@@ -23,6 +26,7 @@ import { idleExtensions } from "./studio_ext.js";
 import { withExtraParams } from "./studio_pnginfo.js";
 
 const SAM3_EMPTY = "aistudio.sam3_empty"; // sam3_nodes.py
+const INPAINT_EMPTY = "aistudio.inpaint_empty"; // sam3_nodes.py
 const EVENTS = Object.freeze([
   "execution_start",
   "executed",
@@ -33,6 +37,7 @@ const EVENTS = Object.freeze([
   "executing",
   "b_preview",
   SAM3_EMPTY,
+  INPAINT_EMPTY,
 ]);
 const EARLY_EVENT_LIMIT = 500; // events of prompts whose id the queue call has not returned yet
 
@@ -45,7 +50,10 @@ export const NOTICES = Object.freeze({
   noLora: "LoRA 없음 (빼고 생성)",
   noNegpip: "NegPiP 꺼짐: 음수 가중치가 그림을 망침",
   noExtFile: "파일 없음 (빼고 생성)",
-  noWeights: "MOSS·Krea2 는 (단어:1.2) 가중치를 못 읽음: 글자 그대로 들어감",
+  noWeights: "이 모델은 (단어:1.2) 가중치를 못 읽음: 글자 그대로 들어감 (MOSS 는 NegPiP 를 켜면 읽음)",
+  noWildcard: "와일드카드 파일 없음 (글자 그대로 들어감)",
+  noMask: "마스크가 없어 그림을 그대로 둠: 마스크 그리기로 칠하기",
+  idleAxis: "이 축은 그림을 바꾸지 않음 (스위치·파일·모드 확인)",
   refAdapterDrops: "Ref Adapter v2 에서는 꺼짐",
   otherFamily: "다른 모델 계열로 만든 그림: 그 체크포인트로 바꾼 뒤 다시",
   oldTeNode: "불가: 이 워크플로의 TE 노드는 MOSS 를 못 읽음. AI Studio Anima.json 을 새로 여세요",
@@ -80,8 +88,27 @@ function savedState(output, nodeId) {
 /** The seed image `index` of a batch was drawn with: seed + index with Forge-like noise (Forge), else the batch seed. */
 function imageSeed(state, index) {
   const s = withDefaults(state);
-  return s.forge_like.master && s.forge_like.noise ? s.seed + index : s.seed;
+  return s.forge_like.master && s.forge_like.noise && !inpaintByDetailer(s) ? s.seed + index : s.seed;
 }
+
+/** The labels of the plot's axes whose columns all build one prompt: a switch off, a file not picked, a node this workflow lacks. */
+function idleAxes(plan, built, roleIds) {
+  const saved = new Set([roleIds.save, roleIds.post_save].map(String));
+  const signature = (index) => JSON.stringify(Object.entries(built.get(index).output).filter(([id]) => !saved.has(id)));
+  const idle = [];
+  for (const [letter, others] of [["x", ["iy", "iz"]], ["y", ["ix", "iz"]], ["z", ["ix", "iy"]]]) {
+    if ((plan.labels?.[letter] || []).length < 2) continue;
+    const lines = new Map();
+    plan.cells.forEach((cell, index) => {
+      const line = `${cell[others[0]]}/${cell[others[1]]}`;
+      lines.set(line, (lines.get(line) || new Set()).add(signature(index)));
+    });
+    if ([...lines.values()].every((prompts) => prompts.size === 1)) idle.push(plan.infotext_extra?.[`${letter.toUpperCase()} Type`] || letter);
+  }
+  return idle;
+}
+
+const wildcardWarnings = ({ missing }) => (missing.length ? [`${NOTICES.noWildcard}: ${missing.join(", ")}`] : []);
 
 const POST_SETTINGS = Object.freeze(["hires", "upscale", "sam3"]);
 
@@ -180,8 +207,8 @@ export class RunController {
   /** The notices `state` alone gives: `(x:-1)` without NegPiP, `(x:1.2)` on MOSS or Krea2, what Ref Adapter drops, files of switched-on extensions. */
   stateWarnings(state, action = null) {
     const texts = [];
-    if (!state.negpip && hasNegativeWeights(state)) texts.push(NOTICES.noNegpip);
-    if (modelFamily(state.unet) !== "anima" && hasPromptWeights(state, action)) texts.push(NOTICES.noWeights);
+    if (!negpipOn(state) && hasNegativeWeights(state)) texts.push(NOTICES.noNegpip);
+    if (modelFamily(state.unet) !== "anima" && !negpipOn(state) && hasPromptWeights(state, action)) texts.push(NOTICES.noWeights);
     if (ownPromptOn38(state, this.deps.families?.(), action)) texts.push(NOTICES.ownPrompt38);
     const dropped = refAdapterDrops(state);
     if (dropped.length) texts.push(`${NOTICES.refAdapterDrops}: ${dropped.join(", ")}`);
@@ -199,13 +226,20 @@ export class RunController {
    * Notices that never block: `<lora:…>` tags matching no file (the LoRA node skips them) and `stateWarnings`.
    * `action`: the gallery post-processing action, if any.
    */
-  async warnRun(state, action = null) {
+  async warnRun(state, action = null, extra = []) {
     let missing = missingLoras(state, this.deps.loras?.());
     if (missing.length && this.deps.reloadLoras) { // the list may predate a file written since (a training epoch)
       await this.deps.reloadLoras();
       missing = missingLoras(state, this.deps.loras?.());
     }
-    this.warn([...(missing.length ? [`${NOTICES.noLora}: ${missing.join(", ")}`] : []), ...this.stateWarnings(state, action)]);
+    this.warn([...(missing.length ? [`${NOTICES.noLora}: ${missing.join(", ")}`] : []), ...extra, ...this.stateWarnings(state, action)]);
+  }
+
+  /** `{states, missing}`: the run of `state`, one state per image when it has wildcards, else `state` as it is. */
+  async wildcardRuns(state) {
+    if (!mayHaveWildcards(state)) return { states: [state], missing: [] };
+    const result = await this.deps.route("/wildcards/expand", { state });
+    return { states: result?.states?.length ? result.states : [state], missing: result?.missing || [] };
   }
 
   /** 생성: the X/Y/Z plot when its panel is on (R17), else one generation of the panel state. */
@@ -219,10 +253,18 @@ export class RunController {
         this.warn(this.stateWarnings(state));
         return this.generateXyz(state);
       }
-      await this.warnRun(state);
-      return this.run("single", 1, async (job) => {
-        const prompt = await this.panelPrompt(state);
-        await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
+      let runs;
+      try {
+        runs = await this.wildcardRuns(state);
+      } catch (error) {
+        return this.notice(errorText(error));
+      }
+      await this.warnRun(runs.states[0], null, wildcardWarnings(runs));
+      return this.run("single", runs.states.length, async (job) => {
+        for (const [slot, one] of runs.states.entries()) {
+          const prompt = await this.panelPrompt(one);
+          await this.queueSlot(job, slot, prompt, undefined, String(this.deps.roleIds().save));
+        }
       });
     });
   }
@@ -237,6 +279,7 @@ export class RunController {
       return this.notice(errorText(error));
     }
     if (plan?.errors?.length) return this.notice(plan.errors.join("\n")); // R13: a rejected plan is a 200 with errors
+    if (plan?.wildcards_missing?.length) this.notice(`${NOTICES.noWildcard}: ${plan.wildcards_missing.join(", ")}`);
     const cells = plan?.cells || [];
     if (!cells.length) return this.notice(NOTICES.noCells);
     const missing = cells.map((cell) => missingSam3Picks(cell.state)).find(Boolean);
@@ -247,17 +290,19 @@ export class RunController {
       const options = this.options();
       const roleIds = this.deps.roleIds();
       const bases = new Map(); // R16: one base prompt per stage-mode signature
+      const built = new Map();
       for (const index of plan.order) {
-        if (job.stopped) {
-          this.resolveSlot(job, index, null);
-          continue;
-        }
         const modes = stageModes(cells[index].state, null, options);
         const key = JSON.stringify(modes);
         if (!bases.has(key)) bases.set(key, await this.deps.basePrompt(modes));
         const base = bases.get(key);
-        const output = applyStateToPrompt(base.output, roleIds, cells[index].state, options);
-        await this.queueSlot(job, index, { output, workflow: base.workflow }, undefined, String(roleIds.save));
+        built.set(index, { output: applyStateToPrompt(base.output, roleIds, cells[index].state, options), workflow: base.workflow });
+      }
+      const idle = idleAxes(plan, built, roleIds);
+      if (idle.length) this.noticeOnce(job, `${NOTICES.idleAxis}: ${idle.join(", ")}`);
+      for (const index of plan.order) {
+        if (job.stopped) this.resolveSlot(job, index, null);
+        else await this.queueSlot(job, index, built.get(index), undefined, String(roleIds.save));
       }
     });
   }
@@ -280,13 +325,22 @@ export class RunController {
     const flat = await this.imageRecord(item);
     if (!flat) return this.notice(NOTICES.noInfo);
     const record = { ...flat, image: item.image };
-    const current = this.deps.getState();
+    let current = this.deps.getState();
     const runState = postRunState(record, current, action);
     const draws = postDraws(runState, action);
     if (draws && otherFamily(record, runState)) return this.notice(NOTICES.otherFamily);
     const missing = this.refusal(runState, action);
     if (missing) return this.notice(missing);
-    if (draws) await this.warnRun(runState, action);
+    if (draws) {
+      let runs;
+      try {
+        runs = await this.wildcardRuns(runState); // the panel's Hires and SAM3 prompts, drawn from the image's seed
+      } catch (error) {
+        return this.notice(errorText(error));
+      }
+      current = { ...current, hires: runs.states[0].hires, sam3: runs.states[0].sam3 };
+      await this.warnRun(runs.states[0], action, wildcardWarnings(runs));
+    }
     return this.run("post", 1, async (job) => {
       const options = this.options();
       const roleIds = this.deps.roleIds();
@@ -310,9 +364,15 @@ export class RunController {
       if (otherFamily(record, state)) return this.notice(NOTICES.otherFamily);
       const missing = this.refusal(state);
       if (missing) return this.notice(missing);
-      await this.warnRun(state);
+      let runs;
+      try {
+        runs = await this.wildcardRuns(state); // the current Hires and SAM3 prompts; the record's own are already drawn
+      } catch (error) {
+        return this.notice(errorText(error));
+      }
+      await this.warnRun(runs.states[0], null, wildcardWarnings(runs));
       const result = await this.run("single", 1, async (job) => {
-        const prompt = await this.panelPrompt(state);
+        const prompt = await this.panelPrompt(runs.states[0]);
         await this.queueSlot(job, 0, prompt, undefined, String(this.deps.roleIds().save));
       });
       return result.queued ? { ...result, seed: record.seed } : result;
@@ -487,6 +547,10 @@ export class RunController {
     }
     if (name === "executing") {
       this.progressBase = null; // a new node: its own progress rate
+      return;
+    }
+    if (name === INPAINT_EMPTY) {
+      this.emit("notice", { text: NOTICES.noMask });
       return;
     }
     if (name === SAM3_EMPTY) {

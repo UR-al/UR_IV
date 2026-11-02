@@ -67,9 +67,9 @@ export function autoGrow(el) {
   if (box) box.scrollTop = top;
 }
 
-export function optionItems(items, current, { empty } = {}) {
+export function optionItems(items, current, { empty, loaded = false } = {}) {
   const list = (items || []).map((item) => (typeof item === "string" ? { value: item, label: item } : item));
-  const known = list.length > 0; // an empty list is still loading (or the route failed): no "(없음)" mark
+  const known = loaded || list.length > 0; // an empty list is still loading (or the route failed): no "(없음)" mark
   if (empty !== undefined) list.unshift({ value: "", label: empty });
   if (current !== undefined && current !== null && !list.some((item) => item.value === current)) {
     list.push({ value: current, label: current === "" ? "-" : known ? `${current} (없음)` : current });
@@ -77,12 +77,22 @@ export function optionItems(items, current, { empty } = {}) {
   return list;
 }
 
+const optionTag = (item) => h("option", { value: item.value, title: item.label }, item.label);
+
+/** `<option>`s; neighbours with the same `group` share an `<optgroup>`. */
+export function optionTags(items) {
+  const tags = [];
+  for (const item of items) {
+    const last = tags[tags.length - 1];
+    if (!item.group) tags.push(optionTag(item));
+    else if (last?.label === item.group) last.appendChild(optionTag(item));
+    else tags.push(h("optgroup", { label: item.group }, optionTag(item)));
+  }
+  return tags;
+}
+
 export function select(items, value, onChange, props = {}) {
-  const element = h(
-    "select",
-    { class: "ais-f", ...props, onChange: (event) => onChange(event.target.value) },
-    items.map((item) => h("option", { value: item.value, title: item.label }, item.label)),
-  );
+  const element = h("select", { class: "ais-f", ...props, onChange: (event) => onChange(event.target.value) }, optionTags(items));
   element.value = value;
   return element;
 }

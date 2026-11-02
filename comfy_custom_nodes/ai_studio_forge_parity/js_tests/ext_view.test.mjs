@@ -560,12 +560,15 @@ function panelWithTags(tags, state = {}) {
 const later = (ms) => new Promise((done) => setTimeout(done, ms));
 const boxRect = () => ({ left: 10, top: 10, bottom: 60, right: 300, width: 290, height: 50 });
 const boxes = (view, ...names) => names.map((name) => Object.assign(view.element.byClass(name)[0], { getBoundingClientRect: boxRect }));
+/** The prompt card's small boxes in order: 선행 고정 ... 작가, 후행 고정, 네거티브. */
+const promptBoxes = (view) => view.element.byClass("ais-negative").slice(0, 7).map((box) => Object.assign(box, { getBoundingClientRect: boxRect }));
 
 test("autocomplete: typing in the prompt asks for tags and still saves the text; the negative box is wired too", () => withBody(async (body) => {
   const asked = [];
   const view = panelWithTags(async (query, limit) => { asked.push([query, limit]); return [{ name: "long_hair", category: 0, count: 5 }]; });
   await later(5); // the choice lists arrive and redraw the panel once; type into the boxes that stay
-  const [prompt, negative] = boxes(view, "ais-prompt", "ais-negative");
+  const [prompt] = boxes(view, "ais-prompt");
+  const negative = promptBoxes(view)[6];
   prompt.value = "1girl, lo";
   prompt.fire("input");
   assert.equal(view.state.prompt, "1girl, lo"); // the panel's own handler ran
@@ -580,6 +583,33 @@ test("autocomplete: typing in the prompt asks for tags and still saves the text;
   assert.deepEqual(asked.at(-1), ["bl", 12]);
   view.dispose();
   assert.equal(body.children.length, 0);
+}));
+
+test("the prompt card lists its boxes in the order they join, each with its name", () => withBody(async () => {
+  const view = panelWithTags(async () => []);
+  await later(5);
+  const card = view.element.byClass("ais-prompt")[0].parent.parent.parent;
+  const names = card.byClass("ais-label").map((label) => label.text);
+  assert.deepEqual(names, ["선행 고정", "인물 수", "캐릭터", "작품", "작가", "프롬프트", "후행 고정", "네거티브"]);
+  const boxes = card.all((element) => element.tag === "textarea");
+  assert.deepEqual(boxes.map((box) => box.attrs["aria-label"]), names);
+  view.dispose();
+}));
+
+test("every prompt box is saved and autocompleted like the prompt", () => withBody(async () => {
+  const asked = [];
+  const view = panelWithTags(async (query) => { asked.push(query); return []; });
+  await later(5);
+  const keys = ["prompt_prefix", "prompt_char_count", "prompt_character", "prompt_copyright", "prompt_artist", "prompt_suffix"];
+  const boxes = promptBoxes(view);
+  for (const [index, key] of keys.entries()) {
+    boxes[index].value = `tag${index}`;
+    boxes[index].fire("input");
+    assert.equal(view.state[key], `tag${index}`);
+    await later(220);
+  }
+  assert.deepEqual(asked, keys.map((_, index) => `tag${index}`));
+  view.dispose();
 }));
 
 test("autocomplete: <lora: in the prompt lists the panel's LoRA files; a redraw closes the popup", () => withBody(async () => {
@@ -671,3 +701,19 @@ test("a reference runs on Anima and Krea2, MOSS has none", () => {
   assert.match(referenceBlock("moss", "snapref", null), /MOSS/);
 });
 
+function pressQuadviewTrigger(changes) {
+  const state = withDefaults({ unet: "krea2_raw.safetensors", reference: { on: true, image: "a.png", krea2: { file: "krea2/QuadView_krea2_v1.safetensors" } }, ...changes });
+  const view = { set: (mutate) => mutate(state), hasRole: () => true, family: "krea2", memory: { open: new Set(["reference"]), lists: {} }, rerender() {}, loras: [], image: { url: () => "" }, image2: { url: () => "" } };
+  renderReference(state, view).all((element) => element.tag === "button" && element.text === "트리거 넣기")[0].fire("click");
+  return state;
+}
+
+test("트리거 넣기 adds the caption once, wherever the prompt card already holds it", () => {
+  const caption = pressQuadviewTrigger({ prompt: "" }).prompt;
+  assert.ok(caption.length > 20);
+  assert.equal(pressQuadviewTrigger({ prompt: "1girl" }).prompt, `${caption} 1girl`);
+  for (const key of ["prompt", "prompt_prefix", "prompt_artist", "prompt_suffix"]) {
+    const given = { prompt: "1girl", [key]: key === "prompt" ? `${caption}, 1girl` : caption };
+    assert.equal(pressQuadviewTrigger(given).prompt, given.prompt, key);
+  }
+});

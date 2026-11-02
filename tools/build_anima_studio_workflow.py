@@ -5,7 +5,7 @@ Output: ``comfy_custom_nodes/ai_studio_forge_parity/example_workflows/AI Studio 
 ``tests/test_studio_workflow_json.py`` checks that this script reproduces the saved file.
 
 Layout: the three studio UI nodes on top (panel, result view, XYZ view); below them the engine room, one group per
-row from top to bottom (① models, ①b 3.8B / MOSS, ② LoRA, ③ prompts, ③b reference, ④ extensions, ⑤ latent/sampling,
+row from top to bottom (① models, ①b 3.8B / MOSS, ② LoRA, ③ prompts, ③b reference, ④ extensions, ⑤ latent/sampling and inpaint,
 ⑥ Hires, ⑦ upscale, ⑧ SAM3, ⑨ save, ⑩ gallery post-processing), nodes left to right, every link left->right in a row or from an upper row
 to a lower one (R6). Engine nodes are saved folded (the panel's engine-room button unfolds them); groups are sized for
 the unfolded layout. Each engine node carries ``properties.aistudio_role``; the roles come from
@@ -72,7 +72,8 @@ NODE_WIDTH = 340
 NODE_WIDTHS = {
     "AIStudioSwitch": 220, "VAEDecode": 220, "VAEEncode": 220, "ForgeNeoModelSamplingShift": 260,
     "AIStudioPromptEncode": 400, "ForgeNeoAnima38V2Prompt": 400, "AIStudioLoraStack": 400,
-    "ForgeNeoHiresFix": 400, "ForgeNeoSAM3Mask": 400, "ForgeNeoSAM3Detailer": 400, "AIStudioSaveForge": 400,
+    "ForgeNeoHiresFix": 400, "ForgeNeoSAM3Mask": 400, "ForgeNeoSAM3Detailer": 400, "AIStudioInpaintDetailer": 400,
+    "AIStudioSaveForge": 400,
 }
 LOAD_IMAGE_HEIGHT = 340  # room for the preview
 
@@ -95,6 +96,7 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("ext_lora_block", "ForgeNeoLoraBlockWeight", "LoRA 블록"),
         ("negpip", "ForgeNeoNegPip", "NegPiP"),
         ("dora", "ForgeNeoDoraInferenceMode", "DoRA"),
+        ("attention", "AIStudioAttention", "어텐션"),
         ("ext_er_sde", "ForgeNeoExtraSamplerSettings", "ER SDE"),
     ]),
     ("③ 프롬프트", [
@@ -125,12 +127,14 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("i2i_image", "LoadImage", "i2i 이미지"),
         ("latent", "ForgeNeoLatentInput", "잠재"),
         ("sampler", "ForgeNeoKSamplerCNS", "샘플러"),
+        ("inpaint_detailer", "AIStudioInpaintDetailer", "인페인트"),
     ]),
     ("⑥ Hires", [
         ("hires", "ForgeNeoHiresFix", "Hires"),
         ("ext_vae_2x", "ForgeNeoAnimaVAE2x", "VAE 2x"),
         ("decode", "VAEDecode", "VAE 디코드"),
         ("ext_pid", "ForgeNeoAnimaPiD", "PiD"),
+        ("inpaint_switch", "AIStudioSwitch", "인페인트: 이미지"),
     ]),
     ("⑦ 업스케일", [
         ("upscale", "AIStudioUpscaleImage", "업스케일"),
@@ -187,7 +191,8 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("ext_lora_block", 0, "negpip", "model"),
     ("ext_lora_block", 1, "negpip", "clip"),
     ("negpip", 0, "dora", "model"),
-    ("dora", 0, "ext_er_sde", "model"),
+    ("dora", 0, "attention", "model"),
+    ("attention", 0, "ext_er_sde", "model"),
     ("negpip", 1, "pos_encode", "clip"),
     ("lora_stack", 2, "pos_encode", "text"),
     ("negpip", 1, "neg_encode", "clip"),
@@ -239,13 +244,23 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("krea2_ref", 1, "sampler", "positive"),
     ("krea2_ref", 2, "sampler", "negative"),
     ("latent", 0, "sampler", "latent_image"),
+    # Inpaint: bypassed unless it runs. The switch's lazy input then keeps the main sampler from running
+    ("i2i_image", 0, "inpaint_detailer", "image"),
+    ("i2i_image", 1, "inpaint_detailer", "mask"),
+    ("ext_speed", 0, "inpaint_detailer", "model"),
+    ("negpip", 1, "inpaint_detailer", "clip"),
+    ("vae", 0, "inpaint_detailer", "vae"),
+    ("krea2_ref", 1, "inpaint_detailer", "positive"),
+    ("krea2_ref", 2, "inpaint_detailer", "negative"),
     *_hires_links("hires", "sampler"),
     ("hires", 1, "ext_vae_2x", "vae"),
     ("hires", 0, "decode", "samples"),
     ("ext_vae_2x", 0, "decode", "vae"),
     ("decode", 0, "ext_pid", "image"),
     ("hires", 0, "ext_pid", "latent"),
-    ("ext_pid", 0, "upscale", "image"),
+    ("ext_pid", 0, "inpaint_switch", "a"),
+    ("inpaint_detailer", 0, "inpaint_switch", "b"),
+    ("inpaint_switch", 0, "upscale", "image"),
     ("upscale", 0, "sam3_mask", "image"),
     *_detailer_links("sam3_detailer", "upscale", "sam3_mask"),
     *_detailer_links("ext_sam3_refine", "sam3_detailer", "sam3_mask"),
@@ -294,6 +309,7 @@ INSTALL_COMBOS = {
     "AIStudioUpscaleImage": {"model_name"},
     "ForgeNeoSAM3Mask": {"face_crop_detector"},
     "ForgeNeoSAM3Detailer": {"sampler_name", "scheduler"},
+    "AIStudioInpaintDetailer": {"sampler_name", "scheduler"},
     "ForgeNeoSAM3Refine": {"sampler_name", "scheduler"},
     "ForgeNeoLoraBlockWeight": {"lora_name"},
     "ForgeNeoExtraSamplerSettings": {"owned_names"},
@@ -406,6 +422,8 @@ def role_values(state: dict) -> dict[str, dict]:
         "family_switch_model": select,
         "family_switch_pos": select,
         "family_switch_neg": select,
+        "inpaint_switch": select,
+        "attention": {"mode": state["attention"]},
         "shift": {"shift": state["shift"]},
         "lora_stack": {"positive": effective_prompt(state), "negative": state["negative"]},
         "negpip": {"enabled": state["negpip"]},
@@ -423,6 +441,7 @@ def role_values(state: dict) -> dict[str, dict]:
         "post_sam3_mask": mask,
         "sam3_detailer": detailer,
         "post_sam3_detailer": detailer,
+        "inpaint_detailer": detailer,
         "save": save,
         "post_save": save,
         "ext_speed": {"pass_label": "base"},
@@ -434,7 +453,7 @@ def default_bypassed(state: dict) -> set[str]:
     """studio_logic.js stageModes(DEFAULT_STATE) roles that are bypassed (R7): saved that way as a safe default."""
     # the default unet is neither a 3.8B nor a MOSS file; the reference is off
     bypassed = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "reference_image_2", "anima_ref",
-                "krea2_ref"}
+                "krea2_ref", "inpaint_detailer"}
     if state["tab"] == "t2i":
         bypassed.add("i2i_image")
     if not state["sam3"]["on"]:

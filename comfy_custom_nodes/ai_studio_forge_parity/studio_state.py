@@ -29,6 +29,12 @@ REFERENCE_METHODS = ("snapref", "ref_adapter")
 REFERENCE_MODES = ("cs", "char")
 REFERENCE_CORRECTIONS = ("apg", "rescale", "none")
 KREA2_POSITIONS = ("aligned (trained)", "beside (right of target)")
+PROMPT_SECTIONS = ("prompt_prefix", "prompt_char_count", "prompt_character", "prompt_copyright", "prompt_artist", "prompt",
+                   "prompt_suffix")  # the prompt card's boxes in the order they join
+PROMPT_BOXES = tuple(key for key in PROMPT_SECTIONS if key != "prompt")
+# "launch" = what ComfyUI was started with; the others are the core's registered attention functions.
+ATTENTION_MODES = ("launch", "pytorch", "sage", "flash", "comfy_kitchen_int8")
+INPAINT_FILLS = ("original", "fill", "latent noise", "latent nothing")  # ForgeNeoSAM3Detailer's fill_mode
 
 DEFAULT_STATE: dict = {
     "version": 1,
@@ -36,6 +42,7 @@ DEFAULT_STATE: dict = {
     "i2i_mode": "img2img",
     "prompt": "",
     "negative": "",
+    **dict.fromkeys(PROMPT_BOXES, ""),
     "unet": "",
     "te": "",
     "vae": "",
@@ -50,18 +57,22 @@ DEFAULT_STATE: dict = {
     "batch": 1,
     "loras": [],
     "negpip": True,
+    # MOSS has its own switch: on, its tokenizer reads the parentheses of a plain sentence as weights, so it starts off
+    # and a panel saved before MOSS had NegPiP stays as it was.
+    "moss_negpip": False,
+    "attention": ATTENTION_MODES[0],
     "moss_stream": True,  # MOSS-Image only: the fp32 residual stream
     "family_memory": {},  # family -> the model picks and sampling numbers it had when the checkpoint left it
     "dora_mode": DORA_MODES[0],
-    "forge_like": {"master": False, "noise": True, "prompt_syntax": True, "dora": True, "attention": False},
+    "forge_like": {"master": False, "noise": True, "prompt_syntax": True, "dora": True, "attention": True},
     # steps: 0 = the main steps; the rest of these three sections is the table in studio_post_schema.py
     "hires": {"on": False, "upscaler": "4x-UltraSharp.pth", "sampler": "", "scale": 1.5, "steps": 16, "denoise": 0.4,
               **post_defaults("hires")},
     "upscale": {"on": False, "model": "", "scale": 2.0, **post_defaults("upscale")},
     "sam3": {"on": False, "checkpoint": "", "prompt": "face", "denoise": 0.4, **post_defaults("sam3")},
-    # inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture); the panel shows
-    # "전체" greyed out (studio_forge_parity.md), the key keeps the saved shape.
-    "i2i": {"image": "", "width": 832, "height": 1216, "denoise": 0.55, "mask_blur": 4, "inpaint_area": "whole"},
+    # The inpaint_detailer role runs every inpaint. inpaint_area "masked" is Forge's Only masked, padding belongs to it.
+    "i2i": {"image": "", "width": 832, "height": 1216, "denoise": 0.55, "mask_blur": 4, "inpaint_area": "whole",
+            "inpaint_padding": 32, "inpaint_fill": INPAINT_FILLS[0]},
     "reference": {
         "on": False,
         "image": "",
@@ -77,18 +88,24 @@ DEFAULT_STATE: dict = {
     },
     "ext": {item["key"]: {"on": False, **{field["key"]: field["default"] for field in item["fields"]}}
             for item in EXT_SCHEMA["extensions"]},
+    # What a run's wildcards were written as (studio_wildcards.py): the saved info, never the panel's boxes.
+    "prompt_template": "",
+    "negative_template": "",
 }
 
 _ENUMS = {
     "tab": ("t2i", "i2i"),
     "i2i_mode": ("img2img", "inpaint"),
     "dora_mode": DORA_MODES,
+    "attention": ATTENTION_MODES,
     "inpaint_area": ("masked", "whole"),
+    "inpaint_fill": INPAINT_FILLS,
     "method": REFERENCE_METHODS,
     "mode": REFERENCE_MODES,
     "correction": REFERENCE_CORRECTIONS,
     "position": KREA2_POSITIONS,
 }
+_PROMPT_EDGE = " \t\r\n,"  # what a joined prompt box loses at its ends
 _LORA_TAG = re.compile(r"<lora:([^:>]*)[:>]")
 
 
@@ -248,6 +265,7 @@ def normalize_state(raw: object) -> dict:
         "i2i_mode": _enum(raw.get("i2i_mode"), d["i2i_mode"], "i2i_mode"),
         "prompt": _str(raw.get("prompt"), d["prompt"]),
         "negative": _str(raw.get("negative"), d["negative"]),
+        **{key: _str(raw.get(key), d[key]) for key in PROMPT_BOXES},
         "unet": _str(raw.get("unet"), d["unet"]),
         "te": _str(raw.get("te"), d["te"]),
         "vae": _str(raw.get("vae"), d["vae"]),
@@ -262,6 +280,8 @@ def normalize_state(raw: object) -> dict:
         "batch": _int(raw.get("batch"), d["batch"], 1, 16),
         "loras": [x for x in map(_lora, loras) if x] if isinstance(loras, list) else [],
         "negpip": _bool(raw.get("negpip"), d["negpip"]),
+        "moss_negpip": _bool(raw.get("moss_negpip"), d["moss_negpip"]),
+        "attention": _enum(raw.get("attention"), d["attention"], "attention"),
         "moss_stream": _bool(raw.get("moss_stream"), d["moss_stream"]),
         "family_memory": _family_memory(raw.get("family_memory")),
         "dora_mode": _enum(raw.get("dora_mode"), d["dora_mode"], "dora_mode"),
@@ -296,11 +316,26 @@ def normalize_state(raw: object) -> dict:
             "denoise": lambda v, df: _float(v, df, 0.0, 1.0),
             "mask_blur": lambda v, df: _int(v, df, 0, 64),
             "inpaint_area": lambda v, df: _enum(v, df, "inpaint_area"),
+            "inpaint_padding": lambda v, df: _int(v, df, 0, 2048),
+            "inpaint_fill": lambda v, df: _enum(v, df, "inpaint_fill"),
         }),
         "reference": _reference(raw.get("reference")),
         "ext": _ext(raw.get("ext")),
+        "prompt_template": _str(raw.get("prompt_template"), d["prompt_template"]),
+        "negative_template": _str(raw.get("negative_template"), d["negative_template"]),
     }
     return out
+
+
+def effective_attention(state: dict) -> str:
+    """The attention a run uses: "Forge처럼" means PyTorch, the user's Forge setting."""
+    forge = state["forge_like"]
+    return "pytorch" if forge["master"] and forge["attention"] else state["attention"]
+
+
+def inpaint_by_detailer(state: dict) -> bool:
+    """An inpaint run: the inpaint detailer draws it instead of the main sampler, either area."""
+    return state["tab"] == "i2i" and state["i2i_mode"] == "inpaint"
 
 
 def size_grid(state: dict) -> int:
@@ -317,9 +352,18 @@ def generation_size(state: dict) -> tuple[int, int]:
     return size["width"], size["height"]
 
 
+def assembled_prompt(state: dict) -> str:
+    """The prompt card's boxes in ``PROMPT_SECTIONS`` order: empty ones skipped, joined with ``", "`` as the app joins its
+    prompt sections.  With only the main box the prompt stays exactly as written."""
+    parts = {key: (state.get(key) or "").strip(_PROMPT_EDGE) for key in PROMPT_SECTIONS}
+    if not any(parts[key] for key in PROMPT_BOXES):
+        return state.get("prompt") or ""
+    return ", ".join(part for part in parts.values() if part)
+
+
 def effective_prompt(state: dict) -> str:
-    """Prompt plus ``<lora:name:strength>`` tags for enabled list LoRAs not already tagged in the prompt."""
-    prompt = state.get("prompt") or ""
+    """The assembled prompt plus ``<lora:name:strength>`` tags for enabled list LoRAs not already tagged in it."""
+    prompt = assembled_prompt(state)
     tagged = set(_LORA_TAG.findall(prompt))
     tags = [
         f"<lora:{item['name']}:{item['strength']:g}>"

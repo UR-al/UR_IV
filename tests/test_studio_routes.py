@@ -182,6 +182,14 @@ class StudioPlanRouteTests(unittest.TestCase):
         self.assertEqual(payload["cells"], [])
         self.assertIn(studio_routes.xyz_plan.MIXED_FAMILIES, payload["errors"])
 
+    def test_plan_handler_reads_the_last_epoch_from_the_file(self):
+        body = {"state": {"prompt": "x <lora:a-000014:1>"}, "options": PLAN_BODY["options"],
+                "axes": [{"axis": "lora", "text": "", "lora": {"rows": [{"lora": "a-000014", "epoch_mode": "direct", "epoch": 25}]}}]}
+        with mock.patch.object(studio_routes.studio_choices, "lora_epoch", return_value=25):
+            status, payload = studio_routes.handle_plan(body, families={}, loras=["a-000014.safetensors", "a.safetensors"])
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["labels"]["x"], ["e14", "last"])
+
     def test_plan_handler_bad_body_400(self):
         for body in (None, [], "x", {"state": [], "axes": [], "options": {}}, {"state": {}, "axes": "x", "options": {}},
                      {"state": {}, "axes": [], "options": 3}):
@@ -395,7 +403,7 @@ class StudioHandlerRegistrationTests(unittest.IsolatedAsyncioTestCase):
     def test_all_routes_are_registered_at_import(self):
         # They are added while the pack imports (the server mounts what exists); none may be added lazily later.
         expected = {("GET", "/choices"), ("GET", "/tags"), ("POST", "/xyz/plan"), ("POST", "/xyz/grid"),
-                    ("POST", "/open_output"), ("POST", "/to_input")}
+                    ("POST", "/open_output"), ("POST", "/to_input"), ("POST", "/wildcards/expand")}
         self.assertEqual(set(studio_routes._HANDLERS), expected)
         studio_routes._HANDLERS.clear()
         studio_routes.register_studio_handlers()
@@ -464,6 +472,22 @@ class StudioInstallerTests(unittest.TestCase):
             self.assertEqual(
                 (result.target / "web" / "ai_studio" / "a.js").read_text(encoding="utf-8"), "// two\n",
             )
+
+
+class WildcardRouteTests(unittest.TestCase):
+    def test_a_run_comes_back_with_one_state_per_image(self):
+        state = {"prompt": "__a__", "seed": 4, "batch": 2}
+        status, body = studio_routes.handle_wildcards_expand({"state": state}, lookup=lambda name: [["x"]])
+        self.assertEqual(status, 200)
+        self.assertEqual([(one["prompt"], one["seed"], one["batch"]) for one in body["states"]], [("x", 4, 1), ("x", 5, 1)])
+
+    def test_a_prompt_without_wildcards_gives_no_states(self):
+        self.assertEqual(studio_routes.handle_wildcards_expand({"state": {"prompt": "a"}}, lookup=lambda name: [])[1],
+                         {"states": [], "missing": []})
+
+    def test_a_body_without_a_state_is_refused(self):
+        self.assertEqual(studio_routes.handle_wildcards_expand({})[0], 400)
+        self.assertEqual(studio_routes.handle_wildcards_expand("x")[0], 400)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from .mask_ops import (
     ensure_image,
     ensure_mask,
     expand_crop_region,
+    gaussian_blur,
     finish_masks,
     fit_sample_size,
     make_overlay,
@@ -43,6 +44,7 @@ from .extra_samplers_register import impact_scheduler_func
 
 CATEGORY = "AI Studio/Forge parity/SAM3"
 SAM3_EMPTY_EVENT = "aistudio.sam3_empty"  # run_controller.js
+INPAINT_EMPTY_EVENT = "aistudio.inpaint_empty"  # run_controller.js
 _EASY_SEGMENTATION_KEYS = (
     "easy sam3ImageSegmentation",
     "EasySam3ImageSegmentation",
@@ -633,6 +635,15 @@ def _tell_nothing_found(reason: str = "") -> None:
         import server
 
         server.PromptServer.instance.send_sync(SAM3_EMPTY_EVENT, {"reason": reason})
+    except Exception:
+        pass
+
+
+def _tell_empty_mask() -> None:
+    try:
+        import server
+
+        server.PromptServer.instance.send_sync(INPAINT_EMPTY_EVENT, {})
     except Exception:
         pass
 
@@ -2038,6 +2049,9 @@ class ForgeNeoSAM3Detailer:
         target_width=0,
         target_height=0,
         target_image_size=False,
+        mask_blur=0,
+        batch_size=1,
+        tell_empty_mask=False,
     ):
         image_value = ensure_image(image)[..., :3]
         mask_value = ensure_mask(mask, height=image_value.shape[1], width=image_value.shape[2])
@@ -2045,6 +2059,8 @@ class ForgeNeoSAM3Detailer:
         if not enabled:
             return image_value, mask_value, json.dumps({"enabled": False, "status": "disabled"})
         if not bool((mask_value > 0.0).any()):
+            if tell_empty_mask:
+                _tell_empty_mask()
             return image_value, mask_value, json.dumps({
                 "enabled": True,
                 "status": "no_detection",
@@ -2053,6 +2069,10 @@ class ForgeNeoSAM3Detailer:
                 "controlnet_enabled": False,
                 "restore_face": None,
             })
+        if int(mask_blur) > 0:  # Forge's mask blur is a Gaussian of this sigma; gaussian_blur takes three times it
+            mask_value = gaussian_blur(mask_value, 3 * int(mask_blur))
+        if int(batch_size) > 1 and image_value.shape[0] == 1:
+            image_value = image_value.repeat(int(batch_size), 1, 1, 1)
         denoise_value = float(denoise)
         if not 0.0 <= denoise_value <= 1.0:
             raise ValueError("SAM3 detailer denoise must be between zero and one.")
@@ -2469,6 +2489,30 @@ class ForgeNeoSAM3Detailer:
         return current.clamp(0.0, 1.0), applied, json.dumps(report, ensure_ascii=False)
 
 
+class AIStudioInpaintDetailer(ForgeNeoSAM3Detailer):
+    """The studio's inpaint: a drawn mask has not been through SAM3's feathering, a batch of one input image is that many
+    pictures, and an empty mask is the user's to hear about.  "Whole picture" works at the tab's size, as Forge resizes
+    the image first, so the result has that size; "only masked" pastes into the image at its own size."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        inputs = super().INPUT_TYPES()
+        return {**inputs, "optional": {
+            **inputs["optional"],
+            "mask_blur": ("INT", {"default": 0, "min": 0, "max": 256}),
+            "batch_size": ("INT", {"default": 1, "min": 1, "max": 64}),
+            "tell_empty_mask": ("BOOLEAN", {"default": False}),
+        }}
+
+    def detail(self, image, mask, *args, **kwargs):
+        if not kwargs.get("only_masked", True) and kwargs.get("target_width") and kwargs.get("target_height"):
+            height, width = int(kwargs["target_height"]), int(kwargs["target_width"])
+            image = ensure_image(image)[..., :3]
+            mask = ensure_mask(mask, height=image.shape[1], width=image.shape[2])
+            image, mask = _resample_image(image, height, width), _resize_mask(mask, height, width)
+        return super().detail(image, mask, *args, **kwargs)
+
+
 class ForgeNeoSAM3Refine(ForgeNeoSAM3Detailer):
     """Forge-style independent results: every mask starts from the source."""
 
@@ -2755,6 +2799,7 @@ class ForgeNeoSAM3TileRepair(ForgeNeoSAM3Detailer):
 NODE_CLASS_MAPPINGS = {
     "ForgeNeoSAM3Mask": ForgeNeoSAM3Mask,
     "ForgeNeoSAM3Detailer": ForgeNeoSAM3Detailer,
+    "AIStudioInpaintDetailer": AIStudioInpaintDetailer,
     "ForgeNeoSAM3Refine": ForgeNeoSAM3Refine,
     "ForgeNeoSAM3TileRepair": ForgeNeoSAM3TileRepair,
 }
@@ -2762,6 +2807,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ForgeNeoSAM3Mask": "Forge Neo SAM3 Mask",
     "ForgeNeoSAM3Detailer": "Forge Neo SAM3 Detailer",
+    "AIStudioInpaintDetailer": "AI Studio Inpaint Detailer",
     "ForgeNeoSAM3Refine": "Forge Neo SAM3 Refine",
     "ForgeNeoSAM3TileRepair": "SAM3 Region Repair (Comfy)",
 }

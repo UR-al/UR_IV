@@ -24,9 +24,11 @@ const SEED_RANGE = 4294967294; // Forge: random.randrange(4294967294)
 const MODE_ALWAYS = 0;
 const MODE_BYPASS = 4;
 const MASK_OVERLAY_SLOT = 3; // ForgeNeoSAM3Mask's overlay output
+const FORGE_ATTENTION = "pytorch"; // "Forge처럼": the user's Forge runs --use-pytorch-cross-attention
 export const REFERENCE_METHODS = Object.freeze(["snapref", "ref_adapter"]);
 export const REFERENCE_CORRECTIONS = Object.freeze(["apg", "rescale", "none"]);
 export const KREA2_POSITIONS = Object.freeze(["aligned (trained)", "beside (right of target)"]);
+export const INPAINT_FILLS = Object.freeze(["original", "fill", "latent noise", "latent nothing"]);
 
 function deepFreeze(value) {
   if (value && typeof value === "object") {
@@ -36,12 +38,18 @@ function deepFreeze(value) {
   return value;
 }
 
+// The prompt card's boxes in the order they join (studio_state.PROMPT_SECTIONS).
+export const PROMPT_SECTIONS = Object.freeze(["prompt_prefix", "prompt_char_count", "prompt_character", "prompt_copyright", "prompt_artist", "prompt", "prompt_suffix"]);
+const PROMPT_BOXES = PROMPT_SECTIONS.filter((key) => key !== "prompt");
+const EMPTY_PROMPT_BOXES = Object.fromEntries(PROMPT_BOXES.map((key) => [key, ""]));
+
 export const DEFAULT_STATE = deepFreeze({
   version: 1,
   tab: "t2i",
   i2i_mode: "img2img",
   prompt: "",
   negative: "",
+  ...EMPTY_PROMPT_BOXES,
   unet: "",
   te: "",
   vae: "",
@@ -56,17 +64,18 @@ export const DEFAULT_STATE = deepFreeze({
   batch: 1,
   loras: [],
   negpip: true,
+  moss_negpip: false, // MOSS's own switch: on, its tokenizer reads a plain sentence's parentheses as weights
+  attention: "launch", // what ComfyUI was started with, else a registered attention function
   moss_stream: true, // MOSS-Image only: the fp32 residual stream
   family_memory: {}, // family -> the model picks and sampling numbers it had when the checkpoint left it
   dora_mode: DORA_MODES[0],
-  forge_like: { master: false, noise: true, prompt_syntax: true, dora: true, attention: false },
+  forge_like: { master: false, noise: true, prompt_syntax: true, dora: true, attention: true },
   // steps: 0 = the main steps; the rest of these three sections is the table in post_schema.js
   hires: { on: false, upscaler: "4x-UltraSharp.pth", sampler: "", scale: 1.5, steps: 16, denoise: 0.4, ...postDefaults("hires") },
   upscale: { on: false, model: "", scale: 2.0, ...postDefaults("upscale") },
   sam3: { on: false, checkpoint: "", prompt: "face", denoise: 0.4, ...postDefaults("sam3") },
-  // inpaint_area: no node input takes it yet (ForgeNeoLatentInput inpaints the whole picture), so the panel shows
-  // "전체" greyed out; the key stays so a saved state keeps its shape.
-  i2i: { image: "", width: 832, height: 1216, denoise: 0.55, mask_blur: 4, inpaint_area: "whole" },
+  // The inpaint_detailer role runs every inpaint. inpaint_area "masked" is Forge's Only masked, padding belongs to it.
+  i2i: { image: "", width: 832, height: 1216, denoise: 0.55, mask_blur: 4, inpaint_area: "whole", inpaint_padding: 32, inpaint_fill: INPAINT_FILLS[0] },
   reference: {
     on: false,
     image: "",
@@ -78,6 +87,9 @@ export const DEFAULT_STATE = deepFreeze({
     krea2: { file: "", strength: 1.0, grounding_px: 768, boost: 1.0, position: KREA2_POSITIONS[0] },
   },
   ext: EXT_DEFAULTS, // the table in ext_schema.js: one {on, fields...} per extension
+  // What a run's wildcards were written as (studio_wildcards.py): the saved info, never the panel's boxes.
+  prompt_template: "",
+  negative_template: "",
 });
 
 const SECTIONS = new Set(["forge_like", "hires", "upscale", "sam3", "i2i"]);
@@ -138,9 +150,17 @@ function formatG(value) {
   return dropZeros(v.toFixed(5 - exp));
 }
 
-/** studio_state.effective_prompt: the prompt plus `<lora:name:strength>` for enabled list LoRAs not already tagged (R3). */
+const promptEdge = (text) => (typeof text === "string" ? text.replace(/^[ \t\r\n,]+|[ \t\r\n,]+$/g, "") : "");
+
+/** studio_state.assembled_prompt: the boxes in PROMPT_SECTIONS order; with only the main box the prompt exactly as written. */
+export function assembledPrompt(state) {
+  if (!PROMPT_BOXES.some((key) => promptEdge(state[key]))) return state.prompt || "";
+  return PROMPT_SECTIONS.map((key) => promptEdge(state[key])).filter(Boolean).join(", ");
+}
+
+/** studio_state.effective_prompt: the assembled prompt plus `<lora:name:strength>` for enabled list LoRAs not already tagged (R3). */
 export function effectivePrompt(state) {
-  const prompt = state.prompt || "";
+  const prompt = assembledPrompt(state);
   const tagged = new Set([...prompt.matchAll(/<lora:([^:>]*)[:>]/g)].map((match) => match[1]));
   const tags = (state.loras || [])
     .filter((item) => item.on && item.name && !tagged.has(item.name))
@@ -328,7 +348,10 @@ export function missingPicks(state, action = null, { sam3 = true } = {}) {
   return "";
 }
 
-const LORA_EXTENSIONS = [".safetensors", ".ckpt", ".pt", ".pth", ".bin"];
+const LORA_EXTENSIONS = [".safetensors", ".sft", ".ckpt", ".pt", ".pt2", ".pth", ".bin", ".pkl"];
+
+/** A `/choices?kind=loras` entry as a `<lora:...>` tag names it. */
+export const fileStem = (entry) => entry.replace(/\\/g, "/").split("/").pop().replace(/\.[^.]+$/, "");
 
 function loraTagName(args) {
   const positional = args.split(":").filter((item) => item.split("=").length !== 2);
@@ -352,11 +375,12 @@ function stripLoraExtension(path) {
 
 /** studio_lora_tags.resolve_lora_name: the name with or without extension, else the file stem in a subfolder. */
 export function resolveLoraName(name, available) {
-  const fold = (text) => stripLoraExtension(String(text).replace(/\\/g, "/")).toLowerCase();
-  const wanted = fold(String(name || "").trim());
-  if (!wanted) return null;
-  const stems = (available || []).map((entry) => [fold(entry), entry]);
-  return (stems.find(([stem]) => stem === wanted) || stems.find(([stem]) => stem.endsWith(`/${wanted}`)) || [])[1] ?? null;
+  const written = String(name || "").trim().replace(/\\/g, "/").toLowerCase();
+  const wanted = [written, stripLoraExtension(written)].filter(Boolean);
+  if (!wanted.length) return null;
+  const stems = (available || []).map((entry) => [stripLoraExtension(String(entry).replace(/\\/g, "/")).trim().toLowerCase(), entry]);
+  const found = stems.find(([stem]) => wanted.includes(stem)) || stems.find(([stem]) => wanted.some((item) => stem.endsWith(`/${item}`)));
+  return found ? found[1] : null;
 }
 
 /** The tag names of `state` that match no file of `available` (the LoRA node skips them). */
@@ -365,7 +389,7 @@ const NEGATIVE_WEIGHT = /:\s*-\s*\d[\d.]*\s*\)/;
 /** True when the prompt or negative uses a negative attention weight `(x:-1.0)`, which only NegPiP makes sense of. */
 export function hasNegativeWeights(state) {
   const s = withDefaults(state);
-  return NEGATIVE_WEIGHT.test(s.prompt) || NEGATIVE_WEIGHT.test(s.negative);
+  return NEGATIVE_WEIGHT.test(assembledPrompt(s)) || NEGATIVE_WEIGHT.test(s.negative);
 }
 
 const PROMPT_WEIGHT = /\((?:[^()]|\([^()]*\))*:\s*-?(?:\d+\.?\d*|\.\d+)\s*\)/; // a tag's own `(series)` may sit inside
@@ -387,16 +411,38 @@ function passPrompts(s, action) {
   ].filter(Boolean);
 }
 
-/** True when a prompt has an explicit `(x:1.2)`: MOSS's and Krea2's encoders read it as words. `action`: as in missingPicks. */
+/** True when a prompt has an explicit `(x:1.2)`: Krea2's encoder reads it as words, and MOSS's without NegPiP. `action`: as in missingPicks. */
 export function hasPromptWeights(state, action = null) {
   const s = withDefaults(state);
-  return [s.prompt, s.negative, ...passPrompts(s, action)].filter(Boolean).some(hasWeight);
+  return [assembledPrompt(s), s.negative, ...passPrompts(s, action)].filter(Boolean).some(hasWeight);
 }
 
 /** True when a Hires or SAM3 pass has a prompt of its own on 3.8B: the node encodes it without the v2 connector. */
 export function ownPromptOn38(state, families, action = null) {
   const s = withDefaults(state);
   return unetFamily(s.unet, families) === "3.8b" && passPrompts(s, action).some(Boolean);
+}
+
+/** NegPiP needs a text path that reads weights: ComfyUI-ppm patches Anima's and MOSS's, Krea2 has none. */
+export const familyHasNegpip = (family) => family === "anima" || family === "moss";
+
+/** The panel's NegPiP switch of `family`. */
+export const negpipKey = (family) => (family === "moss" ? "moss_negpip" : "negpip");
+
+/** True when this state's run reads NegPiP weights. */
+export function negpipOn(state) {
+  const family = modelFamily(state.unet);
+  return familyHasNegpip(family) && Boolean(state[negpipKey(family)]);
+}
+
+const MAYBE_WILDCARD = /__|~\/|\{[^{}]*\|/;
+
+/** True when the run may hold a wildcard, so its prompts should go to `/wildcards/expand`, which has the final word. */
+export function mayHaveWildcards(state) {
+  const s = withDefaults(state);
+  return [assembledPrompt(s), s.negative, s.hires.prompt, s.hires.negative, s.sam3.inpaint_prompt, s.sam3.negative_prompt,
+    s.ext.sam3_refine.inpaint_prompt, s.ext.sam3_refine.negative_prompt, s.ext.sam3_tile.inpaint_prompt, s.ext.sam3_tile.negative_prompt]
+    .some((text) => MAYBE_WILDCARD.test(text || ""));
 }
 
 export function missingLoras(state, available) {
@@ -422,6 +468,31 @@ function effectiveDoraMode(s) {
   if (s.forge_like.master && s.forge_like.dora) return DORA_FORGE_MODE;
   return DORA_MODES.includes(s.dora_mode) ? s.dora_mode : DORA_MODES[0];
 }
+
+/** studio_state.effective_attention. */
+export const effectiveAttention = (s) => (s.forge_like.master && s.forge_like.attention ? FORGE_ATTENTION : s.attention);
+
+/** An inpaint run: the detailer draws it, from the original pixels as Forge does, and the main sampler does not run. */
+export const inpaintByDetailer = (s) => s.tab === "i2i" && s.i2i_mode === "inpaint";
+
+const inpaintDetailerInputs = (s, generation, seed) => ({
+  enabled: true,
+  mask_mode: "Combined",
+  seed,
+  steps: s.steps,
+  cfg: s.cfg,
+  sampler_name: s.sampler,
+  scheduler: s.scheduler,
+  denoise: s.i2i.denoise,
+  fill_mode: s.i2i.inpaint_fill,
+  only_masked: s.i2i.inpaint_area === "masked",
+  mask_padding: s.i2i.inpaint_padding,
+  mask_blur: s.i2i.mask_blur,
+  target_width: generation.width,
+  target_height: generation.height,
+  batch_size: s.batch,
+  tell_empty_mask: true,
+});
 
 function hiresInputs(s, enabled, options) {
   return {
@@ -525,8 +596,9 @@ function mainInputs(s, options) {
     family_switch_neg: select,
     shift: { shift: s.shift },
     lora_stack: { positive: effectivePrompt(s), negative: s.negative },
-    negpip: { enabled: Boolean(s.negpip) && family === "anima" },
+    negpip: { enabled: negpipOn(s) },
     dora: { enabled: true, mode: effectiveDoraMode(s) },
+    attention: { mode: effectiveAttention(s) },
     pos_encode: encode,
     neg_encode: encode,
     reference_image: { image: choice(s.reference.image) },
@@ -550,6 +622,8 @@ function mainInputs(s, options) {
       forge_noise: s.forge_like.master && s.forge_like.noise,
       ...extCnsInputs(s),
     },
+    inpaint_detailer: inpaintDetailerInputs(s, generation, s.seed),
+    inpaint_switch: { select: inpaintByDetailer(s) ? 1 : 0 },
     hires: hiresInputs(s, s.hires.on && !isI2i, options), // Forge's img2img has no hires pass
     upscale: upscaleInputs(s, s.upscale.on),
     sam3_mask: sam3MaskInputs(s, s.sam3.on || extNeedsSam3Mask(s)),
@@ -620,6 +694,7 @@ export function stageModes(state, postAction = null, options = {}) {
   if (!reference || family !== "anima") bypass.add("anima_ref");
   if (!reference || family !== "krea2") bypass.add("krea2_ref");
   if (s.tab === "t2i") bypass.add("i2i_image");
+  if (postAction || !inpaintByDetailer(s)) bypass.add("inpaint_detailer");
   // R22: Refine replaces it, as in the app's post run. Mask only keeps it in the prompt: relink needs its links, and then nothing reads it.
   if (!s.sam3.on || (s.ext.sam3_refine.on && !sam3MaskOnly(s))) bypass.add("sam3_detailer");
   if (!s.sam3.on && !extNeedsSam3Mask(s)) bypass.add("sam3_mask");
@@ -631,13 +706,14 @@ export function stageModes(state, postAction = null, options = {}) {
 /**
  * The state a gallery post-processing run uses: the record's settings (the image's own prompt, seed, models …;
  * keys it lacks come from the current state) with the post-processing sections from the current state, only the
- * `action`'s stage on (spec §4). A record without `loras` (read from `parameters`) already has its tags in the prompt.
+ * `action`'s stage on (spec §4). A record without `loras` or the prompt boxes (read from `parameters`) already has them
+ * in the prompt.
  */
 export function postRunState(record, currentState, action) {
   const current = withDefaults(currentState);
   const generation = { ...(isObject(record) ? record : {}) };
   for (const section of Object.values(POST_SECTIONS)) delete generation[section];
-  const merged = withDefaults({ ...current, loras: [], ...generation });
+  const merged = withDefaults({ ...current, loras: [], ...EMPTY_PROMPT_BOXES, ...generation });
   for (const section of Object.values(POST_SECTIONS)) {
     merged[section] = { ...current[section], on: POST_SECTIONS[action] === section };
   }

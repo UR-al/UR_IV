@@ -690,6 +690,118 @@ test("the studio's own loader runs MOSS, and an older workflow still runs Anima"
   assert.equal(anima.api.queued.length, 1);
 });
 
+test("MOSS with NegPiP on reads weights, so it stays quiet about them", async () => {
+  const { controller, emitted } = setup({ state: { ...MOSS, moss_negpip: true, prompt: "(detailed:1.2)" }, roleClass: () => "AIStudioTextEncoderLoader" });
+  await controller.generate();
+  assert.deepEqual(noticesOf(emitted), []);
+});
+
+const WILDCARD_ROUTE = (states, missing = []) => async (path) => {
+  assert.equal(path, "/wildcards/expand");
+  return { states, missing };
+};
+const picked = (seed, prompt) => withDefaults({ ...PICKS, seed, prompt, batch: 1 });
+
+test("a run with wildcards queues one prompt per image, each with its own state", async () => {
+  const route = WILDCARD_ROUTE([picked(5, "red"), picked(6, "blue")]);
+  const { controller, api, routes, emitted } = setup({ state: { prompt: "__hair__", batch: 2 }, route });
+  await controller.generate();
+  assert.equal(api.queued.length, 2);
+  assert.deepEqual(api.queued.map(({ data }) => JSON.parse(data.output[SAVE].inputs.studio_state).prompt), ["red", "blue"]);
+  assert.equal(routes[0][1].state.prompt, "__hair__");
+  assert.deepEqual(noticesOf(emitted), []);
+});
+
+test("a prompt that only looks like one runs as it is", async () => {
+  const { controller, api } = setup({ state: { prompt: "a__b__c", batch: 3 }, route: WILDCARD_ROUTE([]) });
+  await controller.generate();
+  assert.equal(api.queued.length, 1);
+  assert.equal(JSON.parse(api.queued[0].data.output[SAVE].inputs.studio_state).batch, 3);
+});
+
+test("a plain prompt never asks the wildcard route", async () => {
+  const { controller, api, routes } = setup({ state: { prompt: "1girl, [a|b]" } });
+  await controller.generate();
+  assert.equal(api.queued.length, 1);
+  assert.deepEqual(routes, []);
+});
+
+test("a wildcard file that is not there is a notice, not a stop", async () => {
+  const route = WILDCARD_ROUTE([picked(5, "__nope__")], ["nope"]);
+  const { controller, api, emitted } = setup({ state: { prompt: "__nope__" }, route });
+  await controller.generate();
+  assert.equal(api.queued.length, 1);
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.noWildcard}: nope`]);
+});
+
+test("a failed wildcard route stops the run with its reason", async () => {
+  const route = async () => { throw new Error("no route"); };
+  const { controller, api, emitted } = setup({ state: { prompt: "__a__" }, route });
+  await controller.generate();
+  assert.equal(api.queued.length, 0);
+  assert.deepEqual(noticesOf(emitted), ["no route"]);
+});
+
+test("an X/Y/Z plan says which wildcards it could not read", async () => {
+  const plan = { ...plan2x2(), wildcards_missing: ["nope"] };
+  const { controller, emitted } = setup({ plan, xyz: XYZ_ON, parameters: golden.infotext.text });
+  await controller.generate();
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.noWildcard}: nope`]);
+});
+
+test("an empty inpaint mask is told", async () => {
+  const { controller, api, emitted } = setup();
+  await controller.generate();
+  api.fire("aistudio.inpaint_empty", {});
+  assert.deepEqual(noticesOf(emitted), [NOTICES.noMask]);
+});
+
+test("a gallery Hires draws the panel's wildcards from the image's seed", async () => {
+  const hires = { ...DEFAULT_STATE.hires, prompt: "__eyes__" };
+  const route = async (path, body) => {
+    assert.equal(path, "/wildcards/expand");
+    assert.equal(body.state.seed, 77);
+    assert.equal(body.state.hires.on, true);
+    return { states: [{ ...body.state, hires: { ...body.state.hires, prompt: "red eyes" } }], missing: [] };
+  };
+  const { controller, api } = setup({ state: { hires }, route });
+  await controller.runPost("hires", { image: ref("a.png"), record: { seed: 77, state: withDefaults({ ...PICKS, seed: 77, prompt: "1girl" }) } });
+  const saved = JSON.parse(api.queued[0].data.output[POST_SAVE].inputs.studio_state);
+  assert.equal(saved.hires.prompt, "red eyes");
+  assert.equal(saved.prompt, "1girl");
+  assert.equal(saved.seed, 77);
+});
+
+test("같은 시드 draws the current passes' wildcards too", async () => {
+  const hires = { ...DEFAULT_STATE.hires, on: true, prompt: "__eyes__" };
+  const route = async (path, body) => ({ states: [{ ...body.state, hires: { ...body.state.hires, prompt: "red eyes" } }], missing: [] });
+  const { controller, api } = setup({ state: { hires }, route });
+  await controller.sameSeed({ image: ref("a.png"), record: { seed: 77, state: withDefaults({ ...PICKS, seed: 77, prompt: "1girl" }) } });
+  const saved = JSON.parse(api.queued[0].data.output[SAVE].inputs.studio_state);
+  assert.equal(saved.hires.prompt, "red eyes");
+  assert.equal(saved.seed, 77);
+});
+
+test("an axis whose columns build one prompt is named, and the plot still runs", async () => {
+  const plan = plan2x2((index) => ({ seed: 100 + (index >> 1) })); // X changes nothing
+  plan.infotext_extra["X Type"] = "[Detail Daemon] 강도";
+  const { controller, api, emitted } = setup({ plan, xyz: XYZ_ON, parameters: golden.infotext.text });
+  await controller.generate();
+  assert.equal(api.queued.length, 4);
+  assert.deepEqual(noticesOf(emitted), [`${NOTICES.idleAxis}: [Detail Daemon] 강도`]);
+});
+
+test("the images of an inpaint batch keep the batch seed", async () => {
+  const inpaint = { tab: "i2i", i2i_mode: "inpaint", seed: 5, batch: 2, forge_like: { ...DEFAULT_STATE.forge_like, master: true } };
+  const { controller, api, emitted } = setup({ state: inpaint });
+  await controller.generate();
+  api.fire("execution_start", { prompt_id: "p0" });
+  api.fire("executed", { prompt_id: "p0", node: SAVE, output: { images: [ref("a.png"), ref("b.png")] } });
+  api.fire("execution_success", { prompt_id: "p0" });
+  const { items } = emitted.find(([type]) => type === "images")[1];
+  assert.deepEqual(items.map((item) => item.record.seed), [5, 5]);
+});
+
 test("the warnings of a run share one notice, so none hides another", async () => {
   const { controller, emitted } = setup({
     state: { ...MOSS, prompt: "(detailed:1.2) <lora:typo:1>", ext: { vae_2x: { on: false }, skim: { on: true } } },

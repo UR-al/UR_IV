@@ -12,6 +12,12 @@ def _state(**changes):
     return normalize_state(raw)
 
 
+class PromptBoxTests(unittest.TestCase):
+    def test_the_first_line_is_the_joined_prompt(self):
+        state = _state(prompt_prefix="best", prompt_artist="@a", prompt="1boy", prompt_suffix="highres")
+        self.assertEqual(studio_infotext.build_infotext(state, seed=1).split("\n")[0], "best, @a, 1boy, highres")
+
+
 class InfotextLayoutTests(unittest.TestCase):
     def test_infotext_txt2img_matches_forge_layout(self):
         lines = studio_infotext.build_infotext(_state(), seed=42).split("\n")
@@ -182,6 +188,32 @@ class PackTablesMatchAppTests(unittest.TestCase):
         for comfy_name, label in extra_schedulers.SCHEDULER_LABELS.items():
             with self.subTest(scheduler=comfy_name):
                 self.assertEqual(studio_infotext.SCHEDULER_LABELS[comfy_name], label)
+
+
+class StudioToolsTests(unittest.TestCase):
+    def line(self, **changes):
+        return studio_infotext.build_infotext(_state(**changes), seed=1).split("\n")[-1]
+
+    def test_only_masked_writes_forges_keys(self):
+        line = self.line(tab="i2i", i2i_mode="inpaint", i2i={"inpaint_area": "masked", "inpaint_padding": 40, "mask_blur": 6})
+        self.assertIn("Mask blur: 6, Inpaint area: Only masked, Masked area padding: 40, Masked content: original", line)
+
+    def test_a_whole_picture_inpaint_writes_no_area(self):
+        line = self.line(tab="i2i", i2i_mode="inpaint")
+        self.assertIn("Mask blur: 4, Masked content: original", line)
+        self.assertNotIn("Inpaint area", line)
+
+    def test_img2img_has_no_inpaint_keys(self):
+        self.assertNotIn("Mask blur", self.line(tab="i2i", i2i={"inpaint_area": "masked"}))
+
+    def test_attention_is_written_when_it_was_picked(self):
+        self.assertNotIn("Attention", self.line())
+        self.assertIn("Attention: sage", self.line(attention="sage"))
+        self.assertIn("Attention: pytorch", self.line(forge_like={"master": True}))
+
+    def test_wildcard_templates_use_dynamic_prompts_keys(self):
+        line = self.line(prompt_template="__a__, x", negative_template="__b__")
+        self.assertIn('Template: "__a__, x", Negative Template: __b__', line)
 
 
 if __name__ == "__main__":

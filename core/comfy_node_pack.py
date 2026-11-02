@@ -102,7 +102,12 @@ PACK_ID = "ai_studio_forge_parity"
 # 1.13.0: the studio's post-processing settings (studio_post_schema.py, web/ai_studio/post_view.js + studio_post.js): SAM3 in
 # full, Hires' own CFG / Shift / scheduler / size / VAE / prompts, Extras' Scale to, second upscaler, colour correction and
 # tiles (studio_upscale.py); a SAM3 file in the transformers layout is refused, an empty mask is told.
-PACK_VERSION = "1.13.0"
+# 1.14.0: the X/Y/Z plot's LoRA axis (xyz_lora.py, web/ai_studio/xyz_lora_view.js): other LoRAs in the place of one tag, with
+# their triggers and epoch ranges; the prompt card's sections, joined in the app's order (studio_state.assembled_prompt).
+# 1.15.0: the studio picks its attention (AIStudioAttention), inpaints only the masked area (the detailer as the inpaint_detailer
+# role, a lazy switch keeps the main sampler out), plots any extension setting (xyz_axes.EXT_AXES) and draws wildcards
+# (studio_wildcards.py); NegPiP runs on MOSS too.
+PACK_VERSION = "1.15.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

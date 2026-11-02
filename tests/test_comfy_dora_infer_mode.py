@@ -1057,7 +1057,7 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(patched, [])
 
     def test_version_lockstep(self):
-        self.assertEqual(bundled_pack.__version__, "1.13.0")
+        self.assertEqual(bundled_pack.__version__, "1.15.0")
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
         source = (Path(__file__).resolve().parent.parent / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# Same (unreleased) 1.9.0: new ForgeNeoDoraInferenceMode", source)

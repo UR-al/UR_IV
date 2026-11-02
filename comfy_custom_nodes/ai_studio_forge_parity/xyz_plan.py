@@ -3,13 +3,18 @@
 Pure Python (no ComfyUI / torch).  Follows the behaviour of Forge Neo's X/Y/Z plot as described in the recon memo;
 the pack carries no Forge code.
 
-- Every cell starts from the normalized state with its list LoRAs already rendered into the prompt as
-  ``<lora:name:strength>`` tags (``effective_prompt``; the cell's ``loras`` list is empty), so Prompt S/R can
-  rewrite them.  Axes apply X, then Y, then Z.
+- Every cell starts from the normalized state with its prompt boxes and list LoRAs already rendered into the prompt,
+  the LoRAs as ``<lora:name:strength>`` tags (``effective_prompt``; the cell's boxes and ``loras`` list are empty),
+  so Prompt S/R can rewrite them.  Axes apply X, then Y, then Z.
 - Prompt S/R: the first value is the search text and every value (the first included) is one column; plain,
   case-sensitive replace-all in the prompt and the negative prompt.  A search text found in neither aborts the plan.
 - Prompt order: the given tokens are cut out of the positive prompt and put back into the same slots in each
   permutation's order.
+- LoRA: the axis has a block of settings instead of a value box; ``xyz_lora`` turns it into columns.
+- Extension axes also turn on what their setting needs (``AxisSpec.switches``), before any axis writes its value, so a
+  switch axis keeps its columns; a family that cannot run the extension aborts the plan.
+- Wildcards: each cell's prompts are drawn from the cell's seed, after the axes, so Prompt S/R sees what was written and
+  cells of one seed compare the same picks.
 - Seeds: unless ``keep_minus1``, a state seed of -1 becomes one random seed shared by every cell, and each -1 of a
   Seed axis becomes its own random seed (listed in ``fixed`` and ``Fixed X Values``).  ``vary_x/y/z`` add the cell
   position on top (``ix``; ``iy * nx``; ``iz * nx * ny``, a factor only for the varied axes).
@@ -33,8 +38,10 @@ from dataclasses import dataclass, field
 from .dora_infer_mode import MODE_LABELS, mode_key
 from .studio_lora_tags import parse_lora_tags, resolve_lora_name
 from .studio_choices import unet_family
-from .studio_state import effective_prompt, generation_size, normalize_state
-from .xyz_axes import AxisSpec, axis_by_id
+from .studio_state import ATTENTION_MODES, EXT_SCHEMA, PROMPT_BOXES, effective_prompt, generation_size, normalize_state
+from .studio_wildcards import expand_state, uses_wildcards
+from . import xyz_lora
+from .xyz_axes import AxisSpec, axis_by_id, ext_key
 from .xyz_values import parse_axis_values
 
 LETTERS = ("x", "y", "z")
@@ -60,6 +67,8 @@ class XyzPlan:
     fixed: dict = field(default_factory=dict)
     infotext_extra: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
+    lora_preview: dict = field(default_factory=dict)  # letter -> the LoRA axis' columns, for the panel's list
+    wildcards_missing: list = field(default_factory=list)  # wildcard names no file has: they stay as written
 
 
 class _PlanError(Exception):
@@ -71,6 +80,7 @@ class _Axis:
     spec: AxisSpec
     text: str
     values: list
+    block: dict = field(default_factory=dict)  # the LoRA axis' settings
 
 
 # ---------------------------------------------------------------------------------------------- reading the axes
@@ -85,7 +95,7 @@ def _read_axes(axes) -> list[_Axis]:
         text = entry.get("text") if isinstance(entry.get("text"), str) else ""
         try:
             spec = axis_by_id(axis_id)
-        except KeyError:
+        except (KeyError, TypeError):
             errors.append(f"Unknown axis: {axis_id}")
             continue
         try:
@@ -96,10 +106,33 @@ def _read_axes(axes) -> list[_Axis]:
         if not values:
             errors.append(f"{spec.label}: no values")
             continue
-        out.append(_Axis(spec, text, values))
+        out.append(_Axis(spec, text, values, entry.get("lora") if isinstance(entry.get("lora"), dict) else {}))
     if errors:
         raise _PlanError(*errors)
     return out
+
+
+def _lora_file_list(loras):
+    def read() -> list:
+        if loras is None:
+            raise xyz_lora.LoraAxisError("LoRA 축: LoRA 목록을 읽지 못했습니다")
+        try:
+            return list(loras() if callable(loras) else loras)
+        except Exception as exc:  # the LoRA folder could not be listed
+            raise xyz_lora.LoraAxisError(f"LoRA 축: LoRA 목록을 읽지 못했습니다: {exc}") from exc
+
+    return read
+
+
+def _expand_lora_axes(axes: list[_Axis], prompt: str, negative: str, loras, lora_epoch) -> None:
+    """A LoRA axis' columns need the prompt and the file list, so they come after the value boxes."""
+    lora_axes = [axis for axis in axes if axis.spec.id == "lora"]
+    for axis in lora_axes:
+        axis.values = xyz_lora.lora_columns(axis.block, prompt, negative, _lora_file_list(loras), lora_epoch)
+        axis.text = ", ".join(column.label for column in axis.values)
+    names = [xyz_lora.base_lora(axis.block).casefold() for axis in lora_axes]
+    if len(set(names)) < len(names):
+        raise xyz_lora.LoraAxisError("LoRA 축: 같은 LoRA 를 두 축에서 찾을 수 없습니다")
 
 
 def _match_checkpoint(text: str, names) -> str:
@@ -126,8 +159,26 @@ def _dora_mode(text: str) -> str:
     raise _PlanError(f"Unknown DoRA mode: {text}")
 
 
+def _attention(text: str) -> str:
+    wanted = text.strip().casefold()
+    if wanted in ATTENTION_MODES:
+        return wanted
+    raise _PlanError(f"Unknown attention: {text}")
+
+
 def _model_family(family: str) -> str:
     return family if family in ("moss", "krea2") else "anima"
+
+
+def _check_ext_family(base: dict, axes: list[_Axis], families: dict) -> None:
+    """An extension axis on a family that cannot run it would draw the same picture in every column."""
+    unet = base["unet"]
+    family = _model_family(families.get(unet) or unet_family(unet)) if unet else "anima"
+    runs_on = {item["key"]: item["families"] for item in EXT_SCHEMA["extensions"]}
+    for axis in axes:
+        key = ext_key(axis.spec)
+        if key and family not in runs_on[key]:
+            raise _PlanError(f"{axis.spec.label}: 이 모델 계열에서는 못 씀")
 
 
 def _check_panel_family(base: dict, axes: list[_Axis], resolved: list[list], families: dict) -> None:
@@ -153,6 +204,12 @@ def _resolve(axes: list[_Axis], families: dict) -> list[list]:
                 seen.update(families[v] for v in values)
             elif axis.spec.id == "dora_mode":
                 values = [_dora_mode(v) for v in values]
+            elif axis.spec.id == "attention":
+                values = [_attention(v) for v in values]
+            elif axis.spec.values:
+                unknown = [v for v in values if v not in axis.spec.values]
+                if unknown:
+                    raise _PlanError(f"{axis.spec.label}: {', '.join(unknown)} 없음")
         except _PlanError as exc:
             errors.extend(exc.args)
         resolved.append(values)
@@ -252,11 +309,16 @@ def _apply(state: dict, axis: _Axis, value, search) -> None:
         _search_replace(state, search, value)
     elif spec.id == "prompt_order":
         state["prompt"] = _reorder(state["prompt"], value)
+    elif spec.id == "lora":
+        xyz_lora.apply_column(state, axis.block, value)
     elif spec.id == "denoising":
         _set_path(state, "hires.denoise" if state["tab"] == "t2i" else "i2i.denoise", value)
     elif spec.id == "dora_mode":
         state["dora_mode"] = value
         state["forge_like"]["dora"] = False  # otherwise "Forge처럼" would mask the axis value
+    elif spec.id == "attention":
+        state["attention"] = value
+        state["forge_like"]["attention"] = False  # the same
     else:
         paths = spec.field.split(",")
         if spec.kind == "size" and state["tab"] == "i2i":
@@ -283,6 +345,8 @@ def _value_text(value) -> str:
 def _label(spec: AxisSpec, value) -> str:
     if spec.fmt == "empty":
         return ""
+    if spec.id == "lora":
+        return value.label
     if spec.fmt == "value":
         return _value_text(value)
     if spec.fmt == "basename":
@@ -334,19 +398,43 @@ def _check_loras(cells: list, loras) -> None:
 
 # ---------------------------------------------------------------------------------------------- the plan
 
-def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, families: dict, loras=None) -> XyzPlan:
-    """Plan an X/Y/Z grid: ``axes`` is ``[{"axis": AxisSpec.id, "text": value box}]`` for X, Y, Z (missing = Nothing),
+def _refusal(errors, axes) -> list:
+    """A LoRA axis' panel lists its columns; without any, the last line says that nothing will run."""
+    lora_axis = any(isinstance(entry, dict) and entry.get("axis") == "lora" for entry in list(axes or [])[:3])
+    return [*errors, xyz_lora.NOT_MADE] if lora_axis else list(errors)
+
+
+def _expand_wildcards(cells: list, wildcards, rng: random.Random) -> list:
+    missing: list = []
+    for cell in cells:
+        if not uses_wildcards(cell.state):
+            continue
+        if cell.state["seed"] < 0:  # keep_minus1: the seed the picks came from must be the one the cell runs with
+            cell.state["seed"] = rng.randrange(SEED_RANGE)
+        cell.state, names = expand_state(cell.state, cell.state["seed"], wildcards)
+        missing += [name for name in names if name not in missing]
+    return missing
+
+
+def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, families: dict, loras=None, lora_epoch=None,
+             wildcards=None) -> XyzPlan:
+    """Plan an X/Y/Z grid: ``axes`` is ``[{"axis": AxisSpec.id, "text": value box, "lora": LoRA axis settings}]`` for X, Y, Z (missing = Nothing),
     ``families`` maps every UNET file to ``"2.9b" | "base" | "3.8b" | "moss" | "krea2"``, ``loras`` is the LoRA file list (or a callable
-    returning it; None skips the LoRA check).  See the module docstring for the rules."""
+    returning it; None skips the LoRA check, and a LoRA axis then cannot plan), ``lora_epoch`` tells a LoRA file's epoch
+    number (None if it cannot), ``wildcards`` gives a wildcard's groups by name (None leaves wildcards as written).
+    See the module docstring for the rules."""
     options = options if isinstance(options, dict) else {}
     keep_minus1 = bool(options.get("keep_minus1"))
     try:
         parsed = _read_axes(axes)
         base = normalize_state(state)
+        prompt = effective_prompt(base)
+        _expand_lora_axes(parsed, prompt, base["negative"], loras, lora_epoch)
         counts = {letter: len(axis.values) for letter, axis in zip(LETTERS, parsed)}
         nx, ny, nz = counts["x"], counts["y"], counts["z"]
         resolved = _resolve(parsed, families or {})
         _check_panel_family(base, parsed, resolved, families or {})
+        _check_ext_family(base, parsed, families or {})
         width, height = generation_size(base)
         grid_mp = round(nx * ny * nz * width * height / 1e6)
         if grid_mp >= MAX_GRID_MP:
@@ -354,22 +442,31 @@ def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, fami
         if base["seed"] == -1 and not keep_minus1:
             base["seed"] = rng.randrange(SEED_RANGE)
         fixed = _fix_seed_axes(parsed, resolved, rng, keep_minus1)
-        base["prompt"] = effective_prompt(base)
+        base["prompt"] = prompt
+        base.update(dict.fromkeys(PROMPT_BOXES, ""))
         base["loras"] = []
         searches = [values[0] if axis.spec.id == "prompt_sr" else None for axis, values in zip(parsed, resolved)]
+        find_file = xyz_lora.file_finder(_lora_file_list(loras)()) if any(axis.spec.id == "lora" for axis in parsed) else None
         cells = []
         for iz in range(nz):
             for iy in range(ny):
                 for ix in range(nx):
                     cell = copy.deepcopy(base)
+                    for axis in parsed:
+                        for path, switch in axis.spec.switches:
+                            _set_path(cell, path, switch)
                     for axis, values, search, i in zip(parsed, resolved, searches, (ix, iy, iz)):
                         _apply(cell, axis, values[i], search)
+                    if find_file:
+                        picked = [values[i] for axis, values, i in zip(parsed, resolved, (ix, iy, iz)) if axis.spec.id == "lora"]
+                        xyz_lora.check_cell(cell, picked, find_file)
                     cell["seed"] += _seed_offset(ix, iy, iz, counts, options)
                     cells.append(Cell(ix, iy, iz, normalize_state(cell)))
+        wildcards_missing = _expand_wildcards(cells, wildcards, rng) if wildcards is not None else []
         if loras is not None:
             _check_loras(cells, loras)
-    except _PlanError as exc:
-        return XyzPlan(errors=list(exc.args))
+    except (_PlanError, xyz_lora.LoraAxisError) as exc:
+        return XyzPlan(errors=_refusal(exc.args, axes))
     return XyzPlan(
         cells=cells,
         order=_order(counts, {letter: axis.spec.cost for letter, axis in zip(LETTERS, parsed)}),
@@ -377,4 +474,7 @@ def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, fami
         fixed=fixed,
         infotext_extra=_infotext(parsed, fixed),
         errors=[],
+        lora_preview={letter: [xyz_lora.column_preview(column, axis.block, prompt, base["negative"]) for column in axis.values]
+                      for letter, axis in zip(LETTERS, parsed) if axis.spec.id == "lora"},
+        wildcards_missing=wildcards_missing,
     )

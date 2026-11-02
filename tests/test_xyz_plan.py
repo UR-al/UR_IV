@@ -6,6 +6,7 @@ import unittest
 
 from comfy_custom_nodes.ai_studio_forge_parity import dora_infer_mode as dim
 from comfy_custom_nodes.ai_studio_forge_parity import xyz_plan as xp
+from comfy_custom_nodes.ai_studio_forge_parity.studio_state import PROMPT_BOXES, effective_prompt
 
 OPTIONS = {"draw_legend": True, "keep_minus1": False, "vary_x": False, "vary_y": False, "vary_z": False,
            "include_sub_images": False, "include_sub_grids": False, "margin": 0, "row_count": 0}
@@ -349,13 +350,51 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(len(plan.cells), 2)
 
 
+class PromptBoxTests(unittest.TestCase):
+    STATE = {"prompt": "1boy", "prompt_prefix": "best", "prompt_suffix": "highres",
+             "loras": [{"on": True, "name": "a", "strength": 1}]}
+
+    def plan(self, axes):
+        return xp.plan_xyz(self.STATE, axes, {}, rng=random.Random(1), families={}, loras=["a.safetensors", "b.safetensors"])
+
+    def test_a_cell_holds_the_whole_prompt_once(self):
+        cell = self.plan([{"axis": "steps", "text": "10"}]).cells[0].state
+        self.assertEqual(cell["prompt"], "best, 1boy, highres <lora:a:1>")
+        self.assertEqual((cell["prompt_prefix"], cell["prompt_suffix"]), ("", ""))
+        self.assertEqual(effective_prompt(cell), "best, 1boy, highres <lora:a:1>")
+
+    def test_a_cell_empties_every_box(self):
+        state = {**dict.fromkeys(PROMPT_BOXES, "x"), "prompt": "main"}
+        cell = xp.plan_xyz(state, [{"axis": "steps", "text": "10"}], {}, rng=random.Random(1), families={}).cells[0].state
+        self.assertEqual(cell["prompt"], "x, x, x, x, x, main, x")
+        self.assertEqual([cell[key] for key in PROMPT_BOXES], [""] * len(PROMPT_BOXES))
+        self.assertEqual(effective_prompt(cell), "x, x, x, x, x, main, x")
+
+    def test_prompt_sr_reaches_the_boxes(self):
+        plan = self.plan([{"axis": "prompt_sr", "text": "best, worst"}])
+        self.assertEqual(plan.errors, [])
+        self.assertEqual(plan.cells[1].state["prompt"], "worst, 1boy, highres <lora:a:1>")
+
+    def test_prompt_order_reaches_the_boxes(self):
+        plan = self.plan([{"axis": "prompt_order", "text": "best, highres"}])
+        self.assertEqual(plan.errors, [])
+        self.assertEqual(plan.cells[1].state["prompt"], "highres, 1boy, best <lora:a:1>")
+
+    def test_the_lora_axis_reaches_the_boxes(self):
+        block = {"find": "highres", "rows": [{"lora": "a"}, {"lora": "b", "trigger": "@b"}]}
+        plan = self.plan([{"axis": "lora", "text": "", "lora": block}])
+        self.assertEqual(plan.errors, [])
+        self.assertEqual(plan.cells[1].state["prompt"], "best, 1boy, @b <lora:b:1>")
+
+
 class SerializationTests(unittest.TestCase):
     def test_plan_is_json_serializable(self):
         plan = _plan({"prompt": "a"}, _axes(("prompt_sr", "a, b"), ("size", "512x512")))
         data = json.loads(json.dumps(dataclasses.asdict(plan)))
         self.assertEqual(data["cells"][1]["ix"], 1)
         self.assertEqual(data["cells"][1]["state"]["prompt"], "b")
-        self.assertEqual(set(data), {"cells", "order", "labels", "fixed", "infotext_extra", "errors"})
+        self.assertEqual(set(data), {"cells", "order", "labels", "fixed", "infotext_extra", "errors", "lora_preview",
+                                     "wildcards_missing"})
 
 
 
@@ -388,6 +427,112 @@ class LoraCheckTests(unittest.TestCase):
                            families=FAMILIES, loras=unreadable)
         self.assertEqual(plan.cells, [])
         self.assertEqual(plan.errors, ["LoRA list could not be read: no folder"])
+
+class ExtensionAxisTests(unittest.TestCase):
+    def test_a_setting_turns_its_extension_on_in_every_column(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.detail_daemon.dd_amount", "0.1, 0.3")))
+        self.assertEqual(plan.errors, [])
+        self.assertEqual(_cell(plan, 1).state["ext"]["detail_daemon"]["dd_amount"], 0.3)
+        self.assertTrue(_cell(plan, 0).state["ext"]["detail_daemon"]["on"])
+        self.assertEqual(plan.labels["x"], [f"{xp.axis_by_id('ext.detail_daemon.dd_amount').label}: {value}" for value in (0.1, 0.3)])
+
+    def test_a_guidance_setting_turns_its_feature_on(self):
+        guidance = _cell(_plan({"prompt": "a"}, _axes(("ext.guidance.guid_scale", "2"))), 0).state["ext"]["guidance"]
+        self.assertTrue(guidance["on"] and guidance["guid_enabled"])
+
+    def test_a_switch_axis_can_compare_off_with_on(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.skim.on", "False, True")))
+        self.assertEqual([cell.state["ext"]["skim"]["on"] for cell in plan.cells], [False, True])
+
+    def test_values_are_clamped_like_the_panel(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.detail_daemon.dd_amount", "99")))
+        self.assertEqual(plan.cells[0].state["ext"]["detail_daemon"]["dd_amount"], 5.0)
+
+    def test_a_value_outside_a_fixed_list_is_refused(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.speed.transform", "dct, nope")))
+        self.assertEqual(plan.cells, [])
+        self.assertIn("nope", plan.errors[0])
+
+    def test_a_family_that_cannot_run_the_extension_is_refused(self):
+        moss = {"moss_x.safetensors": "moss", **FAMILIES}
+        refused = _plan({"prompt": "a", "unet": "moss_x.safetensors"}, _axes(("ext.guidance.guid_scale", "2")), families=moss)
+        self.assertEqual(refused.cells, [])
+        self.assertIn("못 씀", refused.errors[0])
+        allowed = _plan({"prompt": "a", "unet": "moss_x.safetensors"}, _axes(("ext.skim.skim_skimming_cfg", "2")), families=moss)
+        self.assertEqual(allowed.errors, [])
+
+    def test_a_model_patch_loops_outside_a_plain_number(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.skim.skim_skimming_cfg", "1, 2"), ("cfg", "3, 4")))
+        self.assertEqual(plan.order, [0, 2, 1, 3])
+
+
+class AttentionAxisTests(unittest.TestCase):
+    def test_each_column_runs_its_backend(self):
+        plan = _plan({"prompt": "a", "forge_like": {"master": True}}, _axes(("attention", "pytorch, Sage")))
+        self.assertEqual([cell.state["attention"] for cell in plan.cells], ["pytorch", "sage"])
+        self.assertFalse(plan.cells[0].state["forge_like"]["attention"])  # "Forge처럼" would mask the column
+        self.assertEqual(plan.labels["x"], ["[Attention] Backend: pytorch", "[Attention] Backend: Sage"])
+
+    def test_an_unknown_backend_is_refused(self):
+        self.assertIn("Unknown attention: nope", _plan({"prompt": "a"}, _axes(("attention", "nope"))).errors)
+
+
+class WildcardTests(unittest.TestCase):
+    FILES = {"one": [["x", "y", "z", "w", "v", "u"]], "styled": [["<lora:typo:1>"]]}
+
+    def plan(self, state, axes, **kwargs):
+        return xp.plan_xyz(state, axes, OPTIONS, rng=random.Random(0), families=FAMILIES,
+                           wildcards=lambda name: self.FILES.get(name, []), **kwargs)
+
+    def test_cells_of_one_seed_compare_the_same_pick(self):
+        plan = self.plan({"prompt": "__one__", "seed": 3}, _axes(("cfg", "3, 4, 5")))
+        self.assertEqual(len({cell.state["prompt"] for cell in plan.cells}), 1)
+        self.assertEqual(plan.cells[0].state["prompt_template"], "__one__")
+
+    def test_a_seed_axis_gives_each_seed_its_pick(self):
+        plan = self.plan({"prompt": "__one__", "seed": 3}, _axes(("seed", "1-12")))
+        self.assertGreater(len({cell.state["prompt"] for cell in plan.cells}), 1)
+
+    def test_prompt_search_sees_what_was_written(self):
+        plan = self.plan({"prompt": "__one__", "seed": 3}, _axes(("prompt_sr", "__one__, fixed")))
+        self.assertEqual(plan.cells[1].state["prompt"], "fixed")
+
+    def test_a_missing_file_is_reported_and_stays(self):
+        plan = self.plan({"prompt": "__nope__", "seed": 3}, _axes(("cfg", "3, 4")))
+        self.assertEqual(plan.wildcards_missing, ["nope"])
+        self.assertEqual(plan.cells[0].state["prompt"], "__nope__")
+
+    def test_a_lora_a_wildcard_brings_is_checked_too(self):
+        plan = self.plan({"prompt": "__styled__", "seed": 3}, _axes(("cfg", "3")), loras=["other.safetensors"])
+        self.assertEqual(plan.errors, ["LoRA not found: typo"])
+
+    def test_without_a_reader_the_prompt_stays(self):
+        self.assertEqual(_plan({"prompt": "__one__"}, _axes(("cfg", "3"))).cells[0].state["prompt"], "__one__")
+
+
+class TwoExtensionAxesTests(unittest.TestCase):
+    def test_a_switch_axis_keeps_its_columns_under_a_setting_axis(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.detail_daemon.on", "False, True"), ("ext.detail_daemon.dd_amount", "0.1, 0.3")))
+        self.assertEqual([_cell(plan, ix, 1).state["ext"]["detail_daemon"]["on"] for ix in (0, 1)], [False, True])
+
+    def test_the_order_of_the_axes_does_not_matter(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.detail_daemon.dd_amount", "0.1, 0.3"), ("ext.detail_daemon.on", "False, True")))
+        self.assertEqual([_cell(plan, 1, iy).state["ext"]["detail_daemon"]["on"] for iy in (0, 1)], [False, True])
+
+    def test_a_block_list_is_one_value(self):
+        plan = _plan({"prompt": "a"}, _axes(("ext.speed.scales", "0.5,1.0\n0.25,0.5,1.0")))
+        self.assertEqual([cell.state["ext"]["speed"]["scales"] for cell in plan.cells], ["0.5,1.0", "0.25,0.5,1.0"])
+
+    def test_keep_minus1_gives_a_wildcard_cell_the_seed_of_its_picks(self):
+        plan = xp.plan_xyz({"prompt": "{a|b|c}", "seed": -1}, _axes(("cfg", "3, 4")), {**OPTIONS, "keep_minus1": True},
+                           rng=random.Random(0), families=FAMILIES, wildcards=lambda name: [])
+        self.assertTrue(all(cell.state["seed"] >= 0 for cell in plan.cells))
+
+    def test_keep_minus1_stays_without_wildcards(self):
+        plan = xp.plan_xyz({"prompt": "a", "seed": -1}, _axes(("cfg", "3")), {**OPTIONS, "keep_minus1": True},
+                           rng=random.Random(0), families=FAMILIES, wildcards=lambda name: [])
+        self.assertEqual(plan.cells[0].state["seed"], -1)
+
 
 if __name__ == "__main__":
     unittest.main()

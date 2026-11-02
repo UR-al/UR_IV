@@ -93,6 +93,64 @@ class Sam3ChoicesTests(unittest.TestCase):
             self.assertEqual([Path(p) for p in paths], [comfy / "models" / "sam3"])
 
 
+class LoraEpochTests(unittest.TestCase):
+    def lora(self, directory, metadata):
+        path = Path(directory) / "a.safetensors"
+        header = json.dumps({"__metadata__": metadata}).encode("utf-8")
+        path.write_bytes(struct.pack("<Q", len(header)) + header)
+        return path
+
+    def epoch_of(self, path):
+        host = SimpleNamespace(get_full_path=lambda kind, name: str(path) if kind == "loras" else None)
+        return studio_choices.lora_epoch(path.name, host)
+
+    def test_the_epoch_a_training_tool_wrote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(self.epoch_of(self.lora(directory, {"ss_epoch": "25"})), 25)
+
+    def test_a_file_that_says_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for metadata in ({}, {"ss_epoch": "x"}, {"ss_epoch": "None"}, {"ss_epoch": "0"}):
+                with self.subTest(metadata=metadata):
+                    self.assertIsNone(self.epoch_of(self.lora(directory, metadata)))
+
+    def test_a_file_that_cannot_be_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(self.epoch_of(Path(directory) / "missing.safetensors"))
+            broken = Path(directory) / "broken.safetensors"
+            broken.write_bytes(b"xx")
+            self.assertIsNone(self.epoch_of(broken))
+
+    def test_a_header_too_odd_to_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(self.epoch_of(self.lora(directory, {"ss_epoch": "1" * 5000})))
+            deep = Path(directory) / "deep.safetensors"
+            header = b"[" * 200000
+            deep.write_bytes(struct.pack("<Q", len(header)) + header)
+            self.assertIsNone(self.epoch_of(deep))
+
+    def test_a_read_that_failed_is_tried_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.lora(directory, {"ss_epoch": "25"})
+            with mock.patch.object(studio_choices, "safetensors_header", return_value=None):
+                self.assertIsNone(self.epoch_of(path))
+            self.assertEqual(self.epoch_of(path), 25)
+
+    def test_no_host_no_epoch(self):
+        with mock.patch.dict("sys.modules", {"folder_paths": None}):
+            self.assertIsNone(studio_choices.lora_epoch("a.safetensors"))
+
+    def test_a_header_is_read_once_until_the_file_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.lora(directory, {"ss_epoch": "25"})
+            with mock.patch.object(studio_choices, "safetensors_header", wraps=studio_choices.safetensors_header) as read:
+                self.assertEqual(self.epoch_of(path), 25)
+                self.assertEqual(self.epoch_of(path), 25)
+                self.assertEqual(read.call_count, 1)
+                self.lora(directory, {"ss_epoch": "250"})
+                self.assertEqual(self.epoch_of(path), 250)
+
+
 class UnetFamilyTests(unittest.TestCase):
     def test_unet_families(self):
         names = ["anima-2.9b.safetensors", "anima-base.safetensors", "Anima_3.8B_v2.safetensors",
@@ -118,6 +176,46 @@ class UnetFamilyTests(unittest.TestCase):
         with mock.patch.dict("sys.modules", {}), \
                 mock.patch("comfy_custom_nodes.ai_studio_forge_parity.anima38_nodes.ForgeNeoAnima38V2Loader", loader):
             self.assertEqual(studio_choices.anima38_bundle_names(), frozenset({"a.safetensors"}))
+
+    def test_the_loader_opens_the_model_files_once_per_file_list(self):
+        scans = []
+
+        def scan():
+            scans.append(1)
+            return frozenset({"bundle.safetensors"})
+
+        with mock.patch.object(studio_choices, "_read_bundle_names", scan), mock.patch.dict(studio_choices._bundle_scan, clear=True):
+            names = ["plain.safetensors", "bundle.safetensors"]
+            self.assertEqual(studio_choices.unet_families(names)["bundle.safetensors"], "3.8b")
+            self.assertEqual(studio_choices.unet_families(list(names))["bundle.safetensors"], "3.8b")
+            self.assertEqual(len(scans), 1)
+            studio_choices.unet_families(["bundle.safetensors"])
+            self.assertEqual(len(scans), 2)
+
+    def test_a_changed_file_is_opened_again(self):
+        answers = iter([frozenset(), frozenset({"model.safetensors"})])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.safetensors"
+            path.write_bytes(b"x")
+            host = SimpleNamespace(get_full_path=lambda kind, name: str(path), get_filename_list=lambda kind: [path.name])
+            with mock.patch.dict("sys.modules", {"folder_paths": host}), mock.patch.dict(studio_choices._bundle_scan, clear=True), \
+                    mock.patch.object(studio_choices, "_read_bundle_names", lambda: next(answers)):
+                self.assertEqual(studio_choices.unet_families([path.name])[path.name], "2.9b")
+                path.write_bytes(b"xx")
+                self.assertEqual(studio_choices.unet_families([path.name])[path.name], "3.8b")
+
+    def test_a_failed_scan_is_not_kept(self):
+        answers = iter([RuntimeError("busy"), frozenset({"later.safetensors"})])
+
+        def scan():
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with mock.patch.object(studio_choices, "_read_bundle_names", scan), mock.patch.dict(studio_choices._bundle_scan, clear=True):
+            self.assertEqual(studio_choices.unet_families(["later.safetensors"])["later.safetensors"], "2.9b")
+            self.assertEqual(studio_choices.unet_families(["later.safetensors"])["later.safetensors"], "3.8b")
 
     def test_bundle_beats_a_plain_name(self):
         self.assertEqual(studio_choices.unet_family("anima-base.safetensors", frozenset({"anima-base.safetensors"})),

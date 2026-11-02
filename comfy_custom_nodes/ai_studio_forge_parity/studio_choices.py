@@ -11,16 +11,23 @@ import importlib
 import os
 import re
 from pathlib import Path
+from typing import Optional
 
+from .degrid_files import safetensors_header
 from .dora_infer_mode import MODE_CHOICES
 from .sam3_face_detect import model_dirs as face_model_dirs, scan_models as scan_face_models
 from .sam3_files import is_transformers_layout
+from .studio_state import ATTENTION_MODES
+from .studio_wildcards import FILES as WILDCARD_FILES
 
-KINDS = ("samplers", "schedulers", "unets", "vaes", "tes", "loras", "upscalers", "sam3", "dora_modes", "controlnets", "face_models")
+KINDS = ("samplers", "schedulers", "unets", "vaes", "tes", "loras", "upscalers", "sam3", "dora_modes", "controlnets", "face_models",
+         "attentions", "wildcards")
 SAM3_PREFIX = "sam3"
 SAM3_SUFFIXES = (".pt", ".safetensors")  # what sam-extra's find_checkpoint_options accepts
 EXTRA_PATHS_FILE = "extra_model_paths.yaml"
 _NAME_38 = re.compile(r"3[._-]?8b", re.IGNORECASE)
+_bundle_scan: dict = {}  # the last scan: "stamps" (see _model_stamps), "bundles"
+_lora_epochs: dict = {}  # file path -> ((size, time), epoch)
 
 
 def _folder_paths():
@@ -48,12 +55,16 @@ def _samplers(name: str) -> list[str]:
 
 # ------------------------------------------------------------------------------------------------- unet families
 
+def _read_bundle_names() -> frozenset:
+    from .anima38_nodes import ForgeNeoAnima38V2Loader
+
+    return frozenset(ForgeNeoAnima38V2Loader.INPUT_TYPES()["required"]["model_name"][0])
+
+
 def anima38_bundle_names() -> frozenset:
     """The files the 3.8B v2 loader offers (checkpoints whose header says they are a bundle); empty outside ComfyUI."""
     try:
-        from .anima38_nodes import ForgeNeoAnima38V2Loader
-
-        return frozenset(ForgeNeoAnima38V2Loader.INPUT_TYPES()["required"]["model_name"][0])
+        return _read_bundle_names()
     except Exception:
         return frozenset()
 
@@ -79,9 +90,35 @@ def unet_names(folder_paths=None) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+def _model_stamps(names: list) -> tuple:
+    """What a bundle scan depends on: the model files, each with its size and time."""
+    folder_paths = _folder_paths()
+    stamps = []
+    for name in names:
+        try:
+            stat = os.stat(folder_paths.get_full_path("diffusion_models", name))
+            stamps.append((name, stat.st_size, stat.st_mtime_ns))
+        except (AttributeError, OSError, TypeError):
+            stamps.append((name, None, None))
+    return tuple(stamps)
+
+
+def _bundle_names_of(names: list) -> frozenset:
+    """The loader opens every model file, which can take seconds, and the X/Y/Z panel plans on each edit: it runs again only
+    when a file changed. A scan that failed is not kept."""
+    stamps = _model_stamps(names)
+    if _bundle_scan.get("stamps") != stamps:
+        try:
+            _bundle_scan.update(stamps=stamps, bundles=_read_bundle_names())
+        except Exception:
+            _bundle_scan.clear()
+            return frozenset()
+    return _bundle_scan["bundles"]
+
+
 def unet_families(names=None, bundle_names=None) -> dict:
     names = unet_names() if names is None else list(names)
-    bundle = anima38_bundle_names() if bundle_names is None else bundle_names
+    bundle = _bundle_names_of(names) if bundle_names is None else bundle_names
     return {name: unet_family(name, bundle) for name in names}
 
 
@@ -92,6 +129,36 @@ def lora_names(folder_paths=None) -> list[str]:
     if folder_paths is None:
         raise RuntimeError("ComfyUI folder_paths is not available")
     return list(folder_paths.get_filename_list("loras"))
+
+
+def _ss_epoch(header: dict) -> Optional[int]:
+    metadata = header.get("__metadata__")
+    text = str(metadata.get("ss_epoch")) if isinstance(metadata, dict) else ""
+    return int(text) if text.isdecimal() and len(text) < 10 and int(text) > 0 else None
+
+
+def lora_epoch(name: str, folder_paths=None) -> Optional[int]:
+    """The epoch a training tool wrote into a LoRA file (``ss_epoch``), None if it wrote none or the file cannot be read.
+    Read once per version of the file: a header can be megabytes of JSON and the X/Y/Z panel plans on each edit. A read that
+    failed is not kept."""
+    folder_paths = folder_paths if folder_paths is not None else _folder_paths()
+    try:
+        path = folder_paths.get_full_path("loras", name)
+        stat = os.stat(path)
+    except (AttributeError, OSError, TypeError):
+        return None
+    stamp = (stat.st_size, stat.st_mtime_ns)
+    known = _lora_epochs.get(path)
+    if known is not None and known[0] == stamp:
+        return known[1]
+    try:
+        header = safetensors_header(path)
+    except RecursionError:
+        header = None
+    if header is None:
+        return None
+    _lora_epochs[path] = (stamp, _ss_epoch(header))
+    return _lora_epochs[path][1]
 
 
 # ------------------------------------------------------------------------------------------------- SAM3 files
@@ -191,8 +258,20 @@ def upscaler_items() -> list[str]:
     return upscale_method_choices()
 
 
+def attention_choices() -> dict:
+    """The attention modes this ComfyUI has; ``launch`` names what it was started with."""
+    try:
+        attention = importlib.import_module("comfy.ldm.modules.attention")
+    except Exception:
+        return {"items": list(ATTENTION_MODES[:2]), "launch": ""}
+    known = attention.REGISTERED_ATTENTION_FUNCTIONS
+    started = next((name for name, function in known.items() if function is attention.optimized_attention), "")
+    return {"items": [mode for mode in ATTENTION_MODES if mode == "launch" or mode in known], "launch": started}
+
+
 def choices(kind: str) -> dict:
-    """``{"items": [...]}`` for one kind (``unets`` adds ``"families"``); ValueError for an unknown kind."""
+    """``{"items": [...]}`` for one kind (``unets`` adds ``"families"``, ``attentions`` adds ``"launch"``); ValueError for
+    an unknown kind."""
     if kind not in KINDS:
         raise ValueError(f"unknown kind: {kind}")
     folder_paths = _folder_paths()
@@ -217,4 +296,8 @@ def choices(kind: str) -> dict:
         return {"items": _file_list(folder_paths, "controlnet")}
     if kind == "face_models":
         return {"items": face_model_items(face_model_directories(folder_paths))}
+    if kind == "attentions":
+        return attention_choices()
+    if kind == "wildcards":
+        return {"items": WILDCARD_FILES.names()}
     return {"items": list(MODE_CHOICES)}

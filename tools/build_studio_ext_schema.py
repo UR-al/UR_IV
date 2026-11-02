@@ -13,8 +13,8 @@ The pack cannot import ``core``, which is why the table is generated. Each entry
 Daemon and SPEED are ``studio_ext.js``'s), ``class``, ``form`` (``json`` = the fields go into ``settings_json``,
 ``widgets`` = each field with an ``input`` writes that node input), ``on_key`` (the app's master-switch key, the state's
 ``on``), ``fixed`` (node inputs the panel does not show), ``active_keys`` (guidance: any of them on = the node runs) and
-``fields`` (``key``, ``label``, ``kind``, ``default``, ``min``/``max``, ``choices`` (empty = the node's file list, read
-from ``/object_info``), ``input``, ``section``).
+``families`` (the model families it runs on) and ``fields`` (``key``, ``label``, ``kind``, ``default``, ``min``/``max``,
+``choices`` (empty = the node's file list, read from ``/object_info``), ``input``, ``section``).
 
 Colorcraft is not in the table: its node takes the chain ``core/colorcraft.build_chain`` compiles (mask tags, combos,
 per-pass filtering, ~1500 lines of app code), which the pack does not have.
@@ -40,6 +40,15 @@ from core import anima_guidance as ag  # noqa: E402
 from core import anima_speed, extra_samplers, vae_degrid  # noqa: E402
 
 MAX_SAFE_INT = 2 ** 53 - 1  # JS holds these numbers as doubles; a larger bound would round past the node's own max
+
+# What runs outside Anima: the sampling helpers and SAM3 work on any model, the VAE ones on Krea2 because it shares
+# Anima's VAE and latents. The rest (guidance suite, SPEED, LoRA blocks, ...) reach into Anima's blocks or are tuned to it.
+ANY_MODEL = ("anima", "moss", "krea2")
+QWEN_VAE = ("anima", "krea2")
+EXT_FAMILIES = {
+    "skim": ANY_MODEL, "detail_daemon": ANY_MODEL, "er_sde": ANY_MODEL, "sam3_refine": ANY_MODEL, "sam3_tile": ANY_MODEL,
+    "vae_2x": QWEN_VAE, "degrid": QWEN_VAE, "pid": QWEN_VAE,
+}
 
 # (section, [(key, label)]): every non-fixed PERTURBATION_SPEC key exactly once, in display order
 GUIDANCE_SECTIONS = (
@@ -292,7 +301,7 @@ def build_schema() -> dict:
         {"key": "sam3_tile", "label": "SAM3 타일", "group": "SAM3", "role": "ext_sam3_tile",
          "class": "ForgeNeoSAM3TileRepair", "form": "json", "fixed": {"enabled": True}, "fields": _tile_fields()},
     ]
-    return {"extensions": extensions}
+    return {"extensions": [{**item, "families": list(EXT_FAMILIES.get(item["key"], ("anima",)))} for item in extensions]}
 
 
 def write_schema(folder: Path = WEB) -> tuple[Path, Path]:

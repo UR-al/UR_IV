@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 
-from .studio_state import effective_prompt, generation_size, size_grid
+from .studio_state import effective_attention, effective_prompt, generation_size, size_grid
 from .studio_upscale import hires_size
 
 # ComfyUI sampler name -> Forge label.  Unknown names are written as they are.
@@ -192,6 +192,14 @@ def _hires_params(state: dict, hires: dict) -> dict[str, str | None]:
     return params
 
 
+def _inpaint_params(i2i: dict) -> dict[str, str]:
+    params = {"Mask blur": str(i2i["mask_blur"])}
+    if i2i["inpaint_area"] == "masked":
+        params.update({"Inpaint area": "Only masked", "Masked area padding": str(i2i["inpaint_padding"])})
+    params["Masked content"] = i2i["inpaint_fill"]
+    return params
+
+
 def build_infotext(state: dict, *, seed: int, extra: dict[str, str] | None = None) -> str:
     """``prompt`` / ``Negative prompt: ...`` / ``Steps: ..., Sampler: ...`` for a normalized studio state."""
     prompt = effective_prompt(state)
@@ -217,10 +225,18 @@ def build_infotext(state: dict, *, seed: int, extra: dict[str, str] | None = Non
         params["Denoising strength"] = _number(i2i.get("denoise", 0.0))
     elif hires_on:
         params["Denoising strength"] = _number(hires["denoise"])
+    if is_i2i and state.get("i2i_mode") == "inpaint":
+        params.update(_inpaint_params(i2i))
     if hires_on:
         params.update(_hires_params(state, hires))
     params.update(_sam3_params(state.get("sam3") or {}))
     params.update(_upscale_params(state.get("upscale") or {}))
+    if effective_attention(state) != "launch":
+        params["Attention"] = effective_attention(state)
+    if state.get("prompt_template"):  # the keys Dynamic Prompts writes
+        params["Template"] = state["prompt_template"]
+    if state.get("negative_template"):
+        params["Negative Template"] = state["negative_template"]
     for key, value in (extra or {}).items():
         params[str(key)] = str(value)
 

@@ -4,13 +4,36 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  Suggester, caretPoint, createAutocomplete, formatCount, formatTag, insertTag, loraQuery, matchLoras, narrow, tagCandidate,
-  tokenAtCaret,
+  Suggester, caretPoint, createAutocomplete, formatCount, formatTag, insertTag, loraQuery, matchLoras, matchWildcards, narrow, tagCandidate,
+  tokenAtCaret, wildcardQuery,
 } from "../web/ai_studio/studio_autocomplete.js";
 
 // ----------------------------------------------------------------------------------------------- pure text helpers
 
 const tokenOf = (text, caret = text.length) => tokenAtCaret(text, caret);
+
+test("wildcardQuery: a name after two underscores, not a finished wildcard or a tag", () => {
+  assert.equal(wildcardQuery("__"), "");
+  assert.equal(wildcardQuery("__ha"), "ha");
+  assert.equal(wildcardQuery("__hair_st"), "hair_st");
+  assert.equal(wildcardQuery("__hair__"), null);
+  assert.equal(wildcardQuery("hair_"), null);
+  assert.equal(wildcardQuery("_a"), null);
+});
+
+test("matchWildcards: prefix before contains, and __name__ goes in as written", () => {
+  const rows = matchWildcards(["outfit", "hair", "chair"], "hai");
+  assert.deepEqual(rows.map((row) => row.name), ["hair", "chair"]);
+  assert.deepEqual([rows[0].insert, rows[0].verbatim], ["__hair__", true]);
+  assert.equal(matchWildcards(["a", "b"], "").length, 2);
+});
+
+test("Suggester answers a wildcard query at once from the list", () => {
+  const answers = [];
+  const suggester = new Suggester({ wildcards: () => ["hair"], onItems: (rows) => answers.push(rows), setTimer: () => assert.fail("no timer") });
+  suggester.ask("__ha");
+  assert.equal(answers[0][0].insert, "__hair__");
+});
 
 test("tokenAtCaret: the tag being typed, bounded by commas and newlines", () => {
   assert.deepEqual(tokenOf("1girl, lo"), { start: 7, end: 9, query: "lo" });
