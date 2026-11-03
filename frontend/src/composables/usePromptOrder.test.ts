@@ -39,6 +39,35 @@ it('moves sections up and down within bounds, then saves the keys and closes', (
   expect(addToast).toHaveBeenCalledWith('success', '프롬프트 순서 저장됨')
 })
 
+const USER_ORDER = ['prefix', 'char_count', 'character', 'copyright', 'artist', 'main', 'suffix']
+const loaded = (keys: string[]) => JSON.stringify(keys.map((key) => ({ key, label: key })))
+
+it('the panel starts in the default order and follows what the backend sends', () => {
+  const { mgr, handlers } = setup()
+  expect(createPromptOrder({ requestAction: vi.fn(), addToast: vi.fn(), onBackendEvent: () => {} }).sectionOrder.value)
+    .toEqual(['char_count', 'character', 'copyright', 'artist', 'prefix', 'main', 'suffix'])
+  handlers.get('promptOrderLoaded')!(loaded(USER_ORDER))
+  expect(mgr.sectionOrder.value).toEqual(USER_ORDER)
+})
+
+it('moving a row in the modal leaves the panel alone until it is saved', () => {
+  const { mgr, handlers } = setup()
+  handlers.get('promptOrderLoaded')!(loaded(USER_ORDER))
+  mgr.moveOrderDown(0)
+  expect(mgr.promptOrderList.value[0].key).toBe('char_count')
+  expect(mgr.sectionOrder.value).toEqual(USER_ORDER)
+  mgr.closeOrderManager()
+  expect(mgr.sectionOrder.value).toEqual(USER_ORDER)
+})
+
+it('a broken answer keeps the panel in its order', () => {
+  const { mgr, handlers } = setup()
+  handlers.get('promptOrderLoaded')!(loaded(USER_ORDER))
+  handlers.get('promptOrderLoaded')!('oops')
+  handlers.get('promptOrderLoaded')!('{"a": 1}')
+  expect(mgr.sectionOrder.value).toEqual(USER_ORDER)
+})
+
 it('reset asks first', () => {
   const { mgr, requestAction, addToast } = setup()
   vi.stubGlobal('window', { confirm: () => false })

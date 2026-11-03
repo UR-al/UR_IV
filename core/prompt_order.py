@@ -30,9 +30,9 @@ SECTION_LABELS: dict[str, str] = {
     "character": "캐릭터",
     "copyright": "작품 (Copyright)",
     "artist": "작가 (Artist)",
-    "prefix": "선행 (Prefix)",
+    "prefix": "선행 고정 (Prefix)",
     "main": "메인 태그",
-    "suffix": "후행 (Suffix)",
+    "suffix": "후행 고정 (Suffix)",
 }
 
 # 기존 동작과 동일한 기본 순서

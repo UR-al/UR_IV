@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { moveAdjacent } from '../utils/listMove'
+import { orderedSections, type PromptSectionKey } from '../utils/promptSections'
 import { appManagerDeps, type ManagerDeps } from './managerDeps'
 
 export interface PromptOrderSection { key: string; label: string; [k: string]: any }
@@ -7,10 +8,12 @@ export interface PromptOrderSection { key: string; label: string; [k: string]: a
 /**
  * 프롬프트 섹션 순서 매니저 — App.vue 에서 추출(App.vue 분할 ④).
  * 화면은 components/managers/PromptOrderModal.vue. 목록은 promptOrderLoaded 로 온다(App onMounted 가 `bind()`).
+ * `promptOrderList` 는 모달이 고치는 사본이고, 패널의 입력 칸은 저장된 값인 `sectionOrder` 를 따른다.
  */
 export function createPromptOrder(deps: Pick<ManagerDeps, 'onBackendEvent' | 'requestAction' | 'addToast'>) {
   const showOrderManager = ref(false)
   const promptOrderList = ref<PromptOrderSection[]>([])  // [{key, label}, ...]
+  const sectionOrder = ref<PromptSectionKey[]>(orderedSections([]))
 
   function loadPromptOrder() {
     deps.requestAction('prompt_order_list', {})
@@ -30,7 +33,7 @@ export function createPromptOrder(deps: Pick<ManagerDeps, 'onBackendEvent' | 're
     deps.addToast('success', '프롬프트 순서 저장됨')
   }
   function resetPromptOrder() {
-    if (!window.confirm('기본 순서(인물수 → 캐릭터 → 작품 → 작가 → 선행 → 메인 → 후행)로 복원할까요?')) return
+    if (!window.confirm('기본 순서(인물수 → 캐릭터 → 작품 → 작가 → 선행 고정 → 메인 → 후행 고정)로 복원할까요?')) return
     deps.requestAction('prompt_order_reset', {})
     deps.addToast('info', '기본 순서로 복원')
   }
@@ -39,7 +42,9 @@ export function createPromptOrder(deps: Pick<ManagerDeps, 'onBackendEvent' | 're
   function applyLoaded(json: string) {
     try {
       const arr = JSON.parse(json)
-      if (Array.isArray(arr)) promptOrderList.value = arr
+      if (!Array.isArray(arr)) return
+      promptOrderList.value = arr
+      sectionOrder.value = orderedSections(arr.map((section) => section?.key))
     } catch {}
   }
   function bind() { return deps.onBackendEvent('promptOrderLoaded', applyLoaded) }
@@ -52,7 +57,7 @@ export function createPromptOrder(deps: Pick<ManagerDeps, 'onBackendEvent' | 're
   function closeOrderManager() { showOrderManager.value = false }
 
   return {
-    showOrderManager, promptOrderList,
+    showOrderManager, promptOrderList, sectionOrder,
     loadPromptOrder, moveOrderUp, moveOrderDown, saveOrderAndClose, resetPromptOrder,
     applyLoaded, bind, openOrderManager, closeOrderManager,
   }
