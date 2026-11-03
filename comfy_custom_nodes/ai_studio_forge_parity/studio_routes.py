@@ -10,6 +10,7 @@ The routes (all JSON; a failure is ``{"error": ...}`` with status 400):
 - ``GET  /choices?kind=...``  picker lists (``studio_choices``)
 - ``GET  /tags?q=&limit=``    prompt tag autocomplete (``studio_tags``; ``limit`` 1..30, default 12)
 - ``POST /wildcards/expand``  ``{state}`` -> ``{states, missing}``, one state per image (``studio_wildcards``)
+- ``POST /infotext/parse``    ``{text}`` -> ``{settings, model, modules}``, ``{settings: null}`` for other text (``studio_infotext_read``)
 - ``POST /xyz/plan``          ``{state, axes, options}`` -> the planned X/Y/Z cells (``xyz_plan``)
 - ``POST /xyz/grid``          generated cell images -> grid PNG(s) in ``output/AIStudio/xyz`` (``xyz_grid_draw``)
 - ``POST /open_output``       opens the output folder in the file manager (Windows only)
@@ -30,7 +31,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import studio_choices, studio_tags, studio_wildcards, xyz_plan
+from . import studio_choices, studio_infotext_read, studio_tags, studio_wildcards, xyz_plan
 from .compat import folder_paths_module
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -195,6 +196,13 @@ def handle_wildcards_expand(body, *, lookup=None) -> tuple[int, dict]:
     if not isinstance(body, dict) or not isinstance(body.get("state"), dict):
         return _error("body must be {state}")
     return 200, studio_wildcards.expand_run(body["state"], lookup or studio_wildcards.FILES.groups)
+
+
+def handle_infotext_parse(body) -> tuple[int, dict]:
+    """The settings an image's infotext names, for the EXIF panel's 설정 가져오기."""
+    if not isinstance(body, dict) or not isinstance(body.get("text"), str):
+        return _error("body must be {text}")
+    return 200, studio_infotext_read.parse_infotext(body["text"]) or {"settings": None}
 
 
 def handle_plan(body, *, families=None, loras=None, lora_epoch=None, wildcards=None) -> tuple[int, dict]:
@@ -417,6 +425,7 @@ def register_studio_handlers() -> None:
     add_handler("GET", "/choices", _route(handle_choices, read="query"))
     add_handler("GET", "/tags", _route(handle_tags, read="query"))
     add_handler("POST", "/wildcards/expand", _route(handle_wildcards_expand))
+    add_handler("POST", "/infotext/parse", _route(handle_infotext_parse))
     add_handler("POST", "/xyz/plan", _route(handle_plan))
     add_handler("POST", "/xyz/grid", _route(handle_grid))
     add_handler("POST", "/open_output", _route(handle_open_output, read="none"))

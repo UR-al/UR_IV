@@ -154,6 +154,12 @@ export class XyzView {
     return structuredClone(this.settings);
   }
 
+  /** The EXIF panel's 설정 가져오기: the plot as the image's run had it. */
+  pullSettings(saved) {
+    this.set((settings) => { Object.assign(settings, xyzWithDefaults(saved)); }, { rerender: true });
+    this.loadLoraFiles();
+  }
+
   set(mutate, { rerender = false, estimate = true } = {}) {
     mutate(this.settings);
     if (this.widget) this.widget.value = JSON.stringify(this.settings);

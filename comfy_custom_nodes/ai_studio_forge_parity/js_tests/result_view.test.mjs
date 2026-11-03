@@ -77,6 +77,37 @@ const grid = (view, name, replace = true) => view.onStudioEvent("grid", { item: 
 const FULL = { gallery: [ref("a.png"), ref("b.png")], selected: 1 };
 const FULL_ON = { ...FULL, auto_clear: true };
 
+const galleryBox = (view) => view.element.byClass("ais-gallery")[0];
+
+test("picking a thumbnail leaves the gallery where it was scrolled", () => {
+  const { view } = setup(FULL);
+  galleryBox(view).scrollLeft = 300;
+  view.element.byClass("ais-thumb")[1].fire("click");
+  assert.deepEqual(picked(view), ["b.png"]);
+  assert.equal(galleryBox(view).scrollLeft, 300);
+});
+
+test("the tabs, 자동 비우기 and a run's start leave the gallery where it was scrolled", () => {
+  const { view } = setup(FULL);
+  galleryBox(view).scrollLeft = 300;
+  pillNamed(view, "XYZ 격자").fire("click");
+  assert.equal(galleryBox(view).scrollLeft, 300);
+  autoClearPill(view).fire("click");
+  assert.equal(galleryBox(view).scrollLeft, 300);
+  start(view);
+  assert.equal(galleryBox(view).scrollLeft, 300);
+});
+
+test("new images bring the gallery back to its start: that is where they are", () => {
+  const { view } = setup(FULL);
+  galleryBox(view).scrollLeft = 300;
+  images(view, ["new.png"]);
+  assert.equal(galleryBox(view).scrollLeft, 0);
+  galleryBox(view).scrollLeft = 300;
+  grid(view, "grid.png");
+  assert.equal(galleryBox(view).scrollLeft, 0);
+});
+
 test("with 자동 비우기 off new images go in front of the older ones", () => {
   const { view } = setup(FULL);
   start(view);

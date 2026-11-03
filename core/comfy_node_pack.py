@@ -107,7 +107,9 @@ PACK_ID = "ai_studio_forge_parity"
 # 1.15.0: the studio picks its attention (AIStudioAttention), inpaints only the masked area (the detailer as the inpaint_detailer
 # role, a lazy switch keeps the main sampler out), plots any extension setting (xyz_axes.EXT_AXES) and draws wildcards
 # (studio_wildcards.py); NegPiP runs on MOSS too.
-PACK_VERSION = "1.15.0"
+# 1.16.0: the studio's EXIF panel pulls an image's settings back into the panels (web/ai_studio/studio_settings.js,
+# studio_infotext_read.py), and the gallery keeps its scroll.
+PACK_VERSION = "1.16.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

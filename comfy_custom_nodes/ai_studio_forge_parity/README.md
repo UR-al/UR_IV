@@ -102,6 +102,18 @@ model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
 
+## 1.16.0 changes
+
+Opening another workflow no longer costs the settings: 설정 가져오기 on the EXIF panel brings them back from any image.
+
+- A studio image keeps the panel and the X/Y/Z panel of its run in ComfyUI's `workflow` text, and `studio_settings.js` puts
+  them back as they were: prompt boxes, wildcards, the seed box, extensions. An X/Y/Z cell gives the plot's base, not the cell.
+  The tab and the i2i image stay, since they are where the work is.
+- Any other image has its infotext: `POST /infotext/parse` (`studio_infotext_read.py`, the reverse of `build_infotext`) reads the
+  prompts, sampling, size, Hires, inpaint and attention keys, and the rest of the panel stays. The seed is not taken.
+- A file or sampler this ComfyUI lacks keeps the panel's pick and is named in a notice.
+- The gallery keeps its scroll when a thumbnail is picked; new images bring it back to its start.
+
 ## 1.15.0 changes
 
 Five additions to the studio, all saved in the panel state and all off by default.

@@ -70,8 +70,8 @@ const png = (texts = {}) => Uint8Array.from([
 const ref = (filename) => ({ filename, subfolder: "", type: "output" });
 const fakeFile = (name, buffer) => ({ name, arrayBuffer: async () => buffer });
 
-function setup(readImage) {
-  return new ExifView(null, { imageUrl: (image) => `/view/${image.filename}`, readImage });
+function setup(readImage, pullSettings) {
+  return new ExifView(null, { imageUrl: (image) => `/view/${image.filename}`, readImage, pullSettings });
 }
 
 /** Lets the view's pending reads finish. */
@@ -221,6 +221,45 @@ test("a very long text shows its beginning and says so", async () => {
   await pick(view, "a.png");
   assert.equal(texts(view)[0].length, 1024 * 1024);
   assert.match(view.element.byClass("ais-label")[0].text, /parameters .*앞부분/);
+});
+
+const pullButton = (view) => view.element.byClass("ais-mini").find((button) => button.text === "설정 가져오기");
+
+test("설정 가져오기 hands the shown image's settings to the studio", async () => {
+  const pulled = [];
+  const view = setup(async () => png({ parameters: "1girl\nSteps: 32" }), (settings) => pulled.push(settings));
+  await pick(view, "a.png");
+  const button = pullButton(view);
+  assert.equal(button.attrs["aria-disabled"], undefined);
+  button.fire("click");
+  assert.deepEqual(pulled, [{ infotext: "1girl\nSteps: 32" }]);
+});
+
+test("a studio image pulls its panel, not the text", async () => {
+  const pulled = [];
+  const workflow = JSON.stringify({ nodes: [{ type: "AIStudioPanel", widgets_values: ['{"prompt":"x"}'] }] });
+  const view = setup(async () => png({ parameters: "1girl\nSteps: 32", workflow }), (settings) => pulled.push(settings));
+  await pick(view, "a.png");
+  pullButton(view).fire("click");
+  assert.deepEqual(pulled, [{ panel: { prompt: "x" }, xyz: null }]);
+});
+
+test("with nothing to pull the button is grey and does nothing", async () => {
+  const pulled = [];
+  const view = setup(async () => png({ Software: "paint" }), (settings) => pulled.push(settings));
+  assert.equal(pullButton(view).attrs["aria-disabled"], "true"); // no image yet
+  await pick(view, "a.png");
+  const button = pullButton(view);
+  assert.equal(button.attrs["aria-disabled"], "true");
+  button.fire("click");
+  assert.deepEqual(pulled, []);
+});
+
+test("picking nothing takes the button away again", async () => {
+  const view = setup(async () => png({ parameters: "1girl\nSteps: 32" }), () => {});
+  await pick(view, "a.png");
+  await pick(view, null);
+  assert.equal(pullButton(view).attrs["aria-disabled"], "true");
 });
 
 test("long machine text starts folded, a long infotext never", async () => {

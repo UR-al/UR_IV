@@ -6,6 +6,24 @@ import { test } from "node:test";
 
 import { DEFAULT_XYZ, XYZ_AXES, XyzView, csvField, estimateText, toggleLine, xyzWithDefaults } from "../web/ai_studio/xyz_view.js";
 
+test("설정 가져오기 puts the image's plot in the panel and its widget", () => {
+  const view = Object.create(XyzView.prototype);
+  const saved = { on: true, axes: [{ axis: "steps", text: "20,30" }], options: { keep_seed: true } };
+  const calls = [];
+  Object.assign(view, {
+    settings: xyzWithDefaults({}),
+    set(mutate, options) {
+      mutate(this.settings);
+      calls.push(options);
+    },
+    loadLoraFiles: () => calls.push("loras"),
+  });
+  view.pullSettings(saved);
+  assert.equal(view.settings.on, true);
+  assert.deepEqual(view.settings.axes[0], { axis: "steps", text: "20,30" });
+  assert.deepEqual(calls, [{ rerender: true }, "loras"]);
+});
+
 /** `[{id, label, kind, choices}]` read from the `_axis(...)` calls of xyz_axes.py. */
 function pythonAxes() {
   const source = readFileSync(new URL("../xyz_axes.py", import.meta.url), "utf-8");

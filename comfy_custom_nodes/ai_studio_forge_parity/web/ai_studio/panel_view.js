@@ -7,6 +7,7 @@ import { createAutocomplete } from "./studio_autocomplete.js";
 import { hiresCard, hiresSizeText, postCard } from "./post_view.js";
 import { FAMILY_LABELS } from "./studio_ext.js";
 import { DORA_MODES, INPAINT_FILLS, PROMPT_SECTIONS, defaultModel, familyHasNegpip, fileStem, imageSize, modelFamily, negpipKey, pickCheckpoint, sizeStep, withDefaults } from "./studio_logic.js";
+import { pulledState } from "./studio_settings.js";
 import { autoGrow, card, h, numberBox, optionItems, pill, row, select } from "./studio_dom.js";
 
 const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3", "controlnets", "face_models", "attentions", "wildcards"];
@@ -192,6 +193,14 @@ export class PanelView {
   async pinSeed() {
     const seed = await this.ctx.pickedSeed?.();
     if (Number.isInteger(seed)) this.setSeed(seed);
+  }
+
+  /** The EXIF panel's 설정 가져오기 (`read`: studio_settings.pulledState); answers the names this ComfyUI has no file for. */
+  pullSettings(read) {
+    const { state, missing } = pulledState(this.state, read, this.choices);
+    this.set((s) => { Object.assign(s, state); }, true);
+    this.loadChoices(); // an empty model pick takes its family's default
+    return missing;
   }
 
   /** Forge's send-to: the image goes to the i2i tab and its size (`{width, height}`) becomes that tab's size. */

@@ -242,6 +242,21 @@ async function pickedSeed() {
   return record ? record.seed : notice(NOTICES.noInfo);
 }
 
+/** The EXIF panel's 설정 가져오기: `settings` (studio_settings.imageSettings) into the control panel and the XYZ panel. */
+async function pullSettings(settings) {
+  const panel = viewOf(PANEL);
+  if (!panel) return notice(NOTICES.noPanel);
+  try {
+    const read = settings.infotext ? await route("/infotext/parse", { text: settings.infotext }) : settings;
+    if (!read.panel && !read.settings) return notice(NOTICES.noInfo);
+    const missing = panel.pullSettings(read);
+    if (read.xyz) viewOf(XYZ)?.pullSettings(read.xyz);
+    return notice(missing.length ? `${NOTICES.pulled} · ${NOTICES.pulledMissing}: ${missing.join(", ")}` : NOTICES.pulled);
+  } catch (error) {
+    return notice(String(error?.message || error));
+  }
+}
+
 function contextFor(comfyClass) {
   if (comfyClass === PANEL) {
     return {
@@ -260,7 +275,7 @@ function contextFor(comfyClass) {
     };
   }
   if (comfyClass === RESULT) return { imageUrl, action: galleryAction, selected: (image) => emit("selected", { image }) };
-  if (comfyClass === EXIF) return { imageUrl, readImage };
+  if (comfyClass === EXIF) return { imageUrl, readImage, pullSettings };
   return { choices, plan: (body) => route("/xyz/plan", body), getState: () => viewOf(PANEL)?.getState() || {} };
 }
 
@@ -324,7 +339,7 @@ app.registerExtension({
       roleClass: (role) => roleNodes().get(role)?.comfyClass,
       getState: () => {
         const panel = viewOf(PANEL);
-        if (!panel) throw new Error("제어판(AI Studio Panel) 노드가 없음");
+        if (!panel) throw new Error(NOTICES.noPanel);
         return panel.getState();
       },
       getXyz: () => viewOf(XYZ)?.getXyz() || { on: false },

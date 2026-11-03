@@ -241,8 +241,18 @@ class TestBundledComfyNodePack(unittest.TestCase):
     def test_pack_version_matches_package_version(self):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
+    def test_settings_pull_release_is_1_16_0(self):
+        self.assertEqual(bundled_pack.__version__, "1.16.0")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.16.0: the studio's EXIF panel pulls", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.16.0 changes"), readme.index("## 1.15.0 changes"))
+        changes = " ".join(readme.split("## 1.16.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`studio_settings.js`", "`studio_infotext_read.py`", "`POST /infotext/parse`"):
+            self.assertIn(text, changes)
+
     def test_studio_tools_release_is_1_15_0(self):
-        self.assertEqual(bundled_pack.__version__, "1.15.0")
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# 1.15.0: the studio picks its attention", source)

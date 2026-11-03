@@ -3,6 +3,7 @@
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { h } from "./studio_dom.js";
 import { INFOTEXT_KEYS, readImageInfo } from "./studio_exif.js";
+import { imageSettings } from "./studio_settings.js";
 
 const FOLD_CHARS = 2000; // longer text (ComfyUI's prompt and workflow JSON) starts folded; the infotext never does
 const MAX_SHOWN = 1024 * 1024; // a textarea takes seconds to lay out past a few MB and stops answering near 100 MB
@@ -12,6 +13,8 @@ const MESSAGES = Object.freeze({
   noFormat: "PNG · JPEG · WebP 만 읽음",
   failed: "이미지를 읽지 못함",
 });
+const PULL_TITLE = "이 이미지를 만들 때의 제어판과 XYZ 설정을 그대로 되돌림 (탭과 i2i 이미지는 지금 그대로). Forge 이미지는 생성 정보에 적힌 것만";
+const PULL_NONE = "가져올 생성 정보가 있는 이미지를 고르기";
 
 const keepFromComfy = (event) => {
   event.preventDefault();
@@ -19,7 +22,10 @@ const keepFromComfy = (event) => {
 };
 
 export class ExifView {
-  /** `ctx`: `imageUrl(ref)`, `readImage(ref)` (the file's bytes as an ArrayBuffer, null when the server has none). */
+  /**
+   * `ctx`: `imageUrl(ref)`, `readImage(ref)` (the file's bytes as an ArrayBuffer, null when the server has none),
+   * `pullSettings(settings)` (settings: studio_settings.imageSettings).
+   */
   constructor(widget, ctx) {
     this.ctx = ctx;
     this.shown = null; // {name, url, info}; info: null while reading, `{failed: true}` when that failed
@@ -91,16 +97,30 @@ export class ExifView {
     }
     if (reading !== this.reading) return;
     this.shown.info = info;
+    this.shown.settings = info.entries ? imageSettings(info.entries) : null;
     this.render();
   }
 
   // ------------------------------------------------------------------------------------------- drawing
 
+  /** Grey with aria-disabled, as `pill`: the mouse-over title still says why. */
+  pullButton() {
+    const settings = this.shown?.settings;
+    return h("button", {
+      type: "button",
+      class: `ais-mini ${settings ? "" : "dis"}`,
+      title: settings ? PULL_TITLE : PULL_NONE,
+      "aria-disabled": settings ? undefined : "true",
+      onClick: settings ? () => this.ctx.pullSettings(settings) : undefined,
+    }, "설정 가져오기");
+  }
+
   render() {
     this.element.replaceChildren(
       h("div", { class: "ais-nt" }, h("span", {}, "EXIF"),
         h("span", { class: "ais-head-ctl" }, this.picker,
-          h("button", { type: "button", class: "ais-mini", onClick: () => this.picker.click() }, "파일 열기"))),
+          h("button", { type: "button", class: "ais-mini", onClick: () => this.picker.click() }, "파일 열기"),
+          this.pullButton())),
       h("div", { class: "ais-exif-body" }, this.shown ? this.details(this.shown) : h("div", { class: "ais-note" }, MESSAGES.empty)),
     );
   }

@@ -61,6 +61,7 @@ textarea.ais-f { white-space: pre-wrap; line-height: 1.5; resize: none; width: 1
   flex-shrink: 0;
 }
 .ais-mini:hover { background: #3a3a3a; }
+.ais-mini.dis, .ais-mini.dis:hover { background: #2b2b2b; color: #8a8a8a; cursor: help; }
 
 /* nodes (.node / .nt / .nb), rows, groups (.grp / .gh) */
 .ais-node {

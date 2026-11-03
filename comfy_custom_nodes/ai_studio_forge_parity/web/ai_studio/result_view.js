@@ -86,6 +86,7 @@ export class ResultView {
     const rest = replace && this.view.auto_clear ? [] : this.view.gallery.filter((ref) => !keys.has(refKey(ref)));
     this.view.gallery = [...fresh.map((item) => cleanRef(item.image)), ...rest].slice(0, GALLERY_LIMIT);
     this.view.selected = 0;
+    if (this.galleryEl) this.galleryEl.scrollLeft = 0; // the picked image is in front now
     this.save();
     this.announce();
   }
@@ -150,9 +151,11 @@ export class ResultView {
     const tab = (name, text) =>
       h("button", { type: "button", class: `ais-pill ${this.view.tab === name ? "on" : "off"}`, "aria-pressed": this.view.tab === name ? "true" : "false",
         onClick: () => { this.view.tab = name; this.save(); this.render(); } }, text);
+    const scrolled = this.galleryEl?.scrollLeft ?? 0; // the gallery is drawn anew
     this.progressEl = h("div", { class: "ais-progress" });
     this.noticeEl = h("div", { class: "ais-notice", role: "status" });
     this.stage = h("div", { class: "ais-stage" });
+    this.galleryEl = this.gallery();
     this.element.replaceChildren(
       h("div", { class: "ais-nt" },
         h("span", { class: "ais-head-ctl" }, h("span", {}, "결과"),
@@ -161,13 +164,14 @@ export class ResultView {
       this.progressEl,
       this.noticeEl,
       this.stage,
-      this.gallery(),
+      this.galleryEl,
       h("div", { class: "ais-buttons" }, GALLERY_BUTTONS.map(([name, label]) =>
         h("button", { type: "button", class: "ais-ib", "aria-label": label, title: label, onClick: () => this.ctx.action(name, this.selectedItem()) }, icon(name)))),
       h("div", { class: "ais-gallery-opts" },
         pill(this.view.auto_clear, () => { this.view.auto_clear = !this.view.auto_clear; this.save(); this.render(); }, {
           on: AUTO_CLEAR, off: AUTO_CLEAR, title: "켜면 Forge처럼 생성할 때마다 새 이미지로 바꿈 (파일은 그대로)" })),
     );
+    this.galleryEl.scrollLeft = scrolled; // after it joined the page: an element outside it has nowhere to scroll
     this.renderProgress();
     this.renderNotice();
     this.renderStage();
