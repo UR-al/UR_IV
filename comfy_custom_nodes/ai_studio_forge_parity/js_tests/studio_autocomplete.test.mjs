@@ -137,9 +137,18 @@ test("matchLoras: by stem, stem prefix before contains before folder, deduplicat
   const item = matchLoras(LORAS, "bjun")[0];
   assert.equal(item.insert, "<lora:bjunbae_e10:1>");
   assert.equal(item.verbatim, true);
-  assert.equal(item.hint, "묵밥 (@Bjunbae)/ep10");
+  assert.equal(item.hint, "ep10 · bjunbae e10"); // the short name (lora_names.shortLoraName), not the folder
   assert.equal(matchLoras(LORAS, "", 2).length, 2);
   assert.deepEqual(matchLoras(undefined, "a"), []);
+});
+
+test("matchLoras: the hint is the short name of the run and epoch; the inserted tag keeps the stem", () => {
+  const entry = "LoKr\\묵밥 (@Bjunbae)\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16-000014.safetensors";
+  const [item] = matchLoras([entry], "bjun");
+  assert.equal(item.hint, "묵밥 · @bjunbae fp16 · e14");
+  assert.equal(item.name, "@bjunbae_2.9b_lokr_came_b10_2e06_fp16-000014");
+  assert.equal(item.insert, "<lora:@bjunbae_2.9b_lokr_came_b10_2e06_fp16-000014:1>");
+  assert.equal(matchLoras(["plain.safetensors"], "pl")[0].hint, "plain");
 });
 
 // ----------------------------------------------------------------------------------------------- candidates

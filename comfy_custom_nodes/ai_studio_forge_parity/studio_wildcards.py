@@ -17,7 +17,7 @@ import random
 import re
 from pathlib import Path
 
-from .studio_state import PROMPT_BOXES, assembled_prompt
+from .studio_state import assembled_prompt, effective_negative, single_prompt
 
 SEED_RANGE = 4294967294  # xyz_plan.SEED_RANGE
 MAX_DEPTH = 10
@@ -140,14 +140,15 @@ def _running_pass(state: dict, path: tuple):
 
 
 def uses_wildcards(state: dict) -> bool:
-    texts = [assembled_prompt(state), state.get("negative") or ""]
+    texts = [assembled_prompt(state), effective_negative(state)]
     texts += [node.get(path[-1]) or "" for path in _PASS_PROMPTS if (node := _running_pass(state, path))]
     return any(map(has_wildcard, texts))
 
 
 def expand_state(state: dict, seed: int, lookup) -> tuple[dict, list]:
     """A copy of ``state`` with this seed's prompts, and the names no file has.  The templates go to the saved info;
-    the prompt boxes are joined first, so a box can use what another one wrote."""
+    the prompt boxes are joined first, so a box can use what another one wrote.  A box or a negative that is switched
+    off is not drawn and keeps its text."""
     out = copy.deepcopy(state)
     missing: list = []
 
@@ -157,8 +158,8 @@ def expand_state(state: dict, seed: int, lookup) -> tuple[dict, list]:
     prompt = assembled_prompt(out)
     expanded = drawn(prompt, "prompt")
     if expanded != prompt:
-        out.update(dict.fromkeys(PROMPT_BOXES, ""), prompt=expanded, prompt_template=prompt)
-    negative = out.get("negative") or ""
+        out.update(single_prompt(expanded), prompt_template=prompt)
+    negative = effective_negative(out)
     expanded = drawn(negative, "negative")
     if expanded != negative:
         out.update(negative=expanded, negative_template=negative)

@@ -10,7 +10,8 @@ from pathlib import Path
 
 from comfy_custom_nodes.ai_studio_forge_parity.studio_choices import unet_family
 from comfy_custom_nodes.ai_studio_forge_parity.studio_infotext import build_infotext
-from comfy_custom_nodes.ai_studio_forge_parity.studio_state import DEFAULT_STATE, effective_prompt, normalize_state
+from comfy_custom_nodes.ai_studio_forge_parity.studio_state import (DEFAULT_STATE, effective_negative, effective_prompt,
+                                                                    normalize_state)
 from comfy_custom_nodes.ai_studio_forge_parity.xyz_plan import missing_loras
 
 FIXTURE = (Path(__file__).resolve().parent.parent / "comfy_custom_nodes" / "ai_studio_forge_parity"
@@ -29,6 +30,11 @@ class StudioLogicGoldenTests(unittest.TestCase):
         for case in self.golden["effective_prompt"]:
             with self.subTest(state=case["state"]):
                 self.assertEqual(effective_prompt(normalize_state(case["state"])), case["expected"])
+
+    def test_effective_negative_cases(self):
+        for case in self.golden["effective_negative"]:
+            with self.subTest(state=case["state"]):
+                self.assertEqual(effective_negative(normalize_state(case["state"])), case["expected"])
 
     def test_unet_family_cases(self):
         for case in self.golden["unet_family"]:

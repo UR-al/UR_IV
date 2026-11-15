@@ -5,6 +5,7 @@
 // after `__` the wildcard names and `__name__`.
 // The popup lives on document.body (the canvas transforms everything inside a node's DOM widget) at the caret's line.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
+import { shortLoraName } from "./lora_names.js";
 
 const HANGUL = /[ㄱ-ㆎ가-힣]/;
 const SEPARATOR = /[,\n]/;
@@ -97,7 +98,7 @@ export function loraQuery(query) {
 const stemOf = (entry) => entry.replace(/\\/g, "/").split("/").pop().replace(/\.[^.]+$/, "");
 const folderOf = (entry) => entry.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
 
-/** LoRA candidates for `name` from the ComfyUI file names: stem prefix, then stem contains, then folder contains. */
+/** LoRA candidates for `name` from the ComfyUI file names: stem prefix, then stem contains, then folder contains; hint = the short name. */
 export function matchLoras(entries, name, limit = RESULT_LIMIT) {
   const wanted = normalize(name).trim();
   const seen = new Set();
@@ -109,11 +110,11 @@ export function matchLoras(entries, name, limit = RESULT_LIMIT) {
     const tier = !wanted || key.startsWith(wanted) ? 0 : key.includes(wanted) ? 1 : normalize(folderOf(String(entry))).includes(wanted) ? 2 : -1;
     if (tier < 0) continue;
     seen.add(stem);
-    ranked.push({ tier, stem, folder: folderOf(String(entry)) });
+    ranked.push({ tier, stem, entry: String(entry) });
   }
   ranked.sort((a, b) => a.tier - b.tier || a.stem.localeCompare(b.stem));
-  return ranked.slice(0, limit).map(({ stem, folder }) => ({
-    kind: "lora", name: stem, hint: folder, count: 0, category: "lora", insert: `<lora:${stem}:1>`, verbatim: true,
+  return ranked.slice(0, limit).map(({ stem, entry }) => ({
+    kind: "lora", name: stem, hint: shortLoraName(entry), count: 0, category: "lora", insert: `<lora:${stem}:1>`, verbatim: true,
   }));
 }
 

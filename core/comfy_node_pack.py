@@ -109,7 +109,18 @@ PACK_ID = "ai_studio_forge_parity"
 # (studio_wildcards.py); NegPiP runs on MOSS too.
 # 1.16.0: the studio's EXIF panel pulls an image's settings back into the panels (web/ai_studio/studio_settings.js,
 # studio_infotext_read.py), and the gallery keeps its scroll.
-PACK_VERSION = "1.16.0"
+# 1.17.0: the studio's prompt adherence controls (studio_adherence.py, studio_adherence_nodes.py): LoRA Base 먼저 (the main
+# sampler's first steps without the LoRAs), LoRA 교차 어텐션 제외, CFG 스케줄 and 단어 주목, each with an X/Y/Z axis.
+# 1.18.0: SnapRef v2a stable: its node fits 2.9B itself (the original file, no __40b copy), a third reference picture
+# (reference_image_3) and the multi-picture layout (separate / stitch).
+# 1.19.0: the studio's LoRA picker (search, artist folder tree, run cards, epoch chips with training-sample previews, XYZ).
+# 1.20.0: the studio's 스텝 row switches: MOSS-Image's official layer skip (block 22 in the uncond pass, on AIStudioMossStream)
+# and on/off for the 선행 고정 / 후행 고정 prompt boxes.
+# 1.21.0: the studio's prompt-box presets (studio_presets.py, preset_routes.py, web/ai_studio/preset_*.js: a box's name opens
+# its quick list, "프리셋 관리…" the preset window), the X/Y/Z value boxes as blocks (xyz_chips.js for list axes, xyz_blocks.js
+# for Prompt S/R / Prompt order: one text block a value, commas included), sampler / scheduler lists with similar names
+# together (studio_choices_order.py), ←/→ in the gallery, and panels that keep their scroll when redrawn.
+PACK_VERSION = "1.21.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

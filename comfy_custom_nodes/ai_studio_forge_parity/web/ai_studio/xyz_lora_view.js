@@ -1,6 +1,7 @@
 // Anima studio: the LoRA axis of the XYZ panel: which `<lora:...>` tag to swap for which LoRAs, with their triggers and
 // epochs, and the list of columns that makes. xyz_lora.py reads the block this view edits and makes the columns.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
+import { rowFace } from "./lora_rows.js";
 import { h, optionItems, optionTags, pill, select } from "./studio_dom.js";
 import { fileStem, loraTagNames } from "./studio_logic.js";
 
@@ -45,6 +46,34 @@ export function fileItems(entries) {
   });
 }
 
+/** Rows picked in the LoRA window (stems): the empty last row (never the base row) takes the first, the others are added after it. */
+export function addPickedRows(block, picks) {
+  const names = (picks || []).map((pick) => String(pick?.name ?? "")).filter(Boolean);
+  const last = block.rows.at(-1);
+  if (names.length && block.rows.length > 1 && !last.lora) last.lora = names.shift();
+  for (const name of names) block.rows.push(emptyRow(name));
+  return block;
+}
+
+/** The look of a row's button: `rowFace` of the list entry the row's name means (a stem, or `folder/stem` for two files that share one). */
+export function rowFaceOf(name, entries) {
+  const list = entries || [];
+  const path = (entry) => String(entry).replace(/\\/g, "/").replace(/\.[^.]+$/, "");
+  const entry = list.find((item) => path(item) === name) ?? list.find((item) => fileStem(String(item)) === name);
+  return entry === undefined ? rowFace(name, list) : rowFace(fileStem(String(entry)), [entry]);
+}
+
+/** A new file list for the drawn row buttons: their names and "(없음)" marks follow it in place (a redraw would take the focus). */
+export function refaceFiles(root, entries) {
+  for (const button of root.querySelectorAll(".ais-lb-pick[data-lora]")) {
+    const face = rowFaceOf(button.getAttribute("data-lora"), entries);
+    button.title = face.title;
+    button.classList.toggle("missing", face.missing);
+    const text = button.querySelector(".ais-lb-pick-text");
+    if (text) text.textContent = face.text;
+  }
+}
+
 /** A new file list for the drawn drop-downs; a redraw would take the focus from the box being typed in. */
 export function refillFiles(root, items) {
   for (const box of root.querySelectorAll(".ais-lx-files")) {
@@ -84,16 +113,34 @@ function epochLine(row, change) {
       : null);
 }
 
+/** A row after the base: the short name of its file; a click opens the window to swap it for one other file (or epoch). */
+function fileButton(row, index, view) {
+  const face = rowFaceOf(row.lora, view.loras);
+  const pick = () => view.loraBrowser?.({
+    mode: "replace",
+    current: row.lora,
+    strength: null, // the row keeps its own 강도: the window shows no strength controls
+    onPick: (picked) => {
+      view.change((block) => { block.rows[index].lora = String(picked?.name ?? ""); }, true);
+      view.refreshFiles();
+    },
+  });
+  return h("button", { type: "button", class: `ais-f ais-grow ais-lb-pick${face.missing ? " missing" : ""}`, title: face.title, "data-lora": row.lora, "aria-label": "바꿀 LoRA", onClick: pick },
+    h("span", { class: "ais-lb-pick-text" }, face.text));
+}
+
 function rowBlock(row, index, view) {
   const isBase = index === 0;
   const change = (mutate, rerender) => view.change((block) => mutate(block.rows[index]), rerender);
-  const items = optionItems(isBase ? view.baseItems : view.fileItems, row.lora, { empty: NO_PICK, loaded: isBase });
   const strength = numberField(row.strength, (value) => change((r) => { r.strength = value; }),
     { min: -MAX_STRENGTH, max: MAX_STRENGTH, step: 0.05, placeholder: "그대로" });
   return h("div", { class: `ais-lx-row ${isBase ? "base" : ""}` },
     h("div", { class: "ais-lx-head" },
       h("span", { class: "ais-lx-badge" }, isBase ? "기준" : String(index + 1)),
-      select(items, row.lora, (value) => change((r) => { r.lora = value; }, true), { class: `ais-f ais-grow ${isBase ? "" : "ais-lx-files"}`, title: row.lora, "aria-label": isBase ? "프롬프트에서 찾을 LoRA" : "바꿀 LoRA" }),
+      isBase
+        ? select(optionItems(view.baseItems, row.lora, { empty: NO_PICK, loaded: true }), row.lora, (value) => change((r) => { r.lora = value; }, true),
+          { class: "ais-f ais-grow", title: row.lora, "aria-label": "프롬프트에서 찾을 LoRA" })
+        : fileButton(row, index, view),
       isBase ? null : h("button", { type: "button", class: "ais-mini", title: "빼기", "aria-label": "이 LoRA 빼기", onClick: () => view.change((block) => { block.rows.splice(index, 1); }, true) }, "✕")),
     h("div", { class: "ais-lx-fields" },
       field("강도", strength),
@@ -105,12 +152,20 @@ function rowBlock(row, index, view) {
 }
 
 /**
- * The inside of a LoRA axis. `view`: `block`, `baseItems`, `fileItems`, `change(mutate(block), rerender)`, `refreshFiles()`.
+ * The inside of a LoRA axis. `view`: `block`, `baseItems`, `loras` (the list entries), `change(mutate(block), rerender)`, `refreshFiles()`,
+ * `loraBrowser(opts)` (the picker window; without it "+ 비교할 LoRA" adds an empty row as before).
  */
 export function loraAxisBody(view) {
   const add = () => {
-    view.change((block) => { block.rows.push(emptyRow()); }, true);
     view.refreshFiles();
+    if (!view.loraBrowser) return view.change((block) => { block.rows.push(emptyRow()); }, true);
+    view.loraBrowser({
+      mode: "xyz",
+      onPickMany: (picks) => {
+        view.change((block) => { addPickedRows(block, picks); }, true);
+        view.refreshFiles();
+      },
+    });
   };
   return [view.block.rows.map((row, index) => rowBlock(row, index, view)), h("button", { type: "button", class: "ais-add", onClick: add }, "+ 비교할 LoRA")];
 }

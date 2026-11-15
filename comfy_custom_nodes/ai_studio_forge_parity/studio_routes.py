@@ -5,7 +5,7 @@ without a Comfy host.  Handlers are added with ``add_handler`` and mounted under
 ``ROUTE_PREFIX`` once ComfyUI's ``PromptServer`` exists, so every handler is added while this
 module imports (``register_studio_handlers`` at the bottom), never lazily after startup.
 
-The routes (all JSON; a failure is ``{"error": ...}`` with status 400):
+The routes (all JSON; a failure is ``{"error": ...}`` with status 400, the presets also 404 and 500, see below):
 
 - ``GET  /choices?kind=...``  picker lists (``studio_choices``)
 - ``GET  /tags?q=&limit=``    prompt tag autocomplete (``studio_tags``; ``limit`` 1..30, default 12)
@@ -15,6 +15,10 @@ The routes (all JSON; a failure is ``{"error": ...}`` with status 400):
 - ``POST /xyz/grid``          generated cell images -> grid PNG(s) in ``output/AIStudio/xyz`` (``xyz_grid_draw``)
 - ``POST /open_output``       opens the output folder in the file manager (Windows only)
 - ``POST /to_input``          copies an output / temp / input image into the input folder (answer: name, width, height)
+- ``GET  /presets``           the prompt-box presets ``{doc, limits, broken}`` (``preset_routes`` / ``studio_presets``);
+                              500 when the file is there but cannot be opened
+- ``POST /presets``           one preset change ``{op, ...}`` -> the new ``{doc, limits}`` (+ ``id`` for ``add``);
+                              404 for a preset that is gone, 500 when the file cannot be read or written
 
 Each ``handle_*`` is a pure function ``-> (status, dict)``; the aiohttp wrappers are thin.  An image is only ever
 named by ``{filename, subfolder, type}`` and must resolve inside ComfyUI's output, temp or input folder.
@@ -31,7 +35,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import studio_choices, studio_infotext_read, studio_tags, studio_wildcards, xyz_plan
+from . import preset_routes, studio_choices, studio_infotext_read, studio_tags, studio_wildcards, xyz_plan
 from .compat import folder_paths_module
 
 LOGGER = logging.getLogger("ai_studio_forge_parity")
@@ -430,6 +434,7 @@ def register_studio_handlers() -> None:
     add_handler("POST", "/xyz/grid", _route(handle_grid))
     add_handler("POST", "/open_output", _route(handle_open_output, read="none"))
     add_handler("POST", "/to_input", _route(handle_to_input))
+    preset_routes.register_preset_handlers(add_handler, _route)  # GET / POST /presets
 
 
 register_studio_handlers()

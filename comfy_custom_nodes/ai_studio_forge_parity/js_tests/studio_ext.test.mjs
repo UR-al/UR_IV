@@ -9,6 +9,7 @@ import {
   EXT_DEFAULTS,
   EXT_ROLES,
   comboItems,
+  emphasisPhrases,
   extCnsInputs,
   extFieldValue,
   extInputs,
@@ -186,8 +187,9 @@ test("SPEED: pass label, seeds and the card's own switches stay out of the node"
 test("widget extensions write their node input names and fixed values", () => {
   assert.deepEqual(extInputs(withExt("degrid", { strength: 0.5, tile: 0 }), "ext_degrid"), {
     enabled: true, device: "auto", precision: "fp32", keep_loaded: false, forge_quantize: true,
-    model_name: "auto", mode: "Full", strength: 0.5, tile: 0,
+    engine: "NAFNet", model_name: "auto", mode: "Full", strength: 0.5, tile: 0,
   });
+  assert.equal(extInputs(withExt("degrid", { engine: "Nyquist (ComfyUI-DeGrid)" }), "ext_degrid").engine, "Nyquist (ComfyUI-DeGrid)");
   const block = extInputs(withExt("lora_block", { lora_name: "a.safetensors", A: 2 }), "ext_lora_block");
   assert.equal(block.lora_name, "a.safetensors");
   assert.equal(block.A, 2);
@@ -452,4 +454,23 @@ test("a record without ext uses the current panel's extensions", () => {
   const current = withExt("skim", {});
   const merged = postRunState({ prompt: "x", image: "a.png" }, current, "upscale");
   assert.equal(merged.ext.skim.on, true);
+});
+
+test("emphasisPhrases mirrors studio_adherence.emphasis_phrases", () => {
+  assert.deepEqual(emphasisPhrases("gripping,  metal   bar\n\n gripping ,"), ["gripping", "metal bar"]);
+  assert.deepEqual(emphasisPhrases(""), []);
+  assert.deepEqual(emphasisPhrases(undefined), []);
+});
+
+test("단어 주목 runs only with words, CFG 스케줄 with its switch", () => {
+  const ext = (emphasis, cfg = {}) => withDefaults({ ext: { emphasis, cfg_schedule: cfg } });
+  assert.equal(extModes(ext({ on: true, words: "" })).ext_emphasis, 4);
+  assert.equal(extModes(ext({ on: true, words: " , \n" })).ext_emphasis, 4);
+  assert.equal(extModes(ext({ on: true, words: "gripping" })).ext_emphasis, 0);
+  assert.equal(extModes(ext({ on: false, words: "gripping" })).ext_emphasis, 4);
+  assert.equal(extModes(ext({}, { on: true })).ext_cfg_schedule, 0);
+  assert.deepEqual(extInputs(ext({ on: true, words: "a, b", multiplier: 3 }), "ext_emphasis"),
+    { words: "a, b", multiplier: 3, start_percent: 0, end_percent: 40 });
+  assert.deepEqual(extInputs(ext({}, { on: true, start_cfg: 6, curve: "계단" }), "ext_cfg_schedule"),
+    { start_cfg: 6, end_percent: 40, curve: "계단" });
 });

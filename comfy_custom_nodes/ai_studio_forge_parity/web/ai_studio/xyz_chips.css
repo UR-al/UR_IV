@@ -1,0 +1,88 @@
+/* Anima studio: the XYZ panel's value blocks (xyz_chips.js loads this file once). Every class is ais-* scoped; the colours
+   are studio.css's. The box and its add row together are as high as the text box they stand for (two rows of blocks, four
+   on X; more scroll inside), so the column is no longer than before and adding a block never moves what is under the pointer. */
+.ais-chipfield { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.ais-chips {
+  height: 58px;
+  overflow-y: auto;
+  overflow-anchor: none; /* the blocks are redrawn in place: the browser must not "follow" one of them */
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  padding: 5px;
+  background: #1d1d1d;
+  border: 1px solid #474747;
+  border-radius: 6px;
+}
+.ais-chips.tall { height: 110px; }
+.ais-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 2px 0 9px;
+  border: 1px solid #4b6a9b;
+  border-radius: 6px;
+  background: #2c3a52;
+  color: #ececec;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+}
+.ais-chip.warn { border-color: #b45309; background: #3d2a12; color: #fcd9a8; }
+.ais-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ais-chip.warn .ais-chip-text::before { content: "⚠ "; }
+.ais-root .ais-chip-x {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #b9cdf3;
+  font-size: 11px;
+  line-height: 1;
+}
+.ais-chip.warn .ais-chip-x { color: #fcd9a8; }
+.ais-chip-x:hover, .ais-chip-x:focus-visible { background: #4b6a9b; color: #fff; outline: none; }
+.ais-chip.warn .ais-chip-x:hover, .ais-chip.warn .ais-chip-x:focus-visible { background: #b45309; }
+.ais-chip-none { color: #9a9a9a; font-size: 12px; padding: 3px 2px; }
+.ais-chip-add { position: relative; display: flex; align-items: center; gap: 6px; }
+.ais-chip-search { cursor: text; }
+.ais-chip-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  max-height: 204px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: #202020;
+  border: 1px solid #474747;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.55);
+}
+.ais-root .ais-chip-opt {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #ececec;
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ais-chip-opt:hover { background: #2f2f2f; }
+.ais-chip-opt.cur { background: #2563eb; color: #fff; }
+.ais-chip-empty { color: #9a9a9a; font-size: 12px; padding: 4px 7px; }

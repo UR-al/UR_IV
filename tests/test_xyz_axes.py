@@ -11,6 +11,7 @@ FORGE_LABELS = [
     "[Modules] Text Encoder", "[DoRA] Inference mode", "[Attention] Backend", "[SAM3] Enable", "[SAM3] Checkpoint",
     "[SAM3] Detect Prompt", "[SAM3] Denoising Strength", "[SAM3] Steps", "[SAM3] CFG Scale",
 ]
+STUDIO_LABELS = ["[LoRA] Base 먼저 %", "[LoRA] 교차 어텐션 제외"]  # not Forge's: the LoRA card's adherence settings (1.17.0)
 CHOICE_KINDS = {"samplers", "schedulers", "unets", "vaes", "tes", "upscalers", "sam3", "dora_modes", "attentions"}
 
 
@@ -25,7 +26,7 @@ def _has_path(state: dict, path: str) -> bool:
 
 class AxisListTests(unittest.TestCase):
     def test_axis_labels_match_forge(self):
-        self.assertEqual([a.label for a in xa.AXES], FORGE_LABELS)
+        self.assertEqual([a.label for a in xa.AXES], FORGE_LABELS + STUDIO_LABELS)
 
     def test_ids_are_unique(self):
         ids = [a.id for a in xa.AXES]
@@ -70,7 +71,9 @@ class AxisListTests(unittest.TestCase):
             with self.subTest(axis=axis.label):
                 self.assertIn(axis.kind, xv.KINDS)
                 self.assertIn(axis.fmt, ("label_value", "value", "basename", "joined", "empty"))
-                if axis.kind == "choice":
+                if axis.kind == "choice" and axis.values:  # a fixed list comes with the axis
+                    self.assertIsNone(axis.choices)
+                elif axis.kind == "choice":
                     self.assertIn(axis.choices, CHOICE_KINDS)
                 else:
                     self.assertIsNone(axis.choices)

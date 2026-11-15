@@ -4,10 +4,12 @@
 import { extLine } from "./ext_view.js";
 import { h, numberBox, optionItems, pill, select } from "./studio_dom.js";
 import { FAMILY_LABELS } from "./studio_ext.js";
-import { KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_METHODS, assembledPrompt, referenceFile } from "./studio_logic.js";
+import { KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_LAYOUTS, REFERENCE_METHODS, addPromptTrigger, referenceFile } from "./studio_logic.js";
 
 const METHOD_LABELS = Object.freeze({ snapref: "SnapRef", ref_adapter: "Ref Adapter" });
 const MODE_ITEMS = [{ value: "cs", label: "캐릭터+그림체" }, { value: "char", label: "캐릭터만" }];
+const LAYOUT_LABELS = Object.freeze({ separate: "따로 (선명, 느림)", stitch: "나란히 붙이기 (빠름)" });
+const LAYOUT_ITEMS = REFERENCE_LAYOUTS.map((value) => ({ value, label: LAYOUT_LABELS[value] }));
 const POSITION_LABELS = Object.freeze({ "aligned (trained)": "맞춤 (학습 방식)", "beside (right of target)": "옆에 (자세 자유)" });
 const NODE_OF_METHOD = Object.freeze({ snapref: "SnapRef", ref_adapter: "AnimaRefAdapter" });
 const FILE_PATTERNS = Object.freeze({
@@ -44,7 +46,7 @@ export function referenceBlock(family, method, hasRole) {
   return hasRole && !hasRole(role) ? OLD_GRAPH : "";
 }
 
-/** A picture box of `key` ("image" | "image_2"), read and uploaded through `node`; `clear` adds a remove button. */
+/** A picture box of `key` ("image" | "image_2" | "image_3"), read and uploaded through `node`; `clear` adds a remove button. */
 function imageBox(reference, view, { key, node, label, clear = false }) {
   const value = reference[key]; // not the node's value: a fresh LoadImage holds the first file of input/
   const file = h("input", { type: "file", accept: "image/*", hidden: true, onChange: async (event) => {
@@ -69,13 +71,30 @@ function imageBox(reference, view, { key, node, label, clear = false }) {
 const hasSecondImage = (reference, view) =>
   view.family === "anima" && reference.method === "snapref" && (!view.hasRole || view.hasRole("reference_image_2"));
 
+/** SnapRef v2a reads a third one (1.18.0's node); its box opens once the second picture is there. */
+const hasThirdImage = (reference, view) =>
+  hasSecondImage(reference, view) && (!view.hasRole || view.hasRole("reference_image_3")) && Boolean(reference.image_2 || reference.image_3);
+
 const field = (label, control) =>
   h("div", { class: "ais-row" }, h("span", { class: "ais-label" }, label), h("span", { class: "ais-ctl" }, control));
+
+// Anima references come as base originals (28 blocks) and as files someone already converted to 2.9B's 40 blocks
+// (pamparamm's `*_29B`): two groups, so either can be picked. SnapRef's v2a node fits a base original to 2.9B itself and
+// reference_layout.py writes the 3.8B copy; Ref Adapter's node fits nothing, so both of its copies come from us.
+const CONVERTED_29B = /(?:^|[^0-9a-z])2\.?9b(?:[^0-9a-z]|$)/i;
+const BASE_GROUPS = Object.freeze({ snapref: "Base 원본 (2.9B 는 노드가 맞춤 · 3.8B 는 자동 변환)", ref_adapter: "Base 원본 (2.9B·3.8B 에선 자동 변환)" });
+const CONVERTED_GROUP = "2.9B 변환본";
+
+function animaFileItems(entries, key) {
+  const item = (entry) => ({ value: entry, label: entry, group: CONVERTED_29B.test(entry) ? CONVERTED_GROUP : BASE_GROUPS[key] });
+  return [...entries.filter((entry) => !CONVERTED_29B.test(entry)), ...entries.filter((entry) => CONVERTED_29B.test(entry))].map(item);
+}
 
 /** The picks of `key`'s adapter files in the LoRA list; the current pick stays listed even when its file is gone. */
 function filePick(key, current, view, pick) {
   const entries = view.loras.filter((entry) => FILE_PATTERNS[key].test(fileName(entry)) && !REMAPPED_COPY.test(entry));
-  return select(optionItems(entries, current, { empty: entries.length ? "[파일]" : "[파일 없음: LoRA 폴더에 받기]" }), current, pick);
+  const items = key === "krea2" ? entries : animaFileItems(entries, key);
+  return select(optionItems(items, current, { empty: entries.length ? "[파일]" : "[파일 없음: LoRA 폴더에 받기]" }), current, pick);
 }
 
 function number(value, write, options) {
@@ -88,12 +107,17 @@ function snaprefFields(reference, view) {
   const values = reference.snapref;
   const write = (key) => (value) => view.set((s) => { s.reference.snapref[key] = value; });
   const weight = (key, label, title) => field(label, number(values[key], write(key), { min: 0, max: 2, step: 0.05, title }));
+  const third = Boolean(reference.image_3) && hasThirdImage(reference, view);
+  const several = Boolean(reference.image_2) || third;
+  const separate = values.multi_layout !== "stitch"; // stitched pictures are one reference: no per-picture weights
   return [
     field("파일", filePick("snapref", values.file, view, (value) => view.set((s) => { s.reference.snapref.file = value; }, true))),
     field("모드", select(MODE_ITEMS, values.mode, write("mode"))),
     field("세기", number(values.strength, write("strength"), { min: -3, max: 3, step: 0.1, title: "로그 눈금. 0 = 학습값, +1 = 약 2.7배" })),
-    reference.image_2 ? weight("weight_1", "비중 1", "첫 그림이 얼마나 반영되는지. 1 = 학습값") : null,
-    reference.image_2 ? weight("weight_2", "비중 2", "둘째 그림이 얼마나 반영되는지. 0 = 안 씀") : null,
+    several ? field("여러 장", select(LAYOUT_ITEMS, values.multi_layout, (value) => view.set((s) => { s.reference.snapref.multi_layout = value; }, true))) : null,
+    several && separate ? weight("weight_1", "비중 1", "첫 그림이 얼마나 반영되는지. 1 = 학습값") : null,
+    reference.image_2 && separate ? weight("weight_2", "비중 2", "둘째 그림이 얼마나 반영되는지. 0 = 안 씀") : null,
+    third && separate ? weight("weight_3", "비중 3", "셋째 그림이 얼마나 반영되는지. 0 = 안 씀") : null,
     field("가이던스", [pill(values.guidance_on, () => view.set((s) => { s.reference.snapref.guidance_on = !values.guidance_on; }, true)),
       values.guidance_on ? number(values.guidance, write("guidance"), { min: 0, max: 20, step: 0.1, title: "스텝마다 모델 호출 한 번 더" }) : null]),
     values.guidance_on
@@ -128,9 +152,8 @@ function krea2Fields(values, view) {
     field("참조 크기", number(values.grounding_px, write("grounding_px"), { min: 0, max: 4096, step: 64, title: "TE 에 넣는 이미지의 긴 변" })),
     field("위치", select(positions, values.position, write("position"))),
     QUADVIEW_FILE.test(values.file)
-      ? h("button", { type: "button", class: "ais-add", onClick: () => view.set((s) => { // typing does not redraw this card
-        if (!assembledPrompt(s).includes(QUADVIEW_CAPTION)) s.prompt = [QUADVIEW_CAPTION, s.prompt].filter(Boolean).join(" ");
-      }, true) }, "트리거 넣기")
+      ? h("button", { type: "button", class: "ais-add", title: "프롬프트 칸 맨 앞에 넣음. 프롬프트 칸이 꺼져 있으면 켬",
+        onClick: () => view.set((s) => addPromptTrigger(s, QUADVIEW_CAPTION), true) }, "트리거 넣기") // typing does not redraw this card
       : null,
   ];
 }
@@ -153,13 +176,16 @@ function fields(state, view) {
   if (hasSecondImage(reference, view)) {
     pictures.push(imageBox(reference, view, { key: "image_2", node: view.image2, label: "같은 캐릭터 2장째 (선택)", clear: true }));
   }
+  if (hasThirdImage(reference, view)) {
+    pictures.push(imageBox(reference, view, { key: "image_3", node: view.image3, label: "같은 캐릭터 3장째 (선택)", clear: true }));
+  }
   return h("div", { class: "ais-ext-body ais-ref-body" }, h("div", { class: "ais-ref-images" }, pictures), h("div", { class: "ais-ext-fields" },
     view.family === "krea2" ? krea2Fields(reference.krea2, view) : animaFields(reference, view)));
 }
 
 /**
  * The card. `view`: `set(mutate, rerender)`, `hasRole(role)` (optional), `family`, `memory` (extMemory()),
- * `rerender()`, `loras` (file names), `refreshLoras()` (optional), `image` and `image2` {url(value), upload(file) -> {name}}.
+ * `rerender()`, `loras` (file names), `refreshLoras()` (optional), `image`, `image2` and `image3` {url(value), upload(file) -> {name}}.
  */
 export function renderReference(state, view) {
   const { reference } = state;

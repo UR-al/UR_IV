@@ -934,6 +934,100 @@
    ]
   },
   {
+   "key": "cfg_schedule",
+   "label": "CFG 스케줄",
+   "group": "가이던스",
+   "role": "ext_cfg_schedule",
+   "class": "AIStudioCFGSchedule",
+   "form": "widgets",
+   "fixed": {},
+   "fields": [
+    {
+     "key": "start_cfg",
+     "label": "초반 CFG",
+     "kind": "float",
+     "default": 5.0,
+     "min": 0.0,
+     "max": 30.0,
+     "input": "start_cfg"
+    },
+    {
+     "key": "end_percent",
+     "label": "끝 %",
+     "kind": "int",
+     "default": 40,
+     "min": 0,
+     "max": 100,
+     "input": "end_percent"
+    },
+    {
+     "key": "curve",
+     "label": "곡선",
+     "kind": "choice",
+     "default": "코사인",
+     "choices": [
+      "코사인",
+      "선형",
+      "계단"
+     ],
+     "input": "curve"
+    }
+   ],
+   "families": [
+    "anima",
+    "moss",
+    "krea2"
+   ]
+  },
+  {
+   "key": "emphasis",
+   "label": "단어 주목",
+   "group": "가이던스",
+   "role": "ext_emphasis",
+   "class": "AIStudioWordEmphasis",
+   "form": "widgets",
+   "fixed": {},
+   "fields": [
+    {
+     "key": "words",
+     "label": "단어",
+     "kind": "text",
+     "default": "",
+     "input": "words"
+    },
+    {
+     "key": "multiplier",
+     "label": "배수",
+     "kind": "float",
+     "default": 2.0,
+     "min": 0.1,
+     "max": 10.0,
+     "input": "multiplier"
+    },
+    {
+     "key": "start_percent",
+     "label": "시작 %",
+     "kind": "int",
+     "default": 0,
+     "min": 0,
+     "max": 100,
+     "input": "start_percent"
+    },
+    {
+     "key": "end_percent",
+     "label": "끝 %",
+     "kind": "int",
+     "default": 40,
+     "min": 0,
+     "max": 100,
+     "input": "end_percent"
+    }
+   ],
+   "families": [
+    "anima"
+   ]
+  },
+  {
    "key": "detail_daemon",
    "label": "Detail Daemon",
    "group": "디테일",
@@ -1377,6 +1471,17 @@
     "forge_quantize": true
    },
    "fields": [
+    {
+     "key": "engine",
+     "label": "엔진",
+     "kind": "choice",
+     "default": "NAFNet",
+     "choices": [
+      "NAFNet",
+      "Nyquist (ComfyUI-DeGrid)"
+     ],
+     "input": "engine"
+    },
     {
      "key": "model",
      "label": "모델",

@@ -1,13 +1,25 @@
 // Anima studio: the result column (C4 middle, 680px) drawn into AIStudioResultView's DOM widget — image, 미리보기 /
 // XYZ 격자 tabs, progress, gallery, the seven gallery buttons and 갤러리 자동 비우기. The gallery's image refs are kept as
 // JSON in the node's hidden `view` widget; the settings each image was made with are kept for this session only.
+// ←/→ (Home/End) pick the previous/next gallery image while the focus is somewhere in this node (a click in it puts it
+// there): the key listener is on the node's own element, nothing on document or window. The picked thumbnail is kept in
+// the middle of the strip (result_gallery.css has the focus styles). With the focus in the node, the canvas's own shortcuts
+// (Delete, Backspace, ...) stay in it too: ComfyUI would run them on this node.
+// The enlarged view (a click on the image) pages through the gallery; the pick follows it (`follow`).
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { h, icon, pill, refKey } from "./studio_dom.js";
-import { openLightbox } from "./studio_lightbox.js";
+import { lightboxOpen, openLightbox } from "./studio_lightbox.js";
 
 const GALLERY_LIMIT = 40;
 const NOTICE_MS = 8000;
 const AUTO_CLEAR = "갤러리 자동 비우기";
+const GALLERY_CSS_ID = "aistudio-result-gallery-css";
+const GALLERY_LABEL = "갤러리 (←/→ 로 이동)";
+const TYPING_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
+// ComfyUI's shortcuts for the canvas (frontend 1.58 defaults: delete, delete, fit view, pin, collapse, bypass, mute, select
+// all, paste with links, zoom). It runs them when the pressed element is inside the canvas container, and a node's DOM
+// widget is: a click in this node selects it, so Delete would remove the node and its gallery.
+const CANVAS_KEYS = new Set(["delete", "backspace", ".", "p", "alt+c", "ctrl+b", "ctrl+m", "ctrl+a", "ctrl+shift+v", "alt+=", "alt+shift++", "alt++", "alt+-"]);
 // Forge's order under the gallery (Global Constraints): name -> label.
 export const GALLERY_BUTTONS = Object.freeze([
   ["folder", "폴더"],
@@ -17,6 +29,7 @@ export const GALLERY_BUTTONS = Object.freeze([
   ["hires", "Hires"],
   ["sam3", "SAM3"],
   ["seed", "같은 시드"],
+  ["lora_preview", "LoRA 미리보기로"],
 ]);
 
 const isRef = (ref) => ref && typeof ref === "object" && typeof ref.filename === "string" && ref.filename !== "";
@@ -25,6 +38,44 @@ const cleanRef = (ref) => ({ filename: ref.filename, subfolder: String(ref.subfo
 function duration(seconds) {
   const total = Math.max(0, Math.round(seconds));
   return total < 60 ? `${total}초` : `${Math.floor(total / 60)}분 ${total % 60}초`;
+}
+
+/**
+ * Where a gallery key moves the pick among `count` images: the new index (the same one at an end: no wrap), or null
+ * for a key that is not the gallery's.
+ */
+export function galleryKeyIndex(key, selected, count) {
+  if (!(count > 0)) return null;
+  if (key === "ArrowLeft") return Math.max(0, selected - 1);
+  if (key === "ArrowRight") return Math.min(count - 1, selected + 1);
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
+/**
+ * The scrollLeft that puts a thumbnail (`left` and `width` inside the strip's content) in the middle of a strip `view`
+ * wide whose content is `total` wide, clamped at both ends. Null while the strip is not laid out (not on the page yet).
+ */
+export function centredScrollLeft({ left, width, view, total }) {
+  if (![left, width, view, total].every(Number.isFinite) || view <= 0) return null;
+  return Math.round(Math.min(Math.max(0, total - view), Math.max(0, left + width / 2 - view / 2)));
+}
+
+/** A key event as ComfyUI names its combos: Ctrl (or ⌘), Alt, Shift, then the key, whatever its case. */
+const comboOf = (event) =>
+  `${event.ctrlKey || event.metaKey ? "ctrl+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${String(event.key ?? "").toLowerCase()}`;
+const isTyping = (element) => !!element && (TYPING_TAGS.has(String(element.tagName || "").toUpperCase()) || element.isContentEditable === true);
+const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+
+/** The gallery's focus styles, once per page (studio.css is studio_main.js's). */
+function addGalleryStyles(doc = globalThis.document) {
+  if (!doc?.head || doc.getElementById(GALLERY_CSS_ID)) return;
+  const link = doc.createElement("link");
+  link.id = GALLERY_CSS_ID;
+  link.rel = "stylesheet";
+  link.href = new URL("./result_gallery.css", import.meta.url).href;
+  doc.head.append(link);
 }
 
 /** A finished run's time: tenths of a second are worth showing only under a minute (Forge's Time taken). */
@@ -42,8 +93,18 @@ export class ResultView {
     this.previewUrl = "";
     this.notice = "";
     this.view = this.read();
-    this.element = h("div", { class: "ais-root ais-result" });
+    this.uncentred = false; // the pick still has to be brought to the middle: the strip had no size when it was picked
+    this.disposed = false; // the node is gone: an enlarged view it opened may still be on the page
+    // tabindex -1: a click anywhere in the node (the image, an empty spot) leaves the focus in it, so its keys come here.
+    this.element = h("div", { class: "ais-root ais-result", tabindex: "-1", onKeydown: (event) => this.onKey(event) });
+    addGalleryStyles();
+    if (typeof ResizeObserver === "function") {
+      // The view is drawn before ComfyUI puts it on the page: centre the pick when the node first has a size.
+      this.observer = new ResizeObserver(() => { if (this.uncentred) this.centre(); });
+      this.observer.observe(this.element);
+    }
     this.render();
+    this.centre();
   }
 
   read() {
@@ -61,6 +122,7 @@ export class ResultView {
   load() {
     this.view = this.read();
     this.render();
+    this.centre();
   }
 
   save() {
@@ -91,6 +153,92 @@ export class ResultView {
     this.announce();
   }
 
+  /**
+   * Picks gallery image `index` (a clicked thumbnail, ←/→): the image and everything that follows the pick (EXIF panel,
+   * the gallery buttons) show it, and it glides to the middle of the strip. On the 미리보기 tab only the frames and the
+   * image change, so the strip and its scroll stay as they are. A thumbnail that holds the focus hands it to the picked
+   * one: Enter / Space on it would pick the old image again.
+   */
+  pick(index) {
+    const redraw = this.view.tab !== "preview"; // the tab pills change too
+    const active = globalThis.document?.activeElement;
+    const onThumb = !!active && active !== this.galleryEl && this.galleryEl.contains?.(active) === true;
+    this.view.selected = index;
+    this.view.tab = "preview";
+    this.save();
+    if (redraw) this.render();
+    else {
+      Array.from(this.galleryEl.children).forEach((thumb, at) => { thumb.className = `ais-thumb ${at === index ? "sel" : ""}`; });
+      this.renderStage();
+    }
+    const thumb = this.galleryEl.children[index];
+    if (onThumb && thumb !== active) thumb?.focus?.({ preventScroll: true }); // centre() alone scrolls the strip
+    this.centre(true);
+    this.announce();
+  }
+
+  /**
+   * The enlarged view this gallery opened moved to `ref`: the gallery picks it too, as a click on its thumbnail would (the
+   * image, EXIF panel, gallery buttons, the saved pick, the thumbnail in the middle). The image is looked up by what it is,
+   * not by its place in the viewer: the gallery may have changed since it was opened (new images in front, another
+   * workflow). One that is not in the gallery any more picks nothing.
+   */
+  follow(ref) {
+    if (this.disposed || !isRef(ref)) return;
+    const key = refKey(ref);
+    const index = this.view.gallery.findIndex((image) => refKey(image) === key);
+    if (index < 0 || (index === this.view.selected && this.view.tab === "preview")) return; // gone, or already shown
+    this.pick(index);
+  }
+
+  /**
+   * A key pressed in the node. ←/→, Home/End: see `galleryKeyIndex`; the enlarged view has its own keys. The canvas's
+   * shortcuts (`CANVAS_KEYS`) go no further than the node, the enlarged view open or not. Typing keeps all its keys.
+   */
+  onKey(event) {
+    if (isTyping(event.target)) return;
+    if (CANVAS_KEYS.has(comboOf(event))) {
+      event.stopPropagation(); // not prevented: the browser's own part (none for Delete on a button) stays
+      return;
+    }
+    if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || lightboxOpen()) return;
+    const index = galleryKeyIndex(event.key, this.view.selected, this.view.gallery.length);
+    if (index === null) return;
+    event.preventDefault(); // the browser would scroll the focused strip
+    event.stopPropagation(); // the canvas does not get a key the gallery used
+    if (index !== this.view.selected) this.pick(index);
+  }
+
+  /** Whether the focus is on this node or in it. */
+  holdsFocus() {
+    const active = globalThis.document?.activeElement;
+    return !!active && this.element.contains?.(active) === true;
+  }
+
+  focusGallery() {
+    this.galleryEl?.focus?.({ preventScroll: true }); // the page and the canvas stay where they are
+  }
+
+  /**
+   * Scrolls the strip so the picked thumbnail is in its middle (the ends clamp): `smooth` for a pick by the user, at once
+   * otherwise. Only scrollLeft of the strip itself, in layout pixels (the canvas zoom is a CSS transform, which
+   * getBoundingClientRect would include), never scrollIntoView. A strip without a size yet is centred when it gets one.
+   */
+  centre(smooth = false) {
+    const box = this.galleryEl;
+    const thumb = box?.children?.[this.view.selected];
+    if (!thumb) {
+      this.uncentred = false;
+      return;
+    }
+    const left = thumb.offsetParent === box ? thumb.offsetLeft : thumb.offsetLeft - box.offsetLeft;
+    const target = centredScrollLeft({ left, width: thumb.offsetWidth, view: box.clientWidth, total: box.scrollWidth });
+    this.uncentred = target === null;
+    if (target === null) return;
+    if (smooth && typeof box.scrollTo === "function" && !reducedMotion()) box.scrollTo({ left: target, behavior: "smooth" });
+    else box.scrollLeft = target;
+  }
+
   /** Tells the EXIF panel which image is picked now. */
   announce() {
     this.ctx.selected?.(this.view.gallery[this.view.selected] || null);
@@ -113,11 +261,13 @@ export class ResultView {
       this.view.tab = "preview";
       this.add(payload.items, payload.replace);
       this.render();
+      this.centre();
     } else if (type === "grid") {
       this.view.grid = cleanRef(payload.item.image);
       this.view.tab = "grid";
       this.add([payload.item, ...(payload.subgrids || [])], payload.replace);
       this.render();
+      this.centre();
     } else if (type === "notice") {
       this.showNotice(payload.text);
     }
@@ -141,8 +291,10 @@ export class ResultView {
   }
 
   dispose() {
+    this.disposed = true;
     clearTimeout(this.noticeTimer);
     this.setPreview(null);
+    this.observer?.disconnect();
   }
 
   // ------------------------------------------------------------------------------------------- drawing
@@ -152,6 +304,7 @@ export class ResultView {
       h("button", { type: "button", class: `ais-pill ${this.view.tab === name ? "on" : "off"}`, "aria-pressed": this.view.tab === name ? "true" : "false",
         onClick: () => { this.view.tab = name; this.save(); this.render(); } }, text);
     const scrolled = this.galleryEl?.scrollLeft ?? 0; // the gallery is drawn anew
+    const held = this.holdsFocus(); // on a thumbnail it goes away with the old strip
     this.progressEl = h("div", { class: "ais-progress" });
     this.noticeEl = h("div", { class: "ais-notice", role: "status" });
     this.stage = h("div", { class: "ais-stage" });
@@ -172,6 +325,7 @@ export class ResultView {
           on: AUTO_CLEAR, off: AUTO_CLEAR, title: "켜면 Forge처럼 생성할 때마다 새 이미지로 바꿈 (파일은 그대로)" })),
     );
     this.galleryEl.scrollLeft = scrolled; // after it joined the page: an element outside it has nowhere to scroll
+    if (held && !this.holdsFocus()) this.focusGallery(); // the keys keep working
     this.renderProgress();
     this.renderNotice();
     this.renderStage();
@@ -200,7 +354,7 @@ export class ResultView {
   renderStage() {
     if (!this.stage) return;
     let src = "";
-    let zoom = null; // what a click on the image opens big; the live step preview opens nothing
+    let zoom = null; // what a click on the image opens big (`ref`: what `follow` picks); the live step preview opens nothing
     let text = this.running ? "생성 중 미리보기 (중간 단계)" : "선택한 이미지";
     if (this.running && this.previewUrl && this.view.tab === "preview") src = this.previewUrl;
     else if (this.view.tab === "grid") {
@@ -210,19 +364,22 @@ export class ResultView {
       } else text = "XYZ 격자 없음";
     } else if (this.view.gallery[this.view.selected]) {
       src = this.ctx.imageUrl(this.view.gallery[this.view.selected]);
-      zoom = { items: this.view.gallery.map((ref) => ({ url: this.ctx.imageUrl(ref) })), index: this.view.selected };
+      zoom = { items: this.view.gallery.map((ref) => ({ url: this.ctx.imageUrl(ref), ref })), index: this.view.selected };
     }
     const img = src
       ? h("img", { class: `ais-stage-img ${zoom ? "zoomable" : ""}`, src, alt: "결과 이미지", title: zoom ? "클릭하면 확대" : undefined,
-        onClick: zoom ? () => openLightbox(zoom.items, zoom.index) : undefined })
+        onClick: zoom ? () => openLightbox(zoom.items, zoom.index, undefined, { onShow: (item) => this.follow(item.ref) }) : undefined })
       : null;
     this.stage.replaceChildren(img || h("div", { class: "ais-stage-empty" }, text));
   }
 
   gallery() {
-    return h("div", { class: "ais-gallery" }, this.view.gallery.map((ref, index) =>
+    return h("div", { class: "ais-gallery", tabindex: "0", "aria-label": GALLERY_LABEL }, this.view.gallery.map((ref, index) =>
       h("button", { type: "button", class: `ais-thumb ${index === this.view.selected ? "sel" : ""}`, title: ref.filename, "aria-label": ref.filename,
-        onClick: () => { this.view.selected = index; this.view.tab = "preview"; this.save(); this.render(); this.announce(); } },
+        onClick: () => {
+          this.pick(index);
+          if (!this.holdsFocus()) this.focusGallery(); // where a click does not focus a button (Safari)
+        } },
       h("img", { src: this.ctx.imageUrl(ref, true), loading: "lazy", alt: "" }))));
   }
 }

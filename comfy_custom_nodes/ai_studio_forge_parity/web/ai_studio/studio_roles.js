@@ -8,14 +8,15 @@ export const ROLES = Object.freeze([
   // ① models (2.9B / base) and ①b 3.8B; the switches pick one family (R6: the TE is shared, no clip switch)
   "unet", "te", "vae", "unet38", "qwen35", "family_switch_model", "moss_stream",
   "shift", "sched",
-  // ② LoRA / DoRA
-  "lora_stack", "ext_lora_block", "negpip", "dora", "attention", "ext_er_sde",
+  // ② LoRA / DoRA, then the LoRA control (Base 먼저, 교차 어텐션 제외; 1.17.0)
+  "lora_stack", "ext_lora_block", "negpip", "dora", "attention", "ext_er_sde", "lora_ctl",
   // ③ prompts
   "pos_encode", "neg_encode", "pos_encode38", "neg_encode38", "family_switch_pos", "family_switch_neg",
   // ③b the reference image and the node of the family that uses it
-  "reference_image", "reference_image_2", "anima_ref", "krea2_ref",
-  // ④ extensions: the guidance stack, then each pass's Detail Daemon and SPEED
-  "ext_optimal_scale", "ext_guidance", "ext_skim", "ext_dd", "ext_speed", "ext_dd_hires", "ext_speed_hires", "ext_dd_sam3",
+  "reference_image", "reference_image_2", "reference_image_3", "anima_ref", "krea2_ref",
+  // ④ extensions: the guidance stack, then each pass's Detail Daemon and SPEED; CFG 스케줄 and 단어 주목 are the main pass'
+  "ext_optimal_scale", "ext_guidance", "ext_skim", "ext_dd", "ext_speed", "ext_cfg_schedule", "ext_emphasis", "ext_dd_hires",
+  "ext_speed_hires", "ext_dd_sam3",
   // ⑤ latent and sampling; the inpaint detailer stands in for the sampler on an inpaint run
   "latent", "i2i_image", "sampler", "inpaint_detailer",
   // ⑥ hires ⑦ upscale ⑧ SAM3 ⑨ save

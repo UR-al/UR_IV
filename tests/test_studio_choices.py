@@ -238,6 +238,19 @@ class ChoicesKindTests(unittest.TestCase):
         self.assertEqual(self._run("samplers"), {"items": ["euler", "exp_heun_2_x0_sde"]})
         self.assertEqual(self._run("schedulers"), {"items": ["simple", "flow_cosmos_dynamic"]})
 
+    def test_similar_samplers_and_schedulers_sit_together(self):
+        ksampler = SimpleNamespace(SAMPLERS=["euler", "dpm_2", "lms", "dpm_2_ancestral", "euler_dy"],
+                                   SCHEDULERS=["simple", "karras", "beta", "normal", "beta57", "karras_dynamic", "beta_1_1"])
+        self.assertEqual(self._run("samplers", samplers=ksampler),
+                         {"items": ["euler", "euler_dy", "dpm_2", "dpm_2_ancestral", "lms"]})
+        self.assertEqual(self._run("schedulers", samplers=ksampler),
+                         {"items": ["simple", "karras", "karras_dynamic", "beta", "beta57", "beta_1_1", "normal"]})
+        self.assertEqual(ksampler.SCHEDULERS[-1], "beta_1_1")  # ComfyUI's own list is left as it is
+
+    def test_file_lists_keep_their_order(self):
+        lists = {"vae": ["b_2.safetensors", "a.safetensors", "b_1.safetensors"]}
+        self.assertEqual(self._run("vaes", lists), {"items": ["b_2.safetensors", "a.safetensors", "b_1.safetensors"]})
+
     def test_file_kinds(self):
         lists = {"vae": ["a.safetensors"], "text_encoders": ["te.safetensors"], "loras": ["x/l.safetensors"]}
         self.assertEqual(self._run("vaes", lists), {"items": ["a.safetensors"]})

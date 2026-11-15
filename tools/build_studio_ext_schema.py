@@ -46,7 +46,7 @@ MAX_SAFE_INT = 2 ** 53 - 1  # JS holds these numbers as doubles; a larger bound 
 ANY_MODEL = ("anima", "moss", "krea2")
 QWEN_VAE = ("anima", "krea2")
 EXT_FAMILIES = {
-    "skim": ANY_MODEL, "detail_daemon": ANY_MODEL, "er_sde": ANY_MODEL, "sam3_refine": ANY_MODEL, "sam3_tile": ANY_MODEL,
+    "skim": ANY_MODEL, "cfg_schedule": ANY_MODEL, "detail_daemon": ANY_MODEL, "er_sde": ANY_MODEL, "sam3_refine": ANY_MODEL, "sam3_tile": ANY_MODEL,
     "vae_2x": QWEN_VAE, "degrid": QWEN_VAE, "pid": QWEN_VAE,
 }
 
@@ -205,6 +205,7 @@ def _speed_fields() -> list[dict]:
 def _degrid_fields() -> list[dict]:
     class_type = vae_degrid.COMFY_NODE_CLASS
     return [
+        _node_field(class_type, "engine", "엔진"),  # ComfyUI only: NAFNet (Forge's) or ComfyUI-DeGrid's Nyquist notch
         _file_field(class_type, "model_name", "모델", key="model", default=vae_degrid.COMFY_AUTO),
         _node_field(class_type, "mode", "방식"),
         _node_field(class_type, "strength", "강도"),
@@ -249,6 +250,15 @@ def build_schema() -> dict:
              "skim_skimming_cfg": "skimming_cfg", "skim_full_skim_negative": "full_skim_negative",
              "skim_disable_flipping_filter": "disable_flipping_filter", "skim_start_percent": "start_percent",
              "skim_end_percent": "end_percent", "skim_flip_at": "flip_percent",
+         })},
+        # Pack 1.17.0, the studio's own (no app spec): the main pass only, between SPEED and the sampler.
+        {"key": "cfg_schedule", "label": "CFG 스케줄", "group": "가이던스", "role": "ext_cfg_schedule",
+         "class": "AIStudioCFGSchedule", "form": "widgets", "fixed": {},
+         "fields": _node_fields("AIStudioCFGSchedule", {"start_cfg": "초반 CFG", "end_percent": "끝 %", "curve": "곡선"})},
+        {"key": "emphasis", "label": "단어 주목", "group": "가이던스", "role": "ext_emphasis",
+         "class": "AIStudioWordEmphasis", "form": "widgets", "fixed": {},
+         "fields": _node_fields("AIStudioWordEmphasis", {
+             "words": "단어", "multiplier": "배수", "start_percent": "시작 %", "end_percent": "끝 %",
          })},
         {"key": "detail_daemon", "label": "Detail Daemon", "group": "디테일", "role": "ext_dd",
          "class": "ForgeNeoAnimaDetailDaemon", "form": "json", "on_key": "dd_enabled", "fixed": {"enabled": True},

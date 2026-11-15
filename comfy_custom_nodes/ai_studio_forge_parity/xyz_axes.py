@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal, Optional
 
+from .studio_adherence import CROSS_ATTN_MODES
 from .studio_state import EXT_SCHEMA
 
 Fmt = Literal["label_value", "value", "basename", "joined", "empty"]
@@ -36,8 +37,8 @@ class AxisSpec:
     group: str = ""
 
 
-def _axis(id, label, kind, field, cost=0.0, fmt="label_value", choices=None) -> AxisSpec:
-    return AxisSpec(id, label, kind, field, cost, fmt, choices)
+def _axis(id, label, kind, field, cost=0.0, fmt="label_value", choices=None, values=()) -> AxisSpec:
+    return AxisSpec(id, label, kind, field, cost, fmt, choices, tuple(values))
 
 
 AXES: tuple[AxisSpec, ...] = (
@@ -67,6 +68,9 @@ AXES: tuple[AxisSpec, ...] = (
     _axis("sam3_denoise", "[SAM3] Denoising Strength", "float", "sam3.denoise"),
     _axis("sam3_steps", "[SAM3] Steps", "int", "sam3.steps"),
     _axis("sam3_cfg", "[SAM3] CFG Scale", "float", "sam3.cfg"),
+    # Not Forge's (pack 1.17.0): the LoRA card's adherence settings. A column changes the MODEL's patches (a re-merge).
+    _axis("lora_base", "[LoRA] Base 먼저 %", "int", "lora_base", 0.5),
+    _axis("lora_cross_attn", "[LoRA] 교차 어텐션 제외", "choice", "lora_cross_attn", 0.5, values=CROSS_ATTN_MODES),
 )
 
 EXT_COST = 0.2  # a model patch to redo, no file to load

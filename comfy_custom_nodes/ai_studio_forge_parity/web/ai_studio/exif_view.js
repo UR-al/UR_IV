@@ -1,7 +1,7 @@
 // Anima studio: the EXIF panel next to XYZ 비교 (Forge's PNG Info): the gallery's picked image, or a file dropped on the
 // panel or opened with its button, and the text that file carries. Nothing here is saved with the workflow.
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
-import { h } from "./studio_dom.js";
+import { guardCanvasKeys, h } from "./studio_dom.js";
 import { INFOTEXT_KEYS, readImageInfo } from "./studio_exif.js";
 import { imageSettings } from "./studio_settings.js";
 
@@ -31,7 +31,7 @@ export class ExifView {
     this.shown = null; // {name, url, info}; info: null while reading, `{failed: true}` when that failed
     this.reading = 0; // only the newest read may draw
     this.fileUrl = ""; // the object URL of a dropped or opened file
-    this.element = h("div", {
+    this.element = guardCanvasKeys(h("div", { // Delete on a focused button must not delete this node
       class: "ais-root ais-exif",
       onDragover: keepFromComfy,
       onDrop: (event) => {
@@ -39,7 +39,7 @@ export class ExifView {
         const file = event.dataTransfer?.files?.[0];
         if (file) this.openFile(file);
       },
-    });
+    }));
     this.picker = h("input", {
       type: "file",
       accept: "image/png,image/jpeg,image/webp",

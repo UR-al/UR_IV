@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ResultView } from "../web/ai_studio/result_view.js";
+import { GALLERY_BUTTONS, ResultView } from "../web/ai_studio/result_view.js";
 
 class FakeElement {
   constructor(tag) {
@@ -79,7 +79,9 @@ const FULL_ON = { ...FULL, auto_clear: true };
 
 const galleryBox = (view) => view.element.byClass("ais-gallery")[0];
 
-test("picking a thumbnail leaves the gallery where it was scrolled", () => {
+// This fake has no layout, so the strip cannot be measured: a pick must then leave the scroll alone (never back to 0).
+// With a layout the pick glides to the middle: result_view_keys.test.mjs.
+test("picking a thumbnail in a strip without a size leaves the gallery where it was scrolled", () => {
   const { view } = setup(FULL);
   galleryBox(view).scrollLeft = 300;
   view.element.byClass("ais-thumb")[1].fire("click");
@@ -251,4 +253,10 @@ test("announce() repeats the picked image, null with an empty gallery", () => {
   const empty = setup();
   empty.view.announce();
   assert.deepEqual(empty.picks, [null]);
+});
+
+test("the gallery button table ends with LoRA 미리보기로 and every button is drawn", () => {
+  assert.deepEqual(GALLERY_BUTTONS.at(-1), ["lora_preview", "LoRA 미리보기로"]);
+  const { view } = setup(FULL);
+  assert.equal(view.element.byClass("ais-buttons")[0].children.length, GALLERY_BUTTONS.length);
 });

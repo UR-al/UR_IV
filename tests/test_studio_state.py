@@ -68,6 +68,23 @@ class StudioStateTests(unittest.TestCase):
         self.assertIs(ss.normalize_state({"moss_stream": False})["moss_stream"], False)
         self.assertIs(ss.normalize_state({"moss_stream": "no"})["moss_stream"], True)
 
+    def test_the_new_switches_default_on_and_keep_only_booleans(self):
+        for key in ("moss_layer_skip", "prompt_prefix_on", "prompt_suffix_on"):
+            with self.subTest(key=key):
+                self.assertIs(ss.DEFAULT_STATE[key], True)
+                self.assertIs(ss.normalize_state({})[key], True)  # a panel saved before 1.20.0
+                self.assertIs(ss.normalize_state({key: False})[key], False)
+                self.assertIs(ss.normalize_state({key: "no"})[key], True)
+                self.assertIs(ss.normalize_state({key: 0})[key], True)
+
+    def test_the_layer_skip_runs_on_moss_alone(self):
+        on = lambda **raw: ss.effective_layer_skip(ss.normalize_state(raw))
+        self.assertIs(on(unet="moss_sft.safetensors"), True)
+        self.assertIs(on(unet="moss_sft.safetensors", moss_layer_skip=False), False)
+        self.assertIs(on(unet="anima-2.9b.safetensors"), False)
+        self.assertIs(on(unet="krea2_raw.safetensors"), False)
+        self.assertIs(on(), False)
+
     def test_a_moss_size_runs_on_the_16_grid(self):
         self.assertEqual(ss.generation_size(ss.normalize_state({"unet": "moss_sft.safetensors", "width": 856, "height": 840})), (864, 848))
         self.assertEqual(ss.generation_size(ss.normalize_state({"unet": "anima.safetensors", "width": 856, "height": 840})), (856, 840))
@@ -217,6 +234,32 @@ class StudioStateTests(unittest.TestCase):
     def test_without_the_boxes_the_prompt_stays_as_it_is(self):
         self.assertEqual(ss.assembled_prompt({"prompt": "1boy, \n"}), "1boy, \n")
         self.assertEqual(ss.assembled_prompt({"prompt": "1boy, \n", "prompt_prefix": "", "prompt_suffix": " "}), "1boy, \n")
+
+    def test_a_fixed_box_switched_off_is_left_out(self):
+        state = {"prompt": "1boy", "prompt_prefix": "best", "prompt_suffix": "highres"}
+        self.assertEqual(ss.assembled_prompt({**state, "prompt_prefix_on": False}), "1boy, highres")
+        self.assertEqual(ss.assembled_prompt({**state, "prompt_suffix_on": False}), "best, 1boy")
+        self.assertEqual(ss.assembled_prompt({**state, "prompt_prefix_on": True, "prompt_suffix_on": True}), "best, 1boy, highres")
+
+    def test_with_both_fixed_boxes_off_the_prompt_is_as_without_them(self):
+        off = {"prompt_prefix": "best", "prompt_suffix": "highres", "prompt_prefix_on": False, "prompt_suffix_on": False}
+        self.assertEqual(ss.assembled_prompt({**off, "prompt": "1boy, \n"}), "1boy, \n")  # byte for byte, as with empty boxes
+        self.assertEqual(ss.assembled_prompt({**off, "prompt": "1boy,", "prompt_artist": "@a"}), "@a, 1boy")
+        self.assertEqual(ss.assembled_prompt({**off, "prompt": ""}), "")
+
+    def test_a_switched_off_box_keeps_its_text_in_the_state(self):
+        state = ss.normalize_state({"prompt": "1boy", "prompt_prefix": "best", "prompt_prefix_on": False})
+        self.assertEqual((state["prompt_prefix"], state["prompt_prefix_on"]), ("best", False))
+        self.assertEqual(ss.effective_prompt(state), "1boy")
+
+    def test_a_tag_in_a_switched_off_box_is_not_in_the_run(self):
+        state = {"prompt": "1boy", "prompt_suffix": "<lora:l:0.5>", "prompt_suffix_on": False,
+                 "loras": [{"on": True, "name": "l", "strength": 1}]}
+        self.assertEqual(ss.effective_prompt(state), "1boy <lora:l:1>")
+
+    def test_the_fixed_boxes_keep_their_1_20_0_switch_names(self):  # the rest: tests/test_studio_prompt_switches.py
+        self.assertEqual((ss.PROMPT_SWITCHES["prompt_prefix"], ss.PROMPT_SWITCHES["prompt_suffix"]),
+                         ("prompt_prefix_on", "prompt_suffix_on"))
 
     def test_a_box_keeps_its_lines(self):
         self.assertEqual(ss.assembled_prompt({"prompt": "c", "prompt_prefix": "a,\nb"}), "a,\nb, c")

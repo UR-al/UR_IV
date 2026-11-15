@@ -1,12 +1,12 @@
 // node:test for the studio's run controller (web/ai_studio/run_controller.js): the state machine only, no DOM.
-// A fake ComfyUI `api` records queue / delete / interrupt calls and fires websocket events in any order.
+// A fake ComfyUI `api` records queue / cancel / delete / interrupt calls and fires websocket events in any order.
 // Run: cd frontend && npm run test:pack
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { deflateSync } from "node:zlib";
 
-import { NOTICES, RunController } from "../web/ai_studio/run_controller.js";
+import { NOTICES, RunController, adherenceWarnings } from "../web/ai_studio/run_controller.js";
 import { DEFAULT_STATE, PICK_NOTICES, stageModes, withDefaults } from "../web/ai_studio/studio_logic.js";
 import { readPngText, withExtraParams } from "../web/ai_studio/studio_pnginfo.js";
 import { ROLES } from "../web/ai_studio/studio_roles.js";
@@ -23,6 +23,7 @@ class FakeApi {
     this.queued = [];
     this.log = [];
     this.failNext = null;
+    this.cancelFails = false;
   }
 
   addEventListener(name, fn) {
@@ -45,6 +46,11 @@ class FakeApi {
     this.log.push(["queue", id]);
     if (this.onQueue) this.onQueue(id);
     return { prompt_id: id, number: this.queued.length, node_errors: {} };
+  }
+
+  async cancelJob(id) {
+    this.log.push(["cancel", id]);
+    if (this.cancelFails) throw new Error("Failed to cancel job: 404");
   }
 
   async deleteItem(type, id) {
@@ -182,8 +188,12 @@ test("stop marks remaining cells null", async () => {
   finishCell(api, "p0", `cell${plan.order[0]}.png`);
   api.fire("execution_start", { prompt_id: "p1" });
   await controller.stop();
-  // pending prompts are deleted before the global interrupt (else the server would start the next one)
-  assert.deepEqual(api.log.slice(4), [["delete", "queue", "p2"], ["delete", "queue", "p3"], ["interrupt", null]]);
+  // only this run's own prompts, no global interrupt: all dequeued first (else the server would start the next one,
+  // and each job cancel deep-copies whatever is still queued), then each cancelled under the server's queue lock
+  assert.deepEqual(api.log.slice(4), [
+    ["delete", "queue", "p2"], ["delete", "queue", "p3"], ["delete", "queue", "p1"],
+    ["cancel", "p2"], ["cancel", "p3"], ["cancel", "p1"],
+  ]);
   api.fire("execution_interrupted", { prompt_id: "p1" });
   api.fire("execution_success", { prompt_id: "p2" }); // too late: already given up
   await controller.whenIdle();
@@ -201,7 +211,8 @@ test("stop during queueing never queues the remaining cells", async () => {
   await controller.generate();
   await controller.whenIdle();
   assert.equal(api.queued.length, 2);
-  assert.ok(api.log.some((entry) => entry[0] === "delete" && entry[2] === "p1"));
+  assert.ok(api.log.some((entry) => entry[0] === "cancel" && entry[1] === "p1"));
+  assert.ok(!api.log.some((entry) => entry[0] === "interrupt"));
   assert.equal(gridBody(routes), undefined); // no cell finished: nothing to draw
 });
 
@@ -212,12 +223,36 @@ test("stop ends a started prompt whose end event never comes (lost websocket eve
   await controller.stop(); // the interrupt is never answered
   assert.equal(controller.running, false); // before whenIdle(), which would never resolve if this failed
   await controller.whenIdle();
-  assert.deepEqual(api.log.slice(1), [["interrupt", null]]);
+  assert.deepEqual(api.log.slice(1), [["delete", "queue", "p0"], ["cancel", "p0"]]);
   assert.deepEqual(emittedOf(emitted, "running").map((e) => e.running), [true, false]);
   api.fire("executed", { prompt_id: "p0", node: SAVE, output: { images: [ref("late.png")] } });
   api.fire("execution_success", { prompt_id: "p0" }); // too late: ignored
   assert.deepEqual(emittedOf(emitted, "images"), []);
   assert.deepEqual(await controller.generate(), { queued: 1 }); // not stuck on "이미 생성 중"
+});
+
+test("stop on a host without the job cancel API dequeues, then interrupts only its own prompts", async () => {
+  const plan = plan2x2();
+  const { api, controller } = setup({ plan, xyz: XYZ_ON });
+  await controller.generate();
+  finishCell(api, "p0", `cell${plan.order[0]}.png`);
+  api.fire("execution_start", { prompt_id: "p1" });
+  api.cancelFails = true; // older ComfyUI: POST /api/jobs/{id}/cancel is 404
+  await controller.stop();
+  assert.deepEqual(api.log.slice(4), [
+    ["delete", "queue", "p2"], ["delete", "queue", "p3"], ["delete", "queue", "p1"],
+    ["cancel", "p2"], ["cancel", "p3"], ["cancel", "p1"],
+    ["interrupt", "p2"], ["interrupt", "p3"], ["interrupt", "p1"],
+  ]);
+});
+
+test("stop with an older frontend api (no cancelJob) never sends a global interrupt", async () => {
+  const { api, controller } = setup();
+  api.cancelJob = undefined;
+  await controller.generate();
+  api.fire("execution_start", { prompt_id: "p0" });
+  await controller.stop();
+  assert.deepEqual(api.log.slice(1), [["delete", "queue", "p0"], ["interrupt", "p0"]]);
 });
 
 test("failed cell becomes null", async () => {
@@ -1035,4 +1070,17 @@ test("SAM3 finding nothing says so instead of ending without a word", async () =
   assert.deepEqual(noticesOf(emitted), [NOTICES.sam3Empty]);
   api.fire("execution_success", { prompt_id: "p0" });
   await controller.whenIdle();
+});
+
+test("adherenceWarnings names the settings that do nothing on this run", () => {
+  const warn = (overrides, families, action = null) => adherenceWarnings({ ...DEFAULT_STATE, ...overrides }, families, action);
+  assert.deepEqual(warn({}), []);
+  assert.deepEqual(warn({ lora_base: 30, tab: "i2i", i2i_mode: "inpaint" }), [NOTICES.loraBaseInpaint]);
+  assert.deepEqual(warn({ lora_base: 30, tab: "i2i", i2i_mode: "img2img" }), []);
+  assert.deepEqual(warn({ lora_cross_attn: "교차 어텐션", unet: "moss_sft.safetensors" }), [NOTICES.crossAttnFamily]);
+  const emphasis = (words) => ({ ext: { ...DEFAULT_STATE.ext, emphasis: { ...DEFAULT_STATE.ext.emphasis, on: true, words } } });
+  assert.deepEqual(warn(emphasis(""), {}), [NOTICES.emphasisEmpty]);
+  assert.deepEqual(warn(emphasis("gripping"), {}), []);
+  assert.deepEqual(warn({ ...emphasis("gripping"), unet: "big.safetensors" }, { "big.safetensors": "3.8b" }), [NOTICES.emphasis38]);
+  assert.deepEqual(warn({ lora_base: 30, tab: "i2i", i2i_mode: "inpaint" }, {}, "hires"), []);  // a post run uses none
 });

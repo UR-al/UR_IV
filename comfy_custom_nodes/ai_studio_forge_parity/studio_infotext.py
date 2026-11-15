@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 import re
 
-from .studio_state import effective_attention, effective_prompt, generation_size, size_grid
+from .studio_adherence import CROSS_ATTN_OFF
+from .studio_choices import unet_family
+from .studio_state import (MOSS_SKIP_LAYER, effective_attention, effective_cross_attn, effective_layer_skip, effective_negative,
+                           effective_prompt, generation_size, lora_split_steps, size_grid)
 from .studio_upscale import hires_size
 
 # ComfyUI sampler name -> Forge label.  Unknown names are written as they are.
@@ -200,10 +203,39 @@ def _inpaint_params(i2i: dict) -> dict[str, str]:
     return params
 
 
+# The studio's own keys (pack 1.17.0, 1.20.0); not Forge's. ``studio_infotext_read`` reads the LoRA and MOSS ones back.
+MOSS_LAYER_SKIP_KEY = "MOSS layer skip"  # the block the uncond pass skipped; written for a MOSS image with it on
+LORA_BASE_KEY = "LoRA base first"
+LORA_CROSS_ATTN_KEY = "LoRA cross-attn"
+CFG_SCHEDULE_KEY = "CFG schedule"
+WORD_EMPHASIS_KEY = "Word emphasis"
+
+
+def _adherence_params(state: dict) -> dict[str, str]:
+    """The prompt adherence settings that changed the image: the LoRA card's, CFG 스케줄 and 단어 주목 when on."""
+    params = {}
+    if lora_split_steps(state):
+        params[LORA_BASE_KEY] = f"{int(state['lora_base'])}%"
+    if effective_cross_attn(state) != CROSS_ATTN_OFF:
+        params[LORA_CROSS_ATTN_KEY] = state["lora_cross_attn"]
+    ext = state.get("ext") or {}
+    schedule = ext.get("cfg_schedule") or {}
+    if schedule.get("on") and schedule.get("end_percent", 0) > 0:
+        params[CFG_SCHEDULE_KEY] = (f"{_number(schedule['start_cfg'])} -> {_number(state['cfg'])} by "
+                                    f"{int(schedule['end_percent'])}% ({schedule['curve']})")
+    emphasis = ext.get("emphasis") or {}
+    anima = unet_family(state.get("unet") or "") in ("2.9b", "base")  # 3.8B's connector conds are left out
+    if emphasis.get("on") and anima and (emphasis.get("words") or "").strip():
+        words = ", ".join(part.strip() for part in re.split(r"[,\n]", emphasis["words"]) if part.strip())
+        params[WORD_EMPHASIS_KEY] = (f"{words} x{_number(emphasis['multiplier'])} "
+                                     f"{int(emphasis['start_percent'])}-{int(emphasis['end_percent'])}%")
+    return params
+
+
 def build_infotext(state: dict, *, seed: int, extra: dict[str, str] | None = None) -> str:
     """``prompt`` / ``Negative prompt: ...`` / ``Steps: ..., Sampler: ...`` for a normalized studio state."""
     prompt = effective_prompt(state)
-    negative = state.get("negative") or ""
+    negative = effective_negative(state)  # what the run used: nothing while the negative is switched off
     hires = state.get("hires") or {}
     i2i = state.get("i2i") or {}
     is_i2i = state.get("tab") == "i2i"
@@ -233,6 +265,9 @@ def build_infotext(state: dict, *, seed: int, extra: dict[str, str] | None = Non
     params.update(_upscale_params(state.get("upscale") or {}))
     if effective_attention(state) != "launch":
         params["Attention"] = effective_attention(state)
+    if effective_layer_skip(state):
+        params[MOSS_LAYER_SKIP_KEY] = str(MOSS_SKIP_LAYER)
+    params.update(_adherence_params(state))
     if state.get("prompt_template"):  # the keys Dynamic Prompts writes
         params["Template"] = state["prompt_template"]
     if state.get("negative_template"):

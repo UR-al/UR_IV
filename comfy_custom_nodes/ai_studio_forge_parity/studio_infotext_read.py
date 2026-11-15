@@ -10,8 +10,11 @@ from __future__ import annotations
 import json
 import re
 
-from .studio_infotext import LATENT_LABELS, SAMPLER_LABELS, SCHEDULER_LABELS
-from .studio_state import ATTENTION_MODES, INPAINT_FILLS, PROMPT_BOXES
+from .studio_adherence import CROSS_ATTN_MODES, CROSS_ATTN_OFF, LORA_BASE_MAX
+from .studio_choices import unet_family
+from .studio_infotext import (LATENT_LABELS, LORA_BASE_KEY, LORA_CROSS_ATTN_KEY, MOSS_LAYER_SKIP_KEY, SAMPLER_LABELS,
+                              SCHEDULER_LABELS)
+from .studio_state import ATTENTION_MODES, INPAINT_FILLS, NEGATIVE_SWITCH, single_prompt
 
 _PARAM = re.compile(r'\s*([^,:"]+?):\s*("(?:\\.|[^\\"])*"|[^,]*)(?:,|$)')
 _SIZE = re.compile(r"(\d+)x(\d+)")
@@ -114,10 +117,11 @@ def parse_infotext(text) -> dict | None:
         return None
 
     prompt, negative = _prompts(lines[:at])
-    # The prompt holds the LoRAs as tags and every box in one text.
-    settings: dict = {**dict.fromkeys(PROMPT_BOXES, ""), "loras": [], "steps": steps}
-    settings["prompt"] = params.get("Template") or prompt
+    # The prompt holds the LoRAs as tags and every box that was switched on in one text. It and the negative are what the
+    # image was made with, so both come back switched on (a negative that was off left none in the text: an empty box).
+    settings: dict = {**single_prompt(params.get("Template") or prompt), "loras": [], "steps": steps}
     settings["negative"] = params.get("Negative Template") or negative
+    settings[NEGATIVE_SWITCH] = True
     if "Sampler" in params:
         settings["sampler"] = _SAMPLERS.get(params["Sampler"], params["Sampler"])
     if "Schedule type" in params:
@@ -126,6 +130,14 @@ def parse_infotext(text) -> dict | None:
     _put(settings, "shift", _number(float, params.get("Shift")))
     if params.get("Attention") in ATTENTION_MODES:
         settings["attention"] = params["Attention"]
+    # The LoRA card's settings change the image: an image without them was made without them.
+    base = _number(int, (params.get(LORA_BASE_KEY) or "").rstrip("%").strip())
+    settings["lora_base"] = min(LORA_BASE_MAX, max(0, base)) if base is not None else 0
+    cross = params.get(LORA_CROSS_ATTN_KEY)
+    settings["lora_cross_attn"] = cross if cross in CROSS_ATTN_MODES else CROSS_ATTN_OFF
+    # So does MOSS's layer skip; on another family the panel's switch means nothing and stays.
+    if unet_family(params.get("Model", "")) == "moss":
+        settings["moss_layer_skip"] = MOSS_LAYER_SKIP_KEY in params
 
     hires = any(key.startswith("Hires ") for key in params)
     settings["hires"] = _hires(params) if hires else {"on": False}

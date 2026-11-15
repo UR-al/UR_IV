@@ -33,6 +33,7 @@ from .guidance_cns import (
 )
 from .guidance_common import DY_SUBSTEPS_OFF_KEY, set_transformer_option
 from .guidance_detail import PASS_BASE, PASS_HIRES, with_pass_tag
+from .studio_adherence_nodes import SPLIT_REFUSED, base_model_of, has_wrapper, planned_split, split_lora_sample
 from .studio_forge_noise import forge_image_seeds, forge_initial_noise, forge_step_noise_seed
 from .anima_lora_nodes import (
     AnimaLoraStateCache,
@@ -288,7 +289,10 @@ FORGE_NOISE_INPUT = ("BOOLEAN", {"default": False, "tooltip": (
     "step noise of SDE samplers that draw it like EXP Heun 2 x0 SDE. Not with SPEED.")})
 
 
-def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise, forge_noise=False):
+def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise, forge_noise=False,
+                   lora_split=False):
+    """One sampling run. ``lora_split`` (the main sampler only): a LoRA control node's "Base 먼저" on ``model`` runs
+    its first steps without the LoRAs (``studio_adherence_nodes.split_lora_sample``)."""
     require_torch()
     import comfy.sample
     import comfy.utils
@@ -310,12 +314,22 @@ def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, n
     else:
         noise = comfy.sample.prepare_noise(latent_image, int(seed), batch_inds)
     callback = latent_preview.prepare_callback(model, int(steps))
-    samples = comfy.sample.sample(
-        model, noise, int(steps), float(cfg), sampler_name, scheduler,
-        positive, negative, latent_image, denoise=float(denoise),
-        noise_mask=latent.get("noise_mask"), callback=callback,
-        disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=sampler_seed,
-    )
+    schedule, split = planned_split(model, steps, latent) if lora_split else (None, 0)
+    if split >= int(steps):
+        model, split = base_model_of(model, schedule), 0  # every step without the LoRAs
+    if split:
+        samples = split_lora_sample(
+            model, schedule, split, noise, int(steps), float(cfg), sampler_name, scheduler, positive, negative,
+            latent_image, float(denoise), callback=callback, disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED,
+            seed=sampler_seed,
+        )
+    else:
+        samples = comfy.sample.sample(
+            model, noise, int(steps), float(cfg), sampler_name, scheduler,
+            positive, negative, latent_image, denoise=float(denoise),
+            noise_mask=latent.get("noise_mask"), callback=callback,
+            disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=sampler_seed,
+        )
     output = dict(latent)
     output.pop("downscale_ratio_spacial", None)
     output.pop("downscale_ratio_temporal", None)
@@ -381,6 +395,13 @@ class ForgeNeoKSamplerCNS:
         model = _with_cns(model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
         # The base pass of the generation: HiFlow records here, S² draws with the 'base' tag (guidance_detail).
         model = with_pass_tag(model, PASS_BASE)
+        # Imported here: importing speed_nodes registers its names, and __init__ fixes that order (extra schedulers first).
+        from .speed_nodes import SPEED_WRAPPER_KEY
+
+        _schedule, split = planned_split(model, steps, latent_image, warn=False)
+        if 0 < split < int(steps) and (speed_enabled or spectrum_enabled or has_wrapper(model, SPEED_WRAPPER_KEY)):
+            # SPEED and Spectrum segment the sampler themselves; the split cuts it as well.
+            raise RuntimeError(SPLIT_REFUSED.format(what="SPEED·Spectrum"))
         if speed_enabled:
             # CNS rides on the MODEL's sampler wrapper, so it also colours the
             # SPEED sampler's steps (Path B when SPEED wraps sample_*).
@@ -412,7 +433,8 @@ class ForgeNeoKSamplerCNS:
                 "DiTSpectrumPatch", method="patch", feature="Spectrum sampler",
                 args=(model, int(steps), float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps), float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size), True, bool(spectrum_one_sampler_only), bool(spectrum_verbose)),
             )[0]
-        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise, forge_noise=bool(forge_noise))
+        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise,
+                              forge_noise=bool(forge_noise), lora_split=True)
 
 
 def _is_flux_sampling(sampling: Any) -> bool:
@@ -944,12 +966,40 @@ class ForgeNeoAnimaVAE2x:
         ),)
 
 
+_PID_TE = "gemma_2_2b_it_elm"  # the Gemma-2-2B text encoder PiD's split release ships beside the model
+
+
+def _file_list(kind: str) -> list[str]:
+    try:
+        return list(folder_paths_module().get_filename_list(kind))
+    except Exception:
+        return []
+
+
+def _pid_files() -> list[str]:
+    """PiD models: Comfy-Org's split release in diffusion_models, or a combined PiD checkpoint; named for PiD either way."""
+    found = []
+    for name in _file_list("diffusion_models") + _file_list("checkpoints"):
+        base = name.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+        if (base.startswith("pid") or "_pid" in base or "-pid" in base) and name not in found:
+            found.append(name)
+    return found
+
+
+def _pid_text_encoder() -> str:
+    candidates = [name for name in _file_list("text_encoders") if _PID_TE in name.casefold()]
+    if not candidates:
+        raise RuntimeError(f"PiD 의 텍스트 인코더({_PID_TE}_bf16 또는 _fp8_scaled)가 text_encoders 폴더에 없음: "
+                           "Comfy-Org/PixelDiT 의 text_encoders 에서 받으세요")
+    return sorted(candidates, key=lambda name: "bf16" not in name.casefold())[0]
+
+
 class ForgeNeoAnimaPiD:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "image": ("IMAGE",), "latent": ("LATENT",), "enabled": ("BOOLEAN", {"default": False}),
-            "ckpt_name": (["(auto-download)", *filename_choices("checkpoints")],),
+            "ckpt_name": (["(auto-download)", *_pid_files()],),
             "dtype": (["bf16", "fp32"],), "steps": ("INT", {"default": 4, "min": 1, "max": 100}),
             "sigma": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}), "seed": ("INT", {"default": -1, "min": -1, "max": 0xFFFFFFFFFFFFFFFF}),
             "tile_latent": ("INT", {"default": 64, "min": 0, "max": 2048}), "tile_overlap": ("INT", {"default": 16, "min": 0, "max": 1024}),
@@ -978,10 +1028,17 @@ class ForgeNeoAnimaPiD:
                 "PiD tile_latent/tile_overlap overrides are not exposed by ComfyUI's "
                 "current PiDConditioning API."
             )
-        loaded = invoke_provider("CheckpointLoaderSimple", method="load_checkpoint", feature="PiD decoder", args=(ckpt_name,))
-        if len(loaded) < 2:
-            raise RuntimeError("The PiD checkpoint did not provide both MODEL and CLIP.")
-        pid_model, pid_clip = loaded[0], loaded[1]
+        # The core template (utility_pid_latent_upscale_dit): Comfy-Org's split release loads through UNETLoader and
+        # CLIPLoader(type pixeldit); a combined checkpoint brings its own TE.
+        if ckpt_name in _file_list("diffusion_models"):
+            te_name = _pid_text_encoder()
+            pid_model = invoke_provider("UNETLoader", method="load_unet", feature="PiD decoder", args=(ckpt_name, "default"))[0]
+            pid_clip = invoke_provider("CLIPLoader", method="load_clip", feature="PiD decoder", args=(te_name, "pixeldit"))[0]
+        else:
+            loaded = invoke_provider("CheckpointLoaderSimple", method="load_checkpoint", feature="PiD decoder", args=(ckpt_name,))
+            if len(loaded) < 2:
+                raise RuntimeError("The PiD checkpoint did not provide both MODEL and CLIP.")
+            pid_model, pid_clip = loaded[0], loaded[1]
         positive = invoke_provider("CLIPTextEncode", method="encode", feature="PiD decoder", args=(pid_clip, ""))[0]
         conditioned = invoke_provider("PiDConditioning", method="execute", feature="PiD conditioning", args=(positive, latent, "qwenimage", float(sigma)))[0]
         negative = invoke_provider("ConditioningZeroOut", method="zero_out", feature="PiD decoder", args=(conditioned,))[0]
@@ -990,11 +1047,12 @@ class ForgeNeoAnimaPiD:
         target_h, target_w = int(source.shape[1]) * 4, int(source.shape[2]) * 4
         empty = {"samples": torch.zeros((source.shape[0], 3, target_h, target_w), dtype=source.dtype, device=source.device)}
         actual_seed = secrets.randbits(64) if int(seed) < 0 else int(seed)
-        result = _common_sample(pid_model, actual_seed, int(steps), 1.0, "euler", "simple", conditioned, negative, empty, 1.0)[0]["samples"]
+        # the template's sampler (lcm, simple, cfg 1); PiD's pixels are -1..1 and the pixel_space VAE maps them (x + 1) / 2
+        result = _common_sample(pid_model, actual_seed, int(steps), 1.0, "lcm", "simple", conditioned, negative, empty, 1.0)[0]["samples"]
         latent_format = getattr(getattr(pid_model, "model", None), "latent_format", None)
         if latent_format is not None and callable(getattr(latent_format, "process_out", None)):
             result = latent_format.process_out(result)
-        return (result.movedim(1, -1).clamp(0, 1).contiguous(),)
+        return (result.add(1.0).div(2.0).movedim(1, -1).clamp(0, 1).contiguous(),)
 
 
 # Forge/A1111 sampler labels -> ComfyUI names.  This pack runs inside ComfyUI

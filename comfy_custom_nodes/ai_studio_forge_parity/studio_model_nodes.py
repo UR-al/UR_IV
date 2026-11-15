@@ -3,17 +3,22 @@
 The packs stay separate installs with their own licences and updates, and their weights are never bundled. A node here
 only dispatches: a missing pack stops the run that needed it with ``compat.MissingComfyProvider``'s message, and the
 panel greys the switch (``web/ai_studio/reference_view.js``). Off, each of these is bypassed in the graph (R7).
+
+The MOSS node also carries MOSS-Image's layer skip (pack 1.20.0), which needs no other pack: ``moss_layer_skip``.
 """
 from __future__ import annotations
 
 import importlib
 import json
+import sys
 
-from .compat import filename_choices, folder_paths_module, invoke_provider, require_torch
+from .compat import clone_model, filename_choices, folder_paths_module, invoke_provider, provider_class, require_torch
 from .guidance_common import ASYM_REFERENCE_KEY
+from .moss_lora_layout import is_moss_model
 from .reference_layout import adapter_for_model
 from .studio_nodes import scheduled_encode
-from .studio_state import ATTENTION_MODES, KREA2_POSITIONS, REFERENCE_CORRECTIONS, REFERENCE_METHODS, REFERENCE_MODES
+from .studio_state import (ATTENTION_MODES, KREA2_POSITIONS, MOSS_SKIP_LAYER, REFERENCE_CORRECTIONS, REFERENCE_LAYOUTS,
+                           REFERENCE_METHODS, REFERENCE_MODES)
 
 CATEGORY = "AI Studio/모델"
 TE_TYPES = ("stable_diffusion", "moss_image", "krea2")
@@ -22,6 +27,10 @@ DIFFUSION_MODEL_WRAPPERS = "diffusion_model"  # comfy.patcher_extension.Wrappers
 KREA2_LATENT_CHANNELS = 16
 KREA2_LATENT_SCALE = 8
 KREA2_NEGATIVE_GROUNDING = 768  # both of the packs' example workflows ground the empty negative at 768
+DIT_PATCHES = "dit"  # transformer_options["patches_replace"] name MOSS-Image's forward reads
+SINGLE_BLOCK = "single_block"
+UNCOND = 1  # the negative's flag in transformer_options["cond_or_uncond"] (comfy.samplers.calc_cond_batch)
+SKIP_ROWS_SEEN = "ai_studio_uncond_skip_rows"  # transformer_options: rows of this forward the layer skip has seen
 
 
 def _read_moss_te(path):
@@ -86,20 +95,119 @@ class AIStudioAttention:
         return (patched,)
 
 
+def _dit_replace(model, key):
+    """The block replace a MODEL already carries under ``key``, else None."""
+    options = getattr(model, "model_options", None) or {}
+    return (((options.get("transformer_options") or {}).get("patches_replace") or {}).get(DIT_PATCHES) or {}).get(key)
+
+
+def _rows_in_batch(options, conds, count):
+    """``(rows per cond, first row)`` of a block call with ``count`` rows, in the batch its ``cond_or_uncond`` describes.
+
+    ComfyUI's own DiT runs the block once for the whole batch. The moss-image loader's DiT and MOSS-Toolkit's reference
+    pass run it one sample at a time with the whole batch's flags: ``sigmas`` (one per row of a cond) gives the batch's
+    size, and the rows that went before are counted in the options, the forward's own copy.
+    """
+    shape = getattr(options.get("sigmas"), "shape", None)
+    total = int(shape[0]) * conds if shape else 0
+    if count < total:
+        first = options.get(SKIP_ROWS_SEEN, 0) % total
+        options[SKIP_ROWS_SEEN] = first + count
+        return total // conds, first
+    if count % conds:
+        raise RuntimeError(
+            f"MOSS layer skip: {count} rows for {conds} conds, so the negative's rows cannot be told apart in this "
+            "model call. Turn the layer skip (스킵 22) off for this model.")
+    return count // conds, 0
+
+
+def uncond_block_skip(previous=None):
+    """A block replace (``patches_replace["dit"]``) that leaves the block out of the uncond pass only.
+
+    ComfyUI runs the positive and the negative as one batch when memory allows, and then the block cannot be left out:
+    it runs for the whole batch (through ``previous``, a replace that was already on the block, when there is one) and
+    the uncond rows get the values they came in with back. A block maps each row by itself, so that is the pass without
+    the block. The rows are copied first: MOSS-Image's blocks write the stream in place. A DiT that runs the block one
+    sample at a time gets the same answer per call (``_rows_in_batch``), and a call whose rows cannot be told apart
+    stops the run: running the block for the negative too would be no layer skip, silently.
+    """
+
+    def replace(args, extra):
+        def run():
+            return previous(args, extra) if previous is not None else extra["original_block"](args)
+
+        options = args.get("transformer_options") or {}
+        flags = list(options.get("cond_or_uncond") or [])
+        if UNCOND not in flags:
+            return run()
+        if all(flag == UNCOND for flag in flags):
+            return args  # the whole call is the uncond pass
+        img = args["img"]
+        count = img.shape[0]
+        rows, first = _rows_in_batch(options, len(flags), count)
+        spans = [(max(index * rows - first, 0), min((index + 1) * rows - first, count))
+                 for index, flag in enumerate(flags) if flag == UNCOND]
+        chunks = [slice(start, stop) for start, stop in spans if start < stop]
+        if not chunks:
+            return run()
+        if sum(chunk.stop - chunk.start for chunk in chunks) == count:
+            return args  # every row of this call is the negative's
+        kept = [img[chunk].clone() for chunk in chunks]
+        out = run()
+        for chunk, before in zip(chunks, kept):
+            out["img"][chunk] = before
+        return out
+
+    replace.ai_studio_uncond_skip = True
+    return replace
+
+
+def moss_layer_skip(model, layer=MOSS_SKIP_LAYER):
+    """A clone of a MOSS-Image MODEL whose uncond pass skips block ``layer``, over the whole schedule (what core
+    ``SkipLayerGuidanceDiTSimple`` does with ``single_layers=str(layer)``, 0..1); any other MODEL as it is.
+
+    The core node takes ``sampler_calc_cond_batch_function``, a single slot the guidance suite's Adaptive Guidance and
+    PAG use too. This sits on the block instead, in ``model_options``, so every pass that samples with a clone of this
+    MODEL has it (main, Hires, the detailers, Base 먼저's base run) beside NegPiP, the fp32 stream and Spectrum.
+    """
+    if not is_moss_model(model):
+        return model
+    key = (SINGLE_BLOCK, int(layer))
+    previous = _dit_replace(model, key)
+    if getattr(previous, "ai_studio_uncond_skip", False):
+        return model
+    patched = clone_model(model, "MOSS layer skip")
+    patched.set_model_patch_replace(uncond_block_skip(previous), DIT_PATCHES, SINGLE_BLOCK, int(layer))
+    return patched
+
+
 class AIStudioMossStream:
-    """MOSS-Image's fp32 residual stream (ComfyUI-MOSS-Toolkit ``MOSSStreamFP32``), for a core-loaded MODEL."""
+    """MOSS-Image's own two switches for a core-loaded MODEL: the fp32 residual stream (ComfyUI-MOSS-Toolkit
+    ``MOSSStreamFP32``) and the layer skip of its official sampling (``moss_layer_skip``)."""
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"model": ("MODEL",)}}
+        # The switches came with 1.20.0, after the socket: a workflow saved before has neither and runs as it did
+        # (the stream on, no layer skip) until the panel writes them.
+        return {"required": {"model": ("MODEL",)}, "optional": {
+            "stream": ("BOOLEAN", {"default": True, "tooltip": "the fp32 residual stream (needs ComfyUI-MOSS-Toolkit)"}),
+            "layer_skip": ("BOOLEAN", {"default": False, "tooltip": (
+                f"the uncond pass skips block {MOSS_SKIP_LAYER}: OpenMOSS's sampling, as core "
+                f"SkipLayerGuidanceDiTSimple with single_layers={MOSS_SKIP_LAYER}, 0..1")}),
+        }}
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
     CATEGORY = CATEGORY
-    DESCRIPTION = "Runs MOSS-Image's stream in fp32 around its block GEMMs (ComfyUI-MOSS-Toolkit)."
+    DESCRIPTION = ("MOSS-Image: the fp32 stream around its block GEMMs (ComfyUI-MOSS-Toolkit) and the official layer skip "
+                   f"(block {MOSS_SKIP_LAYER}, uncond pass only).")
 
-    def patch(self, model):
-        return invoke_provider("MOSSStreamFP32", method="patch", feature="MOSS fp32 stream", args=(model,))[:1]
+    def patch(self, model, stream=True, layer_skip=False):
+        if stream:
+            model = invoke_provider("MOSSStreamFP32", method="patch", feature="MOSS fp32 stream", args=(model,))[0]
+        if layer_skip:
+            model = moss_layer_skip(model)
+        return (model,)
 
 
 def _split_mixed_batch(executor, x, timesteps, context, fps=None, padding_mask=None, **kwargs):
@@ -130,6 +238,18 @@ def _outermost_wrapper(model, key, wrapper):
     wrappers = patched.wrappers[DIFFUSION_MODEL_WRAPPERS]
     patched.wrappers[DIFFUSION_MODEL_WRAPPERS] = {key: wrappers.pop(key), **wrappers}
     return patched
+
+
+def _snapref_native_layouts() -> frozenset:
+    """``(adapter blocks, model blocks)`` pairs the installed SnapRef node fits by itself. The v2a release node (11-09) maps a
+    28-block adapter onto Anima 2.9B's 40 blocks (``_INSERTED_29B``: the inserted blocks run without it), so 2.9B takes the
+    original file; 3.8B still needs our lineage copy. An older node maps nothing, and then the copy is used as before."""
+    try:
+        cls = provider_class("SnapRef", feature="SnapRef")
+    except Exception:
+        return frozenset()
+    module = sys.modules.get(getattr(cls, "__module__", ""))
+    return frozenset({(28, 40)}) if getattr(module, "_INSERTED_29B", None) else frozenset()
 
 
 def _adapter_is_asym(path) -> bool:
@@ -169,6 +289,11 @@ class AIStudioAnimaReference:
             "weight_2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": "SnapRef: how much image_2 counts"}),
             "fidelity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                    "tooltip": "SnapRef: 1 keeps the picture's details, lower follows the prompt; off with guidance_on"}),
+            # SnapRef v2a (11-09): after the older inputs, so saved workflows keep their widget values in place
+            "image_3": ("IMAGE", {"tooltip": "SnapRef: a third picture of the same character"}),
+            "weight_3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": "SnapRef: how much image_3 counts"}),
+            "multi_layout": (list(REFERENCE_LAYOUTS), {"tooltip": "SnapRef, several pictures: separate = each encoded on its own "
+                                                                  "(sharper, slower); stitch = side by side in one picture"}),
         }}
 
     RETURN_TYPES = ("MODEL",)
@@ -177,13 +302,22 @@ class AIStudioAnimaReference:
     DESCRIPTION = "Character / style reference for Anima through SnapRef or Anima Ref Adapter."
 
     def apply(self, model, clip, vae, image, method, file, mode, strength, guidance_on, guidance, correction, ref_end,
-              megapixels, caption, image_2=None, weight_1=1.0, weight_2=1.0, fidelity=1.0):
+              megapixels, caption, image_2=None, weight_1=1.0, weight_2=1.0, fidelity=1.0, image_3=None, weight_3=1.0,
+              multi_layout=REFERENCE_LAYOUTS[0]):
         if not file:
             raise ValueError("레퍼런스 파일이 비어 있음")
-        file = adapter_for_model(model, file)
+        file = adapter_for_model(model, file, native=_snapref_native_layouts() if method == "snapref" else frozenset())
         if method == "snapref":
             # defaults stay out of the call, so an older SnapRef node keeps working
-            newer = {} if image_2 is None else {"image_2": image_2, "weight_1": weight_1, "weight_2": weight_2}
+            newer = {}
+            if image_2 is not None or image_3 is not None:
+                newer["weight_1"] = weight_1
+                if image_2 is not None:
+                    newer.update(image_2=image_2, weight_2=weight_2)
+                if image_3 is not None:
+                    newer.update(image_3=image_3, weight_3=weight_3)
+                if multi_layout != REFERENCE_LAYOUTS[0]:
+                    newer["multi_layout"] = multi_layout
             if fidelity < 1.0:
                 newer["fidelity"] = fidelity
             try:
@@ -195,7 +329,7 @@ class AIStudioAnimaReference:
                 })[0]
             except TypeError as error:
                 if newer and "unexpected keyword" in str(error):
-                    raise RuntimeError("SnapRef 노드가 옛 버전이라 충실도·두 번째 이미지를 못 씀: 노드를 새로 받으세요") from error
+                    raise RuntimeError("SnapRef 노드가 옛 버전이라 충실도·두·세 번째 이미지·배치 방식을 못 씀: 노드를 새로 받으세요") from error
                 raise
             # with its guidance on SnapRef keeps the batch whole; off, only the positive row reads the reference
             return (patched if guidance_on else _outermost_wrapper(patched, SPLIT_WRAPPER_KEY, _split_mixed_batch),)

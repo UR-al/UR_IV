@@ -18,6 +18,26 @@ class PromptBoxTests(unittest.TestCase):
         self.assertEqual(studio_infotext.build_infotext(state, seed=1).split("\n")[0], "best, @a, 1boy, highres")
 
 
+    def test_a_switched_off_fixed_box_is_not_in_the_text(self):
+        state = _state(prompt_prefix="best", prompt="1boy", prompt_suffix="highres", prompt_suffix_on=False)
+        self.assertEqual(studio_infotext.build_infotext(state, seed=1).split("\n")[0], "best, 1boy")
+        state = _state(prompt_prefix="best", prompt="1boy", prompt_suffix="highres", prompt_prefix_on=False, prompt_suffix_on=False)
+        self.assertEqual(studio_infotext.build_infotext(state, seed=1).split("\n")[0], "1boy")
+
+
+class MossLayerSkipTests(unittest.TestCase):
+    def _last(self, **changes):
+        return studio_infotext.build_infotext(_state(**changes), seed=1).split("\n")[-1]
+
+    def test_a_moss_image_names_the_skipped_layer(self):
+        self.assertIn("MOSS layer skip: 22", self._last(unet="moss_image_sft.safetensors"))
+
+    def test_off_or_another_family_writes_nothing(self):
+        self.assertNotIn("MOSS layer skip", self._last(unet="moss_image_sft.safetensors", moss_layer_skip=False))
+        self.assertNotIn("MOSS layer skip", self._last())
+        self.assertNotIn("MOSS layer skip", self._last(unet="krea2_raw.safetensors"))
+
+
 class InfotextLayoutTests(unittest.TestCase):
     def test_infotext_txt2img_matches_forge_layout(self):
         lines = studio_infotext.build_infotext(_state(), seed=42).split("\n")

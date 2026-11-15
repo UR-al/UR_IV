@@ -111,6 +111,9 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "AIStudioAnimaReference",     # studio: Anima reference (SnapRef / Anima Ref Adapter)
     "AIStudioKrea2Reference",     # studio: Krea2 reference (comfyui-krea2edit)
     "AIStudioSwitch",             # Anima studio: lazy a/b switch between the 2.9B/base and 3.8B paths
+    "AIStudioLoraControl",        # 1.17.0: LoRA Base 먼저 / 교차 어텐션 제외
+    "AIStudioCFGSchedule",        # 1.17.0: CFG per step
+    "AIStudioWordEmphasis",       # 1.17.0: cross-attention emphasis of listed words
 })
 EXPECTED_BUNDLED_NODES = COMPILER_BUILT_NODES | CUSTOM_WORKFLOW_NODES
 
@@ -123,7 +126,8 @@ def _source(root: Path, body: str = "VALUE = 1\n") -> Path:
 
 
 MODEL_NODES_1_11 = ("AIStudioTextEncoderLoader", "AIStudioMossStream", "AIStudioAnimaReference", "AIStudioKrea2Reference")
-NODES_AFTER_1_10 = ("AIStudioRelight", "AIStudioExifView", "AIStudioAttention", "AIStudioInpaintDetailer")
+NODES_AFTER_1_10 = ("AIStudioRelight", "AIStudioExifView", "AIStudioAttention", "AIStudioInpaintDetailer",
+                    "AIStudioLoraControl", "AIStudioCFGSchedule", "AIStudioWordEmphasis")
 
 
 class TestBundledComfyNodePack(unittest.TestCase):
@@ -193,7 +197,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 59)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 62)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
@@ -241,8 +245,52 @@ class TestBundledComfyNodePack(unittest.TestCase):
     def test_pack_version_matches_package_version(self):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
+    def test_adherence_release_is_1_17_0(self):
+        self.assertEqual(bundled_pack.__version__, "1.21.0")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.17.0: the studio's prompt adherence controls", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.17.0 changes"), readme.index("## 1.16.0 changes"))
+        changes = " ".join(readme.split("## 1.17.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`AIStudioLoraControl`", "`AIStudioCFGSchedule`", "`AIStudioWordEmphasis`", "`studio_adherence.py`",
+                     "`lora_ctl`", "`ext_cfg_schedule`", "`ext_emphasis`"):
+            self.assertIn(text, changes)
+
+    def test_presets_and_blocks_release_is_1_21_0(self):
+        """1.21.0 = prompt-box presets, XYZ value blocks (list chips, Prompt S/R text blocks), list grouping, gallery keys."""
+        self.assertEqual(PACK_VERSION, "1.21.0")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.21.0: the studio's prompt-box presets", source)
+        pack = root / "comfy_custom_nodes" / "ai_studio_forge_parity"
+        readme = (pack / "README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.21.0 changes"), readme.index("## 1.20.0 changes"))
+        changes = " ".join(readme.split("## 1.21.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`studio_presets.py`", "`preset_routes.py`", "`prompt_presets.json`", "`GET /presets`", "`POST /presets`",
+                     "`preset_panel.js`", "`ctx.boxPreset(key, text)`", "저장 안 됨", "프리셋 관리…",
+                     "`xyz_chips.js`", "`xyz_blocks.js`", "Prompt S/R", "Prompt order", "찾을 글", "직접 입력",
+                     "`xyz_values_golden.json`", "`keepScroll`", "`studio_choices_order.py`", "`group_similar`",
+                     "`result_gallery.css`", "Home", "End", "Delete"):
+            with self.subTest(readme=text):
+                self.assertIn(text, changes)
+        # every web file the release added is named, so the list of what ships stays readable
+        for name in ("preset_api.js", "preset_dom.js", "preset_logic.js", "preset_quick.js", "preset_tools.js", "preset_window.js",
+                     "preset_window_view.js", "preset.css", "xyz_chips.css", "xyz_blocks.css"):
+            with self.subTest(file=name):
+                self.assertIn(name, changes)
+                self.assertTrue((pack / "web" / "ai_studio" / name).is_file())
+        parity = (pack / "studio_forge_parity.md").read_text(encoding="utf-8")
+        for heading in ("## 프롬프트 프리셋 (1.21.0)", "## XYZ 값 블록 (1.21.0)", "## 샘플러·스케줄러 목록 순서 (1.21.0)",
+                        "## 갤러리 키보드 (1.21.0)"):
+            with self.subTest(parity=heading):
+                self.assertIn(heading, parity)
+        blocks = parity.split("## XYZ 값 블록 (1.21.0)", 1)[1].split("\n## ", 1)[0]
+        for text in ("Prompt S/R", "따옴표", "the first value (the text to search for) is empty"):
+            with self.subTest(parity_blocks=text):
+                self.assertIn(text, blocks)
+
     def test_settings_pull_release_is_1_16_0(self):
-        self.assertEqual(bundled_pack.__version__, "1.16.0")
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# 1.16.0: the studio's EXIF panel pulls", source)

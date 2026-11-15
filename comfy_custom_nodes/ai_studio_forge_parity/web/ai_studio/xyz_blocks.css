@@ -1,0 +1,62 @@
+/* Anima studio: the XYZ panel's text blocks (xyz_blocks.js loads this file once): Prompt S/R and Prompt order, one editable
+   block a value. Every class is ais-* scoped; the colours are studio.css's. The field starts as high as the text box it
+   stands for (90px, 150px on X), grows with its blocks up to a limit and then scrolls inside. "+ 블록" sits over the list,
+   so a growing list never moves it from under the pointer. */
+.ais-blockfield { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.ais-blk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.ais-blk-hint { min-width: 0; color: #9a9a9a; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ais-blks {
+  position: relative; /* a block's offsetTop is its place in this list (xyz_blocks.js reveal) */
+  min-height: 61px;
+  max-height: 300px;
+  overflow-y: auto;
+  overflow-anchor: none; /* the blocks are redrawn in place: the browser must not "follow" one of them */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  background: #1d1d1d;
+  border: 1px solid #474747;
+  border-radius: 6px;
+}
+.ais-blks.tall { min-height: 121px; }
+.ais-blk {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 3px 3px 3px 7px;
+  border: 1px solid #4b6a9b;
+  border-radius: 6px;
+  background: #2c3a52;
+}
+.ais-blk.find { border-color: #8a6a2f; background: #3a311f; }
+.ais-blk-tag { flex-shrink: 0; min-width: 40px; color: #b9cdf3; font-size: 11px; line-height: 24px; white-space: nowrap; user-select: none; }
+.ais-blk.find .ais-blk-tag { color: #f3d9a6; font-weight: 700; }
+.ais-root textarea.ais-blk-text {
+  flex: 1;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden; /* as high as its lines (xyz_blocks.js fit) */
+  field-sizing: content; /* where the browser has it, the same without waiting for the script */
+  background: #161616;
+}
+.ais-blk-btns { flex-shrink: 0; display: inline-flex; align-items: center; height: 24px; }
+.ais-root .ais-blk-btn {
+  width: 18px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #b9cdf3;
+  font-size: 11px;
+  line-height: 1;
+}
+.ais-blk.find .ais-blk-btn { color: #f3d9a6; }
+.ais-blk-btn:hover:not(:disabled), .ais-blk-btn:focus-visible { background: #4b6a9b; color: #fff; outline: none; }
+.ais-blk.find .ais-blk-btn:hover:not(:disabled), .ais-blk.find .ais-blk-btn:focus-visible { background: #8a6a2f; color: #fff; }
+.ais-root .ais-blk-btn:disabled { opacity: 0.3; }

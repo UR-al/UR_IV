@@ -1,0 +1,7 @@
+/* Anima studio: the result gallery's keyboard focus. result_view.js adds this sheet to the page (studio.css has the
+   rest of the result column). ←/→ move the pick while the focus is in the result node. */
+.ais-result:focus { outline: none; } /* the node itself takes the focus on a click; the cue is on the picked thumbnail */
+.ais-gallery:focus-visible { outline: 2px solid #60a5fa; outline-offset: -2px; border-radius: 6px; }
+/* The keys are the gallery's now: the picked thumbnail's frame lights up. An outline, drawn over the picture and inside
+   the frame: a shadow outside it would be cut off by the strip's scroll box. */
+.ais-result:focus-within .ais-thumb.sel { outline: 2px solid #bfdbfe; outline-offset: -2px; }

@@ -363,6 +363,19 @@ class PromptBoxTests(unittest.TestCase):
         self.assertEqual((cell["prompt_prefix"], cell["prompt_suffix"]), ("", ""))
         self.assertEqual(effective_prompt(cell), "best, 1boy, highres <lora:a:1>")
 
+    def test_a_cell_leaves_a_switched_off_fixed_box_out(self):
+        state = {**self.STATE, "prompt_prefix_on": False}
+        cell = xp.plan_xyz(state, [{"axis": "steps", "text": "10"}], {}, rng=random.Random(1), families={},
+                           loras=["a.safetensors"]).cells[0].state
+        self.assertEqual(cell["prompt"], "1boy, highres <lora:a:1>")
+        self.assertEqual(effective_prompt(cell), "1boy, highres <lora:a:1>")
+
+    def test_a_cell_carries_the_moss_layer_skip_switch(self):
+        for on in (True, False):
+            state = {"prompt": "x", "unet": "moss_sft.safetensors", "moss_layer_skip": on}
+            cells = xp.plan_xyz(state, [{"axis": "steps", "text": "10, 20"}], {}, rng=random.Random(1), families={}).cells
+            self.assertEqual([cell.state["moss_layer_skip"] for cell in cells], [on, on])
+
     def test_a_cell_empties_every_box(self):
         state = {**dict.fromkeys(PROMPT_BOXES, "x"), "prompt": "main"}
         cell = xp.plan_xyz(state, [{"axis": "steps", "text": "10"}], {}, rng=random.Random(1), families={}).cells[0].state

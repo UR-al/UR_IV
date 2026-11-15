@@ -40,7 +40,13 @@ export function imageSettings(entries) {
 
 const byName = (list, name) => (list || []).find((item) => item === name || fileStem(item) === name);
 
-/** The saved panel, but for the tab and the i2i image: those are where the work is now, not settings. */
+/**
+ * The saved panel, but for the tab and the i2i image: those are where the work is now, not settings. A switch the panel
+ * does not have reads as opening its workflow reads it (`withDefaults`: the 1.20.0 switches and the prompt card's box and
+ * negative switches on, so an image made before them brings its prompts back in full). The panel cannot tell more: the
+ * hidden widget is written on the first change only, so a run of an untouched panel saves none either.
+ * An infotext (`namedState`) carries no switches: `/infotext/parse` answers the prompt and the negative switched on.
+ */
 function wholeState(current, panel) {
   const state = withDefaults(panel);
   Object.assign(state, { tab: current.tab, i2i_mode: current.i2i_mode });

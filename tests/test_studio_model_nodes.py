@@ -38,20 +38,312 @@ class MossStreamTests(unittest.TestCase):
         self.assertEqual((calls.calls[0]["name"], calls.calls[0]["method"], calls.calls[0]["args"]),
                          ("MOSSStreamFP32", "patch", ("model",)))
 
+    def test_the_stream_and_the_layer_skip_are_optional_switches_after_the_model(self):
+        spec = nodes.AIStudioMossStream.INPUT_TYPES()
+        self.assertEqual(list(spec["required"]), ["model"])  # a workflow saved before 1.20.0 has this socket alone
+        self.assertEqual(list(spec["optional"]), ["stream", "layer_skip"])
+        self.assertEqual((spec["optional"]["stream"][0], spec["optional"]["stream"][1]["default"]), ("BOOLEAN", True))
+        self.assertEqual((spec["optional"]["layer_skip"][0], spec["optional"]["layer_skip"][1]["default"]), ("BOOLEAN", False))
+
+    def test_the_stream_off_leaves_the_toolkit_out(self):
+        calls = ProviderCalls(MOSSStreamFP32=("streamed",))
+        with mock.patch.object(nodes, "invoke_provider", calls):
+            self.assertEqual(nodes.AIStudioMossStream().patch("model", stream=False), ("model",))
+        self.assertEqual(calls.calls, [])
+
+    def test_the_layer_skip_goes_on_after_the_stream(self):
+        streamed = FakeMossModel()
+        calls = ProviderCalls(MOSSStreamFP32=(streamed,))
+        with mock.patch.object(nodes, "invoke_provider", calls):
+            (result,) = nodes.AIStudioMossStream().patch("model", stream=True, layer_skip=True)
+        self.assertEqual(calls.calls[0]["args"], ("model",))
+        self.assertIsNot(result, streamed)
+        self.assertIn(SKIP_KEY, _dit_patches(result))
+        self.assertEqual(_dit_patches(streamed), {})
+
+    def test_the_layer_skip_alone_needs_no_toolkit(self):
+        model = FakeMossModel()
+        calls = ProviderCalls()
+        with mock.patch.object(nodes, "invoke_provider", calls):
+            (result,) = nodes.AIStudioMossStream().patch(model, stream=False, layer_skip=True)
+        self.assertEqual(calls.calls, [])
+        self.assertIn(SKIP_KEY, _dit_patches(result))
+
+
+SKIP_KEY = ("single_block", 22)
+
+
+class FakeMossModel:
+    """A MODEL as far as the layer skip reads it: the inner model's class name, ``model_options`` and ComfyUI's
+    copy-on-write ``set_model_patch_replace``."""
+
+    def __init__(self, kind="MOSSImage", options=None):
+        self.model = type(kind, (), {})()
+        self.model_options = options if options is not None else {"transformer_options": {}}
+
+    def clone(self):
+        clone = FakeMossModel.__new__(FakeMossModel)
+        clone.model = self.model
+        clone.model_options = dict(self.model_options)
+        return clone
+
+    def set_model_patch_replace(self, patch, name, block_name, number):
+        options = dict(self.model_options)
+        transformer = dict(options.get("transformer_options") or {})
+        replace = dict(transformer.get("patches_replace") or {})
+        replace[name] = {**(replace.get(name) or {}), (block_name, number): patch}
+        transformer["patches_replace"] = replace
+        options["transformer_options"] = transformer
+        self.model_options = options
+
+
+def _dit_patches(model):
+    return ((model.model_options.get("transformer_options") or {}).get("patches_replace") or {}).get("dit", {})
+
+
+class Rows:
+    """A batch tensor's rows for the tests without torch: a slice is a view, as in torch, until ``clone``."""
+
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    @property
+    def shape(self):
+        return (len(self.rows),)
+
+    def __getitem__(self, part):
+        return RowsView(self, part)
+
+    def __setitem__(self, part, value):
+        self.rows[part] = value.rows
+
+
+class RowsView:
+    def __init__(self, owner, part):
+        self.owner, self.part = owner, part
+
+    @property
+    def rows(self):
+        return self.owner.rows[self.part]
+
+    def clone(self):
+        return Rows(self.rows)
+
+
+class MossLayerSkipTests(unittest.TestCase):
+    """OpenMOSS's sampling: the uncond pass without block 22 (core ``SkipLayerGuidanceDiTSimple`` with
+    ``single_layers="22"``, 0..1), as a block replace of our own."""
+
+    def _patch(self, model=None):
+        patched = nodes.moss_layer_skip(model or FakeMossModel())
+        return _dit_patches(patched)[SKIP_KEY]
+
+    @staticmethod
+    def _block(calls):
+        def original_block(args):  # in place, as MOSS's blocks update the stream
+            calls.append(list(args["img"].rows))
+            args["img"].rows[:] = [row + 10 for row in args["img"].rows]
+            return {"img": args["img"]}
+        return original_block
+
+    def _run(self, flags, rows=(1, 2, 3, 4), patch=None):
+        calls = []
+        args = {"img": Rows(rows), "transformer_options": {} if flags is None else {"cond_or_uncond": flags}}
+        out = (patch or self._patch())(args, {"original_block": self._block(calls)})
+        return out["img"].rows, calls, out is args
+
+    def test_block_22_is_the_official_layer(self):
+        self.assertEqual(nodes.MOSS_SKIP_LAYER, 22)
+
+    def test_a_moss_model_gets_the_patch_on_a_clone_and_only_on_block_22(self):
+        model = FakeMossModel()
+        patched = nodes.moss_layer_skip(model)
+        self.assertIsNot(patched, model)
+        self.assertEqual(_dit_patches(model), {})
+        self.assertEqual(list(_dit_patches(patched)), [SKIP_KEY])
+
+    def test_any_other_model_is_left_as_it_is(self):
+        for kind in ("Anima", "Krea2", "Flux"):
+            with self.subTest(kind=kind):
+                model = FakeMossModel(kind)
+                self.assertIs(nodes.moss_layer_skip(model), model)
+                self.assertEqual(_dit_patches(model), {})
+
+    def test_the_uncond_pass_skips_the_block(self):
+        rows, calls, same = self._run([1])
+        self.assertEqual((rows, calls), ([1, 2, 3, 4], []))
+        self.assertTrue(same)  # the core node's skip: the block's arguments come back untouched
+
+    def test_the_cond_pass_runs_the_block(self):
+        rows, calls, _ = self._run([0])
+        self.assertEqual((rows, calls), ([11, 12, 13, 14], [[1, 2, 3, 4]]))
+
+    def test_a_call_without_flags_runs_the_block(self):
+        for flags in (None, []):
+            with self.subTest(flags=flags):
+                rows, calls, _ = self._run(flags)
+                self.assertEqual((rows, len(calls)), ([11, 12, 13, 14], 1))
+
+    def test_a_mixed_batch_keeps_the_uncond_rows_as_they_came_in(self):
+        rows, calls, _ = self._run([0, 1])
+        self.assertEqual((rows, len(calls)), ([11, 12, 3, 4], 1))
+        rows, _, _ = self._run([1, 0])
+        self.assertEqual(rows, [1, 2, 13, 14])
+
+    def test_a_third_cond_of_a_guidance_pass_is_no_uncond(self):
+        rows, _, _ = self._run([0, 1, 2], rows=(1, 2, 3))
+        self.assertEqual(rows, [11, 2, 13])
+
+    def _by_sample(self, flags, rows, per_chunk=1, options=None, patch=None):
+        """A DiT that runs its blocks one sample at a time (the moss-image loader's, MOSS-Toolkit's reference pass):
+        every call has one row and the whole batch's flags, in the forward's own copy of the options."""
+        patch = patch or self._patch()
+        options = {"cond_or_uncond": flags, "sigmas": Rows([0.5] * per_chunk)} if options is None else options
+        out, calls = [], []
+        for row in rows:
+            out += patch({"img": Rows([row]), "transformer_options": options}, {"original_block": self._block(calls)})["img"].rows
+        return out, calls
+
+    def test_a_dit_that_runs_one_sample_at_a_time_skips_the_block_for_the_uncond_sample(self):
+        rows, calls = self._by_sample([0, 1], (1, 2))
+        self.assertEqual((rows, calls), ([11, 2], [[1]]))
+        rows, calls = self._by_sample([1, 0], (1, 2))
+        self.assertEqual((rows, calls), ([1, 12], [[2]]))
+
+    def test_one_sample_at_a_time_with_a_batch_of_images_per_cond(self):
+        rows, calls = self._by_sample([0, 1], (1, 2, 3, 4), per_chunk=2)
+        self.assertEqual((rows, calls), ([11, 12, 3, 4], [[1], [2]]))
+        rows, _ = self._by_sample([0, 1, 2], (1, 2, 3))
+        self.assertEqual(rows, [11, 2, 13])
+
+    def test_one_sample_at_a_time_starts_over_with_each_forward(self):
+        patch = self._patch()
+        shared = {"cond_or_uncond": [0, 1], "sigmas": Rows([0.5])}
+        for _ in range(2):  # a copy of the options per forward, as both packs make
+            rows, _ = self._by_sample(None, (1, 2), options=dict(shared), patch=patch)
+            self.assertEqual(rows, [11, 2])
+        for _ in range(2):  # and one dict for every forward
+            rows, _ = self._by_sample(None, (1, 2), options=shared, patch=patch)
+            self.assertEqual(rows, [11, 2])
+
+    def test_the_whole_batch_in_one_call_reads_no_position(self):
+        options = {"cond_or_uncond": [0, 1], "sigmas": Rows([0.5, 0.5])}
+        for _ in range(2):
+            calls = []
+            out = self._patch()({"img": Rows((1, 2, 3, 4)), "transformer_options": options}, {"original_block": self._block(calls)})
+            self.assertEqual(out["img"].rows, [11, 12, 3, 4])
+        self.assertEqual(list(options), ["cond_or_uncond", "sigmas"])
+
+    def test_rows_nobody_can_tell_apart_stop_the_run_instead_of_running_the_block_for_the_uncond(self):
+        for options in ({"cond_or_uncond": [0, 1]}, {"cond_or_uncond": [0, 1], "sigmas": Rows([0.5])}):
+            with self.subTest(options=list(options)):
+                calls = []
+                with self.assertRaisesRegex(RuntimeError, "MOSS layer skip"):
+                    self._patch()({"img": Rows((1, 2, 3)), "transformer_options": options}, {"original_block": self._block(calls)})
+                self.assertEqual(calls, [])
+
+    def test_a_replace_that_was_on_the_block_runs_where_the_block_runs(self):
+        seen = []
+
+        def earlier(args, extra):
+            seen.append("earlier")
+            return extra["original_block"](args)
+        model = FakeMossModel(options={"transformer_options": {"patches_replace": {"dit": {SKIP_KEY: earlier}}}})
+        patch = self._patch(model)
+        rows, calls, _ = self._run([0], patch=patch)
+        self.assertEqual((rows, seen, len(calls)), ([11, 12, 13, 14], ["earlier"], 1))
+        rows, calls, _ = self._run([1], patch=patch)
+        self.assertEqual((rows, seen, calls), ([1, 2, 3, 4], ["earlier"], []))
+
+    def test_a_second_application_adds_nothing(self):
+        once = nodes.moss_layer_skip(FakeMossModel())
+        twice = nodes.moss_layer_skip(once)
+        self.assertIs(_dit_patches(twice)[SKIP_KEY], _dit_patches(once)[SKIP_KEY])
+
+    @requires_torch
+    def test_real_tensors_with_a_block_that_writes_in_place(self):
+        torch = load_torch()
+        patch = self._patch()
+
+        def original_block(args):
+            args["img"].add_(10.0)
+            return {"img": args["img"]}
+        img = torch.arange(8.0).reshape(4, 2)  # two chunks of two rows: cond, uncond
+        out = patch({"img": img, "transformer_options": {"cond_or_uncond": [0, 1]}}, {"original_block": original_block})
+        self.assertEqual(out["img"].tolist(), [[10.0, 11.0], [12.0, 13.0], [4.0, 5.0], [6.0, 7.0]])
+        # ComfyUI's own options (sigmas: one per row of a chunk), whole batch and then one sample at a time
+        options = {"cond_or_uncond": [1, 0], "sigmas": torch.ones(2)}
+        img = torch.arange(8.0).reshape(4, 2)
+        out = patch({"img": img, "transformer_options": dict(options)}, {"original_block": original_block})
+        self.assertEqual(out["img"].tolist(), [[0.0, 1.0], [2.0, 3.0], [14.0, 15.0], [16.0, 17.0]])
+        forward = dict(options)
+        img = torch.arange(8.0).reshape(4, 2)
+        outs = [patch({"img": img[row:row + 1], "transformer_options": forward}, {"original_block": original_block})["img"] for row in range(4)]
+        self.assertEqual(torch.cat(outs).tolist(), [[0.0, 1.0], [2.0, 3.0], [14.0, 15.0], [16.0, 17.0]])
+
 
 class AnimaReferenceTests(unittest.TestCase):
     values = {"model": "m", "clip": "c", "vae": "v", "image": "i", "file": "sub/ref.safetensors", "mode": "char",
               "strength": 0.5, "guidance_on": True, "guidance": 4.5, "correction": "apg", "ref_end": 0.6,
               "megapixels": 1.25, "caption": "1girl"}
 
-    def _apply(self, method, asym=False, values=None, remap=(), **outputs):
+    def _apply(self, method, asym=False, values=None, remap=(), native=frozenset(), **outputs):
         remap = dict(remap)
         calls = ProviderCalls(**outputs)
+        self.native_seen = []
+
+        def fit(_model, file, native=frozenset()):
+            self.native_seen.append(native)
+            return file if native else remap.get(file, file)
         with mock.patch.object(nodes, "invoke_provider", calls), mock.patch.object(nodes, "folder_paths_module"), \
                 mock.patch.object(nodes, "_adapter_is_asym", return_value=asym), \
-                mock.patch.object(nodes, "adapter_for_model", side_effect=lambda _model, file: remap.get(file, file)):
+                mock.patch.object(nodes, "_snapref_native_layouts", return_value=native), \
+                mock.patch.object(nodes, "adapter_for_model", side_effect=fit):
             result = nodes.AIStudioAnimaReference().apply(method=method, **(values or self.values))
         return result, calls.calls
+
+    def test_a_third_reference_goes_with_its_weight(self):
+        values = {**self.values, "image_2": "second", "image_3": "third", "weight_1": 0.8, "weight_2": 0.4, "weight_3": 0.6}
+        _, calls = self._apply("snapref", values=values, SnapRef=("patched",))
+        kwargs = calls[0]["kwargs"]
+        self.assertEqual((kwargs["image_3"], kwargs["weight_3"], kwargs["weight_1"], kwargs["weight_2"]), ("third", 0.6, 0.8, 0.4))
+
+    def test_a_third_reference_alone_still_sends_every_weight(self):
+        _, calls = self._apply("snapref", values={**self.values, "image_3": "third", "weight_3": 0.6}, SnapRef=("patched",))
+        kwargs = calls[0]["kwargs"]
+        self.assertEqual((kwargs["image_3"], kwargs["weight_1"], kwargs["weight_3"]), ("third", 1.0, 0.6))
+        self.assertNotIn("image_2", kwargs)
+
+    def test_stitch_layout_goes_to_snapref_and_separate_stays_out(self):
+        values = {**self.values, "image_2": "second"}
+        _, calls = self._apply("snapref", values={**values, "multi_layout": "stitch"}, SnapRef=("patched",))
+        self.assertEqual(calls[0]["kwargs"]["multi_layout"], "stitch")
+        _, calls = self._apply("snapref", values={**values, "multi_layout": "separate"}, SnapRef=("patched",))
+        self.assertNotIn("multi_layout", calls[0]["kwargs"])
+
+    def test_the_layout_needs_more_than_one_picture(self):
+        _, calls = self._apply("snapref", values={**self.values, "multi_layout": "stitch"}, SnapRef=("patched",))
+        self.assertNotIn("multi_layout", calls[0]["kwargs"])
+
+    def test_the_third_reference_and_layout_inputs_stay_optional(self):
+        spec = nodes.AIStudioAnimaReference.INPUT_TYPES()
+        self.assertEqual(spec["optional"]["image_3"][0], "IMAGE")
+        self.assertEqual(spec["optional"]["weight_3"][0], "FLOAT")
+        self.assertEqual(list(spec["optional"]["multi_layout"][0]), ["separate", "stitch"])
+        # new inputs go after the old ones, so a saved workflow's widget values keep their places
+        self.assertEqual(list(spec["optional"])[-3:], ["image_3", "weight_3", "multi_layout"])
+
+    def test_snapref_hands_its_node_the_layouts_it_maps_itself(self):
+        _, calls = self._apply("snapref", remap={"sub/ref.safetensors": "sub/ref__40b.safetensors"},
+                               native=frozenset({(28, 40)}), SnapRef=("patched",))
+        self.assertEqual(self.native_seen, [frozenset({(28, 40)})])
+        self.assertEqual(calls[0]["kwargs"]["adapter"], "sub/ref.safetensors")
+
+    def test_ref_adapter_still_gets_the_remapped_copy(self):
+        _, calls = self._apply("ref_adapter", remap={"sub/ref.safetensors": "sub/ref__40b.safetensors"},
+                               native=frozenset({(28, 40)}), AnimaRefAdapter=(FakeWrapped(),))
+        self.assertEqual(self.native_seen, [frozenset()])
+        self.assertEqual(calls[0]["kwargs"]["lora_name"], "sub/ref__40b.safetensors")
 
     def test_snapref_arguments(self):
         result, calls = self._apply("snapref", SnapRef=("patched",))
@@ -397,7 +689,7 @@ class ReferenceLayoutTests(unittest.TestCase):
     def _model(self, blocks):
         return mock.Mock(get_model_object=lambda _name: mock.Mock(blocks=[None] * blocks))
 
-    def _for_model(self, blocks, file_blocks, source):
+    def _for_model(self, blocks, file_blocks, source, native=frozenset()):
         folders = mock.Mock(get_full_path_or_raise=lambda _kind, _name: str(source))
 
         def write(_source, target, *_blocks):
@@ -406,7 +698,21 @@ class ReferenceLayoutTests(unittest.TestCase):
         with mock.patch.object(reference_layout, "folder_paths_module", return_value=folders), \
                 mock.patch.object(reference_layout, "_file_blocks", return_value=file_blocks), \
                 mock.patch.object(reference_layout, "_write_remapped", side_effect=write) as writer:
-            return reference_layout.adapter_for_model(self._model(blocks), "ref.safetensors"), writer
+            return reference_layout.adapter_for_model(self._model(blocks), "ref.safetensors", native=native), writer
+
+    def test_a_layout_the_node_maps_itself_keeps_the_original(self):
+        # SnapRef v2a's node fits a 28-block adapter to 2.9B on its own (11-10): no __40b copy
+        name, writer = self._for_model(40, 28, "ref.safetensors", native=frozenset({(28, 40)}))
+        self.assertEqual(name, "ref.safetensors")
+        writer.assert_not_called()
+
+    def test_native_layouts_do_not_cover_3_8b(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "ref.safetensors"
+            source.write_bytes(b"x")
+            name, writer = self._for_model(52, 28, source, native=frozenset({(28, 40)}))
+            self.assertEqual(name, "ref__52b.safetensors")
+            self.assertEqual(writer.call_count, 1)
 
     def test_a_file_on_its_own_layout_is_kept(self):
         for blocks in (28, 40, 52):

@@ -33,6 +33,8 @@ EXPECTED_ORDER = [
     ("guidance", "ForgeNeoAnimaGuidanceSuite", "가이던스"),
     ("optimal_scale", "ForgeNeoAnimaOptimalScale", "가이던스"),
     ("skim", "ForgeNeoSkimmedCFG", "가이던스"),
+    ("cfg_schedule", "AIStudioCFGSchedule", "가이던스"),
+    ("emphasis", "AIStudioWordEmphasis", "가이던스"),
     ("detail_daemon", "ForgeNeoAnimaDetailDaemon", "디테일"),
     ("lora_block", "ForgeNeoLoraBlockWeight", "디테일"),
     ("speed", "ForgeNeoAnimaSpeed", "샘플러·VAE"),
@@ -303,7 +305,10 @@ class SchemaMatchesAppSpecsTests(unittest.TestCase):
 
     def test_degrid_has_the_card_values(self):
         fields = _fields("degrid")
-        self.assertEqual(set(fields), {"model", "mode", "strength", "tile", "apply_img2img"})
+        self.assertEqual(set(fields), {"engine", "model", "mode", "strength", "tile", "apply_img2img"})
+        # ComfyUI-only engine: Forge's NAFNet by default, or ComfyUI-DeGrid's Nyquist notch
+        self.assertEqual((fields["engine"]["default"], fields["engine"]["choices"]),
+                         ("NAFNet", ["NAFNet", "Nyquist (ComfyUI-DeGrid)"]))
         self.assertEqual(_extension("degrid")["on_key"], "enabled")
         self.assertEqual(fields["model"]["default"], vae_degrid.COMFY_AUTO)
         self.assertEqual(fields["mode"]["default"], vae_degrid.MODE_LABELS[vae_degrid.DEFAULT_MODE])

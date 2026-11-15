@@ -62,12 +62,14 @@ def _file_blocks(source: Path) -> int:
         return layout_blocks(handle.keys())
 
 
-def adapter_for_model(model, file: str) -> str:
-    """``file``, or the name of its copy on this MODEL's block layout (written on first use)."""
+def adapter_for_model(model, file: str, native=frozenset()) -> str:
+    """``file``, or the name of its copy on this MODEL's block layout (written on first use). ``native``: the
+    ``(file blocks, model blocks)`` pairs the adapter's own node fits by itself, which keep the original (SnapRef v2a's
+    node maps a 28-block adapter onto 2.9B's 40 blocks, leaving the inserted blocks without it)."""
     blocks = len(model.get_model_object("diffusion_model").blocks)
     source = Path(folder_paths_module().get_full_path_or_raise("loras", file))
     source_blocks = _file_blocks(source)
-    if source_blocks == blocks:
+    if source_blocks == blocks or (source_blocks, blocks) in native:
         return file
     if (source_blocks, blocks) not in BLOCK_MAPPINGS:
         raise ValueError(f"레퍼런스 파일의 블록 수가 맞지 않음: {file} 는 {source_blocks}블록, 모델은 {blocks}블록")

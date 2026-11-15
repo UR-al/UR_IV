@@ -128,6 +128,22 @@ class StudioRoundTripTests(unittest.TestCase):
         self.assertEqual(read["settings"]["prompt"], "a __color__ hat")
         self.assertEqual(read["settings"]["negative"], "{ugly|bad}")
 
+    def test_a_moss_image_says_whether_block_22_was_skipped(self):
+        moss = "moss_image_sft.safetensors"
+        self.assertIs(_built(unet=moss)["settings"]["moss_layer_skip"], True)
+        self.assertIs(_built(unet=moss, moss_layer_skip=False)["settings"]["moss_layer_skip"], False)
+        # an image without the key was made without the skip (the studio before 1.20.0)
+        self.assertIs(parse_infotext("x\nSteps: 50, Model: MOSS-Image-Base")["settings"]["moss_layer_skip"], False)
+
+    def test_another_family_leaves_the_layer_skip_as_the_panel_has_it(self):
+        self.assertNotIn("moss_layer_skip", _built()["settings"])
+        self.assertNotIn("moss_layer_skip", parse_infotext("x\nSteps: 20")["settings"])
+
+    def test_a_switched_off_fixed_box_was_not_in_the_image(self):
+        settings = _built(prompt_prefix="best", prompt_suffix="highres", prompt_prefix_on=False)["settings"]
+        self.assertEqual((settings["prompt"], settings["prompt_prefix"], settings["prompt_suffix"]), ("1girl, solo, highres", "", ""))
+        self.assertNotIn("prompt_prefix_on", settings)  # the boxes come back empty, so the switches stay the panel's
+
     def test_attention(self):
         self.assertEqual(_built(attention="sage")["settings"]["attention"], "sage")
         self.assertNotIn("attention", _built()["settings"])

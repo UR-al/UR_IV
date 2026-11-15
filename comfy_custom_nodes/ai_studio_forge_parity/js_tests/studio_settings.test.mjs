@@ -168,3 +168,46 @@ test("each missing name is said once", () => {
   const { missing } = pulledState(current(), { panel: { unet: "gone", vae: "gone" } }, LISTS);
   assert.deepEqual(missing, ["gone"]);
 });
+
+// ---------------------------------------------------------------------------------------------- 1.20.0 switches
+
+const MOSS_PANEL = { unet: LISTS.unets[1], te: LISTS.tes[1], vae: LISTS.vaes[1], prompt: "x", prompt_prefix: "best", prompt_suffix: "highres" };
+
+test("a studio image brings its layer skip and fixed-box switches back, on or off", () => {
+  const off = { ...MOSS_PANEL, moss_layer_skip: false, prompt_prefix_on: false, prompt_suffix_on: false };
+  const first = pulledState(current(), { panel: off }, LISTS).state;
+  assert.deepEqual([first.moss_layer_skip, first.prompt_prefix_on, first.prompt_suffix_on], [false, false, false]);
+  assert.deepEqual([first.prompt_prefix, first.prompt_suffix], ["best", "highres"]); // the boxes keep their text
+  const on = { ...MOSS_PANEL, moss_layer_skip: true, prompt_prefix_on: true, prompt_suffix_on: true };
+  const second = pulledState(current({ moss_layer_skip: false, prompt_prefix_on: false, prompt_suffix_on: false }), { panel: on }, LISTS).state;
+  assert.deepEqual([second.moss_layer_skip, second.prompt_prefix_on, second.prompt_suffix_on], [true, true, true]);
+});
+
+// A panel without the switches is one saved before 1.20.0, or one 1.20.0 ran before anything in it was changed (the
+// hidden widget is written on the first change only): that run had all three on.
+test("a saved panel without the switches comes with all three on, as opening its workflow reads it", () => {
+  const off = { moss_layer_skip: false, prompt_prefix_on: false, prompt_suffix_on: false };
+  const anima = { unet: LISTS.unets[0], te: LISTS.tes[0], vae: LISTS.vaes[0], prompt: "x" };
+  for (const panel of [MOSS_PANEL, anima]) {
+    for (const now of [current(), current(off)]) {
+      const { state } = pulledState(now, { panel }, LISTS);
+      const opened = withDefaults(panel);
+      assert.deepEqual([state.moss_layer_skip, state.prompt_prefix_on, state.prompt_suffix_on], [true, true, true], panel.unet);
+      assert.deepEqual([state.moss_layer_skip, state.prompt_prefix_on, state.prompt_suffix_on],
+        [opened.moss_layer_skip, opened.prompt_prefix_on, opened.prompt_suffix_on]);
+    }
+  }
+});
+
+test("a MOSS image whose file this ComfyUI lacks does not switch the layer skip off behind the other model", () => {
+  const gone = { ...MOSS_PANEL, unet: "moss_gone.safetensors" };
+  const { state, missing } = pulledState(current(), { panel: gone }, LISTS);
+  assert.deepEqual([state.unet, state.moss_layer_skip], [current().unet, true]);
+  assert.ok(missing.includes("moss_gone.safetensors"));
+});
+
+test("an infotext's layer skip comes with its settings", () => {
+  const read = infotext({ steps: 50, moss_layer_skip: false }, { model: "MOSS-Image" });
+  assert.equal(pulledState(current(), read, LISTS).state.moss_layer_skip, false);
+  assert.equal(pulledState(current({ moss_layer_skip: false }), infotext({ steps: 50, moss_layer_skip: true }, { model: "MOSS-Image" }), LISTS).state.moss_layer_skip, true);
+});

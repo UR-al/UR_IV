@@ -151,6 +151,15 @@ class ExpandStateTests(unittest.TestCase):
         self.assertEqual(after["prompt_character"], "")
         self.assertEqual(after["prompt_template"], "{a|a}, __one__")
 
+    def test_a_switched_off_fixed_box_is_not_drawn(self):
+        before = state(prompt="1girl", prompt_prefix="__one__", prompt_suffix="{a|a}", prompt_prefix_on=False)
+        self.assertTrue(sw.uses_wildcards(before))
+        after = sw.expand_state(before, 5, lookup)[0]
+        self.assertEqual((after["prompt"], after["prompt_template"]), ("1girl, a", "1girl, {a|a}"))
+        off = state(prompt="1girl", prompt_prefix="__one__", prompt_prefix_on=False)
+        self.assertFalse(sw.uses_wildcards(off))  # the only wildcard sits in a box that is off
+        self.assertEqual(sw.expand_state(off, 5, lookup)[0]["prompt_prefix"], "__one__")  # nothing drawn: the box stays
+
     def test_the_list_loras_stay_in_the_list(self):
         before = state(prompt="__one__", loras=[{"on": True, "name": "style", "strength": 0.5}])
         after = sw.expand_state(before, 5, lookup)[0]

@@ -95,6 +95,16 @@ function fieldInputs(item, values) {
   return Object.fromEntries(item.fields.filter((field) => field.input).map((field) => [field.input, values[field.key]]));
 }
 
+/** studio_adherence.emphasis_phrases: the 단어 field's comma or line separated phrases, blanks and repeats left out. */
+export function emphasisPhrases(text) {
+  const out = [];
+  for (const part of String(text ?? "").split(/[,\n]/)) {
+    const phrase = part.split(/\s+/).filter(Boolean).join(" ");
+    if (phrase && !out.includes(phrase)) out.push(phrase);
+  }
+  return out;
+}
+
 /** Forge's Mask only: the mask is made and saved, nothing is drawn. */
 export const sam3MaskOnly = (s) => s.sam3.mode === "Mask only";
 
@@ -232,6 +242,8 @@ function roleRuns(s, role, postAction) {
       return speed.on && speed.hires && hiresRuns;
     case "ext_degrid":
       return ext.on && runsOnTab(s, "degrid");
+    case "ext_emphasis": // no words: the node would hand the MODEL back as it is
+      return ext.on && emphasisPhrases(ext.words).length > 0;
     case "ext_sam3_refine":
     case "ext_sam3_tile":
       return ext.on && !(s.sam3.on && sam3MaskOnly(s));

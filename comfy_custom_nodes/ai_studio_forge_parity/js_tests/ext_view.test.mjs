@@ -49,8 +49,16 @@ class FakeElement {
     return this.all((element) => element.className.split(" ").includes(name));
   }
   querySelector(selector) {
+    const attr = /^\[([\w-]+)="(.*)"\]$/.exec(selector);
+    if (attr) return this.all((element) => element.attrs[attr[1]] === attr[2])[0] ?? null;
     return this.byClass(selector.slice(1))[0] ?? null;
   }
+  getAttribute(name) { return this.attrs[name] ?? null; }
+  contains(node) {
+    for (let at = node; at; at = at.parent) if (at === this) return true;
+    return false;
+  }
+  focus() { globalThis.document.activeElement = this; }
   querySelectorAll() {
     return []; // growPrompts: no layout here
   }
@@ -535,6 +543,126 @@ test("the Hires card writes its new fields", async () => {
   assert.equal(view.state.hires.prompt, "detail");
 });
 
+// ---------------------------------------------------------------------------------------------- LoRA card ↔ picker window
+
+const BJUN = "LoKr\\묵밥 (@Bjunbae)\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16-000014.safetensors";
+const BJUN_STEM = "@bjunbae_2.9b_lokr_came_b10_2e06_fp16-000014";
+
+/** A panel whose `ctx.loraBrowser` only records the window's options; `asked` = the `choices(kind, fresh)` calls; `freshLoras` = a fresh list. */
+async function loraPanel(state = {}, loras = [BJUN, "x/kept.safetensors"], freshLoras = loras) {
+  const opened = [];
+  const asked = [];
+  const ctx = {
+    choices: async (kind, fresh = false) => { asked.push([kind, fresh]); return { items: kind === "loras" ? (fresh ? freshLoras : loras) : [] }; },
+    engineRoom: { collapsed: () => true, toggle() {} },
+    i2i: { get: () => "", set() {}, url: () => "", upload: async () => ({}), maskEditor() {} },
+    hasRole: () => true,
+    fetchChoices: async () => ({}),
+    loraBrowser: (opts) => { opened.push(opts); },
+  };
+  const view = new PanelView({ value: JSON.stringify(state) }, ctx);
+  await flush();
+  return { view, opened, asked };
+}
+
+const loraButtons = (view) => view.element.byClass("ais-lb-pick");
+const loraAdd = (view) => view.element.byClass("ais-add").find((button) => button.text === "+ LoRA");
+const savedLoras = (view) => JSON.parse(view.widget.value).loras;
+
+test("a LoRA row shows its short name as a button, the full path on hover; a name not in the list is marked", async () => {
+  const { view } = await loraPanel({ loras: [{ on: true, name: BJUN_STEM, strength: 1 }, { on: true, name: "gone", strength: 1 }, { on: true, name: "", strength: 1 }] });
+  const [found, gone, empty] = loraButtons(view);
+  assert.equal(found.tag, "button");
+  assert.equal(found.text, "묵밥 · @bjunbae fp16 · e14");
+  assert.equal(found.attrs.title, BJUN);
+  assert.doesNotMatch(found.className, /missing/);
+  assert.equal(gone.text, "gone (없음)");
+  assert.match(gone.className, /\bmissing\b/);
+  assert.equal(empty.text, "[LoRA]");
+  assert.equal(view.element.all((element) => element.tag === "select" && element.parent?.className.includes("ais-lora")).length, 0);
+});
+
+test("+ LoRA opens the window in add mode: each pick is a row at once, the tray ✕ takes it out again", async () => {
+  const { view, opened } = await loraPanel({ loras: [{ on: false, name: "kept", strength: 0.5 }] });
+  loraAdd(view).fire("click");
+  assert.equal(opened.length, 1);
+  const win = opened[0];
+  assert.equal(win.mode, "add");
+  assert.equal(win.onPickMany, undefined);
+  assert.equal(win.onPick({ name: BJUN_STEM, strength: 0.8, label: "묵밥 · @bjunbae fp16 · e14" }), 1);
+  assert.equal(win.onPick({ name: "kept", strength: 1, label: "kept" }), 2);
+  assert.deepEqual(savedLoras(view), [
+    { on: false, name: "kept", strength: 0.5 }, { on: true, name: BJUN_STEM, strength: 0.8 }, { on: true, name: "kept", strength: 1 },
+  ]);
+  await flush();
+  assert.deepEqual(loraButtons(view).map((button) => button.text), ["kept", "묵밥 · @bjunbae fp16 · e14", "kept"]);
+  assert.equal(win.onUnpick(1), true);
+  view.state.loras[1].name = "changed"; // the user changed the row the window still lists
+  assert.equal(win.onUnpick(1), false);
+  assert.deepEqual(savedLoras(view), [{ on: false, name: "kept", strength: 0.5 }, { on: true, name: "changed", strength: 1 }]);
+  await flush();
+  assert.equal(loraButtons(view).length, 2);
+});
+
+test("a row's name opens the window on that LoRA to replace it; the switch stays", async () => {
+  const { view, opened } = await loraPanel({ loras: [{ on: false, name: "kept", strength: 0.7 }] });
+  loraButtons(view)[0].fire("click");
+  const win = opened[0];
+  assert.deepEqual([win.mode, win.current, win.strength], ["replace", "kept", 0.7]);
+  assert.equal(win.onUnpick, undefined);
+  win.onPick({ name: BJUN_STEM, strength: 1.2, label: "x" });
+  assert.deepEqual(savedLoras(view), [{ on: false, name: BJUN_STEM, strength: 1.2 }]);
+  await flush();
+  assert.equal(loraButtons(view)[0].text, "묵밥 · @bjunbae fp16 · e14");
+});
+
+test("a pick newer than the panel's LoRA list fetches the list again", async () => {
+  const { view, opened, asked } = await loraPanel();
+  loraAdd(view).fire("click");
+  opened[0].onPick({ name: BJUN_STEM, strength: 1 });
+  assert.equal(asked.filter(([kind, fresh]) => kind === "loras" && fresh).length, 0);
+  opened[0].onPick({ name: "@new_run-000016", strength: 1 });
+  assert.equal(asked.filter(([kind, fresh]) => kind === "loras" && fresh).length, 1);
+});
+
+test("a failed fresh LoRA list (empty) does not wipe the list the panel already has", async () => {
+  const { view, opened } = await loraPanel({ loras: [{ on: true, name: "gone", strength: 1 }] }, [BJUN], []);
+  loraAdd(view).fire("click");
+  opened[0].onPick({ name: "@new_run-000016", strength: 1 }); // not listed: asks for a fresh list, which comes back empty
+  await flush();
+  assert.deepEqual(view.choices.loras, [BJUN]);
+  assert.match(loraButtons(view)[0].className, /\bmissing\b/); // the red mark stays (the list also feeds `<lora:` suggestions)
+});
+
+test("a fresh LoRA list with files replaces the old one", async () => {
+  const { view, opened } = await loraPanel({}, [BJUN], [BJUN, "x/@new_run-000016.safetensors"]);
+  loraAdd(view).fire("click");
+  opened[0].onPick({ name: "@new_run-000016", strength: 1 });
+  await flush();
+  assert.deepEqual(view.choices.loras, [BJUN, "x/@new_run-000016.safetensors"]);
+  assert.doesNotMatch(loraButtons(view)[0].className, /\bmissing\b/);
+});
+
+test("the focus goes back to the LoRA button the window was opened from, across the panel's redraw", async () => {
+  const { view, opened } = await loraPanel({ loras: [{ on: true, name: "kept", strength: 1 }] });
+  try {
+    const row = loraButtons(view)[0];
+    row.fire("click");
+    opened[0].onPick({ name: BJUN_STEM, strength: 1 });
+    row.focus(); // the window closes and gives the focus back to its opener, before the panel is drawn again
+    await flush();
+    assert.notEqual(loraButtons(view)[0], row);
+    assert.equal(globalThis.document.activeElement, loraButtons(view)[0]);
+    const add = loraAdd(view);
+    add.fire("click");
+    opened[1].onPick({ name: BJUN_STEM, strength: 1 });
+    await flush();
+    assert.equal(loraAdd(view), add); // the same element: the window's close() can still focus it after redraws
+  } finally {
+    globalThis.document.activeElement = undefined;
+  }
+});
+
 // ---------------------------------------------------------------------------------------------- prompt tag autocomplete wiring
 
 function withBody(run) {
@@ -658,9 +786,37 @@ function referenceCard(reference = {}, { family = "anima", hasRole = () => true 
     loras: ["snapref_v2a_pre2.safetensors", "snapref_v2a_pre2__40b.safetensors"],
     image: { url: (value) => `/one/${value}`, upload: async () => ({ name: "up1.png" }) },
     image2: { url: (value) => `/two/${value}`, upload: async () => ({ name: "up2.png" }) },
+    image3: { url: (value) => `/three/${value}`, upload: async () => ({ name: "up3.png" }) },
   };
   return { card: renderReference(state, view), state, sets };
 }
+
+test("the third box opens once the second picture is in (SnapRef v2a)", () => {
+  assert.equal(imageBoxes(referenceCard().card).length, 2);
+  assert.equal(imageBoxes(referenceCard({ image_2: "two.png" }).card).length, 3);
+  assert.equal(imageBoxes(referenceCard({ image_3: "three.png" }).card).length, 3); // kept while only the third is set
+  const { card } = referenceCard({ image_2: "two.png", image_3: "three.png" });
+  assert.equal(imageBoxes(card)[2].all((element) => element.tag === "img")[0].attrs.src, "/three/three.png");
+});
+
+test("a workflow without the third image node keeps two boxes", () => {
+  const { card } = referenceCard({ image_2: "two.png" }, { hasRole: (role) => role !== "reference_image_3" });
+  assert.equal(imageBoxes(card).length, 2);
+});
+
+test("the layout shows with several pictures and stitching hides the per-picture weights", () => {
+  assert.ok(!labelsOf(referenceCard().card).includes("여러 장"));
+  const separate = labelsOf(referenceCard({ image_2: "two.png", image_3: "three.png" }).card);
+  assert.ok(["여러 장", "비중 1", "비중 2", "비중 3"].every((label) => separate.includes(label)));
+  const stitched = labelsOf(referenceCard({ image_2: "two.png", image_3: "three.png", snapref: { multi_layout: "stitch" } }).card);
+  assert.ok(stitched.includes("여러 장") && !stitched.some((label) => label.startsWith("비중")));
+});
+
+test("clearing the third box leaves the other two", () => {
+  const { card, state } = referenceCard({ image_2: "two.png", image_3: "three.png" });
+  card.byClass("ais-ref-clear")[1].fire("click");
+  assert.deepEqual([state.reference.image, state.reference.image_2, state.reference.image_3], ["one.png", "two.png", ""]);
+});
 
 const labelsOf = (card) => card.byClass("ais-label").map((label) => label.text);
 const imageBoxes = (card) => card.byClass("ais-i2i-box");
@@ -695,6 +851,28 @@ test("the second box shows its own picture and clears without touching the first
   assert.equal(state.reference.image, "one.png");
 });
 
+function fileGroups(reference, loras) {
+  const state = withDefaults({ reference: { on: true, image: "one.png", ...reference } });
+  const view = { set: (mutate) => mutate(state), hasRole: () => true, family: "anima", memory: { open: new Set(["reference"]), lists: {} },
+    rerender() {}, loras, image: { url: () => "" }, image2: { url: () => "" } };
+  return renderReference(state, view).all((element) => element.tag === "optgroup")
+    .map((group) => [group.attrs.label ?? group.label, group.all((element) => element.tag === "option").map((option) => option.attrs.value ?? option.value)]);
+}
+
+test("Anima reference files split into base originals and 2.9B conversions, the run-time copies stay hidden", () => {
+  const snapref = ["_downloaded/snapref-v1a/snapref_v1a.safetensors", "_downloaded/snapref-v1a/snapref_v1a__40b.safetensors",
+    "_downloaded/snapref-2.9B-converted/snapref_v1a_29B.safetensors", "anima_ref_adapter_v2_r64.safetensors"];
+  assert.deepEqual(fileGroups({}, snapref), [
+    ["Base 원본 (2.9B 는 노드가 맞춤 · 3.8B 는 자동 변환)", ["_downloaded/snapref-v1a/snapref_v1a.safetensors"]],
+    ["2.9B 변환본", ["_downloaded/snapref-2.9B-converted/snapref_v1a_29B.safetensors"]],
+  ]);
+  const adapters = ["anima_ref_adapter_v2_r64_29B.safetensors", "anima_ref_adapter_v2_r64.safetensors", "anima_ref_adapter_v2_r64__52b.safetensors"];
+  assert.deepEqual(fileGroups({ method: "ref_adapter" }, adapters), [
+    ["Base 원본 (2.9B·3.8B 에선 자동 변환)", ["anima_ref_adapter_v2_r64.safetensors"]],
+    ["2.9B 변환본", ["anima_ref_adapter_v2_r64_29B.safetensors"]],
+  ]);
+});
+
 test("a reference runs on Anima and Krea2, MOSS has none", () => {
   assert.equal(referenceBlock("anima", "snapref", null), "");
   assert.equal(referenceBlock("krea2", "snapref", null), "");
@@ -715,5 +893,105 @@ test("트리거 넣기 adds the caption once, wherever the prompt card already h
   for (const key of ["prompt", "prompt_prefix", "prompt_artist", "prompt_suffix"]) {
     const given = { prompt: "1girl", [key]: key === "prompt" ? `${caption}, 1girl` : caption };
     assert.equal(pressQuadviewTrigger(given).prompt, given.prompt, key);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------- 스텝 row switches (1.20.0)
+
+const MOSS_UNET = "moss_image_sft_bf16.safetensors";
+const stepControls = (view) => rowLabelled(view, "스텝").byClass("ais-ctl")[0].children;
+const stepSwitches = (view) => rowLabelled(view, "스텝").byClass("ais-step-switches")[0];
+const stepSwitch = (view, text) => stepSwitches(view).byClass("ais-pill").find((button) => button.text === text);
+const isOn = (button) => button.className.split(" ").includes("on") && button.attrs["aria-pressed"] === "true";
+
+test("on MOSS the 스텝 row has 스킵 22, 선행 and 후행 right before the steps box, all on", () => {
+  const view = panelView({ unet: MOSS_UNET, steps: 50 });
+  const controls = stepControls(view);
+  assert.equal(controls[0], stepSwitches(view));
+  assert.deepEqual(controls[0].children.map((button) => button.text), ["스킵 22", "선행", "후행"]);
+  assert.equal(controls[1].tag, "input"); // the steps box comes right after them
+  assert.equal(controls[1].value, "50");
+  assert.deepEqual([controls[2], controls[4]], ["CFG", "Shift"]); // and the row goes on as before
+  assert.equal(controls.length, 6);
+  for (const button of controls[0].children) {
+    assert.equal(isOn(button), true, button.text);
+    assert.ok(button.attrs.title, button.text); // each says what it does
+  }
+});
+
+test("스킵 22 shows on MOSS only", () => {
+  for (const unet of ["anima-2.9b.safetensors", "krea2_raw.safetensors", ""]) {
+    const view = panelView({ unet });
+    assert.deepEqual(stepSwitches(view).children.map((button) => button.text), ["선행", "후행"], unet);
+    assert.equal(stepControls(view)[1].tag, "input");
+  }
+});
+
+test("스킵 22 turns MOSS's layer skip off and on, and is saved", () => {
+  const view = panelView({ unet: MOSS_UNET });
+  stepSwitch(view, "스킵 22").fire("click");
+  assert.equal(view.state.moss_layer_skip, false);
+  assert.equal(JSON.parse(view.widget.value).moss_layer_skip, false);
+  assert.equal(isOn(stepSwitch(view, "스킵 22")), false); // drawn again, dim
+  assert.equal(view.getState().moss_layer_skip, false);
+  stepSwitch(view, "스킵 22").fire("click");
+  assert.equal(view.state.moss_layer_skip, true);
+  assert.equal(isOn(stepSwitch(view, "스킵 22")), true);
+});
+
+test("선행 / 후행 switch their box out of the prompt: the box keeps its text and is dimmed", () => {
+  const view = panelView({ prompt: "1boy", prompt_prefix: "best", prompt_suffix: "highres" });
+  const dimmed = (label) => rowLabelled(view, label).className.split(" ").includes("ais-off");
+  assert.deepEqual([dimmed("선행 고정"), dimmed("후행 고정")], [false, false]);
+  stepSwitch(view, "선행").fire("click");
+  assert.deepEqual([view.state.prompt_prefix_on, view.state.prompt_suffix_on, view.state.prompt_prefix], [false, true, "best"]);
+  assert.deepEqual([dimmed("선행 고정"), dimmed("후행 고정"), dimmed("프롬프트")], [true, false, false]);
+  assert.equal(isOn(stepSwitch(view, "선행")), false);
+  assert.equal(rowLabelled(view, "선행 고정").all((element) => element.tag === "textarea")[0].value, "best");
+  stepSwitch(view, "후행").fire("click");
+  assert.deepEqual([dimmed("선행 고정"), dimmed("후행 고정")], [true, true]);
+  assert.deepEqual([view.getState().prompt_prefix_on, view.getState().prompt_suffix_on], [false, false]);
+  stepSwitch(view, "선행").fire("click");
+  assert.deepEqual([view.state.prompt_prefix_on, dimmed("선행 고정")], [true, false]);
+});
+
+test("a 스텝 row switch keeps the keyboard focus across the redraw of its own toggle", () => {
+  const view = panelView({ unet: MOSS_UNET });
+  try {
+    for (const label of ["스킵 22", "선행", "후행"]) {
+      for (const on of [false, true]) { // Space twice: off, then on again
+        const button = stepSwitch(view, label);
+        button.focus();
+        button.fire("click");
+        assert.notEqual(stepSwitch(view, label), button); // drawn again
+        assert.equal(globalThis.document.activeElement, stepSwitch(view, label), label);
+        assert.equal(isOn(stepSwitch(view, label)), on, label);
+      }
+    }
+  } finally {
+    globalThis.document.activeElement = undefined;
+  }
+});
+
+test("a workflow without the MOSS node cannot skip the layer: the switch is greyed, says why, and the run goes without", () => {
+  const view = panelView({ unet: MOSS_UNET }, (role) => role !== "moss_stream");
+  const button = stepSwitch(view, "스킵 22");
+  assert.match(button.className, /dis/);
+  assert.equal(isOn(button), false);
+  assert.match(button.attrs.title, /^불가/);
+  button.fire("click");
+  assert.equal(view.state.moss_layer_skip, true); // the saved switch stays
+  assert.equal(view.getState().moss_layer_skip, false);
+});
+
+test("the layer skip needs no MOSS toolkit, the fp32 stream does", () => {
+  globalThis.LiteGraph = { registered_node_types: {} };
+  try {
+    const view = panelView({ unet: MOSS_UNET });
+    const state = view.getState();
+    assert.deepEqual([state.moss_stream, state.moss_layer_skip], [false, true]);
+    assert.equal(isOn(stepSwitch(view, "스킵 22")), true);
+  } finally {
+    delete globalThis.LiteGraph;
   }
 });

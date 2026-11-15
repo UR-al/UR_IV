@@ -3,6 +3,7 @@
 // No DOM and no ComfyUI import: ComfyUI's `api`, the graph and the routes come in through `deps` (studio_main.js).
 // Pure ES module without side effects (ComfyUI also loads every .js under web/ as an extension).
 import {
+  CROSS_ATTN_MODES,
   applyStateToPrompt,
   hasNegativeWeights,
   hasPromptWeights,
@@ -20,9 +21,10 @@ import {
   recordFromParameters,
   refAdapterDrops,
   stageModes,
+  unetFamily,
   withDefaults,
 } from "./studio_logic.js";
-import { idleExtensions } from "./studio_ext.js";
+import { emphasisPhrases, idleExtensions } from "./studio_ext.js";
 import { withExtraParams } from "./studio_pnginfo.js";
 
 const SAM3_EMPTY = "aistudio.sam3_empty"; // sam3_nodes.py
@@ -63,10 +65,28 @@ export const NOTICES = Object.freeze({
   sam3Empty: "SAM3 가 찾은 것이 없어 건너뜀: 찾을 것·임계값·SAM3 모델을 확인",
   sam3Face: "SAM3 건너뜀: 얼굴 검출기를 못 씀",
   ownPrompt38: "3.8B: Hires·SAM3 프롬프트는 v2 커넥터 없이 들어감. 비워 두면 메인 프롬프트를 그대로 씀",
+  loraBaseInpaint: "LoRA Base 먼저: 인페인트는 메인 샘플러를 안 써서 듣지 않음",
+  crossAttnFamily: "LoRA 교차 어텐션 제외: Anima 에서만 들음",
+  emphasis38: "단어 주목: 3.8B 에서는 듣지 않음",
+  emphasisEmpty: "단어 주목: 단어가 비어 있어 빼고 생성",
 });
 const TE_LOADER = "AIStudioTextEncoderLoader";
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** The prompt adherence settings that do nothing on this run (a gallery post run uses none of them). */
+export function adherenceWarnings(raw, families, action = null) {
+  if (action) return [];
+  const s = withDefaults(raw);
+  const texts = [];
+  if (s.lora_base && inpaintByDetailer(s)) texts.push(NOTICES.loraBaseInpaint);
+  if (s.lora_cross_attn !== CROSS_ATTN_MODES[0] && modelFamily(s.unet) !== "anima") texts.push(NOTICES.crossAttnFamily);
+  if (s.ext.emphasis.on && modelFamily(s.unet) === "anima") {
+    if (unetFamily(s.unet, families) === "3.8b") texts.push(NOTICES.emphasis38);
+    else if (!emphasisPhrases(s.ext.emphasis.words).length) texts.push(NOTICES.emphasisEmpty);
+  }
+  return texts;
+}
 
 /** A queue error's text: ComfyUI's PromptExecutionError carries `{error, node_errors}` in `response`. */
 function errorText(error) {
@@ -136,7 +156,8 @@ const imageRef = (image) => ({ filename: image.filename, subfolder: image.subfol
 
 export class RunController {
   /**
-   * `deps`: `api` (ComfyUI api: queuePrompt, interrupt, deleteItem, addEventListener), `basePrompt(modes)` (graphToPrompt
+   * `deps`: `api` (ComfyUI api: queuePrompt, interrupt, deleteItem, addEventListener, cancelJob when the host has
+   * it), `basePrompt(modes)` (graphToPrompt
    * with those node modes -> `{output, workflow}`), `roleIds()`, `getState()`, `getXyz()` (`{on, axes, options}`),
    * `route(path, body)` (studio route JSON; throws on an HTTP error), `readParameters(imageRef)` (PNG `parameters` or
    * null), `families()`, `upscalers()`, `loras()` (LoRA file list or undefined), `extFiles()` (class -> `/object_info`
@@ -217,6 +238,7 @@ export class RunController {
     if (dropped.length) texts.push(`${NOTICES.refAdapterDrops}: ${dropped.join(", ")}`);
     const idle = idleExtensions(state, action, this.deps.extFiles?.());
     if (idle.length) texts.push(`${NOTICES.noExtFile}: ${idle.join(", ")}`);
+    texts.push(...adherenceWarnings(state, this.deps.families?.(), action));
     return texts;
   }
 
@@ -392,11 +414,12 @@ export class RunController {
     if (!job || job.stopped) return;
     job.stopped = true;
     const pending = [...job.entries.values()].filter((entry) => !entry.done && !entry.started);
+    const started = [...job.entries.values()].filter((entry) => !entry.done && entry.started);
     pending.forEach((entry) => {
       entry.done = true;
     });
     try {
-      await this.cancelPrompts(pending.map((entry) => entry.id));
+      await this.cancelPrompts([...pending, ...started].map((entry) => entry.id)); // pending first: else the next one starts
     } finally {
       pending.forEach((entry) => this.resolveSlot(job, entry.slot, null));
       for (const entry of job.entries.values()) {
@@ -417,10 +440,22 @@ export class RunController {
     }
   }
 
+  /**
+   * Cancel only these prompts, never with a global interrupt (another client's prompt may be running).
+   * All are dequeued first (removes only these ids): else the next one starts, and each job cancel below
+   * deep-copies whatever is still queued, so a big XYZ would stop slowly. Then POST /api/jobs/{id}/cancel
+   * interrupts one that is running under the server's queue lock; hosts without it get an interrupt
+   * naming the prompt, which the server ignores unless that one is running.
+   */
   async cancelPrompts(ids) {
     const { api } = this.deps;
-    for (const id of ids) await api.deleteItem("queue", id).catch(() => {}); // before the interrupt: else the next one starts
-    await api.interrupt(null).catch(() => {});
+    for (const id of ids) await api.deleteItem("queue", id).catch(() => {});
+    const fallback = [];
+    for (const id of ids) {
+      if (typeof api.cancelJob !== "function") fallback.push(id);
+      else await api.cancelJob(id).catch(() => fallback.push(id));
+    }
+    for (const id of fallback) await api.interrupt(id).catch(() => {});
   }
 
   async run(kind, slots, body) {

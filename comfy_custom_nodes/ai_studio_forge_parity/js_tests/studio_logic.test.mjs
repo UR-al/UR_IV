@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  CROSS_ATTN_MODES,
+  LORA_BASE_MAX,
   resolveLoraName,
   mayHaveWildcards,
   negpipKey,
@@ -19,6 +21,7 @@ import {
   effectivePrompt,
   loraTagNames,
   imageSize,
+  layerSkipOn,
   missingLoras,
   hasPromptWeights,
   missingPicks,
@@ -42,7 +45,7 @@ import { ROLES, ROLE_PROPERTY, roleIdsFromNodes } from "../web/ai_studio/studio_
 const golden = JSON.parse(readFileSync(new URL("./fixtures/studio_logic_golden.json", import.meta.url), "utf-8"));
 
 const fixedRng = () => 0.5; // -> seed 2147483647
-const NEW_ROLES = new Set(["attention", "inpaint_detailer", "inpaint_switch"]); // their own tests below
+const NEW_ROLES = new Set(["attention", "inpaint_detailer", "inpaint_switch", "lora_ctl"]); // their own tests below
 
 // A small API prompt shaped like the studio workflow's (graphToPrompt output): role -> node.
 function studioPrompt() {
@@ -67,6 +70,7 @@ function studioPrompt() {
     family_switch_neg: ["AIStudioSwitch", { select: 0, a: ["neg_encode", 0], b: ["neg_encode38", 0] }],
     reference_image: ["LoadImage", { image: "example.png", upload: "image" }],
     reference_image_2: ["LoadImage", { image: "example.png", upload: "image" }],
+    reference_image_3: ["LoadImage", { image: "example.png", upload: "image" }],
     anima_ref: ["AIStudioAnimaReference", { model: ["dora", 0], clip: ["lora_stack", 1], vae: ["vae", 0], image: ["reference_image", 0], method: "snapref", file: "" }],
     krea2_ref: ["AIStudioKrea2Reference", { model: ["anima_ref", 0], positive: ["family_switch_pos", 0], negative: ["family_switch_neg", 0], file: "", width: 1024, height: 1024 }],
     i2i_image: ["LoadImage", { image: "example.png", upload: "image" }],
@@ -107,7 +111,7 @@ const state = (overrides = {}) => ({ ...structuredClone(DEFAULT_STATE), ...overr
 
 test("ROLES lists every engine role once, without family_switch_clip (R6)", () => {
   assert.equal(new Set(ROLES).size, ROLES.length);
-  assert.equal(ROLES.length, 57);
+  assert.equal(ROLES.length, 61);
   assert.ok(!ROLES.includes("family_switch_clip"));
   const { roleIds } = studioPrompt(); // a workflow without extension nodes: studio_ext.test.mjs covers those roles
   assert.deepEqual(ROLES.filter((role) => !role.startsWith("ext_") && !NEW_ROLES.has(role)).sort(), Object.keys(roleIds).sort());
@@ -385,9 +389,9 @@ test("stageModes bypasses the unused family, i2i input, SAM3 and post nodes (R7)
   assert.deepEqual(Object.keys(modes).sort(), [...ROLES].sort());
   const bypassed = Object.keys(modes).filter((role) => modes[role] === 4 && !role.startsWith("ext_")).sort();
   assert.deepEqual(bypassed, [
-    "anima_ref", "i2i_image", "inpaint_detailer", "krea2_ref", "moss_stream", "neg_encode38", "pos_encode38", "post_decode", "post_encode",
+    "anima_ref", "i2i_image", "inpaint_detailer", "krea2_ref", "lora_ctl", "moss_stream", "neg_encode38", "pos_encode38", "post_decode", "post_encode",
     "post_hires", "post_image", "post_sam3_detailer", "post_sam3_mask", "post_save", "post_upscale", "qwen35", "reference_image", "reference_image_2",
-    "sam3_detailer", "sam3_mask", "unet38",
+    "reference_image_3", "sam3_detailer", "sam3_mask", "unet38",
   ]);
   assert.ok(Object.values(modes).every((mode) => mode === 0 || mode === 4));
 });
@@ -402,6 +406,37 @@ test("stageModes for 3.8b, i2i with SAM3 on, and a post run", () => {
   for (const role of ROLES.filter((r) => r.startsWith("post_"))) assert.equal(post[role], 0, role);
   const viaMap = stageModes(state({ unet: "b.safetensors" }), null, { families: { "b.safetensors": "3.8b" } });
   assert.equal(viaMap.unet, 4);
+});
+
+test("the LoRA control runs only for Base 먼저 or 교차 어텐션 제외 and gets both values", () => {
+  assert.equal(stageModes(state()).lora_ctl, 4);
+  assert.equal(stageModes(state({ lora_base: 30 })).lora_ctl, 0);
+  assert.equal(stageModes(state({ lora_cross_attn: CROSS_ATTN_MODES[1] })).lora_ctl, 0);
+  const prompt = { 7: { class_type: "AIStudioLoraControl", inputs: { model: ["6", 0], base_model: ["5", 0], base_percent: 0, cross_attn: "끔" } } };
+  const out = applyStateToPrompt(prompt, { lora_ctl: "7" }, { ...DEFAULT_STATE, lora_base: 30, lora_cross_attn: CROSS_ATTN_MODES[2] });
+  assert.deepEqual(out[7].inputs, { model: ["6", 0], base_model: ["5", 0], base_percent: 30, cross_attn: "교차 어텐션+변조" });
+});
+
+test("the LoRA control gets what the run uses: no Base 먼저 on inpaint, no 교차 어텐션 off Anima", () => {
+  const prompt = { 7: { class_type: "AIStudioLoraControl", inputs: { base_percent: 0, cross_attn: "끔" } } };
+  const run = (overrides) => applyStateToPrompt(prompt, { lora_ctl: "7" }, { ...DEFAULT_STATE, lora_base: 30, ...overrides })[7].inputs;
+  assert.equal(run({ tab: "i2i", i2i_mode: "inpaint" }).base_percent, 0);
+  assert.equal(run({ tab: "i2i", i2i_mode: "img2img" }).base_percent, 30);
+  assert.equal(run({ unet: "moss_sft.safetensors", lora_cross_attn: CROSS_ATTN_MODES[1] }).cross_attn, "끔");
+  assert.equal(run({ unet: "anima.safetensors", lora_cross_attn: CROSS_ATTN_MODES[1] }).cross_attn, "교차 어텐션");
+  assert.equal(stageModes(state({ lora_base: 30, tab: "i2i", i2i_mode: "inpaint" })).lora_ctl, 4);
+  assert.equal(stageModes(state({ lora_cross_attn: CROSS_ATTN_MODES[1], unet: "krea2.safetensors" })).lora_ctl, 4);
+});
+
+test("withDefaults keeps the LoRA card's settings in range", () => {
+  assert.equal(withDefaults({ lora_base: 95 }).lora_base, LORA_BASE_MAX);
+  assert.equal(withDefaults({ lora_base: -5 }).lora_base, 0);
+  assert.equal(withDefaults({ lora_base: "30" }).lora_base, 30);
+  assert.equal(withDefaults({ lora_base: true }).lora_base, 0);
+  assert.equal(withDefaults({ lora_base: 37.9 }).lora_base, 37);
+  assert.equal(withDefaults({ lora_cross_attn: "nope" }).lora_cross_attn, "끔");
+  assert.equal(withDefaults({ lora_cross_attn: CROSS_ATTN_MODES[1] }).lora_cross_attn, "교차 어텐션");
+  assert.equal(withDefaults({}).lora_base, 0);
 });
 
 // ---------------------------------------------------------------------------------------------- postPrompt
@@ -601,7 +636,7 @@ test("i2i runs at its own size (the image's, once sent) and inpaint_area maps to
 
 const FAMILY_ROLES = {
   te: "1", negpip: "2", moss_stream: "3", reference_image: "4", anima_ref: "5", krea2_ref: "6", unet: "7", family_switch_model: "8",
-  reference_image_2: "9",
+  reference_image_2: "9", reference_image_3: "10",
 };
 const familyPrompt = () => Object.fromEntries(Object.values(FAMILY_ROLES).map((id) => [id, { inputs: {} }]));
 const ready = (overrides) => state({ te: "te", vae: "vae", ...overrides });
@@ -703,7 +738,7 @@ test("extAxes lists what xyz_axes.EXT_AXES does", () => {
 test("the fp32 stream runs on MOSS with its switch on", () => {
   const mode = (overrides) => stageModes(state(overrides)).moss_stream;
   assert.equal(mode({ unet: "moss_sft.safetensors" }), 0);
-  assert.equal(mode({ unet: "moss_sft.safetensors", moss_stream: false }), 4);
+  assert.equal(mode({ unet: "moss_sft.safetensors", moss_stream: false, moss_layer_skip: false }), 4);
   assert.equal(mode({ unet: "anima.safetensors" }), 4);
   assert.equal(mode({ unet: "krea2.safetensors" }), 4);
 });
@@ -764,6 +799,34 @@ test("the second picture, Fidelity and the weights reach their nodes", () => {
   const node = (role) => out[FAMILY_ROLES[role]].inputs;
   assert.equal(node("reference_image_2").image, "two.png");
   assert.deepEqual([node("anima_ref").fidelity, node("anima_ref").weight_1, node("anima_ref").weight_2], [0.7, 0.8, 0.4]);
+});
+
+test("the third reference (SnapRef v2a) runs only on Anima's SnapRef, with its own picture", () => {
+  const reference = { ...structuredClone(DEFAULT_STATE.reference), on: true, image: "ref.png", image_2: "two.png", image_3: "three.png" };
+  const mode = (unet, changes = {}) => stageModes(state({ unet, reference: { ...reference, ...changes } })).reference_image_3;
+  assert.equal(mode("anima.safetensors"), 0);
+  assert.equal(mode("anima.safetensors", { image_3: "" }), 4);
+  assert.equal(mode("anima.safetensors", { image_2: "" }), 0); // the third picture does not need the second
+  assert.equal(mode("anima.safetensors", { method: "ref_adapter" }), 4);
+  assert.equal(mode("anima.safetensors", { on: false }), 4);
+  assert.equal(mode("krea2.safetensors"), 4);
+});
+
+test("the third picture, its weight and the layout reach their nodes", () => {
+  const base = structuredClone(DEFAULT_STATE.reference);
+  const reference = { ...base, on: true, image: "ref.png", image_2: "two.png", image_3: "three.png",
+    snapref: { ...base.snapref, file: "snapref_v2a.safetensors", weight_3: 0.6, multi_layout: "stitch" } };
+  const out = applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ unet: "anima.safetensors", reference }), { rng: fixedRng });
+  const node = (role) => out[FAMILY_ROLES[role]].inputs;
+  assert.equal(node("reference_image_3").image, "three.png");
+  assert.deepEqual([node("anima_ref").weight_3, node("anima_ref").multi_layout], [0.6, "stitch"]);
+});
+
+test("an older saved state gains the third picture and the layout at their defaults", () => {
+  const old = { reference: { on: true, image: "a.png", image_2: "b.png", snapref: { file: "x.safetensors", weight_2: 0.4 } } };
+  const ref = withDefaults(old).reference;
+  assert.equal(ref.image_3, "");
+  assert.deepEqual([ref.snapref.weight_2, ref.snapref.weight_3, ref.snapref.multi_layout], [0.4, 1.0, "separate"]);
 });
 
 test("a reference run needs its image and file", () => {
@@ -933,4 +996,83 @@ test("a session record keeps the boxes it was made with", () => {
   const panel = { prompt: "now", prompt_prefix: "panel", prompt_suffix: "boxes" };
   const merged = postRunState({ prompt: "1boy", prompt_prefix: "best", prompt_suffix: "highres" }, panel, "upscale");
   assert.equal(effectivePrompt(merged), "best, 1boy, highres");
+});
+
+// ---------------------------------------------------------------------------------------------- 1.20.0: MOSS layer skip, 선행 / 후행 고정 switches
+
+const SWITCHES = ["moss_layer_skip", "prompt_prefix_on", "prompt_suffix_on"];
+
+test("the three switches default on, and only a boolean turns one off", () => {
+  for (const key of SWITCHES) {
+    assert.equal(DEFAULT_STATE[key], true, key);
+    assert.equal(withDefaults({})[key], true, key); // a panel saved before 1.20.0
+    assert.equal(withDefaults({ [key]: false })[key], false, key);
+    assert.equal(withDefaults({ [key]: "no" })[key], true, key);
+    assert.equal(withDefaults({ [key]: 0 })[key], true, key);
+  }
+});
+
+test("a fixed box switched off is left out of the prompt and keeps its text", () => {
+  const boxes = { prompt: "1boy", prompt_prefix: "best", prompt_suffix: "highres" };
+  assert.equal(assembledPrompt({ ...boxes, prompt_prefix_on: false }), "1boy, highres");
+  assert.equal(assembledPrompt({ ...boxes, prompt_suffix_on: false }), "best, 1boy");
+  assert.equal(assembledPrompt({ ...boxes, prompt_prefix_on: true, prompt_suffix_on: true }), "best, 1boy, highres");
+  assert.equal(withDefaults({ ...boxes, prompt_prefix_on: false }).prompt_prefix, "best");
+});
+
+test("with both fixed boxes off the prompt is as without them", () => {
+  const off = { prompt_prefix: "best", prompt_suffix: "highres", prompt_prefix_on: false, prompt_suffix_on: false };
+  assert.equal(assembledPrompt({ ...off, prompt: "1boy, \n" }), "1boy, \n"); // byte for byte, as with empty boxes
+  assert.equal(assembledPrompt({ ...off, prompt: "1boy,", prompt_artist: "@a" }), "@a, 1boy");
+  assert.equal(assembledPrompt({ ...off, prompt: "" }), "");
+});
+
+test("what a run reads leaves a switched-off box out: the prompt, its LoRA tags, weights and wildcards", () => {
+  const api = { 1: { class_type: "AIStudioLoraStack", inputs: {} } };
+  const off = { prompt: "1boy", prompt_prefix: "(bad:-1.0), __wild__", prompt_suffix: "<lora:l:1>", prompt_prefix_on: false, prompt_suffix_on: false, seed: 5 };
+  assert.equal(applyStateToPrompt(api, { lora_stack: "1" }, off)[1].inputs.positive, "1boy");
+  assert.deepEqual(loraTagNames(off), []);
+  assert.equal(hasNegativeWeights(off), false);
+  assert.equal(hasPromptWeights(off), false);
+  assert.equal(mayHaveWildcards(off), false);
+  const on = { ...off, prompt_prefix_on: true, prompt_suffix_on: true };
+  assert.equal(applyStateToPrompt(api, { lora_stack: "1" }, on)[1].inputs.positive, "(bad:-1.0), __wild__, 1boy, <lora:l:1>");
+  assert.equal(mayHaveWildcards(on), true);
+});
+
+test("the MOSS node runs for the stream, the layer skip or both, and is told which", () => {
+  const moss = { unet: "moss_sft.safetensors" };
+  const mode = (overrides) => stageModes(state({ ...moss, ...overrides })).moss_stream;
+  assert.equal(mode({}), 0);
+  assert.equal(mode({ moss_stream: false }), 0); // the layer skip alone
+  assert.equal(mode({ moss_layer_skip: false }), 0); // the stream alone
+  assert.equal(mode({ moss_stream: false, moss_layer_skip: false }), 4);
+  for (const unet of ["anima.safetensors", "krea2.safetensors"]) assert.equal(stageModes(state({ unet })).moss_stream, 4);
+  const node = (overrides) => applyStateToPrompt(familyPrompt(), FAMILY_ROLES, ready({ ...moss, ...overrides }), { rng: fixedRng })[3].inputs;
+  assert.deepEqual(node({}), { stream: true, layer_skip: true });
+  assert.deepEqual(node({ moss_stream: false }), { stream: false, layer_skip: true });
+  assert.deepEqual(node({ moss_layer_skip: false }), { stream: true, layer_skip: false });
+});
+
+test("the layer skip is MOSS's alone", () => {
+  assert.equal(layerSkipOn(state({ unet: "moss_sft.safetensors" })), true);
+  assert.equal(layerSkipOn(state({ unet: "moss_sft.safetensors", moss_layer_skip: false })), false);
+  assert.equal(layerSkipOn(state({ unet: "anima.safetensors" })), false);
+  assert.equal(layerSkipOn(state({ unet: "krea2.safetensors" })), false);
+});
+
+test("an XYZ cell runs with the plot's switches", () => {
+  const { prompt, roleIds } = studioPrompt();
+  const cell = { ...structuredClone(DEFAULT_STATE), unet: "moss_sft.safetensors", te: "te", vae: "vae", seed: 1, prompt: "1boy", prompt_prefix: "best", prompt_prefix_on: false, moss_layer_skip: false };
+  const [{ prompt: out }] = xyzCellPrompts(prompt, roleIds, { cells: [{ state: cell }], order: [0] });
+  assert.equal(inputs(out, roleIds, "lora_stack").positive, "1boy");
+  assert.equal(inputs(out, roleIds, "moss_stream").layer_skip, false);
+});
+
+test("a gallery run keeps the record's boxes in, whatever the panel's switches say", () => {
+  const panel = { prompt: "now", prompt_prefix_on: false, prompt_suffix_on: false };
+  const old = postRunState({ prompt: "1boy", prompt_prefix: "best", prompt_suffix: "highres" }, panel, "upscale"); // a record from before 1.20.0
+  assert.equal(effectivePrompt(old), "best, 1boy, highres");
+  const record = { prompt: "1boy", prompt_prefix: "best", prompt_suffix: "highres", prompt_prefix_on: false };
+  assert.equal(effectivePrompt(postRunState(record, { prompt: "now" }, "upscale")), "1boy, highres"); // and its own switches
 });

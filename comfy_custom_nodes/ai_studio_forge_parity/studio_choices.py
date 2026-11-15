@@ -1,7 +1,8 @@
 """Choice lists for the Anima studio's pickers (samplers, models, LoRAs, SAM3 checkpoints, ...).
 
 No ComfyUI import at module level: ``folder_paths`` / ``comfy.samplers`` are read when a list is asked for, and a
-missing host just gives an empty list.  Every kind returns plain strings except ``sam3`` and ``face_models``, which return
+missing host just gives an empty list.  ``samplers`` and ``schedulers`` are ComfyUI's names in picker order
+(``studio_choices_order``).  Every kind returns plain strings except ``sam3`` and ``face_models``, which return
 ``{"value": absolute path, "label": file name}`` objects (the Forge ``[SAM3] Checkpoint`` axis and the SAM3 node take the
 path; the picker shows the file name).
 """
@@ -17,6 +18,7 @@ from .degrid_files import safetensors_header
 from .dora_infer_mode import MODE_CHOICES
 from .sam3_face_detect import model_dirs as face_model_dirs, scan_models as scan_face_models
 from .sam3_files import is_transformers_layout
+from .studio_choices_order import group_similar
 from .studio_state import ATTENTION_MODES
 from .studio_wildcards import FILES as WILDCARD_FILES
 
@@ -47,8 +49,9 @@ def _file_list(folder_paths, kind: str) -> list[str]:
 
 
 def _samplers(name: str) -> list[str]:
+    """ComfyUI's sampler / scheduler names, similar ones next to each other (a pack's names come last in ComfyUI's list)."""
     try:
-        return list(getattr(importlib.import_module("comfy.samplers").KSampler, name))
+        return group_similar(getattr(importlib.import_module("comfy.samplers").KSampler, name))
     except Exception:
         return []
 

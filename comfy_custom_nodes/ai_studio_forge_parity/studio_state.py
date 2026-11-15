@@ -11,6 +11,7 @@ import math
 import re
 from pathlib import Path
 
+from .studio_adherence import CROSS_ATTN_MODES, CROSS_ATTN_OFF, LORA_BASE_MAX, base_steps
 from .studio_post_schema import POST_SCHEMA, post_defaults
 
 EXT_SCHEMA: dict = json.loads(
@@ -25,13 +26,22 @@ DORA_MODES = (
 MEMORY_SLOTS = ("anima", "moss", "krea2", "krea2_turbo")  # Turbo takes other numbers than Raw
 SIZE_STEP = 8
 MOSS_SIZE_STEP = 16
+# OpenMOSS's MOSS-Image sampling (its ComfyUI workflow, and our trainer's sampler) skips this block in the uncond pass:
+# core SkipLayerGuidanceDiTSimple(double_layers="", single_layers="22", start_percent=0, end_percent=1).
+MOSS_SKIP_LAYER = 22
 REFERENCE_METHODS = ("snapref", "ref_adapter")
 REFERENCE_MODES = ("cs", "char")
 REFERENCE_CORRECTIONS = ("apg", "rescale", "none")
+REFERENCE_LAYOUTS = ("separate", "stitch")  # SnapRef v2a, several pictures: each encoded alone, or side by side in one
 KREA2_POSITIONS = ("aligned (trained)", "beside (right of target)")
 PROMPT_SECTIONS = ("prompt_prefix", "prompt_char_count", "prompt_character", "prompt_copyright", "prompt_artist", "prompt",
                    "prompt_suffix")  # the prompt card's boxes in the order they join
 PROMPT_BOXES = tuple(key for key in PROMPT_SECTIONS if key != "prompt")
+# box -> its on/off switch: off, the box keeps its text and stays out of the assembled prompt. The two fixed boxes got
+# theirs in pack 1.20.0 (the 스텝 row's pills), the others and the negative with the prompt card's own switches.
+PROMPT_SWITCHES = {key: f"{key}_on" for key in PROMPT_SECTIONS}
+NEGATIVE_SWITCH = "negative_on"  # off: the run's negative is empty
+BOX_SWITCHES = {**PROMPT_SWITCHES, "negative": NEGATIVE_SWITCH}  # the prompt card's rows, top to bottom
 # "launch" = what ComfyUI was started with; the others are the core's registered attention functions.
 ATTENTION_MODES = ("launch", "pytorch", "sage", "flash", "comfy_kitchen_int8")
 INPAINT_FILLS = ("original", "fill", "latent noise", "latent nothing")  # ForgeNeoSAM3Detailer's fill_mode
@@ -43,6 +53,7 @@ DEFAULT_STATE: dict = {
     "prompt": "",
     "negative": "",
     **dict.fromkeys(PROMPT_BOXES, ""),
+    **dict.fromkeys(BOX_SWITCHES.values(), True),
     "unet": "",
     "te": "",
     "vae": "",
@@ -56,12 +67,17 @@ DEFAULT_STATE: dict = {
     "height": 1216,
     "batch": 1,
     "loras": [],
+    # LoRA card (pack 1.17.0): the main sampler's first N % of steps without the LoRAs; what the LoRAs leave alone
+    "lora_base": 0,
+    "lora_cross_attn": CROSS_ATTN_MODES[0],
     "negpip": True,
     # MOSS has its own switch: on, its tokenizer reads the parentheses of a plain sentence as weights, so it starts off
     # and a panel saved before MOSS had NegPiP stays as it was.
     "moss_negpip": False,
     "attention": ATTENTION_MODES[0],
     "moss_stream": True,  # MOSS-Image only: the fp32 residual stream
+    # MOSS-Image only: the uncond pass skips block 22, OpenMOSS's own sampling. A panel saved before 1.20.0 gets it too.
+    "moss_layer_skip": True,
     "family_memory": {},  # family -> the model picks and sampling numbers it had when the checkpoint left it
     "dora_mode": DORA_MODES[0],
     "forge_like": {"master": False, "noise": True, "prompt_syntax": True, "dora": True, "attention": True},
@@ -77,10 +93,11 @@ DEFAULT_STATE: dict = {
         "on": False,
         "image": "",
         "image_2": "",  # SnapRef only: another picture of the same character
+        "image_3": "",  # SnapRef v2a: a third one
         "method": REFERENCE_METHODS[0],  # Anima's two adapters; Krea2 has its own section
         "megapixels": 1.0,
         "snapref": {"file": "", "mode": REFERENCE_MODES[0], "strength": 0.0, "fidelity": 1.0, "weight_1": 1.0, "weight_2": 1.0,
-                    "guidance_on": True, "guidance": 4.5,
+                    "weight_3": 1.0, "multi_layout": REFERENCE_LAYOUTS[0], "guidance_on": True, "guidance": 4.5,
                     "correction": REFERENCE_CORRECTIONS[0], "ref_end": 1.0, "caption": ""},
         "ref_adapter": {"file": "", "strength": 1.0, "guidance": 4.5, "correction": REFERENCE_CORRECTIONS[0],
                         "ref_end": 1.0},
@@ -98,11 +115,13 @@ _ENUMS = {
     "i2i_mode": ("img2img", "inpaint"),
     "dora_mode": DORA_MODES,
     "attention": ATTENTION_MODES,
+    "lora_cross_attn": CROSS_ATTN_MODES,
     "inpaint_area": ("masked", "whole"),
     "inpaint_fill": INPAINT_FILLS,
     "method": REFERENCE_METHODS,
     "mode": REFERENCE_MODES,
     "correction": REFERENCE_CORRECTIONS,
+    "multi_layout": REFERENCE_LAYOUTS,
     "position": KREA2_POSITIONS,
 }
 _PROMPT_EDGE = " \t\r\n,"  # what a joined prompt box loses at its ends
@@ -222,6 +241,7 @@ def _reference(raw) -> dict:
         "on": _bool(raw.get("on"), d["on"]),
         "image": _str(raw.get("image"), d["image"]),
         "image_2": _str(raw.get("image_2"), d["image_2"]),
+        "image_3": _str(raw.get("image_3"), d["image_3"]),
         "method": _enum(raw.get("method"), d["method"], "method"),
         "megapixels": _float(raw.get("megapixels"), d["megapixels"], 0.25, 2.0),
         "snapref": _section(raw.get("snapref"), d["snapref"], {
@@ -231,6 +251,8 @@ def _reference(raw) -> dict:
             "fidelity": unit,
             "weight_1": weight,
             "weight_2": weight,
+            "weight_3": weight,
+            "multi_layout": enum("multi_layout"),
             "guidance_on": _bool,
             "guidance": guidance,
             "correction": enum("correction"),
@@ -266,6 +288,7 @@ def normalize_state(raw: object) -> dict:
         "prompt": _str(raw.get("prompt"), d["prompt"]),
         "negative": _str(raw.get("negative"), d["negative"]),
         **{key: _str(raw.get(key), d[key]) for key in PROMPT_BOXES},
+        **{key: _bool(raw.get(key), d[key]) for key in BOX_SWITCHES.values()},
         "unet": _str(raw.get("unet"), d["unet"]),
         "te": _str(raw.get("te"), d["te"]),
         "vae": _str(raw.get("vae"), d["vae"]),
@@ -279,10 +302,13 @@ def normalize_state(raw: object) -> dict:
         "height": _int(raw.get("height"), d["height"], 64, 4096, 8),
         "batch": _int(raw.get("batch"), d["batch"], 1, 16),
         "loras": [x for x in map(_lora, loras) if x] if isinstance(loras, list) else [],
+        "lora_base": _int(raw.get("lora_base"), d["lora_base"], 0, LORA_BASE_MAX),
+        "lora_cross_attn": _enum(raw.get("lora_cross_attn"), d["lora_cross_attn"], "lora_cross_attn"),
         "negpip": _bool(raw.get("negpip"), d["negpip"]),
         "moss_negpip": _bool(raw.get("moss_negpip"), d["moss_negpip"]),
         "attention": _enum(raw.get("attention"), d["attention"], "attention"),
         "moss_stream": _bool(raw.get("moss_stream"), d["moss_stream"]),
+        "moss_layer_skip": _bool(raw.get("moss_layer_skip"), d["moss_layer_skip"]),
         "family_memory": _family_memory(raw.get("family_memory")),
         "dora_mode": _enum(raw.get("dora_mode"), d["dora_mode"], "dora_mode"),
         "forge_like": _section(raw.get("forge_like"), d["forge_like"],
@@ -338,6 +364,33 @@ def inpaint_by_detailer(state: dict) -> bool:
     return state["tab"] == "i2i" and state["i2i_mode"] == "inpaint"
 
 
+def _family_by_name(unet: str) -> str:
+    lowered = (unet or "").lower()
+    return "moss" if "moss" in lowered else "krea2" if "krea" in lowered else "anima"
+
+
+def effective_lora_base(state: dict) -> int:
+    """The Base 먼저 % a run uses: none on an inpaint run (the inpaint detailer, not the main sampler, draws it)."""
+    return 0 if inpaint_by_detailer(state) else int(state.get("lora_base") or 0)
+
+
+def effective_cross_attn(state: dict) -> str:
+    """The 교차 어텐션 제외 a run uses: Anima only (MOSS and Krea2 have no such layers)."""
+    value = state.get("lora_cross_attn") or CROSS_ATTN_OFF
+    return value if _family_by_name(state.get("unet", "")) == "anima" else CROSS_ATTN_OFF
+
+
+def effective_layer_skip(state: dict) -> bool:
+    """Does a run skip MOSS's block 22 in the uncond pass? MOSS only; a state without the key has it on."""
+    return _family_by_name(state.get("unet", "")) == "moss" and state.get("moss_layer_skip") is not False
+
+
+def lora_split_steps(state: dict) -> int:
+    """How many main steps run without the LoRAs (0 = none)."""
+    base = effective_lora_base(state)
+    return base_steps(base, state.get("steps", 0)) if base else 0
+
+
 def size_grid(state: dict) -> int:
     """The latent's cell in pixels (the panel's ``sizeStep``)."""
     return MOSS_SIZE_STEP if "moss" in state["unet"].lower() else SIZE_STEP
@@ -352,13 +405,31 @@ def generation_size(state: dict) -> tuple[int, int]:
     return size["width"], size["height"]
 
 
+def _prompt_part(state: dict, key: str) -> str:
+    """One box's text as it joins: without its edges, and nothing while its switch is off (a missing switch is on)."""
+    if state.get(PROMPT_SWITCHES.get(key)) is False:
+        return ""
+    return (state.get(key) or "").strip(_PROMPT_EDGE)
+
+
 def assembled_prompt(state: dict) -> str:
-    """The prompt card's boxes in ``PROMPT_SECTIONS`` order: empty ones skipped, joined with ``", "`` as the app joins its
-    prompt sections.  With only the main box the prompt stays exactly as written."""
-    parts = {key: (state.get(key) or "").strip(_PROMPT_EDGE) for key in PROMPT_SECTIONS}
+    """The prompt card's boxes in ``PROMPT_SECTIONS`` order: empty and switched-off ones skipped, joined with ``", "`` as
+    the app joins its prompt sections.  With only the main box the prompt stays exactly as written."""
+    parts = {key: _prompt_part(state, key) for key in PROMPT_SECTIONS}
     if not any(parts[key] for key in PROMPT_BOXES):
-        return state.get("prompt") or ""
+        return "" if state.get(PROMPT_SWITCHES["prompt"]) is False else state.get("prompt") or ""
     return ", ".join(part for part in parts.values() if part)
+
+
+def effective_negative(state: dict) -> str:
+    """The negative a run uses: the box as written, or nothing while its switch is off (a missing switch is on)."""
+    return "" if state.get(NEGATIVE_SWITCH) is False else state.get("negative") or ""
+
+
+def single_prompt(text: str) -> dict:
+    """The state keys of a positive prompt that is already joined: all of it in the main box, which is on, and the other
+    boxes empty (their switches stay as they are: an empty box sends nothing either way)."""
+    return {**dict.fromkeys(PROMPT_BOXES, ""), "prompt": text, PROMPT_SWITCHES["prompt"]: True}
 
 
 def effective_prompt(state: dict) -> str:

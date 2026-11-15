@@ -39,6 +39,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from comfy_custom_nodes.ai_studio_forge_parity import NODE_CLASS_MAPPINGS  # noqa: E402
+from comfy_custom_nodes.ai_studio_forge_parity.studio_adherence import CROSS_ATTN_OFF  # noqa: E402
 from comfy_custom_nodes.ai_studio_forge_parity.studio_state import effective_prompt, normalize_state  # noqa: E402
 
 PACK = ROOT / "comfy_custom_nodes" / "ai_studio_forge_parity"
@@ -98,6 +99,7 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("dora", "ForgeNeoDoraInferenceMode", "DoRA"),
         ("attention", "AIStudioAttention", "어텐션"),
         ("ext_er_sde", "ForgeNeoExtraSamplerSettings", "ER SDE"),
+        ("lora_ctl", "AIStudioLoraControl", "LoRA 제어"),
     ]),
     ("③ 프롬프트", [
         ("pos_encode", "AIStudioPromptEncode", "프롬프트"),
@@ -110,6 +112,7 @@ ROWS = (  # (group title, [(role, class, node title)])
     ("③b 레퍼런스", [
         ("reference_image", "LoadImage", "레퍼런스 이미지"),
         ("reference_image_2", "LoadImage", "레퍼런스 이미지 2"),
+        ("reference_image_3", "LoadImage", "레퍼런스 이미지 3"),
         ("anima_ref", "AIStudioAnimaReference", "Anima 레퍼런스"),
         ("krea2_ref", "AIStudioKrea2Reference", "Krea2 레퍼런스"),
     ]),
@@ -119,6 +122,8 @@ ROWS = (  # (group title, [(role, class, node title)])
         ("ext_skim", "ForgeNeoSkimmedCFG", "Skim CFG"),
         ("ext_dd", "ForgeNeoAnimaDetailDaemon", "Detail Daemon"),
         ("ext_speed", "ForgeNeoAnimaSpeed", "SPEED"),
+        ("ext_cfg_schedule", "AIStudioCFGSchedule", "CFG 스케줄"),
+        ("ext_emphasis", "AIStudioWordEmphasis", "단어 주목"),
         ("ext_dd_hires", "ForgeNeoAnimaDetailDaemon", "Detail Daemon (Hires)"),
         ("ext_speed_hires", "ForgeNeoAnimaSpeed", "SPEED (Hires)"),
         ("ext_dd_sam3", "ForgeNeoAnimaDetailDaemon", "Detail Daemon (SAM3)"),
@@ -193,6 +198,9 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("negpip", 0, "dora", "model"),
     ("dora", 0, "attention", "model"),
     ("attention", 0, "ext_er_sde", "model"),
+    # LoRA control: the patches the LoRA nodes added are what lora_ctl has beyond the MODEL before them (sched)
+    ("ext_er_sde", 0, "lora_ctl", "model"),
+    ("sched", 0, "lora_ctl", "base_model"),
     ("negpip", 1, "pos_encode", "clip"),
     ("lora_stack", 2, "pos_encode", "text"),
     ("negpip", 1, "neg_encode", "clip"),
@@ -211,11 +219,12 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("neg_encode", 0, "family_switch_neg", "a"),
     ("neg_encode38", 0, "family_switch_neg", "b"),
     # ③b the reference. Everything after it reads the prompts from krea2_ref: bypassed, it passes the family's prompts
-    ("ext_er_sde", 0, "anima_ref", "model"),
+    ("lora_ctl", 0, "anima_ref", "model"),
     ("negpip", 1, "anima_ref", "clip"),
     ("vae", 0, "anima_ref", "vae"),
     ("reference_image", 0, "anima_ref", "image"),
     ("reference_image_2", 0, "anima_ref", "image_2"),
+    ("reference_image_3", 0, "anima_ref", "image_3"),
     ("anima_ref", 0, "krea2_ref", "model"),
     ("family_switch_pos", 0, "krea2_ref", "positive"),
     ("family_switch_neg", 0, "krea2_ref", "negative"),
@@ -240,14 +249,17 @@ LINKS = (  # (source role, output slot, target role, input name); ids follow thi
     ("i2i_image", 0, "latent", "img2img_image"),
     ("i2i_image", 0, "latent", "inpaint_image"),
     ("i2i_image", 1, "latent", "inpaint_mask"),  # the mask editor's alpha
-    ("ext_speed", 0, "sampler", "model"),
+    # the main pass' own CFG 스케줄 and 단어 주목 (the inpaint detailer stands in for the sampler)
+    ("ext_speed", 0, "ext_cfg_schedule", "model"),
+    ("ext_cfg_schedule", 0, "ext_emphasis", "model"),
+    ("ext_emphasis", 0, "sampler", "model"),
     ("krea2_ref", 1, "sampler", "positive"),
     ("krea2_ref", 2, "sampler", "negative"),
     ("latent", 0, "sampler", "latent_image"),
     # Inpaint: bypassed unless it runs. The switch's lazy input then keeps the main sampler from running
     ("i2i_image", 0, "inpaint_detailer", "image"),
     ("i2i_image", 1, "inpaint_detailer", "mask"),
-    ("ext_speed", 0, "inpaint_detailer", "model"),
+    ("ext_emphasis", 0, "inpaint_detailer", "model"),
     ("negpip", 1, "inpaint_detailer", "clip"),
     ("vae", 0, "inpaint_detailer", "vae"),
     ("krea2_ref", 1, "inpaint_detailer", "positive"),
@@ -424,8 +436,10 @@ def role_values(state: dict) -> dict[str, dict]:
         "family_switch_neg": select,
         "inpaint_switch": select,
         "attention": {"mode": state["attention"]},
+        "moss_stream": {"stream": state["moss_stream"], "layer_skip": state["moss_layer_skip"]},
         "shift": {"shift": state["shift"]},
         "lora_stack": {"positive": effective_prompt(state), "negative": state["negative"]},
+        "lora_ctl": {"base_percent": state["lora_base"], "cross_attn": state["lora_cross_attn"]},
         "negpip": {"enabled": state["negpip"]},
         "dora": {"enabled": True, "mode": DORA_FORGE_MODE if forge["master"] and forge["dora"] else state["dora_mode"]},
         "pos_encode": encode,
@@ -453,11 +467,13 @@ def default_bypassed(state: dict) -> set[str]:
     """studio_logic.js stageModes(DEFAULT_STATE) roles that are bypassed (R7): saved that way as a safe default."""
     # the default unet is neither a 3.8B nor a MOSS file; the reference is off
     bypassed = {"unet38", "qwen35", "pos_encode38", "neg_encode38", "moss_stream", "reference_image", "reference_image_2", "anima_ref",
-                "krea2_ref", "inpaint_detailer"}
+                "reference_image_3", "krea2_ref", "inpaint_detailer"}
     if state["tab"] == "t2i":
         bypassed.add("i2i_image")
     if not state["sam3"]["on"]:
         bypassed |= {"sam3_mask", "sam3_detailer"}
+    if not state["lora_base"] and state["lora_cross_attn"] == CROSS_ATTN_OFF:
+        bypassed.add("lora_ctl")
     bypassed |= {role for _, row in ROWS for role, _, _ in row if role.startswith(("post_", "ext_"))}
     return bypassed
 

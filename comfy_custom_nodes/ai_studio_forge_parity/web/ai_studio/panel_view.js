@@ -4,11 +4,13 @@
 import { dropBlockedExt, extMemory, renderExtensions } from "./ext_view.js";
 import { nodeInstalled, referenceBlock, renderReference } from "./reference_view.js";
 import { createAutocomplete } from "./studio_autocomplete.js";
+import { addSession, listedStem, replaceRow, rowFace } from "./lora_rows.js";
 import { hiresCard, hiresSizeText, postCard } from "./post_view.js";
+import { labelMark } from "./preset_logic.js";
 import { FAMILY_LABELS } from "./studio_ext.js";
-import { DORA_MODES, INPAINT_FILLS, PROMPT_SECTIONS, defaultModel, familyHasNegpip, fileStem, imageSize, modelFamily, negpipKey, pickCheckpoint, sizeStep, withDefaults } from "./studio_logic.js";
+import { BOX_LABELS, BOX_SWITCHES, CROSS_ATTN_MODES, DORA_MODES, INPAINT_FILLS, LORA_BASE_MAX, MOSS_SKIP_LAYER, PROMPT_SWITCHES, defaultModel, inpaintByDetailer, familyHasNegpip, imageSize, modelFamily, negpipKey, pickCheckpoint, sizeStep, withDefaults } from "./studio_logic.js";
 import { pulledState } from "./studio_settings.js";
-import { autoGrow, card, h, numberBox, optionItems, pill, row, select } from "./studio_dom.js";
+import { autoGrow, card, guardCanvasKeys, h, numberBox, optionItems, pill, row, select } from "./studio_dom.js";
 
 const CHOICE_KINDS = ["unets", "tes", "vaes", "samplers", "schedulers", "loras", "upscalers", "sam3", "controlnets", "face_models", "attentions", "wildcards"];
 // Model picks filled with an Anima default when their list arrives empty-handed (an empty pick would run the
@@ -20,9 +22,33 @@ const NEGPIP_NO_FAMILY = "불가: Krea2 는 가중치를 못 읽음. 빼고 싶�
 const NEGPIP_TITLE = { anima: "음수 가중치 (단어:-1.0)", moss: "음수 가중치 (단어:-1.0). 켜면 (단어:1.2) 도 읽고, 글의 괄호도 가중치가 됨: 글자 괄호는 \\( \\)" };
 const STREAM_MISSING = "불가: ComfyUI-MOSS-Toolkit 노드 팩(MOSSStreamFP32)이 설치돼 있지 않음";
 const STREAM_OLD_GRAPH = "불가: 이 워크플로에는 fp32 노드가 없음. AI Studio Anima.json 을 새로 여세요";
+const SKIP_OLD_GRAPH = "불가: 이 워크플로에는 MOSS 노드가 없음. AI Studio Anima.json 을 새로 여세요";
+const SKIP_LABEL = `스킵 ${MOSS_SKIP_LAYER}`;
+const SKIP_TITLE =
+  `MOSS 공식 샘플링: 네거티브(uncond) 패스에서 ${MOSS_SKIP_LAYER}번 블록을 건너뜀 (전 구간, 모든 패스). ` +
+  "끄면 1.19 까지의 그림. CFG 1 에서는 네거티브를 안 돌려서 차이 없음";
+// The 스텝 row's switches of the two fixed boxes: [box, pill text, tooltip]; off, the box keeps its text. The same two flags
+// as those boxes' switches on the prompt card: either one moves both.
+const STEP_BOX_SWITCHES = [
+  ["prompt_prefix", "선행", "선행 고정 칸을 프롬프트에 넣기. 끄면 칸의 글은 두고 프롬프트에서만 뺌 (XYZ·와일드카드·저장 정보도). 프롬프트 카드의 스위치와 같음"],
+  ["prompt_suffix", "후행", "후행 고정 칸을 프롬프트에 넣기. 끄면 칸의 글은 두고 프롬프트에서만 뺌 (XYZ·와일드카드·저장 정보도). 프롬프트 카드의 스위치와 같음"],
+];
+// The prompt card's switch left of every box's name (studio_logic BOX_SWITCHES): what it says on mouse-over, and its row when off.
+const BOX_SWITCH_TITLE = "프롬프트에 넣기/빼기. 끄면 칸의 글은 두고 프롬프트에서만 뺌 (XYZ·와일드카드·저장 정보도)";
+const NEGATIVE_SWITCH_TITLE = "네거티브 넣기/빼기. 끄면 칸의 글은 두고 빈 네거티브로 실행 (XYZ·와일드카드·저장 정보도)";
+const BOX_OFF_TITLE = "꺼짐: 프롬프트에 안 들어감 (이름 왼쪽 스위치로 켬)";
+const NEGATIVE_OFF_TITLE = "꺼짐: 네거티브 없이 실행 (이름 왼쪽 스위치로 켬)";
 const INPAINT_OLD_GRAPH = "불가: 이 워크플로에는 인페인트 노드가 없음. AI Studio Anima.json 을 새로 여세요";
 const INPAINT_AREA_TITLE = "전체: 그림 전체를 위 크기로 다시 그림. 마스크만: 마스크 둘레를 잘라 위 크기로 그리고 원본에 붙임 (Forge의 Only masked)";
 const ATTENTION_OLD_GRAPH = "불가: 이 워크플로에는 어텐션 노드가 없음. AI Studio Anima.json 을 새로 여세요";
+const LORA_CTL_OLD_GRAPH = "불가: 이 워크플로에는 LoRA 제어 노드가 없음. AI Studio Anima.json 을 새로 여세요";
+const LORA_BASE_TITLE =
+  "메인 샘플링의 처음 N% 스텝은 LoRA 없이(Base), 나머지는 LoRA로. 구도는 Base가 프롬프트대로 잡고 화풍은 LoRA가 입힌다. " +
+  "Hires·SAM3·후처리는 LoRA 그대로, 텍스트 인코더 LoRA는 늘 적용. SPEED·Spectrum·Restart·UniPC와는 같이 못 씀. 0 = 끔";
+const LORA_BASE_INPAINT = "인페인트는 메인 샘플러를 안 써서 Base 먼저가 듣지 않음 (다른 탭에서는 그대로)";
+const LORA_CROSS_FAMILY = "Anima 에서만 들음 (MOSS·Krea2 에는 교차 어텐션이 없음)";
+const LORA_CROSS_TITLE =
+  "LoRA가 Anima의 글자→그림 경로(교차 어텐션, LLM 어댑터)는 건드리지 않게 한다(+변조 = 교차 어텐션의 adaLN 변조까지). 모든 패스에 적용";
 const ATTENTION_FORGE = "Forge처럼: PyTorch 어텐션";
 const ATTENTION_LABELS = { launch: "실행 옵션대로", pytorch: "PyTorch", sage: "Sage", flash: "Flash", comfy_kitchen_int8: "Kitchen" };
 const FILL_LABELS = { original: "원본", fill: "채우기", "latent noise": "latent noise", "latent nothing": "latent nothing" };
@@ -35,17 +61,6 @@ const FORGE_ITEMS = [
   { key: "attention", label: "어텐션", title: "실행 옵션과 상관없이 PyTorch 어텐션으로 (실제 Forge 설정)" },
 ];
 
-const PROMPT_LABELS = {
-  prompt_prefix: "선행 고정",
-  prompt_char_count: "인물 수",
-  prompt_character: "캐릭터",
-  prompt_copyright: "작품",
-  prompt_artist: "작가",
-  prompt: "프롬프트",
-  prompt_suffix: "후행 고정",
-  negative: "네거티브",
-};
-
 const group = (title, color, extraClass, ...children) =>
   h("div", { class: `ais-grp ${extraClass}`, style: `--c:${color}` }, title ? h("div", { class: "ais-gh" }, title) : null, children);
 
@@ -56,7 +71,13 @@ export class PanelView {
    * Promise<[{name, category, count, alias?, ko?}]> (prompt tag autocomplete), `pickedSeed()` -> Promise<seed of the image
    * picked in the gallery, or null>, `engineRoom` {collapsed(),
    * toggle()}, `i2i` {get(), set(value), url(value), upload(file) -> {name, width, height}, maskEditor()},
-   * `reference`, `reference2` {url(value), upload(file) -> {name}} (the reference images' nodes).
+   * `reference`, `reference2`, `reference3` {url(value), upload(file) -> {name}} (the reference images' nodes),
+   * `loraBrowser({mode, current, strength, onPick, onUnpick, onPickMany})` (the LoRA picker window; studio_main adds the rest),
+   * optional `boxLabel(key, anchorEl)`: a prompt-card name was pressed (`key`: a box of studio_logic BOX_SWITCHES, `anchorEl`:
+   * the name's button). With it the names are buttons, without it plain text.
+   * Optional `boxPreset(key, text)` -> the preset whose text is the box's, null when there is none, undefined while the presets
+   * are not read: with it every name has a small line under it (the preset's name / "저장 안 됨" / nothing for an empty box).
+   * Call `refreshBoxMarks()` when the presets change.
    */
   constructor(widget, ctx) {
     this.widget = widget;
@@ -71,7 +92,8 @@ export class PanelView {
       ? createAutocomplete({ fetchTags: ctx.tags, loras: () => this.choices.loras || [], wildcards: () => this.choices.wildcards || [] })
       : null;
     this.state = this.read();
-    this.element = h("div", { class: "ais-root ais-panel" });
+    // Delete / Backspace on a focused button (a box name after its preset list closed) must not delete this node.
+    this.element = guardCanvasKeys(h("div", { class: "ais-root ais-panel" }));
     this.render();
     this.loadChoices();
     // The first render has no size yet (the DOM widget is attached later).
@@ -100,6 +122,11 @@ export class PanelView {
     return this.ctx.hasRole && !this.ctx.hasRole("attention") ? ATTENTION_OLD_GRAPH : "";
   }
 
+  /** Why the LoRA card's Base 먼저 / 교차 어텐션 cannot be set here ("" = they can). */
+  loraCtlBlock() {
+    return this.ctx.hasRole && !this.ctx.hasRole("lora_ctl") ? LORA_CTL_OLD_GRAPH : "";
+  }
+
   /** Why the inpaint settings cannot run here ("" = they can): this graph predates the nodes. */
   inpaintBlock() {
     return this.ctx.hasRole && !this.ctx.hasRole("inpaint_detailer") ? INPAINT_OLD_GRAPH : "";
@@ -109,6 +136,11 @@ export class PanelView {
   streamBlock() {
     if (!nodeInstalled("MOSSStreamFP32")) return STREAM_MISSING;
     return this.ctx.hasRole && !this.ctx.hasRole("moss_stream") ? STREAM_OLD_GRAPH : "";
+  }
+
+  /** Why MOSS's layer skip cannot run here ("" = it can): this graph predates the MOSS node. It needs no other pack. */
+  layerSkipBlock() {
+    return this.ctx.hasRole && !this.ctx.hasRole("moss_stream") ? SKIP_OLD_GRAPH : "";
   }
 
   growPrompts() {
@@ -130,6 +162,7 @@ export class PanelView {
   refreshLoras() {
     return Promise.resolve(this.ctx.choices("loras", true)).then((data) => {
       const items = data?.items || [];
+      if (!items.length && this.choices.loras?.length) return; // a failed request answers []: keep the list we have
       if (JSON.stringify(items) === JSON.stringify(this.choices.loras)) return;
       this.choices.loras = items;
       this.scheduleRender();
@@ -173,6 +206,8 @@ export class PanelView {
     if (image) state.i2i.image = image;
     if (this.negpipBlock()) Object.assign(state, { negpip: false, moss_negpip: false });
     if (this.streamBlock()) state.moss_stream = false;
+    if (this.layerSkipBlock()) state.moss_layer_skip = false;
+    if (this.loraCtlBlock()) Object.assign(state, { lora_base: 0, lora_cross_attn: CROSS_ATTN_MODES[0] });
     if (this.attentionBlock()) {
       state.attention = "launch";
       state.forge_like.attention = false;
@@ -239,10 +274,13 @@ export class PanelView {
     this.autocomplete?.close(); // the prompt boxes below are rebuilt
     this.sizeText = null; // drawn again with the t2i tab
     const scrolled = this.element.querySelector(".ais-scroll")?.scrollTop ?? 0;
+    const active = globalThis.document?.activeElement; // a LoRA button the picker window gave the focus back to keeps it, and a 스텝 row switch its own
+    const focusKey = active && this.element.contains?.(active) ? active.getAttribute?.("data-focus-key") : null;
     this.top = h("div", { class: "ais-top" });
     this.thin = h("div", { class: "ais-thin" }, (this.bar = h("div")));
     const scroll = h("div", { class: "ais-scroll" }, this.common(s), this.tabs(s), this.extensions(s), this.engineBar());
     this.element.replaceChildren(this.top, this.thin, scroll);
+    if (focusKey) this.element.querySelector(`[data-focus-key="${focusKey}"]`)?.focus({ preventScroll: true });
     this.renderTop();
     this.growPrompts(); // first: the prompts' height decides how far the column can scroll
     scroll.scrollTop = scrolled;
@@ -265,7 +303,7 @@ export class PanelView {
   // ------------------------------------------------------------------------------------------- 공통 설정
 
   common(s) {
-    const typed = (key) => (e) => { autoGrow(e.target); this.set((st) => { st[key] = e.target.value; }); };
+    const typed = (key) => (e) => { autoGrow(e.target); this.set((st) => { st[key] = e.target.value; }); this.markBox(key); };
     const blocked = this.negpipBlock();
     const key = negpipKey(this.family);
     const negpip = pill(s[key] && !blocked, () => this.set((st) => { st[key] = !st[key]; }, true), {
@@ -274,12 +312,76 @@ export class PanelView {
       title: blocked || NEGPIP_TITLE[this.family],
       disabled: Boolean(blocked),
     });
-    const keys = [...PROMPT_SECTIONS, "negative"];
+    const keys = Object.keys(BOX_SWITCHES); // the boxes in the order they join, then the negative
     const boxes = keys.map((key) =>
-      h("textarea", { class: `ais-f ${key === "prompt" ? "ais-prompt" : "ais-negative"}`, "aria-label": PROMPT_LABELS[key], value: s[key], onInput: typed(key) }));
+      h("textarea", { class: `ais-f ${key === "prompt" ? "ais-prompt" : "ais-negative"}`, "aria-label": BOX_LABELS[key], value: s[key], onInput: typed(key) }));
     boxes.forEach((box) => this.autocomplete?.attach(box)); // after the panel's own input handler: a picked tag is saved too
-    const prompt = card("프롬프트", negpip, boxes.map((box, index) => row(PROMPT_LABELS[keys[index]], box)), "ais-prompts");
+    const rows = boxes.map((box, index) => this.promptRow(s, keys[index], box));
+    const prompt = card("프롬프트", negpip, rows, "ais-prompts");
     return group("공통 설정", "#4b6a8f", "", h("div", { class: "ais-stack" }, prompt, this.modelCard(s), this.loraCard(s), postCard(s, this.postView())));
+  }
+
+  /**
+   * One row of the prompt card: the box's on/off switch, its name, the box. Off, the box keeps its text (and can still be
+   * typed in) and the run leaves it out; the row is dimmed and says so.
+   * The name is an element of its own, `.ais-box-label[data-section="<key>"]`, never the switch: with `ctx.boxLabel` it is a
+   * button that calls `ctx.boxLabel(key, thatButton)` (the preset list opens under it).
+   * It is ONE element a box for the panel's life (`this.boxNames`), like "+ LoRA": the list keeps the name it opened under
+   * as its anchor (its place, a press on it, aria-expanded, the focus back when it closes) while the panel redraws under it.
+   * So nothing that changes with the state may be set on the name itself: its look when off comes from the row's classes.
+   * With `ctx.boxPreset` a third element follows, `.ais-box-mark[data-for="<key>"]`: what the box holds (markBox).
+   */
+  promptRow(s, key, box) {
+    const flag = BOX_SWITCHES[key];
+    const on = s[flag] !== false;
+    const negative = key === "negative";
+    const toggle = h("button", {
+      type: "button",
+      class: `ais-box-switch ${on ? "on" : "off"}`,
+      role: "switch",
+      "aria-checked": on ? "true" : "false",
+      "aria-label": `${BOX_LABELS[key]} ${negative ? "쓰기" : "프롬프트에 넣기"}`,
+      title: negative ? NEGATIVE_SWITCH_TITLE : BOX_SWITCH_TITLE,
+      "data-switch": flag,
+      "data-focus-key": `box-switch-${key}`,
+      onClick: () => this.set((st) => { st[flag] = st[flag] === false; }, true),
+    });
+    const open = this.ctx.boxLabel;
+    const name = ((this.boxNames ??= {})[key] ??= h(open ? "button" : "span", {
+      type: open ? "button" : undefined,
+      class: "ais-box-label",
+      "data-section": key,
+      "data-focus-key": open ? `box-label-${key}` : undefined,
+      onClick: open ? () => open(key, this.boxNames[key]) : undefined,
+    }, BOX_LABELS[key]));
+    const mark = this.ctx.boxPreset ? ((this.boxMarks ??= {})[key] ??= h("span", { class: "ais-box-mark", "data-for": key, hidden: true })) : null;
+    this.markBox(key);
+    return h(
+      "div",
+      { class: `ais-row ${negative ? "ais-neg" : "ais-pos"}${on ? "" : " ais-off"}`, "data-box": key, title: on ? undefined : negative ? NEGATIVE_OFF_TITLE : BOX_OFF_TITLE },
+      h("span", { class: "ais-label" }, toggle, name, mark),
+      h("span", { class: "ais-ctl" }, box),
+    );
+  }
+
+  /**
+   * The line under a box's name: the preset whose text the box holds, "저장 안 됨" for a text no preset has, nothing for an
+   * empty box or while the presets are not read (preset_logic.js labelMark). One element a box, filled in place: typing
+   * changes it without a redraw.
+   */
+  markBox(key) {
+    const mark = this.boxMarks?.[key];
+    if (!mark) return;
+    const { kind, text, title } = labelMark(this.ctx.boxPreset(key, this.state[key]), this.state[key]);
+    mark.textContent = text;
+    mark.title = title;
+    mark.hidden = kind === "empty";
+    mark.setAttribute("data-mark", kind);
+  }
+
+  /** The presets changed (read, saved, renamed, deleted): every box's mark again, without drawing the panel. */
+  refreshBoxMarks() {
+    for (const key of Object.keys(this.boxMarks || {})) this.markBox(key);
   }
 
   modelCard(s) {
@@ -309,12 +411,24 @@ export class PanelView {
       row("샘플러", pick("samplers", "sampler")),
       row("스케줄러", pick("schedulers", "scheduler")),
       row("어텐션", this.attentionPick(s)),
-      row("스텝", num("steps", { min: 1, max: 150, step: 1, width: 46 }), "CFG", num("cfg", { min: 0, max: 30, step: 0.5, width: 44 }),
+      row("스텝", this.stepSwitches(s), num("steps", { min: 1, max: 150, step: 1, width: 46 }), "CFG", num("cfg", { min: 0, max: 30, step: 0.5, width: 44 }),
         "Shift", num("shift", { min: 0, max: 100, step: 0.5, width: 44 })),
       row("시드", num("seed", { min: -1, step: 1, width: 120, title: "-1 = 랜덤, 그 밖의 값은 그대로 유지", live: true }), // Ctrl+Enter comes before the box is left
         h("button", { type: "button", class: "ais-mini", title: "현재 이미지의 시드 가져오기", "aria-label": "현재 이미지 시드 가져오기", onClick: () => this.pinSeed() }, "♻"),
         h("button", { type: "button", class: "ais-mini", title: "랜덤 (-1)", "aria-label": "랜덤 시드", onClick: () => this.setSeed(-1) }, "랜덤")),
     ]);
+  }
+
+  /** The 스텝 row's switches, right before the steps box: MOSS's layer skip (MOSS only), then the two fixed prompt boxes. */
+  stepSwitches(s) {
+    const flip = (key) => () => this.set((st) => { st[key] = st[key] === false; }, true);
+    const blocked = this.layerSkipBlock();
+    const skip = this.family === "moss"
+      ? pill(s.moss_layer_skip !== false && !blocked, flip("moss_layer_skip"), { on: SKIP_LABEL, off: SKIP_LABEL, title: blocked || SKIP_TITLE, disabled: Boolean(blocked), focusKey: "switch-moss_layer_skip" })
+      : null;
+    const boxes = STEP_BOX_SWITCHES.map(([box, label, title]) =>
+      pill(s[PROMPT_SWITCHES[box]] !== false, flip(PROMPT_SWITCHES[box]), { on: label, off: label, title, focusKey: `switch-${PROMPT_SWITCHES[box]}` }));
+    return h("span", { class: "ais-step-switches" }, skip, boxes);
   }
 
   attentionPick(s) {
@@ -345,15 +459,54 @@ export class PanelView {
   }
 
   loraCard(s) {
-    const files = (this.choices.loras || []).map((entry) => ({ value: fileStem(entry), label: entry }));
-    const rows = s.loras.map((lora, index) =>
-      h("div", { class: "ais-row ais-lora" },
+    const rows = s.loras.map((lora, index) => {
+      const face = rowFace(lora.name, this.choices.loras);
+      return h("div", { class: "ais-row ais-lora" },
         pill(lora.on, () => this.set((st) => { st.loras[index].on = !st.loras[index].on; }, true)),
-        select(optionItems(files, lora.name, { empty: "[LoRA]" }), lora.name, (value) => this.set((st) => { st.loras[index].name = value; }), { class: "ais-f ais-grow" }),
+        h("button", { type: "button", class: `ais-f ais-grow ais-lb-pick${face.missing ? " missing" : ""}`, title: face.title, "data-focus-key": `lora-${index}`, onClick: () => this.replaceLora(index) },
+          h("span", { class: "ais-lb-pick-text" }, face.text)),
         numberBox(lora.strength, (value) => this.set((st) => { st.loras[index].strength = value; }), { min: -10, max: 10, step: 0.05, width: 50 }),
-        h("button", { type: "button", class: "ais-mini", title: "빼기", "aria-label": "LoRA 빼기", onClick: () => this.set((st) => { st.loras.splice(index, 1); }, true) }, "✕")));
-    const add = h("button", { type: "button", class: "ais-add", onClick: () => this.set((st) => { st.loras.push({ on: true, name: "", strength: 1.0 }); }, true) }, "+ LoRA");
-    return card("LoRA", null, [rows, add]);
+        h("button", { type: "button", class: "ais-mini", title: "빼기", "aria-label": "LoRA 빼기", onClick: () => this.set((st) => { st.loras.splice(index, 1); }, true) }, "✕"));
+    });
+    // One element across redraws: the window gives the focus back to it when it closes, after the picks redrew the panel.
+    const add = (this.loraAdd ??= h("button", { type: "button", class: "ais-add", "data-focus-key": "lora-add", onClick: () => this.addLoras() }, "+ LoRA"));
+    const blocked = this.loraCtlBlock();
+    const baseOff = blocked || (inpaintByDetailer(s) ? LORA_BASE_INPAINT : "");
+    const crossOff = blocked || (this.family !== "anima" ? LORA_CROSS_FAMILY : "");
+    const base = numberBox(blocked ? 0 : s.lora_base, (value) => this.set((st) => { st.lora_base = Math.max(0, Math.min(LORA_BASE_MAX, Math.trunc(value))); }),
+      { min: 0, max: LORA_BASE_MAX, step: 5, width: 46, title: baseOff || LORA_BASE_TITLE, disabled: Boolean(baseOff) });
+    const cross = select(optionItems(CROSS_ATTN_MODES, s.lora_cross_attn), crossOff ? CROSS_ATTN_MODES[0] : s.lora_cross_attn,
+      (value) => this.set((st) => { st.lora_cross_attn = value; }),
+      { disabled: Boolean(crossOff), title: crossOff || LORA_CROSS_TITLE, "aria-label": "LoRA 교차 어텐션 제외" });
+    const controls = [row("Base 먼저", base, h("span", { title: baseOff || LORA_BASE_TITLE }, "%")), row("교차 어텐션 제외", cross)];
+    return card("LoRA", null, [rows, add, ...controls]);
+  }
+
+  /** "+ LoRA": the picker window (lora_rows.addSession) puts each pick in as a row at once; its tray ✕ takes the row out again. */
+  addLoras() {
+    const session = addSession();
+    this.ctx.loraBrowser?.({
+      mode: "add",
+      onPick: (pick) => this.editLoras((loras) => session.onPick(loras, pick), pick.name),
+      onUnpick: (row) => this.editLoras((loras) => session.onUnpick(loras, row)),
+    });
+  }
+
+  /** A row's name: the window opens on that LoRA and strength ("바꾸기"), one pick, then it closes. */
+  replaceLora(index) {
+    const lora = this.state.loras[index];
+    if (!lora) return;
+    this.ctx.loraBrowser?.({ mode: "replace", current: lora.name, strength: lora.strength,
+      onPick: (pick) => this.editLoras((loras) => replaceRow(loras, index, pick), pick.name) });
+  }
+
+  /** A row edit from the window: saved now, drawn after the window's step (its close() gives the focus back first). */
+  editLoras(edit, picked = "") {
+    let result;
+    this.set((st) => { result = edit(st.loras); });
+    this.scheduleRender();
+    if (picked && !listedStem(this.choices.loras, picked)) this.refreshLoras(); // a file newer than the panel's list
+    return result;
   }
 
   /** What post_view.js draws with. */
@@ -462,6 +615,7 @@ export class PanelView {
         refreshLoras: () => this.refreshLoras(),
         image: this.ctx.reference,
         image2: this.ctx.reference2,
+        image3: this.ctx.reference3,
       }),
     });
   }

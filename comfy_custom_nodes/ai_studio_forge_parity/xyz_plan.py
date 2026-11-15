@@ -5,9 +5,13 @@ the pack carries no Forge code.
 
 - Every cell starts from the normalized state with its prompt boxes and list LoRAs already rendered into the prompt,
   the LoRAs as ``<lora:name:strength>`` tags (``effective_prompt``; the cell's boxes and ``loras`` list are empty),
-  so Prompt S/R can rewrite them.  Axes apply X, then Y, then Z.
+  so Prompt S/R can rewrite them.  A box that is switched off is not in that prompt, and a negative that is switched
+  off is an empty negative in the cell: the axes read and write what the run uses.  Axes apply X, then Y, then Z.
 - Prompt S/R: the first value is the search text and every value (the first included) is one column; plain,
   case-sensitive replace-all in the prompt and the negative prompt.  A search text found in neither aborts the plan.
+  A value is whatever the value box gives as one field (``xyz_values.split_values``): quoted, it may hold commas,
+  quotes and line breaks, so several tags are swapped at once (the panel's text blocks write it that way).  An empty
+  search text aborts the plan too (Forge would put the replacement between every two characters).
 - Prompt order: the given tokens are cut out of the positive prompt and put back into the same slots in each
   permutation's order.
 - LoRA: the axis has a block of settings instead of a value box; ``xyz_lora`` turns it into columns.
@@ -23,7 +27,7 @@ the pack carries no Forge code.
   order.  Each cell state is normalized again, so axis values are clamped like the control panel's.
 
 Validation problems (unparsable values, unknown checkpoint or DoRA mode, 3.8B mixed with 2.9B/base, a grid of
-100 MP or more, Prompt S/R or Prompt order text not found, and - when ``loras`` is given - a ``<lora:...>`` tag of
+100 MP or more, Prompt S/R or Prompt order text not found, an empty Prompt S/R search text, and - when ``loras`` is given - a ``<lora:...>`` tag of
 any cell that matches no LoRA file) come back in ``errors`` with no cells; ``plan_xyz`` never raises for them.
 The LoRA check exists because the LoRA node only logs a missing file and renders the cell without it: in an
 epoch x strength grid a mistyped epoch would read as a bad epoch (Forge tells the user instead).
@@ -38,7 +42,8 @@ from dataclasses import dataclass, field
 from .dora_infer_mode import MODE_LABELS, mode_key
 from .studio_lora_tags import parse_lora_tags, resolve_lora_name
 from .studio_choices import unet_family
-from .studio_state import ATTENTION_MODES, EXT_SCHEMA, PROMPT_BOXES, effective_prompt, generation_size, normalize_state
+from .studio_state import (ATTENTION_MODES, EXT_SCHEMA, NEGATIVE_SWITCH, effective_negative, effective_prompt, generation_size,
+                           inpaint_by_detailer, normalize_state, single_prompt)
 from .studio_wildcards import expand_state, uses_wildcards
 from . import xyz_lora
 from .xyz_axes import AxisSpec, axis_by_id, ext_key
@@ -181,6 +186,20 @@ def _check_ext_family(base: dict, axes: list[_Axis], families: dict) -> None:
             raise _PlanError(f"{axis.spec.label}: 이 모델 계열에서는 못 씀")
 
 
+def _check_adherence(base: dict, axes: list[_Axis], families: dict) -> None:
+    """The adherence settings that cannot act on this panel would draw the same picture in every column."""
+    unet = base["unet"]
+    family = (families.get(unet) or unet_family(unet)) if unet else "2.9b"
+    for axis in axes:
+        key = ext_key(axis.spec)
+        if axis.spec.id == "lora_base" and inpaint_by_detailer(base):
+            raise _PlanError(f"{axis.spec.label}: 인페인트는 메인 샘플러를 안 써서 듣지 않음")
+        if axis.spec.id == "lora_cross_attn" and _model_family(family) != "anima":
+            raise _PlanError(f"{axis.spec.label}: 이 모델 계열에서는 못 씀")
+        if key == "emphasis" and family == "3.8b":
+            raise _PlanError(f"{axis.spec.label}: 3.8B 에서는 듣지 않음")
+
+
 def _check_panel_family(base: dict, axes: list[_Axis], resolved: list[list], families: dict) -> None:
     """A checkpoint axis stays in the panel's family: a cell takes only its UNET from the axis, the TE, VAE, sampler and
     extensions stay the panel's."""
@@ -276,6 +295,8 @@ def _set_path(state: dict, path: str, value) -> None:
 
 
 def _search_replace(state: dict, search: str, value: str) -> None:
+    if not search:
+        raise _PlanError("Prompt S/R: the first value (the text to search for) is empty")
     if search not in state["prompt"] and search not in state["negative"]:
         raise _PlanError(f'Prompt S/R did not find "{search}" in either prompt or negative prompt')
     state["prompt"] = state["prompt"].replace(search, value)
@@ -379,7 +400,7 @@ def missing_loras(states, available) -> list[str]:
     only called when some state has a tag, and its error propagates."""
     names: list[str] = []
     for state in states:
-        tags, _ = parse_lora_tags(effective_prompt(state), state.get("negative") or "")
+        tags, _ = parse_lora_tags(effective_prompt(state), effective_negative(state))
         names += [tag.name for tag in tags if tag.name not in names]
     if not names:
         return []
@@ -429,12 +450,14 @@ def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, fami
         parsed = _read_axes(axes)
         base = normalize_state(state)
         prompt = effective_prompt(base)
+        base.update(negative=effective_negative(base), **{NEGATIVE_SWITCH: True})
         _expand_lora_axes(parsed, prompt, base["negative"], loras, lora_epoch)
         counts = {letter: len(axis.values) for letter, axis in zip(LETTERS, parsed)}
         nx, ny, nz = counts["x"], counts["y"], counts["z"]
         resolved = _resolve(parsed, families or {})
         _check_panel_family(base, parsed, resolved, families or {})
         _check_ext_family(base, parsed, families or {})
+        _check_adherence(base, parsed, families or {})
         width, height = generation_size(base)
         grid_mp = round(nx * ny * nz * width * height / 1e6)
         if grid_mp >= MAX_GRID_MP:
@@ -442,9 +465,7 @@ def plan_xyz(state: dict, axes: list, options: dict, *, rng: random.Random, fami
         if base["seed"] == -1 and not keep_minus1:
             base["seed"] = rng.randrange(SEED_RANGE)
         fixed = _fix_seed_axes(parsed, resolved, rng, keep_minus1)
-        base["prompt"] = prompt
-        base.update(dict.fromkeys(PROMPT_BOXES, ""))
-        base["loras"] = []
+        base.update(single_prompt(prompt), loras=[])
         searches = [values[0] if axis.spec.id == "prompt_sr" else None for axis, values in zip(parsed, resolved)]
         find_file = xyz_lora.file_finder(_lora_file_list(loras)()) if any(axis.spec.id == "lora" for axis in parsed) else None
         cells = []

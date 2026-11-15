@@ -27,8 +27,12 @@ const MASK_OVERLAY_SLOT = 3; // ForgeNeoSAM3Mask's overlay output
 const FORGE_ATTENTION = "pytorch"; // "Forge처럼": the user's Forge runs --use-pytorch-cross-attention
 export const REFERENCE_METHODS = Object.freeze(["snapref", "ref_adapter"]);
 export const REFERENCE_CORRECTIONS = Object.freeze(["apg", "rescale", "none"]);
+export const REFERENCE_LAYOUTS = Object.freeze(["separate", "stitch"]); // SnapRef v2a, several pictures (studio_state.py)
 export const KREA2_POSITIONS = Object.freeze(["aligned (trained)", "beside (right of target)"]);
 export const INPAINT_FILLS = Object.freeze(["original", "fill", "latent noise", "latent nothing"]);
+// The LoRA card's adherence settings (studio_adherence.py CROSS_ATTN_MODES, LORA_BASE_MAX).
+export const CROSS_ATTN_MODES = Object.freeze(["끔", "교차 어텐션", "교차 어텐션+변조"]);
+export const LORA_BASE_MAX = 90;
 
 function deepFreeze(value) {
   if (value && typeof value === "object") {
@@ -42,6 +46,24 @@ function deepFreeze(value) {
 export const PROMPT_SECTIONS = Object.freeze(["prompt_prefix", "prompt_char_count", "prompt_character", "prompt_copyright", "prompt_artist", "prompt", "prompt_suffix"]);
 const PROMPT_BOXES = PROMPT_SECTIONS.filter((key) => key !== "prompt");
 const EMPTY_PROMPT_BOXES = Object.fromEntries(PROMPT_BOXES.map((key) => [key, ""]));
+// box -> its on/off switch (studio_state.PROMPT_SWITCHES): off, the box keeps its text and stays out of the assembled prompt
+export const PROMPT_SWITCHES = Object.freeze(Object.fromEntries(PROMPT_SECTIONS.map((key) => [key, `${key}_on`])));
+export const NEGATIVE_SWITCH = "negative_on"; // off: the run's negative is empty (studio_state.NEGATIVE_SWITCH)
+// The prompt card's rows, top to bottom, each with its switch (studio_state.BOX_SWITCHES).
+export const BOX_SWITCHES = Object.freeze({ ...PROMPT_SWITCHES, negative: NEGATIVE_SWITCH });
+// Those rows' names on the panel; the presets (preset_logic.js PRESET_LABELS) show the same ones.
+export const BOX_LABELS = Object.freeze({
+  prompt_prefix: "선행 고정",
+  prompt_char_count: "인물 수",
+  prompt_character: "캐릭터",
+  prompt_copyright: "작품",
+  prompt_artist: "작가",
+  prompt: "프롬프트",
+  prompt_suffix: "후행 고정",
+  negative: "네거티브",
+});
+const BOX_SWITCHES_ON = Object.fromEntries(Object.values(BOX_SWITCHES).map((key) => [key, true]));
+export const MOSS_SKIP_LAYER = 22; // studio_state.MOSS_SKIP_LAYER: the block OpenMOSS's sampling skips in the uncond pass
 
 export const DEFAULT_STATE = deepFreeze({
   version: 1,
@@ -50,6 +72,7 @@ export const DEFAULT_STATE = deepFreeze({
   prompt: "",
   negative: "",
   ...EMPTY_PROMPT_BOXES,
+  ...BOX_SWITCHES_ON,
   unet: "",
   te: "",
   vae: "",
@@ -63,10 +86,14 @@ export const DEFAULT_STATE = deepFreeze({
   height: 1216,
   batch: 1,
   loras: [],
+  // LoRA card (pack 1.17.0): the main sampler's first N % of steps without the LoRAs; what the LoRAs leave alone
+  lora_base: 0,
+  lora_cross_attn: CROSS_ATTN_MODES[0],
   negpip: true,
   moss_negpip: false, // MOSS's own switch: on, its tokenizer reads a plain sentence's parentheses as weights
   attention: "launch", // what ComfyUI was started with, else a registered attention function
   moss_stream: true, // MOSS-Image only: the fp32 residual stream
+  moss_layer_skip: true, // MOSS-Image only: the uncond pass skips block 22 (OpenMOSS's sampling); an older panel gets it too
   family_memory: {}, // family -> the model picks and sampling numbers it had when the checkpoint left it
   dora_mode: DORA_MODES[0],
   forge_like: { master: false, noise: true, prompt_syntax: true, dora: true, attention: true },
@@ -80,9 +107,10 @@ export const DEFAULT_STATE = deepFreeze({
     on: false,
     image: "",
     image_2: "", // SnapRef only: another picture of the same character
+    image_3: "", // SnapRef v2a: a third one
     method: REFERENCE_METHODS[0], // Anima's two adapters; Krea2 has its own section
     megapixels: 1.0,
-    snapref: { file: "", mode: "cs", strength: 0.0, fidelity: 1.0, weight_1: 1.0, weight_2: 1.0, guidance_on: true, guidance: 4.5, correction: "apg", ref_end: 1.0, caption: "" },
+    snapref: { file: "", mode: "cs", strength: 0.0, fidelity: 1.0, weight_1: 1.0, weight_2: 1.0, weight_3: 1.0, multi_layout: REFERENCE_LAYOUTS[0], guidance_on: true, guidance: 4.5, correction: "apg", ref_end: 1.0, caption: "" },
     ref_adapter: { file: "", strength: 1.0, guidance: 4.5, correction: "apg", ref_end: 1.0 },
     krea2: { file: "", strength: 1.0, grounding_px: 768, boost: 1.0, position: KREA2_POSITIONS[0] },
   },
@@ -93,6 +121,7 @@ export const DEFAULT_STATE = deepFreeze({
 });
 
 const SECTIONS = new Set(["forge_like", "hires", "upscale", "sam3", "i2i"]);
+const SWITCHES = new Set(["moss_layer_skip", ...Object.values(BOX_SWITCHES)]); // studio_state._bool: anything but a boolean is the default
 const REFERENCE_SECTIONS = ["snapref", "ref_adapter", "krea2"];
 const POST_SECTIONS = Object.freeze({ upscale: "upscale", hires: "hires", sam3: "sam3" });
 // Post runs route the image around the stages they do not use, so e.g. an upscale never takes a VAE round trip.
@@ -121,6 +150,13 @@ function normalizeReference(raw) {
 }
 
 /** A complete copy of `state`: missing keys (an older saved state) come from DEFAULT_STATE, unknown keys are dropped. */
+/** studio_state's lora_base: a whole percent in 0..LORA_BASE_MAX (a bool or a non-number is 0). */
+function loraBase(value) {
+  const number = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof number !== "number" || !Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(LORA_BASE_MAX, Math.trunc(number)));
+}
+
 export function withDefaults(state) {
   const raw = isObject(state) ? state : {};
   const out = structuredClone(DEFAULT_STATE);
@@ -131,6 +167,9 @@ export function withDefaults(state) {
     else if (key === "loras") out.loras = Array.isArray(value) ? value.filter(isObject).map(normalizeLora) : [];
     else if (key === "ext") out.ext = normalizeExt(value);
     else if (key === "reference") out.reference = normalizeReference(value);
+    else if (key === "lora_base") out.lora_base = loraBase(value);
+    else if (key === "lora_cross_attn") out.lora_cross_attn = CROSS_ATTN_MODES.includes(value) ? value : CROSS_ATTN_MODES[0];
+    else if (SWITCHES.has(key)) out[key] = typeof value === "boolean" ? value : DEFAULT_STATE[key];
     else out[key] = structuredClone(value);
   }
   return out;
@@ -152,10 +191,27 @@ function formatG(value) {
 
 const promptEdge = (text) => (typeof text === "string" ? text.replace(/^[ \t\r\n,]+|[ \t\r\n,]+$/g, "") : "");
 
-/** studio_state.assembled_prompt: the boxes in PROMPT_SECTIONS order; with only the main box the prompt exactly as written. */
+/** One box's text as it joins: without its edges, and nothing while its switch is off (a missing switch is on). */
+const promptPart = (state, key) => (state[PROMPT_SWITCHES[key]] === false ? "" : promptEdge(state[key]));
+
+/** studio_state.assembled_prompt: the boxes in PROMPT_SECTIONS order, switched-off ones left out; with only the main box the prompt exactly as written. */
 export function assembledPrompt(state) {
-  if (!PROMPT_BOXES.some((key) => promptEdge(state[key]))) return state.prompt || "";
-  return PROMPT_SECTIONS.map((key) => promptEdge(state[key])).filter(Boolean).join(", ");
+  if (!PROMPT_BOXES.some((key) => promptPart(state, key))) return state[PROMPT_SWITCHES.prompt] === false ? "" : state.prompt || "";
+  return PROMPT_SECTIONS.map((key) => promptPart(state, key)).filter(Boolean).join(", ");
+}
+
+/** studio_state.effective_negative: the negative a run uses, nothing while its switch is off (a missing switch is on). */
+export const effectiveNegative = (state) => (state[NEGATIVE_SWITCH] === false ? "" : state.negative || "");
+
+/**
+ * A button that puts a trigger text into the prompt ("트리거 넣기"): in front of the main box, unless the run already has it
+ * (some box that is on holds it). The main box is switched on: a trigger in a box the run leaves out would never reach the
+ * model, and the button would add it again at every press. Text the box already holds is not doubled. Mutates `state`.
+ */
+export function addPromptTrigger(state, trigger) {
+  if (assembledPrompt(state).includes(trigger)) return;
+  if (!String(state.prompt ?? "").includes(trigger)) state.prompt = [trigger, state.prompt].filter(Boolean).join(" ");
+  state[PROMPT_SWITCHES.prompt] = true;
 }
 
 /** studio_state.effective_prompt: the assembled prompt plus `<lora:name:strength>` for enabled list LoRAs not already tagged (R3). */
@@ -363,7 +419,7 @@ export function loraTagNames(state) {
   const s = withDefaults(state);
   const names = [];
   for (const match of effectivePrompt(s).matchAll(/<(\w+):([^>]+)>/g)) if (match[1] === "lora") names.push(loraTagName(match[2]));
-  for (const match of (s.negative || "").matchAll(/<(lora):([^>]+)>/gi)) if (match[1] === "lora") names.push(loraTagName(match[2]));
+  for (const match of effectiveNegative(s).matchAll(/<(lora):([^>]+)>/gi)) if (match[1] === "lora") names.push(loraTagName(match[2]));
   return [...new Set(names.filter(Boolean))];
 }
 
@@ -389,7 +445,7 @@ const NEGATIVE_WEIGHT = /:\s*-\s*\d[\d.]*\s*\)/;
 /** True when the prompt or negative uses a negative attention weight `(x:-1.0)`, which only NegPiP makes sense of. */
 export function hasNegativeWeights(state) {
   const s = withDefaults(state);
-  return NEGATIVE_WEIGHT.test(assembledPrompt(s)) || NEGATIVE_WEIGHT.test(s.negative);
+  return NEGATIVE_WEIGHT.test(assembledPrompt(s)) || NEGATIVE_WEIGHT.test(effectiveNegative(s));
 }
 
 const PROMPT_WEIGHT = /\((?:[^()]|\([^()]*\))*:\s*-?(?:\d+\.?\d*|\.\d+)\s*\)/; // a tag's own `(series)` may sit inside
@@ -414,7 +470,7 @@ function passPrompts(s, action) {
 /** True when a prompt has an explicit `(x:1.2)`: Krea2's encoder reads it as words, and MOSS's without NegPiP. `action`: as in missingPicks. */
 export function hasPromptWeights(state, action = null) {
   const s = withDefaults(state);
-  return [assembledPrompt(s), s.negative, ...passPrompts(s, action)].filter(Boolean).some(hasWeight);
+  return [assembledPrompt(s), effectiveNegative(s), ...passPrompts(s, action)].filter(Boolean).some(hasWeight);
 }
 
 /** True when a Hires or SAM3 pass has a prompt of its own on 3.8B: the node encodes it without the v2 connector. */
@@ -440,7 +496,7 @@ const MAYBE_WILDCARD = /__|~\/|\{[^{}]*\|/;
 /** True when the run may hold a wildcard, so its prompts should go to `/wildcards/expand`, which has the final word. */
 export function mayHaveWildcards(state) {
   const s = withDefaults(state);
-  return [assembledPrompt(s), s.negative, s.hires.prompt, s.hires.negative, s.sam3.inpaint_prompt, s.sam3.negative_prompt,
+  return [assembledPrompt(s), effectiveNegative(s), s.hires.prompt, s.hires.negative, s.sam3.inpaint_prompt, s.sam3.negative_prompt,
     s.ext.sam3_refine.inpaint_prompt, s.ext.sam3_refine.negative_prompt, s.ext.sam3_tile.inpaint_prompt, s.ext.sam3_tile.negative_prompt]
     .some((text) => MAYBE_WILDCARD.test(text || ""));
 }
@@ -474,6 +530,15 @@ export const effectiveAttention = (s) => (s.forge_like.master && s.forge_like.at
 
 /** An inpaint run: the detailer draws it, from the original pixels as Forge does, and the main sampler does not run. */
 export const inpaintByDetailer = (s) => s.tab === "i2i" && s.i2i_mode === "inpaint";
+
+/** studio_state.effective_layer_skip: a run skips MOSS's block 22 in the uncond pass (MOSS only). */
+export const layerSkipOn = (s) => modelFamily(s.unet) === "moss" && s.moss_layer_skip !== false;
+
+/** The Base 먼저 % a run uses: none on an inpaint run (the inpaint detailer, not the main sampler, draws it). */
+export const effectiveLoraBase = (s) => (inpaintByDetailer(s) ? 0 : s.lora_base);
+
+/** The 교차 어텐션 제외 a run uses: Anima only (MOSS and Krea2 have no such layers). */
+export const effectiveCrossAttn = (s) => (modelFamily(s.unet) === "anima" ? s.lora_cross_attn : CROSS_ATTN_MODES[0]);
 
 const inpaintDetailerInputs = (s, generation, seed) => ({
   enabled: true,
@@ -594,8 +659,10 @@ function mainInputs(s, options) {
     family_switch_model: select,
     family_switch_pos: select,
     family_switch_neg: select,
+    moss_stream: { stream: Boolean(s.moss_stream), layer_skip: s.moss_layer_skip !== false }, // the node runs on MOSS only (stageModes)
     shift: { shift: s.shift },
-    lora_stack: { positive: effectivePrompt(s), negative: s.negative },
+    lora_stack: { positive: effectivePrompt(s), negative: effectiveNegative(s) }, // every pass takes its conds from here
+    lora_ctl: { base_percent: effectiveLoraBase(s), cross_attn: effectiveCrossAttn(s) },
     negpip: { enabled: negpipOn(s) },
     dora: { enabled: true, mode: effectiveDoraMode(s) },
     attention: { mode: effectiveAttention(s) },
@@ -603,6 +670,7 @@ function mainInputs(s, options) {
     neg_encode: encode,
     reference_image: { image: choice(s.reference.image) },
     reference_image_2: { image: choice(s.reference.image_2) },
+    reference_image_3: { image: choice(s.reference.image_3) },
     anima_ref: animaRefInputs(s.reference),
     krea2_ref: { ...s.reference.krea2, width: size.width, height: size.height, ...encode },
     latent: {
@@ -687,10 +755,12 @@ export function stageModes(state, postAction = null, options = {}) {
       ? ["unet", "pos_encode", "neg_encode"]
       : ["unet38", "qwen35", "pos_encode38", "neg_encode38"],
   );
-  if (family !== "moss" || !s.moss_stream) bypass.add("moss_stream");
+  if (family !== "moss" || (!s.moss_stream && !layerSkipOn(s))) bypass.add("moss_stream"); // one node carries both MOSS switches
+  if (!effectiveLoraBase(s) && effectiveCrossAttn(s) === CROSS_ATTN_MODES[0]) bypass.add("lora_ctl");
   const reference = referenceRuns(s, family);
   if (!reference) bypass.add("reference_image");
   if (!reference || family !== "anima" || s.reference.method !== "snapref" || !s.reference.image_2) bypass.add("reference_image_2");
+  if (!reference || family !== "anima" || s.reference.method !== "snapref" || !s.reference.image_3) bypass.add("reference_image_3");
   if (!reference || family !== "anima") bypass.add("anima_ref");
   if (!reference || family !== "krea2") bypass.add("krea2_ref");
   if (s.tab === "t2i") bypass.add("i2i_image");
@@ -707,13 +777,13 @@ export function stageModes(state, postAction = null, options = {}) {
  * The state a gallery post-processing run uses: the record's settings (the image's own prompt, seed, models …;
  * keys it lacks come from the current state) with the post-processing sections from the current state, only the
  * `action`'s stage on (spec §4). A record without `loras` or the prompt boxes (read from `parameters`) already has them
- * in the prompt.
+ * in the prompt, and one without the switches of the boxes and the negative (an older one) was made with all of them in.
  */
 export function postRunState(record, currentState, action) {
   const current = withDefaults(currentState);
   const generation = { ...(isObject(record) ? record : {}) };
   for (const section of Object.values(POST_SECTIONS)) delete generation[section];
-  const merged = withDefaults({ ...current, loras: [], ...EMPTY_PROMPT_BOXES, ...generation });
+  const merged = withDefaults({ ...current, loras: [], ...EMPTY_PROMPT_BOXES, ...BOX_SWITCHES_ON, ...generation });
   for (const section of Object.values(POST_SECTIONS)) {
     merged[section] = { ...current[section], on: POST_SECTIONS[action] === section };
   }

@@ -5,11 +5,18 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { ExifView } from "./exif_view.js";
+import { loraApi } from "./lora_api.js";
+import { openLoraBrowser } from "./lora_browser.js";
+import { setImageAsLoraPreview } from "./lora_preview.js";
+import { appendTrigger } from "./lora_names.js";
 import { PanelView } from "./panel_view.js";
+import { wirePresets } from "./preset_panel.js";
+import { createPresetTools } from "./preset_tools.js";
 import { ResultView } from "./result_view.js";
 import { NOTICES, RunController } from "./run_controller.js";
 import { refFromValue } from "./studio_dom.js";
 import { engineRoomCollapsed, toggleEngineRoom } from "./studio_engine_room.js";
+import { unetFamily } from "./studio_logic.js";
 import { readPngText } from "./studio_pnginfo.js";
 import { ROLE_PROPERTY } from "./studio_roles.js";
 import { XyzView } from "./xyz_view.js";
@@ -90,6 +97,21 @@ function choices(kind, fresh = false) {
   return choiceCache.get(kind).request;
 }
 
+const loraRoutes = loraApi(route, (path) => api.apiURL(ROUTE + path));
+// Prompt-box presets: one store for the page; a box's name on the panel opens its quick list, "프리셋 관리…" the window.
+const presets = wirePresets(createPresetTools(route), { panel: () => viewOf(PANEL), notice });
+
+/**
+ * The LoRA picker window (lora_browser.js) for the panel's LoRA card: `opts` = {mode, current, strength, onPick, onUnpick,
+ * onPickMany} pass through; the routes, the panel checkpoint's family and "작가 칸에 넣기" (into 작가) are added here.
+ */
+function loraBrowser({ mode, current, strength, onPick, onUnpick, onPickMany } = {}) {
+  const panel = viewOf(PANEL);
+  const onTrigger = panel ? (text) => panel.set((s) => { s.prompt_artist = appendTrigger(s.prompt_artist, text); }, true) : undefined;
+  const family = unetFamily(panel?.state.unet, loaded.families);
+  return openLoraBrowser({ mode, current, strength, onPick, onUnpick, onPickMany, onTrigger, family, api: loraRoutes });
+}
+
 /** A node class's inputs from `/object_info/<class>` (its COMBO file lists); throws on an HTTP error. */
 async function nodeInputs(comfyClass) {
   const response = await api.fetchApi(`/object_info/${encodeURIComponent(comfyClass)}`);
@@ -167,6 +189,7 @@ const imageNode = (role) => ({
 const i2i = { ...imageNode("i2i_image"), maskEditor: () => openMaskEditor() };
 const reference = imageNode("reference_image");
 const reference2 = imageNode("reference_image_2");
+const reference3 = imageNode("reference_image_3");
 
 /** `{width, height}` of a picked image file (Forge's send-to size), or `{}` when the browser cannot decode it. */
 async function fileImageSize(file) {
@@ -226,6 +249,10 @@ async function galleryAction(name, item) {
       if (result?.queued) viewOf(PANEL)?.setSeed(result.seed); // the panel keeps that seed too, like Forge's ♻
       return;
     }
+    if (name === "lora_preview") {
+      await setImageAsLoraPreview(item, { readText: readParameters, entries: async () => (await choices("loras")).items || [], api: loraRoutes, notice });
+      return;
+    }
     await controller.runPost(name, item);
   } catch (error) {
     notice(String(error?.message || error));
@@ -271,12 +298,16 @@ function contextFor(comfyClass) {
       i2i,
       reference,
       reference2,
+      reference3,
+      loraBrowser,
       hasRole: (role) => roleNodes().has(role),
+      boxLabel: presets.boxLabel,
+      boxPreset: presets.boxPreset,
     };
   }
   if (comfyClass === RESULT) return { imageUrl, action: galleryAction, selected: (image) => emit("selected", { image }) };
   if (comfyClass === EXIF) return { imageUrl, readImage, pullSettings };
-  return { choices, plan: (body) => route("/xyz/plan", body), getState: () => viewOf(PANEL)?.getState() || {} };
+  return { choices, loraBrowser, plan: (body) => route("/xyz/plan", body), getState: () => viewOf(PANEL)?.getState() || {} };
 }
 
 // ---------------------------------------------------------------------------------------------- ComfyUI hooks
@@ -376,12 +407,14 @@ app.registerExtension({
     });
     dom.serialize = false; // not in widgets_values: the hidden STRING widget holds the saved state
     views.set(node, view);
+    if (node.comfyClass === PANEL) presets.load(); // once: the names' marks appear when the presets arrive
     fixSize(node, spec);
     chain(node, "onConfigure", () => {
       view.load?.(); // widgets_values were just restored into the hidden widget
       fixSize(node, spec);
     });
     chain(node, "onRemoved", () => {
+      if (node.comfyClass === PANEL) presets.close(); // the quick list hangs under a name of this panel
       views.delete(node);
       view.dispose?.();
     });

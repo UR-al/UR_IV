@@ -12,6 +12,14 @@
     "prompt_copyright": "",
     "prompt_artist": "",
     "prompt_suffix": "",
+    "prompt_prefix_on": true,
+    "prompt_char_count_on": true,
+    "prompt_character_on": true,
+    "prompt_copyright_on": true,
+    "prompt_artist_on": true,
+    "prompt_on": true,
+    "prompt_suffix_on": true,
+    "negative_on": true,
     "unet": "",
     "te": "",
     "vae": "",
@@ -25,10 +33,13 @@
     "height": 1216,
     "batch": 1,
     "loras": [],
+    "lora_base": 0,
+    "lora_cross_attn": "끔",
     "negpip": true,
     "moss_negpip": false,
     "attention": "launch",
     "moss_stream": true,
+    "moss_layer_skip": true,
     "family_memory": {},
     "dora_mode": "LyCORIS fp32 (as trained)",
     "forge_like": {
@@ -137,6 +148,7 @@
       "on": false,
       "image": "",
       "image_2": "",
+      "image_3": "",
       "method": "snapref",
       "megapixels": 1.0,
       "snapref": {
@@ -146,6 +158,8 @@
         "fidelity": 1.0,
         "weight_1": 1.0,
         "weight_2": 1.0,
+        "weight_3": 1.0,
+        "multi_layout": "separate",
         "guidance_on": true,
         "guidance": 4.5,
         "correction": "apg",
@@ -277,6 +291,19 @@
         "skim_end_percent": 1.0,
         "skim_flip_at": 0.0
       },
+      "cfg_schedule": {
+        "on": false,
+        "start_cfg": 5.0,
+        "end_percent": 40,
+        "curve": "코사인"
+      },
+      "emphasis": {
+        "on": false,
+        "words": "",
+        "multiplier": 2.0,
+        "start_percent": 0,
+        "end_percent": 40
+      },
       "detail_daemon": {
         "on": false,
         "dd_amount": 0.1,
@@ -334,6 +361,7 @@
       },
       "degrid": {
         "on": false,
+        "engine": "NAFNet",
         "model": "auto",
         "mode": "Full",
         "strength": 1.0,
@@ -599,6 +627,353 @@
         ]
       },
       "expected": "pre, 1boy, hero, game, @a, main, post <lora:meow:0.7>"
+    },
+    {
+      "state": {
+        "prompt": "1girl",
+        "prompt_prefix": "best",
+        "prompt_suffix": "highres",
+        "prompt_prefix_on": false,
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "1girl, highres <lora:meow:0.7>"
+    },
+    {
+      "state": {
+        "prompt": "1girl",
+        "prompt_prefix": "best",
+        "prompt_suffix": "<lora:meow:1>",
+        "prompt_suffix_on": false,
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "best, 1girl <lora:meow:0.7>"
+    },
+    {
+      "state": {
+        "prompt": "1girl, \n",
+        "prompt_prefix": "best",
+        "prompt_suffix": "highres",
+        "prompt_prefix_on": false,
+        "prompt_suffix_on": false
+      },
+      "expected": "1girl, \n"
+    },
+    {
+      "state": {
+        "prompt": "1girl,",
+        "prompt_prefix": "best",
+        "prompt_artist": "@a",
+        "prompt_suffix": "highres",
+        "prompt_prefix_on": false,
+        "prompt_suffix_on": "no"
+      },
+      "expected": "@a, 1girl, highres"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_prefix_on": false
+      },
+      "expected": "1boy, hero, game, @a, main, post"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_char_count_on": false
+      },
+      "expected": "pre, hero, game, @a, main, post"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_character_on": false
+      },
+      "expected": "pre, 1boy, game, @a, main, post"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_copyright_on": false
+      },
+      "expected": "pre, 1boy, hero, @a, main, post"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_artist_on": false
+      },
+      "expected": "pre, 1boy, hero, game, main, post"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_on": false
+      },
+      "expected": "pre, 1boy, hero, game, @a, post"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_suffix_on": false
+      },
+      "expected": "pre, 1boy, hero, game, @a, main"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_character_on": false,
+        "prompt_copyright_on": false,
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "pre, 1boy, @a, main, post <lora:meow:0.7>"
+    },
+    {
+      "state": {
+        "prompt": "1girl, \n",
+        "prompt_on": false
+      },
+      "expected": ""
+    },
+    {
+      "state": {
+        "prompt": "1girl <lora:meow:1>",
+        "prompt_on": false,
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "<lora:meow:0.7>"
+    },
+    {
+      "state": {
+        "prompt": "1girl,",
+        "prompt_artist": "@a,",
+        "prompt_on": false
+      },
+      "expected": "@a"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_prefix_on": false,
+        "prompt_char_count_on": false,
+        "prompt_character_on": false,
+        "prompt_copyright_on": false,
+        "prompt_artist_on": false,
+        "prompt_on": false,
+        "prompt_suffix_on": false,
+        "negative_on": false
+      },
+      "expected": ""
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_prefix_on": false,
+        "prompt_char_count_on": false,
+        "prompt_character_on": false,
+        "prompt_copyright_on": false,
+        "prompt_artist_on": false,
+        "prompt_on": false,
+        "prompt_suffix_on": false,
+        "negative_on": false,
+        "loras": [
+          {
+            "on": true,
+            "name": "meow",
+            "strength": 0.7
+          }
+        ]
+      },
+      "expected": "<lora:meow:0.7>"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_prefix_on": true,
+        "prompt_char_count_on": true,
+        "prompt_character_on": true,
+        "prompt_copyright_on": true,
+        "prompt_artist_on": true,
+        "prompt_on": true,
+        "prompt_suffix_on": true,
+        "negative_on": true
+      },
+      "expected": "pre, 1boy, hero, game, @a, main, post"
+    },
+    {
+      "state": {
+        "prompt_prefix": "pre",
+        "prompt_char_count": "1boy",
+        "prompt_character": "hero",
+        "prompt_copyright": "game",
+        "prompt_artist": "@a",
+        "prompt": "main",
+        "prompt_suffix": "post",
+        "prompt_on": "no",
+        "prompt_artist_on": 0,
+        "negative_on": false
+      },
+      "expected": "pre, 1boy, hero, game, @a, main, post"
+    },
+    {
+      "state": {
+        "prompt": "1girl, \n",
+        "prompt_prefix_on": false,
+        "prompt_char_count_on": false,
+        "prompt_character_on": false,
+        "prompt_copyright_on": false,
+        "prompt_artist_on": false,
+        "prompt_suffix_on": false,
+        "prompt_prefix": "x",
+        "prompt_char_count": "x",
+        "prompt_character": "x",
+        "prompt_copyright": "x",
+        "prompt_artist": "x",
+        "prompt_suffix": "x"
+      },
+      "expected": "1girl, \n"
+    }
+  ],
+  "effective_negative": [
+    {
+      "state": {
+        "negative": "bad hands, \n"
+      },
+      "expected": "bad hands, \n"
+    },
+    {
+      "state": {
+        "negative": "bad hands, \n",
+        "negative_on": true
+      },
+      "expected": "bad hands, \n"
+    },
+    {
+      "state": {
+        "negative": "bad hands, \n",
+        "negative_on": false
+      },
+      "expected": ""
+    },
+    {
+      "state": {
+        "negative": "bad hands",
+        "negative_on": "no"
+      },
+      "expected": "bad hands"
+    },
+    {
+      "state": {
+        "negative": "bad hands",
+        "negative_on": 0
+      },
+      "expected": "bad hands"
+    },
+    {
+      "state": {
+        "negative": "",
+        "negative_on": false
+      },
+      "expected": ""
+    },
+    {
+      "state": {
+        "negative_on": false
+      },
+      "expected": ""
+    },
+    {
+      "state": {},
+      "expected": ""
     }
   ],
   "unet_family": [
@@ -748,6 +1123,38 @@
       ],
       "missing": [
         "e10"
+      ]
+    },
+    {
+      "state": {
+        "prompt": "<lora:meow:1>",
+        "prompt_artist": "<lora:gone:1>",
+        "negative": "<lora:neg:1>",
+        "prompt_artist_on": false,
+        "negative_on": false
+      },
+      "available": [
+        "meow.safetensors",
+        "sub\\na-e10.safetensors",
+        "Styles/Ink.pt",
+        "na-e100.safetensors"
+      ],
+      "missing": []
+    },
+    {
+      "state": {
+        "prompt": "<lora:gone:1>",
+        "prompt_on": false,
+        "negative": "<lora:neg:1>"
+      },
+      "available": [
+        "meow.safetensors",
+        "sub\\na-e10.safetensors",
+        "Styles/Ink.pt",
+        "na-e100.safetensors"
+      ],
+      "missing": [
+        "neg"
       ]
     }
   ],
@@ -1991,6 +2398,73 @@
       "Skim CFG"
     ],
     [
+      "ext.cfg_schedule.on",
+      "[CFG 스케줄] 켜기",
+      "bool",
+      [],
+      "CFG 스케줄"
+    ],
+    [
+      "ext.cfg_schedule.start_cfg",
+      "[CFG 스케줄] 초반 CFG",
+      "float",
+      [],
+      "CFG 스케줄"
+    ],
+    [
+      "ext.cfg_schedule.end_percent",
+      "[CFG 스케줄] 끝 %",
+      "int",
+      [],
+      "CFG 스케줄"
+    ],
+    [
+      "ext.cfg_schedule.curve",
+      "[CFG 스케줄] 곡선",
+      "choice",
+      [
+        "코사인",
+        "선형",
+        "계단"
+      ],
+      "CFG 스케줄"
+    ],
+    [
+      "ext.emphasis.on",
+      "[단어 주목] 켜기",
+      "bool",
+      [],
+      "단어 주목"
+    ],
+    [
+      "ext.emphasis.words",
+      "[단어 주목] 단어",
+      "lines",
+      [],
+      "단어 주목"
+    ],
+    [
+      "ext.emphasis.multiplier",
+      "[단어 주목] 배수",
+      "float",
+      [],
+      "단어 주목"
+    ],
+    [
+      "ext.emphasis.start_percent",
+      "[단어 주목] 시작 %",
+      "int",
+      [],
+      "단어 주목"
+    ],
+    [
+      "ext.emphasis.end_percent",
+      "[단어 주목] 끝 %",
+      "int",
+      [],
+      "단어 주목"
+    ],
+    [
       "ext.detail_daemon.on",
       "[Detail Daemon] 켜기",
       "bool",
@@ -2319,6 +2793,16 @@
       "[VAE DeGrid] 켜기",
       "bool",
       [],
+      "VAE DeGrid"
+    ],
+    [
+      "ext.degrid.engine",
+      "[VAE DeGrid] 엔진",
+      "choice",
+      [
+        "NAFNet",
+        "Nyquist (ComfyUI-DeGrid)"
+      ],
       "VAE DeGrid"
     ],
     [

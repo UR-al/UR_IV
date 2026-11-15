@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { baseItems, epochText, fileItems, loraWithDefaults, newLoraBlock, refillFiles } from "../web/ai_studio/xyz_lora_view.js";
+import { addPickedRows, baseItems, epochText, fileItems, loraWithDefaults, newLoraBlock, refillFiles, refaceFiles, rowFaceOf } from "../web/ai_studio/xyz_lora_view.js";
 import { optionItems } from "../web/ai_studio/studio_dom.js";
 import { XYZ_AXES, XyzView, xyzWithDefaults } from "../web/ai_studio/xyz_view.js";
 
@@ -99,6 +99,7 @@ function bareView(settings, answer, state = {}) {
   const view = Object.create(XyzView.prototype);
   view.settings = xyzWithDefaults(settings);
   view.choices = {};
+  view.typed = new Set();
   view.loraColumns = {};
   view.renders = 0;
   view.render = () => { view.renders += 1; view.baseLoras = baseItems(view.ctx.getState()); };
@@ -207,13 +208,18 @@ test("a panel that gained a LoRA while the list loaded is still seen", async () 
   assert.equal(view.renders, 1);
 });
 
-test("swapping axes closes an open value picker", () => {
-  const view = bareView({ axes: [{ axis: "sampler", text: "" }, { axis: "lora", text: "" }] }, {});
+test("swapping axes takes a list axis' 직접 입력 along; picking a type ends only that axis' own", () => {
+  const view = bareView({ axes: [{ axis: "sampler", text: "" }, { axis: "lora", text: "" }, { axis: "scheduler", text: "" }] }, {});
   view.widget = null;
-  view.picker = 0;
+  view.typed = new Set([0]);
   view.swapAxes(0, 1);
-  assert.equal(view.picker, -1);
-  assert.deepEqual(view.settings.axes.map((entry) => entry.axis), ["lora", "sampler", "nothing"]);
+  assert.deepEqual([...view.typed], [1]);
+  assert.deepEqual(view.settings.axes.map((entry) => entry.axis), ["lora", "sampler", "scheduler"]);
+  view.typed.add(2);
+  view.pickAxis(2, "vae");
+  assert.deepEqual([...view.typed], [1]);
+  view.swapAxes(1, 2);
+  assert.deepEqual([...view.typed], [2]);
 });
 
 test("picking the LoRA axis starts a block on the panel's first LoRA and keeps an existing one", async () => {
@@ -225,4 +231,65 @@ test("picking the LoRA axis starts a block on the panel's first LoRA and keeps a
   view.pickAxis(0, "steps");
   view.pickAxis(0, "lora");
   assert.equal(view.settings.axes[0].lora.find, "@a");
+});
+
+const block3 = () => ({ find: "@a", after: true, rows: [{ ...EMPTY_ROW, lora: "base" }, { ...EMPTY_ROW, lora: "x-000001", trigger: "@x" }] });
+
+test("addPickedRows fills the empty last row first", () => {
+  const block = block3();
+  block.rows.push({ ...EMPTY_ROW });
+  const out = addPickedRows(block, [{ name: "r-000010" }, { name: "r-000020" }, { name: "r-000030" }]);
+  assert.equal(out, block);
+  assert.deepEqual(block.rows.map((row) => row.lora), ["base", "x-000001", "r-000010", "r-000020", "r-000030"]);
+  assert.deepEqual(block.rows[3], { ...EMPTY_ROW, lora: "r-000020" });
+});
+
+test("addPickedRows keeps base row and existing rows", () => {
+  const block = block3();
+  const before = JSON.parse(JSON.stringify(block));
+  addPickedRows(block, [{ name: "r-000010" }, { name: "r-000020" }]);
+  assert.deepEqual(block.rows.slice(0, 2), before.rows);
+  assert.deepEqual(block.rows.slice(2).map((row) => row.lora), ["r-000010", "r-000020"]);
+  assert.equal(block.find, "@a");
+  assert.equal(block.after, true);
+  // a base row that is still empty is not filled: only rows after it are
+  const lone = newLoraBlock();
+  addPickedRows(lone, [{ name: "q" }]);
+  assert.deepEqual(lone.rows.map((row) => row.lora), ["", "q"]);
+  assert.equal(addPickedRows(block3(), []).rows.length, 2);
+});
+
+test("picked names are stems (same as before)", () => {
+  const block = block3();
+  addPickedRows(block, [{ name: fileItems(["LoKr\\run\\r-000010.safetensors"])[0].value }]);
+  assert.equal(block.rows.at(-1).lora, "r-000010");
+  assert.deepEqual(block.rows.at(-1), { ...EMPTY_ROW, lora: "r-000010" });
+});
+
+test("rowFaceOf shows the short name of the row's file, also a folder-form name", () => {
+  const entries = ["LoKr\\run\\r-000010.safetensors", "A\\same.safetensors", "B\\same.safetensors"];
+  assert.equal(rowFaceOf("r-000010", entries).missing, false);
+  assert.equal(rowFaceOf("r-000010", entries).title, entries[0]);
+  assert.equal(rowFaceOf("B/same", entries).title, entries[2]);
+  assert.equal(rowFaceOf("", entries).text, "[LoRA]");
+  assert.equal(rowFaceOf("gone", entries).missing, true);
+  assert.equal(rowFaceOf("gone", []).missing, false);
+});
+
+test("refaceFiles updates the drawn row buttons in place when the list arrives", () => {
+  const classes = new Set();
+  const text = { textContent: "x" };
+  const button = {
+    title: "",
+    getAttribute: () => "r-000010",
+    classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+    querySelector: () => text,
+  };
+  const root = { querySelectorAll: () => [button] };
+  refaceFiles(root, ["run\\r-000010.safetensors"]);
+  assert.equal(button.title, "run\\r-000010.safetensors");
+  assert.equal(classes.has("missing"), false);
+  refaceFiles(root, ["other.safetensors"]);
+  assert.equal(classes.has("missing"), true);
+  assert.match(text.textContent, /없음/);
 });

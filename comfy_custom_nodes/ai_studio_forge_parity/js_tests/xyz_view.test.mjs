@@ -1,10 +1,11 @@
-// node:test for the XYZ panel's pure helpers (web/ai_studio/xyz_view.js); the DOM part is checked in a browser (Task 14).
+// node:test for the XYZ panel's pure helpers (web/ai_studio/xyz_view.js); the drawn panel is in xyz_view_scroll.test.mjs and
+// the value blocks (CSV reading and writing) in xyz_chips.test.mjs.
 // Run: cd frontend && npm run test:pack
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { DEFAULT_XYZ, XYZ_AXES, XyzView, csvField, estimateText, toggleLine, xyzWithDefaults } from "../web/ai_studio/xyz_view.js";
+import { DEFAULT_XYZ, XYZ_AXES, XyzView, estimateText, xyzWithDefaults } from "../web/ai_studio/xyz_view.js";
 
 test("설정 가져오기 puts the image's plot in the panel and its widget", () => {
   const view = Object.create(XyzView.prototype);
@@ -21,7 +22,7 @@ test("설정 가져오기 puts the image's plot in the panel and its widget", ()
   view.pullSettings(saved);
   assert.equal(view.settings.on, true);
   assert.deepEqual(view.settings.axes[0], { axis: "steps", text: "20,30" });
-  assert.deepEqual(calls, [{ rerender: true }, "loras"]);
+  assert.deepEqual(calls, [{ rerender: true, fresh: true }, "loras"]); // fresh: another plot, its value boxes start at the top
 });
 
 /** `[{id, label, kind, choices}]` read from the `_axis(...)` calls of xyz_axes.py. */
@@ -65,16 +66,6 @@ test("estimateText multiplies the used axes' value counts", () => {
   assert.equal(estimateText(axes, { x: ["a", "b", "c", "d"], y: ["1", "2", "3"], z: [""] }), "4 × 3 = 12장");
   assert.equal(estimateText([{ axis: "seed" }, { axis: "nothing" }, { axis: "nothing" }], { x: ["1", "2"] }), "2장");
   assert.equal(estimateText([{ axis: "nothing" }, { axis: "nothing" }, { axis: "nothing" }], {}), "1장");
-});
-
-test("toggleLine adds or removes one value line, CSV-quoted when needed", () => {
-  assert.equal(csvField("plain.safetensors"), "plain.safetensors");
-  assert.equal(csvField("a, b"), '"a, b"');
-  assert.equal(csvField('say "hi"'), '"say ""hi"""');
-  assert.equal(toggleLine("", "a.safetensors"), "a.safetensors");
-  assert.equal(toggleLine("a.safetensors\nb.safetensors", "a.safetensors"), "b.safetensors");
-  assert.equal(toggleLine("x\n", "a, b"), 'x\n"a, b"');
-  assert.equal(toggleLine('x\n"a, b"', "a, b"), "x");
 });
 
 // The estimate logic without the DOM: a view object whose element was never drawn (renderEstimate is then a no-op).
