@@ -106,7 +106,7 @@ def _is_box_model(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() == MODEL_SUFFIX and "-world" not in path.stem.lower()
 
 
-def _scan(folder: Path) -> list[Path]:
+def scan_models(folder: Path) -> list[Path]:
     try:
         return sorted((p for p in folder.rglob(f"*{MODEL_SUFFIX}") if _is_box_model(p)), key=lambda p: p.name.lower())
     except OSError:
@@ -123,7 +123,7 @@ def resolve_face_model(name: str) -> Path | None:
         direct = folder / value
         if _is_box_model(direct):
             return direct
-        for candidate in _scan(folder):
+        for candidate in scan_models(folder):
             if candidate.name.lower() == path.name.lower():
                 return candidate
     return None

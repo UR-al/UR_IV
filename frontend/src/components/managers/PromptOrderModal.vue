@@ -3,7 +3,7 @@
     <div class="wc-modal" style="max-width: 680px;">
       <div class="wc-modal-header">
         <h3>프롬프트 섹션 순서</h3>
-        <span class="wc-path">생성 시 합쳐지는 순서를 ↑/↓로 조정. 저장 시 즉시 반영</span>
+        <span class="wc-path">생성 시 합쳐지는 순서와 입력 칸 순서를 ↑/↓로 조정. 저장 시 즉시 반영</span>
         <button class="close-btn" @click="closeOrderManager"><Icon name="close" /></button>
       </div>
       <div class="order-modal-body">

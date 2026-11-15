@@ -66,54 +66,9 @@
       </details>
     </div>
 
-    <!-- 2. CHARACTER & MODEL -->
+    <!-- 2. MODEL -->
     <div id="sec-character" class="glass-card">
-      <div class="card-header">캐릭터 · 모델</div>
-      <div class="input-group">
-        <label>인물 수</label>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.char_count_input" :color-fn="() => 'bc-count'" placeholder="인물수..." />
-        <input v-else type="text" data-prompt-undo v-model="widgets.char_count_input" placeholder="e.g. 1girl, 2girls..." />
-      </div>
-      <div class="input-group autocomplete-wrap">
-        <div class="row label-row">
-          <label>캐릭터 <span v-if="sectionTokens.character" class="tk-badge" :class="tokenBadgeClass(sectionTokens.character)">{{ sectionTokens.character }}t</span></label>
-          <button class="small-btn" @click="openCharPresetModal(); loadCharTags()">프리셋</button>
-        </div>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.character_input" :color-fn="() => 'bc-count'" placeholder="캐릭터..." @open-wildcard="forwardWildcard" />
-        <input v-else type="text" data-prompt-undo v-model="widgets.character_input" placeholder="e.g. hatsune miku"
-          @input="onFieldInput($event, 'character_input')" @keydown="onFieldKey($event, 'character_input')"
-          @click="closeFieldAc" @blur="closeFieldAc(); loadCharTags()" />
-        <div class="char-insight" v-if="charInsight.tags.length > 0">
-          <div class="insight-header">
-            <span class="insight-label"><Icon name="book" /> 공식 태그</span>
-            <button class="insight-apply" @click="applyOfficialTags">전체 적용</button>
-          </div>
-          <div class="insight-tags">
-            <button v-for="tag in charInsight.tags" :key="tag" class="char-tag-chip" @click="insertCharTag(tag)">{{ tag.replace(/_/g, ' ') }}</button>
-          </div>
-        </div>
-        <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('character_input')">
-          <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'character_input')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
-        </div>
-      </div>
-      <div class="input-group autocomplete-wrap">
-        <label>작품 <span v-if="sectionTokens.copyright" class="tk-badge" :class="tokenBadgeClass(sectionTokens.copyright)">{{ sectionTokens.copyright }}t</span></label>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.copyright_input" :color-fn="() => ''" placeholder="작품..." />
-        <input v-else type="text" data-prompt-undo v-model="widgets.copyright_input" placeholder="Copyright / Series..."
-          @input="onFieldInput($event, 'copyright_input')" @keydown="onFieldKey($event, 'copyright_input')"
-          @click="closeFieldAc" @blur="closeFieldAc" />
-        <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('copyright_input')">
-          <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'copyright_input')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
-        </div>
-      </div>
-      <div class="input-group">
-        <div class="row label-row">
-          <label>작가 <span v-if="sectionTokens.artist" class="tk-badge" :class="tokenBadgeClass(sectionTokens.artist)">{{ sectionTokens.artist }}t</span></label>
-          <button class="lock-btn" :class="{ locked: artistLocked }" @click="toggleArtistLock"><Icon :name="artistLocked ? 'lock' : 'unlock'" /></button>
-        </div>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.artist_input" :color-fn="() => ''" placeholder="작가..." />
-        <textarea v-else ref="artistRef" data-prompt-undo v-model="widgets.artist_input" class="auto-grow" placeholder="Artist tags..." @input="autoGrow($event.target)"></textarea>
-      </div>
+      <div class="card-header">모델</div>
       <div v-if="showGenerationFamily" class="input-group generation-family">
         <label>생성 엔진</label>
         <CustomSelect v-model="widgets.generation_family_combo" :options="generationFamilyItems" />
@@ -158,66 +113,128 @@
           <button class="undo-btn" :disabled="redoStack.length === 0" @click="performRedo" title="다시 실행 (Ctrl+Y)"><Icon name="redo" /></button>
         </span>
       </summary>
-      <div class="input-group autocomplete-wrap">
-        <div class="row label-row">
-          <label>메인 태그 <span v-if="sectionTokens.main" class="tk-badge" :class="tokenBadgeClass(sectionTokens.main)">{{ sectionTokens.main }}t</span></label>
-          <div class="ai-btns">
-            <!-- 태그형 출력 AI -->
-            <div class="ai-menu-wrap">
-              <button class="ai-btn ai-menu-btn" @click.stop="toggleAiMenu('tag')" :disabled="ollamaLoading" title="태그를 만드는 AI"><Icon name="sparkles" /> 태그 AI <Icon name="chevron-down" size="12" /></button>
-              <div class="ai-menu" v-if="aiMenu === 'tag'">
-                <button @click="runAi('expand')">태그 확장 <em>연관 태그 추가</em></button>
-                <button @click="runAi('suggest')">유사 태그 <em>비슷한 태그 추천</em></button>
-                <button @click="openNlInput('nl2tags')">자연어 → 태그 <em>문장을 태그로</em></button>
+      <!-- 칸은 프롬프트 섹션 순서(저장 값)대로 놓인다. 슬롯 이름은 core/prompt_order.py 의 키다 -->
+      <PromptSections :order="sectionOrder">
+        <template #char_count>
+          <div class="input-group">
+            <label>인물 수</label>
+            <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.char_count_input" :color-fn="() => 'bc-count'" placeholder="인물수..." />
+            <input v-else type="text" data-prompt-undo v-model="widgets.char_count_input" placeholder="e.g. 1girl, 2girls..." />
+          </div>
+        </template>
+        <template #character>
+          <div class="input-group autocomplete-wrap">
+            <div class="row label-row">
+              <label>캐릭터 <span v-if="sectionTokens.character" class="tk-badge" :class="tokenBadgeClass(sectionTokens.character)">{{ sectionTokens.character }}t</span></label>
+              <button class="small-btn" @click="openCharPresetModal(); loadCharTags()">프리셋</button>
+            </div>
+            <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.character_input" :color-fn="() => 'bc-count'" placeholder="캐릭터..." @open-wildcard="forwardWildcard" />
+            <input v-else type="text" data-prompt-undo v-model="widgets.character_input" placeholder="e.g. hatsune miku"
+              @input="onFieldInput($event, 'character_input')" @keydown="onFieldKey($event, 'character_input')"
+              @click="closeFieldAc" @blur="closeFieldAc(); loadCharTags()" />
+            <div class="char-insight" v-if="charInsight.tags.length > 0">
+              <div class="insight-header">
+                <span class="insight-label"><Icon name="book" /> 공식 태그</span>
+                <button class="insight-apply" @click="applyOfficialTags">전체 적용</button>
+              </div>
+              <div class="insight-tags">
+                <button v-for="tag in charInsight.tags" :key="tag" class="char-tag-chip" @click="insertCharTag(tag)">{{ tag.replace(/_/g, ' ') }}</button>
               </div>
             </div>
-            <!-- 자연어형 출력 AI -->
-            <div class="ai-menu-wrap">
-              <button class="ai-btn ai-menu-btn" @click.stop="toggleAiMenu('nl')" :disabled="ollamaLoading" title="자연어/문장을 만드는 AI"><Icon name="message" /> 자연어 AI <Icon name="chevron-down" size="12" /></button>
-              <div class="ai-menu" v-if="aiMenu === 'nl'">
-                <button @click="runAi('nl_caption')">자연어 캡션 <em>태그 → 영어 문장</em></button>
-                <button @click="openNlInput('nl_scene')">영문 장면묘사 <em>키워드 → 장면</em></button>
-                <button @click="runAi('translate')">한↔영 번역</button>
-                <button @click="runAi('creative')">창의 생성 <em>캐릭터 기반 창작</em></button>
-              </div>
+            <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('character_input')">
+              <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'character_input')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
             </div>
           </div>
-        </div>
-        <div v-if="aiMenu" class="ai-menu-backdrop" @click="aiMenu = ''"></div>
-        <div class="nl-input-row" v-if="showNlInput">
-          <input v-model="nlPrompt" ref="nlInputRef" :placeholder="pendingNlMode === 'nl2tags' ? '자연어 설명을 입력...' : '키워드를 입력...'" @keydown.enter="onNlEnter" class="nl-input" />
-          <button class="ai-btn go" @click="runPendingNl()" :disabled="ollamaLoading">실행</button>
-          <button class="ai-btn" @click="showNlInput = false" title="닫기"><Icon name="close" /></button>
-        </div>
-        <div class="ai-loading" v-if="ollamaLoading"><Icon name="cpu" /> AI 처리 중...</div>
-        <div class="nl-result" v-if="nlResult">
-          <textarea :value="nlResult" readonly class="nl-result-text" rows="4"></textarea>
-          <div class="nl-result-btns">
-            <button class="ai-btn go" @click="copyNlResult" title="복사">복사</button>
-            <button class="ai-btn go" @click="useNlAsMain" title="메인 프롬프트에 넣기">메인에 넣기</button>
-            <button v-if="nlRes" class="ai-btn go" @click="applyNlRes" :title="`추천 해상도 ${nlRes.w}×${nlRes.h} 적용`"><Icon name="crop" /> {{ nlRes.w }}×{{ nlRes.h }}</button>
-            <button class="ai-btn" @click="nlResult = ''; nlRes = null" title="닫기"><Icon name="close" /></button>
+        </template>
+        <template #copyright>
+          <div class="input-group autocomplete-wrap">
+            <label>작품 <span v-if="sectionTokens.copyright" class="tk-badge" :class="tokenBadgeClass(sectionTokens.copyright)">{{ sectionTokens.copyright }}t</span></label>
+            <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.copyright_input" :color-fn="() => ''" placeholder="작품..." />
+            <input v-else type="text" data-prompt-undo v-model="widgets.copyright_input" placeholder="Copyright / Series..."
+              @input="onFieldInput($event, 'copyright_input')" @keydown="onFieldKey($event, 'copyright_input')"
+              @click="closeFieldAc" @blur="closeFieldAc" />
+            <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('copyright_input')">
+              <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'copyright_input')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
+            </div>
           </div>
-        </div>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.main_prompt_text" :color-fn="blockColorClass" placeholder="태그 추가..." @open-wildcard="forwardWildcard" />
-        <textarea v-else ref="mainRef" data-prompt-undo v-model="widgets.main_prompt_text" class="auto-grow" placeholder="메인 태그..."
-          @input="onMainInput($event)" @keydown="onAutoKey($event)" @click="closeFieldAc" @blur="closeFieldAc" rows="3"></textarea>
-        <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('main_prompt_text')">
-          <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'main_prompt_text')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
-        </div>
-      </div>
-      <CompositionControl :model-value="widgets.main_prompt_text || ''" :other-prompts="compositionOtherPrompts" @append="appendComposition" />
-      <RelatedTagsControl :model-value="widgets.main_prompt_text || ''" :other-prompts="compositionOtherPrompts" :block-mode="tagBlockMode" @append="appendComposition" />
-      <div class="input-group">
-        <label>접두 <span v-if="sectionTokens.prefix" class="tk-badge" :class="tokenBadgeClass(sectionTokens.prefix)">{{ sectionTokens.prefix }}t</span></label>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.prefix_prompt_text" :color-fn="blockColorClass" placeholder="선행 추가..." @open-wildcard="forwardWildcard" />
-        <textarea v-else ref="prefixRef" data-prompt-undo v-model="widgets.prefix_prompt_text" class="auto-grow" placeholder="선행..." @input="autoGrow($event.target)"></textarea>
-      </div>
-      <div class="input-group">
-        <label>접미 <span v-if="sectionTokens.suffix" class="tk-badge" :class="tokenBadgeClass(sectionTokens.suffix)">{{ sectionTokens.suffix }}t</span></label>
-        <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.suffix_prompt_text" :color-fn="blockColorClass" placeholder="후행 추가..." @open-wildcard="forwardWildcard" />
-        <textarea v-else ref="suffixRef" data-prompt-undo v-model="widgets.suffix_prompt_text" class="auto-grow" placeholder="후행..." @input="autoGrow($event.target)"></textarea>
-      </div>
+        </template>
+        <template #artist>
+          <div class="input-group">
+            <div class="row label-row">
+              <label>작가 <span v-if="sectionTokens.artist" class="tk-badge" :class="tokenBadgeClass(sectionTokens.artist)">{{ sectionTokens.artist }}t</span></label>
+              <button class="lock-btn" :class="{ locked: artistLocked }" @click="toggleArtistLock"><Icon :name="artistLocked ? 'lock' : 'unlock'" /></button>
+            </div>
+            <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.artist_input" :color-fn="() => ''" placeholder="작가..." />
+            <textarea v-else ref="artistRef" data-prompt-undo v-model="widgets.artist_input" class="auto-grow" placeholder="Artist tags..." @input="autoGrow($event.target)"></textarea>
+          </div>
+        </template>
+        <template #prefix>
+          <div class="input-group">
+            <label>선행 고정 <span v-if="sectionTokens.prefix" class="tk-badge" :class="tokenBadgeClass(sectionTokens.prefix)">{{ sectionTokens.prefix }}t</span></label>
+            <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.prefix_prompt_text" :color-fn="blockColorClass" placeholder="선행 고정 추가..." @open-wildcard="forwardWildcard" />
+            <textarea v-else ref="prefixRef" data-prompt-undo v-model="widgets.prefix_prompt_text" class="auto-grow" placeholder="선행 고정..." @input="autoGrow($event.target)"></textarea>
+          </div>
+        </template>
+        <template #main>
+          <div class="input-group autocomplete-wrap">
+            <div class="row label-row">
+              <label>메인 태그 <span v-if="sectionTokens.main" class="tk-badge" :class="tokenBadgeClass(sectionTokens.main)">{{ sectionTokens.main }}t</span></label>
+              <div class="ai-btns">
+                <!-- 태그형 출력 AI -->
+                <div class="ai-menu-wrap">
+                  <button class="ai-btn ai-menu-btn" @click.stop="toggleAiMenu('tag')" :disabled="ollamaLoading" title="태그를 만드는 AI"><Icon name="sparkles" /> 태그 AI <Icon name="chevron-down" size="12" /></button>
+                  <div class="ai-menu" v-if="aiMenu === 'tag'">
+                    <button @click="runAi('expand')">태그 확장 <em>연관 태그 추가</em></button>
+                    <button @click="runAi('suggest')">유사 태그 <em>비슷한 태그 추천</em></button>
+                    <button @click="openNlInput('nl2tags')">자연어 → 태그 <em>문장을 태그로</em></button>
+                  </div>
+                </div>
+                <!-- 자연어형 출력 AI -->
+                <div class="ai-menu-wrap">
+                  <button class="ai-btn ai-menu-btn" @click.stop="toggleAiMenu('nl')" :disabled="ollamaLoading" title="자연어/문장을 만드는 AI"><Icon name="message" /> 자연어 AI <Icon name="chevron-down" size="12" /></button>
+                  <div class="ai-menu" v-if="aiMenu === 'nl'">
+                    <button @click="runAi('nl_caption')">자연어 캡션 <em>태그 → 영어 문장</em></button>
+                    <button @click="openNlInput('nl_scene')">영문 장면묘사 <em>키워드 → 장면</em></button>
+                    <button @click="runAi('translate')">한↔영 번역</button>
+                    <button @click="runAi('creative')">창의 생성 <em>캐릭터 기반 창작</em></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="aiMenu" class="ai-menu-backdrop" @click="aiMenu = ''"></div>
+            <div class="nl-input-row" v-if="showNlInput">
+              <input v-model="nlPrompt" ref="nlInputRef" :placeholder="pendingNlMode === 'nl2tags' ? '자연어 설명을 입력...' : '키워드를 입력...'" @keydown.enter="onNlEnter" class="nl-input" />
+              <button class="ai-btn go" @click="runPendingNl()" :disabled="ollamaLoading">실행</button>
+              <button class="ai-btn" @click="showNlInput = false" title="닫기"><Icon name="close" /></button>
+            </div>
+            <div class="ai-loading" v-if="ollamaLoading"><Icon name="cpu" /> AI 처리 중...</div>
+            <div class="nl-result" v-if="nlResult">
+              <textarea :value="nlResult" readonly class="nl-result-text" rows="4"></textarea>
+              <div class="nl-result-btns">
+                <button class="ai-btn go" @click="copyNlResult" title="복사">복사</button>
+                <button class="ai-btn go" @click="useNlAsMain" title="메인 프롬프트에 넣기">메인에 넣기</button>
+                <button v-if="nlRes" class="ai-btn go" @click="applyNlRes" :title="`추천 해상도 ${nlRes.w}×${nlRes.h} 적용`"><Icon name="crop" /> {{ nlRes.w }}×{{ nlRes.h }}</button>
+                <button class="ai-btn" @click="nlResult = ''; nlRes = null" title="닫기"><Icon name="close" /></button>
+              </div>
+            </div>
+            <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.main_prompt_text" :color-fn="blockColorClass" placeholder="태그 추가..." @open-wildcard="forwardWildcard" />
+            <textarea v-else ref="mainRef" data-prompt-undo v-model="widgets.main_prompt_text" class="auto-grow" placeholder="메인 태그..."
+              @input="onMainInput($event)" @keydown="onAutoKey($event)" @click="closeFieldAc" @blur="closeFieldAc" rows="3"></textarea>
+            <div class="ac-popup" v-if="!tagBlockMode && ac.isOpenFor('main_prompt_text')">
+              <div v-for="(item, i) in acItems" :key="item.tag" class="ac-item" :class="{ selected: acIdx === i }" @mousedown.prevent="acceptFieldSuggestion(item.tag, 'main_prompt_text')">{{ item.tag }}<span v-if="item.ko" class="ac-ko">{{ item.ko }}</span></div>
+            </div>
+          </div>
+          <CompositionControl :model-value="widgets.main_prompt_text || ''" :other-prompts="compositionOtherPrompts" @append="appendComposition" />
+          <RelatedTagsControl :model-value="widgets.main_prompt_text || ''" :other-prompts="compositionOtherPrompts" :block-mode="tagBlockMode" @append="appendComposition" />
+        </template>
+        <template #suffix>
+          <div class="input-group">
+            <label>후행 고정 <span v-if="sectionTokens.suffix" class="tk-badge" :class="tokenBadgeClass(sectionTokens.suffix)">{{ sectionTokens.suffix }}t</span></label>
+            <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.suffix_prompt_text" :color-fn="blockColorClass" placeholder="후행 고정 추가..." @open-wildcard="forwardWildcard" />
+            <textarea v-else ref="suffixRef" data-prompt-undo v-model="widgets.suffix_prompt_text" class="auto-grow" placeholder="후행 고정..." @input="autoGrow($event.target)"></textarea>
+          </div>
+        </template>
+      </PromptSections>
       <details class="input-group exclude-section">
         <summary class="exclude-toggle">제외 (로컬)
           <span v-if="excludeRuleCount" class="excl-badge">{{ excludeRuleCount }}</span><Icon name="chevron-down" /><button class="excl-mgr-btn" @click.prevent.stop="showExcludeManager = true"><Icon name="search" /> 관리</button></summary>
@@ -295,6 +312,8 @@
 </template>
 
 <script setup lang="ts">
+import PromptSections from './PromptSections.vue'
+import { usePromptOrder } from '../composables/usePromptOrder'
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useWidgetStore, requestAction, whenWidgetValuesLoaded } from '../stores/widgetStore.js'
@@ -332,6 +351,7 @@ function forwardWildcard(name: string | undefined) {
 }
 const store = useWidgetStore()
 const widgets = store.widgets
+const { sectionOrder } = usePromptOrder()
 const route = useRoute()
 const compositionOtherPrompts = computed(() => [
   widgets.char_count_input, widgets.character_input, widgets.copyright_input,

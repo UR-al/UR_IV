@@ -655,7 +655,7 @@ const {
   showProfileManager, profileNames, openProfileManager,
   loadWorkflowProfilesList, loadWorkflowProfile, saveCurrentAsProfile, bind: bindWorkflowProfiles,
 } = useWorkflowProfiles()
-const { showOrderManager, openOrderManager, bind: bindPromptOrder } = usePromptOrder()
+const { showOrderManager, openOrderManager, bind: bindPromptOrder, loadPromptOrder } = usePromptOrder()
 const { showInstantWcManager, openInstantWcManager, bind: bindInstantWildcards } = useInstantWildcards()
 const { showStatsModal, openStatsModal } = useGenStats()
 
@@ -1051,8 +1051,9 @@ onMounted(async () => {
   })
   // 워크플로우 프로파일 목록 수신(workflowProfilesList → useWorkflowProfiles)
   bindWorkflowProfiles()
-  // 프롬프트 섹션 순서 수신(promptOrderLoaded → usePromptOrder)
+  // 프롬프트 섹션 순서 수신(promptOrderLoaded → usePromptOrder). 입력 칸이 이 순서를 따르므로 시작할 때 받는다
   bindPromptOrder()
+  loadPromptOrder()
   // PR 8: 인스턴트 와일드카드 목록 수신(instantWildcardsList → useInstantWildcards)
   bindInstantWildcards()
   // PR 9: 백엔드가 모드별 자동화 설정을 푸시 (백엔드 모드 전환 시). 부팅 값은 아래 hydrate 가 당겨 온다.

@@ -1151,5 +1151,21 @@ class TestVendoredNodeEndToEnd(_TempControlnetFolder, unittest.TestCase):
             node.repair(base, "CLIP", "VAE", source, "animaTileRepair_v20.safetensors", strength=11.0)
 
 
+class BlockCountTests(unittest.TestCase):
+    def test_a_file_for_another_block_count_says_so(self):
+        node = mock.Mock()
+        node.apply.side_effect = RuntimeError("depth_embed slices missing for module idx(es) [112, 113]")
+        vendored = types.SimpleNamespace(AnimaLLLiteApply_sdscripts=lambda: node)
+        with mock.patch.object(anima_lllite, "_vendored_nodes", return_value=vendored),                 self.assertRaisesRegex(RuntimeError, "블록 수가 달라"):
+            anima_lllite.apply_lllite(object(), "x.safetensors", None, 1.0, 0.0, 1.0)
+
+    def test_other_errors_pass_through(self):
+        node = mock.Mock()
+        node.apply.side_effect = RuntimeError("something else")
+        vendored = types.SimpleNamespace(AnimaLLLiteApply_sdscripts=lambda: node)
+        with mock.patch.object(anima_lllite, "_vendored_nodes", return_value=vendored),                 self.assertRaisesRegex(RuntimeError, "something else"):
+            anima_lllite.apply_lllite(object(), "x.safetensors", None, 1.0, 0.0, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -64,12 +64,479 @@ inspector recognises them.
 - `ForgeNeoMossSpectrum` (Spectrum forecasting for MOSS-Image, pack 1.9.0+; see "1.9.0 changes")
 - `ForgeNeoDoraInferenceMode` (sam-extra's DoRA Inference Mode for the DoRA patches on a MODEL, pack 1.9.0+;
   after the LoRA loaders; see "1.9.0 changes")
+- `AIStudioLoraStack` (Anima studio: strips Forge `<lora:name:strength>` tags from the positive/negative prompts and
+  applies them to MODEL and CLIP through `ForgeNeoAnimaLoraLoader`; a LoRA file it cannot find is skipped with one
+  warning line)
+- `AIStudioSaveForge` (Anima studio: saves PNGs with a Forge-style `parameters` chunk built from the studio state
+  (`Steps, Sampler, Schedule type, CFG scale, Shift, Seed, Size, Model, VAE`, plus `Denoising strength` and the `Hires …`
+  keys when they apply) next to ComfyUI's `prompt` / `workflow` chunks, so the app's PNG Info and Forge read the files)
+- `AIStudioUpscaleImage` (Anima studio: `enabled` off passes the image through; on runs Forge's Extras upscale from
+  `studio_upscale.py`: by a factor or to a size, up to two upscale models or Lanczos / Nearest, colour correction, tiles)
+- `AIStudioPromptEncode` (Anima studio: `forge_syntax` off is `CLIPTextEncode`; on, Forge's prompt editing
+  `[a:b:step]` / `[a::step]` / `[:b:step]` / `[a|b]` (nested, `\[` escapes) is worked out for `steps` and each segment
+  is encoded once and set to its share of the steps with `ConditioningSetTimestepRange`; weights `(x:1.2)` are left to
+  the Anima tokenizer, which reads them as Forge's Anima path does. What matches Forge and what does not:
+  `studio_forge_parity.md`)
+- `AIStudioPanel`, `AIStudioResultView`, `AIStudioXYZView`, `AIStudioExifView` (Anima studio: the control panel, the
+  result/gallery view, the X/Y/Z panel and the EXIF panel; the studio JS in `web/ai_studio` draws them, each keeps its state in one hidden `STRING`; no outputs,
+  so ComfyUI never runs them)
+- `AIStudioSwitch` (Anima studio: `select` 0 passes `a`, 1 passes `b`; both inputs are optional and lazy, so only the
+  chosen model family's nodes (2.9B/base or 3.8B) run)
+- `AIStudioTextEncoderLoader` (Anima studio: `CLIPLoader` for the three families; also reads a MOSS text encoder saved with
+  bare `language_model.` / `visual.` keys)
+- `AIStudioAttention` (Anima studio: the attention backend of a MODEL through core's `set_model_optimized_attention`, `launch`
+  = what ComfyUI was started with)
+- `AIStudioInpaintDetailer` (Anima studio: `ForgeNeoSAM3Detailer` for the mask editor's mask, with `mask_blur`, `batch_size` and
+  `tell_empty_mask`)
+- `AIStudioMossStream`, `AIStudioAnimaReference`, `AIStudioKrea2Reference` (Anima studio: thin nodes over the optional
+  ComfyUI-MOSS-Toolkit, SnapRef, ComfyUI-Anima-Ref-Adapter and comfyui-krea2edit packs; bypassed unless the panel uses them.
+  `AIStudioMossStream` also carries MOSS-Image's layer skip, which needs no other pack; see "1.20.0 changes")
+- `AIStudioLoraControl`, `AIStudioCFGSchedule`, `AIStudioWordEmphasis` (Anima studio, 1.17.0: LoRA Base 먼저 / 교차 어텐션 제외,
+  a CFG per step and cross-attention emphasis of listed words; see "1.17.0 changes")
+
+`ForgeNeoKSamplerCNS` and `ForgeNeoHiresFix` also take an optional `forge_noise` input (default off; the app compiler
+never sets it) for the Anima studio's "Forge-like noise": each image's initial noise from its own seed (`seed + i`), as
+Forge Neo draws it, and the sampler seed `(last image seed + 100000) % 65536`, the global seed Forge leaves for SDE
+samplers such as EXP Heun 2 x0 SDE (`studio_forge_noise.py`; not with SPEED).
 
 When the app generates from an ANIMA custom workflow it keeps
 `ForgeNeoLoraBlockWeight` and `ForgeNeoAnimaLoraLoaderModelOnly` in the active
 model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
+
+## 1.21.0 changes
+
+스튜디오의 화면과 그 뒤의 라우트·목록·플래너 검사가 바뀌었다. 노드, 그래프, 패널 상태 키는 그대로라 저장해 둔 워크플로와 예제 `AI Studio Anima.json` 을 다시 만들
+필요가 없다(빌더 출력이 1.20.0 과 바이트 단위로 같다: 노드 65개·링크 132개).
+
+### 프롬프트 프리셋 (1.21.0)
+
+- 프롬프트 카드 여덟 칸(네거티브 포함)의 **이름을 누르면** 그 칸의 프리셋 목록이 이름 아래에 뜬다. 줄을 누르면 칸을 그 프리셋으로
+  바꾸고, 줄 끝의 `+` 는 칸의 글 뒤에 `, ` 로 붙인다. 바꾼 직후 목록을 다시 열면 "되돌리기" 가 있다. `+ 지금 내용 저장` 은 칸의
+  글을 `내 <칸> N` 이름으로 저장한다. 이름을 다시 누르거나 Esc, 바깥을 누르면 닫히고 포커스는 이름으로 돌아온다. ↑/↓ 로 줄을 옮긴다.
+- 목록의 `프리셋 관리…` 는 큰 창을 연다. 칸마다 탭, 프리셋마다 카드(바꾸기 / + 붙이기)가 있고, 오른쪽 칸에서 이름과 내용을 고치고
+  (Ctrl+S), 순서를 바꾸고(↑ 위로 / ↓ 아래로), 지우고, 칸을 비운다. 검색은 이름과 내용을 같이 본다(Ctrl+F). 마지막 변경은 아래 줄의
+  "되돌리기" 로 되돌린다. "넣으면 닫기" 를 켜면 한 번 넣고 창이 닫힌다(켠 상태는 기억한다). 고치던 것이 있으면 닫기 전에 한 번 묻는다.
+- **이름 아래 작은 글**: 칸의 글이 어떤 프리셋과 같으면 그 프리셋 이름, 프리셋에 없는 글이면 `저장 안 됨`, 빈 칸이면 아무것도 없다.
+  비교는 양 끝의 쉼표·공백·줄바꿈을 뺀 글로 한다(합친 프롬프트가 버리는 부분). 글자를 칠 때마다 바로 바뀌고 패널은 다시 그리지
+  않는다. 프리셋을 아직 읽지 않았거나 읽지 못했으면 아무 표시도 하지 않는다. 긴 이름은 … 으로 줄고 마우스를 올리면 전부 보인다.
+  꺼진 칸은 전처럼 줄이 흐려지고 이름이 회색 취소선이며, 아래 글도 회색이 된다.
+- 저장하는 곳: ComfyUI 의 `user/default/ai_studio/` 폴더에 `prompt_presets.json` 파일 하나(`studio_presets.py`). 워크플로와 그림에는 들어가지
+  않는다. 처음에는 비어 있다(기본 프리셋 없음). 변경 하나마다 파일을 읽고 고쳐서 통째로 바꿔 쓴다(임시 파일 → `os.replace`). 그래서
+  브라우저 탭 둘이 서로의 변경을 잃지 않는다. 읽지 못하는 파일(깨진 JSON, 더 새 버전)은 처음 덮어쓰기 전에
+  `prompt_presets.json.bak` 으로 남긴다. 한도: 이름 60자, 내용 20000자, 칸마다 200개.
+- 라우트(`preset_routes.py`, `/aistudio/studio` 아래): `GET /presets` → `{doc, limits, broken}`, `POST /presets` 는 변경 하나
+  `{op: "add" | "update" | "delete" | "move" | "use" | "insert" | "prefs", ...}` → `{doc, limits}`(`add` 는 `id` 도).
+- 웹 파일(`web/ai_studio`): `preset_api.js`(라우트와 스토어), `preset_logic.js`(순수 규칙. Python 쪽과 `preset_logic_golden.json` 으로
+  묶임), `preset_quick.js`(이름 아래 목록), `preset_window.js`·`preset_window_view.js`(창), `preset_dom.js`, `preset_tools.js`(묶음),
+  `preset_panel.js`(패널 배선), `preset.css`.
+- 패널 쪽: `studio_main.js` 가 `createPresetTools(route)` 를 한 번 만들고 `preset_panel.js` `wirePresets` 로 패널에 두 훅을 준다.
+  `ctx.boxLabel(key, anchorEl)` 은 이름 아래에 목록을 열고, `ctx.boxPreset(key, text)` 는 칸의 글과 같은 프리셋(없으면 null, 아직 못
+  읽었으면 undefined)을 답한다. 스토어가 바뀌면 `PanelView.refreshBoxMarks()` 가 이름 아래 글만 다시 채운다. 훅을 주지 않은 패널은
+  전과 같다(이름은 글자, 아래 글 없음).
+- 칸 이름 글자는 `studio_logic.js` `BOX_LABELS` 한 곳에만 있다. 패널과 프리셋(`PRESET_LABELS`)이 같은 표를 쓴다.
+- 처음 여는 목록이 스타일시트보다 먼저 그려져 창 맨 위에 뜨는 일이 없게, 패널이 만들어질 때 `preset.css` 를 미리 부르고 그래도
+  늦으면 도착했을 때 자리를 다시 잡는다.
+
+### XYZ 값 블록 (1.21.0)
+
+- **목록에서 고르는 축**(Sampler, Schedule type, Checkpoint name, VAE, 스위치 축 등)의 값 칸이 블록이다(`xyz_chips.js`,
+  `xyz_chips.css`). 고른 값이 순서대로 놓이고 블록의 ✕ 로 뺀다. 아래 검색 칸을 누르면 아직 넣지 않은 값의 목록이 뜬다(글자를 치면
+  좁혀지고 ↑/↓, Enter, Esc. 빈 칸에서 ⌫ 는 마지막 블록을 뺀다). `전부 넣기` 는 목록 순서대로 전부, `모두 지우기` 는 전부 뺀다.
+  순서는 블록을 끌거나 ✕ 에서 Alt+←/→ 로 바꾼다. 목록에 없는 값은 주황색 ⚠ 블록이다(플래너의 오류는 전처럼 패널 아래에 나온다).
+- **Prompt S/R 과 Prompt order 는 글 블록**이다(`xyz_blocks.js`, `xyz_blocks.css`). 값마다 고칠 수 있는 블록이 하나씩 있다.
+  - Prompt S/R: 첫 블록이 `찾을 글`, 나머지가 `바꿀 글` 이다. Prompt order 는 `조각 1`, `조각 2` … 다.
+  - 블록 안의 쉼표, 따옴표, 공백, 줄바꿈은 전부 그 값의 일부다. 그래서 `blue hair, long hair` 를 `red hair, short hair` 로 바꾸듯
+    여러 태그를 한 번에 바꿔 볼 수 있다.
+  - `+ 블록` 은 끝에 빈 블록을 더한다. 블록 안에서 Enter 는 그 블록 바로 뒤에 새 블록을 연다(Shift+Enter 는 줄바꿈, Ctrl+Enter 는
+    전처럼 생성). ✕ 로 빼고, ↑ ↓ 버튼이나 글 안에서 Alt+↑/↓ 로 순서를 바꾼다. 첫 블록을 빼면 다음 블록이 `찾을 글` 이 된다.
+  - 빈 `바꿀 글` 은 찾은 글을 지우는 칸이다. 값 칸이 비어 있으면 빈 `찾을 글` 블록 하나가 보이고, 글을 쓰기 전에는 아무것도 저장하지
+    않는다.
+  - 상자는 전의 글 칸 높이에서 시작해 블록 수만큼 자라다가 300px 에서 안쪽이 스크롤된다. `+ 블록` 은 목록 위에 있어서 눌러도 자리가
+    움직이지 않는다.
+- **값 글이 원본이다.** 블록은 축의 값 글(`axes[i].text`)을 보여 줄 뿐이고, 고치면 한 줄에 한 값으로 다시 쓴다(쉼표·따옴표·줄바꿈·
+  빈 값은 CSV 따옴표로 감싼다: `"blue hair, long hair"`). 플래너(`xyz_values.split_values`), `parameters` 의 `X Values`, 저장한
+  워크플로와 옛 워크플로가 전과 똑같이 읽는다. 손으로, 또는 Forge 처럼 한 줄에 `"a, b", "c, d"` 라고 쓴 값 칸도 같은 블록으로 보인다.
+  JS(`splitValues`·`csvField`·`stripValue`)와 Python(`split_values`)은 `js_tests/fixtures/xyz_values_golden.json` 한 표로 묶여 있다
+  (`xyz_values_golden.json` 에 여러 태그 값 줄을 더했다).
+- `직접 입력` 스위치는 블록 대신 값 글을 그대로 고치게 한다. 목록 축과 글 블록 축에 있고, 다시 누르면 그 글이 블록으로 돌아온다.
+- 따옴표로 감싼 여러 태그 값은 전에도 플래너가 한 값으로 읽었다(Forge 와 같은 CSV 규칙). 안 됐던 것은 화면이다. 글 칸은 쉼표마다
+  값을 나눴고 따옴표를 쓰면 된다는 말이 어디에도 없었다. 파서는 고치지 않았다.
+- 새 검사 하나: Prompt S/R 의 첫 값(찾을 글)이 비어 있으면 격자를 만들지 않고 알린다
+  (`Prompt S/R: the first value (the text to search for) is empty`). Forge 는 이때 모든 글자 사이에 바꿀 글을 끼워 넣는다.
+- 스크롤과 포커스: 블록을 고치는 동안에는 패널을 다시 그리지 않아서 포커스와 스크롤이 그대로다. 스위치나 축 종류를 바꿔 패널을 다시
+  그릴 때는 `studio_dom.js` `keepScroll` 이 `data-scroll` 키가 같은 상자(XYZ 열, 축마다의 값 칸)를 있던 자리로 되돌린다. 워크플로를
+  열거나 설정 가져오기를 하면 내용이 바뀐 것이므로 열의 위치만 지킨다.
+- 글 블록 목록은 손댄 블록을 따라간다. Enter 로 연 블록, Alt+↑/↓ 나 ↑ ↓ 로 옮긴 블록, ✕ 뒤에 포커스가 간 블록, 치는 동안 줄이
+  늘어난 블록이 목록(300px)의 보이는 곳 밖이면 목록 안쪽만 그 블록이 다 보일 만큼 움직인다. 이미 보이면 움직이지 않는다. 포커스는
+  스크롤 없이 주고(`preventScroll`) `scrollIntoView` 는 쓰지 않으므로 XYZ 열과 캔버스는 그대로다.
+- LoRA 선택 창의 스크롤 두 가지(1.21.0):
+  - 상세 칸은 같은 런을 다시 그릴 때 제자리에 있다.
+  - 카드 목록은 카드를 눌러도 위로 밀리지 않는다. 목록이 줄을 직접 놓기 때문에 브라우저의 스크롤 앵커링이 카드를 누를 때마다
+    목록을 몇 줄씩 올렸다. 목록 상자에서 앵커링을 껐다(`overflow-anchor: none`, `lora_browser_grid.js`).
+  - `최근 사용`(폴더와 정렬)에서는 창이 열려 있는 동안 카드 순서가 바뀌지 않는다. 방금 추가한 LoRA 가 맨 앞으로 튀어 가면 누르던 카드가
+    자리를 옮기기 때문에, 창을 열 때의 순서(`recentShown`, `lora_browser_state.js`)로 보여 준다. 저장하는 최근 목록은 전처럼 바로
+    바뀌고, 창을 다시 열면 새 순서로 보인다.
+
+### 샘플러·스케줄러 목록 순서 (1.21.0)
+
+- ComfyUI 는 팩이 등록한 이름을 목록 끝에 붙여서 `karras` 와 `karras_dynamic`, `beta`·`beta57`·`beta_1_1` 이 멀리 떨어진다.
+  `studio_choices_order.py` `group_similar` 가 첫 낱말이 같은 이름을 한 줄로 모은다(그 안에서는 다음 낱말로 다시 모으고, 짧은 이름이
+  앞: `euler_dy` 가 `euler_dy_cfg_pp` 앞).
+- 이름을 옮기기만 한다. 바꾸거나 더하거나 빼지 않으므로 저장한 패널·워크플로의 값은 그대로 듣는다. `GET /choices` 의 `samplers`,
+  `schedulers` 가 이 순서로 오고, 패널의 고르는 칸과 XYZ 블록의 목록이 같이 따른다.
+
+### 패널 안의 캔버스 단축키 (1.21.0)
+
+- 제어판, XYZ 패널, EXIF 패널 안의 버튼·스위치·고르는 칸에 포커스가 있을 때 누른 Delete, Backspace, `.`, P, Alt+C, Ctrl+B, Ctrl+M,
+  Ctrl+A, Ctrl+Shift+V, Alt+=/+/- 는 ComfyUI 로 나가지 않는다(`studio_dom.js` `guardCanvasKeys`, 패널의 맨 바깥 요소에 한 번).
+  ComfyUI 는 눌린 요소가 캔버스 안에 있고 글 칸이 아니면 이 단축키를 선택된 노드에 실행한다. 패널을 누르면 그 노드가 선택되므로,
+  막지 않으면 Delete 가 패널 노드를 통째로 지운다.
+- 1.21.0 에서 포커스가 그런 자리에 남는 일이 늘어서 넣었다. 프리셋 목록이나 창을 닫으면 포커스가 칸의 이름으로 돌아오고, XYZ 의
+  `직접 입력` 은 누른 뒤에도 포커스를 가진다. 전부터 있던 버튼과 고르는 칸(마우스로 누른 뒤)도 같이 막힌다.
+- 키를 삼키지는 않는다. 나가는 길만 막으므로 고르는 칸에서 글자를 눌러 항목으로 가는 것 같은 브라우저 동작은 그대로다. 글 칸
+  (프롬프트 칸, 숫자 칸, 글 블록)은 제 키를 전부 가진다. 어디서나 듣는 ComfyUI 단축키(Ctrl+Enter 등)는 그대로 지나간다.
+- 결과 노드는 같은 일을 `result_view.js` 가 한다(아래 "갤러리 키보드"). 키 목록은 두 파일이 같다(frontend 1.58 의 캔버스 단축키).
+
+### 갤러리 키보드 (1.21.0)
+
+- 결과 노드를 한 번 누른 뒤(포커스가 노드 안에 있을 때) ←/→ 가 이전/다음 그림, Home/End 가 처음/끝 그림을 고른다. 끝에서는 멈춘다
+  (돌아가지 않음). 썸네일을 누른 것과 똑같이 그림, EXIF 패널, 갤러리 버튼이 따라간다. 글자를 치는 칸 안에서는 그 칸의 키다.
+- 고른 썸네일은 띠 가운데로 미끄러져 온다(양 끝에서는 멈춤, "동작 줄이기" 설정이면 바로 이동). 띠의 `scrollLeft` 만 바꾸고
+  `scrollIntoView` 는 쓰지 않는다.
+- 키 리스너는 노드 자신의 요소에만 있다(document·window 에는 없음). 그래서 캔버스나 다른 패널에서 누른 키는 갤러리에 닿지 않는다.
+  확대 창이 열려 있는 동안에는 확대 창의 키가 먼저다.
+- 노드 안에 포커스가 있을 때 Delete, Backspace 같은 캔버스 단축키는 노드 밖으로 나가지 않는다. ComfyUI 는 눌린 요소가 캔버스 안에
+  있으면 그 단축키를 실행하는데 노드의 DOM 위젯이 그 안이라, 막지 않으면 Delete 가 결과 노드를 갤러리째 지운다. 어디서나 듣는
+  ComfyUI 단축키(Ctrl+Enter 등)는 그대로 지나간다.
+- 포커스 표시는 `result_gallery.css` 가 맡는다(고른 썸네일의 테두리).
+- 확대 창(그림을 눌러 여는 큰 보기)에서 ←/→ 나 옆 버튼으로 넘긴 그림이 갤러리의 선택이 된다(`ResultView.follow`, 확대 창의
+  `onShow`). 그래서 창을 닫으면 보던 그림이 골라져 있고 EXIF 패널과 갤러리 버튼도 그 그림을 본다. 그림은 자리가 아니라 파일
+  (`type/subfolder/filename`)로 찾는다. 그 사이 갤러리에서 빠진 그림이면 선택은 그대로 둔다. 창을 여는 것만으로는 바뀌지 않는다.
+
+## 1.20.0 changes
+
+모델 · 샘플링 카드의 스텝 줄, 스텝 칸 바로 왼쪽에 스위치 세 개가 생겼다(켜짐 = 초록, 꺼짐 = 회색, 마우스를 올리면 설명).
+
+- **스킵 22** (`moss_layer_skip`, 기본 켬, MOSS 를 골랐을 때만 보임): MOSS-Image 공식 샘플링의 레이어 스킵. 네거티브(uncond)
+  패스에서만 22번 블록을 건너뛰고, 전 구간에 건다. 코어 `SkipLayerGuidanceDiTSimple(double_layers="", single_layers="22",
+  start_percent=0, end_percent=1)` 과 같은 동작이다. 메인·Hires·인페인트 디테일러·SAM3·XYZ 칸·갤러리 후처리처럼 MOSS 모델로
+  샘플링하는 모든 패스에 걸린다. CFG 1 이면 ComfyUI 가 네거티브를 안 돌려서 차이가 없다.
+  - **바뀌는 점:** 1.19.0 까지 스튜디오의 MOSS 는 레이어 스킵 없이 그렸다. 스위치가 없던 저장 패널·워크플로도 켬으로 읽으므로,
+    같은 시드라도 MOSS 그림이 전과 달라진다(일부러 공식 값에 맞춤). 전과 같은 그림은 스위치를 끄면 나온다. Anima·Krea2 는 그대로다.
+  - 구현: 코어 노드를 쓰지 않고 `studio_model_nodes.moss_layer_skip` 이 22번 블록에 block replace
+    (`patches_replace["dit"][("single_block", 22)]`)를 건다. 코어 노드는 `sampler_calc_cond_batch_function` 한 자리를 차지해서
+    가이던스 묶음(ADG·PAG)과 부딪치기 때문이다. 포지티브와 네거티브가 한 배치로 돌 때는 블록을 그대로 돌린 뒤 네거티브 줄만 블록에
+    들어오기 전 값으로 되돌린다(블록은 줄마다 따로 계산하므로 건너뛴 것과 같다). 블록을 샘플 하나씩 돌리는 DiT(`moss-image`
+    로더, MOSS-Toolkit 의 레퍼런스 패스)는 `sigmas` 로 배치 크기를 알아내 몇 번째 샘플인지 세고 네거티브 샘플에서만 건너뛴다.
+    어느 줄이 네거티브인지 알 수 없는 호출은 조용히 스킵 없이 돌리지 않고 오류로 멈춘다. 코어 코드는 복사하지 않았다. `model_options` 에
+    실리므로 NegPiP, fp32 stream, CFG 스케줄, LoRA Base 먼저(Base 모델 사본), MOSS Spectrum 과 같이 쓸 수 있다.
+  - 노드: `AIStudioMossStream` 에 선택 입력 `stream`(기본 켬) 과 `layer_skip`(기본 끔) 이 `model` 뒤에 붙었다. 그래프 모양·링크는
+    그대로라 저장해 둔 워크플로를 다시 만들 필요가 없다(패널이 실행할 때 두 값을 써 넣는다). ComfyUI-MOSS-Toolkit 이 없어도
+    레이어 스킵은 된다. MOSS 노드(`moss_stream` 역할)가 없는 아주 옛 워크플로에서는 회색이고 이유를 말한다.
+  - 저장 정보: MOSS 그림이고 켰을 때만 `parameters` 에 `MOSS layer skip: 22` 가 남는다.
+- **선행 / 후행** (`prompt_prefix_on`, `prompt_suffix_on`, 기본 켬, 모든 모델): 선행 고정·후행 고정 칸을 프롬프트에 넣을지. 끄면
+  칸의 글은 그대로 두고 합친 프롬프트에서만 뺀다(프롬프트 카드의 그 칸이 흐려진다). 합친 프롬프트를 쓰는 곳 전부가 따른다:
+  실행, XYZ 칸, 와일드카드, LoRA 태그·가중치 검사, `parameters` 의 프롬프트. 둘 다 켜져 있으면 전과 글자 하나 다르지 않다.
+- 설정 가져오기: 스튜디오 그림은 세 스위치를 `workflow` 의 패널 상태에서 그대로 되돌린다. 패널 상태에 스위치가 없으면(1.20.0 전에
+  저장한 그림, 또는 1.20.0 에서 패널을 한 번도 건드리지 않고 만든 그림) 워크플로를 열 때와 똑같이 셋 다 켬이다. 그래서 1.19.0
+  까지의 MOSS 그림은 스킵 없이 만들었어도 켬으로 들어온다(위 "바뀌는 점"과 같은 규칙. 그때 그림을 그대로 다시 만들려면 끈다).
+  `parameters` 만 있는 MOSS 그림은 `MOSS layer skip` 이 있으면 켬, 없으면 끔.
+- 스텝 줄 스위치는 키보드로 눌러도(Space/Enter) 다시 그려진 뒤 포커스를 그대로 가진다.
+- 예제 워크플로 `AI Studio Anima.json`: 노드 65개·링크 132개 그대로, MOSS 노드에 위젯 두 개가 보이는 것만 다르다.
+
+### 프롬프트 카드: 칸마다 켬/끔, 포지티브·네거티브 색 (1.20.0)
+
+프롬프트 카드의 여덟 칸(선행 고정, 인물 수, 캐릭터, 작품, 작가, 프롬프트, 후행 고정, 네거티브) 이름 왼쪽에 작은 스위치가 하나씩 있다.
+
+- 끄면 칸의 글은 그대로 두고(꺼진 채로 고칠 수도 있다) 실행에서만 뺀다. 그 줄은 흐려지고 이름이 회색 취소선이 된다. 스위치에
+  마우스를 올리면 "프롬프트에 넣기/빼기" 설명이 뜬다.
+- 상태 키: `prompt_prefix_on`, `prompt_char_count_on`, `prompt_character_on`, `prompt_copyright_on`, `prompt_artist_on`, `prompt_on`,
+  `prompt_suffix_on`, `negative_on`. 모두 기본 켬이고 불리언만 받는다(`studio_state.BOX_SWITCHES`, JS 쌍둥이 `studio_logic.js`).
+  선행 고정·후행 고정은 스텝 줄의 `선행`·`후행` 과 같은 값이라 어느 쪽을 눌러도 둘 다 바뀐다.
+- **네거티브 끔 = 빈 네거티브로 실행.** 메인, i2i, 인페인트 디테일러, Hires, SAM3 가 모두 같은 네거티브 조건을 받아 쓰므로 전부
+  따른다. Hires·SAM3·Refine·타일의 자체 프롬프트/네거티브 칸은 별개 설정이라 그대로다.
+- 합친 프롬프트·네거티브를 쓰는 곳 전부가 따른다: 실행, 갤러리 후처리, XYZ 칸, 와일드카드, LoRA 태그 검사, 가중치·NegPiP 알림,
+  `parameters`.
+  - XYZ: 칸 상태에는 실제로 쓰는 글만 들어간다(꺼진 칸은 빠지고, 꺼진 네거티브는 빈 글). 그래서 Prompt S/R 과 LoRA 축은 꺼진
+    칸에만 있는 말을 찾지 못하고(없다고 알림), 꺼진 칸의 `<lora:...>` 는 파일 검사를 하지 않는다.
+  - 와일드카드: 꺼진 칸·꺼진 네거티브는 뽑지 않고 글자 그대로 남는다.
+  - `parameters`: 프롬프트와 `Negative prompt` 는 실제로 쓴 글이다. 네거티브를 끄면 `Negative prompt` 줄이 없다.
+- 예전 패널·워크플로·그림에는 스위치가 없고, 없으면 전부 켬으로 읽는다. 그래서 프롬프트와 네거티브는 전과 글자 하나 다르지 않다.
+- 설정 가져오기: 스튜디오 그림은 `workflow` 의 패널 상태에서 스위치와 칸의 글을 그대로 되돌린다(스위치가 없으면 켬).
+  `parameters` 만 있는 그림은 프롬프트와 네거티브가 켜진 채로 들어온다(그 그림에 실제로 쓴 글이므로). 나머지 칸은 비워지고 그
+  스위치는 패널 그대로다.
+- 갤러리 후처리: 기록에 스위치가 없으면(전의 그림, `parameters` 로 읽은 그림) 패널의 스위치와 상관없이 전부 켬으로 돌린다.
+- 색: 포지티브 일곱 칸의 이름은 초록(`--ais-pos` `#7ddf9f`, 카드 배경 `#2b2b2b` 대비 8.7:1), 네거티브는 붉은 주황(`--ais-neg`
+  `#ff9585`, 6.7:1)이고 칸 테두리도 같은 색으로 옅게 물든다. 꺼진 칸은 회색(`--ais-box-off` `#9a9a9a`, 5.0:1)이 색을 덮는다.
+- 키보드: 스위치는 `role="switch"` 버튼이라 Tab 으로 가서 Space/Enter 로 누른다. 눌러서 패널이 다시 그려져도 포커스가 남는다.
+- 칸 이름은 스위치와 다른 요소다: `.ais-box-label[data-section="<칸 키>"]`. 패널에 `ctx.boxLabel(key, anchorEl)` 을 주면 이름이
+  버튼이 되어 누를 때 그 함수를 부른다(프리셋 목록을 붙일 자리). 주지 않으면 이름은 글자일 뿐이다.
+  - 이름은 칸마다 요소 하나를 패널이 살아 있는 동안 계속 쓴다(다시 그려도 같은 요소). 그래서 그 아래에 연 프리셋 목록은
+    프리셋을 넣거나 되돌려 패널이 다시 그려져도 제자리에 있고, 닫히면 포커스가 그 이름으로 돌아오며, 이름을 다시 누르면 닫힌다.
+  - 그 요소에는 상태에 따라 바뀌는 것을 넣지 않는다. 꺼짐 표시는 줄(`.ais-row.ais-off`)의 클래스가 한다.
+- 레퍼런스 카드의 "트리거 넣기"(Krea2 QuadView): 실행에 들어가는 프롬프트에 트리거가 없을 때만 프롬프트 칸 맨 앞에 넣는다.
+  프롬프트 칸이 꺼져 있으면 켠다(꺼진 칸에 넣으면 실행에 안 들어가고, 누를 때마다 또 들어갔다). 칸에 이미 있으면 켜기만 한다.
+
+## 1.19.0 changes
+
+LoRA 선택 창. "+ LoRA" 버튼, LoRA 줄의 이름, XYZ 의 "+ 비교할 LoRA" 로 열린다.
+
+- 위쪽에 검색, 왼쪽에 작가 폴더 트리, 가운데에 런 카드, 오른쪽 상세 칸에 에폭 칩과 학습 샘플 미리보기가 있다. 트리거는 "작가 칸에 넣기"
+  로 프롬프트의 작가 칸에 바로 넣는다. 즐겨찾기/최근 목록이 있고, 모델 계열(2.9B 등)에 맞지 않는 런은 거른다("모든 모델"로 다시 보임).
+- 카드마다 "+ 추가" 가 있고, 창 아래 "이번에 추가" 줄에 방금 넣은 것이 칩으로 쌓인다(칩의 ✕ 로 뺌). "추가하면 닫기" 를 켜면 한 번
+  추가하고 바로 닫힌다(켠 상태는 기억한다). 세기는 −/+ 로 조절한다.
+- 미리보기 순서: 갤러리의 "LoRA 미리보기로" 로 직접 지정한 그림 → 학습 샘플 → 보드 띠 → 출력 그림 EXIF.
+- 줄에는 짧은 이름을 보여 주고, 저장값(워크플로·parameters)은 전과 같이 파일 이름 그대로다.
+- 색인·미리보기 캐시는 ComfyUI 의 user 폴더에 둔다.
+
+## 1.18.0 changes
+
+SnapRef v2a stable (`0ppxnhximxr/snapref-v2a`, 11-09: `snapref_v2a.safetensors`, an optional `snapref_v2a_fp8.safetensors`,
+and the node in `comfyui/snapref/`, which replaces the preview node in `custom_nodes/snapref`).
+
+- The released node fits a 28-block adapter onto Anima 2.9B's 40 blocks by itself (the 12 inserted blocks run without it), so
+  on 2.9B `AIStudioAnimaReference` now hands SnapRef the original file; `reference_layout.py` still writes the `<name>__52b`
+  copy for 3.8B, which the node does not fit, and both copies for Ref Adapter, whose node fits nothing.
+  `studio_model_nodes._snapref_native_layouts()` reads that from the installed node (`_INSERTED_29B`), so an older node keeps
+  getting the `<name>__40b` copy as before. The original 28 blocks land on the same positions either way; only the inserted
+  blocks differ (our copy filled them with the block before).
+- A third picture of the same character: role `reference_image_3` (a LoadImage next to `reference_image_2`), node inputs
+  `image_3` and `weight_3`; the panel opens its box once the second picture is in.
+- `multi_layout` (`separate` / `stitch`, panel row 여러 장): several pictures encoded one by one, or side by side in one picture
+  (as Image Stitch; the per-picture weights do not apply then and the panel hides them). `use_batch` stays out: the panel
+  feeds each picture through its own node.
+- The new inputs sit after the old ones, so a saved workflow keeps its widget values; a workflow from before this version
+  shows two picture boxes. They need the v2a node; an older node names itself as too old when one is set.
+
+## 1.17.0 changes
+
+Four ways to keep what the prompt asks for when a LoRA is on (`studio_adherence.py` holds the rules,
+`studio_adherence_nodes.py` the nodes). All are off by default, all go into the PNG's `parameters`, and each has an X/Y/Z axis
+for a before/after grid.
+
+- LoRA card, **Base 먼저**: the main sampler's first N % of steps run without the LoRAs (below 100 % the last step always keeps
+  them). `AIStudioLoraControl` (role `lora_ctl`, after the LoRA nodes) notes which patch entries the LoRAs added, against the
+  MODEL before them (`sched`), and leaves the split under `model_options["ai_studio_lora_schedule"]`. `ForgeNeoKSamplerCNS` then
+  runs two ComfyUI sampling runs, the base MODEL's and the LoRA MODEL's, so ComfyUI loads and patches each the usual way, but
+  both get the whole schedule: only the innermost sampler function is cut (`split_sampler_functions`). The second run takes the
+  first run's latent at the cut, its noise sampler (one seeded stream, or one Brownian tree over the whole schedule) and the
+  step offset `sam_extra_step_offset` (Dy samplers), so Detail Daemon, DAVE, S², CNS, CFG 스케줄, 단어 주목 and the preview see
+  one run. Hires, SAM3, post and inpaint passes keep the LoRAs, and so does a LoRA's text encoder part. Refused with SPEED,
+  Spectrum and the samplers SPEED cannot cut either (Restart, UniPC, DPM fast/adaptive); a masked latent is sampled in one run.
+- LoRA card, **교차 어텐션 제외**: the same node drops the LoRA entries of Anima's text path, the DiT's `cross_attn` layers and the
+  whole LLM adapter (with `+변조` also `adaln_modulation_cross_attn`), in every pass. MOSS and Krea2 have no such layers: the pick
+  is greyed there.
+- Extension **CFG 스케줄** (`AIStudioCFGSchedule`, role `ext_cfg_schedule`): a `PREDICT_NOISE` wrapper sets the guider's CFG per
+  step, from `start_cfg` at the first step to the panel's CFG at `end_percent` (코사인 / 선형 / 계단); everything downstream (APG,
+  Skimmed CFG, Optimal Scale) sees it as the run's CFG.
+- Extension **단어 주목** (`AIStudioWordEmphasis`, role `ext_emphasis`, Anima): the listed words' T5 tokens get `multiplier` times
+  their cross-attention weight between `start_percent` and `end_percent` of the steps. An `extra_conds` object patch writes each
+  positive cond's logit offsets (zeros for the negative, so both still batch), an `APPLY_MODEL` wrapper passes them on inside the
+  window, an `attn2_patch` marks each cross-attention call (Cosmos runs it for those only) and an `optimized_attention_override`
+  runs the marked calls through PyTorch SDPA with the offsets as an additive mask (other calls go to the attention pick as
+  before). Prompt weights `(word:1.2)` scale the token's value instead. Not on 3.8B (its connector builds the context from
+  other tokens); with no words the node is bypassed.
+- CFG 스케줄 and 단어 주목 sit between SPEED and the sampler, so only the main pass (or the inpaint detailer in its place) has
+  them. Their % counts steps of the run's schedule (`step_progress`; a re-published SPEED list is followed to the run's own).
+- A setting that cannot act on the run (Base 먼저 on inpaint, 교차 어텐션 off Anima, 단어 주목 on 3.8B or without words) is
+  greyed or named in a notice, left out of `parameters`, and an X/Y/Z axis of it is refused.
+- Older workflows lack the three nodes: the LoRA card greys its settings out and the extensions say so; open
+  `AI Studio Anima.json` again.
+
+## 1.16.0 changes
+
+Opening another workflow no longer costs the settings: 설정 가져오기 on the EXIF panel brings them back from any image.
+
+- A studio image keeps the panel and the X/Y/Z panel of its run in ComfyUI's `workflow` text, and `studio_settings.js` puts
+  them back as they were: prompt boxes, wildcards, the seed box, extensions. An X/Y/Z cell gives the plot's base, not the cell.
+  The tab and the i2i image stay, since they are where the work is.
+- Any other image has its infotext: `POST /infotext/parse` (`studio_infotext_read.py`, the reverse of `build_infotext`) reads the
+  prompts, sampling, size, Hires, inpaint and attention keys, and the rest of the panel stays. The seed is not taken.
+- A file or sampler this ComfyUI lacks keeps the panel's pick and is named in a notice.
+- The gallery keeps its scroll when a thumbnail is picked; new images bring it back to its start.
+
+## 1.15.0 changes
+
+Five additions to the studio, all saved in the panel state and all off by default.
+
+- Attention: a row on the model card picks the backend without restarting ComfyUI. `AIStudioAttention` sets it on the MODEL
+  after DoRA, so every pass runs it and a change redoes no LoRA. `launch` passes the MODEL through. `/choices?kind=attentions`
+  lists what this ComfyUI has and names what it was started with. "Forge처럼" 어텐션 now works and means PyTorch.
+- Inpaint: `AIStudioInpaintDetailer`, a `ForgeNeoSAM3Detailer` in the `inpaint_detailer` role, runs every inpaint from the mask
+  editor's MASK. "마스크만" is Forge's Only masked: it crops around the mask, draws at the tab's size and pastes the result into the
+  picture, which keeps its size. "전체" resizes the picture to the tab's size first. Both start from the original pixels by default
+  (마스크 내용) and keep every pixel outside the mask; before, an inpaint went through `VAEEncodeForInpaint`, which greys the masked
+  pixels, so a denoise below 1 started from grey. The role is bypassed unless it runs; `inpaint_switch` (a lazy `AIStudioSwitch`)
+  then takes its image in place of the main pass, so the main sampler does not run. `mask_blur`, `batch_size` and `tell_empty_mask`
+  are that node's alone: Refine and tile take their widgets as named arguments, an inherited input would stop them.
+- X/Y/Z: `EXT_AXES` in `xyz_axes.py` is one axis per setting of the extension table, grouped by extension in the axis list
+  (`studio_ext.js` lists them the same way, the golden `ext_axes` pins both). A value also turns on what the setting needs, and
+  an extension the family cannot run refuses the plan. Prompts, paths and file lists have no axis, and a text setting takes one
+  value per line (`lines`), since its commas belong to it. `[Attention] Backend` is an axis too. An axis whose columns all build
+  one prompt is named in a notice.
+- Wildcards: `studio_wildcards.py` draws `__name__`, `~/name/~` and `__name:n__` by the app's rules, and `{a|b}`, `{2::a|b}`
+  by Dynamic Prompts'. `POST /wildcards/expand` gives a run one state per image, each drawn from its own seed; the file list is
+  `<ComfyUI>/wildcards` plus `wildcards:` entries of `extra_model_paths.yaml`. The prompts' `Template` and `Negative Template` go
+  into `parameters`. `__` in a prompt box lists the names.
+- NegPiP on MOSS: `CLIPNegPip` patches MOSS as well, so the switch opens there. MOSS has its own switch, `moss_negpip`, off by
+  default, because its tokenizer then reads every parenthesis as a weight. Krea2 stays greyed: no pack patches it.
+
+## 1.14.0 changes
+
+The X/Y/Z plot has a LoRA axis (`xyz_lora.py`, `web/ai_studio/xyz_lora_view.js`), which takes a block of rows instead of a
+value box. The first row names the `<lora:...>` tag to look for, exactly, so other LoRAs of the prompt stay as they are. Every
+row gives a column, or one column per epoch: from the row's file to a given number, or to the run's last file, the one
+without a number. A row can set its strength and a new trigger, which replaces the 찾을 말 text, goes behind the prompt tag
+holding that text, or to the front of the prompt when the box is empty; `-` removes the text. Extra-network tags are left
+out of that search: a trigger is usually also the start of the LoRA's file name. The last file's epoch number is the
+`ss_epoch` of its header, else one saving interval after the others. A problem comes back in the plan's `errors` and no cell
+is made: an epoch before the row's file or past the run, a tag, text or file that is not there, a name a tag cannot hold,
+two axes on one tag, a trigger that changes the prompt's tags, or a finished cell that loads a column's file more often
+than the prompt loaded the base (a name loads once with its last strength, and a second spelling loads the file again). The
+plan's `lora_preview` lists the columns for the panel. The axis costs 0.5, so a grid changes its LoRA less often than its
+steps or CFG. `/xyz/plan` no longer opens every model file on each call: `studio_choices.py` scans again only when a file
+changed. `resolve_lora_name` also finds a file whose stem ends in an extension or a space, and knows `.sft`, `.pt2`, `.pkl`.
+
+The prompt card has the app's sections, each box with its name: 선행 고정, 인물 수, 캐릭터, 작품, 작가, 프롬프트, 후행 고정
+(`PROMPT_SECTIONS` in `studio_state.py`). `assembled_prompt` (twin `assembledPrompt` in `studio_logic.js`) joins them in that
+order as the app joins its sections, empty ones skipped; with only the main box the prompt stays exactly as written. X/Y/Z
+cells carry the joined text with empty boxes, so an axis sees all of it, and a record read from a PNG's `parameters` does
+not take the panel's boxes.
+
+## 1.13.0 changes
+
+The studio's post-processing cards now hold Forge's settings. `studio_post_schema.py` is one table of the Hires, upscale and
+SAM3 fields (key, label, range, node input); `studio_state.py` adds and clamps them, `tools/build_studio_post_schema.py`
+writes the table as `web/ai_studio/post_schema.js`, and `tests/test_studio_post_schema.py` checks that every named input
+exists on its node.
+
+- SAM3: a caret on the 후처리 card unfolds seven sections in the shape of the extension rows (`web/ai_studio/post_view.js`):
+  찾기, 마스크, 얼굴, 인페인트, 샘플링, ControlNet, 실행. Mask only moves the row after the detailer to the mask node's image
+  output (its overlay, or with the new `plain_overlay` the picture itself), so nothing draws and a gallery run loads no model;
+  Refine and tile stay out. The panel now writes
+  `target_width` / `target_height` (Forge's `p.width/p.height`): an "only masked" crop is drawn at the generation size instead of
+  at crop size. `ForgeNeoSAM3Detailer` and `ForgeNeoSAM3Refine` gain the optional `target_image_size`: a gallery pass and Refine
+  are an img2img at the input image's size in Forge, which only the node knows. `/choices` gains `controlnets` and
+  `face_models` (absolute paths, Forge's `models/adetailer` included).
+- SAM3 runs in bf16 by default, as Forge does on CUDA; `auto` on a machine without CUDA falls back to fp32.
+- A `.safetensors` SAM3 file in the Hugging Face transformers layout (`detector_model.*`) is left out of the list and refused:
+  Easy SAM3 loads with `strict=False`, so it ran on random weights, found nothing and finished in a blink. An empty mask now
+  sends `aistudio.sam3_empty`, and the studio says so.
+- `ForgeNeoHiresFix`: the optional `tile_size`, `tile_overlap` and `size_step` (Forge's Resolution Step; 0 = one latent cell, and
+  halves now round up as in Forge, so a size can differ by a cell from 1.12.0), `latent:nearest`, `latent:bilinear antialiased`, `latent:bicubic antialiased`, `Lanczos` and `Nearest`. One size box alone
+  keeps the aspect. The panel adds the pass's own CFG, Shift, scheduler, size, VAE, prompt and negative, steps 0 = the main steps,
+  and shows the size the run ends at.
+- `AIStudioUpscaleImage`: the optional `resize_mode` (Scale by / Scale to), `max_side_length`, `width`, `height`, `crop`,
+  `model_name_2`, `upscaler_2_visibility`, `color_correction`, `tile_size` and `tile_overlap`; `Lanczos` and `Nearest` need no model
+  file. Picking an upscaler sets the factor in its name, as Forge does. Colour correction needs opencv-python, which ComfyUI does
+  not ship; the node says so before it upscales.
+- `studio_upscale.py` holds both nodes' upscaling: the model runs again until the picture reaches the target (4 passes at most),
+  then Lanczos, to a multiple of 8. Core's `ImageUpscaleWithModel` hard-codes its tiles, so `model_pass` repeats that node with
+  them as arguments; an older ComfyUI without `upscale_model.patcher` still goes through the core node.
+- The panel: the prompt, model, LoRA and 후처리 cards and the extension groups stack one per line, so a long LoRA name fits. 시드
+  gains ♻ (the seed of the image picked in the gallery, as in Forge) and 랜덤; only -1 draws a seed. SAM3's prompt box takes two
+  lines and states sam-extra's grammar (`,` merges into one mask, `/` is a pass of its own). Forge처럼 now starts off; a saved
+  panel keeps its own switch.
+- `parameters` gains Forge's keys for all of this (`Hires CFG Scale`, `Hires resize`, `Postprocess upscaler`, `SAM3 Enable`, the
+  `SAM3 Use ...` switches, ...), and latent upscalers carry Forge's names (`Latent (bicubic)`).
+- A ControlNet preprocessor without a threshold input now ignores the thresholds, as Forge's do, instead of stopping the run.
+
+## 1.12.0 changes
+
+Three additions to the studio's result side, all from Forge:
+
+- 갤러리 자동 비우기 (a pill under the gallery buttons, saved in the result view's `view` widget, off by default): a
+  generation's images replace the gallery, once per run, when the first of them arrive. A stopped or failed run leaves the
+  last images in place, the 업스케일 / Hires / SAM3 buttons keep the other images, the XYZ 격자 tab keeps its grid. No file is
+  deleted.
+- 걸린 시간 in the result header (Forge's Time taken): from the 생성 click to the run's last image, for one image or a whole
+  X/Y/Z plot. The `running: false` event of `run_controller.js` carries it as `elapsed` (ms; null when no image was made).
+- `AIStudioExifView`, a fourth UI node right of the X/Y/Z panel (Forge's PNG Info): the gallery's picked image, or a file
+  dropped on the panel or opened with its button, and the text that file carries. `web/ai_studio/studio_exif.js` reads PNG
+  text chunks and the EXIF block of JPEG, WebP and PNG files (`UserComment` with Forge's `UNICODE` prefix, `Comment`, the
+  text tags of IFD 0). Files are read in the browser and never uploaded. An older workflow gets the panel by adding the node
+  by hand or opening `example_workflows/AI Studio Anima.json` again.
+- SnapRef v2a previews (`snapref_v2a_pre1`, `snapref_v2a_pre2`, from `0ppxnhximxr`; the stable release came in 1.18.0) work like
+  v1a in the panel's file list and get the same block-layout copies. The panel adds 충실도 (`fidelity`, shown with SnapRef's guidance off, which the node
+  ignores otherwise), a second picture of the same character (role `reference_image_2`, node input `image_2`) and each
+  picture's weight (`weight_1`, `weight_2`). These need the SnapRef node published with v2a; an older node still runs
+  everything else and names itself as too old when one of them is set. A workflow from before this version shows one
+  picture box.
+
+## 1.11.0 changes
+
+The studio now runs three model families on one workflow, picked by the checkpoint's file name: `moss` -> MOSS-Image,
+`krea` -> Krea2, anything else -> Anima. Models load through core `UNETLoader` / `CLIPLoader` (`type` follows the family).
+
+- Changing family keeps the old family's TE, VAE, sampler, scheduler, steps, CFG and Shift in `family_memory` and brings
+  back the new family's, or its defaults (MOSS: euler, sgm_uniform, 50 steps, CFG 3, Shift 5; Krea2: euler, simple,
+  Shift 1.15, Raw 20 steps CFG 3, Turbo 8 steps CFG 1).
+- The extensions that reach into Anima's blocks are greyed out on the other families; X/Y/Z refuses to mix families in one
+  grid. NegPiP stayed Anima-only here until 1.15.0.
+- `AIStudioMossStream`: MOSS-Image's fp32 residual stream, from the separate
+  [ComfyUI-MOSS-Toolkit](https://github.com/sorryhyun/ComfyUI-MOSS-Toolkit) pack (Apache-2.0, not bundled).
+- `AIStudioTextEncoderLoader`: core `CLIPLoader`, plus MOSS text encoders saved with bare key prefixes, which core's
+  detection reads as an empty SD1 CLIP.
+- `AIStudioAnimaReference`: character / style reference, either SnapRef (`SnapRef` node from
+  `0ppxnhximxr/snapref-v1a`) or [ComfyUI-Anima-Ref-Adapter](https://github.com/ElectronGirl/ComfyUI-Anima-Ref-Adapter)
+  (Apache-2.0). Their weights are non-commercial and never bundled. They were trained on Anima base (28 blocks);
+  `reference_layout.py` remaps a file along the block lineage plain LoRAs use for 2.9B / 3.8B and saves the copy once next
+  to the original (`<name>__40b`, `<name>__52b`). SnapRef refuses PAG, and a Ref Adapter v2 file runs without DAVE, SLG and SEG.
+- `AIStudioKrea2Reference`: an edit LoRA (`krea2_identity_edit_v2`, `krea2_general_edit_v2`, `QuadView_krea2_v1`, ...)
+  through [comfyui-krea2edit](https://github.com/lbouaraba/comfyui-krea2edit) (Apache-2.0, not bundled).
+- `ForgeNeoModelSamplingShift` keeps a flux-type predictor (Krea2 has no timestep multiplier).
+- MOSS LoRAs from other trainers are converted through ComfyUI-MOSS-Toolkit's `lora_compat` when it is installed; a MOSS
+  LoRA that patches nothing stops the run. The panel's size step is 16 on MOSS (16x latents).
+
+## 1.10.0 changes
+
+The Anima studio: a Forge-WebUI-like Anima generation screen inside ComfyUI (t2i, i2i, inpaint, Hires fix, upscale,
+SAM3 detailer and a Forge-style X/Y/Z plot), opened from `example_workflows/AI Studio Anima.json` (ComfyUI lists it
+under the pack's example workflows). Everything is for custom workflows only: the app compiler emits none of it.
+
+- NegPiP: the studio runs `ForgeNeoNegPip` after the LoRAs (a switch on the prompt card). It needs the separate
+  [ComfyUI-ppm](https://github.com/pamparamm/ComfyUI-ppm) node pack (`CLIPNegPip`, AGPL-3.0, not bundled); without it
+  the switch is greyed out.
+- Extensions: the workflow's "④ 확장" row and its neighbours hold the pack's guidance suite, Optimal Scale, Skimmed CFG,
+  Detail Daemon, SPEED, ER SDE values, LoRA block weight, VAE 2x, VAE DeGrid, PiD, SAM3 Refine and SAM3 tile repair in
+  the app compiler's order, bypassed until switched on. Detail Daemon has one node per pass and SPEED one per main pass,
+  as the compiler adds them. SAM3 Refine replaces the SAM3 detailer when on (the app's post run swaps them the same
+  way), and tile repair takes Refine's applied mask. The panel's "확장기능" group is drawn from the table:
+  `web/ai_studio/ext_schema.json` (what Python reads) and its `ext_schema.js` twin (what
+  the JS imports) are generated from the app's specs by `tools/build_studio_ext_schema.py`. ADetailer, character
+  reference and Colorcraft (its chain is compiled by the app's `core/colorcraft.py`) are not part of the studio.
+- New nodes `AIStudioLoraStack`, `AIStudioSaveForge`, `AIStudioUpscaleImage`, `AIStudioPromptEncode`, `AIStudioSwitch`
+  and the three UI nodes `AIStudioPanel`, `AIStudioResultView`, `AIStudioXYZView` (see "Custom ComfyUI workflows
+  only"). The UI nodes have no outputs and are never run.
+- `ForgeNeoKSamplerCNS` and `ForgeNeoHiresFix` take the optional `forge_noise` input (default off, so saved graphs and
+  the compiler are unchanged). What the "Forge-like" switches match and what they do not: `studio_forge_parity.md`.
+- Web extension `web/ai_studio` (ComfyUI serves it through the pack's `WEB_DIRECTORY`): the panel, result/gallery and
+  X/Y/Z views, the run controller (the panel state is written into the engine nodes when ComfyUI builds the prompt, so
+  the 생성 button and Ctrl+Enter both use it; 정지 interrupts and removes this tab's queued prompts) and the gallery
+  buttons. The installer now also copies and fingerprints `.js`, `.css`, `.ttf` and `.csv` files (a change refreshes the
+  install; only `.py`/`.json`/`.safetensors` changes ask for a ComfyUI restart). The repo-only `js_tests/` folder (the
+  node:test files and their golden fixture) is never installed.
+- HTTP routes under `/aistudio/studio` (`studio_routes.py`, JSON, mounted when ComfyUI's server exists):
+  `GET /choices` (picker lists by `kind`; `sam3` lists the SAM3 checkpoints, also `sam3.1_multiplex_fp16.safetensors`,
+  as `{value, label}`), `POST /xyz/plan` (the X/Y/Z cells for the panel state and axes; a planner rejection is
+  `200` with `errors` and no cells), `POST /xyz/grid` (draws the grid and Z sub-grids into `output/AIStudio/xyz`),
+  `GET /tags?q=&limit=` (prompt tag autocomplete: `{items: [{name, category, count, alias?, ko?}]}`, `limit` 1..30),
+  `POST /open_output` (opens the output folder, Windows only) and `POST /to_input` (copies an output/temp/input image
+  into the input folder, never overwriting). Images are named only by `{filename, subfolder, type}` inside ComfyUI's
+  output, temp or input folder.
+- Prompt tag autocomplete (`web/ai_studio/studio_autocomplete.js`, `studio_tags.py`): the prompt and negative boxes suggest
+  Danbooru tags as you type (name, alias or Korean word; Tab/Enter accept only while the popup is open) and, after
+  `<lora:`, the panel's LoRA files. The list is `tags/danbooru_tags.csv` (tags used 20+ times, generated by
+  `tools/build_studio_tag_list.py` from the app's tag tables; read once, on the first request).
+- X/Y/Z plot written from a behavior description of Forge Neo's script (`xyz_axes.py`, `xyz_values.py`, `xyz_plan.py`,
+  `xyz_grid_draw.py`; none of Forge's AGPL-3.0 code): the legend uses `fonts/Roboto-Regular.ttf` (Apache-2.0,
+  `THIRD_PARTY_NOTICES.md`).
+- SAM3: a requested precision is kept for files whose name says `fp16` (Easy SAM3 forced fp16 for
+  `sam3.1_multiplex_fp16.safetensors`).
+- The example workflow is generated by `tools/build_anima_studio_workflow.py` (the node roles come from
+  `web/ai_studio/studio_roles.js`); edit the builder and regenerate rather than editing the JSON by hand.
 
 ## 1.9.0 changes
 

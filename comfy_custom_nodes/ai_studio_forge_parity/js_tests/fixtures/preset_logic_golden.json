@@ -1,0 +1,186 @@
+{
+  "_note": "Shared by js_tests/preset_logic.test.mjs (preset_logic.js) and tests/test_studio_presets.py (studio_presets.py).",
+  "edge": " \t\r\n,",
+  "match": [
+    {
+      "case": "exact",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "1boy, solo"
+        },
+        {
+          "id": "b",
+          "name": "B",
+          "text": "2boys"
+        }
+      ],
+      "text": "2boys",
+      "id": "b"
+    },
+    {
+      "case": "box edges ignored",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "1boy, solo"
+        }
+      ],
+      "text": " ,1boy, solo,\r\n",
+      "id": "a"
+    },
+    {
+      "case": "preset edges ignored",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "\n1boy, solo, "
+        }
+      ],
+      "text": "1boy, solo",
+      "id": "a"
+    },
+    {
+      "case": "inner spacing matters",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "1boy, solo"
+        }
+      ],
+      "text": "1boy,solo",
+      "id": null
+    },
+    {
+      "case": "case matters",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "1boy"
+        }
+      ],
+      "text": "1Boy",
+      "id": null
+    },
+    {
+      "case": "inner newline kept",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "a,\nb"
+        }
+      ],
+      "text": "a,\nb\n",
+      "id": "a"
+    },
+    {
+      "case": "first of two equal presets",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "x"
+        },
+        {
+          "id": "b",
+          "name": "B",
+          "text": "x, "
+        }
+      ],
+      "text": "x",
+      "id": "a"
+    },
+    {
+      "case": "empty box matches nothing",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "x"
+        }
+      ],
+      "text": " , \n",
+      "id": null
+    },
+    {
+      "case": "no presets",
+      "list": [],
+      "text": "x",
+      "id": null
+    },
+    {
+      "case": "korean and escapes",
+      "list": [
+        {
+          "id": "a",
+          "name": "A",
+          "text": "ike \\(fire emblem\\), 한글"
+        }
+      ],
+      "text": "ike \\(fire emblem\\), 한글,",
+      "id": "a"
+    }
+  ],
+  "names": [
+    {
+      "in": "Anima 기본",
+      "out": "Anima 기본"
+    },
+    {
+      "in": "  내   네거티브\n 3 ",
+      "out": "내 네거티브 3"
+    },
+    {
+      "in": "tab\tname",
+      "out": "tab name"
+    },
+    {
+      "in": "",
+      "out": null
+    },
+    {
+      "in": " \n\t ",
+      "out": null
+    },
+    {
+      "in": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "out": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "in": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "out": null
+    },
+    {
+      "in": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "out": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"
+    },
+    {
+      "in": " yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy ",
+      "out": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+    }
+  ],
+  "texts": [
+    {
+      "in": "1boy, solo",
+      "ok": true
+    },
+    {
+      "in": " 1boy,\n",
+      "ok": true
+    },
+    {
+      "in": "",
+      "ok": false
+    },
+    {
+      "in": " ,\r\n\t, ",
+      "ok": false
+    }
+  ]
+}

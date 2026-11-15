@@ -1,0 +1,183 @@
+/* Prompt-box presets of the Anima studio: the quick list under a box's label (.ais-pq, preset_quick.js) and the preset window
+   (.ais-pp, preset_window*.js). Added once by preset_dom.js addPresetStylesheet(). Both are attached to document.body (outside
+   the canvas transform), so nothing here is inside .ais-root; the look follows studio.css (the LoRA picker window .ais-lb). */
+
+/* ------------------------------------------------------------------------------------------------ quick list */
+.ais-pq {
+  position: fixed;
+  z-index: 99980; /* over ComfyUI's own overlays, under the preset / LoRA windows (99990) and the lightbox (100000) */
+  box-sizing: border-box;
+  width: 330px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  background: #1c1c1c;
+  border: 1px solid #4b6a9b;
+  border-radius: 9px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  outline: none;
+  color: #e8e8e8;
+  font-family: "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.ais-pq *, .ais-pq *::before, .ais-pq *::after { box-sizing: border-box; }
+.ais-pq :where(button) { font: inherit; cursor: pointer; } /* :where = no weight: the class rules below set sizes and weights */
+.ais-pq button:focus-visible { outline: 2px solid #60a5fa; outline-offset: -1px; }
+.ais-pq [hidden] { display: none !important; }
+.ais-pq-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #2f2f2f; background: #202020; }
+.ais-pq-title { font-weight: 700; color: #ececec; white-space: nowrap; }
+.ais-pq-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8f8f8f; font-size: 11px; }
+.ais-pq-rows { display: flex; flex-direction: column; max-height: 260px; overflow: auto; padding: 4px; }
+.ais-pq-row { flex-shrink: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: center; border-radius: 6px; }
+.ais-pq-row:hover { background: #2a2a2a; }
+.ais-pq-pick { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; }
+.ais-pq-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ais-pq-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: #3a3a3a; }
+.ais-pq-dot.on { background: #3ccf8e; }
+.ais-pq-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: #ececec; }
+.ais-pq-text { padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9a9a9a; font-size: 11.5px; }
+.ais-pq-add { width: 30px; height: 30px; margin-right: 4px; padding: 0; border: 1px solid #3a3a3a; border-radius: 6px; background: #262626; color: #dcdcdc; font-size: 15px; }
+.ais-pq-add:hover { border-color: #5a5a5a; background: #303030; }
+.ais-pq-empty { padding: 18px 10px; text-align: center; color: #9a9a9a; }
+.ais-pq-note { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-top: 1px solid #2f2f2f; background: #1a1a1a; color: #cfcfcf; font-size: 11.5px; }
+.ais-pq-undo { flex-shrink: 0; margin-left: auto; height: 24px; padding: 0 9px; border: 1px solid #3a3a3a; border-radius: 6px; background: #262626; color: #dcdcdc; white-space: nowrap; }
+.ais-pq-undo:hover { border-color: #5a5a5a; }
+.ais-pq-foot { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #2f2f2f; background: #202020; }
+.ais-pq-save, .ais-pq-manage { flex: 1; min-width: 0; height: 30px; padding: 0 6px; border-radius: 6px; white-space: nowrap; }
+.ais-pq-save { border: 1px dashed #5a5a5a; background: transparent; color: #dcdcdc; }
+.ais-pq-save:hover { border-color: #8a8a8a; }
+.ais-pq-save[aria-disabled="true"] { opacity: 0.55; cursor: progress; }
+.ais-pq-manage { border: 1px solid #3b5f9e; background: #1f2b40; color: #dbe6ff; }
+.ais-pq-manage:hover { background: #26375a; }
+
+/* ------------------------------------------------------------------------------------------------ preset window */
+.ais-pp-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99990; /* as the LoRA picker window: just under the lightbox */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #d8d8d8;
+  font-family: "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ais-pp-backdrop *, .ais-pp-backdrop *::before, .ais-pp-backdrop *::after { box-sizing: border-box; }
+.ais-pp-backdrop :where(button) { font: inherit; cursor: pointer; } /* :where = no weight: the class rules below set sizes and weights */
+.ais-pp-backdrop button:disabled { cursor: not-allowed; }
+.ais-pp-backdrop button:focus-visible, .ais-pp-backdrop input:focus-visible, .ais-pp-backdrop textarea:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }
+.ais-pp-backdrop input::placeholder, .ais-pp-backdrop textarea::placeholder { color: #8a8a8a; }
+.ais-pp-backdrop [hidden] { display: none !important; }
+.ais-pp {
+  position: relative;
+  width: min(1240px, 95vw);
+  height: min(768px, 92vh);
+  display: flex;
+  flex-direction: column;
+  background: #1c1c1c;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  outline: none;
+}
+.ais-pp-btn { height: 30px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 6px; background: #262626; color: #dcdcdc; white-space: nowrap; }
+.ais-pp-btn:hover:not(:disabled) { border-color: #5a5a5a; background: #2e2e2e; }
+.ais-pp-btn:disabled { opacity: 0.45; }
+
+/* header: title, search, switches; then the box tabs */
+.ais-pp-head { flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #2f2f2f; background: #202020; }
+.ais-pp-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ais-pp-top h1 { margin: 0; font-size: 16px; font-weight: 700; color: #ececec; white-space: nowrap; }
+.ais-pp-hint { padding: 3px 8px; border-radius: 999px; background: #233149; color: #b9cdf3; font-size: 12px; white-space: nowrap; }
+.ais-pp-searchbox { flex: 1 1 200px; min-width: 0; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 7px; background: #141414; color: #8a8a8a; }
+.ais-pp-searchbox:focus-within { border-color: #60a5fa; }
+.ais-pp-backdrop .ais-pp-search { flex: 1; min-width: 0; height: 32px; border: 0; outline: none; background: transparent; color: #ececec; font: inherit; font-size: 14px; }
+.ais-pp-toggle { height: 36px; padding: 0 12px; border: 1px solid #3a3a3a; border-radius: 7px; background: #262626; color: #dcdcdc; font-size: 13px; white-space: nowrap; }
+.ais-pp-toggle:hover, .ais-pp-icon:hover { border-color: #5a5a5a; }
+.ais-pp-toggle.on { background: #2c3a52; color: #f0f4ff; border-color: #4b6a9b; }
+.ais-pp-icon { flex-shrink: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #3a3a3a; border-radius: 7px; background: #262626; color: #dcdcdc; }
+.ais-pp-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.ais-pp-tab { height: 30px; padding: 0 11px; border: 1px solid #3a3a3a; border-radius: 999px; background: #262626; color: #dcdcdc; font-size: 12.5px; white-space: nowrap; }
+.ais-pp-tab:hover { border-color: #5a5a5a; }
+.ais-pp-tab.on { background: #2c3a52; color: #f0f4ff; border-color: #4b6a9b; }
+.ais-pp-count { margin-left: 6px; color: #8f8f8f; font-size: 11px; }
+.ais-pp-tab.on .ais-pp-count { color: #b9cdf3; }
+
+/* body: cards | detail */
+.ais-pp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 388px; }
+.ais-pp-gridsec { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ais-pp-bar { flex-shrink: 0; min-height: 52px; display: flex; align-items: center; padding: 10px 14px; border-bottom: 1px solid #262626; color: #a8a8a8; font-size: 12px; }
+.ais-pp-bar-info, .ais-pp-bar-form { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.ais-pp-bar-info { justify-content: space-between; }
+.ais-pp-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ais-pp-savenew { flex-shrink: 0; height: 32px; padding: 0 12px; border: 1px dashed #5a5a5a; border-radius: 7px; background: transparent; color: #dcdcdc; font-size: 12.5px; white-space: nowrap; }
+.ais-pp-savenew:hover { border-color: #8a8a8a; }
+.ais-pp-newlabel { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: #cfcfcf; white-space: nowrap; }
+.ais-pp-newname { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid #60a5fa; border-radius: 7px; background: #141414; color: #ececec; font: inherit; }
+.ais-pp-commit { flex-shrink: 0; height: 32px; padding: 0 14px; border: 0; border-radius: 7px; background: #2563eb; color: #fff; font-weight: 500; }
+.ais-pp-commit:hover { background: #1d4ed8; }
+.ais-pp-cancel { flex-shrink: 0; height: 32px; border-radius: 7px; }
+.ais-pp-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; }
+.ais-pp-empty { padding: 40px 0; text-align: center; color: #9a9a9a; }
+.ais-pp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.ais-pp-card { display: flex; flex-direction: column; justify-content: space-between; min-width: 0; border: 2px solid #2c2c2c; border-radius: 9px; background: #222; overflow: hidden; }
+.ais-pp-card.cur { border-color: #2f6f4f; }
+.ais-pp-card.sel { border-color: #3b82f6; }
+.ais-pp-card-main { display: flex; flex-direction: column; gap: 6px; min-height: 120px; padding: 10px 11px 8px; border: 0; background: transparent; color: inherit; text-align: left; }
+.ais-pp-backdrop .ais-pp-card-main:focus-visible { outline-offset: -2px; }
+.ais-pp-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ais-pp-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: #ececec; }
+.ais-pp-badge { flex-shrink: 0; padding: 1px 7px; border-radius: 999px; background: #2f6f4f; color: #eafff3; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.ais-pp-card-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: #bdbdbd; font-size: 12px; line-height: 1.5; word-break: break-all; }
+.ais-pp-card-meta { margin-top: auto; color: #8f8f8f; font-size: 11px; }
+.ais-pp-card-foot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 0 9px 9px; }
+.ais-pp-replace, .ais-pp-use { border: 1px solid #3b5f9e; border-radius: 6px; background: #1f2b40; color: #dbe6ff; font-weight: 500; white-space: nowrap; }
+.ais-pp-replace:hover, .ais-pp-use:hover { background: #26375a; }
+.ais-pp-replace, .ais-pp-append { height: 34px; font-size: 12.5px; }
+.ais-pp-append { padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 6px; background: #262626; color: #dcdcdc; white-space: nowrap; }
+.ais-pp-append:hover { border-color: #5a5a5a; background: #2e2e2e; }
+
+/* detail pane */
+.ais-pp-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid #2f2f2f; background: #1f1f1f; }
+.ais-pp-dwrap { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 14px 16px; }
+.ais-pp-now, .ais-pp-edit { flex-shrink: 0; display: flex; flex-direction: column; }
+.ais-pp-now { gap: 6px; }
+.ais-pp-edit { gap: 10px; }
+.ais-pp-row2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ais-pp-cap { font-size: 12px; font-weight: 700; color: #8f8f8f; letter-spacing: 0.04em; }
+.ais-pp-status { padding: 2px 8px; border-radius: 999px; background: #3d3322; color: #f1d39a; font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ais-pp-status.match { background: #2f6f4f; color: #eafff3; }
+.ais-pp-status.empty { background: #2b2b2b; color: #a8a8a8; }
+.ais-pp-current { min-height: 64px; max-height: 120px; overflow: auto; padding: 8px 10px; border: 1px solid #2f2f2f; border-radius: 7px; background: #171717; color: #cfcfcf; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.ais-pp-current.dim { color: #7c7c7c; }
+.ais-pp-clear { align-self: flex-start; height: 28px; font-size: 12px; }
+.ais-pp-sep { flex-shrink: 0; height: 1px; background: #2f2f2f; }
+.ais-pp-field { display: flex; flex-direction: column; gap: 4px; color: #a8a8a8; font-size: 12px; }
+.ais-pp-name { height: 34px; padding: 0 10px; border: 1px solid #474747; border-radius: 6px; background: #1d1d1d; color: #ececec; font: inherit; font-size: 13px; }
+.ais-pp-text { padding: 8px 10px; border: 1px solid #474747; border-radius: 6px; background: #1d1d1d; color: #ececec; font: inherit; font-size: 12.5px; line-height: 1.5; resize: vertical; min-height: 90px; }
+.ais-pp-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.ais-pp-savedraft, .ais-pp-use, .ais-pp-add { height: 32px; padding: 0 12px; }
+.ais-pp-savedraft { border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-weight: 500; }
+.ais-pp-savedraft:hover:not(:disabled) { background: #1d4ed8; }
+.ais-pp-savedraft:disabled { background: #2b2b2b; color: #8a8a8a; }
+.ais-pp-delete { height: 30px; margin-left: auto; padding: 0 10px; border: 1px solid #6b2b2b; border-radius: 6px; background: #2a1c1c; color: #fca5a5; }
+.ais-pp-delete:hover { background: #3a2020; }
+.ais-pp-none { padding-top: 30px; text-align: center; color: #9a9a9a; }
+
+/* foot line */
+.ais-pp-foot { flex-shrink: 0; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 14px; border-top: 1px solid #2f2f2f; background: #202020; font-size: 12.5px; }
+.ais-pp-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cfcfcf; }
+.ais-pp-undo { flex-shrink: 0; }
+.ais-pp-path { flex-shrink: 0; color: #8f8f8f; white-space: nowrap; }
+
+/* narrow page: the detail goes under the cards */
+@media (max-width: 900px) {
+  .ais-pp-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(200px, 1fr) minmax(0, 48%); }
+  .ais-pp-detail { border-left: 0; border-top: 1px solid #2f2f2f; }
+  .ais-pp-path, .ais-pp-hint { display: none; }
+}

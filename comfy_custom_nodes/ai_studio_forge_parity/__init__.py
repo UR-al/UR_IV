@@ -59,8 +59,24 @@ from .dora_infer_mode_nodes import (
     NODE_DISPLAY_NAME_MAPPINGS as _DORA_MODE_DISPLAY_NAMES,
 )
 
+from .studio_model_nodes import (
+    NODE_CLASS_MAPPINGS as _STUDIO_MODEL_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _STUDIO_MODEL_DISPLAY_NAMES,
+)
+# Prompt adherence (pack 1.17.0): LoRA control, CFG schedule, word emphasis. Registers nothing at import.
+from .studio_adherence_nodes import (
+    NODE_CLASS_MAPPINGS as _STUDIO_ADHERENCE_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _STUDIO_ADHERENCE_DISPLAY_NAMES,
+)
+from .studio_nodes import (
+    NODE_CLASS_MAPPINGS as _STUDIO_NODES,
+    NODE_DISPLAY_NAME_MAPPINGS as _STUDIO_DISPLAY_NAMES,
+)
+from .studio_routes import register_routes as _register_studio_routes
+from .lora_routes import register_lora_handlers as _register_lora_handlers
 
-__version__ = "1.9.0"
+
+__version__ = "1.21.0"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside
@@ -106,6 +122,9 @@ NODE_CLASS_MAPPINGS = _merge_node_maps(
     _COLORCRAFT_NODES,
     _MOSS_SPECTRUM_NODES,
     _DORA_MODE_NODES,
+    _STUDIO_NODES,
+    _STUDIO_MODEL_NODES,
+    _STUDIO_ADHERENCE_NODES,
 )
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -122,6 +141,16 @@ NODE_DISPLAY_NAME_MAPPINGS.update(_SPEED_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_COLORCRAFT_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_MOSS_SPECTRUM_DISPLAY_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_DORA_MODE_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_STUDIO_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_STUDIO_MODEL_DISPLAY_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_STUDIO_ADHERENCE_DISPLAY_NAMES)
 
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+# Anima studio web extension: ComfyUI serves every *.js under this folder (keep tests out of it).
+WEB_DIRECTORY = "./web"
+# Mount the studio's HTTP routes (no-op outside ComfyUI).
+_register_lora_handlers()
+_register_studio_routes()
+
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

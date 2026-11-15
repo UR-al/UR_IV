@@ -22,12 +22,14 @@ sampler wrapper (``guidance_cns.apply_cns``).
 
 from __future__ import annotations
 
+import logging
+
 import functools
 import math
 from typing import Any
 
 from .compat import clone_model, invoke_provider, provider
-from .guidance_common import is_extra_sampler_substep
+from .guidance_common import ASYM_REFERENCE_KEY, is_extra_sampler_substep
 
 # Re-exports (see the module docstring) — also used by the suite below.
 from .guidance_common import (  # noqa: F401
@@ -394,6 +396,20 @@ def _patch_cfg_stage(
     return patched, apg_settings is not None
 
 
+def _reference_guard(model, attention_method, slg_enabled, dave_enabled, attention_scale=1.0):
+    """What a studio reference on ``model`` leaves of the suite. SnapRef prepends the reference's keys, which PAG's blend
+    cannot take; a Ref Adapter v2 runs the blocks itself, so it never reaches DAVE's, SLG's or SEG's patches."""
+    pag_runs = attention_method == "pag" and attention_scale != 0.0  # scale 0 installs no patch
+    if pag_runs and "snapref" in getattr(model, "wrappers", {}).get("diffusion_model", {}):
+        raise RuntimeError("SnapRef 는 PAG 와 같이 못 씀: Ref Adapter 로 바꾸거나 PAG 를 끄세요.")
+    if not getattr(model, "model_options", {}).get("transformer_options", {}).get(ASYM_REFERENCE_KEY):
+        return attention_method, slg_enabled, dave_enabled
+    dropped = [name for name, on in (("DAVE", dave_enabled), ("SLG", slg_enabled), ("SEG", attention_method == "seg")) if on]
+    if dropped:
+        logging.getLogger(__name__).warning("Ref Adapter v2 runs without %s", ", ".join(dropped))
+    return None if attention_method == "seg" else attention_method, False, False
+
+
 class ForgeNeoAnimaGuidanceSuite:
     """Compose the extension's Anima Perturbation Guidance settings (``settings_json``) on one MODEL."""
 
@@ -432,6 +448,8 @@ class ForgeNeoAnimaGuidanceSuite:
 
         slg_enabled = _as_bool(_setting(settings, "guid_slg_on", False))
         dave_enabled = _as_bool(_setting(settings, "guid_dave_enabled", False))
+        attention_method, slg_enabled, dave_enabled = _reference_guard(
+            model, attention_method, slg_enabled, dave_enabled, float(_setting(settings, "guid_scale", 4.0)))
         # S² (SLG mode Stochastic): SLG's weak row skips a fresh draw of blocks from the eligible pool at
         # every evaluation, with omega as its scale (sam-extra v0.30.0 — guidance_s2). Without omega or
         # a block to drop the extension turns SLG off, and so does the suite.

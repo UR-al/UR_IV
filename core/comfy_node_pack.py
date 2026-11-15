@@ -88,7 +88,39 @@ PACK_ID = "ai_studio_forge_parity"
 # ComfyUI classes, with a new patches_uuid and an OUTER_SAMPLE wrapper that reports each sampling run; no ComfyUI
 # function is patched. Adapted from sam-extra's own ``decompose`` under its author's MIT grant (the LyCORIS mode takes
 # LyCORIS' own operations, bit for bit with its training merge). The compiler emits no new node, so it needs no gate.
-PACK_VERSION = "1.9.0"
+# 1.10.0: the Anima studio (custom workflows only; the compiler emits none of it): eight AIStudio* nodes (LoRA tags,
+# Forge-info save, upscale, Forge prompt syntax, the panel / result / X/Y/Z UI nodes, a lazy two-way switch), an
+# optional forge_noise input on ForgeNeoKSamplerCNS / ForgeNeoHiresFix, the web extension under web/ai_studio (.js/.css
+# now installed and fingerprinted, js_tests/ never), HTTP routes under /aistudio/studio, the X/Y/Z grid (Roboto legend
+# font, .ttf installed; the prompt tag list tags/danbooru_tags.csv, .csv installed), SAM3.1 multiplex files in the SAM3 picker, and example_workflows/AI Studio Anima.json.
+# 1.11.0: the studio picks its model family from the checkpoint name (Anima, MOSS-Image, Krea2): TE type, default
+# settings, extensions per family; four AIStudio* nodes (a text encoder loader, and three over optional packs: MOSS fp32
+# stream, Anima and Krea2 references; web/ai_studio/reference_view.js); ForgeNeoModelSamplingShift keeps a flux-type
+# predictor (Krea2); moss_lora_layout.py.
+# 1.12.0: the studio's EXIF panel (AIStudioExifView, web/ai_studio/exif_view.js + studio_exif.js), 갤러리 자동 비우기 and
+# 걸린 시간 in the result column.
+# 1.13.0: the studio's post-processing settings (studio_post_schema.py, web/ai_studio/post_view.js + studio_post.js): SAM3 in
+# full, Hires' own CFG / Shift / scheduler / size / VAE / prompts, Extras' Scale to, second upscaler, colour correction and
+# tiles (studio_upscale.py); a SAM3 file in the transformers layout is refused, an empty mask is told.
+# 1.14.0: the X/Y/Z plot's LoRA axis (xyz_lora.py, web/ai_studio/xyz_lora_view.js): other LoRAs in the place of one tag, with
+# their triggers and epoch ranges; the prompt card's sections, joined in the app's order (studio_state.assembled_prompt).
+# 1.15.0: the studio picks its attention (AIStudioAttention), inpaints only the masked area (the detailer as the inpaint_detailer
+# role, a lazy switch keeps the main sampler out), plots any extension setting (xyz_axes.EXT_AXES) and draws wildcards
+# (studio_wildcards.py); NegPiP runs on MOSS too.
+# 1.16.0: the studio's EXIF panel pulls an image's settings back into the panels (web/ai_studio/studio_settings.js,
+# studio_infotext_read.py), and the gallery keeps its scroll.
+# 1.17.0: the studio's prompt adherence controls (studio_adherence.py, studio_adherence_nodes.py): LoRA Base 먼저 (the main
+# sampler's first steps without the LoRAs), LoRA 교차 어텐션 제외, CFG 스케줄 and 단어 주목, each with an X/Y/Z axis.
+# 1.18.0: SnapRef v2a stable: its node fits 2.9B itself (the original file, no __40b copy), a third reference picture
+# (reference_image_3) and the multi-picture layout (separate / stitch).
+# 1.19.0: the studio's LoRA picker (search, artist folder tree, run cards, epoch chips with training-sample previews, XYZ).
+# 1.20.0: the studio's 스텝 row switches: MOSS-Image's official layer skip (block 22 in the uncond pass, on AIStudioMossStream)
+# and on/off for the 선행 고정 / 후행 고정 prompt boxes.
+# 1.21.0: the studio's prompt-box presets (studio_presets.py, preset_routes.py, web/ai_studio/preset_*.js: a box's name opens
+# its quick list, "프리셋 관리…" the preset window), the X/Y/Z value boxes as blocks (xyz_chips.js for list axes, xyz_blocks.js
+# for Prompt S/R / Prompt order: one text block a value, commas included), sampler / scheduler lists with similar names
+# together (studio_choices_order.py), ←/→ in the gallery, and panels that keep their scroll when redrawn.
+PACK_VERSION = "1.21.0"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 
@@ -96,8 +128,18 @@ OWNER_MARKER = ".aistudio-owned.json"
 # and licenses too) versus what ComfyUI actually imports or reads at runtime.
 # .safetensors: the Colorcraft basis vectors under vendor/ (1.7.0) are read at run
 # time, so a vectors-only change must change the fingerprint and ask for a restart.
-_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors"})
+# .js/.css (web/ai_studio): ComfyUI serves them from disk, so a change refreshes the
+# install (fingerprinted) but needs only a browser reload, not a restart.
+# .ttf (fonts/): the X/Y/Z grid legend font is read when a grid is drawn (never imported), so like
+# .js/.css a change refreshes the install without a restart.
+# .csv (tags/): the studio's prompt autocomplete list is read on the first /tags request (never imported), so it
+# too refreshes the install without a restart.
+_PACK_SUFFIXES = frozenset({".py", ".json", ".md", ".txt", ".safetensors", ".js", ".css", ".ttf", ".csv"})
 _RUNTIME_SUFFIXES = frozenset({".py", ".json", ".safetensors"})
+# Repo-only folders: never copied into ComfyUI nor fingerprinted.  js_tests/ holds the
+# pack's node:test files and their golden .json fixture (a copied .json would count as a
+# runtime file and ask for a restart whenever a fixture changed).
+_DEV_ONLY_DIRS = frozenset({"js_tests"})
 
 
 class ComfyNodePackError(RuntimeError):
@@ -134,6 +176,7 @@ def pack_files(source: Path | str, *, runtime_only: bool = False) -> list[Path]:
             for path in source_path.rglob("*")
             if path.is_file()
             and "__pycache__" not in path.parts
+            and not _DEV_ONLY_DIRS.intersection(path.relative_to(source_path).parts)
             and path.name != OWNER_MARKER
             and path.suffix.casefold() in suffixes
         ),
@@ -250,7 +293,7 @@ def install_bundled_node_pack(
         shutil.copytree(
             source_path,
             staging,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", OWNER_MARKER),
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", OWNER_MARKER, *_DEV_ONLY_DIRS),
         )
         marker = {
             "owner": OWNER_ID,

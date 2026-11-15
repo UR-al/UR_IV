@@ -2576,6 +2576,11 @@ onActivated(() => {
   ollamaUrl.value = storedOllamaUrl()
   ollamaModel.value = storedOllamaModel()
 })
+// 업데이트 초기화가 실패했으면 다시 열 때 다시 시도한다 — 실패 상태에선 패널 버튼이 모두 비활성이라
+// 이것 말고 다시 시도할 계기가 없다. 성공한 초기화는 캐시라 아무 일도 안 한다.
+onActivated(() => {
+  void initialiseAppUpdates(false)
+})
 
 const defaultOrder = ['T2I','I2I','Inpaint','Event Gen','Search','Batch / Upscale','Gallery','XYZ Plot','PNG Info','Favorites','Settings']
 function _loadTabOrder() {

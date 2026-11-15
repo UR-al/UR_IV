@@ -162,7 +162,11 @@ class TestDegridNodeContract(unittest.TestCase):
         required = spec["required"]
         self.assertEqual(tuple(required), COMFY_INPUTS)
         self.assertEqual(degrid_nodes.INPUT_NAMES, COMFY_INPUTS)
-        self.assertEqual(set(spec), {"required"})
+        # the studio card's ComfyUI-only engine stays optional and NAFNet by default, so the app compiler's graph
+        # (required inputs only) runs exactly as before
+        self.assertEqual(set(spec), {"required", "optional"})
+        self.assertEqual(tuple(spec["optional"]), ("engine",))
+        self.assertEqual(spec["optional"]["engine"][1]["default"], degrid_nodes.ENGINE_NAFNET)
         self.assertEqual(required["image"], ("IMAGE",))
         self.assertEqual(required["enabled"], ("BOOLEAN", {"default": True}))
         self.assertEqual(required["model_name"][0][0], "auto")  # outside ComfyUI: only auto

@@ -441,6 +441,84 @@ class TestForgeParityDisabledPaths(unittest.TestCase):
                 object(), object(), True, ckpt_name="pid.safetensors", tile_latent=96,
             )
 
+    @requires_torch
+    def test_pid_runs_comfy_orgs_split_files_like_the_core_template(self):
+        # Comfy-Org/PixelDiT ships the PiD model (diffusion_models) and its Gemma TE (text_encoders) apart; the core
+        # template loads them with UNETLoader + CLIPLoader(pixeldit), samples lcm, and decodes with the pixel_space VAE,
+        # whose output is (x + 1) / 2.
+        torch = load_torch()
+        lists = {
+            "diffusion_models": ["anima.safetensors", "pid_1.5_qwenimage_1024_to_4096_4step_bf16.safetensors"],
+            "checkpoints": ["anima.safetensors"],
+            "text_encoders": ["qwen.safetensors", "gemma_2_2b_it_elm_fp8_scaled.safetensors", "gemma_2_2b_it_elm_bf16.safetensors"],
+        }
+        folder_paths = SimpleNamespace(get_filename_list=lambda kind: list(lists.get(kind, [])))
+        calls = []
+
+        def provider(name, *, method=None, feature=None, args=(), kwargs=None):
+            calls.append((name, tuple(args)))
+            return {"UNETLoader": ("pid_model",), "CLIPLoader": ("pid_clip",), "CLIPTextEncode": ("cond",),
+                    "PiDConditioning": ("pid_cond",), "ConditioningZeroOut": ("zero",)}[name]
+
+        samples = torch.tensor([-1.0, 0.0, 1.0, 3.0]).reshape(1, 1, 1, 4).expand(1, 3, 1, 4)
+        sampled = []
+
+        def sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise, **_):
+            sampled.append((model, steps, cfg, sampler_name, scheduler, positive, negative, tuple(latent["samples"].shape)))
+            return ({"samples": samples.clone()},)
+
+        image = torch.zeros((1, 2, 3, 3))
+        with mock.patch.object(generation, "folder_paths_module", return_value=folder_paths), \
+                mock.patch.object(generation, "invoke_provider", side_effect=provider), \
+                mock.patch.object(generation, "_common_sample", side_effect=sample):
+            choices = generation.ForgeNeoAnimaPiD.INPUT_TYPES()["required"]["ckpt_name"][0]
+            out = generation.ForgeNeoAnimaPiD().decode(image, {"samples": None}, True, ckpt_name=lists["diffusion_models"][1], seed=5)[0]
+        self.assertEqual(choices, ["(auto-download)", "pid_1.5_qwenimage_1024_to_4096_4step_bf16.safetensors"])
+        self.assertIn(("UNETLoader", ("pid_1.5_qwenimage_1024_to_4096_4step_bf16.safetensors", "default")), calls)
+        self.assertIn(("CLIPLoader", ("gemma_2_2b_it_elm_bf16.safetensors", "pixeldit")), calls)
+        self.assertEqual(sampled, [("pid_model", 4, 1.0, "lcm", "simple", "pid_cond", "zero", (1, 3, 8, 12))])
+        self.assertEqual(out.shape, (1, 1, 4, 3))
+        self.assertTrue(torch.equal(out[0, 0, :, 0], torch.tensor([0.0, 0.5, 1.0, 1.0])))
+
+    def test_pid_without_its_gemma_text_encoder_says_what_to_download(self):
+        folder_paths = SimpleNamespace(get_filename_list=lambda kind: ["pid_x.safetensors"] if kind == "diffusion_models" else [])
+        with mock.patch.object(generation, "folder_paths_module", return_value=folder_paths), \
+                mock.patch.object(generation, "invoke_provider", side_effect=AssertionError("loaded before the check")):
+            with self.assertRaisesRegex(RuntimeError, "gemma_2_2b_it_elm"):
+                generation.ForgeNeoAnimaPiD().decode(object(), object(), True, ckpt_name="pid_x.safetensors")
+
+    def test_degrid_nyquist_engine_runs_comfyui_degrid_on_auto(self):
+        # The card's second engine: lunaaispace-eng/ComfyUI-DeGrid's notch filter, measured and limited per image.
+        image, cleaned = SimpleNamespace(shape=(2, 8, 8, 3)), object()
+        calls = []
+
+        def provider(name, *, method=None, feature=None, args=(), kwargs=None):
+            calls.append((name, method, kwargs))
+            return (cleaned, object())
+
+        node = degrid_nodes.ForgeNeoAnimaVAEDeGrid()
+        self.assertEqual(node.INPUT_TYPES()["optional"]["engine"][0], list(degrid_nodes.ENGINE_CHOICES))
+        self.assertEqual(node.INPUT_TYPES()["optional"]["engine"][1]["default"], degrid_nodes.ENGINE_NAFNET)
+        with mock.patch.object(degrid_nodes, "invoke_provider", side_effect=provider):
+            result = node.apply(image, True, "auto", "Full", 1.0, 512, engine=degrid_nodes.ENGINE_NYQUIST)
+            untouched = node.apply(image, False, "auto", "Full", 1.0, 512, engine=degrid_nodes.ENGINE_NYQUIST)
+        self.assertEqual(calls, [("VAEDeGrid", "execute", {
+            "image": image, "enabled": True, "mode": "auto", "limit": 0.02, "grid_gain": 10.0,
+            "grid_view": "full frame", "skip_when_clean": True})])
+        self.assertIs(result["result"][0], cleaned)
+        reports = result["ui"][degrid_nodes.UI_KEY]
+        self.assertEqual([(r["status"], r["model"]) for r in reports], [("ok", degrid_nodes.ENGINE_NYQUIST)] * 2)
+        self.assertEqual(json.loads(result["result"][1]), reports)
+        self.assertIs(untouched["result"][0], image)
+        self.assertEqual(untouched["ui"][degrid_nodes.UI_KEY][0]["status"], "off")
+
+    def test_degrid_nyquist_engine_without_the_node_pack_fails_loudly(self):
+        error = compat.MissingComfyProvider("VAEDeGrid missing")
+        with mock.patch.object(degrid_nodes, "invoke_provider", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "ComfyUI-DeGrid"):
+                degrid_nodes.ForgeNeoAnimaVAEDeGrid().apply(
+                    SimpleNamespace(shape=(1, 8, 8, 3)), True, "auto", "Full", 1.0, 512, engine=degrid_nodes.ENGINE_NYQUIST)
+
     def test_suite_rejects_unsupported_seg_modes_before_runtime(self):
         # PAG 의 legacy·헤드 지정은 원본 노드가 받는다(tests/test_forge_parity_pag_origin.py 가
         # 스위트로 원본과 비트 단위 대조). SEG 는 팩 구현이 둘 다 없어 모델을 만지기 전에 막는다.

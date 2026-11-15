@@ -262,7 +262,7 @@ def _patch_anima_blocks(
     for index in sorted(dave_targets | slg_targets):
         original = _block_forward(patched, blocks, index)
 
-        def combined_forward(*args, _index=index, _original=original, **kwargs):
+        def combined_forward(*args, _index=index, _original=original, _block=blocks[index], **kwargs):
             options = _transformer_options(args, kwargs)
             drop = options.get(_S2_DROP_KEY)
             skipped = slg_targets if drop is None else drop
@@ -274,7 +274,10 @@ def _patch_anima_blocks(
                     raise RuntimeError("SLG block wrapper did not receive its input tensor.")
                 return value
             output = _original(*args, **kwargs)
-            if _index in dave_targets and dave_gate_active(options, tau, dave_pre_dd):
+            # SnapRef's reference pass records K/V once per run: DAVE belongs to the target forwards only
+            reference = getattr(getattr(_block, "self_attn", None), "_ref_kv_state", None)
+            recording = isinstance(reference, dict) and "record" in reference
+            if _index in dave_targets and not recording and dave_gate_active(options, tau, dave_pre_dd):
                 output = apply_dave(output, attenuation)
             return output
 

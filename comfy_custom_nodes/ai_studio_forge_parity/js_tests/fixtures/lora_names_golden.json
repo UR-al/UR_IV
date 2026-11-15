@@ -1,0 +1,446 @@
+[
+  {
+    "entry": "LoKr\\묵밥 (@Bjunbae)\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16-000014.safetensors",
+    "expect": {
+      "group": "묵밥 (@Bjunbae)",
+      "run": "@bjunbae_2.9b_lokr_came_b10_2e06_fp16",
+      "runShort": "@bjunbae fp16",
+      "epoch": 14,
+      "final": false,
+      "downloaded": false,
+      "label": "묵밥 · @bjunbae fp16 · e14"
+    }
+  },
+  {
+    "entry": "LoKr\\묵밥 (@Bjunbae)\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16\\@bjunbae_2.9b_lokr_came_b10_2e06_fp16-000015.safetensors",
+    "expect": {
+      "group": "묵밥 (@Bjunbae)",
+      "run": "@bjunbae_2.9b_lokr_came_b10_2e06_fp16",
+      "runShort": "@bjunbae fp16",
+      "epoch": 15,
+      "final": false,
+      "downloaded": false,
+      "label": "묵밥 · @bjunbae fp16 · e15"
+    }
+  },
+  {
+    "entry": "LoKr\\GT_DunE\\@gt_dune_2.9b_lokr_came_b10_2e06_fp16\\@gt_dune_2.9b_lokr_came_b10_2e06_fp16.safetensors",
+    "expect": {
+      "group": "GT_DunE",
+      "run": "@gt_dune_2.9b_lokr_came_b10_2e06_fp16",
+      "runShort": "@gt_dune fp16",
+      "epoch": null,
+      "final": true,
+      "downloaded": false,
+      "label": "GT_DunE · @gt_dune fp16 · 최종"
+    }
+  },
+  {
+    "entry": "LoKr\\묵밥 (@Bjunbae)\\@bjunbae_3.8b_anima-000001.safetensors",
+    "expect": {
+      "group": "묵밥 (@Bjunbae)",
+      "run": "@bjunbae_3.8b_anima",
+      "runShort": "@bjunbae anima",
+      "epoch": 1,
+      "final": false,
+      "downloaded": false,
+      "label": "묵밥 · @bjunbae anima · e1"
+    }
+  },
+  {
+    "entry": "LoKr\\묵밥 (@Bjunbae)\\@bjunbae_3.8b_anima.safetensors",
+    "expect": {
+      "group": "묵밥 (@Bjunbae)",
+      "run": "@bjunbae_3.8b_anima",
+      "runShort": "@bjunbae anima",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "묵밥 · @bjunbae anima"
+    }
+  },
+  {
+    "entry": "LoKr\\@enaa97\\@enaa97-000001.safetensors",
+    "expect": {
+      "group": "@enaa97",
+      "run": "@enaa97",
+      "runShort": "@enaa97",
+      "epoch": 1,
+      "final": false,
+      "downloaded": false,
+      "label": "@enaa97 · e1"
+    }
+  },
+  {
+    "entry": "LoKr\\@enaa97\\@enaa97_2.9b_lokr_came_b10_2e06_wsd_fp16\\@enaa97_2.9b_lokr_came_b10_2e06_wsd_fp16-000010.safetensors",
+    "expect": {
+      "group": "@enaa97",
+      "run": "@enaa97_2.9b_lokr_came_b10_2e06_wsd_fp16",
+      "runShort": "@enaa97 wsd fp16",
+      "epoch": 10,
+      "final": false,
+      "downloaded": false,
+      "label": "@enaa97 wsd fp16 · e10"
+    }
+  },
+  {
+    "entry": "LoRA\\_downloaded\\Komano\\Komano_Civ.safetensors",
+    "expect": {
+      "group": "Komano",
+      "run": "Komano_Civ",
+      "runShort": "Komano Civ",
+      "epoch": null,
+      "final": false,
+      "downloaded": true,
+      "label": "Komano Civ"
+    }
+  },
+  {
+    "entry": "LoRA\\HUSI\\HUSI.safetensors",
+    "expect": {
+      "group": "HUSI",
+      "run": "HUSI",
+      "runShort": "HUSI",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "HUSI"
+    }
+  },
+  {
+    "entry": "LoKr\\໊ (@9an9ta)\\@na-eun_2.9b_lokr_came_b10_2e06_fp16\\@na-eun_2.9b_lokr_came_b10_2e06_fp16-000020.safetensors",
+    "expect": {
+      "group": "໊ (@9an9ta)",
+      "run": "@na-eun_2.9b_lokr_came_b10_2e06_fp16",
+      "runShort": "@na-eun fp16",
+      "epoch": 20,
+      "final": false,
+      "downloaded": false,
+      "label": "໊ · @na-eun fp16 · e20"
+    }
+  },
+  {
+    "entry": "LoKr\\묵밥 (@Bjunbae)\\@bjunbae_2.9b_lokr_came_b10_2e06\\@bjunbae_2.9b_lokr_came_b10_2e06.safetensors",
+    "expect": {
+      "group": "묵밥 (@Bjunbae)",
+      "run": "@bjunbae_2.9b_lokr_came_b10_2e06",
+      "runShort": "@bjunbae",
+      "epoch": null,
+      "final": true,
+      "downloaded": false,
+      "label": "묵밥 · @bjunbae · 최종"
+    }
+  },
+  {
+    "entry": "LoKr/Rochan (@rochan00)/@rochan00_2.9b_lokr_came_b10_2e06/@rochan00_2.9b_lokr_came_b10_2e06-000010.safetensors",
+    "expect": {
+      "group": "Rochan (@rochan00)",
+      "run": "@rochan00_2.9b_lokr_came_b10_2e06",
+      "runShort": "@rochan00",
+      "epoch": 10,
+      "final": false,
+      "downloaded": false,
+      "label": "Rochan · @rochan00 · e10"
+    }
+  },
+  {
+    "entry": "LoKr\\eastown\\@h3r0d1c3_2.9b_lokr_came_b10_2e06_v5\\@h3r0d1c3_2.9b_lokr_came_b10_2e06_v5-000015.safetensors",
+    "expect": {
+      "group": "eastown",
+      "run": "@h3r0d1c3_2.9b_lokr_came_b10_2e06_v5",
+      "runShort": "@h3r0d1c3 v5",
+      "epoch": 15,
+      "final": false,
+      "downloaded": false,
+      "label": "eastown · @h3r0d1c3 v5 · e15"
+    }
+  },
+  {
+    "entry": "LoKr\\eastown\\@h3r0d1c3_2.9b_lokr_came_b10_2e06\\@h3r0d1c3_2.9b_lokr_came_b10_2e06.safetensors",
+    "expect": {
+      "group": "eastown",
+      "run": "@h3r0d1c3_2.9b_lokr_came_b10_2e06",
+      "runShort": "@h3r0d1c3",
+      "epoch": null,
+      "final": true,
+      "downloaded": false,
+      "label": "eastown · @h3r0d1c3 · 최종"
+    }
+  },
+  {
+    "entry": "LoKr\\GT_DunE\\@gt_dune_flat_2.9b_lokr_came_b10_2e06_fp16\\@gt_dune_flat_2.9b_lokr_came_b10_2e06_fp16-000015.safetensors",
+    "expect": {
+      "group": "GT_DunE",
+      "run": "@gt_dune_flat_2.9b_lokr_came_b10_2e06_fp16",
+      "runShort": "@gt_dune_flat fp16",
+      "epoch": 15,
+      "final": false,
+      "downloaded": false,
+      "label": "GT_DunE · @gt_dune_flat fp16 · e15"
+    }
+  },
+  {
+    "entry": "LoKr\\GT_DunE\\@gt_dune_2.9b_exp\\@gt_dune_2.9b_exp.safetensors",
+    "expect": {
+      "group": "GT_DunE",
+      "run": "@gt_dune_2.9b_exp",
+      "runShort": "@gt_dune exp",
+      "epoch": null,
+      "final": true,
+      "downloaded": false,
+      "label": "GT_DunE · @gt_dune exp · 최종"
+    }
+  },
+  {
+    "entry": "LoKr\\GT_DunE\\ANIMA_Lokr_@dune.safetensors",
+    "expect": {
+      "group": "GT_DunE",
+      "run": "ANIMA_Lokr_@dune",
+      "runShort": "ANIMA @dune",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "GT_DunE · ANIMA @dune"
+    }
+  },
+  {
+    "entry": "LoKr\\@TAESOL9743\\@taesol9743_3.8b-000003.safetensors",
+    "expect": {
+      "group": "@TAESOL9743",
+      "run": "@taesol9743_3.8b",
+      "runShort": "@taesol9743",
+      "epoch": 3,
+      "final": false,
+      "downloaded": false,
+      "label": "@taesol9743 · e3"
+    }
+  },
+  {
+    "entry": "LoKr\\@enaa97\\@enaa97_3.8b_v6-000004.safetensors",
+    "expect": {
+      "group": "@enaa97",
+      "run": "@enaa97_3.8b_v6",
+      "runShort": "@enaa97 v6",
+      "epoch": 4,
+      "final": false,
+      "downloaded": false,
+      "label": "@enaa97 v6 · e4"
+    }
+  },
+  {
+    "entry": "LoKr\\@enaa97\\ANIMAV10_Lokr_@enast-000005.safetensors",
+    "expect": {
+      "group": "@enaa97",
+      "run": "ANIMAV10_Lokr_@enast",
+      "runShort": "ANIMAV10 @enast",
+      "epoch": 5,
+      "final": false,
+      "downloaded": false,
+      "label": "@enaa97 · ANIMAV10 @enast · e5"
+    }
+  },
+  {
+    "entry": "LoKr\\@enaa97\\v1_@enast_3648.safetensors",
+    "expect": {
+      "group": "@enaa97",
+      "run": "v1_@enast_3648",
+      "runShort": "v1 @enast 3648",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "@enaa97 · v1 @enast 3648"
+    }
+  },
+  {
+    "entry": "LoKr\\moss\\@enaa97_moss_doraT\\@enaa97_moss_doraT-000002.safetensors",
+    "expect": {
+      "group": "moss",
+      "run": "@enaa97_moss_doraT",
+      "runShort": "@enaa97 moss doraT",
+      "epoch": 2,
+      "final": false,
+      "downloaded": false,
+      "label": "moss · @enaa97 moss doraT · e2"
+    }
+  },
+  {
+    "entry": "LoKr\\moss\\@enaa97_moss.safetensors",
+    "expect": {
+      "group": "moss",
+      "run": "@enaa97_moss",
+      "runShort": "@enaa97 moss",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "moss · @enaa97 moss"
+    }
+  },
+  {
+    "entry": "LoKr\\SAIO_GA_USHI\\v2ANIMAV10_Lokr_@saushi-000016.safetensors",
+    "expect": {
+      "group": "SAIO_GA_USHI",
+      "run": "v2ANIMAV10_Lokr_@saushi",
+      "runShort": "v2ANIMAV10 @saushi",
+      "epoch": 16,
+      "final": false,
+      "downloaded": false,
+      "label": "SAIO_GA_USHI · v2ANIMAV10 @saushi · e16"
+    }
+  },
+  {
+    "entry": "LoKr\\_人間失联_ (@renjianshilian0)\\ANIMAV10_Lokr_@renjianshilian0.safetensors",
+    "expect": {
+      "group": "_人間失联_ (@renjianshilian0)",
+      "run": "ANIMAV10_Lokr_@renjianshilian0",
+      "runShort": "ANIMAV10 @renjianshilian0",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "_人間失联_ · ANIMAV10 @renjianshilian0"
+    }
+  },
+  {
+    "entry": "LoKr\\youchien wars\\ANIMAV10_Lokr_@you chiba2.safetensors",
+    "expect": {
+      "group": "youchien wars",
+      "run": "ANIMAV10_Lokr_@you chiba2",
+      "runShort": "ANIMAV10 @you chiba2",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "youchien wars · ANIMAV10 @you chiba2"
+    }
+  },
+  {
+    "entry": "LoRA\\@NAI\\@NAI-step00001200.safetensors",
+    "expect": {
+      "group": "@NAI",
+      "run": "@NAI-step00001200",
+      "runShort": "@NAI-step00001200",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "@NAI-step00001200"
+    }
+  },
+  {
+    "entry": "LoRA\\Hstylev1\\Hstylev1-000004.safetensors",
+    "expect": {
+      "group": "Hstylev1",
+      "run": "Hstylev1",
+      "runShort": "Hstylev1",
+      "epoch": 4,
+      "final": false,
+      "downloaded": false,
+      "label": "Hstylev1 · e4"
+    }
+  },
+  {
+    "entry": "LoRA\\HUSI\\HUSI-000005.safetensors",
+    "expect": {
+      "group": "HUSI",
+      "run": "HUSI",
+      "runShort": "HUSI",
+      "epoch": 5,
+      "final": false,
+      "downloaded": false,
+      "label": "HUSI · e5"
+    }
+  },
+  {
+    "entry": "LoRA\\_downloaded\\Extend Image (Anima Edit)\\Extend Image (Anima Edit) v1.safetensors",
+    "expect": {
+      "group": "Extend Image (Anima Edit)",
+      "run": "Extend Image (Anima Edit) v1",
+      "runShort": "Extend Image (Anima Edit) v1",
+      "epoch": null,
+      "final": false,
+      "downloaded": true,
+      "label": "Extend Image (Anima Edit) v1"
+    }
+  },
+  {
+    "entry": "LoRA\\_downloaded\\ise14\\ise14_rendering_detailer_base10-000400.safetensors",
+    "expect": {
+      "group": "ise14",
+      "run": "ise14_rendering_detailer_base10",
+      "runShort": "ise14 rendering detailer base10",
+      "epoch": 400,
+      "final": false,
+      "downloaded": true,
+      "label": "ise14 rendering detailer base10 · e400"
+    }
+  },
+  {
+    "entry": "LoRA\\_downloaded\\anima_my8t\\anima_my8t_v1.1-epoch24.safetensors",
+    "expect": {
+      "group": "anima_my8t",
+      "run": "anima_my8t_v1.1-epoch24",
+      "runShort": "anima my8t v1.1-epoch24",
+      "epoch": null,
+      "final": false,
+      "downloaded": true,
+      "label": "anima my8t v1.1-epoch24"
+    }
+  },
+  {
+    "entry": "LoCon\\_downloaded\\hyatsu_LoCon\\hyatsu_LoCon-AnimaBaseV1.0-Run2    -000035.safetensors",
+    "expect": {
+      "group": "hyatsu_LoCon",
+      "run": "hyatsu_LoCon-AnimaBaseV1.0-Run2    ",
+      "runShort": "hyatsu LoCon-AnimaBaseV1.0-Run2",
+      "epoch": 35,
+      "final": false,
+      "downloaded": true,
+      "label": "hyatsu LoCon-AnimaBaseV1.0-Run2 · e35"
+    }
+  },
+  {
+    "entry": "LoRA\\_downloaded\\snapref-v2a\\snapref_v2a.safetensors",
+    "expect": {
+      "group": "snapref-v2a",
+      "run": "snapref_v2a",
+      "runShort": "snapref v2a",
+      "epoch": null,
+      "final": false,
+      "downloaded": true,
+      "label": "snapref-v2a · snapref v2a"
+    }
+  },
+  {
+    "entry": "Full\\Henen\\@henen illust_v2.safetensors",
+    "expect": {
+      "group": "Henen",
+      "run": "@henen illust_v2",
+      "runShort": "@henen illust v2",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "Henen · @henen illust v2"
+    }
+  },
+  {
+    "entry": "Full\\묵밥 (@Bjunbae)\\@Bjunbae.safetensors",
+    "expect": {
+      "group": "묵밥 (@Bjunbae)",
+      "run": "@Bjunbae",
+      "runShort": "@Bjunbae",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "묵밥 · @Bjunbae"
+    }
+  },
+  {
+    "entry": "LoKr\\Wil\\@wh1tes1ife_2.9b_lokr_came_b10_2e06\\@wh1tes1ife_2.9b_lokr_came_b10_2e06-000020.safetensors",
+    "expect": {
+      "group": "Wil",
+      "run": "@wh1tes1ife_2.9b_lokr_came_b10_2e06",
+      "runShort": "@wh1tes1ife",
+      "epoch": 20,
+      "final": false,
+      "downloaded": false,
+      "label": "Wil · @wh1tes1ife · e20"
+    }
+  }
+]

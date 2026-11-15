@@ -268,6 +268,9 @@ def _controlnet_folder_name(path: Path, requested: str):
         folder_paths.folder_names_and_paths[CONTROLNET_FOLDER] = previous
 
 
+OTHER_BLOCK_COUNT = "depth_embed slices missing"  # the vendored loader's words for a file with fewer blocks than the model
+
+
 def _vendored_nodes():
     return importlib.import_module(f"{__package__}.{_VENDOR_NODES}")
 
@@ -277,10 +280,17 @@ def apply_lllite(model: Any, lllite_name: str, image: Any, strength: float,
                  preserve_wrapper: bool = True, mask: Any = None) -> Any:
     """``AnimaLLLiteApply_sdscripts().apply(...)`` of the pinned original → patched MODEL."""
     node = _vendored_nodes().AnimaLLLiteApply_sdscripts()
-    output = node.apply(
-        model, lllite_name, image, float(strength), float(start_percent),
-        float(end_percent), preserve_wrapper=bool(preserve_wrapper), mask=mask,
-    )
+    try:
+        output = node.apply(
+            model, lllite_name, image, float(strength), float(start_percent),
+            float(end_percent), preserve_wrapper=bool(preserve_wrapper), mask=mask,
+        )
+    except RuntimeError as error:
+        if OTHER_BLOCK_COUNT in str(error):
+            raise RuntimeError(
+                f"{lllite_name} 는 이 체크포인트와 블록 수가 달라 쓸 수 없음: base 로 학습한 LLLite 는 2.9B·3.8B 에서 못 씀"
+            ) from error
+        raise
     return _mark_lllite(output[0])
 
 

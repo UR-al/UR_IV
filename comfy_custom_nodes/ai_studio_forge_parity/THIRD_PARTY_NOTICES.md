@@ -195,6 +195,17 @@ included: the function is this pack's own code (one helper, `_grow_span`, for ei
 `tests/test_comfy_node_pack.py` also checks that no pack function is a near-copy of the code in Forge's `modules/`,
 `modules_forge/` (without its third-party `packages/`) or `backend/`.
 
+## Forge upscale rules (`studio_upscale.py`)
+
+`ForgeNeoHiresFix` and `AIStudioUpscaleImage` upscale by the rules of Forge's `modules/upscaler.py` (the model again until the
+picture covers the target, 4 passes at most, then Lanczos to a multiple of 8), `modules/processing.py` (the Hires target size,
+Color Correction), `modules/images.py` (the upscaler only when the picture must grow) and `scripts/postprocessing_upscale.py`
+(Scale by, Scale to, Max Side Length, the second upscaler), which are A1111 stable-diffusion-webui and Forge code under
+AGPL-3.0. Only those rules are shared. No Forge code is included; `studio_upscale.py` is this pack's own code.
+`match_channel` does what scikit-image's `match_histograms` does for uint8 pictures, written for this pack so that ComfyUI needs
+no scikit-image; `tests/test_studio_upscale.py` compares the two. `tests/test_comfy_node_pack.py` also checks that no pack
+function is a near-copy of the code in Forge's `modules/`, `modules_forge/`, `backend/` and `scripts/`.
+
 ## Code shared with the sam-extra Forge extension (MIT, by its author)
 
 The sam-extra Forge extension ([UR-al/sam-extra](https://github.com/UR-al/sam-extra), installed as
@@ -236,7 +247,7 @@ for the pack first. Either way, the author wrote both copies.
 | `sam3_face_crop.py` (pack 1.8.0) | All of it: `CropBox`, `_finite_box`, `clip_box`, `expand_box`, `_fit_axis`, `square_crop`, `face_crop_box`, `grow_crop`, `box_to_image`, `box_to_crop`, `paste_mask`, `mask_centroid`, `assign_owner` (its `score`), `_spread`, `edge_contact`, `assign_owners`, `touching_sides`, `_grow_axis`, `grow_toward`, `enclosing_crop`, `growth_requests`, `continuing_pieces`, `order_faces`, `CropGrowth`, `_crop_text`, `FaceCropInfo`, `box_iou`, `_centre_inside`, `same_face`, `dedupe_faces`, `plan_face_crops` | `sam3ext/face_crop.py` (same names; installed v0.34.0, and the crop growth — `touching_sides`, `_grow_axis`, `grow_toward`, `enclosing_crop`, `growth_requests`, `continuing_pieces`, `CropGrowth` — from v0.34.1 as fixed before its release, sam-extra commit `b815f68`) |
 | `sam3_face_crop_run.py` (pack 1.8.0) | `run_face_crop` (the face-crop branch of `run_sam3_on_pil`, with the v0.34.1 crop growth), `_continuing_result`, `_split_masks`, `_mask_bbox`, `_intersection_area`, `_restrict_mask_to_box`, `_clean_split_masks` | `sam3ext/core.py` `run_sam3_on_pil` and the helpers of the same names |
 | `sam3_nodes.py` (pack 1.8.0) | `_copy_image_state` and the one-backbone-per-region rule of `_CropBackbone` | `sam3ext/core.py` `run_sam3_on_pil` (`_run_prompt`: `set_image` once per region, a shallow copy of the state and its `backbone_out` per token) |
-| `sam3_face_detect.py` (pack 1.8.0) | `FaceDetectorUnavailable`, `FaceDetection`, `_is_box_model`, `_scan`, `resolve_face_model`, `missing_model_message`, `_guard_no_download`, `ultralytics_device`, `_to_list`, `detect_faces` (`detect_faces_many`, `_detection`) | `sam3ext/face_detect.py` (same names; the pack looks in ComfyUI's model folders instead of Forge's `models/adetailer`) |
+| `sam3_face_detect.py` (pack 1.8.0) | `FaceDetectorUnavailable`, `FaceDetection`, `_is_box_model`, `scan_models`, `resolve_face_model`, `missing_model_message`, `_guard_no_download`, `ultralytics_device`, `_to_list`, `detect_faces` (`detect_faces_many`, `_detection`) | `sam3ext/face_detect.py` (same names, `scan_models` is its `_scan`; the pack looks in ComfyUI's model folders instead of Forge's `models/adetailer`) |
 | `dora_infer_mode.py` (pack 1.9.0) | `decompose` (adapted: LyCORIS' operations in its LyCORIS branch, the delta merged in place), `_can_return_fp32`, `_is_oom`, `_soft_empty_cache` | `sam3ext/dora_infer_mode.py` (same names; installed v0.34.0) |
 
 Formulas shared with GPL-3.0 hosts. Each item is the formula only: the code around it is sam-extra's or the pack's,
@@ -296,7 +307,7 @@ the results bit for bit.
 | `extra_samplers_dy.py`, `extra_samplers_dy_host.py` | sam-extra's changes to the Dy port: `cfg_pp_target`, `churn`, `evaluate`, `dy_substep`, `smea_substep`, `euler_dy`, the entry functions (`_entry`'s `sampler`), `spatial_interpolate`, `SubstepInputs`, the uncond capture; the sub-step placement and the reasons the sub-steps step aside | Koishi-Star's Euler-Smea-Dyn-Sampler (Apache-2.0, below; notice in the file header). The CFG++ step is a formula shared with ComfyUI and Forge (previous section) | `sam3ext/extra_samplers/euler_dy.py`, `substep_guard.py` | same |
 | `extra_samplers_ipndm.py` | `clamp_order` (sam-extra's `_order`, the 1–4 order rule). The rest is not sam-extra's own code: sam-extra's IPNDM_V is zju-pi's code as ComfyUI adapts it. The pack's loop and history (`sample_ipndm_v_fixed`, `step_sizes`, `combine`) are its own and follow sam-extra 0.33.1's rules (order 1 without history, the callback's current latent) | zju-pi/diff-sampler's IPNDM_V weights (Apache-2.0, below; notice in the file header). The weights are a formula shared with ComfyUI (previous section) | `sam3ext/extra_samplers/ipndm_deis.py` (`sample_ipndm_v`, sam-extra ≥ 0.33.1) | `test_comfy_extra_samplers_parity.py`, `test_comfy_extra_samplers_runtime.py` |
 | `extra_samplers_register.py`, `extra_samplers_nodes.py` | None. The registration and node code are this pack's own; the twelve sam-extra names, their order and the penultimate-σ discard set are sam-extra's (the thirteenth name, `ipndm_v_fixed`, is the pack's) | — | `sam3ext/extra_samplers/registry.py`, `params.py` | `test_comfy_extra_samplers_pack.py`, `test_comfy_extra_samplers_runtime.py` |
-| `extra_samplers_dpmpp_4m.py` | `_sample`: sam-extra's port (momentum 0, half-log-SNR flow handling, the noise rule) | Clybius' DPM++ 4M SDE (BSD-3-Clause, below; notice in the file header). The flow form of the step is a formula shared with ComfyUI (previous section) | `sam3ext/extra_samplers/dpmpp_4m_sde.py` | `test_comfy_extra_samplers_parity.py` |
+| `extra_samplers_dpmpp_4m.py` | `_sample`: sam-extra's port (momentum 0, half-log-SNR flow handling, the noise rule); `_fourth_order_terms` (sam-extra's 2026-11-04 fourth-order terms for unequal λ steps) | Clybius' DPM++ 4M SDE (BSD-3-Clause, below; notice in the file header). The flow form of the step is a formula shared with ComfyUI (previous section) | `sam3ext/extra_samplers/dpmpp_4m_sde.py` | `test_comfy_extra_samplers_parity.py`, `test_comfy_dpmpp_4m_terms.py` |
 | `guidance.py`, `guidance_dcw.py`, `guidance_detail.py` (Dy sub-steps) | sam-extra's sub-step rule: the guidance suite keeps its step state (APG momentum, ADG, SMC `e_prev`, RDC, HiFlow, Momentum Guidance, HiGS) through Euler (SMEA) Dy sub-steps | — | `sam3ext/guidance/` | `test_comfy_detail_parity.py` |
 | `speed_schedule.py`, `speed_spectral.py`, `speed_runner.py`, `speed_nodes.py`, the Detail Daemon σ lookup in `guidance_dd.py` | `validate_scales`, `parse_sigmas`, `_transition_hand_offs`; `dct_basis`, `dct_downscale`, `amplitude_resize`, `_target` (`_check_target`), `expand_dct`, `expand_fft`, `expand_haar`; `_expand`, `_init_coarse`, `_apply_transition`, `run_speed` with its `segment`; `plan_for` (`_plan_for`), `_flag` (Colorcraft `spec.py` `_truthy`). Also sam-extra's changes to the upstreams: refusals incl. custom A ≤ 0, seeds and noise streams, the img2img rescale, guards, status lines, and Detail Daemon following the re-published σ list | The three MIT upstreams under "Anima SPEED" | `sam3ext/speed/` (`schedule.py`, `spectral.py`, `runner.py`, `forge_host.py`) | `test_comfy_speed_parity.py`, `test_comfy_speed_host.py`, `test_comfy_speed_runtime.py` |
 | `colorcraft_basis.py`, `colorcraft_engine.py`, `colorcraft_host.py`, `colorcraft_nodes.py` | sam-extra's three substitutions in `apply_chain`; `encode_anchors`, `_anchor_cache_key` (`_anchor_key`), `AnchorCache.put` (`_remember_anchor`), `RunReport.render`, `grid_downscale`, the anchor look-up `get_color_latent`; sam-extra's host rules: anchors, σ look-up, pre-Detail-Daemon σ, fp16/bf16, sub-step pass-through | The MIT upstream and fork under "Colorcraft": `resolve_dev`, `sigma_to_value`, `build_entries` and the modifier loop are theirs | `sam3ext/colorcraft/` (`engine.py`, `hook.py`, `basis.py`, `spec.py`, `schedule.py`) | `test_comfy_colorcraft_parity.py`, `test_comfy_colorcraft_runtime.py` |
@@ -518,3 +529,22 @@ included or imported, and the tests write it out themselves.
 The installed extension is also the test oracle: `tests/test_comfy_dora_infer_mode.py` compares the Forge/Comfy fp32
 branch of `decompose` with sam-extra's bit for bit on CPU, and the LyCORIS branch with sam-extra's where both use the
 same operations; the pack never imports the extension. This notice does not replace or modify sam-extra's license.
+
+## X/Y/Z grid legend font (Roboto)
+
+`xyz_grid_draw.py` draws the X/Y/Z plot's legend with `fonts/Roboto-Regular.ttf`, an unmodified copy of the Roboto
+Regular font file (Google, designer Christian Robertson, "Copyright 2011 Google Inc. All Rights Reserved.") that Forge
+Neo also bundles. The font file is licensed under Apache-2.0; the full license text is included at
+`LICENSES/Roboto-Apache-2.0.txt`. Only the font file is copied: the grid layout (cell box, legend padding, word wrap
+and shrink, margins, Z sub-grids, Row Count) is written here from a behavior description of Forge's X/Y/Z plot and
+contains none of Forge's AGPL-3.0 code (`TestPackCarriesNoForgeCode`). Lines that Roboto cannot draw (Korean) use the
+system's Malgun Gothic or Noto Sans KR font, which the pack does not ship.
+
+## Forge prompt editing and noise rules (`studio_prompt_schedule.py`, `studio_forge_noise.py`)
+
+The Anima studio's "Forge-like" options follow two rules of Forge Neo (A1111 stable-diffusion-webui code, AGPL-3.0):
+the prompt editing grammar of `modules/prompt_parser.py` (`[a:b:step]`, `[a|b]`, which step a number means, when the
+whole prompt is left as written) and how `modules/rng.py` seeds the initial noise and the global RNG. Only the rules
+are shared. No Forge code is included: the prompt parser is a hand-written recursive-descent parser of this pack
+(Forge uses a lark grammar), and the noise helpers are plain torch calls; `studio_forge_parity.md` describes both and
+where they differ. `tests/test_comfy_node_pack.py` checks that no pack function is a near-copy of Forge's code.
