@@ -131,6 +131,33 @@ class TestBuildRefinePrompts(unittest.TestCase):
         out = build_refine_prompts(main_prompt='1girl, solo', replacement='detailed face')
         self.assertEqual(out['prompt'], '1girl, solo, detailed face')
 
+    def test_unmatched_target_appends_replacement(self):
+        # 리뷰 2026-11-04 SAM-05 — 예전엔 'portrait, 1girl' 로 Replacement 가 조용히 사라졌다(확장 handle_refine_click 과 같게)
+        out = build_refine_prompts(main_prompt='portrait, 1girl', target='shirt', replacement='red dress')
+        self.assertEqual(out['prompt'], 'portrait, 1girl, red dress')
+        self.assertTrue(out['replacement_appended'])
+
+    def test_matched_target_equal_to_replacement_is_not_appended_twice(self):
+        out = build_refine_prompts(main_prompt='red dress, 1girl', target='red dress', replacement='red dress')
+        self.assertEqual(out['prompt'], 'red dress, 1girl', '매칭은 됐다 — 결과가 원문과 같아도 덧붙이지 않는다')
+        self.assertFalse(out['replacement_appended'])
+
+    def test_matched_target_is_not_flagged_as_appended(self):
+        out = build_refine_prompts(main_prompt=self.MAIN, target='shirt', replacement='nude')
+        self.assertFalse(out['replacement_appended'])
+
+    def test_unmatched_target_without_replacement_keeps_main(self):
+        for replacement in ('', '   '):
+            out = build_refine_prompts(main_prompt='portrait, 1girl', target='shirt', replacement=replacement)
+            self.assertEqual(out['prompt'], 'portrait, 1girl')
+            self.assertFalse(out['replacement_appended'])
+
+    def test_unmatched_target_with_inherit_off_uses_replacement_only(self):
+        out = build_refine_prompts(main_prompt='portrait, 1girl', target='shirt', replacement='red dress',
+                                   inherit_main=False)
+        self.assertEqual(out['prompt'], 'red dress')
+        self.assertFalse(out['replacement_appended'])
+
     def test_no_target_no_replacement_keeps_main(self):
         out = build_refine_prompts(main_prompt='1girl, solo')
         self.assertEqual(out['prompt'], '1girl, solo')

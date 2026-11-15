@@ -150,16 +150,22 @@ function consumeUpdateEvent(event: any): void {
   }
 }
 
-async function performInitialise(scheduleAutomatic: boolean): Promise<void> {
+// 실패한 초기화가 남긴 문구 — 다시 시도해 성공하면 그대로 남아 있는 경우에만 지운다.
+let initError = ''
+
+// 실패하면 false — 호출부가 캐시를 비워 다음 호출이 다시 시도한다.
+async function performInitialise(scheduleAutomatic: boolean): Promise<boolean> {
   try {
     client = await getStudioClient()
     if (!client.supports('app_update.snapshot')) {
       appUpdateState.available = false
-      return
+      return true
     }
     if (!disconnect) disconnect = client.subscribe('app_update', consumeUpdateEvent)
     const reply = await client.invoke('app_update.snapshot', {})
     applySnapshot(replyData(reply))
+    if (initError && appUpdateState.statusMessage === initError) appUpdateState.statusMessage = ''
+    initError = ''
     appUpdateState.nativeOperations = client.supports('app_update.execute')
     if (scheduleAutomatic) {
       maybeNotifyLastResult()
@@ -176,15 +182,25 @@ async function performInitialise(scheduleAutomatic: boolean): Promise<void> {
         void runAppUpdateAction('check', {}, { silent: true }).catch(() => {})
       }, 3500)
     }
+    return true
   } catch (error) {
+    disconnect?.()
+    disconnect = null
+    client = null
     appUpdateState.available = false
-    appUpdateState.statusMessage = error instanceof Error ? error.message : String(error)
+    initError = error instanceof Error ? error.message : String(error)
+    appUpdateState.statusMessage = initError
+    return false
   }
 }
 
 export function initialiseAppUpdates(scheduleAutomatic = true): Promise<void> {
-  if (!initialisePromise) initialisePromise = performInitialise(scheduleAutomatic)
-  else if (scheduleAutomatic) {
+  if (!initialisePromise) {
+    const pending: Promise<void> = performInitialise(scheduleAutomatic).then((ok) => {
+      if (!ok && initialisePromise === pending) initialisePromise = null
+    })
+    initialisePromise = pending
+  } else if (scheduleAutomatic) {
     void initialisePromise.then(() => {
       maybeNotifyLastResult()
       maybeNotifyRelease()

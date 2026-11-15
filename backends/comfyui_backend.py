@@ -11,7 +11,7 @@ import threading
 import requests
 import websocket
 from typing import Callable, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from PIL import Image
 
@@ -322,8 +322,28 @@ class ComfyUIBackend(AbstractBackend):
             self._cancel_prompt(pid)
 
     def _cancel_prompt(self, pid: str) -> None:
-        """Cancel a prompt after proving whether it is running or pending."""
+        """Cancel only this prompt, never with a global interrupt.
+
+        ``/api/jobs/{id}/cancel`` checks and interrupts under the host's queue
+        mutex, so it cannot hit another client's prompt that started in the
+        gap. Hosts without that route get a dequeue plus a targeted interrupt.
+        """
         try:
+            response = requests.post(
+                f'{self.api_url}/api/jobs/{quote(str(pid), safe="")}/cancel',
+                timeout=5,
+            )
+            if response.status_code not in (404, 405):
+                response.raise_for_status()
+                _logger.info("ComfyUI job cancel 요청 전송: %s", pid)
+                return
+            # Dequeue before reading the queue: once removed it cannot start
+            # later, and one that started before the delete is seen running.
+            response = requests.post(
+                f'{self.api_url}/queue', json={'delete': [pid]}, timeout=5
+            )
+            response.raise_for_status()
+            _logger.info("ComfyUI 대기 prompt 삭제 요청 전송: %s", pid)
             queue_response = requests.get(f'{self.api_url}/queue', timeout=5)
             queue_response.raise_for_status()
             queue_state = queue_response.json()
@@ -337,17 +357,12 @@ class ComfyUIBackend(AbstractBackend):
                 }
 
             if pid in prompt_ids('queue_running'):
-                response = requests.post(f'{self.api_url}/interrupt', timeout=5)
-                response.raise_for_status()
-                _logger.info("현재 ComfyUI prompt interrupt 요청 전송: %s", pid)
-            else:
-                # Pending or already-finished prompts can be removed without a
-                # global interrupt that would affect another ComfyUI client.
+                # The host only interrupts when this id is the running one.
                 response = requests.post(
-                    f'{self.api_url}/queue', json={'delete': [pid]}, timeout=5
+                    f'{self.api_url}/interrupt', json={'prompt_id': pid}, timeout=5
                 )
                 response.raise_for_status()
-                _logger.info("ComfyUI 대기 prompt 삭제 요청 전송: %s", pid)
+                _logger.info("현재 ComfyUI prompt interrupt 요청 전송: %s", pid)
         except Exception as e:
             _logger.debug(f"interrupt 실패(무시): {e}")
 
