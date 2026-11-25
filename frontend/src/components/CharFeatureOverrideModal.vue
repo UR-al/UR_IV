@@ -1,12 +1,12 @@
 <template>
   <div class="ovr-overlay" @mousedown.self="close">
-    <div class="ovr-modal">
+    <div class="ovr-modal" role="dialog" aria-modal="true" aria-label="특징 override">
       <div class="ovr-header">
         <div>
           <h3>특징 override</h3>
           <span class="ovr-sub">auto remove 시, 선택한 카테고리는 덱 태그를 제거하고 캐릭터 특징으로 강제 교체합니다</span>
         </div>
-        <button class="ovr-close" @click="close"><Icon name="close" /></button>
+        <button class="ovr-close" @click="close" title="닫기" aria-label="특징 override 닫기"><Icon name="close" /></button>
       </div>
 
       <div class="ovr-body">
@@ -77,7 +77,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey, true))
 </script>
 
 <style scoped>
-.ovr-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 2300; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.ovr-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: var(--z-modal-nested); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .ovr-modal { width: min(520px, 92vw); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-card); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 .ovr-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .ovr-header h3 { font-size: 16px; font-weight: var(--fw-bold); }

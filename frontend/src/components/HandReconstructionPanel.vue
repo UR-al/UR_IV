@@ -105,6 +105,12 @@ let disposed = false
 let disconnect: (() => void) | undefined
 let timer: ReturnType<typeof setTimeout> | undefined
 const nextId = () => `hand_${Date.now()}_${++sequence}_${Math.random().toString(36).slice(2, 10)}`
+function formatHandError(exc: unknown, fallback: string): string {
+  const raw = String((exc as Error)?.message || exc || '').trim()
+  if (/[가-힣]/.test(raw)) return raw
+  console.error('[HandReconstructionPanel]', exc)
+  return fallback
+}
 const isRaster = (value: unknown): value is string => typeof value === 'string' && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)
 
 function closeComparison() {
@@ -191,7 +197,7 @@ async function generate() {
   } catch (exc) {
     if (pending !== requestId) return
     invalidate()
-    error.value = String((exc as Error).message || exc)
+    error.value = formatHandError(exc, '손 재구성 입력 준비 중 오류가 발생했습니다.')
   }
 }
 function cancelRemaining() {

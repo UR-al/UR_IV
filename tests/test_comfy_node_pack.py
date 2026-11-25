@@ -16,6 +16,7 @@ from core.comfy_node_pack import (
     PACK_VERSION,
     install_bundled_node_pack,
     node_pack_fingerprint,
+    pack_files,
 )
 from core.comfy_compatibility import bundle_fingerprint
 import comfy_custom_nodes.ai_studio_forge_parity as bundled_pack
@@ -95,6 +96,24 @@ CUSTOM_WORKFLOW_NODES = frozenset({
     "AIStudioRelight",
     "ForgeNeoMossSpectrum",       # 1.9.0: Spectrum for MOSS-Image (MODEL -> MODEL; the compiler never emits it)
     "ForgeNeoDoraInferenceMode",  # 1.9.0: sam-extra's DoRA Inference Mode on a MODEL's DoRA patches (MODEL -> MODEL)
+    "AIStudioLoraStack",          # Anima studio: Forge <lora:> tags -> LoRA loaders (the studio workflow, not the compiler)
+    "AIStudioSaveForge",          # Anima studio: PNG save with Forge-style `parameters` + ComfyUI prompt/workflow chunks
+    "AIStudioUpscaleImage",       # Anima studio: model upscale resized to original x scale_by (off = passthrough)
+    "AIStudioPromptEncode",       # Anima studio: CLIPTextEncode + Forge prompt editing as timestep ranges
+    "AIStudioPanel",              # Anima studio UI nodes: drawn by the studio JS, no outputs, never run
+    "AIStudioResultView",
+    "AIStudioXYZView",
+    "AIStudioExifView",           # 1.12.0: the EXIF panel next to the XYZ panel
+    "AIStudioTextEncoderLoader",  # studio: CLIPLoader of the three families
+    "AIStudioAttention",          # 1.15.0: the attention backend without a restart
+    "AIStudioInpaintDetailer",    # 1.15.0: inpaint "only masked" from the mask editor's mask
+    "AIStudioMossStream",         # studio: MOSS fp32 stream (ComfyUI-MOSS-Toolkit)
+    "AIStudioAnimaReference",     # studio: Anima reference (SnapRef / Anima Ref Adapter)
+    "AIStudioKrea2Reference",     # studio: Krea2 reference (comfyui-krea2edit)
+    "AIStudioSwitch",             # Anima studio: lazy a/b switch between the 2.9B/base and 3.8B paths
+    "AIStudioLoraControl",        # 1.17.0: LoRA Base 먼저 / 교차 어텐션 제외
+    "AIStudioCFGSchedule",        # 1.17.0: CFG per step
+    "AIStudioWordEmphasis",       # 1.17.0: cross-attention emphasis of listed words
 })
 EXPECTED_BUNDLED_NODES = COMPILER_BUILT_NODES | CUSTOM_WORKFLOW_NODES
 
@@ -104,6 +123,11 @@ def _source(root: Path, body: str = "VALUE = 1\n") -> Path:
     source.mkdir()
     (source / "__init__.py").write_text(body, encoding="utf-8")
     return source
+
+
+MODEL_NODES_1_11 = ("AIStudioTextEncoderLoader", "AIStudioMossStream", "AIStudioAnimaReference", "AIStudioKrea2Reference")
+NODES_AFTER_1_10 = ("AIStudioRelight", "AIStudioExifView", "AIStudioAttention", "AIStudioInpaintDetailer",
+                    "AIStudioLoraControl", "AIStudioCFGSchedule", "AIStudioWordEmphasis")
 
 
 class TestBundledComfyNodePack(unittest.TestCase):
@@ -173,7 +197,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
 
     def test_expected_snapshot_matches_every_exported_bundled_node(self):
         self.assertFalse(COMPILER_BUILT_NODES & CUSTOM_WORKFLOW_NODES)
-        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 44)
+        self.assertEqual(len(EXPECTED_BUNDLED_NODES), 62)
         self.assertEqual(EXPECTED_BUNDLED_NODES, frozenset(NODE_CLASS_MAPPINGS))
 
     def test_compiler_node_split_matches_app_sources(self):
@@ -221,6 +245,135 @@ class TestBundledComfyNodePack(unittest.TestCase):
     def test_pack_version_matches_package_version(self):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
+    def test_adherence_release_is_1_17_0(self):
+        self.assertEqual(bundled_pack.__version__, "1.21.1")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.17.0: the studio's prompt adherence controls", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.17.0 changes"), readme.index("## 1.16.0 changes"))
+        changes = " ".join(readme.split("## 1.17.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`AIStudioLoraControl`", "`AIStudioCFGSchedule`", "`AIStudioWordEmphasis`", "`studio_adherence.py`",
+                     "`lora_ctl`", "`ext_cfg_schedule`", "`ext_emphasis`"):
+            self.assertIn(text, changes)
+
+    def test_lora_model_folder_release_is_1_21_1(self):
+        """1.21.1 = the LoRA picker reads D:\\LoRA's model folder (<MODEL>/<algo>/<group>/<run>, 11-16) in both parsers."""
+        self.assertEqual(PACK_VERSION, "1.21.1")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.21.1: the studio's LoRA picker reads a model folder", source)
+        pack = root / "comfy_custom_nodes" / "ai_studio_forge_parity"
+        readme = (pack / "README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.21.1 changes"), readme.index("## 1.21.0 changes"))
+        changes = " ".join(readme.split("## 1.21.1 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`lora_index.parse_lora_path`", "`lora_names.parseLoraPath`", "`모델/알고리즘/묶음/런`", "`model`"):
+            with self.subTest(readme=text):
+                self.assertIn(text, changes)
+
+    def test_presets_and_blocks_release_is_1_21_0(self):
+        """1.21.0 = prompt-box presets, XYZ value blocks (list chips, Prompt S/R text blocks), list grouping, gallery keys."""
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.21.0: the studio's prompt-box presets", source)
+        pack = root / "comfy_custom_nodes" / "ai_studio_forge_parity"
+        readme = (pack / "README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.21.0 changes"), readme.index("## 1.20.0 changes"))
+        changes = " ".join(readme.split("## 1.21.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`studio_presets.py`", "`preset_routes.py`", "`prompt_presets.json`", "`GET /presets`", "`POST /presets`",
+                     "`preset_panel.js`", "`ctx.boxPreset(key, text)`", "저장 안 됨", "프리셋 관리…",
+                     "`xyz_chips.js`", "`xyz_blocks.js`", "Prompt S/R", "Prompt order", "찾을 글", "직접 입력",
+                     "`xyz_values_golden.json`", "`keepScroll`", "`studio_choices_order.py`", "`group_similar`",
+                     "`result_gallery.css`", "Home", "End", "Delete"):
+            with self.subTest(readme=text):
+                self.assertIn(text, changes)
+        # every web file the release added is named, so the list of what ships stays readable
+        for name in ("preset_api.js", "preset_dom.js", "preset_logic.js", "preset_quick.js", "preset_tools.js", "preset_window.js",
+                     "preset_window_view.js", "preset.css", "xyz_chips.css", "xyz_blocks.css"):
+            with self.subTest(file=name):
+                self.assertIn(name, changes)
+                self.assertTrue((pack / "web" / "ai_studio" / name).is_file())
+        parity = (pack / "studio_forge_parity.md").read_text(encoding="utf-8")
+        for heading in ("## 프롬프트 프리셋 (1.21.0)", "## XYZ 값 블록 (1.21.0)", "## 샘플러·스케줄러 목록 순서 (1.21.0)",
+                        "## 갤러리 키보드 (1.21.0)"):
+            with self.subTest(parity=heading):
+                self.assertIn(heading, parity)
+        blocks = parity.split("## XYZ 값 블록 (1.21.0)", 1)[1].split("\n## ", 1)[0]
+        for text in ("Prompt S/R", "따옴표", "the first value (the text to search for) is empty"):
+            with self.subTest(parity_blocks=text):
+                self.assertIn(text, blocks)
+
+    def test_settings_pull_release_is_1_16_0(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.16.0: the studio's EXIF panel pulls", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.16.0 changes"), readme.index("## 1.15.0 changes"))
+        changes = " ".join(readme.split("## 1.16.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`studio_settings.js`", "`studio_infotext_read.py`", "`POST /infotext/parse`"):
+            self.assertIn(text, changes)
+
+    def test_studio_tools_release_is_1_15_0(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.15.0: the studio picks its attention", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.15.0 changes"), readme.index("## 1.14.0 changes"))
+        changes = " ".join(readme.split("## 1.15.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`AIStudioAttention`", "`studio_wildcards.py`", "`inpaint_detailer`", "`EXT_AXES`", "`CLIPNegPip`"):
+            self.assertIn(text, changes)
+
+    def test_lora_axis_release_is_1_14_0(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.14.0: the X/Y/Z plot's LoRA axis", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.14.0 changes"), readme.index("## 1.13.0 changes"))
+        changes = " ".join(readme.split("## 1.14.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("`xyz_lora.py`", changes)
+        self.assertIn("`web/ai_studio/xyz_lora_view.js`", changes)
+
+    def test_post_settings_release_is_1_13_0(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.13.0: the studio's post-processing settings", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.13.0 changes"), readme.index("## 1.12.0 changes"))
+        changes = " ".join(readme.split("## 1.13.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        self.assertIn("`studio_post_schema.py`", changes)
+        self.assertIn("`AIStudioExifView`", " ".join(readme.split("## 1.12.0 changes", 1)[1].split("\n## ", 1)[0].split()))
+
+    def test_model_families_release_is_1_11_0(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.11.0: the studio picks its model family", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.11.0 changes"), readme.index("## 1.10.0 changes"))
+        changes = " ".join(readme.split("## 1.11.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        for name in MODEL_NODES_1_11:
+            with self.subTest(name=name):
+                self.assertIn(name, NODE_CLASS_MAPPINGS)
+                self.assertIn(f"`{name}`", changes)
+
+    def test_anima_studio_release_is_1_10_0(self):
+        # 팩 1.10.0 = Anima 스튜디오(노드·웹 확장·라우트·예제 워크플로). 버전·변경 주석·README 변경 절이 같이 간다.
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.10.0: the Anima studio", source)
+        readme = (root / "comfy_custom_nodes/ai_studio_forge_parity/README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.10.0 changes"), readme.index("## 1.9.0 changes"))
+        changes = " ".join(readme.split("## 1.10.0 changes", 1)[1].split("\n## ", 1)[0].split())
+        studio_nodes = sorted(name for name in NODE_CLASS_MAPPINGS if name.startswith("AIStudio") and name not in NODES_AFTER_1_10 and name not in MODEL_NODES_1_11)
+        self.assertEqual(len(studio_nodes), 8)
+        for text in (*(f"`{name}`" for name in studio_nodes),
+                     "`example_workflows/AI Studio Anima.json`", "`tools/build_anima_studio_workflow.py`",
+                     "`web/ai_studio`", "`/aistudio/studio`", "`GET /choices`", "`POST /xyz/plan`",
+                     "`POST /xyz/grid`", "`POST /open_output`", "`POST /to_input`", "`forge_noise`",
+                     "`studio_forge_parity.md`", "`fonts/Roboto-Regular.ttf`", "`js_tests/`",
+                     "`sam3.1_multiplex_fp16.safetensors`"):
+            with self.subTest(text=text):
+                self.assertIn(text, changes)
+
     def test_doc_only_refresh_copies_files_without_requiring_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             tmp_path = Path(directory)
@@ -248,6 +401,126 @@ class TestBundledComfyNodePack(unittest.TestCase):
             unchanged = install_bundled_node_pack(custom_nodes, source=source)
             self.assertFalse(unchanged.changed)
             self.assertFalse(unchanged.restart_required)
+
+    def test_font_file_is_installed_fingerprinted_and_needs_no_restart(self):
+        # fonts/Roboto-Regular.ttf (the X/Y/Z grid legend) must reach ComfyUI and be tamper-checked like the web files.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            custom_nodes = tmp_path / "custom_nodes"
+            custom_nodes.mkdir()
+            source = _source(tmp_path)
+            without = node_pack_fingerprint(source)
+            (source / "fonts").mkdir()
+            font = source / "fonts" / "legend.ttf"
+            font.write_bytes(b"\x00\x01font-v1")
+            self.assertNotEqual(node_pack_fingerprint(source), without)
+            self.assertEqual(
+                [p.name for p in pack_files(source) if p.suffix == ".ttf"], ["legend.ttf"],
+            )
+            self.assertEqual([p.name for p in pack_files(source, runtime_only=True)], ["__init__.py"])
+
+            first = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertEqual((first.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v1")
+
+            font.write_bytes(b"\x00\x01font-v2")
+            refreshed = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(refreshed.changed)
+            self.assertFalse(refreshed.restart_required)
+            self.assertEqual((refreshed.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v2")
+
+            (refreshed.target / "fonts" / "legend.ttf").write_bytes(b"tampered")
+            repaired = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(repaired.changed)
+            self.assertEqual((repaired.target / "fonts" / "legend.ttf").read_bytes(), b"\x00\x01font-v2")
+
+    def test_tag_list_csv_is_installed_fingerprinted_and_needs_no_restart(self):
+        # tags/danbooru_tags.csv (the studio's prompt autocomplete list) is read on the first /tags request, never imported.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            custom_nodes = tmp_path / "custom_nodes"
+            custom_nodes.mkdir()
+            source = _source(tmp_path)
+            without = node_pack_fingerprint(source)
+            (source / "tags").mkdir()
+            tags = source / "tags" / "list.csv"
+            tags.write_text("name,category,count,aliases,ko\nsolo,0,5,,\n", encoding="utf-8")
+            self.assertNotEqual(node_pack_fingerprint(source), without)
+            self.assertEqual([p.name for p in pack_files(source) if p.suffix == ".csv"], ["list.csv"])
+            self.assertEqual([p.name for p in pack_files(source, runtime_only=True)], ["__init__.py"])
+
+            first = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertEqual((first.target / "tags" / "list.csv").read_bytes(), tags.read_bytes())
+
+            tags.write_text("name,category,count,aliases,ko\nsolo,0,6,,\n", encoding="utf-8")
+            refreshed = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(refreshed.changed)
+            self.assertFalse(refreshed.restart_required)
+            self.assertEqual((refreshed.target / "tags" / "list.csv").read_bytes(), tags.read_bytes())
+
+            (refreshed.target / "tags" / "list.csv").write_text("tampered\n", encoding="utf-8")
+            repaired = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertTrue(repaired.changed)
+            self.assertEqual((repaired.target / "tags" / "list.csv").read_bytes(), tags.read_bytes())
+
+    def test_the_real_pack_ships_its_tag_list(self):
+        from core.comfy_node_pack import bundled_node_pack_path, pack_files
+
+        root = bundled_node_pack_path()
+        shipped = {p.relative_to(root).as_posix() for p in pack_files(root)}
+        self.assertIn("tags/danbooru_tags.csv", shipped)
+        runtime = {p.relative_to(root).as_posix() for p in pack_files(root, runtime_only=True)}
+        self.assertNotIn("tags/danbooru_tags.csv", runtime)
+
+    def test_js_tests_folder_is_neither_installed_nor_fingerprinted(self):
+        # R18: the pack's node:test files and their golden JSON fixture are for the repo only. A copied .json would
+        # also count as a runtime file and ask for a ComfyUI restart whenever a fixture changes.
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            custom_nodes = tmp_path / "custom_nodes"
+            custom_nodes.mkdir()
+            source = _source(tmp_path)
+            (source / "web").mkdir()
+            (source / "web" / "studio.js").write_text("export {};\n", encoding="utf-8")
+            before = node_pack_fingerprint(source)
+            before_runtime = node_pack_fingerprint(source, runtime_only=True)
+            fixtures = source / "js_tests" / "fixtures"
+            fixtures.mkdir(parents=True)
+            (source / "js_tests" / "studio.test.mjs").write_text("// test\n", encoding="utf-8")
+            (source / "js_tests" / "helper.js").write_text("// helper\n", encoding="utf-8")
+            golden = fixtures / "golden.json"
+            golden.write_text('{"v": 1}\n', encoding="utf-8")
+
+            self.assertEqual(node_pack_fingerprint(source), before)
+            self.assertEqual(node_pack_fingerprint(source, runtime_only=True), before_runtime)
+            self.assertEqual(
+                sorted(p.relative_to(source).as_posix() for p in pack_files(source)),
+                ["__init__.py", "web/studio.js"],
+            )
+
+            first = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertFalse((first.target / "js_tests").exists())
+            self.assertTrue((first.target / "web" / "studio.js").is_file())
+
+            golden.write_text('{"v": 2}\n', encoding="utf-8")
+            again = install_bundled_node_pack(custom_nodes, source=source)
+            self.assertFalse(again.changed)
+            self.assertFalse(again.restart_required)
+
+    def test_the_real_pack_keeps_its_js_tests_out_of_the_install(self):
+        from core.comfy_node_pack import bundled_node_pack_path
+
+        root = bundled_node_pack_path()
+        self.assertTrue((root / "js_tests").is_dir())
+        shipped = {p.relative_to(root).as_posix() for p in pack_files(root)}
+        self.assertFalse([path for path in shipped if path.startswith("js_tests/")])
+        self.assertIn("web/ai_studio/studio_main.js", shipped)
+
+    def test_the_real_pack_ships_its_legend_font(self):
+        from core.comfy_node_pack import bundled_node_pack_path, pack_files
+
+        root = bundled_node_pack_path()
+        shipped = {p.relative_to(root).as_posix() for p in pack_files(root)}
+        self.assertIn("fonts/Roboto-Regular.ttf", shipped)
 
     def test_tampered_runtime_file_requires_restart_after_repair(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -485,7 +758,7 @@ class TestPackNotices(unittest.TestCase):
 
     def test_every_license_file_is_named_in_the_notices_and_back(self):
         files = sorted(path.name for path in (PACK_DIR / "LICENSES").iterdir() if path.is_file())
-        self.assertEqual(len(files), 18)      # 1.9.0: moss-image-Apache-2.0.txt (the MOSS-Image head in moss_spectrum)
+        self.assertEqual(len(files), 19)      # 1.9.0: moss-image-Apache-2.0.txt (the MOSS-Image head in moss_spectrum); Roboto-Apache-2.0.txt (xyz_grid_draw legend font)
         for name in files:
             with self.subTest(license=name):
                 self.assertIn(f"LICENSES/{name}", self.notices)
@@ -531,6 +804,8 @@ class TestPackNotices(unittest.TestCase):
         ``modules/masking.py`` function since pack 1.3.0 and the notices named no Forge code. The pack's own code now
         follows only the rule (``TestPackCarriesNoForgeCode``); the notices say which rule and that no Forge code is
         included."""
+        upscale = _flat(_section(self.notices, "## Forge upscale rules (`studio_upscale.py`)"))
+        self.assertIn("No Forge code is included", upscale)
         section = _flat(_section(self.notices, "## Forge inpaint crop rule (`mask_ops.py`)"))
         for text in ("`mask_ops.py`", "`expand_crop_region`", "`modules/masking.py`", "AGPL-3.0",
                      "No Forge code is included", "`tests/test_comfy_sam3_nodes.py`", "`tests/test_comfy_node_pack.py`"):
@@ -636,13 +911,14 @@ class TestPackCarriesNoForgeCode(unittest.TestCase):
         root = require_forge()
         forge: dict = {}
         unreadable = []
-        for sub in ("modules", "modules_forge", "backend"):
+        for sub in ("modules", "modules_forge", "backend", "scripts"):
             for path, relative in similarity.python_files(root / sub, excluded=similarity.EXCLUDED_DIRS | {"packages"}):
                 try:
                     forge.update(similarity.function_tokens(path, f"{sub}/{relative}"))
                 except (SyntaxError, UnicodeDecodeError, ValueError):
                     unreadable.append(f"{sub}/{relative}")
         self.assertIn("modules/masking.py:expand_crop_region", forge)
+        self.assertIn("scripts/postprocessing_upscale.py:limit_size_by_one_dimension", forge)
         self.assertGreater(len(forge), 2000)                     # 2,594 functions in the installed Forge (2026-10-05)
         self.assertLessEqual(len(unreadable), 5, unreadable)
         copies = similarity.near_copies(similarity.collect(PACK_DIR), forge)

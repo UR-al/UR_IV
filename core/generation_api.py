@@ -27,6 +27,7 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import socket
 import threading
 import time
@@ -44,6 +45,11 @@ from backends.base import GenerationResult, MediaArtifact
 # 기본 포트·설정 경로는 관리형 엔진 포트 선택(core/backend_runtime._choose_port)도 읽는다.
 # DEFAULT_PORT 는 관리형 Forge(17860~17909)·ComfyUI(18188~18237) 자동 포트 범위 밖이다.
 from core.generation_api_port import DEFAULT_PORT, default_config_path
+from core.path_sanitize import (
+    UNC_PATH_WIDE_RE as _UNC_PATH_IN_ERROR,
+    WINDOWS_PATH_WIDE_RE as _WINDOWS_PATH_IN_ERROR,
+    mask_local_paths,
+)
 from core.resource_coordinator import ResourceBusyError, get_generation_coordinator
 from utils.atomic_json import atomic_write_json, load_json_safe
 
@@ -71,10 +77,6 @@ ALLOWED_FAMILIES = frozenset({"standard", "krea2"})
 _TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 _SAFE_MIME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}/[A-Za-z0-9][A-Za-z0-9.+-]{0,127}$")
-_URL_IN_ERROR = re.compile(r"https?://[^\s\]\[()<>{}\"']+", re.IGNORECASE)
-_WINDOWS_PATH_IN_ERROR = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\r\n\"'<>|]+")
-_UNC_PATH_IN_ERROR = re.compile(r"\\\\[^\s\\/]+[\\/][^\r\n\"'<>|]+")
-_POSIX_PATH_IN_ERROR = re.compile(r"(?<![:\w])/(?:[^/\s]+/)+[^/\s]+")
 _FORBIDDEN_REQUEST_KEYS = frozenset({
     "url", "api_url", "endpoint", "workflow", "workflow_path",
     "workflowpath", "img2img_workflow_path", "img2imgworkflowpath",
@@ -294,10 +296,14 @@ def _validate_generation_payload(payload: dict[str, Any], *, family: str = "stan
 
 def _sanitise_public_string(raw: Any, *, limit: int = 100_000) -> str:
     message = _clean_unicode(raw or "").replace("\x00", "")
-    message = _URL_IN_ERROR.sub("[backend endpoint]", message)
-    message = _UNC_PATH_IN_ERROR.sub("[local path]", message)
-    message = _WINDOWS_PATH_IN_ERROR.sub("[local path]", message)
-    message = _POSIX_PATH_IN_ERROR.sub("[local path]", message)
+    message = mask_local_paths(
+        message,
+        replacement="[local path]",
+        match_spaces=True,
+        mask_urls=True,
+        url_replacement="[backend endpoint]",
+        mask_all_posix=True,
+    )
     return message[:limit]
 
 
@@ -1030,12 +1036,14 @@ class GenerationApiManager:
             if backend_snapshot is not None:
                 self._job_backends[job_id] = backend_snapshot
             self._active_slots += 1
-            self._trim_jobs_locked()
+            evicted = self._trim_jobs_locked()
             target_queue = self._ensure_target_worker_locked(job["_serialKey"])
             self._persist_job(job)
             target_queue.put(job_id)
             self._condition.notify_all()
-            return self._job_public(job)
+            public = self._job_public(job)
+        self._remove_job_dirs(evicted)
+        return public
 
     def inspect(self, job_id: str) -> dict[str, Any]:
         with self._lock:
@@ -1690,7 +1698,11 @@ class GenerationApiManager:
             except OSError:
                 return 0.0
 
-        paths = sorted(self.storage_root.glob("*/job.json"), key=modified_time)[-MAX_RECENT_JOBS:]
+        all_paths = sorted(self.storage_root.glob("*/job.json"), key=modified_time)
+        stale_paths = all_paths[:-MAX_RECENT_JOBS] if len(all_paths) > MAX_RECENT_JOBS else []
+        paths = all_paths[-MAX_RECENT_JOBS:]
+        if stale_paths:
+            self._remove_job_dirs([item.parent.name for item in stale_paths])
         for path in paths:
             try:
                 raw = load_json_safe(str(path), {})
@@ -1755,7 +1767,8 @@ class GenerationApiManager:
                 # prevent the generation API manager from starting.
                 logger.warning("손상된 generation job manifest를 건너뜁니다: %s", path, exc_info=True)
 
-    def _trim_jobs_locked(self) -> None:
+    def _trim_jobs_locked(self) -> list[str]:
+        evicted: list[str] = []
         while len(self._jobs) > MAX_RECENT_JOBS:
             removable_id = next(
                 (
@@ -1771,6 +1784,30 @@ class GenerationApiManager:
             self._job_profiles.pop(removable_id, None)
             self._job_backends.pop(removable_id, None)
             self._previews.pop(removable_id, None)
+            evicted.append(removable_id)
+        return evicted
+
+    def _remove_job_dirs(self, job_ids: list[str]) -> None:
+        if not job_ids:
+            return
+        try:
+            root = self.storage_root.resolve()
+        except OSError:
+            return
+        for job_id in job_ids:
+            if not re.fullmatch(r"[0-9a-f]{32}", str(job_id)):
+                continue
+            try:
+                target = (self.storage_root / str(job_id)).resolve()
+            except OSError:
+                continue
+            if target.parent != root:
+                continue
+            shutil.rmtree(target, ignore_errors=True)
+
+    def default_target(self) -> str:
+        with self._lock:
+            return str(self._config.get("defaultTarget") or "active")
 
     def _resolve_profile(self, target_id: str) -> dict[str, Any]:
         value = str(target_id or "").strip()
@@ -1939,11 +1976,11 @@ class GenerationApiManager:
                         self._json(HTTPStatus.OK, {"jobs": manager.list_jobs(query.get("limit", [50])[0])})
                         return
                     if parsed.path == "/sdapi/v1/progress":
-                        target = str(self.headers.get("X-AIStudio-Target") or manager._config["defaultTarget"])
+                        target = str(self.headers.get("X-AIStudio-Target") or manager.default_target())
                         self._json(HTTPStatus.OK, manager._a1111_progress(target))
                         return
                     if parsed.path == "/sdapi/v1/options":
-                        self._json(HTTPStatus.OK, {"sd_model_checkpoint": "", "ai_studio_target": manager._config["defaultTarget"]})
+                        self._json(HTTPStatus.OK, {"sd_model_checkpoint": "", "ai_studio_target": manager.default_target()})
                         return
                     match = re.fullmatch(r"/api/v1/generations/([0-9a-f]{32})", parsed.path)
                     if match:
@@ -1998,7 +2035,7 @@ class GenerationApiManager:
                     if parsed.path in {"/sdapi/v1/txt2img", "/sdapi/v1/img2img"}:
                         payload = self._read_json()
                         body_target = str(payload.pop("ai_studio_target", "") or "").strip()
-                        target = str(self.headers.get("X-AIStudio-Target") or body_target or manager._config["defaultTarget"])
+                        target = str(self.headers.get("X-AIStudio-Target") or body_target or manager.default_target())
                         family = str(payload.pop("generation_family", payload.pop("request_family", "standard")) or "standard")
                         job = manager.submit({
                             "target": target,
@@ -2044,16 +2081,19 @@ class GenerationApiManager:
                             error = GenerationConflictError("백엔드가 이미지 결과를 반환하지 않았습니다")
                             error.status = HTTPStatus.BAD_GATEWAY
                             raise error
+                        response_parameters = {
+                            k: v for k, v in payload.items() if k != "init_images"
+                        }
                         self._json(HTTPStatus.OK, {
                             "images": images,
-                            "parameters": payload,
+                            "parameters": response_parameters,
                             "info": json.dumps(finished.get("info") or {}, ensure_ascii=False),
                         })
                         return
                     if parsed.path == "/sdapi/v1/interrupt":
                         # Read and discard an optional empty JSON object without
                         # making Content-Length mandatory for compatibility.
-                        target = str(self.headers.get("X-AIStudio-Target") or manager._config["defaultTarget"])
+                        target = str(self.headers.get("X-AIStudio-Target") or manager.default_target())
                         self._json(HTTPStatus.OK, {"cancelled": manager.cancel_target(target)})
                         return
                     raise GenerationNotFoundError("API endpoint를 찾을 수 없습니다")

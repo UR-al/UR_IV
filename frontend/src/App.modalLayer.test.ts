@@ -180,7 +180,7 @@ function compileModal(name: string) {
     '../utils/charPresetState': charPresetState,
     '../utils/imeComposition': imeComposition,
     '../composables/useModalLayer': modalLayer,
-    '../composables/condRules.js': {
+    '../composables/condRules': {
       condPositive: Vue.reactive([]), condNegative: Vue.reactive([]), condEnabled,
       addCondRule: vi.fn(), removeCondRule: vi.fn(), saveCondRules: vi.fn(), loadCondRules: vi.fn(),
     },

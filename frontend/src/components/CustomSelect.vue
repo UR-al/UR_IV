@@ -1,5 +1,5 @@
 <template>
-  <div class="csel" :class="{ open: isOpen }" ref="root">
+  <div class="csel" :class="{ open: isOpen, disabled }" ref="root">
     <button
       ref="trigger"
       type="button"
@@ -9,6 +9,7 @@
       :aria-expanded="isOpen"
       :aria-controls="listboxId"
       :aria-activedescendant="activeDescendant"
+      :disabled="disabled"
       @click="onTriggerClick"
       @keydown="onTriggerKeydown"
     >
@@ -70,11 +71,13 @@ const props = withDefaults(defineProps<{
   options?: SelectValue[]
   optionGroups?: SelectOptionGroup[]
   placeholder?: string
+  disabled?: boolean
 }>(), {
   modelValue: '',
   options: () => [],
   optionGroups: () => [],
   placeholder: '선택...',
+  disabled: false,
 })
 const emit = defineEmits<{ 'update:modelValue': [value: SelectValue] }>()
 
@@ -122,8 +125,12 @@ function optionDomId(index: number) {
   return `${listboxId}-option-${index}`
 }
 
+watch(() => props.disabled, disabled => {
+  if (disabled) isOpen.value = false
+})
+
 function open(direction: 1 | -1 = 1) {
-  if (!flatOptions.value.length) return
+  if (props.disabled || !flatOptions.value.length) return
   updatePlacement()
   isOpen.value = true
   const selectedIndex = flatOptions.value.findIndex(option => option === props.modelValue)
@@ -156,6 +163,7 @@ function releaseFocus() {
 }
 
 function onTriggerClick(event: MouseEvent) {
+  if (props.disabled) return
   if (!isOpen.value) { open(); return }
   isOpen.value = false
   // detail = 클릭 수 — 0 이면 키보드·코드가 만든 클릭(그때는 포커스를 그대로 둔다)
@@ -173,6 +181,7 @@ function moveActive(delta: 1 | -1) {
 }
 
 function onTriggerKeydown(event: KeyboardEvent) {
+  if (props.disabled) return
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
     moveActive(event.key === 'ArrowDown' ? 1 : -1)
@@ -243,11 +252,12 @@ onUnmounted(() => {
   cursor: pointer; transition: var(--transition);
 }
 .csel.open .csel-display { border-color: var(--accent); }
+.csel.disabled .csel-display { cursor: not-allowed; }
 .csel-display:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .csel-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .csel-arrow { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
 .csel-dropdown {
-  position: fixed; z-index: 20000; box-sizing: border-box;
+  position: fixed; z-index: var(--z-select); box-sizing: border-box;
   max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 12px 32px rgba(0,0,0,0.2);

@@ -15,23 +15,22 @@ import os
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.error_handler import sanitize_for_ui
+from core.output_files import write_new_file
+from core.path_safety import safe_input_path, safe_output_dir
 from core.resource_coordinator import backend_job_guard, release_before_backend_job
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_IMAGE_EXTS: frozenset[str] = frozenset((
+    '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff', '.avif', '.apng',
+))
+
 
 def _output_path(src_path: str, output_folder: str = '') -> str:
-    """결과 저장 경로. 같은 이름이 있으면 _2, _3... 으로 비켜간다
-    (체인 refine을 반복해도 이전 결과를 덮어쓰지 않게)."""
-    base_dir = output_folder or os.path.join(os.path.dirname(src_path), 'refine')
-    os.makedirs(base_dir, exist_ok=True)
-    name, ext = os.path.splitext(os.path.basename(src_path))
-    candidate = os.path.join(base_dir, f"{name}_refine{ext}")
-    index = 2
-    while os.path.exists(candidate):
-        candidate = os.path.join(base_dir, f"{name}_refine_{index}{ext}")
-        index += 1
-    return candidate
+    """결과 저장 경로 (항상 .png — write_new_file 이 충돌 시 _2, _3 … 로 비켜간다)."""
+    base_dir = safe_output_dir(output_folder or os.path.join(os.path.dirname(src_path), 'refine'), create=True)
+    name, _ext = os.path.splitext(os.path.basename(src_path))
+    return os.path.join(base_dir, f"{name}_refine.png")
 
 
 def _to_posix(path: str) -> str:
@@ -57,8 +56,9 @@ class RefineWorker(QThread):
             if not hasattr(backend, 'refine'):
                 self.finished.emit(json.dumps({'error': '이 백엔드는 Refine을 지원하지 않습니다'}))
                 return
-            if not os.path.exists(self._path):
-                self.finished.emit(json.dumps({'error': f'이미지를 찾을 수 없습니다: {self._path}'}))
+            safe_src = safe_input_path(self._path, allowed_exts=ALLOWED_IMAGE_EXTS)
+            if not safe_src:
+                self.finished.emit(json.dumps({'error': '유효하지 않은 입력 이미지 경로'}))
                 return
 
             # 결과 프롬프트를 UI에 그대로 보여준다 — Target 수술이 의도대로 됐는지
@@ -74,7 +74,7 @@ class RefineWorker(QThread):
                 inherit_negative=bool(self._settings.get('inherit_negative', True)),
             )
 
-            with open(self._path, 'rb') as fh:
+            with open(safe_src, 'rb') as fh:
                 image_b64 = base64.b64encode(fh.read()).decode()
 
             # Forge img2img + SAM3 Mask 전에 앱 프로세스의 편집기 SAM3 번들(~3.4GB)을 반납
@@ -95,12 +95,11 @@ class RefineWorker(QThread):
                 }, ensure_ascii=False))
                 return
 
-            out_path = _output_path(self._path, self._settings.get('output_folder', ''))
-            with open(out_path, 'wb') as fh:
-                fh.write(base64.b64decode(result_b64))
+            target_path = _output_path(safe_src, self._settings.get('output_folder', ''))
+            out_path = write_new_file(target_path, base64.b64decode(result_b64))
 
             result = {
-                'before': _to_posix(self._path),
+                'before': _to_posix(safe_src),
                 'after': _to_posix(out_path),
                 'output_path': _to_posix(out_path),
                 'prompt': preview['prompt'],

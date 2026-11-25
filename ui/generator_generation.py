@@ -490,6 +490,9 @@ class GenerationMixin:
                     _logger.warning("gen_worker wait timeout — terminate 호출")
                     worker.terminate()
                     worker.wait(500)
+                    release_lease = getattr(worker, 'force_release_lease', None)
+                    if callable(release_lease):
+                        release_lease()
         except RuntimeError:
             pass
         self.gen_worker = None

@@ -106,11 +106,13 @@ def build_refine_prompts(*, main_prompt: str = '', main_negative: str = '',
     확장 `handle_refine_click`의 규칙 그대로:
       · Target 있음 + inherit ON  → 메인 프롬프트에서 Target 세그먼트를 지우고
                                      그 자리에 Replacement를 넣은 것이 최종 프롬프트
+                                     (Target 이 어느 세그먼트에도 없으면 끝에 덧붙이고
+                                     ``replacement_appended`` 를 켠다 — 예전엔 조용히 사라졌다)
       · Target 없음 + inherit ON  → 메인 프롬프트 뒤에 Replacement를 덧붙임
       · inherit OFF               → Replacement만 사용
     네거티브는 Replacement를 넣지 않는다(새 주제를 anti-prompt에 흘리면 안 됨).
 
-    반환: {'prompt', 'negative_prompt', 'detect_tokens', 'changed'}
+    반환: {'prompt', 'negative_prompt', 'detect_tokens', 'changed', 'replacement_appended'}
 
     다섯 입력 모두 프롬프트 주석(``//`` · ``/* */``, core/prompt_comments)을 먼저 뗀다 — 아래 정규화가
     줄바꿈을 공백으로 바꾸면 줄 주석이 다음 태그를 삼킨다. ``changed`` 는 주석을 뗀 뒤 기준이다.
@@ -130,9 +132,19 @@ def build_refine_prompts(*, main_prompt: str = '', main_negative: str = '',
     cleaned_main = apply_prompt_sr(main_prompt, sr_positive) if main_prompt else main_prompt
     cleaned_neg = apply_prompt_sr(main_negative, sr_negative) if main_negative else main_negative
 
+    # Target 매칭 여부는 결과 문자열 비교가 아니라 세그먼트 검사로 판단한다 — 바꾼 결과가 우연히 원문과 같을 때
+    # 두 번 붙지 않게(strip_patterns_with_replacement 와 같은 구간 규칙, 확장 handle_refine_click 과 같게).
+    target_in_main = any(
+        token in seg for seg in (s.strip() for s in main_prompt.split(',')) for token in detect_tokens
+    )
+    replacement_appended = bool(inherit_main and cleaned_main and detect_tokens and replacement
+                                and not target_in_main)
+
     # ── positive ──
     if inherit_main and cleaned_main:
-        if detect_tokens:
+        if replacement_appended:
+            prompt = f"{cleaned_main}, {replacement}"
+        elif detect_tokens:
             prompt = cleaned_main
         else:
             prompt = f"{cleaned_main}, {replacement}".rstrip(', ') if replacement else cleaned_main
@@ -150,4 +162,5 @@ def build_refine_prompts(*, main_prompt: str = '', main_negative: str = '',
         'negative_prompt': normalize_prompt(neg),
         'detect_tokens': detect_tokens,
         'changed': cleaned_main != main_prompt or cleaned_neg != main_negative,
+        'replacement_appended': replacement_appended,
     }

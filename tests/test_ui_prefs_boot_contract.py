@@ -73,7 +73,7 @@ class QtInitialConfigPullTests(unittest.TestCase):
     def test_boot_runtime_pushes_wait_for_the_file_values(self):
         app = _read('frontend', 'src', 'App.vue')
         self.assertNotIn('\n  pushRatingFilter()\n', app)
-        high_res = _read('frontend', 'src', 'composables', 'useHighRes.js')
+        high_res = _read('frontend', 'src', 'composables', 'useHighRes.ts')
         self.assertNotIn('setTimeout(_syncHighRes', high_res)
 
 

@@ -8,7 +8,7 @@
       <div class="qd-backdrop" v-if="drawerOpen" @click="drawerOpen = false"></div>
     </transition>
     <transition name="qd-slide">
-      <aside class="queue-drawer" v-if="drawerOpen">
+      <aside class="queue-drawer" v-if="drawerOpen" role="dialog" aria-modal="true" aria-label="대기열">
         <div class="qd-head">
           <span class="title">
             대기열
@@ -17,7 +17,7 @@
             <span class="paused-badge" v-if="isPaused"><Icon name="pause" /> 일시정지</span>
             <span class="selected-badge" v-if="selectedIds.size > 0">{{ selectedIds.size }} 선택됨</span>
           </span>
-          <button class="qd-x" @click="drawerOpen = false" title="닫기 (Esc)"><Icon name="close" /></button>
+          <button class="qd-x" @click="drawerOpen = false" title="닫기 (Esc)" aria-label="대기열 닫기"><Icon name="close" /></button>
         </div>
 
         <div class="qd-actions">
@@ -45,9 +45,11 @@
         <div class="qd-list" v-if="items.length">
           <div v-for="(item, i) in items" :key="item.id || i"
             class="q-row"
+            tabindex="0"
             :class="{ active: (i === currentIdx && isRunning) || isItemRunning(i), done: item._done, sel: item.id && selectedIds.has(item.id) }"
             @click="onItemClick($event, item, i)"
-            :title="(item.prompt || 'No prompt').toString().substring(0, 200)">
+            @keydown.enter.self.prevent="openEdit(item, i)"
+            :title="(item.prompt || '프롬프트 없음').toString().substring(0, 200)">
             <span class="q-row-st">
               <template v-if="isItemRunning(i) || (i === currentIdx && isRunning && !isPaused)"><Icon name="hourglass" /></template>
               <template v-else-if="i === currentIdx && isPaused"><Icon name="pause" /></template>
@@ -59,27 +61,27 @@
               <span class="q-row-neg" v-if="item.negative_prompt">⊘ {{ item.negative_prompt.toString().slice(0, 60) }}</span>
             </span>
             <span class="q-row-tools" @click.stop>
-              <button class="qr-btn" @click="moveItem(item, 'up')" :disabled="!canMoveUp(i)" title="위로"><Icon name="chevron-up" /></button>
-              <button class="qr-btn" @click="moveItem(item, 'down')" :disabled="!canMoveDown(i)" title="아래로"><Icon name="chevron-down" /></button>
-              <button class="qr-btn" @click="openEdit(item, i)" title="편집"><Icon name="pencil" /></button>
+              <button class="qr-btn" @click="moveItem(item, 'up')" :disabled="!canMoveUp(i)" title="위로" aria-label="위로 이동"><Icon name="chevron-up" /></button>
+              <button class="qr-btn" @click="moveItem(item, 'down')" :disabled="!canMoveDown(i)" title="아래로" aria-label="아래로 이동"><Icon name="chevron-down" /></button>
+              <button class="qr-btn" @click="openEdit(item, i)" title="편집" aria-label="항목 편집"><Icon name="pencil" /></button>
               <button class="qr-btn danger" @click="removeItem(item, i)" :disabled="isItemRunning(i)"
-                :title="isItemRunning(i) ? '생성 중인 항목은 지울 수 없습니다' : '삭제'"><Icon name="trash" /></button>
+                :title="isItemRunning(i) ? '생성 중인 항목은 지울 수 없습니다' : '삭제'" aria-label="항목 삭제"><Icon name="trash" /></button>
             </span>
           </div>
         </div>
         <div class="queue-empty" v-else>
-          대기열이 비어있습니다<br>
-          <span class="qe-hint">생성 화면에서 프롬프트를 큐에 추가하세요</span>
+          대기열이 비어 있습니다<br>
+          <span class="qe-hint">생성 화면에서 프롬프트를 대기열에 추가하세요</span>
         </div>
       </aside>
     </transition>
 
     <!-- 큐 항목 편집 모달 -->
     <div class="qe-overlay" v-if="editItem" @mousedown.self="closeEdit">
-      <div class="qe-modal">
+      <div class="qe-modal" role="dialog" aria-modal="true" :aria-label="`대기열 ${editIdx + 1} 편집`">
         <div class="qe-head">
-          <h3>큐{{ editIdx + 1 }} 편집</h3>
-          <button class="qe-x" @click="closeEdit"><Icon name="close" /></button>
+          <h3>대기열 {{ editIdx + 1 }} 편집</h3>
+          <button class="qe-x" @click="closeEdit" title="닫기" aria-label="편집 닫기"><Icon name="close" /></button>
         </div>
         <label class="qe-label">프롬프트</label>
         <textarea v-model="editPrompt" class="qe-text" rows="6" placeholder="프롬프트..."></textarea>
@@ -103,6 +105,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { onBackendBound, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
+import { useModalLayer } from '../composables/useModalLayer'
 import {
   ONLY_RUNNING_ROW_NOTICE, canMoveDown as rowCanMoveDown, canMoveUp as rowCanMoveUp, clearConfirmMessage,
   isRowLocked, removableIds,
@@ -357,6 +360,10 @@ onMounted(() => {
   _unsubs.push(onBackendBound(() => requestAction('sync_queue_state')))
 })
 
+// 전역 모달 스택 연동 — 드로어·편집 모달이 열린 동안 App 단축키(Ctrl+G/F5/↑/↓ 등)가 배경에서 동작하지 않게
+useModalLayer({ isOpen: () => drawerOpen.value, close: () => { drawerOpen.value = false } })
+useModalLayer({ isOpen: () => !!editItem.value, close: closeEdit })
+
 // Esc — 편집 모달 먼저, 없으면 드로어 닫기
 function _onEditKey(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
@@ -381,10 +388,10 @@ defineExpose({ items, isRunning, isPaused, pinBump })
 .queue-root { display: contents; }  /* 레이아웃 흐름 차지 안 함 — 드로어는 fixed (핀은 dock/QuickDock.vue) */
 
 /* ── 우측 드로어 ── */
-.qd-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 2450; }
+.qd-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: var(--z-dock-panel); }
 .queue-drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 94vw);
-  z-index: 2500; background: var(--bg-secondary); border-left: 1px solid var(--border);
+  z-index: var(--z-dock-panel); background: var(--bg-secondary); border-left: 1px solid var(--border);
   display: flex; flex-direction: column; box-shadow: -10px 0 40px rgba(0,0,0,0.55);
 }
 .qd-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
@@ -437,7 +444,7 @@ defineExpose({ items, isRunning, isPaused, pinBump })
 .qe-hint { color: var(--text-muted); font-size: var(--fs-label); }
 
 /* 큐 항목 편집 모달 */
-.qe-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 3000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px); }
+.qe-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: var(--z-modal-nested); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px); }
 .qe-modal { width: min(620px, 92vw); max-height: 86vh; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 .qe-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .qe-head h3 { font-size: 16px; font-weight: var(--fw-bold); color: var(--text-primary); }

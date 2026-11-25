@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ actionSpy: vi.fn() }))
 vi.mock('../stores/widgetStore.js', () => ({ requestAction: mocks.actionSpy }))
 
-import { useRatingFilter } from './useRatingFilter.js'
+import { useRatingFilter } from './useRatingFilter'
 
 let storage: Map<string, string>
 const pushes = () => mocks.actionSpy.mock.calls.filter(([n]) => n === 'set_rating_filter').map(([, p]) => p.ratings)

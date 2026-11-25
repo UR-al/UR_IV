@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { getCurrentScope, onScopeDispose, ref } from 'vue'
 import { onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
 import type {
@@ -50,9 +50,20 @@ export function useBackendGate() {
   const gateError = ref('')
   const gateDismissible = ref(false)
 
+  const unsubs: Array<() => void> = []
+  function unbindBackendGate() {
+    while (unsubs.length) {
+      try { unsubs.pop()?.() } catch {}
+    }
+  }
+  if (getCurrentScope()) {
+    onScopeDispose(unbindBackendGate)
+  }
+
   // ── Python → Vue ────────────────────────────────────────────────────────
   function bindBackendGate() {
-    onBackendEvent('backendSelectionRequired', (json: string) => {
+    unbindBackendGate()
+    unsubs.push(onBackendEvent('backendSelectionRequired', (json: string) => {
       // 파이썬은 이 신호를 0.3/0.7/1.2초 간격으로 되풀이 보낸다(QWebChannel 핸드셰이크
       // 와 Vue 마운트 경합에 대한 보험). 이미 떠 있는데 다시 열면 사용자가 고치던
       // 주소와 감지 결과가 초기값으로 되돌아간다 — 그래서 첫 신호만 받는다.
@@ -70,15 +81,15 @@ export function useBackendGate() {
       // 마지막에 연다 — 게이트의 open watch 가 곧바로 probe 를 emit 하므로, 그 전에
       // 주소가 채워져 있어야 빈 주소로 감지를 나간다.
       gateOpen.value = true
-    })
+    }))
 
-    onBackendEvent('backendProbeResult', (json: string) => {
+    unsubs.push(onBackendEvent('backendProbeResult', (json: string) => {
       const r = parseEvent<BackendProbeResult>(json)
       if (!r) return
       gateProbe.value = { webui: r.webui, comfy: r.comfy }
-    })
+    }))
 
-    onBackendEvent('backendSelected', (json: string) => {
+    unsubs.push(onBackendEvent('backendSelected', (json: string) => {
       const r = parseEvent<BackendSelectedResult>(json)
       gateBusy.value = false
       if (r?.ok) {
@@ -88,15 +99,16 @@ export function useBackendGate() {
       }
       // 실패해도 닫지 않는다. 닫으면 백엔드 없는 빈 앱만 남고 다시 고를 길이 없다.
       gateError.value = r?.error || '백엔드에 연결하지 못했습니다.'
-    })
+    }))
 
-    onBackendEvent('comfyWorkflowPicked', (json: string) => {
+    unsubs.push(onBackendEvent('comfyWorkflowPicked', (json: string) => {
       const r = parseEvent<ComfyWorkflowPicked>(json)
       if (!r) return
       // 경로를 prop 으로 돌려주면 게이트의 지역 입력값이 watch 로 따라온다.
       gateWorkflowPath.value = r.path || ''
       gateWorkflowInfo.value = toGateWorkflowInfo(r.info)
-    })
+    }))
+    return unbindBackendGate
   }
 
   // ── Vue → Python ────────────────────────────────────────────────────────
@@ -129,7 +141,7 @@ export function useBackendGate() {
   return {
     gateOpen, gateWebuiUrl, gateComfyUrl, gateWorkflowPath,
     gateProbe, gateWorkflowInfo, gateBusy, gateError, gateDismissible,
-    bindBackendGate,
+    bindBackendGate, unbindBackendGate,
     onGateProbe, onGateSelect, onGatePickWorkflow, onGateDismiss,
   }
 }

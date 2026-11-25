@@ -1,18 +1,18 @@
 <template>
   <div class="wc-overlay" @mousedown.self="closeOrderManager">
-    <div class="wc-modal" style="max-width: 680px;">
+    <div class="wc-modal" style="max-width: 680px;" role="dialog" aria-modal="true" aria-label="프롬프트 섹션 순서">
       <div class="wc-modal-header">
         <h3>프롬프트 섹션 순서</h3>
-        <span class="wc-path">생성 시 합쳐지는 순서를 ↑/↓로 조정. 저장 시 즉시 반영</span>
-        <button class="close-btn" @click="closeOrderManager"><Icon name="close" /></button>
+        <span class="wc-path">생성 시 합쳐지는 순서와 입력 칸 순서를 ↑/↓로 조정. 저장 시 즉시 반영</span>
+        <button class="close-btn" @click="closeOrderManager" title="닫기" aria-label="프롬프트 섹션 순서 닫기"><Icon name="close" /></button>
       </div>
       <div class="order-modal-body">
         <div class="order-list">
           <div v-for="(sec, i) in promptOrderList" :key="sec.key" class="order-item">
             <span class="order-num">{{ i + 1 }}</span>
             <span class="order-label">{{ sec.label }}</span>
-            <button class="order-btn" :disabled="i === 0" @click="moveOrderUp(i)" title="위로"><Icon name="arrow-up" /></button>
-            <button class="order-btn" :disabled="i === promptOrderList.length - 1" @click="moveOrderDown(i)" title="아래로"><Icon name="arrow-down" /></button>
+            <button class="order-btn" :disabled="i === 0" @click="moveOrderUp(i)" title="위로" aria-label="섹션 위로 이동"><Icon name="arrow-up" /></button>
+            <button class="order-btn" :disabled="i === promptOrderList.length - 1" @click="moveOrderDown(i)" title="아래로" aria-label="섹션 아래로 이동"><Icon name="arrow-down" /></button>
           </div>
         </div>
         <div class="order-preview">

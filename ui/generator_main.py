@@ -29,6 +29,12 @@ def _clean_path(path: str) -> str:
     clean_path = clean_path.replace('/', os.sep)
     return clean_path
 
+
+from ui.worker_helpers import (
+    attach_worker_cleanup as _attach_worker_cleanup,
+    scan_image_folder as _scan_image_folder,
+)
+
 from ui.generator_base import GeneratorBase
 from ui.generator_ui_setup import UISetupMixin
 from ui.generator_prompts import PromptHandlingMixin
@@ -263,6 +269,12 @@ class GeneratorMainUI(
         try:
             # 1. 워크스페이스 제어
             if action == 'native_tab_switch':
+                if getattr(self, 'web_mode', False):
+                    from core.web_action_policy import web_blocked_message
+                    msg = web_blocked_message('native_tab_switch')
+                    if hasattr(self, 'vue_bridge'):
+                        self.vue_bridge.showNotification.emit('warning', msg)
+                    return
                 tab_id = payload.get('tab', 't2i')
                 tab_map = {'web': 1, 'backend': 2}
                 idx = tab_map.get(tab_id, 0)
@@ -496,13 +508,9 @@ class GeneratorMainUI(
             elif action == 'open_ad_folder':
                 folder = QFileDialog.getExistingDirectory(self, "ADetailer 폴더 선택")
                 if folder:
-                    import glob
-                    imgs = []
-                    for ext in ('*.png', '*.jpg', '*.jpeg', '*.webp'):
-                        imgs.extend(glob.glob(os.path.join(folder, ext)))
+                    imgs = _scan_image_folder(folder, frozenset({'.png', '.jpg', '.jpeg', '.webp'}))
                     if imgs:
-                        self.vue_bridge.batchFilesSelected.emit(
-                            json.dumps([p.replace('\\', '/') for p in sorted(imgs)]))
+                        self.vue_bridge.batchFilesSelected.emit(json.dumps(imgs))
                         self.vue_bridge.showNotification.emit('info', f'{len(imgs)}개 이미지 발견')
             elif action == 'random_prompt': self.apply_random_prompt()
 
@@ -512,11 +520,12 @@ class GeneratorMainUI(
                 from core.search_deck import prompt_bundle_from_row
                 bundle = prompt_bundle_from_row(payload)
 
+                _prev_prog = getattr(self, 'is_programmatic_change', False)
                 self.is_programmatic_change = True
                 try:
                     self.apply_prompt_from_data(bundle)
                 finally:
-                    self.is_programmatic_change = False
+                    self.is_programmatic_change = _prev_prog
 
                 # 조건부 프롬프트 적용
                 cond_pos = payload.get('cond_positive', [])
@@ -534,23 +543,25 @@ class GeneratorMainUI(
                 # 먼저 프롬프트 적용하여 UI 채우기 (덱과 같은 번들 — 자동 해상도 포함)
                 from core.search_deck import prompt_bundle_from_row
                 bundle = prompt_bundle_from_row(payload)
+                _prev_prog = getattr(self, 'is_programmatic_change', False)
                 self.is_programmatic_change = True
                 try:
                     self.apply_prompt_from_data(bundle)
                 finally:
-                    self.is_programmatic_change = False
+                    self.is_programmatic_change = _prev_prog
                 self.update_total_prompt_display()
 
                 # 현재 UI 상태에서 payload 구성
+                from ui.generator_generation import _widget_float, _widget_int
                 queue_payload = {
                     'prompt': self.total_prompt_display.toPlainText(),
                     'negative_prompt': self.neg_prompt_text.toPlainText(),
                     'sampler_name': self.sampler_combo.currentText(),
-                    'steps': int(self.steps_input.text() or 20),
-                    'cfg_scale': float(self.cfg_input.text() or 7),
-                    'seed': int(self.seed_input.text() or -1),
-                    'width': int(self.width_input.text() or 1024),
-                    'height': int(self.height_input.text() or 1024),
+                    'steps': _widget_int(self.steps_input, 20),
+                    'cfg_scale': _widget_float(self.cfg_input, 7.0),
+                    'seed': _widget_int(self.seed_input, -1),
+                    'width': _widget_int(self.width_input, 1024),
+                    'height': _widget_int(self.height_input, 1024),
                 }
                 if hasattr(self, 'queue_panel'):
                     self.queue_panel.add_single_item(queue_payload)
@@ -1059,12 +1070,7 @@ class GeneratorMainUI(
             elif action == 'caption_pick_folder':
                 folder = QFileDialog.getExistingDirectory(self, "캡션할 폴더 선택")
                 if folder:
-                    import glob
-                    imgs = []
-                    for ext in ('*.png', '*.jpg', '*.jpeg', '*.webp', '*.bmp'):
-                        imgs.extend(glob.glob(os.path.join(folder, ext)))
-                        imgs.extend(glob.glob(os.path.join(folder, ext.upper())))
-                    imgs = sorted(set(p.replace('\\', '/') for p in imgs))
+                    imgs = _scan_image_folder(folder, frozenset({'.png', '.jpg', '.jpeg', '.webp', '.bmp'}))
                     if imgs:
                         self.vue_bridge.captionFilesSelected.emit(json.dumps(imgs))
                         self.vue_bridge.showNotification.emit('info', f'{len(imgs)}개 이미지 발견')
@@ -2526,7 +2532,11 @@ class GeneratorMainUI(
 
     def _run_adetailer_single(self, payload):
         """단일 이미지에 ADetailer 적용"""
+        from ui.batch_jobs import worker_running
         from workers.adetailer_worker import ADetailerSingleWorker
+        if worker_running(self, '_ad_worker'):
+            self.vue_bridge.showNotification.emit('warning', '이미 ADetailer 작업이 실행 중입니다')
+            return
         path = payload.get('path', '')
         if not path:
             self.vue_bridge.showNotification.emit('error', '이미지 경로가 없습니다')
@@ -2535,14 +2545,20 @@ class GeneratorMainUI(
         from ui.sam_extra_notices_ui import relay_worker_result
         # 메인 생성 샘플링 블록(가이던스 등)을 클릭한 순간의 T2I 패널에서 싣는다(P7) — 원본 dict 는 그대로
         settings = attach_sampling_snapshot(self, payload.get('settings', {}))
-        self._ad_worker = ADetailerSingleWorker(path, settings, self)
-        self._ad_worker.finished.connect(lambda r: relay_worker_result(self, 'adetailerResult', r))
-        self._ad_worker.start()
+        worker = ADetailerSingleWorker(path, settings, self)
+        self._ad_worker = worker
+        worker.finished.connect(lambda r: relay_worker_result(self, 'adetailerResult', r))
+        _attach_worker_cleanup(self, '_ad_worker', worker)
+        worker.start()
         self.vue_bridge.showNotification.emit('info', 'ADetailer 처리 중...')
 
     def _run_adetailer_batch(self, payload):
         """배치 이미지에 ADetailer 적용"""
+        from ui.batch_jobs import worker_running
         from workers.adetailer_worker import ADetailerBatchWorker
+        if worker_running(self, '_ad_batch_worker'):
+            self.vue_bridge.showNotification.emit('warning', '이미 ADetailer 배치가 실행 중입니다')
+            return
         paths = payload.get('paths', [])
         if not paths:
             self.vue_bridge.showNotification.emit('error', '이미지가 없습니다')
@@ -2550,19 +2566,26 @@ class GeneratorMainUI(
         from ui.aux_pass_snapshot import attach_sampling_snapshot
         from ui.sam_extra_notices_ui import relay_worker_result
         settings = attach_sampling_snapshot(self, payload.get('settings', {}))   # 배치 전체가 같은 블록(P7)
-        self._ad_batch_worker = ADetailerBatchWorker(paths, settings, self)
-        self._ad_batch_worker.progress.connect(
+        worker = ADetailerBatchWorker(paths, settings, self)
+        self._ad_batch_worker = worker
+        worker.progress.connect(
             lambda cur, tot: self.vue_bridge.adetailerProgress.emit(cur, tot))
-        self._ad_batch_worker.single_done.connect(
+        worker.single_done.connect(
             lambda r: relay_worker_result(self, 'adetailerResult', r))
-        self._ad_batch_worker.all_done.connect(
-            lambda: self.vue_bridge.showNotification.emit('success', f'ADetailer 배치 완료 ({len(paths)}장)'))
-        self._ad_batch_worker.start()
+        # 실제 성공·실패·건너뜀 수로 알린다(백엔드 없음·출력 폴더 오류·0장 성공 시 '완료' 오탐 방지)
+        worker.all_done.connect(
+            lambda w=worker: self.vue_bridge.showNotification.emit(*w.completion_notice()))
+        _attach_worker_cleanup(self, '_ad_batch_worker', worker)
+        worker.start()
         self.vue_bridge.showNotification.emit('info', f'ADetailer 배치 시작 ({len(paths)}장)')
 
     def _run_sam3_single(self, payload):
         """단일 이미지에 SAM3 적용"""
+        from ui.batch_jobs import worker_running
         from workers.sam3_worker import Sam3SingleWorker
+        if worker_running(self, '_sam3_worker'):
+            self.vue_bridge.showNotification.emit('warning', '이미 SAM3 작업이 실행 중입니다')
+            return
         path = payload.get('path', '')
         if not path:
             self.vue_bridge.showNotification.emit('error', '이미지 경로가 없습니다')
@@ -2571,14 +2594,20 @@ class GeneratorMainUI(
         from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
         settings = attach_sampling_snapshot(self, payload.get('settings', {}))   # 메인 생성 샘플링 블록(P7)
         check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
-        self._sam3_worker = Sam3SingleWorker(path, settings, self)
-        self._sam3_worker.finished.connect(lambda r: relay_worker_result(self, 'sam3Result', r))
-        self._sam3_worker.start()
+        worker = Sam3SingleWorker(path, settings, self)
+        self._sam3_worker = worker
+        worker.finished.connect(lambda r: relay_worker_result(self, 'sam3Result', r))
+        _attach_worker_cleanup(self, '_sam3_worker', worker)
+        worker.start()
         self.vue_bridge.showNotification.emit('info', 'SAM3 처리 중...')
 
     def _run_sam3_batch(self, payload):
         """배치 이미지에 SAM3 적용"""
+        from ui.batch_jobs import worker_running
         from workers.sam3_worker import Sam3BatchWorker
+        if worker_running(self, '_sam3_batch_worker'):
+            self.vue_bridge.showNotification.emit('warning', '이미 SAM3 배치가 실행 중입니다')
+            return
         paths = payload.get('paths', [])
         if not paths:
             self.vue_bridge.showNotification.emit('error', '이미지가 없습니다')
@@ -2587,14 +2616,16 @@ class GeneratorMainUI(
         from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
         settings = attach_sampling_snapshot(self, payload.get('settings', {}))   # 배치 전체가 같은 블록(P7)
         check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
-        self._sam3_batch_worker = Sam3BatchWorker(paths, settings, self)
-        self._sam3_batch_worker.progress.connect(
+        worker = Sam3BatchWorker(paths, settings, self)
+        self._sam3_batch_worker = worker
+        worker.progress.connect(
             lambda cur, tot: self.vue_bridge.sam3Progress.emit(cur, tot))
-        self._sam3_batch_worker.single_done.connect(
+        worker.single_done.connect(
             lambda r: relay_worker_result(self, 'sam3Result', r))
-        worker = self._sam3_batch_worker   # 실제 성공·실패·건너뜀 수로 알린다(0장 저장이어도 '완료'가 뜨던 문제)
-        worker.all_done.connect(lambda: self.vue_bridge.showNotification.emit(*worker.completion_notice()))
-        self._sam3_batch_worker.start()
+        # 실제 성공·실패·건너뜀 수로 알린다(0장 저장이어도 '완료'가 뜨던 문제)
+        worker.all_done.connect(lambda w=worker: self.vue_bridge.showNotification.emit(*w.completion_notice()))
+        _attach_worker_cleanup(self, '_sam3_batch_worker', worker)
+        worker.start()
         self.vue_bridge.showNotification.emit('info', f'SAM3 배치 시작 ({len(paths)}장)')
 
     def _run_refine(self, payload):
@@ -2604,7 +2635,11 @@ class GeneratorMainUI(
         (확장 Refine 패널의 'Inherit main t2i prompt' 기본 ON과 동일). 물려받을 때는 LoRA 스택도 붙이고(D2),
         메인 생성 샘플링 블록을 싣는다(P7) — ui/aux_pass_snapshot.
         """
+        from ui.batch_jobs import worker_running
         from workers.refine_worker import RefineWorker
+        if worker_running(self, '_refine_worker'):
+            self.vue_bridge.showNotification.emit('warning', '이미 Refine 작업이 실행 중입니다')
+            return
         path = payload.get('path', '')
         if not path:
             self.vue_bridge.showNotification.emit('error', 'Refine: 이미지 경로가 없습니다')
@@ -2615,9 +2650,11 @@ class GeneratorMainUI(
 
         from ui.sam_extra_notices_ui import check_standalone_sam3, relay_worker_result
         check_standalone_sam3(self, settings)   # sam3.pt 자동 다운로드(3.4 GB) 경고
-        self._refine_worker = RefineWorker(path, settings, self)
-        self._refine_worker.finished.connect(lambda r: relay_worker_result(self, 'refineResult', r))
-        self._refine_worker.start()
+        worker = RefineWorker(path, settings, self)
+        self._refine_worker = worker
+        worker.finished.connect(lambda r: relay_worker_result(self, 'refineResult', r))
+        _attach_worker_cleanup(self, '_refine_worker', worker)
+        worker.start()
         self.vue_bridge.showNotification.emit('info', 'Refine 처리 중...')
 
     # ── DEFAULTS 탭 (Vue) → 위젯 적용 ──────────────────────
@@ -2848,31 +2885,24 @@ class GeneratorMainUI(
                 # 다음 부팅이 복구를 제안하지 않는다. 저장이 실패했으면 백업이 유일한 사본이라 둔다.
                 mark_session_backup_clean()
             try:
-                # UI 상태 (창 크기/위치/스플리터 등) 저장
-                if hasattr(self, "ui_state"):
+                # UI 상태 (창 크기/위치/스플리터 등) 저장 — 웹 모드는 창을 띄우지 않으므로 건너뛴다
+                if hasattr(self, "ui_state") and not getattr(self, "web_mode", False):
                     self.ui_state.save_all()
             except Exception as e:
                 print(f"[Warning] UI 상태 저장 실패: {e}")
         return True
 
-    def _quit_app(self):
-        # 덱 진행도는 뽑을 때마다 쓰지 않고 모아 둔다 — 종료 전에 남은 것을 저장한다.
-        try:
-            flush_deck = getattr(self, '_flush_deck_state', None)
-            if callable(flush_deck):
-                flush_deck()
-        except Exception as exc:
-            print(f"[Shutdown] 덱 진행도 저장 실패(계속 종료): {exc}")
-        # 대기열 저장도 모아서 쓴다(widgets/queue_panel.py PERSIST_DELAY_MS) — os._exit 전에 남은 것을 쓴다.
-        try:
-            self._flush_queue_state()
-        except Exception as exc:
-            print(f"[Shutdown] 대기열 저장 실패(계속 종료): {exc}")
-        self._save_shutdown_state()
-        for stop in (self._shutdown_model_downloads, self._chat_stop,
-                     self._shutdown_comfy_compatibility, self._shutdown_comfy_workflow_controls,
-                     self._shutdown_relight, self._shutdown_tile_repair, self._shutdown_hand_reconstruction,
-                     self._shutdown_memo_sync, self._shutdown_related_tags):
+    def _shutdown_hooks_and_workers(self) -> None:
+        """데스크톱·웹 공용 종료 정리 — 믹스인 훅 실행 및 실행 중 QThread 정지·대기."""
+        for hook_name in (
+            '_shutdown_model_downloads', '_chat_stop',
+            '_shutdown_comfy_compatibility', '_shutdown_comfy_workflow_controls',
+            '_shutdown_relight', '_shutdown_tile_repair', '_shutdown_hand_reconstruction',
+            '_shutdown_memo_sync', '_shutdown_related_tags',
+        ):
+            stop = getattr(self, hook_name, None)
+            if not callable(stop):
+                continue
             try:
                 stop()
             except Exception as exc:
@@ -2884,12 +2914,11 @@ class GeneratorMainUI(
                 worker.cancel()
         except Exception:
             pass
-        # QThread 워커들 정지·짧게 대기 — Python 데몬 스레드가 아니므로 그냥 두고 os._exit하면
+        # QThread 워커들 정지·짧게 대기 — Python 데몬 스레드가 아니므로 그냥 두고 종료하면
         # 실행 중 파괴로 Qt 경고/드문 크래시 가능. 각 ~0.5초만 기다리고 안 끝나면 포기(워치독).
-        # (Ollama 워커는 브리지가 보관하고 취소할 수 없는 HTTP 라 기다려도 이득이 없다 — 대상 아님)
-        # Vue I2I·인페인트 워커(ui/i2i_actions·ui/inpaint_actions)도 GPU 작업이라 취소(+interrupt)한다.
         for _name in ('gen_worker', '_search_worker', 'info_worker',
-                      '_vue_i2i_worker', '_vue_inpaint_worker'):
+                      '_vue_i2i_worker', '_vue_inpaint_worker',
+                      '_ad_worker', '_ad_batch_worker', '_sam3_worker', '_sam3_batch_worker', '_refine_worker'):
             try:
                 w = getattr(self, _name, None)
                 if w is None or not hasattr(w, 'isRunning') or not w.isRunning():
@@ -2907,7 +2936,8 @@ class GeneratorMainUI(
                 pass
         # 검색 stale 워커들(브리지가 보관)도 동일 처리
         try:
-            for w in list(getattr(self.vue_bridge, '_stale_search_workers', []) or []):
+            bridge = getattr(self, 'vue_bridge', None)
+            for w in list(getattr(bridge, '_stale_search_workers', []) or []):
                 try:
                     if w.isRunning():
                         w.stop(); w.wait(300)
@@ -2915,6 +2945,22 @@ class GeneratorMainUI(
                     pass
         except Exception:
             pass
+
+    def _quit_app(self):
+        # 덱 진행도는 뽑을 때마다 쓰지 않고 모아 둔다 — 종료 전에 남은 것을 저장한다.
+        try:
+            flush_deck = getattr(self, '_flush_deck_state', None)
+            if callable(flush_deck):
+                flush_deck()
+        except Exception as exc:
+            print(f"[Shutdown] 덱 진행도 저장 실패(계속 종료): {exc}")
+        # 대기열 저장도 모아서 쓴다(widgets/queue_panel.py PERSIST_DELAY_MS) — os._exit 전에 남은 것을 쓴다.
+        try:
+            self._flush_queue_state()
+        except Exception as exc:
+            print(f"[Shutdown] 대기열 저장 실패(계속 종료): {exc}")
+        self._save_shutdown_state()
+        self._shutdown_hooks_and_workers()
         self._stop_owned_backend_runtimes()
         try:
             from core.app_instance import unregister_app_instance

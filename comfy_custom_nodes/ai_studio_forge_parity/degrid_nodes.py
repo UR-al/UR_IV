@@ -38,13 +38,18 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import degrid_files, degrid_math as dm, degrid_runner as runner
-from .compat import folder_paths_module, require_torch
+from .compat import MissingComfyProvider, folder_paths_module, invoke_provider, require_torch
 
 
 NODE_CLASS = "ForgeNeoAnimaVAEDeGrid"
 DISPLAY_NAME = "Forge Neo Anima VAE DeGrid (NAFNet)"
 CATEGORY = "AI Studio/Forge Neo parity/Image"
 UI_KEY = "ai_studio_degrid"
+# The card's engines: Forge's NAFNet residual model, or ComfyUI-DeGrid's Nyquist notch (ComfyUI only, no Forge twin).
+ENGINE_NAFNET = "NAFNet"
+ENGINE_NYQUIST = "Nyquist (ComfyUI-DeGrid)"
+ENGINE_CHOICES = (ENGINE_NAFNET, ENGINE_NYQUIST)
+ENGINE_TOOLTIP = "NAFNet: Forge 와 같은 모델 잔차. Nyquist: ComfyUI-DeGrid 의 2px 격자 필터(자동, 모델·방식·강도·타일 무시)"
 AUTO = "auto"
 
 INPUT_NAMES = (
@@ -448,17 +453,45 @@ class ForgeNeoAnimaVAEDeGrid:
                 "keep_loaded": ("BOOLEAN", {"default": False}),
                 "forge_quantize": ("BOOLEAN", {"default": True}),
             },
+            # optional and last, so a saved workflow's widget values keep their places
+            "optional": {
+                "engine": (list(ENGINE_CHOICES), {"default": ENGINE_NAFNET, "tooltip": ENGINE_TOOLTIP}),
+            },
         }
 
     def apply(self, image, enabled, model_name, mode, strength, tile,
               device=DEVICE_AUTO, precision=runner.PRECISION_FP32,
-              keep_loaded=False, forge_quantize=True):
+              keep_loaded=False, forge_quantize=True, engine=None):
+        if engine == ENGINE_NYQUIST:
+            reports, output = run_nyquist(image, enabled=enabled)
+            return {"ui": {UI_KEY: reports}, "result": (output, json.dumps(reports, ensure_ascii=False))}
         reports, output = run_degrid(
             image, enabled=enabled, model_name=model_name, mode=mode, strength=strength,
             tile=tile, device=device, precision=precision, keep_loaded=keep_loaded,
             forge_quantize=forge_quantize,
         )
         return {"ui": {UI_KEY: reports}, "result": (output, json.dumps(reports, ensure_ascii=False))}
+
+
+def run_nyquist(image, *, enabled):
+    """``(reports, images)`` through ComfyUI-DeGrid's VAEDeGrid (lunaaispace-eng, Apache-2.0) on its zero-config path:
+    it measures each image's 2 px lattice, sets its own limit and passes clean images through untouched. The NAFNet
+    fields (model, mode, strength, tile) do not apply; the report keeps their shape so the panel reads it the same."""
+    batch = int(image.shape[0])
+
+    def reports(status):
+        item = runner.report(status=status, model=ENGINE_NYQUIST, mode=dm.DEFAULT_MODE, strength=1.0, tile=0)
+        return [dict(item) for _ in range(batch)]
+
+    if not enabled:
+        return reports(STATUS_OFF), image
+    try:
+        cleaned = invoke_provider("VAEDeGrid", method="execute", feature="VAE DeGrid (Nyquist)", kwargs={
+            "image": image, "enabled": True, "mode": "auto", "limit": 0.02, "grid_gain": 10.0,
+            "grid_view": "full frame", "skip_when_clean": True})[0]
+    except MissingComfyProvider as error:
+        raise RuntimeError("Nyquist 엔진은 ComfyUI-DeGrid 노드 팩이 있어야 함: custom_nodes 에 설치하고 ComfyUI 를 다시 켜세요") from error
+    return reports(STATUS_OK), cleaned
 
 
 def run_degrid(image, *, enabled, model_name, mode, strength, tile, device=DEVICE_AUTO,

@@ -206,6 +206,46 @@ describe('other shortcuts', () => {
     expect(tab.preventDefault).not.toHaveBeenCalled()
   })
 
+  it('handles Caps Lock uppercase Ctrl+G / Ctrl+S and ignores IME composing or Alt/Meta combos (U-14)', () => {
+    const { deps, handle } = setup()
+    handle(key('G', { ctrlKey: true }))
+    handle(key('S', { ctrlKey: true }))
+    expect(deps.generate).toHaveBeenCalledTimes(1)
+    expect(deps.saveSettings).toHaveBeenCalledTimes(1)
+
+    // Alt/Meta 조합은 무시
+    handle(key('g', { ctrlKey: true, altKey: true }))
+    handle(key('s', { ctrlKey: true, metaKey: true }))
+    expect(deps.generate).toHaveBeenCalledTimes(1)
+    expect(deps.saveSettings).toHaveBeenCalledTimes(1)
+
+    // IME 조합 중은 무시
+    handle({ ...key('g', { ctrlKey: true }), isComposing: true })
+    handle({ ...key('F5'), keyCode: 229 })
+    expect(deps.generate).toHaveBeenCalledTimes(1)
+    expect(deps.reloadHistory).not.toHaveBeenCalled()
+  })
+
+  it('blocks Ctrl+G, F5, and Ctrl+Tab while a modal is open, still calling preventDefault on Ctrl+G and F5 (U-14 / B-2)', () => {
+    const { deps, stack, handle } = setup()
+    const release = stack.open({})
+    const ctrlG = key('g', { ctrlKey: true })
+    const f5 = key('F5')
+    const ctrlTab = key('Tab', { ctrlKey: true })
+    handle(ctrlG)
+    handle(f5)
+    handle(ctrlTab)
+    expect(ctrlG.preventDefault).toHaveBeenCalledTimes(1)
+    expect(f5.preventDefault).toHaveBeenCalledTimes(1)
+    expect(deps.generate).not.toHaveBeenCalled()
+    expect(deps.reloadHistory).not.toHaveBeenCalled()
+    expect(deps.navigateTabs).not.toHaveBeenCalled()
+
+    release()
+    handle(key('g', { ctrlKey: true }))
+    expect(deps.generate).toHaveBeenCalledTimes(1)
+  })
+
   it('everything is dead while the backend gate is open', () => {
     const closeModal = vi.fn()
     const { deps, stack, handle } = setup({ isGateOpen: () => true, isParamsPanelOpen: () => true })

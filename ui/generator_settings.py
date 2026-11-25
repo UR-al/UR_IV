@@ -119,19 +119,36 @@ class SettingsMixin:
             return True
         except Exception as e:
             from utils.app_logger import get_logger
+            from ui.status_line import notify_or_message_box
             get_logger('settings').error(f"설정 저장 실패: {e}")
-            QMessageBox.critical(self, "저장 실패", f"설정 저장 중 오류: {e}")
+            notify_or_message_box(self, 'error', "저장 실패", f"설정 저장 중 오류: {e}", box=QMessageBox)
             return False
 
-    def _get_existing_setting(self, key: str, default: str = "") -> str:
-        """기존 설정 파일에서 특정 키의 값을 읽어옴 (콤보 빈값 가드용)"""
+    def _load_existing_settings_file(self) -> dict:
+        """PROMPT_SETTINGS_FILE 을 한 번 읽어 dict 로 돌려준다(실패 시 빈 dict)."""
         try:
             if os.path.exists(PROMPT_SETTINGS_FILE):
                 with open(PROMPT_SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f).get(key, default)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
         except Exception:
             pass
-        return default
+        return {}
+
+    def _get_existing_setting(self, key: str, default: str = "") -> str:
+        """기존 설정 파일에서 특정 키의 값을 읽어옴 (콤보 빈값 가드용).
+
+        _build_settings_dict() 실행 중에는 캐시(_existing_settings_cache)를 지연 1회 로드해
+        최대 10회의 중복 디스크 읽기·파싱을 방지한다.
+        """
+        sentinel = getattr(self, '_existing_settings_cache', None)
+        if sentinel is not None:
+            if not sentinel['loaded']:
+                sentinel['loaded'] = True
+                sentinel['data'] = self._load_existing_settings_file()
+            return sentinel['data'].get(key, default)
+        return self._load_existing_settings_file().get(key, default)
 
     def _build_settings_dict(self) -> dict:
         """설정 딕셔너리 구성"""
@@ -139,6 +156,14 @@ class SettingsMixin:
         # 모델·Hires 체크포인트는 연결 오류(on_webui_info_error)가 목록을 비운다 — VAE 처럼
         # preservedText(비우기 직전 선택) → 디스크 값 순. currentText 만 보면 끊긴 채 종료할 때 그 전에
         # 고른 모델 대신 옛 디스크 값이 저장돼 다음 시작이 옛 모델로 돌아갔다.
+        prev_cache = getattr(self, '_existing_settings_cache', None)
+        self._existing_settings_cache = {'loaded': False, 'data': {}}
+        try:
+            return self._build_settings_dict_inner()
+        finally:
+            self._existing_settings_cache = prev_cache
+
+    def _build_settings_dict_inner(self) -> dict:
         model_val = self._persisted_combo_text(self.model_combo) or self._get_existing_setting("model")
         sampler_val = self.sampler_combo.currentText() or self._get_existing_setting("sampler")
         scheduler_val = self.scheduler_combo.currentText() or self._get_existing_setting("scheduler")
@@ -278,85 +303,86 @@ class SettingsMixin:
             with open(PROMPT_SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
             
+            _prev_prog = getattr(self, 'is_programmatic_change', False)
             self.is_programmatic_change = True
-            
-            # 프롬프트 칸·생성 파라미터·Hires·ADetailer·SAM3·Anima — 프리셋 불러오기와 같은 적용
-            # 함수(ui/generation_settings_apply.py)를 쓴다. 여기선 없는 키를 기본값으로 채운다.
-            from ui.generation_settings_apply import apply_generation_settings, apply_prompt_settings
-            apply_prompt_settings(self, settings, only_present=False)
-            self.btn_lock_artist.setChecked(settings.get("artist_locked", False))
-            apply_generation_settings(self, settings, only_present=False)
+            try:
+                # 프롬프트 칸·생성 파라미터·Hires·ADetailer·SAM3·Anima — 프리셋 불러오기와 같은 적용
+                # 함수(ui/generation_settings_apply.py)를 쓴다. 여기선 없는 키를 기본값으로 채운다.
+                from ui.generation_settings_apply import apply_generation_settings, apply_prompt_settings
+                apply_prompt_settings(self, settings, only_present=False)
+                self.btn_lock_artist.setChecked(settings.get("artist_locked", False))
+                apply_generation_settings(self, settings, only_present=False)
 
-            # LoRA 활성 목록: config/ui_prefs.json(loraStack) 단일 소스로 이관됨
-            #   (복원은 generator_main._restore_runtime_prefs + App.vue uiPrefsLoaded).
-            #   레거시 prompt_settings.active_loras는 여기서 더 이상 읽지 않는다.
+                # LoRA 활성 목록: config/ui_prefs.json(loraStack) 단일 소스로 이관됨
+                #   (복원은 generator_main._restore_runtime_prefs + App.vue uiPrefsLoaded).
+                #   레거시 prompt_settings.active_loras는 여기서 더 이상 읽지 않는다.
 
-            # NegPiP 은 상시 적용(b8ef7901a) — 옛 prompt_settings/백업의 negpip_enabled=false 로
-            # 조용히 꺼지지 않게 저장값을 읽지 않고 켠다(audit #97).
-            if hasattr(self, 'negpip_group'):
-                self.negpip_group.setChecked(True)
+                # NegPiP 은 상시 적용(b8ef7901a) — 옛 prompt_settings/백업의 negpip_enabled=false 로
+                # 조용히 꺼지지 않게 저장값을 읽지 않고 켠다(audit #97).
+                if hasattr(self, 'negpip_group'):
+                    self.negpip_group.setChecked(True)
 
-            # 제거 옵션
-            self.chk_remove_artist.setChecked(settings.get("remove_artist", False))
-            self.chk_remove_copyright.setChecked(settings.get("remove_copyright", False))
-            self.chk_remove_character.setChecked(settings.get("remove_character", False))
-            self.chk_remove_meta.setChecked(settings.get("remove_meta", False))
-            self.chk_remove_censorship.setChecked(settings.get("remove_censorship", False))
-            self.chk_remove_text.setChecked(settings.get("remove_text", False))
+                # 제거 옵션
+                self.chk_remove_artist.setChecked(settings.get("remove_artist", False))
+                self.chk_remove_copyright.setChecked(settings.get("remove_copyright", False))
+                self.chk_remove_character.setChecked(settings.get("remove_character", False))
+                self.chk_remove_meta.setChecked(settings.get("remove_meta", False))
+                self.chk_remove_censorship.setChecked(settings.get("remove_censorship", False))
+                self.chk_remove_text.setChecked(settings.get("remove_text", False))
 
-            # 웹 설정 불러오기
-            web_home = settings.get("web_home_url", "")
-            if web_home and hasattr(self.web_tab, 'set_home_url'):
-                self.web_tab.set_home_url(web_home)
-            
-            # 캐릭터 특징 자동 추가
-            if hasattr(self, 'chk_prompt_focus'):
-                self.chk_prompt_focus.setChecked(settings.get("prompt_focus", False))
-            if hasattr(self, 'chk_auto_char_features'):
-                self.chk_auto_char_features.setChecked(settings.get("auto_char_features", False))
-            if hasattr(self, 'chk_auto_remove_char_features'):
-                self.chk_auto_remove_char_features.setChecked(settings.get("auto_remove_char_features", False))
-            if hasattr(self, 'combo_char_feature_mode'):
-                self.combo_char_feature_mode.setCurrentIndex(settings.get("char_feature_mode", 0))
-            _ov = settings.get("char_feature_override") or {}
-            self._char_feature_override = {
-                'hair_length': bool(_ov.get('hair_length', False)),
-                'eye_color': bool(_ov.get('eye_color', False)),
-            }
+                # 웹 설정 불러오기
+                web_home = settings.get("web_home_url", "")
+                if web_home and hasattr(self.web_tab, 'set_home_url'):
+                    self.web_tab.set_home_url(web_home)
+                
+                # 캐릭터 특징 자동 추가
+                if hasattr(self, 'chk_prompt_focus'):
+                    self.chk_prompt_focus.setChecked(settings.get("prompt_focus", False))
+                if hasattr(self, 'chk_auto_char_features'):
+                    self.chk_auto_char_features.setChecked(settings.get("auto_char_features", False))
+                if hasattr(self, 'chk_auto_remove_char_features'):
+                    self.chk_auto_remove_char_features.setChecked(settings.get("auto_remove_char_features", False))
+                if hasattr(self, 'combo_char_feature_mode'):
+                    self.combo_char_feature_mode.setCurrentIndex(settings.get("char_feature_mode", 0))
+                _ov = settings.get("char_feature_override") or {}
+                self._char_feature_override = {
+                    'hair_length': bool(_ov.get('hair_length', False)),
+                    'eye_color': bool(_ov.get('eye_color', False)),
+                }
 
-            # 전역 조건식: config/cond_rules.json 단일 소스로 이관됨(늘 적용 — 옛 cond_prompt_enabled 는 읽지 않는다)
-            #   (마이그레이션은 generator_main._apply_saved_configs, Vue 전달은 getInitialConfig pull).
-            #   레거시 prompt_settings.cond_rules_json은 더 이상 cond_block_editor에 로드하지 않는다.
+                # 전역 조건식: config/cond_rules.json 단일 소스로 이관됨(늘 적용 — 옛 cond_prompt_enabled 는 읽지 않는다)
+                #   (마이그레이션은 generator_main._apply_saved_configs, Vue 전달은 getInitialConfig pull).
+                #   레거시 prompt_settings.cond_rules_json은 더 이상 cond_block_editor에 로드하지 않는다.
 
-            # 베이스 프롬프트 — 키가 없는 옛 설정 파일은 칸의 글을 템플릿으로(그 전엔 ''라, 다음 사이클이
-            # 칸을 비우고 프리셋 저장(_build_preset_settings)도 빈 선행/네거티브를 썼다).
-            self.base_prefix_prompt = settings.get("base_prefix_prompt", settings.get("prefix_prompt", ""))
-            self.base_suffix_prompt = settings.get("base_suffix_prompt", settings.get("suffix_prompt", ""))
-            self.base_neg_prompt = settings.get("base_neg_prompt", settings.get("negative_prompt", ""))
+                # 베이스 프롬프트 — 키가 없는 옛 설정 파일은 칸의 글을 템플릿으로(그 전엔 ''라, 다음 사이클이
+                # 칸을 비우고 프리셋 저장(_build_preset_settings)도 빈 선행/네거티브를 썼다).
+                self.base_prefix_prompt = settings.get("base_prefix_prompt", settings.get("prefix_prompt", ""))
+                self.base_suffix_prompt = settings.get("base_suffix_prompt", settings.get("suffix_prompt", ""))
+                self.base_neg_prompt = settings.get("base_neg_prompt", settings.get("negative_prompt", ""))
 
-            # Vue 위젯이 주인이 아닌 키(와일드카드 ON/OFF·레거시 클리너 두 옵션·글꼴) — 예전엔 숨은
-            #   SettingsTab 위젯을 거쳤다(audit #178). theme·parquet_dir·cond_prompt_enabled 등 은퇴한 키는
-            #   읽지 않는다(core/prompt_settings_extras.RETIRED_KEYS) — 데이터셋 경로는 config.PARQUET_DIR
-            #   (= core.fetch_data.DATA_DIR) 한 곳이라, 옮긴 설치본·다른 설치본의 백업이 옛 경로를 되살리지 않는다.
-            self._apply_prompt_settings_extras(PromptSettingsExtras.from_settings(settings))
+                # Vue 위젯이 주인이 아닌 키(와일드카드 ON/OFF·레거시 클리너 두 옵션·글꼴) — 예전엔 숨은
+                #   SettingsTab 위젯을 거쳤다(audit #178). theme·parquet_dir·cond_prompt_enabled 등 은퇴한 키는
+                #   읽지 않는다(core/prompt_settings_extras.RETIRED_KEYS) — 데이터셋 경로는 config.PARQUET_DIR
+                #   (= core.fetch_data.DATA_DIR) 한 곳이라, 옮긴 설치본·다른 설치본의 백업이 옛 경로를 되살리지 않는다.
+                self._apply_prompt_settings_extras(PromptSettingsExtras.from_settings(settings))
 
-            # (editor_defaults·bg_removal_model·shortcuts 는 숨은 PyQt 에디터(MosaicEditor)·설정 탭 전용이라
-            #  은퇴와 함께 저장·복원을 뺐다. Vue 에디터 기본값은 tab_defaults.json, 배경 제거는 u2net 고정,
-            #  Vue 단축키는 프론트가 정한다 — 옛 prompt_settings.json 의 세 키는 무시된다
-            #  (core/prompt_settings_extras.RETIRED_KEYS, tests/test_legacy_editor_retirement.py).
+                # (editor_defaults·bg_removal_model·shortcuts 는 숨은 PyQt 에디터(MosaicEditor)·설정 탭 전용이라
+                #  은퇴와 함께 저장·복원을 뺐다. Vue 에디터 기본값은 tab_defaults.json, 배경 제거는 u2net 고정,
+                #  Vue 단축키는 프론트가 정한다 — 옛 prompt_settings.json 의 세 키는 무시된다
+                #  (core/prompt_settings_extras.RETIRED_KEYS, tests/test_legacy_editor_retirement.py).
 
-            # 옛 중복 키를 ui_prefs 단일 소스로 1회 흡수. 현재 ui_prefs가 항상 우선.
-            # (갤러리 폴더는 Vue 갤러리가 ui_prefs 에서 읽는다 — 숨은 PyQt 갤러리 탭은 은퇴했다)
-            migrate_legacy_gallery_folder(settings)
+                # 옛 중복 키를 ui_prefs 단일 소스로 1회 흡수. 현재 ui_prefs가 항상 우선.
+                # (갤러리 폴더는 Vue 갤러리가 ui_prefs 에서 읽는다 — 숨은 PyQt 갤러리 탭은 은퇴했다)
+                migrate_legacy_gallery_folder(settings)
 
-            # (옛 파일의 i2i_settings·inpaint_settings 는 읽지 않는다 — 숨은 PyQt I2I·Inpaint 탭과 함께
-            #  은퇴했고 Vue 화면은 그 값을 쓴 적이 없다. core/prompt_settings_extras.RETIRED_KEYS)
+                # (옛 파일의 i2i_settings·inpaint_settings 는 읽지 않는다 — 숨은 PyQt I2I·Inpaint 탭과 함께
+                #  은퇴했고 Vue 화면은 그 값을 쓴 적이 없다. core/prompt_settings_extras.RETIRED_KEYS)
 
-            # 백엔드 설정 복원
-            if "backend_type" in settings:
-                self._restore_backend_settings(settings)
-
-            self.is_programmatic_change = False
+                # 백엔드 설정 복원
+                if "backend_type" in settings:
+                    self._restore_backend_settings(settings)
+            finally:
+                self.is_programmatic_change = _prev_prog
 
             self.loaded_settings = settings
             self.show_status("✅ 설정을 불러왔습니다.", 3000)

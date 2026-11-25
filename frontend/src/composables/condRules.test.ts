@@ -17,7 +17,7 @@ let storage: Map<string, string>
 
 async function load() {
   vi.resetModules()
-  return import('./condRules.js')
+  return import('./condRules')
 }
 const saves = () => mocks.actionSpy.mock.calls.filter(([n]) => n === 'save_cond_rules').map(([, p]) => p)
 const fileEvent = (payload: unknown) => mocks.handlers.get('condRulesLoaded')!(JSON.stringify(payload))

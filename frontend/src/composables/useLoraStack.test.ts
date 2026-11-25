@@ -13,7 +13,7 @@ vi.mock('../bridge.js', () => ({
   onBackendEvent: (name: string, cb: (...args: any[]) => void) => { mocks.handlers.set(name, cb); return () => {} },
 }))
 
-import { LORA_SAVE_DEBOUNCE_MS, useLoraStack } from './useLoraStack.js'
+import { LORA_SAVE_DEBOUNCE_MS, useLoraStack } from './useLoraStack'
 
 const STALE = [{ name: 'stale_lora', weight: 50, enabled: true, triggerWords: [] }]
 let storage: Map<string, string>

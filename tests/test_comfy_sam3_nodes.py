@@ -375,6 +375,49 @@ class TestComfySam3Nodes(unittest.TestCase):
         self.assertEqual(tuple(overlay.shape), (1, 10, 10, 3))
         self.assertTrue(torch.equal(overlay, contiguous_result[3]))
 
+    def test_mask_node_tells_the_studio_when_it_found_nothing(self):
+        _skip_without_cv2()
+        nothing = (torch.zeros((1, 10, 10)), [], [])
+        with mock.patch.object(sam3_nodes, "_resolve_easy_node", return_value=_FakeSegmenter), \
+                mock.patch.object(sam3_nodes, "_detect_token", return_value=nothing), \
+                mock.patch.object(sam3_nodes, "_tell_nothing_found") as told:
+            sam3_nodes.ForgeNeoSAM3Mask().segment(
+                _vae_decode_image(10, 10, seed=7), prompt="face", mask_mode="Combined", mask_blur=0, save_artifacts=False,
+                unload_after=False, sam3_model={"model": _FakeModel(), "device": "cpu", "segmentor": "image"})
+        told.assert_called_once_with("")
+
+    def test_mask_node_tells_the_studio_why_the_face_detector_failed(self):
+        _skip_without_cv2()
+
+        def broken(*_args, **_kwargs):
+            raise sam3_nodes._face_detect.FaceDetectorUnavailable("no ultralytics")
+
+        with mock.patch.object(sam3_nodes._face_detect, "detect_faces_many", side_effect=broken), \
+                mock.patch.object(sam3_nodes, "_tell_nothing_found") as told:
+            sam3_nodes.ForgeNeoSAM3Mask().segment(
+                _vae_decode_image(10, 10, seed=7), prompt="face", mask_mode="Combined", mask_blur=0, save_artifacts=False,
+                unload_after=False, face_crop=True, sam3_model={"model": _FakeModel(), "device": "cpu", "segmentor": "image"})
+        told.assert_called_once_with("FaceDetectorUnavailable: no ultralytics")
+
+    def test_plain_overlay_hands_the_picture_itself_to_the_overlay_output(self):
+        _skip_without_cv2()
+        image = _vae_decode_image(10, 10, seed=7)
+        with mock.patch.object(sam3_nodes, "_resolve_easy_node", return_value=_FakeSegmenter):
+            output = sam3_nodes.ForgeNeoSAM3Mask().segment(
+                image, prompt="face", mask_mode="Combined", mask_blur=0, save_artifacts=False, plain_overlay=True,
+                unload_after=False, sam3_model={"model": _FakeModel(), "device": "cpu", "segmentor": "image"})
+        self.assertTrue(torch.equal(output[3], image[..., :3]))
+
+    def test_mask_node_says_nothing_when_it_found_something(self):
+        _skip_without_cv2()
+        _FakeSegmenter.calls = []
+        with mock.patch.object(sam3_nodes, "_resolve_easy_node", return_value=_FakeSegmenter), \
+                mock.patch.object(sam3_nodes, "_tell_nothing_found") as told:
+            sam3_nodes.ForgeNeoSAM3Mask().segment(
+                _vae_decode_image(10, 10, seed=7), prompt="face", mask_mode="Combined", mask_blur=0, save_artifacts=False,
+                unload_after=False, sam3_model={"model": _FakeModel(), "device": "cpu", "segmentor": "image"})
+        told.assert_not_called()
+
     def test_intersection_falls_back_to_manual_per_image(self):
         generated = torch.zeros((2, 6, 6))
         generated[0, 1:4, 1:4] = 1
@@ -1341,6 +1384,39 @@ class TestComfySam3Nodes(unittest.TestCase):
         self.assertEqual(report["passes"][0]["crop"], [97, 97, 113, 113])
         self.assertEqual(encoded, [((1, 16, 16, 3), (1, 16, 16))])
         self.assertIsNone(report["processing_size"])
+
+    def test_image_target_size_draws_at_the_size_of_the_picture(self):
+        mask = torch.zeros((1, 256, 256))
+        mask[:, 100:110, 100:110] = 1
+        _output, encoded, report = self._recording_detailer(
+            mask=mask, mask_padding=0, only_masked=True, target_image_size=True, target_width=64, target_height=96,
+        )
+        self.assertEqual(report["processing_size"], [256, 256])
+        self.assertEqual(encoded, [((1, 256, 256, 3), (1, 256, 256))])
+
+    def test_custom_size_wins_over_the_image_size(self):
+        mask = torch.zeros((1, 256, 256))
+        mask[:, 100:110, 100:110] = 1
+        _output, _encoded, report = self._recording_detailer(
+            mask=mask, mask_padding=0, only_masked=True, target_image_size=True,
+            use_custom_size=True, custom_width=128, custom_height=128,
+        )
+        self.assertEqual(report["processing_size"], [128, 128])
+
+    def test_auto_on_a_machine_without_cuda_drops_the_gpu_precision(self):
+        with mock.patch.object(torch.cuda, "is_available", return_value=False):
+            self.assertEqual(sam3_nodes._resolve_sam3_request("sam3.pt", "auto", "bf16")[:2], ("cpu", "fp32"))
+        with self.assertRaisesRegex(ValueError, "CPU"):
+            sam3_nodes._resolve_sam3_request("sam3.pt", "cpu", "bf16")
+
+    def test_thresholds_left_from_another_preprocessor_are_ignored_like_forge(self):
+        class NoThresholds:
+            @staticmethod
+            def INPUT_TYPES():
+                return {"required": {"image": ("IMAGE",), "resolution": ("INT",)}}
+
+        parameters = sam3_nodes._preprocessor_kwargs(NoThresholds, "image", None, 512, 100.0, 200.0)
+        self.assertEqual(parameters, {"image": "image", "resolution": 512})
 
     def test_invalid_target_size_is_rejected(self):
         mask = torch.zeros((1, 16, 16))

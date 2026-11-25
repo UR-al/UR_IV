@@ -10,18 +10,23 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from core.cancellable_call import call_with_optional_cancel
 from core.error_handler import sanitize_for_ui
 from core.image_metadata import read_applicable_prompts
+from core.output_files import write_new_file
+from core.path_safety import UnsafePathError, safe_input_path, safe_output_dir
 from core.resource_coordinator import backend_job_guard, release_before_backend_job
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_IMAGE_EXTS: frozenset[str] = frozenset((
+    '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff', '.avif', '.apng',
+))
+
 
 def _get_output_path(src_path: str, output_folder: str = '') -> str:
-    """SAM3 결과 저장 경로 생성"""
+    """SAM3 결과 저장 경로 생성 (항상 .png — 백엔드가 PNG 바이트를 반환)"""
     d = os.path.dirname(src_path)
-    name, ext = os.path.splitext(os.path.basename(src_path))
-    output_dir = output_folder or os.path.join(d, 'sam3')
-    os.makedirs(output_dir, exist_ok=True)
-    return os.path.join(output_dir, f"{name}_sam3{ext}")
+    name, _ext = os.path.splitext(os.path.basename(src_path))
+    output_dir = safe_output_dir(output_folder or os.path.join(d, 'sam3'), create=True)
+    return os.path.join(output_dir, f"{name}_sam3.png")
 
 
 def _to_posix(path: str) -> str:
@@ -98,9 +103,14 @@ class Sam3SingleWorker(QThread):
                 self.finished.emit(json.dumps({'error': '백엔드 연결 없음'}))
                 return
 
-            settings, exif_warning = _prepare_settings(self._settings, self._path)
+            safe_src = safe_input_path(self._path, allowed_exts=ALLOWED_IMAGE_EXTS)
+            if not safe_src:
+                self.finished.emit(json.dumps({'error': '유효하지 않은 입력 이미지 경로'}))
+                return
 
-            with open(self._path, 'rb') as f:
+            settings, exif_warning = _prepare_settings(self._settings, safe_src)
+
+            with open(safe_src, 'rb') as f:
                 image_b64 = base64.b64encode(f.read()).decode()
 
             # Forge가 SAM3를 올리기 전에 앱 프로세스의 편집기 SAM3 번들(~3.4GB)을 반납
@@ -113,12 +123,11 @@ class Sam3SingleWorker(QThread):
                 self.finished.emit(json.dumps({'error': failure}, ensure_ascii=False))
                 return
 
-            output_path = _get_output_path(self._path, settings.get('output_folder', ''))
-            with open(output_path, 'wb') as f:
-                f.write(base64.b64decode(result_b64))
+            target_path = _get_output_path(safe_src, settings.get('output_folder', ''))
+            output_path = write_new_file(target_path, base64.b64decode(result_b64))
 
             self.finished.emit(json.dumps(_with_notices(_with_exif_warning({
-                'before': _to_posix(self._path),
+                'before': _to_posix(safe_src),
                 'after': _to_posix(output_path),
                 'output_path': _to_posix(output_path),
             }, exif_warning), result_b64), ensure_ascii=False))
@@ -151,17 +160,38 @@ class Sam3BatchWorker(QThread):
         from backends import get_backend
         backend = get_backend()
         if not backend:
+            self._record(False, '백엔드 연결 없음')
             self.single_done.emit(json.dumps({'error': '백엔드 연결 없음'}))
+            self.job.finish()
+            self.progress.emit(0, 0)
+            self.all_done.emit()
             return
 
         total = len(self._paths)
+        explicit_out = (self._settings or {}).get('output_folder', '')
+        if explicit_out:
+            try:
+                safe_output_dir(explicit_out, create=True)
+            except UnsafePathError as e:
+                message = sanitize_for_ui(f'유효하지 않은 출력 폴더: {e}')
+                self._record(False, message)
+                self.single_done.emit(json.dumps({'error': message}))
+                self.job.finish()
+                self.progress.emit(0, 0)
+                self.all_done.emit()
+                return
+
         for i, path in enumerate(self._paths):
             if self._stop_event.is_set():
                 break
             try:
-                settings, exif_warning = _prepare_settings(self._settings, path)
+                safe_src = safe_input_path(path, allowed_exts=ALLOWED_IMAGE_EXTS)
+                if not safe_src:
+                    raise ValueError('유효하지 않은 입력 이미지 경로')
 
-                with open(path, 'rb') as f:
+                settings, exif_warning = _prepare_settings(self._settings, safe_src)
+
+                with open(safe_src, 'rb') as f:
                     image_b64 = base64.b64encode(f.read()).decode()
 
                 # 항목마다 — 배치 도중 편집기에서 SAM3를 다시 올렸어도 Forge 작업과 겹치지 않게
@@ -173,7 +203,7 @@ class Sam3BatchWorker(QThread):
                 failure, repeats = _sam3_failure(result_b64)
                 if failure:
                     self._record(False, failure)
-                    item = {'error': failure, 'path': _to_posix(path), 'index': i}
+                    item = {'error': failure, 'path': _to_posix(safe_src), 'index': i}
                     if repeats and i + 1 < total:
                         # 설정·설치 문제 — 남은 이미지도 같은 이유로 실패한다. img2img+SAM3 요청을 더 보내지 않는다.
                         item['batch_stopped'] = True
@@ -185,24 +215,23 @@ class Sam3BatchWorker(QThread):
                                        total - i - 1, failure)
                         break
                     continue
-                output_path = _get_output_path(path, settings.get('output_folder', ''))
-                with open(output_path, 'wb') as f:
-                    f.write(base64.b64decode(result_b64))
+                target_path = _get_output_path(safe_src, settings.get('output_folder', ''))
+                output_path = write_new_file(target_path, base64.b64decode(result_b64))
 
                 self._record(True)
                 self.single_done.emit(json.dumps(_with_notices(_with_exif_warning({
-                    'before': _to_posix(path),
+                    'before': _to_posix(safe_src),
                     'after': _to_posix(output_path),
                     'output_path': _to_posix(output_path),
                     'index': i,
                 }, exif_warning), result_b64), ensure_ascii=False))
             except Exception as e:
-                logger.exception("Sam3BatchWorker failed for %s", os.path.basename(path))
+                logger.exception("Sam3BatchWorker failed for %s", os.path.basename(str(path)))
                 message = sanitize_for_ui(e)
                 self._record(False, message)
                 self.single_done.emit(json.dumps({
                     'error': message,
-                    'path': _to_posix(path),
+                    'path': _to_posix(str(path)),
                     'index': i,
                 }))
 

@@ -183,3 +183,77 @@ describe('dev mock transport', () => {
     expect(console.log).toHaveBeenCalledWith('[mock] action sync_queue_state', expect.anything())
   })
 })
+
+describe('web facade error and auth rejection handling (B-02)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    FakeSocket.instances = []
+    FakeSocket.log = []
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('logs console.error and does not invoke callback when web facade returns malformed JSON or !ok', async () => {
+    vi.stubGlobal('window', { __AISTUDIO_WS_URL__: 'ws://bridge.test' })
+    vi.stubGlobal('location', { protocol: 'http:', hostname: 'bridge.test' })
+    vi.stubGlobal('WebSocket', FakeSocket)
+    const { bridge } = await freshBridge()
+    void bridge.initBridge()
+    const sock = FakeSocket.instances[0]
+    sock.facade.invoke = (name: string, _argsJson: string, cb?: (json: string) => void) => {
+      if (name === 'getAllWidgetValues') cb?.('{broken-json')
+      else cb?.(JSON.stringify({ ok: false, error: 'denied' }))
+    }
+    sock.onopen!()
+    const backend: any = await bridge.getBackend()
+
+    const malformedCb = vi.fn()
+    backend.getAllWidgetValues(malformedCb)
+    expect(malformedCb).not.toHaveBeenCalled()
+
+    const rejectedCb = vi.fn()
+    backend.onAction('test', '{}', rejectedCb)
+    expect(rejectedCb).not.toHaveBeenCalled()
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('invalid response'), expect.anything())
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('backend rejected onAction: denied'))
+  })
+
+  it('notifies UI, sets rejected flag, and settles waiters on WS close 1008', async () => {
+    const dispatched: Array<{ type: string; detail?: unknown }> = []
+    vi.stubGlobal('CustomEvent', class {
+      constructor(public type: string, opts?: { detail?: unknown }) { this.detail = opts?.detail }
+      detail: unknown
+    })
+    vi.stubGlobal('window', {
+      __AISTUDIO_WS_URL__: 'ws://bridge.test',
+      dispatchEvent: (ev: any) => { dispatched.push({ type: ev.type, detail: ev.detail }); return true },
+    })
+    vi.stubGlobal('location', { protocol: 'http:', hostname: 'bridge.test' })
+    vi.stubGlobal('WebSocket', FakeSocket)
+    const { bridge } = await freshBridge()
+
+    const notifs: Array<{ type: string; msg: string }> = []
+    bridge.onBackendEvent('showNotification', (type: string, msg: string) => notifs.push({ type, msg }))
+
+    const initPromise = bridge.initBridge()
+    const waiter = bridge.getBackend()
+    FakeSocket.instances[0].onclose?.({ code: 1008 })
+
+    await expect(initPromise).rejects.toThrow(/1008|인증|auth/i)
+    await expect(waiter).rejects.toThrow(/1008|인증|auth/i)
+    expect(bridge.isWebAuthRejected()).toBe(true)
+    expect(notifs).toHaveLength(1)
+    expect(notifs[0]).toMatchObject({ type: 'error' })
+    expect(dispatched.some(e => e.type === 'aistudio:bridge-auth-rejected')).toBe(true)
+
+    // 1008 은 자동 재연결을 예약하지 않는다
+    vi.advanceTimersByTime(5000)
+    expect(FakeSocket.instances).toHaveLength(1)
+  })
+})

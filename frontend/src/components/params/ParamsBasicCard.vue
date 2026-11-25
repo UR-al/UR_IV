@@ -8,7 +8,7 @@
         <input type="number" v-model="storeWidgets.width_input" />
         <span>×</span>
         <input type="number" v-model="storeWidgets.height_input" />
-        <button class="ext-mini-btn" @click="requestAction('swap_resolution')"><Icon name="arrows-horizontal" /></button>
+        <button class="ext-mini-btn" @click="requestAction('swap_resolution')" title="가로·세로 바꾸기" aria-label="가로·세로 바꾸기"><Icon name="arrows-horizontal" /></button>
       </div>
       <div class="ext-res-opts">
         <label class="ext-check-sm"><ToggleSwitch v-model="randomResEnabled" size="sm" /><span>랜덤</span></label>
@@ -41,7 +41,7 @@
           <div v-for="(r, i) in randomResList" :key="i" class="rand-res-item">
             <span class="rand-res-val">{{ r[0] }}×{{ r[1] }}</span>
             <span class="rand-res-desc">{{ r[2] }}</span>
-            <button class="rand-res-del" @click="removeRandomRes(i)"><Icon name="close" /></button>
+            <button class="rand-res-del" @click="removeRandomRes(i)" title="해상도 삭제" aria-label="해상도 삭제"><Icon name="close" /></button>
           </div>
           <div v-if="!randomResList.length" class="rand-res-empty">해상도를 추가하세요</div>
         </div>
@@ -49,7 +49,7 @@
           <input type="number" v-model.number="newResW" placeholder="W" class="rand-res-input" />
           <span>×</span>
           <input type="number" v-model.number="newResH" placeholder="H" class="rand-res-input" />
-          <button class="rand-res-btn" @click="addRandomRes">+</button>
+          <button class="rand-res-btn" @click="addRandomRes" title="해상도 추가" aria-label="해상도 추가">+</button>
         </div>
       </div>
     </div>
@@ -88,7 +88,7 @@ import ExtraSchedulerFields from './ExtraSchedulerFields.vue'
 import { requestAction, useWidgetStore } from '../../stores/widgetStore.js'
 import { useParamItems } from '../../composables/useParamItems'
 import { widgetFlag } from '../../composables/widgetFlag'
-import type { useHighRes } from '../../composables/useHighRes.js'
+import type { useHighRes } from '../../composables/useHighRes'
 import type { RandomResolutions } from '../../composables/useRandomResolutions'
 
 const props = defineProps({

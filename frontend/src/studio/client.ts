@@ -306,7 +306,9 @@ class NativeStudioClient implements StudioClient {
     try {
       const event = parseEvent(raw)
       if (event.eventEpoch !== this.eventEpoch) {
-        void this.beginReconnect(false, this.transport.bindingGeneration)
+        void this.beginReconnect(false, this.transport.bindingGeneration).catch((error) => {
+          if (!this.disposed) console.error('[studio] epoch reconnect handshake failed', error)
+        })
         return
       }
       if (!this.cursor.accept(event.seq)) return

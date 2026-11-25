@@ -24,7 +24,10 @@
 import { appModalStack, type ModalStack } from './modalStack'
 
 /** 핸들러가 읽는 KeyboardEvent 의 부분 — 테스트는 이 모양의 평범한 객체를 넘긴다. */
-export type AppShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault' | 'defaultPrevented'>
+export type AppShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault' | 'defaultPrevented'> & {
+  isComposing?: boolean
+  keyCode?: number
+}
 
 /** 포커스된 요소에서 보는 것 — `document.activeElement` 의 부분. */
 export interface FocusedElementLike {
@@ -63,10 +66,14 @@ export function createAppKeydownHandler(deps: AppShortcutDeps): (e: AppShortcutE
   const stack = deps.modalStack ?? appModalStack
   return (e) => {
     if (deps.isGateOpen()) return
-    if (e.ctrlKey && e.key === 'g') { e.preventDefault(); deps.generate() }
-    if (e.ctrlKey && e.key === 's') { e.preventDefault(); deps.saveSettings() }
-    if (e.key === 'F5') { e.preventDefault(); deps.reloadHistory() }
-    if (e.ctrlKey && e.key === 'Tab') { e.preventDefault(); deps.navigateTabs(e.shiftKey ? -1 : 1) }
+    if (e.isComposing || e.keyCode === 229) return
+    const keyLower = e.key.toLowerCase()
+    const plainCtrl = e.ctrlKey && !e.altKey && !e.metaKey
+    const modalOpen = stack.isAnyOpen()
+    if (plainCtrl && !e.shiftKey && keyLower === 'g') { e.preventDefault(); if (!modalOpen) deps.generate() }
+    if (plainCtrl && !e.shiftKey && keyLower === 's') { e.preventDefault(); deps.saveSettings() }
+    if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key === 'F5') { e.preventDefault(); if (!modalOpen) deps.reloadHistory() }
+    if (!modalOpen && plainCtrl && e.key === 'Tab') { e.preventDefault(); deps.navigateTabs(e.shiftKey ? -1 : 1) }
 
     // ESC — 열려 있는 오버레이/모달을 최상위 우선순위로 닫는다
     if (e.key === 'Escape') {

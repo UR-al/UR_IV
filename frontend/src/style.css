@@ -37,6 +37,24 @@
   --radius-card: 12px;
   --radius-base: 8px;
 
+  --font-mono: 'Consolas', 'JetBrains Mono', monospace;
+
+  /* z-index 계층 계약 — chrome < notif < dock < dock-panel < dock-menu < modal < ctx < select < gate < banner < toast < tooltip */
+  --z-chrome: 500;
+  --z-notif-overlay: 1150;
+  --z-notif: 1160;
+  --z-dock: 1200;
+  --z-dock-panel: 1250;
+  --z-dock-menu: 1260;
+  --z-modal: 2000;
+  --z-modal-nested: 2200;
+  --z-ctx: 2500;
+  --z-select: 3000;
+  --z-gate: 4000;
+  --z-banner: 4500;
+  --z-toast: 9000;
+  --z-tooltip: 2147483647;
+
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -117,7 +135,7 @@ body {
 .btn-pill.primary:hover {
   background: var(--accent-fill-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(250, 204, 21, 0.2);
+  box-shadow: 0 4px 12px var(--accent-dim);
 }
 
 .card {
@@ -144,7 +162,7 @@ textarea {
   word-break: break-all;
 }
 
-input:focus, textarea:focus, select:focus {
+input:where(:not([type="checkbox"]):not([type="radio"])):focus, textarea:focus, select:focus {
   border-color: var(--accent);
   outline: none;
   background: var(--bg-card);
@@ -160,7 +178,7 @@ button:disabled {
 label:has(input[type="checkbox"]) {
   display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;
 }
-input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; margin: 0; width: auto; }
+input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; margin: 0; }
 
 /* select 전역 스타일.
    화살표의 %23909090 은 토큰으로 못 바꾼다 — data URI 안의 SVG 는 별도 문서라

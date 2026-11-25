@@ -34,7 +34,7 @@
       <header class="cm-head">
         <button class="cm-tool cm-mobile-threads" type="button" aria-controls="chat-threads" :aria-expanded="showThreads" @click="showThreads = !showThreads">대화</button>
         <div class="cm-title-wrap">
-          <input v-if="renaming" ref="renameRef" v-model="renameDraft" class="cm-rename" @keydown.enter="finishRename" @keydown.esc="renaming = false" @blur="finishRename" />
+          <input v-if="renaming" ref="renameRef" v-model="renameDraft" class="cm-rename" @keydown.enter="onRenameEnter" @keydown.esc="renaming = false" @blur="finishRename" />
           <h2 v-else class="cm-title" @dblclick="startRename" :title="'더블클릭해서 이름 바꾸기'">{{ active?.title || '새 대화' }}</h2>
           <span class="cm-sub">{{ model || '모델 없음' }}<template v-if="active?.messages.length"> · {{ active.messages.length }}개 메시지</template></span>
         </div>
@@ -379,6 +379,10 @@ function startRename() {
   renaming.value = true
   nextTick(() => renameRef.value?.select())
 }
+function onRenameEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  finishRename()
+}
 function finishRename() {
   if (!renaming.value) return
   renaming.value = false
@@ -629,7 +633,7 @@ onUnmounted(() => {
 .cm-model-info { display: flex; flex-direction: column; gap: 5px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: var(--fs-label); }
 .cm-model-info-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cm-thinking-level { display: flex; align-items: center; gap: 8px; }
-.cm-confirm { width: min(420px, calc(100vw - 32px)); margin: auto; max-height: calc(100dvh - 32px); overflow: auto; padding: 22px; box-sizing: border-box; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); box-shadow: 0 16px 60px rgba(0,0,0,.3); }
+.cm-confirm { width: min(420px, calc(100vw - 32px)); margin: auto; max-height: calc(100dvh - 32px); overflow: auto; padding: 22px; box-sizing: border-box; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: 0 16px 60px rgba(0,0,0,.3); }
 .cm-confirm::backdrop { background: rgba(0,0,0,.45); }
 .cm-confirm h3 { margin: 0 0 12px; font-size: 17px; }
 .cm-confirm p { margin: 0 0 20px; line-height: 1.6; overflow-wrap: anywhere; }

@@ -9,6 +9,7 @@ import secrets
 from typing import Any
 
 from . import hires_carry
+from . import studio_upscale
 from .extra_samplers_register import impact_scheduler_func
 from .compat import (
     clone_model,
@@ -32,6 +33,8 @@ from .guidance_cns import (
 )
 from .guidance_common import DY_SUBSTEPS_OFF_KEY, set_transformer_option
 from .guidance_detail import PASS_BASE, PASS_HIRES, with_pass_tag
+from .studio_adherence_nodes import SPLIT_REFUSED, base_model_of, has_wrapper, planned_split, split_lora_sample
+from .studio_forge_noise import forge_image_seeds, forge_initial_noise, forge_step_noise_seed
 from .anima_lora_nodes import (
     AnimaLoraStateCache,
     load_lora_block_weight,
@@ -280,7 +283,16 @@ class ForgeNeoLatentInput:
         return (latent,)
 
 
-def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise):
+# Optional input of the sampler / hires nodes: Forge Neo's initial and SDE step noise (studio_forge_noise).
+FORGE_NOISE_INPUT = ("BOOLEAN", {"default": False, "tooltip": (
+    "Forge Neo's noise: each image's own seed (seed + i) for the initial noise, and Forge's global seed for the "
+    "step noise of SDE samplers that draw it like EXP Heun 2 x0 SDE. Not with SPEED.")})
+
+
+def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise, forge_noise=False,
+                   lora_split=False):
+    """One sampling run. ``lora_split`` (the main sampler only): a LoRA control node's "Base 먼저" on ``model`` runs
+    its first steps without the LoRAs (``studio_adherence_nodes.split_lora_sample``)."""
     require_torch()
     import comfy.sample
     import comfy.utils
@@ -294,14 +306,30 @@ def _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, n
     batch_inds = latent.get("batch_index")
     # The initial noise is never coloured: CNS colours each step's ancestral
     # noise through the MODEL's SAMPLER_SAMPLE wrapper (guidance_cns.apply_cns).
-    noise = comfy.sample.prepare_noise(latent_image, int(seed), batch_inds)
+    sampler_seed = int(seed)
+    if forge_noise:
+        seeds = forge_image_seeds(sampler_seed, latent_image.shape[0], batch_inds)
+        noise = forge_initial_noise(latent_image, seeds)
+        sampler_seed = forge_step_noise_seed(seeds[-1])
+    else:
+        noise = comfy.sample.prepare_noise(latent_image, int(seed), batch_inds)
     callback = latent_preview.prepare_callback(model, int(steps))
-    samples = comfy.sample.sample(
-        model, noise, int(steps), float(cfg), sampler_name, scheduler,
-        positive, negative, latent_image, denoise=float(denoise),
-        noise_mask=latent.get("noise_mask"), callback=callback,
-        disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=int(seed),
-    )
+    schedule, split = planned_split(model, steps, latent) if lora_split else (None, 0)
+    if split >= int(steps):
+        model, split = base_model_of(model, schedule), 0  # every step without the LoRAs
+    if split:
+        samples = split_lora_sample(
+            model, schedule, split, noise, int(steps), float(cfg), sampler_name, scheduler, positive, negative,
+            latent_image, float(denoise), callback=callback, disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED,
+            seed=sampler_seed,
+        )
+    else:
+        samples = comfy.sample.sample(
+            model, noise, int(steps), float(cfg), sampler_name, scheduler,
+            positive, negative, latent_image, denoise=float(denoise),
+            noise_mask=latent.get("noise_mask"), callback=callback,
+            disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED, seed=sampler_seed,
+        )
     output = dict(latent)
     output.pop("downscale_ratio_spacial", None)
     output.pop("downscale_ratio_temporal", None)
@@ -354,6 +382,8 @@ class ForgeNeoKSamplerCNS:
             "speed_spd_scale": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 1.0}),
             "speed_spd_sigma": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 1.0}),
             "speed_adaptive_smc_alpha": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0}),
+        }, "optional": {
+            "forge_noise": FORGE_NOISE_INPUT,
         }}
 
     RETURN_TYPES = ("LATENT",)
@@ -361,10 +391,17 @@ class ForgeNeoKSamplerCNS:
     FUNCTION = "sample"
     CATEGORY = CATEGORY
 
-    def sample(self, model, positive, negative, latent_image, seed, steps, cfg, sampler_name, scheduler, denoise=1.0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, spectrum_enabled=False, spectrum_window_size=2.0, spectrum_flex_window=0.25, spectrum_warmup_steps=6, spectrum_tail_actual_steps=3, spectrum_blend_w=0.3, spectrum_cheby_degree=3, spectrum_ridge_lambda=0.1, spectrum_history_size=100, spectrum_one_sampler_only=False, spectrum_verbose=False, speed_enabled=False, speed_split_mode="single", speed_spd_scale=0.5, speed_spd_sigma=0.7, speed_adaptive_smc_alpha=0.0):
+    def sample(self, model, positive, negative, latent_image, seed, steps, cfg, sampler_name, scheduler, denoise=1.0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, spectrum_enabled=False, spectrum_window_size=2.0, spectrum_flex_window=0.25, spectrum_warmup_steps=6, spectrum_tail_actual_steps=3, spectrum_blend_w=0.3, spectrum_cheby_degree=3, spectrum_ridge_lambda=0.1, spectrum_history_size=100, spectrum_one_sampler_only=False, spectrum_verbose=False, speed_enabled=False, speed_split_mode="single", speed_spd_scale=0.5, speed_spd_sigma=0.7, speed_adaptive_smc_alpha=0.0, forge_noise=False):
         model = _with_cns(model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
         # The base pass of the generation: HiFlow records here, S² draws with the 'base' tag (guidance_detail).
         model = with_pass_tag(model, PASS_BASE)
+        # Imported here: importing speed_nodes registers its names, and __init__ fixes that order (extra schedulers first).
+        from .speed_nodes import SPEED_WRAPPER_KEY
+
+        _schedule, split = planned_split(model, steps, latent_image, warn=False)
+        if 0 < split < int(steps) and (speed_enabled or spectrum_enabled or has_wrapper(model, SPEED_WRAPPER_KEY)):
+            # SPEED and Spectrum segment the sampler themselves; the split cuts it as well.
+            raise RuntimeError(SPLIT_REFUSED.format(what="SPEED·Spectrum"))
         if speed_enabled:
             # CNS rides on the MODEL's sampler wrapper, so it also colours the
             # SPEED sampler's steps (Path B when SPEED wraps sample_*).
@@ -396,7 +433,22 @@ class ForgeNeoKSamplerCNS:
                 "DiTSpectrumPatch", method="patch", feature="Spectrum sampler",
                 args=(model, int(steps), float(spectrum_window_size), float(spectrum_flex_window), int(spectrum_warmup_steps), int(spectrum_tail_actual_steps), float(spectrum_blend_w), int(spectrum_cheby_degree), float(spectrum_ridge_lambda), int(spectrum_history_size), True, bool(spectrum_one_sampler_only), bool(spectrum_verbose)),
             )[0]
-        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise)
+        return _common_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise,
+                              forge_noise=bool(forge_noise), lora_split=True)
+
+
+def _is_flux_sampling(sampling: Any) -> bool:
+    """Flux-type sampling (Krea2) has no ``multiplier``: its timestep is sigma, and its shift is an exponent ``mu``."""
+    return any(klass.__name__ == "ModelSamplingFlux" for klass in type(sampling).__mro__)
+
+
+def _patch_flux_shift(model: Any, original: Any, shift: float):
+    """``ModelSamplingSD3`` would make Krea2's timesteps 1000 times too large; keep the model's own predictor class."""
+    patched = model.clone()
+    sampling = type(original)(model.model.model_config)
+    sampling.set_parameters(shift=float(shift))
+    patched.add_object_patch("model_sampling", sampling)
+    return hires_carry.copy_sampling_attrs(original, patched)
 
 
 def _patch_flow_shift(model: Any, shift: float):
@@ -418,6 +470,8 @@ def _patch_flow_shift(model: Any, shift: float):
     get_model_object = getattr(model, "get_model_object", None)
     if callable(get_model_object):
         original = get_model_object("model_sampling")
+        if _is_flux_sampling(original):
+            return _patch_flux_shift(model, original, shift)
         current = getattr(original, "multiplier", None)
         if current is not None:
             multiplier = float(current)
@@ -455,6 +509,17 @@ class ForgeNeoModelSamplingShift:
         return (_patch_flow_shift(model, shift),)
 
 
+def upscale_method_choices() -> list[str]:
+    """The Hires ``upscale_method`` list: latent methods, then the ``upscale_models`` files (also the studio's picker)."""
+    return list(dict.fromkeys([
+        "latent:bislerp", "latent:bicubic", "latent:bilinear",
+        "latent:nearest-exact", "latent:area",
+        *(f"latent:{method}" for method in studio_upscale.LATENT_METHODS),
+        *studio_upscale.PIXEL_RESIZERS,
+        *studio_upscale.model_files(),
+    ]))
+
+
 class ForgeNeoHiresFix:
     @classmethod
     def INPUT_TYPES(cls):
@@ -463,11 +528,7 @@ class ForgeNeoHiresFix:
             *filename_choices("checkpoints"),
             *filename_choices("diffusion_models"),
         ]))
-        upscale_choices = list(dict.fromkeys([
-            "latent:bislerp", "latent:bicubic", "latent:bilinear",
-            "latent:nearest-exact", "latent:area",
-            *filename_choices("upscale_models"),
-        ]))
+        upscale_choices = upscale_method_choices()
         return {"required": {
             "model": ("MODEL",), "positive": ("CONDITIONING",), "negative": ("CONDITIONING",), "samples": ("LATENT",),
             "seed": ("INT", {"default": -1, "min": -1, "max": 0xFFFFFFFFFFFFFFFF}), "enabled": ("BOOLEAN", {"default": False}),
@@ -488,6 +549,11 @@ class ForgeNeoHiresFix:
             "base_positive_text": ("STRING", {"default": "", "multiline": True}), "base_negative_text": ("STRING", {"default": "", "multiline": True}),
         }, "optional": {
             "clip_type": (["stable_diffusion", "cosmos", "sd3", "qwen_image", "wan", "krea2"],),
+            "forge_noise": FORGE_NOISE_INPUT,
+            # Forge's Tile Size / Overlap for Upscalers and Resolution Step; 0 = one latent cell.
+            "tile_size": ("INT", {"default": studio_upscale.DEFAULT_TILE, "min": 0, "max": 4096, "step": 16}),
+            "tile_overlap": ("INT", {"default": studio_upscale.DEFAULT_OVERLAP, "min": 0, "max": 512, "step": 4}),
+            "size_step": ("INT", {"default": 0, "min": 0, "max": 256, "step": 8}),
         }}
 
     RETURN_TYPES = ("LATENT", "VAE")
@@ -495,7 +561,7 @@ class ForgeNeoHiresFix:
     FUNCTION = "run"
     CATEGORY = CATEGORY
 
-    def run(self, model, positive, negative, samples, seed=-1, enabled=False, scale_by=1.5, upscale_method="latent:bislerp", steps=0, cfg=5.0, sampler_name="euler", scheduler="simple", denoise=0.35, seed_delta=0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, base_vae=None, base_clip=None, base_steps=30, base_sampler_name="euler", base_scheduler="simple", resize_width=0, resize_height=0, shift=3.0, checkpoint_name="Use same checkpoint", checkpoint_weight_dtype="default", text_encoder_name="Use same choices", vae_name="Use same choices", positive_text="", negative_text="", base_positive_text="", base_negative_text="", clip_type="stable_diffusion"):
+    def run(self, model, positive, negative, samples, seed=-1, enabled=False, scale_by=1.5, upscale_method="latent:bislerp", steps=0, cfg=5.0, sampler_name="euler", scheduler="simple", denoise=0.35, seed_delta=0, cns_enabled=False, cns_strength=1.0, cns_gamma_power=0.5, cns_gamma_scale=2.0, base_vae=None, base_clip=None, base_steps=30, base_sampler_name="euler", base_scheduler="simple", resize_width=0, resize_height=0, shift=3.0, checkpoint_name="Use same checkpoint", checkpoint_weight_dtype="default", text_encoder_name="Use same choices", vae_name="Use same choices", positive_text="", negative_text="", base_positive_text="", base_negative_text="", clip_type="stable_diffusion", forge_noise=False, tile_size=studio_upscale.DEFAULT_TILE, tile_overlap=studio_upscale.DEFAULT_OVERLAP, size_step=0):
         if not enabled:
             return samples, base_vae
         import comfy.utils
@@ -558,14 +624,15 @@ class ForgeNeoHiresFix:
             spatial_ratio = max(1, int(ratio_method())) if callable(ratio_method) else 8
         except Exception:
             spatial_ratio = 8
-        target_w = int(resize_width) // spatial_ratio if int(resize_width) > 0 else max(1, int(round(tensor.shape[-1] * float(scale_by))))
-        target_h = int(resize_height) // spatial_ratio if int(resize_height) > 0 else max(1, int(round(tensor.shape[-2] * float(scale_by))))
+        pixel_width, pixel_height = studio_upscale.hires_size(
+            tensor.shape[-1] * spatial_ratio, tensor.shape[-2] * spatial_ratio, float(scale_by),
+            int(resize_width), int(resize_height), int(size_step) or spatial_ratio, spatial_ratio,
+        )
+        target_w, target_h = pixel_width // spatial_ratio, pixel_height // spatial_ratio
         if str(upscale_method).startswith("latent:"):
             method = str(upscale_method).split(":", 1)[1]
             resized = dict(samples)
-            resized["samples"] = comfy.utils.common_upscale(
-                tensor, target_w, target_h, method, "disabled"
-            )
+            resized["samples"] = studio_upscale.resize_latent(tensor, target_w, target_h, method)
         else:
             if base_vae is None or active_vae is None:
                 raise RuntimeError("Pixel-space Hi-res upscaling requires both base_vae and active VAE inputs.")
@@ -573,24 +640,17 @@ class ForgeNeoHiresFix:
                 "VAEDecode", method="decode", feature="Hi-res pixel decode",
                 args=(base_vae, samples),
             )[0]
-            upscale_model = invoke_provider(
-                "UpscaleModelLoader", method="load_model", feature="Hi-res pixel upscaler",
-                args=(upscale_method,),
-            )[0]
-            upscaled = invoke_provider(
-                "ImageUpscaleWithModel", method="upscale", feature="Hi-res pixel upscaler",
-                args=(upscale_model, decoded),
-            )[0]
-            pixel_width = int(resize_width) if int(resize_width) > 0 else target_w * spatial_ratio
-            pixel_height = int(resize_height) if int(resize_height) > 0 else target_h * spatial_ratio
-            upscaled = resize_image(upscaled, pixel_width, pixel_height, "stretch")
+            upscaled = studio_upscale.upscale_to(
+                decoded, str(upscale_method), target_w * spatial_ratio, target_h * spatial_ratio,
+                int(tile_size), int(tile_overlap),
+            )
             resized = _encode(active_vae, upscaled)
         actual_seed = secrets.randbits(64) if int(seed) < 0 else (int(seed) + int(seed_delta)) & 0xFFFFFFFFFFFFFFFF
         actual_steps = int(steps) if int(steps) > 0 else int(base_steps)
         active_model = _with_cns(active_model, cns_enabled, cns_strength, cns_gamma_power, cns_gamma_scale)
         # The hires pass: HiFlow aligns here with the base pass's trajectory, S² draws with the 'hires' tag.
         active_model = with_pass_tag(active_model, PASS_HIRES)
-        output = _common_sample(active_model, actual_seed, actual_steps, cfg, sampler_name or base_sampler_name, scheduler or base_scheduler, positive, negative, resized, denoise)[0]
+        output = _common_sample(active_model, actual_seed, actual_steps, cfg, sampler_name or base_sampler_name, scheduler or base_scheduler, positive, negative, resized, denoise, forge_noise=bool(forge_noise))[0]
         return output, active_vae
 
 
@@ -906,12 +966,40 @@ class ForgeNeoAnimaVAE2x:
         ),)
 
 
+_PID_TE = "gemma_2_2b_it_elm"  # the Gemma-2-2B text encoder PiD's split release ships beside the model
+
+
+def _file_list(kind: str) -> list[str]:
+    try:
+        return list(folder_paths_module().get_filename_list(kind))
+    except Exception:
+        return []
+
+
+def _pid_files() -> list[str]:
+    """PiD models: Comfy-Org's split release in diffusion_models, or a combined PiD checkpoint; named for PiD either way."""
+    found = []
+    for name in _file_list("diffusion_models") + _file_list("checkpoints"):
+        base = name.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+        if (base.startswith("pid") or "_pid" in base or "-pid" in base) and name not in found:
+            found.append(name)
+    return found
+
+
+def _pid_text_encoder() -> str:
+    candidates = [name for name in _file_list("text_encoders") if _PID_TE in name.casefold()]
+    if not candidates:
+        raise RuntimeError(f"PiD 의 텍스트 인코더({_PID_TE}_bf16 또는 _fp8_scaled)가 text_encoders 폴더에 없음: "
+                           "Comfy-Org/PixelDiT 의 text_encoders 에서 받으세요")
+    return sorted(candidates, key=lambda name: "bf16" not in name.casefold())[0]
+
+
 class ForgeNeoAnimaPiD:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "image": ("IMAGE",), "latent": ("LATENT",), "enabled": ("BOOLEAN", {"default": False}),
-            "ckpt_name": (["(auto-download)", *filename_choices("checkpoints")],),
+            "ckpt_name": (["(auto-download)", *_pid_files()],),
             "dtype": (["bf16", "fp32"],), "steps": ("INT", {"default": 4, "min": 1, "max": 100}),
             "sigma": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}), "seed": ("INT", {"default": -1, "min": -1, "max": 0xFFFFFFFFFFFFFFFF}),
             "tile_latent": ("INT", {"default": 64, "min": 0, "max": 2048}), "tile_overlap": ("INT", {"default": 16, "min": 0, "max": 1024}),
@@ -940,10 +1028,17 @@ class ForgeNeoAnimaPiD:
                 "PiD tile_latent/tile_overlap overrides are not exposed by ComfyUI's "
                 "current PiDConditioning API."
             )
-        loaded = invoke_provider("CheckpointLoaderSimple", method="load_checkpoint", feature="PiD decoder", args=(ckpt_name,))
-        if len(loaded) < 2:
-            raise RuntimeError("The PiD checkpoint did not provide both MODEL and CLIP.")
-        pid_model, pid_clip = loaded[0], loaded[1]
+        # The core template (utility_pid_latent_upscale_dit): Comfy-Org's split release loads through UNETLoader and
+        # CLIPLoader(type pixeldit); a combined checkpoint brings its own TE.
+        if ckpt_name in _file_list("diffusion_models"):
+            te_name = _pid_text_encoder()
+            pid_model = invoke_provider("UNETLoader", method="load_unet", feature="PiD decoder", args=(ckpt_name, "default"))[0]
+            pid_clip = invoke_provider("CLIPLoader", method="load_clip", feature="PiD decoder", args=(te_name, "pixeldit"))[0]
+        else:
+            loaded = invoke_provider("CheckpointLoaderSimple", method="load_checkpoint", feature="PiD decoder", args=(ckpt_name,))
+            if len(loaded) < 2:
+                raise RuntimeError("The PiD checkpoint did not provide both MODEL and CLIP.")
+            pid_model, pid_clip = loaded[0], loaded[1]
         positive = invoke_provider("CLIPTextEncode", method="encode", feature="PiD decoder", args=(pid_clip, ""))[0]
         conditioned = invoke_provider("PiDConditioning", method="execute", feature="PiD conditioning", args=(positive, latent, "qwenimage", float(sigma)))[0]
         negative = invoke_provider("ConditioningZeroOut", method="zero_out", feature="PiD decoder", args=(conditioned,))[0]
@@ -952,11 +1047,12 @@ class ForgeNeoAnimaPiD:
         target_h, target_w = int(source.shape[1]) * 4, int(source.shape[2]) * 4
         empty = {"samples": torch.zeros((source.shape[0], 3, target_h, target_w), dtype=source.dtype, device=source.device)}
         actual_seed = secrets.randbits(64) if int(seed) < 0 else int(seed)
-        result = _common_sample(pid_model, actual_seed, int(steps), 1.0, "euler", "simple", conditioned, negative, empty, 1.0)[0]["samples"]
+        # the template's sampler (lcm, simple, cfg 1); PiD's pixels are -1..1 and the pixel_space VAE maps them (x + 1) / 2
+        result = _common_sample(pid_model, actual_seed, int(steps), 1.0, "lcm", "simple", conditioned, negative, empty, 1.0)[0]["samples"]
         latent_format = getattr(getattr(pid_model, "model", None), "latent_format", None)
         if latent_format is not None and callable(getattr(latent_format, "process_out", None)):
             result = latent_format.process_out(result)
-        return (result.movedim(1, -1).clamp(0, 1).contiguous(),)
+        return (result.add(1.0).div(2.0).movedim(1, -1).clamp(0, 1).contiguous(),)
 
 
 # Forge/A1111 sampler labels -> ComfyUI names.  This pack runs inside ComfyUI

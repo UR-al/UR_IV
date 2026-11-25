@@ -1,9 +1,9 @@
 <template>
   <div class="pm-overlay" @mousedown.self="closePresetManager">
-    <div class="pm-modal">
+    <div class="pm-modal" role="dialog" aria-modal="true" aria-label="프리셋 관리">
       <div class="pm-header">
         <h3>프리셋 관리</h3>
-        <button class="close-btn" @click="closePresetManager"><Icon name="close" /></button>
+        <button class="close-btn" @click="closePresetManager" title="닫기" aria-label="프리셋 관리 닫기"><Icon name="close" /></button>
       </div>
       <div class="pm-body">
         <div class="pm-list">
@@ -54,7 +54,7 @@ useModalLayer({ isOpen: () => showPresetManager.value, close: closePresetManager
 .close-btn:hover { border-color: var(--state-alert-fg); color: var(--state-alert-fg); background: rgba(248, 113, 113, 0.08); }
 
 /* Preset Manager */
-.pm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+.pm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; }
 .pm-modal { width: min(860px, 94vw); height: min(640px, 90vh); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .pm-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .pm-header h3 { font-size: 12px; letter-spacing: 0; color: var(--text-muted); flex: 1; }

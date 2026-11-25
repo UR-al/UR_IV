@@ -459,10 +459,15 @@ class WebUIMixin:
         btn_row.addWidget(btn_skip)
         layout.addLayout(btn_row)
 
+        dialog.finished.connect(lambda _code=0: _detect_version.__setitem__('v', _detect_version['v'] + 1))
         dialog.raise_()
         dialog.activateWindow()
 
-        result = dialog.exec()
+        try:
+            result = dialog.exec()
+        finally:
+            # 다이얼로그가 닫힌 뒤 지연된 비동기 프로브 콜백이 파괴된 Qt 위젯에 접근하지 않도록 버전을 올린다.
+            _detect_version['v'] += 1
 
         if result == QDialog.DialogCode.Accepted:
             self._backend_startup_result = 'accepted'
@@ -1180,14 +1185,16 @@ class WebUIMixin:
         # 게이트 경로도 마찬가지 — 오버레이가 이미 오류를 보여주는데 그 위에
         # QMessageBox 를 또 띄우면 사용자가 두 번 닫아야 다시 시도할 수 있다.
         if not managed_startup and not gate_awaiting:
-            QMessageBox.critical(
-                self, "연결 실패",
+            from ui.status_line import notify_or_message_box
+            notify_or_message_box(
+                self, 'error', "연결 실패",
                 f"{backend_name} API 연결에 실패했습니다.\n\n"
                 f"오류: {error_msg}\n\n"
                 f"현재 URL: {api_url}\n\n"
                 f"1. {backend_name}가 실행 중인지 확인하세요.\n"
                 f"2. API 주소가 올바른지 확인하세요.\n"
-                f"3. 방화벽 설정을 확인하세요."
+                f"3. 방화벽 설정을 확인하세요.",
+                box=QMessageBox,
             )
 
     def retry_connection(self, new_url=None):

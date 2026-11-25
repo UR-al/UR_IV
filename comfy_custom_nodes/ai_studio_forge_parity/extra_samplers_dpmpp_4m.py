@@ -49,8 +49,14 @@ the two give the same latent on the same inputs — ``tests/test_comfy_extra_sam
   ``noise_sampler`` a CPU ``BrownianTreeNoiseSampler`` seeded from ``extra_args["seed"]`` (ComfyUI's
   3M SDE convention); ``s_noise`` times the model sampling's ``noise_scale`` (ComfyUI convention, 1.0
   for every model the app runs).
-* The host's ``trange``; the momentum term's time bookkeeping is dropped. Order selection, ratios,
-  ``d1``/``d2`` and the φ expressions are upstream's.
+* The host's ``trange``; the momentum term's time bookkeeping is dropped. Order selection and the φ
+  expressions are upstream's.
+* **Fourth-order terms** (``_fourth_order_terms``, the same fix as sam-extra's, 2026-11-04): upstream
+  divides the history differences by ``h_3/h_2``, ``h_2/h`` and ``h/h_1`` — three different bases — so on
+  unequal λ steps (any flow schedule, Karras) even an x0 history linear in λ gave a wrong slope and a
+  curvature that is not there. They are now divided differences over the four history points: on equal
+  steps upstream's exactly, a history of degree ≤ 2 in λ gives the DPM++ 3M SDE terms on any steps, the
+  cubic part is upstream's damped Newton term (``tests/test_comfy_dpmpp_4m_terms.py``).
 
 No torch or ComfyUI import at module level; ``kd`` (default ``comfy.k_diffusion.sampling``) lets the
 parity tests run it on Forge's k-diffusion module.
@@ -70,6 +76,30 @@ def sample_dpmpp_4m_sde(model, x, sigmas, extra_args=None, callback=None, disabl
     with importlib.import_module("torch").no_grad():
         return _sample(model, x, sigmas, extra_args, callback, disable, eta, s_noise, noise_sampler,
                        k_diffusion(kd))
+
+
+def _fourth_order_terms(denoised, denoised_1, denoised_2, denoised_3, h, h_1, h_2, h_3):
+    """``(d1, d2)`` of the fourth-order step: ``h``·slope and ``h²``·half-curvature of x0 at λ_s.
+
+    With every ratio taken to the current step ``h``, ``d1_k`` is ``h`` times the first divided
+    difference, ``d2_k`` ``h²`` times the second and ``d3`` ``h³`` times the third over the history
+    points λ_s, λ_s − h_1, λ_s − h_1 − h_2, λ_s − h_1 − h_2 − h_3. ``d1``/``d2`` are the Newton
+    interpolant's slope and half-curvature at λ_s with its cubic term weighted 3/8 and 1/4 — on equal
+    steps exactly Clybius' ``d1 = Δ + Δ²/2 + Δ³/8``, ``d2 = Δ²/2 + Δ³/8`` (Δ: backward differences).
+    sam-extra's ``dpmpp_4m_sde._fourth_order_terms`` operation for operation (same bits).
+    """
+    r0 = h_3 / h
+    r1 = h_2 / h
+    r2 = h_1 / h
+    d1_0 = (denoised - denoised_1) / r2
+    d1_1 = (denoised_1 - denoised_2) / r1
+    d1_2 = (denoised_2 - denoised_3) / r0
+    d2_0 = (d1_0 - d1_1) / (r2 + r1)
+    d2_1 = (d1_1 - d1_2) / (r1 + r0)
+    d3 = (d2_0 - d2_1) / (r2 + r1 + r0)
+    d1 = d1_0 + r2 * d2_0 + 3 * r2 * (r2 + r1) / 8 * d3
+    d2 = d2_0 + (2 * r2 + r1) / 4 * d3
+    return d1, d2
 
 
 def _sample(model, x, sigmas, extra_args, callback, disable, eta, s_noise, noise_sampler, kd):
@@ -104,15 +134,9 @@ def _sample(model, x, sigmas, extra_args, callback, disable, eta, s_noise, noise
         x = sigmas[i + 1] / sigmas[i] * (-h * eta).exp() * x + alpha_t * (-h_eta).expm1().neg() * denoised
 
         if h_3 is not None:
-            # fourth order: upstream's extrapolation over three history differences
-            r0 = h_3 / h_2
-            r1 = h_2 / h
-            r2 = h / h_1
-            d1_0 = (denoised - denoised_1) / r2
-            d1_1 = (denoised_1 - denoised_2) / r1
-            d1_2 = (denoised_2 - denoised_3) / r0
-            d1 = d1_0 + (d1_0 - d1_1) * r2 / (r2 + r1) + ((d1_0 - d1_1) * r2 / (r2 + r1) - (d1_1 - d1_2) * r1 / (r0 + r1)) * r2 / ((r2 + r1) * (r0 + r1))
-            d2 = (d1_0 - d1_1) / (r2 + r1) + ((d1_0 - d1_1) * r2 / (r2 + r1) - (d1_1 - d1_2) * r1 / (r0 + r1)) / ((r2 + r1) * (r0 + r1))
+            # fourth order: divided differences over the three history steps
+            # (`_fourth_order_terms`; upstream's on equal steps)
+            d1, d2 = _fourth_order_terms(denoised, denoised_1, denoised_2, denoised_3, h, h_1, h_2, h_3)
             phi_3 = h_eta.neg().expm1() / h_eta + 1
             phi_4 = phi_3 / h_eta - 0.5
             x = x + (alpha_t * phi_3) * d1 - (alpha_t * phi_4) * d2

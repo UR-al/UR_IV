@@ -108,8 +108,31 @@ export function useHistoryThumbs(deps: HistoryThumbDeps) {
     requested.delete(path)
   }
 
+  /** 목록에서 사라진 경로의 썸네일 캐시를 정리한다(무한 누적 방지). */
+  function prune(list: readonly string[]): number {
+    const keep = new Set(list)
+    let removed = 0
+    for (const key of Object.keys(thumbs)) {
+      if (!keep.has(key)) {
+        delete thumbs[key]
+        removed += 1
+      }
+    }
+    for (const key of [...requested.keys()]) {
+      if (!keep.has(key)) requested.delete(key)
+    }
+    for (const key of [...invalidated]) {
+      if (!keep.has(key)) invalidated.delete(key)
+    }
+    for (const key of [...refreshed]) {
+      if (!keep.has(key)) refreshed.delete(key)
+    }
+    return removed
+  }
+
   /** 목록의 아직 요청 안 한 경로를 청크로 요청 — 페이지 넘김이 즉시 되게 전체를 미리 만든다 */
   async function ensure(list: readonly string[]): Promise<number> {
+    if (requested.size > list.length + 64) prune(list)
     const w = width.value
     const need = list.filter(p => p && requested.get(p) !== w)
     if (!need.length) return 0
@@ -160,5 +183,5 @@ export function useHistoryThumbs(deps: HistoryThumbDeps) {
   }
   function unbind() { if (off) { off(); off = null } }
 
-  return { thumbs, width, srcFor, ensure, invalidate, setWidth, bind, unbind, onReady }
+  return { thumbs, width, srcFor, ensure, invalidate, prune, setWidth, bind, unbind, onReady }
 }

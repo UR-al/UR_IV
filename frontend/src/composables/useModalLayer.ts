@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { appModalStack, type ModalStack } from '../utils/modalStack'
 
 export interface ModalLayerOptions {
@@ -18,14 +18,17 @@ export interface ModalLayerOptions {
  * 모달이 열려 있는 동안 앱 모달 스택(utils/modalStack)에 올라가 있게 한다.
  * 모달 컴포넌트의 setup 에서 한 번 부른다 — 여닫는 곳이 어디든(툴 버튼 · PromptPanel · 헤더)
  * App 의 전역 단축키가 이 모달을 알게 된다.
+ * `<keep-alive>` 안의 탭이 비활성화되면(onDeactivated) 스택에서 내려 다른 탭의 단축키를
+ * 막지 않고, 다시 활성화될 때(onActivated) 여전히 열려 있으면 스택에 되돌린다.
  */
 export function useModalLayer(options: ModalLayerOptions = {}): void {
   const stack = options.stack ?? appModalStack
   let release: (() => void) | null = null
   let mounted = false
+  let active = false
 
   function sync() {
-    const open = mounted && (options.isOpen ? options.isOpen() : true)
+    const open = mounted && active && (options.isOpen ? options.isOpen() : true)
     if (open && !release) {
       release = stack.open({ close: options.close })
     } else if (!open && release) {
@@ -34,8 +37,10 @@ export function useModalLayer(options: ModalLayerOptions = {}): void {
     }
   }
 
-  onMounted(() => { mounted = true; sync() })
+  onMounted(() => { mounted = true; active = true; sync() })
+  onActivated(() => { active = true; sync() })
+  onDeactivated(() => { active = false; sync() })
   // 동기 flush — 플래그를 끈 바로 다음 키 입력부터 스택이 맞아야 한다
   if (options.isOpen) watch(options.isOpen, sync, { flush: 'sync' })
-  onBeforeUnmount(() => { mounted = false; sync() })
+  onBeforeUnmount(() => { mounted = false; active = false; sync() })
 }

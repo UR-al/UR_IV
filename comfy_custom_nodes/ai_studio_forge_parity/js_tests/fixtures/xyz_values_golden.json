@@ -1,0 +1,636 @@
+[
+ {
+  "text": "",
+  "fields": []
+ },
+ {
+  "text": "euler",
+  "fields": [
+   "euler"
+  ]
+ },
+ {
+  "text": "euler\ndpmpp_2m",
+  "fields": [
+   "euler",
+   "dpmpp_2m"
+  ]
+ },
+ {
+  "text": "euler\ndpmpp_2m\n",
+  "fields": [
+   "euler",
+   "dpmpp_2m"
+  ]
+ },
+ {
+  "text": "euler, dpmpp_2m",
+  "fields": [
+   "euler",
+   "dpmpp_2m"
+  ]
+ },
+ {
+  "text": "euler,dpmpp_2m\nlcm",
+  "fields": [
+   "euler",
+   "dpmpp_2m",
+   "lcm"
+  ]
+ },
+ {
+  "text": "a,,b",
+  "fields": [
+   "a",
+   "",
+   "b"
+  ]
+ },
+ {
+  "text": "a,\nb",
+  "fields": [
+   "a",
+   "",
+   "b"
+  ]
+ },
+ {
+  "text": "a,",
+  "fields": [
+   "a",
+   ""
+  ]
+ },
+ {
+  "text": ",",
+  "fields": [
+   "",
+   ""
+  ]
+ },
+ {
+  "text": "\n",
+  "fields": []
+ },
+ {
+  "text": "\n\n",
+  "fields": []
+ },
+ {
+  "text": "a\n\nb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "   ",
+  "fields": [
+   ""
+  ]
+ },
+ {
+  "text": "  a  ,\tb ",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a, b\r\nc",
+  "fields": [
+   "a",
+   "b",
+   "c"
+  ]
+ },
+ {
+  "text": "a\r\n\r\nb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "\"a, b\"",
+  "fields": [
+   "a, b"
+  ]
+ },
+ {
+  "text": "x\n\"a, b\"",
+  "fields": [
+   "x",
+   "a, b"
+  ]
+ },
+ {
+  "text": "a, \"b, c\"",
+  "fields": [
+   "a",
+   "b, c"
+  ]
+ },
+ {
+  "text": "\"say \"\"hi\"\"\", x",
+  "fields": [
+   "say \"hi\"",
+   "x"
+  ]
+ },
+ {
+  "text": "\"\"",
+  "fields": [
+   ""
+  ]
+ },
+ {
+  "text": "\"\"\na",
+  "fields": [
+   "",
+   "a"
+  ]
+ },
+ {
+  "text": "a\n\"\"\nb",
+  "fields": [
+   "a",
+   "",
+   "b"
+  ]
+ },
+ {
+  "text": "  \"a, b\"  , c",
+  "fields": [
+   "a, b",
+   "c"
+  ]
+ },
+ {
+  "text": "\"a\"b, c",
+  "fields": [
+   "ab",
+   "c"
+  ]
+ },
+ {
+  "text": "a\"b, \"c",
+  "fields": [
+   "a\"b",
+   "c"
+  ]
+ },
+ {
+  "text": "\t\"a, b\"",
+  "fields": [
+   "\"a",
+   "b\""
+  ]
+ },
+ {
+  "text": "\"not closed, x",
+  "fields": [
+   "not closed, x"
+  ]
+ },
+ {
+  "text": "\"two\nlines\", z",
+  "fields": [
+   "two\nlines",
+   "z"
+  ]
+ },
+ {
+  "text": "\" spaced \"",
+  "fields": [
+   "spaced"
+  ]
+ },
+ {
+  "text": "sub\\model one.safetensors\nsub/model, two.safetensors",
+  "fields": [
+   "sub\\model one.safetensors",
+   "sub/model",
+   "two.safetensors"
+  ]
+ },
+ {
+  "text": "\"sub/model, two.safetensors\"\nplain.safetensors",
+  "fields": [
+   "sub/model, two.safetensors",
+   "plain.safetensors"
+  ]
+ },
+ {
+  "text": "True, False",
+  "fields": [
+   "True",
+   "False"
+  ]
+ },
+ {
+  "text": "끔\n교차 어텐션\n교차 어텐션+변조",
+  "fields": [
+   "끔",
+   "교차 어텐션",
+   "교차 어텐션+변조"
+  ]
+ },
+ {
+  "text": "a ,b , \"c\" ,d",
+  "fields": [
+   "a",
+   "b",
+   "c",
+   "d"
+  ]
+ },
+ {
+  "text": "\"a\",\"b\"\n\"c\"",
+  "fields": [
+   "a",
+   "b",
+   "c"
+  ]
+ },
+ {
+  "text": "a\t, \tb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u000b, \u000bb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\f, \fb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u001c, \u001cb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u001d, \u001db",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u001e, \u001eb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u001f, \u001fb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u0085, \u0085b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u00a0, \u00a0b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u1680, \u1680b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2000, \u2000b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2001, \u2001b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2002, \u2002b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2003, \u2003b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2004, \u2004b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2005, \u2005b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2006, \u2006b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2007, \u2007b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2008, \u2008b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2009, \u2009b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u200a, \u200ab",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2028, \u2028b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u2029, \u2029b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u202f, \u202fb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u205f, \u205fb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u3000, \u3000b",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "a\u180e, \u180eb",
+  "fields": [
+   "a\u180e",
+   "\u180eb"
+  ]
+ },
+ {
+  "text": "a\u200b, \u200bb",
+  "fields": [
+   "a\u200b",
+   "\u200bb"
+  ]
+ },
+ {
+  "text": "a\u2060, \u2060b",
+  "fields": [
+   "a\u2060",
+   "\u2060b"
+  ]
+ },
+ {
+  "text": "a\ufeff, \ufeffb",
+  "fields": [
+   "a\ufeff",
+   "\ufeffb"
+  ]
+ },
+ {
+  "text": "\ufeffeuler",
+  "fields": [
+   "\ufeffeuler"
+  ]
+ },
+ {
+  "text": "\ufeff",
+  "fields": [
+   "\ufeff"
+  ]
+ },
+ {
+  "text": "euler\u001f",
+  "fields": [
+   "euler"
+  ]
+ },
+ {
+  "text": "\u001f",
+  "fields": [
+   ""
+  ]
+ },
+ {
+  "text": "\u001ceuler\u001d, \u001elcm\u001f",
+  "fields": [
+   "euler",
+   "lcm"
+  ]
+ },
+ {
+  "text": "euler\u0085\nlcm",
+  "fields": [
+   "euler",
+   "lcm"
+  ]
+ },
+ {
+  "text": "\"\u001fa, b\u0085\"",
+  "fields": [
+   "a, b"
+  ]
+ },
+ {
+  "text": "\"\ufeffa\"",
+  "fields": [
+   "\ufeffa"
+  ]
+ },
+ {
+  "text": "a\u3000\u00a0 ,\u2003\tb",
+  "fields": [
+   "a",
+   "b"
+  ]
+ },
+ {
+  "text": "euler\ndpmpp_2m",
+  "fields": [
+   "euler",
+   "dpmpp_2m"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"a, b\"\nplain",
+  "fields": [
+   "a, b",
+   "plain"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"say \"\"hi\"\"\"\nx",
+  "fields": [
+   "say \"hi\"",
+   "x"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"\"\na",
+  "fields": [
+   "",
+   "a"
+  ],
+  "joined": true
+ },
+ {
+  "text": "a\n\"\"\nb",
+  "fields": [
+   "a",
+   "",
+   "b"
+  ],
+  "joined": true
+ },
+ {
+  "text": "sub\\model one.safetensors\n\"sub/model, two.safetensors\"",
+  "fields": [
+   "sub\\model one.safetensors",
+   "sub/model, two.safetensors"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"\"\"quoted\"\"\"\n\"x,y\"\nz",
+  "fields": [
+   "\"quoted\"",
+   "x,y",
+   "z"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"blue hair, long hair\"\n\"red hair, short hair\"\n\"green hair, twintails\"",
+  "fields": [
+   "blue hair, long hair",
+   "red hair, short hair",
+   "green hair, twintails"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"1girl,\nblue hair\"\nred",
+  "fields": [
+   "1girl,\nblue hair",
+   "red"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"<lora:na-e10:1>, @artist\"\n\"<lora:na-e14:0.9>, @other, (smile:1.2)\"",
+  "fields": [
+   "<lora:na-e10:1>, @artist",
+   "<lora:na-e14:0.9>, @other, (smile:1.2)"
+  ],
+  "joined": true
+ },
+ {
+  "text": "plain words\n\"with \"\"quotes\"\", and a comma\"",
+  "fields": [
+   "plain words",
+   "with \"quotes\", and a comma"
+  ],
+  "joined": true
+ },
+ {
+  "text": "\", long hair\"\n\"\"",
+  "fields": [
+   ", long hair",
+   ""
+  ],
+  "joined": true
+ },
+ {
+  "text": "\"blue hair, long hair\", \"red hair, short hair\"",
+  "fields": [
+   "blue hair, long hair",
+   "red hair, short hair"
+  ]
+ },
+ {
+  "text": "\"a, b\" , c",
+  "fields": [
+   "a, b",
+   "c"
+  ]
+ }
+]

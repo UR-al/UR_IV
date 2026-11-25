@@ -96,6 +96,12 @@ let disposed = false
 let disconnect: (() => void) | undefined
 let timer: ReturnType<typeof setTimeout> | undefined
 const nextId = () => `relight_${Date.now()}_${++generation}_${Math.random().toString(36).slice(2, 10)}`
+function formatRelightError(exc: unknown, fallback: string): string {
+  const raw = String((exc as Error)?.message || exc || '').trim()
+  if (/[가-힣]/.test(raw)) return raw
+  console.error('[RelightPanel]', exc)
+  return fallback
+}
 
 function invalidate() {
   generation++
@@ -139,7 +145,7 @@ async function loadMap(key: MapKey, event: Event) {
     })
     if (disposed || version !== generation) return
     maps[key] = data; mapNames[key] = file.name
-  } catch (exc) { if (version === generation) error.value = String((exc as Error).message || exc) }
+  } catch (exc) { if (version === generation) error.value = formatRelightError(exc, '맵 파일을 불러오지 못했습니다.') }
   finally { if (version === generation) busy.value = false }
 }
 async function sourceData(source: string): Promise<string> {
@@ -194,7 +200,7 @@ async function preview() {
   } catch (exc) {
     if (pending !== requestId) return
     invalidate()
-    error.value = String((exc as Error).message || exc)
+    error.value = formatRelightError(exc, '조명 미리보기 준비 중 오류가 발생했습니다.')
   }
 }
 function apply() {

@@ -152,13 +152,14 @@ class ComfyEnvelopeTests(unittest.TestCase):
 
         inpaint, negative = "detailed face, sharp eyes, ", "\nlowres, , blurry,\n"
         # Refine 은 build_refine_prompts 가 스스로 다듬는다 — 남는 차이는 D2 로 물려받은 LoRA 스택 앞의 구분자
+        # Target 이 메인 프롬프트에 있어야 제자리 치환이다(없으면 끝에 덧붙인다 — 리뷰 2026-11-04 SAM-05)
         refine_settings = {"target": "shirt", "replacement": "blue shirt", "negative": "wrinkles",
-                           "main_prompt": "1girl, solo, <lora:ink:0.80>", "main_negative": "bad anatomy"}
+                           "main_prompt": "1girl, solo, shirt, <lora:ink:0.80>", "main_negative": "bad anatomy"}
         refine = build_refine_prompts(main_prompt=refine_settings["main_prompt"],
                                       main_negative=refine_settings["main_negative"],
                                       target=refine_settings["target"], replacement=refine_settings["replacement"],
                                       negative=refine_settings["negative"], inherit_main=True, inherit_negative=True)
-        self.assertEqual(refine["prompt"], "1girl, solo, <lora:ink:0.80>")      # 전제 — Forge p2 는 '1girl, solo, '
+        self.assertEqual(refine["prompt"], "1girl, solo, blue shirt, <lora:ink:0.80>")  # 전제 — Forge p2 는 '1girl, solo, blue shirt, '
         saved_prompt, saved_negative = "masterpiece, , 1girl,\n", " bad anatomy, "
         cases = (
             ("sam3 user prompt", "sam3", "ForgeNeoSAM3Detailer",
@@ -167,7 +168,7 @@ class ComfyEnvelopeTests(unittest.TestCase):
             ("sam3 default = saved T2I prompt", "sam3", "ForgeNeoSAM3Detailer", {"sam3_prompt": "face"},
              (saved_prompt, saved_negative)),
             ("refine (inherited LoRA stack)", "refine", "ForgeNeoSAM3Refine", refine_settings,
-             ("1girl, solo, ", refine["negative_prompt"])),
+             ("1girl, solo, blue shirt, ", refine["negative_prompt"])),
             ("tag only, separators kept (Forge parse_prompt); negative untouched", "sam3", "ForgeNeoSAM3Detailer",
              {"sam3_prompt": "face", "sam3_inpaint_prompt": "a, <lora:ink:0.3>, b ",
               "sam3_negative_prompt": "<LORA:ink:0.5>\nlowres, "},

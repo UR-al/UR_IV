@@ -2,7 +2,7 @@
   <div class="gallery-workspace">
     <!-- Top Filter & Action Bar -->
     <header class="gallery-toolbar">
-      <div class="folder-info" v-host-dialog="'gallery_open_folder'" @click="openFolder">
+      <div class="folder-info" role="button" tabindex="0" aria-label="출력 폴더 선택" v-host-dialog="'gallery_open_folder'" @click="openFolder" @keydown.enter.prevent="openFolder" @keydown.space.prevent="openFolder">
         <span class="icon"><Icon name="folder" /></span>
         <span class="path">{{ currentFolder || '출력 폴더를 선택하세요' }}</span>
       </div>
@@ -12,13 +12,13 @@
       <!-- EXIF 검색 -->
       <div class="search-box">
         <input v-model="exifSearch" placeholder="EXIF 검색..." class="search-input"
-          @keydown.enter="runExifSearch" />
+          @keydown.enter="onExifSearchEnter" />
         <button class="search-go" @click="runExifSearch" :disabled="exifSearching">{{ exifSearching ? '...' : 'GO' }}</button>
-        <button class="search-clear" v-if="exifFiltered || exifSearching" :title="exifSearching ? '검색 취소' : '검색 해제'" @click="clearExifSearch"><Icon name="close" /></button>
+        <button class="search-clear" v-if="exifFiltered || exifSearching" :title="exifSearching ? '검색 취소' : '검색 해제'" :aria-label="exifSearching ? '검색 취소' : '검색 해제'" @click="clearExifSearch"><Icon name="close" /></button>
       </div>
 
       <div class="control-group">
-        <button class="icon-btn" @click="loadImages()" title="Refresh"><Icon name="refresh" /></button>
+        <button class="icon-btn" @click="loadImages()" title="새로고침" aria-label="새로고침"><Icon name="refresh" /></button>
         <div class="sep"></div>
         <div class="sort-chips">
           <button v-for="s in sortOptions" :key="s.val"
@@ -42,7 +42,10 @@
     <section class="gallery-content" ref="galleryContentRef" @scroll="onGalleryScroll">
       <div class="masonry-grid" :style="{ 'columns': `auto ${thumbSize}px` }">
         <div v-for="img in displayImages" :key="img" class="gallery-card"
+          role="button" tabindex="0" :aria-label="filenameOf(img)"
           @click="viewImage(img)"
+          @keydown.enter.self.prevent="viewImage(img)"
+          @keydown.space.self.prevent="viewImage(img)"
           @contextmenu.prevent="showMenu($event, img)"
         >
           <video v-if="isVideo(img)" class="gallery-media" :src="mediaUrl(img)"
@@ -57,8 +60,8 @@
             {{ mediaLabel(img) }}
           </span>
           <div class="card-hover-actions">
-            <button class="tiny-btn" @click.stop="quickAction('add_favorite', img)"><Icon name="star" /></button>
-            <button v-if="isImage(img)" class="tiny-btn" @click.stop="copyImageAndNotify(img)"><Icon name="clipboard" /></button>
+            <button class="tiny-btn" @click.stop="quickAction('add_favorite', img)" title="즐겨찾기 추가" aria-label="즐겨찾기 추가"><Icon name="star" /></button>
+            <button v-if="isImage(img)" class="tiny-btn" @click.stop="copyImageAndNotify(img)" title="이미지 복사" aria-label="이미지 복사"><Icon name="clipboard" /></button>
           </div>
         </div>
       </div>
@@ -68,18 +71,23 @@
       
       <div v-if="isLoading" class="empty-placeholder">
         <div class="spinner"></div>
-        <p>Loading...</p>
+        <p>불러오는 중...</p>
       </div>
       <div v-else-if="images.length === 0" class="empty-placeholder">
         <div class="icon"><Icon name="video" /></div>
         <h2>갤러리가 비어 있습니다</h2>
         <p>이 폴더에는 볼 수 있는 이미지가 없습니다</p>
       </div>
+      <div v-else-if="exifFiltered && filteredImages.length === 0" class="empty-placeholder">
+        <div class="icon"><Icon name="search" /></div>
+        <h2>검색 결과가 없습니다</h2>
+        <p>다른 검색어로 시도하거나 검색을 해제해 보세요</p>
+      </div>
     </section>
 
     <!-- 이미지 확대 뷰 (풀스크린 오버레이) -->
     <transition name="fade">
-      <div v-if="largeView" class="large-view-overlay" @mousedown.self="closeLargeView">
+      <div v-if="largeView" class="large-view-overlay" role="dialog" aria-modal="true" aria-label="이미지 확대 보기" @mousedown.self="closeLargeView">
         <div class="large-view-panel">
           <div class="large-view-header">
             <span class="large-filename">{{ largeView.filename }}</span>
@@ -91,14 +99,14 @@
               <button v-if="isImage(largeView.path)" class="lv-btn" @click="action('send_to_editor', { path: largeView.path })">에디터</button>
               <button class="lv-btn" @click="quickAction('add_favorite', largeView.path)"><Icon name="star" /> 즐겨찾기</button>
               <button v-if="isImage(largeView.path)" class="lv-btn accent" :disabled="largeView.can_apply === false" @click="sendExifToT2I">프롬프트 사용</button>
-              <button class="lv-close" @click="closeLargeView"><Icon name="close" /></button>
+              <button class="lv-close" @click="closeLargeView" title="닫기" aria-label="닫기"><Icon name="close" /></button>
             </div>
           </div>
           <div class="large-view-body">
             <div class="large-img-area">
               <video v-if="isVideo(largeView.path)" :src="mediaUrl(largeView.path)" controls autoplay playsinline />
               <audio v-else-if="isAudio(largeView.path)" :src="mediaUrl(largeView.path)" controls autoplay />
-              <img v-else :src="mediaUrl(largeView.path, true)" />
+              <img v-else :src="versionedMediaUrl(largeView.path)" />
             </div>
             <div class="large-exif">
               <div class="meta-row"><span>종류</span><p>{{ largeView.mediaType || mediaLabel(largeView.path) }}</p></div>
@@ -106,11 +114,11 @@
               <div class="meta-row path-row"><span>경로</span><p>{{ largeView.path }}</p></div>
               <div v-if="largeView.prompt" class="meta-block">
                 <label>프롬프트</label>
-                <div class="code-box" :class="{ editable: largeView.source !== 'comfyui' }" :contenteditable="largeView.source !== 'comfyui' && !exifSaving" @blur="onExifEdit($event, 'prompt')">{{ largeView.prompt }}</div>
+                <div class="code-box" :class="{ editable: largeView.source !== 'comfyui' }" :contenteditable="largeView.source !== 'comfyui' && !exifSaving" @blur="onExifEdit($event, 'prompt')" @keydown.escape="onExifEditEscape($event)">{{ largeView.prompt }}</div>
               </div>
               <div v-if="largeView.negative" class="meta-block mt-8">
                 <label class="danger">네거티브</label>
-                <div class="code-box" :class="{ editable: largeView.source !== 'comfyui' }" :contenteditable="largeView.source !== 'comfyui' && !exifSaving" @blur="onExifEdit($event, 'negative')">{{ largeView.negative }}</div>
+                <div class="code-box" :class="{ editable: largeView.source !== 'comfyui' }" :contenteditable="largeView.source !== 'comfyui' && !exifSaving" @blur="onExifEdit($event, 'negative')" @keydown.escape="onExifEditEscape($event)">{{ largeView.negative }}</div>
               </div>
               <div v-if="largeView.raw && !largeView.prompt && !largeView.raw_prompt && !largeView.raw_workflow" class="meta-block">
                 <label>원본</label>
@@ -130,9 +138,9 @@
     <!-- Slide-out EXIF Panel (간단 사이드바 — 하위호환) -->
     <transition name="slide">
       <aside v-if="exifData && !largeView && showMetadata" class="exif-sidebar">
-        <div class="exif-close" @click="exifData = null"><Icon name="arrow-right" /></div>
+        <div class="exif-close" role="button" tabindex="0" title="사이드바 닫기" aria-label="사이드바 닫기" @click="exifData = null" @keydown.enter.prevent="exifData = null" @keydown.space.prevent="exifData = null"><Icon name="arrow-right" /></div>
         <div class="exif-content">
-          <div class="exif-preview" @click="largeView = exifData">
+          <div class="exif-preview" role="button" tabindex="0" aria-label="이미지 확대 보기" @click="largeView = exifData" @keydown.enter.self.prevent="largeView = exifData" @keydown.space.self.prevent="largeView = exifData">
             <video v-if="isVideo(exifData.path)" :src="mediaUrl(exifData.path)" muted preload="metadata" playsinline />
             <div v-else-if="isAudio(exifData.path)" class="sidebar-audio-preview">
               <span><Icon name="music" /></span>
@@ -206,12 +214,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onActivated, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onActivated, onDeactivated, onMounted, onUnmounted } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
 // 이미지 복사 — 데스크톱은 호스트 Qt 클립보드, 웹은 이 브라우저 클립보드(호스트 PC 클립보드 금지)
 import { copyImageAndNotify } from '../utils/clipboardImageCopy'
 import { vHostDialog } from '../utils/hostDialogs'
+import { isImeComposing } from '../utils/imeComposition'
 import { isSameImagePath, parseImageDeleteResult, withoutImagePath } from '../utils/imageDeleteResult'
 import { mediaUrl, thumbnailUrl, withUrlVersion } from '../utils/media.js'
 import { bumpMediaVersion, mediaVersion, recordListedMediaVersions } from '../utils/mediaVersions'
@@ -225,6 +234,7 @@ import { resolveExifSaveResponse, type ExifSaveRequest } from '../utils/exifSave
 import { useExifSearch } from '../composables/useExifSearch'
 import { useGridPaging } from '../composables/useGridPaging'
 import { useContextMenu } from '../composables/useContextMenu'
+import { useModalLayer } from '../composables/useModalLayer'
 import { galleryShowMetadata } from '../composables/uiPrefs'
 import type { ActionName, ActionPayload } from '../types/bridge'
 import ComfyMetadataDetails from '../components/ComfyMetadataDetails.vue'
@@ -292,6 +302,10 @@ const {
   query: exifSearch, searching: exifSearching, filtered: exifFiltered, results: filteredImages,
   run: runExifSearch, clear: clearExifSearch,
 } = exifSearchState
+function onExifSearchEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  runExifSearch()
+}
 
 const displaySource = computed(() => sortMediaPaths(exifFiltered.value ? filteredImages.value : images.value, sortBy.value))
 
@@ -378,6 +392,14 @@ function onExifEdit(e: FocusEvent, field: 'prompt' | 'negative') {
   }
 }
 
+function onExifEditEscape(e: KeyboardEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  if (!el?.isContentEditable) return
+  e.preventDefault()
+  e.stopPropagation()
+  el.blur()
+}
+
 async function saveExif() {
   const view = largeView.value
   if (!view || !canSaveExif.value || exifSaving.value) return
@@ -440,10 +462,12 @@ function closeLargeView() {
   // metadata OFF면 사이드바도 닫기
   if (!showMetadata.value) exifData.value = null
 }
+useModalLayer({ isOpen: () => !!largeView.value, close: closeLargeView })
 
 const openFolder = () => requestAction('gallery_open_folder')
 const viewImage = async (path: string) => {
   exifViewGen++
+  const gen = exifViewGen
   exifDirty.value = false
   exifSaving.value = false
   const basic: ExifData = {
@@ -458,12 +482,14 @@ const viewImage = async (path: string) => {
     return
   }
   const backend: any = await getBackend()
+  if (gen !== exifViewGen) return
   if (!backend.getImageExif) {
     largeView.value = basic
     exifData.value = basic
     return
   }
   backend.getImageExif(path, (json: string) => {
+    if (gen !== exifViewGen) return
     try {
       const d = JSON.parse(json)
       // 경로는 목록의 표기를 유지한다(삭제·이름 변경·검색 캐시가 같은 키를 쓴다)
@@ -515,6 +541,7 @@ const action = <K extends ActionName>(name: K, payload?: ActionPayload<K>) => re
 let _galleryFolderUnsub: (() => void) | null = null
 let _galleryImagesUnsub: (() => void) | null = null
 let _imageDeleteUnsub: (() => void) | null = null
+let initialFolderLoaded = false
 
 onMounted(async () => {
   _galleryImagesUnsub = onBackendEvent('galleryImagesReady', (json: string) => {
@@ -537,14 +564,22 @@ onMounted(async () => {
   if (bk.getLastGalleryFolder) {
     bk.getLastGalleryFolder((f: string) => {
       if (f) currentFolder.value = f
+      initialFolderLoaded = true
       loadImages()  // 경로 설정 후 로드
     })
   } else {
+    initialFolderLoaded = true
     loadImages()
   }
 })
-// keep-alive 재진입마다 새로 읽는다 — 갤러리 폴더는 생성 이벤트로 무효화할 수 없다(93e2634b6)
-onActivated(() => { loadImages(); fillViewport() })
+// keep-alive 재진입마다 새로 읽는다 — 최초 마운트 직후의 중복 호출은 initialFolderLoaded 로 방지
+onActivated(() => {
+  if (initialFolderLoaded) loadImages()
+  fillViewport()
+})
+onDeactivated(() => {
+  paging.reset()
+})
 onUnmounted(() => {
   if (_galleryFolderUnsub) _galleryFolderUnsub()
   if (_galleryImagesUnsub) _galleryImagesUnsub()

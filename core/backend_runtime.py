@@ -1132,7 +1132,7 @@ class BackendRuntimeManager:
                 "commit": commit,
                 "remoteCommit": cached_remote,
                 "updateAvailable": bool(commit and cached_remote and commit != cached_remote),
-                "status": "git" if (child / ".git").is_dir() else "local / version unknown",
+                "status": "git" if self._git_dir(child) is not None else "local / version unknown",
                 "busy": False,
             })
         return result
@@ -1867,9 +1867,10 @@ class BackendRuntimeManager:
             else:
                 raise BackendRuntimeError("INVALID_ACTION", f"지원하지 않는 작업입니다: {action}")
             message = str(result.get("message", "완료"))
-            self._last_messages[key] = message
-            self._state["engines"][key]["lastError"] = ""
-            self._save_state()
+            with self._state_lock:
+                self._last_messages[key] = message
+                self._state["engines"][key]["lastError"] = ""
+                self._save_state()
             # 결과 스냅샷은 한 번만 계산한다 — 설정 작업의 ``state`` 도 같은 값을 쓴다.
             snapshot = self.snapshot()
             if result.get("state") is _FINAL_SNAPSHOT:
@@ -1884,18 +1885,20 @@ class BackendRuntimeManager:
             self._progress(on_progress, key, action_name, "complete", message, 100)
             return final
         except BackendRuntimeError as exc:
-            self._last_messages[key] = str(exc)
-            self._state["engines"][key]["lastError"] = str(exc)
-            self._save_state()
+            with self._state_lock:
+                self._last_messages[key] = str(exc)
+                self._state["engines"][key]["lastError"] = str(exc)
+                self._save_state()
             self._progress(on_progress, key, action_name, "error", str(exc), 100, error=exc.as_dict())
             raise
         except Exception as exc:
             wrapped = BackendRuntimeError(
                 "RUNTIME_OPERATION_FAILED", str(exc), stage=action_name, retryable=True
             )
-            self._last_messages[key] = str(wrapped)
-            self._state["engines"][key]["lastError"] = str(wrapped)
-            self._save_state()
+            with self._state_lock:
+                self._last_messages[key] = str(wrapped)
+                self._state["engines"][key]["lastError"] = str(wrapped)
+                self._save_state()
             self._progress(on_progress, key, action_name, "error", str(wrapped), 100, error=wrapped.as_dict())
             raise wrapped from exc
         finally:
@@ -2002,8 +2005,16 @@ class BackendRuntimeManager:
                     stage="download", retryable=True,
                     details={"output": result.output[-2000:]},
                 )
-            actual_commit = self._capture(["git", "rev-parse", "HEAD"], cwd=source)
-            if actual_commit and actual_commit != remote_commit:
+            rev_result = self.adapter.run(["git", "rev-parse", "HEAD"], cwd=source, timeout=30)
+            actual_lines = rev_result.output.strip().splitlines() if rev_result.output.strip() else []
+            actual_commit = actual_lines[-1].strip() if actual_lines else ""
+            if rev_result.returncode != 0 or not actual_commit:
+                raise BackendRuntimeError(
+                    "SOURCE_VERIFY_FAILED", "다운로드한 소스 커밋을 확인하지 못했습니다",
+                    stage="verify", retryable=True,
+                    details={"output": rev_result.output[-1000:]},
+                )
+            if actual_commit != remote_commit:
                 raise BackendRuntimeError(
                     "SOURCE_REVISION_MISMATCH", "다운로드한 소스 버전이 확인한 원격 버전과 다릅니다",
                     stage="verify",
@@ -2036,13 +2047,17 @@ class BackendRuntimeManager:
     ) -> None:
         self._progress(on_progress, engine, action, "venv", "전용 Python 환경을 만듭니다", 40)
         uv = self.adapter.which("uv")
+        fallback_argv: list[str] | None = None
         if uv:
             argv = [uv, "venv", str(venv), "--python", "3.13", "--seed"]
         else:
             py = self.adapter.which("py")
+            has_sys_python = Path(sys.executable).name.casefold().startswith("python")
             if py:
                 argv = [py, "-3.13", "-m", "venv", str(venv)]
-            elif Path(sys.executable).name.casefold().startswith("python"):
+                if has_sys_python:
+                    fallback_argv = [sys.executable, "-m", "venv", str(venv)]
+            elif has_sys_python:
                 argv = [sys.executable, "-m", "venv", str(venv)]
             else:
                 raise BackendRuntimeError(
@@ -2056,6 +2071,15 @@ class BackendRuntimeManager:
             timeout=600,
             on_line=self._command_progress(on_progress, engine, action, "venv", 45),
         )
+        if (result.returncode != 0 or not self._venv_python(venv).is_file()) and fallback_argv:
+            if venv.exists():
+                shutil.rmtree(venv, ignore_errors=True)
+            result = self.adapter.run(
+                fallback_argv,
+                cwd=venv.parent,
+                timeout=600,
+                on_line=self._command_progress(on_progress, engine, action, "venv", 45),
+            )
         if result.returncode != 0 or not self._venv_python(venv).is_file():
             raise BackendRuntimeError(
                 "VENV_CREATE_FAILED", "전용 Python 환경 생성에 실패했습니다",
@@ -2876,7 +2900,7 @@ class BackendRuntimeManager:
         on_progress: ProgressCallback | None,
     ) -> dict[str, Any]:
         target = self._extension_by_id(engine, payload)
-        if not (target / ".git").is_dir():
+        if self._git_dir(target) is None:
             raise BackendRuntimeError("EXTENSION_NOT_GIT", "Git으로 설치된 확장만 버전을 확인할 수 있습니다")
         url = self._git_origin_url(target)
         if not url:
@@ -2928,10 +2952,16 @@ class BackendRuntimeManager:
                 stage="extension_update",
             )
         target = self._extension_by_id(engine, payload)
-        if not (target / ".git").is_dir():
+        if self._git_dir(target) is None:
             raise BackendRuntimeError("EXTENSION_NOT_GIT", "Git으로 설치된 확장만 업데이트할 수 있습니다")
-        dirty = self._capture(["git", "status", "--porcelain"], cwd=target)
-        if dirty:
+        status_result = self.adapter.run(["git", "status", "--porcelain"], cwd=target, timeout=30)
+        if status_result.returncode != 0:
+            raise BackendRuntimeError(
+                "EXTENSION_STATUS_FAILED", "확장 Git 상태를 확인하지 못했습니다",
+                stage="extension_update", retryable=True,
+                details={"output": status_result.output[-1000:]},
+            )
+        if status_result.output.strip():
             raise BackendRuntimeError(
                 "EXTENSION_DIRTY", "수정된 파일이 있어 확장을 자동 업데이트하지 않습니다",
                 stage="extension_update",

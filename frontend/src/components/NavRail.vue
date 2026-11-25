@@ -263,22 +263,14 @@ function goSection(section: NavSection) {
   setViewMode(section.scope, section.mode)
 }
 
+import { approxTokens } from '../utils/promptTokens'
+
 /**
  * 오른쪽 숫자.
  *
- * `approxTokens` 는 `PromptPanel.vue` 의 같은 이름 함수와 **규칙이 같아야 한다** —
- * 레일 숫자와 카드 숫자가 다르면 어느 쪽을 믿어야 할지 알 수 없다. 그 쪽은 아직
- * 로컬 함수라 가져다 쓸 수 없어 규칙만 옮겨 적었고, 둘이 갈라지는지는
- * tests/test_nav_rail_contract.py 가 본다.
+ * `approxTokens` 는 `utils/promptTokens.ts` 공용 함수(규칙: total + Math.max(0, chunks.length - 1), 주석 제외)를
+ * `PromptPanel.vue` 와 함께 쓴다.
  */
-function approxTokens(text: unknown): number {
-  const raw = String(text ?? '')
-  if (!raw.trim()) return 0
-  const chunks = raw.split(',').map((s) => s.trim()).filter(Boolean)
-  let total = 0
-  for (const c of chunks) total += c.split(/\s+/).filter(Boolean).length
-  return total + Math.max(0, chunks.length - 1)
-}
 
 function badgeText(section: NavSection): string {
   if (section.badge === 'tokens') {

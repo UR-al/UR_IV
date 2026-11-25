@@ -225,6 +225,7 @@ class ComboBoxProxy(_ProxyBase):
 
     def setEnabled(self, enabled: bool):
         self._enabled = enabled
+        self._bridge.pushWidgetProperty(self._id, "enabled", enabled)
     def isEnabled(self) -> bool:
         return self._enabled
     def setStyleSheet(self, s): pass
@@ -234,16 +235,20 @@ class ComboBoxProxy(_ProxyBase):
     def installEventFilter(self, f): pass
 
     def _on_vue_changed(self, value: str):
-        try:
-            idx = int(value)
-        except ValueError:
-            idx = self._items.index(value) if value in self._items else -1
-        if idx >= 0 and idx != self._index and idx < len(self._items):
-            self._index = idx
-            self._fallback_text = ''   # 사용자가 실제 항목을 골랐다 — 미뤄 둔 값은 낡았다
-            self.currentTextChanged.emit(self.currentText())
-            self.currentIndexChanged.emit(idx)
-        elif idx < 0 and value:
+        if value in self._items:
+            idx = self._items.index(value)
+        else:
+            try:
+                idx = int(value)
+            except ValueError:
+                idx = -1
+        if 0 <= idx < len(self._items):
+            if idx != self._index:
+                self._index = idx
+                self._fallback_text = ''   # 사용자가 실제 항목을 골랐다 — 미뤄 둔 값은 낡았다
+                self.currentTextChanged.emit(self.currentText())
+                self.currentIndexChanged.emit(idx)
+        elif value:
             # items에 없는 값이라도 저장 (설정 로드 시 items보다 값이 먼저 올 수 있음)
             self._fallback_text = value
 
@@ -302,7 +307,7 @@ class ButtonProxy(_ProxyBase):
     clicked = pyqtSignal()
     toggled = pyqtSignal(bool)
 
-    def __init__(self, bridge, widget_id: str, parent=None):
+    def __init__(self, bridge, widget_id: str, parent=None, *, push_to_bridge: bool = True):
         super().__init__(parent)
         self._bridge = bridge
         self._id = widget_id
@@ -310,18 +315,22 @@ class ButtonProxy(_ProxyBase):
         self._enabled = True
         self._checked = False
         self._checkable = False
-        bridge._register_proxy(widget_id, self)
+        self._push_to_bridge = bool(push_to_bridge)
+        if self._push_to_bridge:
+            bridge._register_proxy(widget_id, self)
 
     def text(self) -> str:
         return self._text
 
     def setText(self, text: str):
         self._text = text
-        self._bridge.pushWidgetProperty(self._id, "text", text)
+        if self._push_to_bridge:
+            self._bridge.pushWidgetProperty(self._id, "text", text)
 
     def setEnabled(self, enabled: bool):
         self._enabled = enabled
-        self._bridge.pushWidgetProperty(self._id, "enabled", enabled)
+        if self._push_to_bridge:
+            self._bridge.pushWidgetProperty(self._id, "enabled", enabled)
 
     def isEnabled(self) -> bool:
         return self._enabled
@@ -332,7 +341,8 @@ class ButtonProxy(_ProxyBase):
     def setChecked(self, checked: bool):
         if self._checked != checked:
             self._checked = checked
-            self._bridge.pushWidgetProperty(self._id, "checked", checked)
+            if self._push_to_bridge:
+                self._bridge.pushWidgetProperty(self._id, "checked", checked)
             if self._checkable:
                 self.toggled.emit(checked)
 

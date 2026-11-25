@@ -10,7 +10,7 @@ import { buildRelatedTagsQuery, parseRelatedTagsEvent, querySignature } from '..
 import { createTrailingDebounce, type TimerApi } from '../utils/trailingDebounce'
 import type { OnBackendEventFn, RequestActionFn } from './managerDeps'
 import { persistUiPrefs } from './uiPrefs'
-import { ratingFilterRevision } from './useRatingFilter.js'
+import { ratingFilterRevision } from './useRatingFilter'
 
 /**
  * 연관 태그 패널 상태 — 프롬프트가 바뀌면(패널이 열려 있을 때만) 잠깐 기다렸다 한 번 묻는다.

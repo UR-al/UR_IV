@@ -115,11 +115,14 @@
           </div>
           <div v-else class="file-list">
             <div v-for="(f, i) in adFiles" :key="f" class="file-item"
+              role="button" tabindex="0"
               :class="{ active: adCurrentIdx === i, done: adResults[i] }"
-              @click="previewAdFile(i)">
+              @click="previewAdFile(i)"
+              @keydown.enter.self.prevent="previewAdFile(i)"
+              @keydown.space.self.prevent="previewAdFile(i)">
               <span>{{ basename(f) }}</span>
               <span v-if="adResults[i]" class="done-badge"><Icon name="check" /></span>
-              <button class="rm-btn" @click.stop="adFiles.splice(i, 1)">×</button>
+              <button class="rm-btn" @click.stop="adFiles.splice(i, 1)" title="목록에서 제거" aria-label="목록에서 제거">×</button>
             </div>
           </div>
         </div>
@@ -202,12 +205,15 @@
           </div>
           <div v-else class="file-list">
             <div v-for="(f, i) in sam3Files" :key="f" class="file-item"
+              role="button" tabindex="0"
               :class="{ active: sam3CurrentIdx === i, done: sam3Results[i] }"
-              @click="previewSam3File(i)">
+              @click="previewSam3File(i)"
+              @keydown.enter.self.prevent="previewSam3File(i)"
+              @keydown.space.self.prevent="previewSam3File(i)">
               <span>{{ basename(f) }}</span>
               <span v-if="sam3Results[i]" class="done-badge"><Icon name="check" /></span>
               <span v-else-if="sam3Failed[i]" class="fail-badge" :title="sam3Failed[i]"><Icon name="alert" /></span>
-              <button class="rm-btn" @click.stop="sam3Files.splice(i, 1)">×</button>
+              <button class="rm-btn" @click.stop="sam3Files.splice(i, 1)" title="목록에서 제거" aria-label="목록에서 제거">×</button>
             </div>
           </div>
         </div>
@@ -394,7 +400,7 @@
             <CustomSelect v-if="visibleCaptionModels.length" v-model="activeCaptionModel" :options="visibleCaptionModels"
               placeholder="모델 선택..." @update:modelValue="saveCaptionPrefs" />
             <input v-else class="s-input" v-model="activeCaptionModel" @change="saveCaptionPrefs" placeholder="모델 이름 입력..." />
-            <button class="cap-refresh" @click="loadCaptionModels" title="Ollama 모델 목록 새로고침"><Icon name="refresh" /></button>
+            <button class="cap-refresh" :disabled="captionModelsLoading" @click="loadCaptionModels" title="Ollama 모델 목록 새로고침" aria-label="Ollama 모델 목록 새로고침"><Icon name="refresh" /></button>
           </div>
           <label class="s-label">자연어 캡션 지시</label>
           <textarea class="s-textarea" v-model="captionPrompt" @change="saveCaptionPrefs" rows="4"></textarea>
@@ -410,8 +416,8 @@
         <label class="s-label">저장 위치</label>
         <div class="cap-outdir">
           <span class="cap-outdir-path" :title="captionOutDir || '이미지와 같은 폴더'">{{ captionOutDir || '이미지와 같은 폴더 (.txt 사이드카)' }}</span>
-          <button class="cap-refresh" v-host-dialog="'caption_pick_outdir'" @click="action('caption_pick_outdir')" title="저장 폴더 선택"><Icon name="folder" /></button>
-          <button v-if="captionOutDir" class="cap-refresh" @click="clearCaptionOutDir" title="기본값(이미지 옆)으로"><Icon name="rotate-ccw" /></button>
+          <button class="cap-refresh" v-host-dialog="'caption_pick_outdir'" @click="action('caption_pick_outdir')" title="저장 폴더 선택" aria-label="저장 폴더 선택"><Icon name="folder" /></button>
+          <button v-if="captionOutDir" class="cap-refresh" @click="clearCaptionOutDir" title="기본값(이미지 옆)으로" aria-label="기본값(이미지 옆)으로"><Icon name="rotate-ccw" /></button>
         </div>
         <div class="cap-pick">
           <button class="link-btn" v-host-dialog="'caption_pick_files'" @click="action('caption_pick_files')"><Icon name="file" /> 파일 선택</button>
@@ -777,16 +783,29 @@ function choosePreferredToriiModel() {
     saveCaptionPrefs()
   }
 }
+const captionModelsLoading = ref(false)
+let captionModelsTimer: number | null = null
+function finishCaptionModelsLoad() {
+  captionModelsLoading.value = false
+  if (captionModelsTimer) { window.clearTimeout(captionModelsTimer); captionModelsTimer = null }
+}
 async function loadCaptionModels() {
+  if (captionModelsLoading.value) return
+  captionModelsLoading.value = true
+  if (captionModelsTimer) window.clearTimeout(captionModelsTimer)
+  captionModelsTimer = window.setTimeout(finishCaptionModelsLoad, 15000)
   try {
     const backend = await waitForCaptionBackend()
     // 결과는 ollamaModelsReady → applyCaptionModels (동기 ollamaListModels 는 없앴다)
     if (backend.requestOllamaModels) backend.requestOllamaModels(captionUrl())
+    else finishCaptionModelsLoad()
   } catch (error) {
+    finishCaptionModelsLoad()
     captionToast('error', errorMessage(error, 'Ollama 모델 목록을 불러오지 못했습니다.'))
   }
 }
 function applyCaptionModels(json: string) {
+  finishCaptionModelsLoad()
   try {
     const payload = JSON.parse(json)
     const models = Array.isArray(payload) ? payload : payload.models
@@ -1211,7 +1230,7 @@ async function saveCaptionItem(item: CaptionItem) {
 // 캡션을 T2I 메인 프롬프트에 추가하고 T2I 탭으로 이동
 function sendCaptionToT2I(item: CaptionItem) {
   const cap = (item.caption || '').trim()
-  if (!cap) { requestAction('show_toast', { type: 'warning', msg: '캡션이 비어있습니다' }); return }
+  if (!cap) { requestAction('show_toast', { type: 'warning', msg: '캡션이 비어 있습니다' }); return }
   const cur = ((widgets as any).main_prompt_text || '').trim().replace(/[,\s]+$/, '')
   ;(widgets as any).main_prompt_text = appendPromptText(cur, cap)   // 줄 주석(// 메모)으로 끝나면 줄바꿈으로
   router.push('/')   // T2I 탭 (path '/')
@@ -1457,8 +1476,8 @@ onMounted(async () => {
     if (state.job === 'batch') batchJob.value = state
     else upscaleJob.value = state
   }))
-  onBackendEvent('upscalersReady', applyUpscalers)
-  onBackendEvent('adetailerModelsReady', applyADetailerModels)
+  captionEventUnsubs.push(onBackendEvent('upscalersReady', applyUpscalers))
+  captionEventUnsubs.push(onBackendEvent('adetailerModelsReady', applyADetailerModels))
 
   const backend: any = await getBackend()
   if (captionDisposed) return
@@ -1485,7 +1504,7 @@ onMounted(async () => {
   if (backend.requestADetailerModels) backend.requestADetailerModels()
 
   // 파일 선택 이벤트
-  onBackendEvent('batchFilesSelected', (json: string) => {
+  captionEventUnsubs.push(onBackendEvent('batchFilesSelected', (json: string) => {
     try {
       const parsed = JSON.parse(json)
       const paths: string[] = Array.isArray(parsed) ? parsed.filter((p: unknown): p is string => typeof p === 'string' && !!p) : []
@@ -1496,10 +1515,10 @@ onMounted(async () => {
             : batchFiles
       target.value.push(...newPaths(target.value, paths))
     } catch {}
-  })
+  }))
 
   // ADetailer 결과 수신
-  onBackendEvent('adetailerResult', (json: string) => {
+  captionEventUnsubs.push(onBackendEvent('adetailerResult', (json: string) => {
     try {
       const d = JSON.parse(json)
       if (d.error) {
@@ -1530,16 +1549,16 @@ onMounted(async () => {
         if (adSummary) requestAction('show_toast', { type: 'warning', msg: adSummary })
       }
     } catch {}
-  })
+  }))
 
   // 배치 진행률
-  onBackendEvent('adetailerProgress', (cur: number, total: number) => {
+  captionEventUnsubs.push(onBackendEvent('adetailerProgress', (cur: number, total: number) => {
     adProgressCur.value = cur
     adProgressTotal.value = total
     if (cur >= total) adProcessing.value = false
-  })
+  }))
 
-  onBackendEvent('sam3Result', (json: string) => {
+  captionEventUnsubs.push(onBackendEvent('sam3Result', (json: string) => {
     try {
       const d = JSON.parse(json)
       const outcome = sam3ResultOutcome(d)
@@ -1571,9 +1590,9 @@ onMounted(async () => {
         requestAction('show_toast', { type: 'success', msg: 'SAM3 완료' })
       }
     } catch {}
-  })
+  }))
 
-  onBackendEvent('sam3Progress', (cur: number, total: number) => {
+  captionEventUnsubs.push(onBackendEvent('sam3Progress', (cur: number, total: number) => {
     sam3ProgressCur.value = cur
     sam3ProgressTotal.value = total
     if (cur >= total) {
@@ -1581,7 +1600,7 @@ onMounted(async () => {
       const sam3Summary = sam3ExifNotice.summary()
       if (sam3Summary) requestAction('show_toast', { type: 'warning', msg: sam3Summary })
     }
-  })
+  }))
 
   // 캡션 대상 선택 (파일/폴더)
   captionEventUnsubs.push(onBackendEvent('captionFilesSelected', (json: string) => {
@@ -1631,6 +1650,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   captionDisposed = true
+  finishCaptionModelsLoad()
   captionRuntimeRequestId += 1
   for (const unsubscribe of captionEventUnsubs.splice(0)) unsubscribe()
   if (captionRuntimeResponseTimer) window.clearTimeout(captionRuntimeResponseTimer)
@@ -1776,7 +1796,7 @@ onUnmounted(() => {
 .ad-progress span { font-size: var(--fs-label); color: var(--text-muted); font-family: monospace; }
 
 /* Compare */
-.ad-compare { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; overflow: hidden; }
+.ad-compare { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 20px; overflow: hidden; }
 /* 썸네일 그리드가 있으면 stretch — top-left 채움 */
 .ad-compare:has(.thumb-grid) { align-items: stretch; justify-content: stretch; }
 .compare-split { display: flex; gap: 12px; width: 100%; height: 100%; }

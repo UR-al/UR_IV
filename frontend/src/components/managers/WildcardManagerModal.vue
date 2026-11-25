@@ -1,6 +1,6 @@
 <template>
   <div class="wc-overlay" @mousedown.self="closeWcManager">
-    <div class="wc-modal">
+    <div class="wc-modal" role="dialog" aria-modal="true" aria-label="와일드카드 관리">
       <div class="wc-modal-header">
         <h3>와일드카드 관리</h3>
         <span class="wc-path">wildcards/</span>
@@ -8,7 +8,7 @@
           <ToggleSwitch v-model="wildcardEnabled" size="sm" /><span>생성 시 치환</span>
         </label>
         <button class="wc-new-btn" @click="createNewWildcard">+ NEW</button>
-        <button class="close-btn" @click="closeWcManager"><Icon name="close" /></button>
+        <button class="close-btn" @click="closeWcManager" title="닫기" aria-label="와일드카드 관리 닫기"><Icon name="close" /></button>
       </div>
       <div class="wc-modal-body">
         <!-- 파일 목록 -->
@@ -17,7 +17,7 @@
             :class="{ active: selectedWc === wc.name }" @click="selectWildcard(wc.name)">
             <span class="wc-fname" @dblclick.stop="renameWildcard(wc.name)">{{ wc.name }}</span>
             <span class="wc-file-count">{{ wc.tags.length }}</span>
-            <button class="wc-del" @click.stop="deleteWildcard(wc.name)"><Icon name="close" /></button>
+            <button class="wc-del" @click.stop="deleteWildcard(wc.name)" title="와일드카드 삭제" aria-label="와일드카드 삭제"><Icon name="close" /></button>
           </div>
         </div>
         <!-- 편집 영역 -->
@@ -26,15 +26,15 @@
             <div class="wc-content-header">
               <!-- 파일명 인라인 편집 -->
               <h4 v-if="!wcRenaming" @dblclick="beginRename">{{ selectedWc }}</h4>
-              <input v-else v-model="wcNewName" class="wc-rename-input" @blur="finishWcRename" @keydown.enter="finishWcRename" ref="wcRenameRef" />
+              <input v-else v-model="wcNewName" class="wc-rename-input" @blur="finishWcRename" @keydown.enter="!isImeComposing($event) && finishWcRename()" ref="wcRenameRef" />
               <span class="wc-syntax" title="표기가 둘이면 같은 뜻 — 한 줄마다 쉼표 후보 중 하나를 뽑는다. # 으로 시작하는 줄과 // · /* */ 주석은 뺀다">문법: <template v-for="(form, fi) in wildcardSyntaxForms(selectedWc)" :key="form"><template v-if="fi"> 또는 </template><code>{{ form }}</code></template></span>
             </div>
             <!-- 블록 편집 -->
             <div class="wc-blocks">
               <div v-for="(line, li) in wcEditLines" :key="li" class="wc-block-row" :class="{ comment: line.trim().startsWith('#') }">
                 <span class="wc-block-idx">{{ li + 1 }}</span>
-                <input v-model="wcEditLines[li]" class="wc-block-input" @keydown.enter="addWcLine(li)" />
-                <button class="wc-block-rm" @click="removeWcLine(li)"><Icon name="close" /></button>
+                <input v-model="wcEditLines[li]" class="wc-block-input" @keydown.enter="!isImeComposing($event) && addWcLine(li)" />
+                <button class="wc-block-rm" @click="removeWcLine(li)" title="줄 삭제" aria-label="줄 삭제"><Icon name="close" /></button>
               </div>
               <button class="wc-add-line" @click="appendWcLine">+ 줄 추가</button>
             </div>
@@ -64,6 +64,7 @@ import CustomSelect from '../CustomSelect.vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
 import { useWildcardManager } from '../../composables/useWildcardManager'
 import { useModalLayer } from '../../composables/useModalLayer'
+import { isImeComposing } from '../../utils/imeComposition'
 import { wildcardSyntaxForms } from '../../utils/wildcardFile'
 
 const {

@@ -579,14 +579,14 @@ class UISetupMixin:
 
         b = self.vue_bridge
 
-        self.btn_generate = ButtonProxy(b, 'btn_generate')
+        self.btn_generate = ButtonProxy(b, 'btn_generate', push_to_bridge=False)
         self.btn_generate._text = "이미지 생성"
-        self.btn_random_prompt = ButtonProxy(b, 'btn_random_prompt')
-        self.btn_auto_toggle = ButtonProxy(b, 'btn_auto_toggle')
+        self.btn_random_prompt = ButtonProxy(b, 'btn_random_prompt', push_to_bridge=False)
+        self.btn_auto_toggle = ButtonProxy(b, 'btn_auto_toggle', push_to_bridge=False)
         self.btn_auto_toggle.setCheckable(True)
         self.btn_auto_toggle.toggled.connect(self.toggle_automation_ui)
 
-        self.btn_save_settings = ButtonProxy(b, 'btn_save_settings')
+        self.btn_save_settings = ButtonProxy(b, 'btn_save_settings', push_to_bridge=False)
 
         self._vue_automation_settings = {
             'mode': 'count',
@@ -654,7 +654,8 @@ class UISetupMixin:
         from utils.prompt_history import get_history
         history = get_history()
         if not history:
-            QMessageBox.information(self, "히스토리", "저장된 프롬프트가 없습니다.")
+            from ui.status_line import notify_or_message_box
+            notify_or_message_box(self, 'info', "히스토리", "저장된 프롬프트가 없습니다.", box=QMessageBox)
             return
 
         menu = QMenu(self)

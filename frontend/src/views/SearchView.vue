@@ -37,21 +37,21 @@
           <div class="form-row">
             <div class="form-field wide">
               <label>캐릭터</label>
-              <input v-model="fields[1].include" placeholder="e.g. hatsune_miku, raiden_shogun" @keydown.enter="search" />
+              <input v-model="fields[1].include" placeholder="e.g. hatsune_miku, raiden_shogun" @keydown.enter="onSearchEnter" />
             </div>
             <div class="form-field">
               <label>작품</label>
-              <input v-model="fields[0].include" placeholder="e.g. genshin_impact" @keydown.enter="search" />
+              <input v-model="fields[0].include" placeholder="e.g. genshin_impact" @keydown.enter="onSearchEnter" />
             </div>
           </div>
           <div class="form-row">
             <div class="form-field wide">
               <label>일반 태그</label>
-              <input v-model="fields[3].include" placeholder="e.g. 1girl, blue_hair, sword, outdoors" @keydown.enter="search" />
+              <input v-model="fields[3].include" placeholder="e.g. 1girl, blue_hair, sword, outdoors" @keydown.enter="onSearchEnter" />
             </div>
             <div class="form-field">
               <label>작가</label>
-              <input v-model="fields[2].include" placeholder="Artist name..." @keydown.enter="search" />
+              <input v-model="fields[2].include" placeholder="Artist name..." @keydown.enter="onSearchEnter" />
             </div>
           </div>
         </div>
@@ -60,10 +60,10 @@
         <details class="form-section exclude-section" open>
           <summary class="exclude-toggle">제외 태그 <Icon name="chevron-down" size="12" /></summary>
           <div class="form-row">
-            <div class="form-field"><label class="danger">캐릭터</label><input v-model="fields[1].exclude" placeholder="제외..." @keydown.enter="search" /></div>
-            <div class="form-field"><label class="danger">작품</label><input v-model="fields[0].exclude" placeholder="제외..." @keydown.enter="search" /></div>
-            <div class="form-field"><label class="danger">태그</label><input v-model="fields[3].exclude" placeholder="제외..." @keydown.enter="search" /></div>
-            <div class="form-field"><label class="danger">작가</label><input v-model="fields[2].exclude" placeholder="제외..." @keydown.enter="search" /></div>
+            <div class="form-field"><label class="danger">캐릭터</label><input v-model="fields[1].exclude" placeholder="제외..." @keydown.enter="onSearchEnter" /></div>
+            <div class="form-field"><label class="danger">작품</label><input v-model="fields[0].exclude" placeholder="제외..." @keydown.enter="onSearchEnter" /></div>
+            <div class="form-field"><label class="danger">태그</label><input v-model="fields[3].exclude" placeholder="제외..." @keydown.enter="onSearchEnter" /></div>
+            <div class="form-field"><label class="danger">작가</label><input v-model="fields[2].exclude" placeholder="제외..." @keydown.enter="onSearchEnter" /></div>
           </div>
         </details>
 
@@ -160,9 +160,9 @@
           <button class="bar-btn" @click="viewMode = 'single'" :class="{ active: viewMode === 'single' }"><Icon name="file" /> Single</button>
           <button class="bar-btn" @click="viewMode = 'list'" :class="{ active: viewMode === 'list' }"><Icon name="clipboard" /> List</button>
           <span class="bar-sep">|</span>
-          <button class="bar-btn" @click="prevResult" :disabled="previewIdx <= 0"><Icon name="chevron-left" /></button>
+          <button class="bar-btn" @click="prevResult" :disabled="previewIdx <= 0" title="이전 결과" aria-label="이전 결과"><Icon name="chevron-left" /></button>
           <span class="bar-idx"><b>{{ previewIdx + 1 }}</b>/{{ filteredResults.length }}</span>
-          <button class="bar-btn" @click="nextResult" :disabled="previewIdx >= filteredResults.length - 1"><Icon name="play" /></button>
+          <button class="bar-btn" @click="nextResult" :disabled="previewIdx >= filteredResults.length - 1" title="다음 결과" aria-label="다음 결과"><Icon name="chevron-right" /></button>
           <button class="bar-btn gold" @click="randomResult"><Icon name="dice" /> Random</button>
         </div>
         <div class="bar-right">
@@ -173,8 +173,8 @@
       <!-- 심층검색 바 + 분기 -->
       <div class="deep-bar">
         <span class="deep-label">정밀 검색</span>
-        <input v-model="deepInclude" placeholder="포함 태그 (쉼표 구분)" @keydown.enter="applyDeepSearch" class="deep-input" />
-        <input v-model="deepExclude" placeholder="제외 태그 (쉼표 구분)" @keydown.enter="applyDeepSearch" class="deep-input neg" />
+        <input v-model="deepInclude" placeholder="포함 태그 (쉼표 구분)" @keydown.enter="onDeepSearchEnter" class="deep-input" />
+        <input v-model="deepExclude" placeholder="제외 태그 (쉼표 구분)" @keydown.enter="onDeepSearchEnter" class="deep-input neg" />
         <button class="bar-btn" @click="applyDeepSearch">필터</button>
         <template v-if="filterHistory.length > 0">
           <span class="bar-sep">|</span>
@@ -194,7 +194,7 @@
       <div v-if="viewMode === 'single'" class="single-view">
         <div class="detail-card" v-if="currentResult">
           <div class="detail-meta">
-            <div class="meta-pill"><span class="ml">프로젝트</span>{{ currentResult.copyright || 'ORIGINAL' }}</div>
+            <div class="meta-pill"><span class="ml">작품</span>{{ currentResult.copyright || 'ORIGINAL' }}</div>
             <div class="meta-pill artist"><span class="ml">작가</span>{{ currentResult.artist || 'UNKNOWN' }}</div>
             <div class="meta-pill character"><span class="ml">캐릭터</span>{{ currentResult.character || 'GENERIC' }}</div>
             <div class="meta-pill mini"><span class="ml">등급</span>{{ currentResult.rating || '?' }}</div>
@@ -245,16 +245,17 @@
             </select>
             <button class="sort-dir-btn" v-if="sortBy !== 'default' && sortBy !== 'random'"
               @click="sortDir = sortDir === 'asc' ? 'desc' : 'asc'"
-              :title="sortDir === 'asc' ? '오름차순 → 클릭 시 내림차순' : '내림차순 → 클릭 시 오름차순'">
+              :title="sortDir === 'asc' ? '오름차순 → 클릭 시 내림차순' : '내림차순 → 클릭 시 오름차순'"
+              :aria-label="sortDir === 'asc' ? '오름차순 정렬' : '내림차순 정렬'">
               <Icon :name="sortDir === 'asc' ? 'arrow-up' : 'arrow-down'" size="12" />
             </button>
           </div>
           <div class="list-pager" v-if="totalPages > 1">
-            <button class="page-btn" @click="gotoPage(0)" :disabled="currentPage === 0">≪</button>
-            <button class="page-btn" @click="gotoPage(currentPage - 1)" :disabled="currentPage === 0"><Icon name="chevron-left" /></button>
+            <button class="page-btn" @click="gotoPage(0)" :disabled="currentPage === 0" title="첫 페이지" aria-label="첫 페이지">≪</button>
+            <button class="page-btn" @click="gotoPage(currentPage - 1)" :disabled="currentPage === 0" title="이전 페이지" aria-label="이전 페이지"><Icon name="chevron-left" /></button>
             <span class="page-info">{{ currentPage + 1 }} / {{ totalPages }} ({{ sortedResults.length }})</span>
-            <button class="page-btn" @click="gotoPage(currentPage + 1)" :disabled="currentPage >= totalPages - 1"><Icon name="play" /></button>
-            <button class="page-btn" @click="gotoPage(totalPages - 1)" :disabled="currentPage >= totalPages - 1">≫</button>
+            <button class="page-btn" @click="gotoPage(currentPage + 1)" :disabled="currentPage >= totalPages - 1" title="다음 페이지" aria-label="다음 페이지"><Icon name="chevron-right" /></button>
+            <button class="page-btn" @click="gotoPage(totalPages - 1)" :disabled="currentPage >= totalPages - 1" title="마지막 페이지" aria-label="마지막 페이지">≫</button>
           </div>
         </div>
         <div class="list-header">
@@ -264,8 +265,11 @@
         </div>
         <div class="list-scroll">
           <div v-for="(r, i) in pagedResults" :key="(currentPage * PAGE_SIZE) + i" class="list-row"
+            role="button" tabindex="0"
             :class="{ active: r === currentResult }"
-            @click="onListRowClick(r)">
+            @click="onListRowClick(r)"
+            @keydown.enter.self.prevent="onListRowClick(r)"
+            @keydown.space.self.prevent="onListRowClick(r)">
             <span class="lr idx">{{ (currentPage * PAGE_SIZE) + i + 1 }}</span>
             <span class="lr char">{{ r.character || '-' }}</span>
             <span class="lr copy">{{ r.copyright || '-' }}</span>
@@ -277,11 +281,11 @@
       </div>
       <!-- Filter Manager Modal -->
       <transition name="fade">
-        <div v-if="showFilterManager" class="fm-overlay" @mousedown.self="showFilterManager = false">
+        <div v-if="showFilterManager" class="fm-overlay" role="dialog" aria-modal="true" aria-label="필터 관리" @mousedown.self="showFilterManager = false">
           <div class="fm-modal">
             <div class="fm-header">
               <h3>필터 관리</h3>
-              <button class="close-btn" @click="showFilterManager = false"><Icon name="close" /></button>
+              <button class="close-btn" @click="showFilterManager = false" title="닫기" aria-label="닫기"><Icon name="close" /></button>
             </div>
             <div class="fm-body">
               <!-- Rating -->
@@ -339,10 +343,12 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, markRaw, toRaw, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
-import { condRulesPayload } from '../composables/condRules.js'
+import { condRulesPayload } from '../composables/condRules'
+import { useModalLayer } from '../composables/useModalLayer'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
 import { vHostDialog } from '../utils/hostDialogs'
+import { isImeComposing } from '../utils/imeComposition'
 import {
   buildSearchDeckUpdate,
   parseSearchResultLineage,
@@ -535,6 +541,15 @@ function applySearchState(state: any) {
   return touched
 }
 
+function onSearchEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  void search()
+}
+function onDeepSearchEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  applyDeepSearch()
+}
+
 async function search() {
   searching.value = true; statusText.value = 'EXPLORING...'
   searchProgress.value = 0
@@ -615,9 +630,12 @@ function restoreAndRandom() {
 
 // localStorage가 진실의 원천 — 복원 여부 추적해서 uiPrefsLoaded 덮어쓰기 방지
 let _restoredFromLocalStorage = false
+const unsubs: Array<() => void> = []
 
 onUnmounted(() => {
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
+  if (_persistBackendTimer) { clearTimeout(_persistBackendTimer); _persistBackendTimer = null }
+  unsubs.splice(0).forEach((u) => u())
 })
 
 onMounted(() => {
@@ -698,15 +716,15 @@ onMounted(() => {
     } catch (e) { console.warn('[Search] backend restore failed:', e) }
   })()
 
-  onBackendEvent('searchResultLineage', (json: string) => {
+  unsubs.push(onBackendEvent('searchResultLineage', (json: string) => {
     // 결과 배열과 별도 additive signal이므로 즉시 active로 바꾸지 않는다. 다음
     // searchResultsReady/디스크 복원과 같은 작업에서 승격해야 A rows+B lineage 틈이 없다.
     pendingResultLineage.value = parseSearchResultLineage(json)
     if (pendingResultLineage.value) {
       activeDatasetLabel.value = pendingResultLineage.value.label
     }
-  })
-  onBackendEvent('searchResultsReady', (json: string) => {
+  }))
+  unsubs.push(onBackendEvent('searchResultsReady', (json: string) => {
     try {
       const data = JSON.parse(json)
       if (Array.isArray(data)) {
@@ -735,13 +753,14 @@ onMounted(() => {
       }
     } catch (e: any) {
       pendingResultLineage.value = null
-      statusText.value = `JSON 파싱 실패: ${e?.message || 'unknown'}`
-      requestAction('show_toast', { type: 'error', msg: `검색 결과 JSON 파싱 실패: ${e?.message || e}` })
+      console.error('[Search] 검색 결과 JSON 파싱 실패:', e)
+      statusText.value = '검색 결과 파싱 실패'
+      requestAction('show_toast', { type: 'error', msg: '검색 결과를 불러오지 못했습니다. 다시 시도해 주세요.' })
     }
     searching.value = false; searchProgress.value = 100
     if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
-  })
-  onBackendEvent('searchStatus', (msg: string) => {
+  }))
+  unsubs.push(onBackendEvent('searchStatus', (msg: string) => {
     statusText.value = msg.toUpperCase()
     // 결과 이벤트(searchResultsReady)가 안 오는 '진짜 종료(❌ 로드실패/데이터없음)'만 잡아 정리.
     // (기존 /없|실패|완료|0/ 은 데이터 병합 상태나 '파일 없음'(파일별 경고),
@@ -751,12 +770,12 @@ onMounted(() => {
       if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
       searching.value = false
     }
-  })
-  onBackendEvent('uiPrefsLoaded', (json: string) => {
+  }))
+  unsubs.push(onBackendEvent('uiPrefsLoaded', (json: string) => {
     // localStorage/능동 fetch로 이미 복원했으면 무시 (중복 적용 방지)
     if (_restoredFromLocalStorage) return
     try { if (applySearchState(JSON.parse(json).searchState)) _restoredFromLocalStorage = true } catch {}
-  })
+  }))
 
   // (조건부 프롬프트 로드는 App.vue가 composables/condRules.js의 loadCondRules로 처리)
 })
@@ -888,6 +907,7 @@ watch(() => filteredResults.value.length, () => { if (filteredResults.value.leng
 
 // ── Filter Manager ──
 const showFilterManager = ref(false)
+useModalLayer({ isOpen: () => showFilterManager.value, close: () => { showFilterManager.value = false } })
 const fmCharSearch = ref('')
 const fmCopySearch = ref('')
 const fmArtistSearch = ref('')
@@ -1049,7 +1069,7 @@ function addToQueue() {
 }
 // (조건부 규칙 저장/자동저장은 composables/condRules.js가 담당)
 
-function exportResults() { requestAction('export_search_results', { count: filteredResults.value.length, data: filteredResults.value }) }
+function exportResults() { requestAction('export_search_results', { data: filteredResults.value }) }
 // 가져오기도 검색과 같은 결과 상한(50만, 무작위 표본)을 따른다 — '무제한' 모드면 끈다
 function importResults() {
   requestAction('import_search_results', { disable_result_cap: resultCapMode.value === 'unlimited' })
@@ -1249,7 +1269,7 @@ function importResults() {
 }
 
 /* ═══ Result Bar ═══ */
-.result-bar { display: flex; align-items: center; padding: 6px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); gap: 8px; flex-shrink: 0; }
+.result-bar { display: flex; align-items: center; flex-wrap: wrap; padding: 6px var(--notif-gutter) 6px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); gap: 8px; flex-shrink: 0; }
 .bar-left, .bar-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .bar-center { flex: 1; display: flex; align-items: center; gap: 4px; justify-content: center; }
 .bar-btn { padding: 4px 10px; background: var(--bg-button); border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
@@ -1264,8 +1284,8 @@ function importResults() {
 .filter-btn.active { color: var(--accent); border-color: var(--accent-dim); }
 
 /* Filter Manager Modal */
-.fm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
-.fm-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; width: 560px; max-height: 80vh; display: flex; flex-direction: column; }
+.fm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: var(--z-modal, 2000); display: flex; align-items: center; justify-content: center; }
+.fm-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; width: min(560px, calc(100vw - 32px)); max-height: 80vh; display: flex; flex-direction: column; }
 .fm-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .fm-header h3 { font-size: 13px; font-weight: var(--fw-bold); letter-spacing: 0; color: var(--text-primary); }
 .fm-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }

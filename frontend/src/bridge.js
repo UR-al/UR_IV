@@ -16,6 +16,7 @@ import { ResumableStudioTransport } from './studio/resumableTransport.js'
 
 let _backend = null
 let _storeDisconnect = null
+let _webAuthRejected = false
 const _backendWaiters = []
 // 백엔드가 붙을 때마다(첫 연결 · 웹 재접속) 부르는 콜백 — onBackendBound
 const _boundListeners = new Set()
@@ -58,7 +59,13 @@ const _studioProxy = _resumableStudio.proxy
 
 function _resolveBackendWaiters() {
   while (_backendWaiters.length) {
-    try { _backendWaiters.shift()(_backendProxy) } catch {}
+    try { _backendWaiters.shift().resolve(_backendProxy) } catch {}
+  }
+}
+
+function _rejectBackendWaiters(error) {
+  while (_backendWaiters.length) {
+    try { _backendWaiters.shift().reject(error) } catch {}
   }
 }
 
@@ -129,10 +136,7 @@ function _adaptWebFacade(facade, capabilities) {
         const handleResult = (responseJson) => {
           let response
           try { response = JSON.parse(responseJson || '{}') }
-          catch (e) {
-            console.error(`[bridge] invalid response: ${String(prop)}`, e)
-            return
-          }
+          catch (e) { console.error(`[bridge] invalid response: ${String(prop)}`, e); return }
           if (!response.ok) {
             console.error(`[bridge] backend rejected ${String(prop)}: ${response.error || 'unknown error'}`)
             return
@@ -301,7 +305,18 @@ function _initWebSocketBridge() {
       if (activeBackend) _detachBackend(activeBackend)
       activeBackend = null
       if (event.code === 1008) {
+        const message = '웹 세션 인증이 거부되었습니다. 인증 토큰이 포함된 주소로 다시 열어 주세요.'
         console.error('[bridge] WebSocket authorization rejected — reopen the authenticated URL')
+        _webAuthRejected = true
+        _dispatchEvent('showNotification', ['error', message])
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+          try {
+            window.dispatchEvent(new CustomEvent('aistudio:bridge-auth-rejected', {
+              detail: { code: 1008, message },
+            }))
+          } catch {}
+        }
+        _rejectBackendWaiters(new Error('WebSocket authorization rejected (1008)'))
         return
       }
       console.warn(`[bridge] WebSocket closed — retrying in ${retryDelay}ms`)
@@ -363,7 +378,13 @@ export async function initBridge() {
  */
 export async function getBackend() {
   if (_backend) return _backendProxy
-  return new Promise(resolve => _backendWaiters.push(resolve))
+  if (_webAuthRejected) throw new Error('WebSocket authorization rejected (1008)')
+  return new Promise((resolve, reject) => _backendWaiters.push({ resolve, reject }))
+}
+
+/** 웹 모드 WebSocket 인증 거부(1008) 상태 여부 */
+export function isWebAuthRejected() {
+  return _webAuthRejected
 }
 
 /**

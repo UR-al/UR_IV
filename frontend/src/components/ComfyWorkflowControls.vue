@@ -131,17 +131,17 @@ h3 { font-size: var(--fs-body); margin: 0; }
 p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
 .hint { color: var(--text-secondary); font-size: var(--fs-meta); }
 .error { color: var(--state-alert-fg); font-size: var(--fs-meta); }
-.quality, .preflight { border: 1px solid var(--border); border-radius: var(--r-md, 8px); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.quality, .preflight { border: 1px solid var(--border); border-radius: var(--radius-base); padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 legend, summary { font-size: var(--fs-meta); font-weight: var(--fw-bold); }
 summary { cursor: pointer; padding: var(--sp-2) 0; overflow-wrap: anywhere; }
 .buttons { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; margin: var(--sp-2) 0; }
 .inline, .search { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; font-size: var(--fs-meta); }
 .search { margin: var(--sp-3) 0; }
 .search input { flex: 1; }
-button { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--r-sm, 4px); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-meta); cursor: pointer; white-space: normal; }
+button { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-meta); cursor: pointer; white-space: normal; }
 button:hover:not(:disabled) { background: var(--bg-button-hover); }
 button:disabled { opacity: .55; cursor: default; }
-input, textarea, select { min-width: 0; max-width: 100%; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--r-sm, 4px); padding: var(--sp-2); font-size: var(--fs-meta); }
+input, textarea, select { min-width: 0; max-width: 100%; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; padding: var(--sp-2); font-size: var(--fs-meta); }
 input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .nodes { max-height: 420px; overflow: auto; margin-bottom: var(--sp-3); }

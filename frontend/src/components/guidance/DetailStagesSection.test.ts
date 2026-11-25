@@ -16,7 +16,9 @@ import DetailStagesSection from './DetailStagesSection.vue'
  */
 async function render(values: Record<string, string>) {
   const widgets = reactive<Record<string, any>>(values)
-  return renderToString(createSSRApp(DetailStagesSection, { widgets }))
+  const app = createSSRApp(DetailStagesSection, { widgets })
+  app.component('Icon', { render: () => null })
+  return renderToString(app)
 }
 
 function numberInputs(html: string): string[] {

@@ -15,7 +15,7 @@
         <header class="gate-head">
           <div class="gate-head-text">
             <h1 :id="idTitle" class="gate-title">AI STUDIO PRO</h1>
-            <p class="gate-sub">이미지 생성에 쓸 백엔드를 고르세요. 설정에서 언제든 바꿀 수 있습니다.</p>
+            <p class="gate-sub">이미지 생성에 사용할 백엔드를 선택해 주세요. 설정에서 언제든 바꿀 수 있습니다.</p>
           </div>
           <!-- 닫기는 dismissible 일 때만 존재한다. 시작 게이트에는 버튼 자체가 없어야
                '닫을 수 없다'가 화면에서도 사실이 된다(비활성 버튼은 거짓말이다). -->
@@ -325,7 +325,7 @@ watch(() => props.open, (isOpen) => {
 .gate {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  z-index: var(--z-gate);
   background: var(--bg-primary);
   overflow-y: auto;
 }

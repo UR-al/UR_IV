@@ -62,7 +62,7 @@ class LoraBridgeContractTests(unittest.TestCase):
         self.assertNotIn("_vue_lora_text", _read("ui", "generator_generation.py"))
 
     def test_vue_converts_units_only_through_lora_units(self):
-        composable = _read("frontend", "src", "composables", "useLoraStack.js")
+        composable = _read("frontend", "src", "composables", "useLoraStack.ts")
         self.assertIn("toBridgeLoraEntries(loraStack)", composable)
         self.assertIn("fromBridgeLoraEntries(", composable)
         # 프로파일 적용 결과를 ui_prefs 에 영속(안 하면 재시작 시 옛 스택으로 돌아갔다)
@@ -73,8 +73,8 @@ class LoraBridgeContractTests(unittest.TestCase):
         # 웹 모드: ui_prefs 는 getInitialConfig 응답으로 늦게 오고 Python 은 새 클라이언트마다
         # _restore_runtime_prefs 를 돌리지 않는다. 마운트 시점의 낡은 localStorage 스택을 보내면
         # 공유 _vue_lora_entries 가 덮였고, 복원 뒤에 다시 보내지 않아 그대로 남았다.
-        composable = _read("frontend", "src", "composables", "useLoraStack.js")
-        body = re.search(r"function restoreFromPrefs\(prefs\)\s*\{(.*?)\n  \}", composable, re.S)
+        composable = _read("frontend", "src", "composables", "useLoraStack.ts")
+        body = re.search(r"function restoreFromPrefs\(prefs[^)]*\)\s*\{(.*?)\n  \}", composable, re.S)
         self.assertIsNotNone(body)
         after_restore = body.group(1).split("nextTick(", 1)
         self.assertEqual(len(after_restore), 2, "복원 플래그가 풀린 뒤(nextTick) 전송해야 한다")

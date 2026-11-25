@@ -1,13 +1,13 @@
 <template>
   <div class="cpm-overlay" @mousedown.self="close" @keydown.esc="close">
-    <div class="cpm-modal">
+    <div class="cpm-modal" role="dialog" aria-modal="true" aria-label="캐릭터 특징 프리셋">
       <!-- Header -->
       <div class="cpm-header">
         <div>
           <h3>캐릭터 특징 프리셋</h3>
           <span class="cpm-sub">캐릭터를 검색하고 특징 태그를 선택해 프롬프트에 삽입합니다</span>
         </div>
-        <button class="cpm-close" @click="close"><Icon name="close" /></button>
+        <button class="cpm-close" @click="close" title="닫기" aria-label="캐릭터 특징 프리셋 닫기"><Icon name="close" /></button>
       </div>
 
       <!-- Search -->
@@ -176,7 +176,7 @@
                   </select>
                   <input :value="rule.tags.join(', ')" class="cpm-r-tags" placeholder="대상 태그 (쉼표)"
                     @input="rule.tags = ($event.target as HTMLInputElement).value.split(',').map((s: string) => s.trim()).filter(Boolean)" />
-                  <button class="cpm-r-del" @click="condRules.splice(i, 1)"><Icon name="close" /></button>
+                  <button class="cpm-r-del" @click="condRules.splice(i, 1)" title="규칙 삭제" aria-label="규칙 삭제"><Icon name="close" /></button>
                 </div>
                 <button class="cpm-r-add" @click="addRule">+ 규칙 추가</button>
               </div>
@@ -297,7 +297,7 @@ const resultLabel = computed(() => {
   return query.value.trim().length >= 2 ? `검색 결과 (${results.value.length})` : '검색 결과'
 })
 const emptyMsg = computed(() => {
-  if (deckOnly.value) return deckChars.value && deckChars.value.length ? '일치하는 덱 캐릭터 없음' : '현재 덱이 비어있습니다'
+  if (deckOnly.value) return deckChars.value && deckChars.value.length ? '일치하는 덱 캐릭터 없음' : '현재 덱이 비어 있습니다'
   return query.value.trim().length < 2 ? '2글자 이상 입력하세요' : '결과 없음'
 })
 
@@ -578,6 +578,7 @@ async function savePreset() {
 
 async function deletePreset() {
   if (!selectedChar.value) return
+  if (typeof window !== 'undefined' && typeof window.confirm === 'function' && !window.confirm(`'${selectedChar.value}' 캐릭터 프리셋을 삭제할까요?`)) return
   const r = await callBk('deleteCharacterPreset', selectedChar.value)
   if (r && r.ok) {
     presetStatus.value = '프리셋 삭제됨'
@@ -639,7 +640,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.cpm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 2200; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.cpm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: var(--z-modal-nested); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .cpm-modal { width: min(1180px, 94vw); height: min(840px, 92vh); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-card); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 
 .cpm-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }

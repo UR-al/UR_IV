@@ -19,6 +19,13 @@
       <label class="ext-check-row"><ToggleSwitch v-model="autoCharFeatures" size="sm" /><span>특징 자동 추가</span></label>
       <label class="ext-check-row"><ToggleSwitch v-model="autoRemoveCharFeatures" size="sm" /><span title="closed eyes 있으면 눈색 특징 생략, 머리 길이 충돌 시 생략">특징 auto remove</span></label>
     </div>
+    <div v-if="autoCharFeatures" class="char-mode-row">
+      <label class="char-mode-label" for="char-feature-mode-sel">특징 추가 범위</label>
+      <select id="char-feature-mode-sel" v-model="charFeatureMode" class="char-mode-sel" aria-label="캐릭터 특징 자동 추가 범위">
+        <option value="핵심만">핵심만</option>
+        <option value="핵심+의상">핵심+의상</option>
+      </select>
+    </div>
     <div v-if="autoRemoveCharFeatures" class="char-ovr-row">
       <button class="char-ovr-btn" @click="openCharOverrideModal()"><Icon name="settings" /> override 설정 (머리길이 / 눈색)</button>
     </div>
@@ -30,12 +37,12 @@
  * 파라미터 열 — 프롬프트 필터 카드(등급 g/s/q/e + 태그 제거 토글 10개). App.vue 에서 추출(App.vue 분할 ④).
  * 등급 필터 상태의 주인은 App(uiPrefsLoaded 에서 복원)이라 useRatingFilter 결과를 prop 으로 받는다.
  */
-import type { PropType } from 'vue'
+import { computed, type PropType } from 'vue'
 import ToggleSwitch from '../ToggleSwitch.vue'
 import { useWidgetStore } from '../../stores/widgetStore.js'
 import { widgetFlag } from '../../composables/widgetFlag'
 import { openCharOverrideModal } from '../../composables/uiModals.js'
-import type { useRatingFilter } from '../../composables/useRatingFilter.js'
+import type { useRatingFilter } from '../../composables/useRatingFilter'
 
 const props = defineProps({
   rating: { type: Object as PropType<ReturnType<typeof useRatingFilter>>, required: true },
@@ -54,6 +61,10 @@ const removeText = widgetFlag(storeWidgets, 'chk_remove_text')
 const promptFocus = widgetFlag(storeWidgets, 'chk_prompt_focus')
 const autoCharFeatures = widgetFlag(storeWidgets, 'chk_auto_char_features')
 const autoRemoveCharFeatures = widgetFlag(storeWidgets, 'chk_auto_remove_char_features')
+const charFeatureMode = computed({
+  get: () => storeWidgets.combo_char_feature_mode || '핵심만',
+  set: (v: string) => { storeWidgets.combo_char_feature_mode = v },
+})
 </script>
 
 <style scoped>
@@ -64,6 +75,9 @@ const autoRemoveCharFeatures = widgetFlag(storeWidgets, 'chk_auto_remove_char_fe
   cursor: pointer; text-align: center; transition: var(--transition);
 }
 .rating-toggle.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.char-mode-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.char-mode-label { font-size: var(--fs-label); color: var(--text-muted); margin: 0; white-space: nowrap; }
+.char-mode-sel { flex: 1; padding: 4px 24px 4px 8px; font-size: var(--fs-label); }
 .char-ovr-row { margin-top: 6px; }
 .char-ovr-btn { width: 100%; padding: 6px 10px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--radius-base); color: var(--accent); font-size: var(--fs-label); font-weight: var(--fw-bold); cursor: pointer; }
 .char-ovr-btn:hover { background: rgba(250,204,21,0.18); }

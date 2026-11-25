@@ -35,7 +35,9 @@ const NODE_INPUTS: Record<string, [number, number, number, number]> = {
 
 async function render(values: Record<string, string>) {
   const widgets = reactive<Record<string, any>>(values)
-  return renderToString(createSSRApp(DetailDaemonSection, { widgets }))
+  const app = createSSRApp(DetailDaemonSection, { widgets })
+  app.component('Icon', { render: () => null })
+  return renderToString(app)
 }
 
 function inputFor(html: string, value: string): string {

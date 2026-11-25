@@ -12,13 +12,13 @@
       <!-- EXIF 검색 -->
       <div class="search-box">
         <input v-model="exifSearch" placeholder="EXIF 검색..." class="search-input"
-          @keydown.enter="runExifSearch" />
+          @keydown.enter="onExifSearchEnter" />
         <button class="search-go" @click="runExifSearch" :disabled="exifSearching">{{ exifSearching ? '...' : 'GO' }}</button>
-        <button class="search-clear" v-if="exifFiltered || exifSearching" :title="exifSearching ? '검색 취소' : '검색 해제'" @click="clearExifSearch"><Icon name="close" /></button>
+        <button class="search-clear" v-if="exifFiltered || exifSearching" :title="exifSearching ? '검색 취소' : '검색 해제'" :aria-label="exifSearching ? '검색 취소' : '검색 해제'" @click="clearExifSearch"><Icon name="close" /></button>
       </div>
 
       <div class="control-group">
-        <button class="icon-btn" @click="loadFavorites" title="Refresh"><Icon name="refresh" /></button>
+        <button class="icon-btn" @click="loadFavorites" title="새로고침" aria-label="새로고침"><Icon name="refresh" /></button>
         <div class="sep"></div>
         <div class="sort-chips">
           <button v-for="s in sortOptions" :key="s.val"
@@ -42,7 +42,10 @@
     <section class="gallery-content" ref="galleryContentRef" @scroll="onGalleryScroll">
       <div class="masonry-grid" :style="{ 'columns': `auto ${thumbSize}px` }">
         <div v-for="img in displayImages" :key="img" class="gallery-card"
+          role="button" tabindex="0" :aria-label="filenameOf(img)"
           @click="viewImage(img)"
+          @keydown.enter.self.prevent="viewImage(img)"
+          @keydown.space.self.prevent="viewImage(img)"
           @contextmenu.prevent="showMenu($event, img)"
         >
           <video v-if="isVideo(img)" class="gallery-media" :src="mediaUrl(img)"
@@ -57,8 +60,8 @@
             {{ mediaLabel(img) }}
           </span>
           <div class="card-hover-actions">
-            <button class="tiny-btn" @click.stop="removeFav(img)" title="즐겨찾기 제거"><Icon name="star" /></button>
-            <button v-if="isImage(img)" class="tiny-btn" @click.stop="copyImageAndNotify(img)" title="복사"><Icon name="clipboard" /></button>
+            <button class="tiny-btn" @click.stop="removeFav(img)" title="즐겨찾기 제거" aria-label="즐겨찾기 제거"><Icon name="star" /></button>
+            <button v-if="isImage(img)" class="tiny-btn" @click.stop="copyImageAndNotify(img)" title="복사" aria-label="복사"><Icon name="clipboard" /></button>
           </div>
         </div>
       </div>
@@ -66,20 +69,29 @@
         {{ visibleCount }} / {{ exifFiltered ? filteredImages.length : images.length }} — 스크롤하여 더 보기
       </div>
 
-      <div v-if="images.length === 0" class="empty-placeholder">
+      <div v-if="isLoading" class="empty-placeholder">
+        <div class="spinner"></div>
+        <p>불러오는 중...</p>
+      </div>
+      <div v-else-if="images.length === 0" class="empty-placeholder">
         <div class="icon"><Icon name="star" /></div>
         <h2>즐겨찾기가 없습니다</h2>
         <p>아직 즐겨찾기한 이미지가 없습니다</p>
+      </div>
+      <div v-else-if="exifFiltered && filteredImages.length === 0" class="empty-placeholder">
+        <div class="icon"><Icon name="search" /></div>
+        <h2>검색 결과가 없습니다</h2>
+        <p>다른 검색어로 시도하거나 검색을 해제해 보세요</p>
       </div>
     </section>
 
     <!-- 별도 뷰어 창 (이미지 확대 + EXIF + 전송 버튼) — 이전 Favorites 방식 복원 -->
     <transition name="fade">
-      <div v-if="viewerData" class="viewer-overlay" @mousedown.self="viewerData = null">
+      <div v-if="viewerData" class="viewer-overlay" role="dialog" aria-modal="true" aria-label="즐겨찾기 확대 보기" @mousedown.self="closeViewer">
         <div class="viewer-panel">
           <div class="viewer-header">
             <span>{{ viewerData.filename }}</span>
-            <button class="viewer-close" @click="viewerData = null"><Icon name="close" /></button>
+            <button class="viewer-close" @click="closeViewer" title="닫기" aria-label="닫기"><Icon name="close" /></button>
           </div>
           <div class="viewer-body">
             <div class="viewer-img">
@@ -162,7 +174,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onActivated, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onActivated, onDeactivated, onMounted, onUnmounted } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { requestAction } from '../stores/widgetStore.js'
 import { mediaUrl, thumbnailUrl, withUrlVersion } from '../utils/media.js'
@@ -170,6 +182,7 @@ import { mediaVersion } from '../utils/mediaVersions'
 import { copyTextToClipboard } from '../utils/clipboard'
 // 이미지 복사 — 데스크톱은 호스트 Qt 클립보드, 웹은 이 브라우저 클립보드(호스트 PC 클립보드 금지)
 import { copyImageAndNotify } from '../utils/clipboardImageCopy'
+import { isImeComposing } from '../utils/imeComposition'
 import { isSameImagePath } from '../utils/imageDeleteResult'
 import { fallbackToOriginal } from '../utils/thumbFallback'
 import {
@@ -180,6 +193,7 @@ import { createSearchTextFetcher } from '../utils/imageSearchTexts'
 import { useExifSearch } from '../composables/useExifSearch'
 import { useGridPaging } from '../composables/useGridPaging'
 import { useContextMenu } from '../composables/useContextMenu'
+import { useModalLayer } from '../composables/useModalLayer'
 import type { ActionName, ActionPayload } from '../types/bridge'
 
 interface ViewerData {
@@ -196,6 +210,7 @@ interface ViewerData {
 }
 
 const images = ref<string[]>([])
+const isLoading = ref(true)
 
 // 썸네일 크기 — localStorage 영속 (gallery와 공유)
 const thumbSize = ref(parseInt(window.localStorage.getItem('gallery_thumb_size') || '200'))
@@ -230,6 +245,10 @@ const {
   query: exifSearch, searching: exifSearching, filtered: exifFiltered, results: filteredImages,
   run: runExifSearch, clear: clearExifSearch,
 } = exifSearchState
+function onExifSearchEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  runExifSearch()
+}
 
 const displaySource = computed(() => sortMediaPaths(exifFiltered.value ? filteredImages.value : images.value, sortBy.value))
 
@@ -246,10 +265,17 @@ const displayImages = computed(() => displaySource.value.slice(0, visibleCount.v
 
 // 중앙 모달 뷰어 (이전 Favorites 방식)
 const viewerData = ref<ViewerData | null>(null)
+let viewerGen = 0
+function closeViewer() {
+  viewerGen++
+  viewerData.value = null
+}
+useModalLayer({ isOpen: () => !!viewerData.value, close: closeViewer })
 // 파라미터 표시 — core 가 만든 params_line(WebUI 는 원문 꼬리 그대로, 따옴표 보존)
 const viewerParams = computed(() => viewerData.value?.params_line || '')
 
 async function loadFavorites() {
+  if (images.value.length === 0) isLoading.value = true
   const backend: any = await getBackend()
   if (backend.getFavorites) {
     backend.getFavorites((json: string) => {
@@ -258,17 +284,23 @@ async function loadFavorites() {
         images.value = Array.isArray(list) ? list : []
         paging.keep(images.value.length)
       } catch {}
+      isLoading.value = false
     })
+  } else {
+    isLoading.value = false
   }
 }
 
 const viewImage = async (path: string) => {
+  const gen = ++viewerGen
   const basic: ViewerData = { path, filename: filenameOf(path), mediaType: mediaLabel(path), size: '—' }
   // 영상·오디오는 Pillow 메타 슬롯으로 보내지 않는다
   if (!isImage(path)) { viewerData.value = basic; return }
   const backend: any = await getBackend()
+  if (gen !== viewerGen) return
   if (!backend.getImageExif) { viewerData.value = basic; return }
   backend.getImageExif(path, (json: string) => {
+    if (gen !== viewerGen) return
     try {
       const d = JSON.parse(json)
       viewerData.value = d?.error ? basic : { ...basic, ...d, path, filename: basic.filename, mediaType: basic.mediaType }
@@ -292,7 +324,7 @@ function removeFav(path: string) {
   requestAction('remove_favorite', { path })
   images.value = images.value.filter(i => i !== path)   // EXIF 필터 결과도 현재 목록과의 교집합이라 함께 빠진다
   exifSearchState.forget(path)
-  if (isSameImagePath(viewerData.value?.path, path)) viewerData.value = null
+  if (isSameImagePath(viewerData.value?.path, path)) closeViewer()
 }
 function ctxRemoveFav() { removeFav(ctxMenu.value.path); hideMenu() }
 /** 복사는 클릭 처리 안에서 바로 시작한다(웹 브라우저 클립보드는 사용자 동작 안에서만 쓸 수 있다). */
@@ -315,13 +347,17 @@ async function copySection(text: string, label: string) {
   requestAction('show_toast', { type: ok ? 'success' : 'error', msg: ok ? `${label} 복사됨` : '클립보드에 복사하지 못했습니다' })
 }
 
+let firstActivate = true
 onMounted(() => { loadFavorites() })
 
 // 라우터가 <keep-alive> 로 감싸므로 탭을 다시 열어도 onMounted 는 안 돈다.
-// 갤러리에서 즐겨찾기를 더하고 이 탭으로 오면 옛 목록이 그대로 보였다 —
-// 목록을 밀어 주는 이벤트가 따로 없어서, 들어올 때마다 다시 읽는다.
-// (GalleryView 가 같은 이유로 onActivated 에서 loadImages 를 부른다.)
-onActivated(() => { loadFavorites(); fillViewport() })
+// 최초 마운트 직후 onActivated 중복 로드는 firstActivate 로 건너뛴다.
+onActivated(() => {
+  if (firstActivate) { firstActivate = false; fillViewport(); return }
+  loadFavorites()
+  fillViewport()
+})
+onDeactivated(() => { paging.reset() })
 
 onUnmounted(() => { searchTexts.dispose() })
 </script>
@@ -337,14 +373,14 @@ onUnmounted(() => { searchTexts.dispose() })
 /* 카드 안 이미지·영상·오디오·종류 배지는 galleryShared.css (갤러리와 공용) */
 
 /* 이전 Favorites 중앙 모달 뷰어 복원 */
-.viewer-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; display: flex; align-items: center; justify-content: center; }
+.viewer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: var(--z-modal, 2000); display: flex; align-items: center; justify-content: center; }
 /* 떠 있는 모달이라 --bg-secondary 가 아니라 --bg-card — 안쪽 pre(--bg-input)와 면이 겹치지 않아야 한다 */
 .viewer-panel { width: 85%; height: 85%; background: var(--bg-card); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); }
 .viewer-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--rule); }
 .viewer-header span { font-size: 12px; color: var(--text-muted); }
 .viewer-close { background: none; border: none; color: var(--state-alert-fg); font-size: 18px; cursor: pointer; }
 .viewer-body { flex: 1; display: flex; overflow: hidden; }
-.viewer-img { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--bg-primary); padding: 16px; }
+.viewer-img { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--bg-primary); padding: 16px; }
 .viewer-img img, .viewer-img video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .viewer-img audio { width: min(620px, 90%); }
 .viewer-info { width: 460px; max-width: 46vw; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; border-left: 1px solid var(--rule); }
@@ -353,9 +389,9 @@ onUnmounted(() => { searchTexts.dispose() })
 .vi-head label { color: var(--accent); font-size: 11px; font-weight: var(--fw-bold); letter-spacing: 0; margin: 0; }
 .vi-head label.neg { color: var(--state-alert-fg); }
 .vi-pre-wrap { position: relative; }
-.vi-copy-float { position: absolute; top: 7px; right: 7px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; background: rgba(20,20,20,0.5); border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; color: var(--text-primary); font-size: 14px; cursor: pointer; opacity: 0.5; backdrop-filter: blur(3px); transition: opacity .15s, background .15s, border-color .15s; z-index: 2; }
-.vi-pre-wrap:hover .vi-copy-float { opacity: 0.85; }
-.vi-copy-float:hover { opacity: 1 !important; background: rgba(45,45,45,0.9); border-color: var(--accent); color: var(--accent); }
+.vi-copy-float { position: absolute; top: 7px; right: 7px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; background: var(--bg-button); border: 1px solid var(--border); border-radius: 7px; color: var(--text-primary); font-size: 14px; cursor: pointer; opacity: 0.7; backdrop-filter: blur(3px); transition: opacity .15s, background .15s, border-color .15s; z-index: 2; }
+.vi-pre-wrap:hover .vi-copy-float { opacity: 0.9; }
+.vi-copy-float:hover { opacity: 1 !important; background: var(--bg-button-hover); border-color: var(--accent); color: var(--accent); }
 .vi-section pre { color: var(--text-secondary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; background: var(--bg-input); padding: 12px 14px; border-radius: 6px; margin: 0; max-height: 360px; overflow-y: auto; }
 .vi-actions-section { margin-top: auto; padding-top: 12px; }
 .vi-actions-label { display: block; font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--text-muted); letter-spacing: 0; margin-bottom: 8px; }
@@ -373,4 +409,6 @@ onUnmounted(() => { searchTexts.dispose() })
 
 .pop-enter-active { transition: all 0.12s; }
 .pop-enter-from { opacity: 0; transform: scale(0.95); }
+.spinner { width: 32px; height: 32px; border: 3px solid var(--rule); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -7,7 +7,7 @@ import { nextTick } from 'vue'
 const mocks = vi.hoisted(() => ({ actionSpy: vi.fn() }))
 vi.mock('../stores/widgetStore.js', () => ({ requestAction: mocks.actionSpy }))
 
-import { HIGH_RES_SAVE_DEBOUNCE_MS, useHighRes } from './useHighRes.js'
+import { HIGH_RES_SAVE_DEBOUNCE_MS, useHighRes } from './useHighRes'
 
 let storage: Map<string, string>
 

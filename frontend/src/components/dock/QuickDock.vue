@@ -107,7 +107,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onPointerDown, tru
    클래스 이름은 그대로 둔다: 아이콘 모션(styles/iconMotion*.css)의 '.queue-pin.running' 재생 표시가 건다. */
 .queue-pin {
   position: fixed; right: 18px; bottom: 32px;  /* 하단 VRAM 바(22px) 위로 띄움 */
-  z-index: 2400; display: flex; align-items: center; gap: var(--sp-2);
+  z-index: var(--z-dock); display: flex; align-items: center; gap: var(--sp-2);
   height: 34px; padding: 0 var(--sp-3) 0 var(--sp-4); border-radius: 18px;
   background: var(--bg-button); border: 1px solid var(--border); color: var(--text-muted);
   font-size: var(--fs-meta); font-weight: var(--fw-bold); letter-spacing: 0; cursor: pointer;
@@ -133,7 +133,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onPointerDown, tru
 
 /* ── 펼친 아이콘 줄 — 핀 바로 위, 오른쪽 끝을 맞춘 세로 줄 ── */
 .qdk-menu {
-  position: fixed; right: 18px; bottom: 74px; z-index: 2410;
+  position: fixed; right: 18px; bottom: 74px; z-index: var(--z-dock-menu);
   display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-2);
 }
 .qdk-item {

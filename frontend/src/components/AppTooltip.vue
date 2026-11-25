@@ -146,7 +146,7 @@ onUnmounted(() => {
 <style>
 .app-tooltip {
   position: fixed;
-  z-index: 2147483647;
+  z-index: var(--z-tooltip);
   width: max-content;
   max-width: min(460px, calc(100vw - 24px));
   padding: 10px 12px;

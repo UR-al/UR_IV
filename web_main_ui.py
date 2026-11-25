@@ -280,6 +280,8 @@ class WebBridgeFacade(QObject):
         super().__init__(parent)
         self._bridge = bridge
         self._signal_links = []
+        # 최신 backendStatus 를 보관해 뒤늦게 붙거나 재접속한 브라우저 탭에도 즉시 재전송한다.
+        self._last_backend_status_args = None
         for name in sorted(_WEB_SIGNALS):
             signal = getattr(bridge, name, None)
             if signal is None or not hasattr(signal, "connect"):
@@ -290,9 +292,20 @@ class WebBridgeFacade(QObject):
 
     def _forward_event(self, name, *args):
         try:
-            self.event.emit(name, json.dumps(list(args), ensure_ascii=False))
+            encoded = json.dumps(list(args), ensure_ascii=False)
+            if name == "backendStatus":
+                self._last_backend_status_args = encoded
+            self.event.emit(name, encoded)
         except Exception as e:
             print(f"[web] event 직렬화 실패({name}): {e}")
+
+    def replay_cached_events(self):
+        """늦게 접속/재접속한 웹 클라이언트에 캐시된 backendStatus 를 다시 보낸다."""
+        if self._last_backend_status_args is not None:
+            try:
+                self.event.emit("backendStatus", self._last_backend_status_args)
+            except RuntimeError:
+                pass
 
     @pyqtSlot(result=str)
     def getCapabilities(self) -> str:
@@ -313,6 +326,9 @@ class WebBridgeFacade(QObject):
             if not isinstance(args, list):
                 raise ValueError("arguments must be a JSON array")
             value = target(*args)
+            if method == "getInitialConfig" and self._last_backend_status_args is not None:
+                # 새/재접속 클라이언트가 event 구독을 마친 뒤 getInitialConfig 를 부를 때 최신 상태를 재전송
+                QTimer.singleShot(0, self.replay_cached_events)
             return json.dumps({"ok": True, "value": value}, ensure_ascii=False)
         except Exception as e:
             print(f"[web] bridge 호출 실패({method}): {e}")
@@ -356,10 +372,11 @@ class WebSocketTransport(QWebChannelAbstractTransport):
 class WebChannelServer(QObject):
     """WebSocket 서버를 띄우고 새 연결마다 channel에 transport를 연결한다."""
 
-    def __init__(self, channel, host, port, on_first_client=None):
+    def __init__(self, channel, host, port, on_first_client=None, on_client_connected=None):
         super().__init__()
         self._channel = channel
         self._on_first_client = on_first_client
+        self._on_client_connected = on_client_connected
         self._had_client = False
         self._connections = []  # [(socket, transport)]
         self.server = QWebSocketServer(
@@ -371,7 +388,7 @@ class WebChannelServer(QObject):
                 f"WebSocket 서버가 포트 {port} 에서 listen 실패: {self.server.errorString()}"
             )
         self.server.newConnection.connect(self._on_new_connection)
-        print(f"[web] WebChannel(WebSocket) listening on ws://{host}:{port}")
+        print(f"[web] WebChannel(WebSocket) listening on ws://{_format_url_host(host)}:{port}")
 
     def _on_new_connection(self):
         socket = self.server.nextPendingConnection()
@@ -396,6 +413,8 @@ class WebChannelServer(QObject):
             self._had_client = True
             if self._on_first_client:
                 self._on_first_client()
+        if callable(self._on_client_connected):
+            self._on_client_connected()
 
     def _is_authorized(self, socket) -> bool:
         """세션 쿠키와 동일 출처 Origin을 모두 만족해야 연결한다."""
@@ -681,13 +700,21 @@ def _prune_web_thumb_cache():
         print(f"[web] 썸네일 캐시 정리 실패(무시): {e}")
 
 
+def _format_url_host(host: str) -> str:
+    """IPv6 리터럴 주소(::1 등)는 RFC 3986 형식대로 대괄호로 감싼다."""
+    value = str(host or "").strip()
+    if ":" in value and not value.startswith("["):
+        return f"[{value}]"
+    return value
+
+
 def _start_http_server():
     httpd = ThreadingHTTPServer((BIND_HOST, HTTP_PORT), _DistHandler)
     httpd.daemon_threads = True
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     threading.Thread(target=_prune_web_thumb_cache, daemon=True, name="web-thumb-prune").start()
-    print(f"[web] HTTP 정적 서버: http://{BIND_HOST}:{HTTP_PORT}")
+    print(f"[web] HTTP 정적 서버: http://{_format_url_host(BIND_HOST)}:{HTTP_PORT}")
     return httpd
 
 
@@ -695,21 +722,28 @@ def _start_http_server():
 # 웹 모드 시작 시퀀스 — 임베드 Vue 로드/대기는 건너뛰고 백엔드만 준비
 # ──────────────────────────────────────────────────────────────────────────
 def _flush_window_state_on_quit(window) -> None:
-    """웹 모드 종료(aboutToQuit) — 모아 둔 덱 진행도와 대기열을 저장한다.
+    """웹 모드 종료(aboutToQuit) — 덱·대기열·설정 저장, 훅 정리, 실행 중 QThread 정지/대기.
 
     덱 진행도는 뽑을 때마다 쓰지 않고 모아 둔다(core.search_deck.DeckSaveThrottle). 대기열도
     변경을 모아 한 번에 쓴다(widgets/queue_panel.py PERSIST_DELAY_MS). 데스크톱은 _quit_app 이
-    저장하지만 웹 모드는 그 경로를 타지 않아, 여기서 안 쓰면 마지막 저장 뒤 뽑은 진행(최대 19장)과
-    마지막 대기열 변경이 사라진다. 종료를 막지 않도록 실패는 기록만 한다.
+    저장·정리하지만 웹 모드는 그 경로를 타지 않아, 여기서 설정·워커까지 함께 정리해야
+    Ctrl+C 종료 시 미저장 설정 유실이나 `QThread: Destroyed while thread is still running` 크래시가
+    나지 않는다. 종료를 막지 않도록 실패는 기록만 한다.
     """
-    for name, label in (('_flush_deck_state', '덱 진행도'), ('_flush_queue_state', '대기열')):
-        flush = getattr(window, name, None)
-        if not callable(flush):
+    for name, label in (
+        ('_flush_deck_state', '덱 진행도 저장'),
+        ('_flush_queue_state', '대기열 저장'),
+        ('_save_shutdown_state', '설정 저장'),
+        ('_shutdown_hooks_and_workers', '워커·훅 정리'),
+        ('_stop_owned_backend_runtimes', '관리 백엔드 종료'),
+    ):
+        fn = getattr(window, name, None)
+        if not callable(fn):
             continue
         try:
-            flush()
+            fn()
         except Exception as exc:
-            print(f"[web] {label} 저장 실패(계속 종료): {exc}")
+            print(f"[web] {label} 실패(계속 종료): {exc}")
     try:
         undo_manager = getattr(window, '_history_trash_undo', None)
         if undo_manager is not None:
@@ -820,7 +854,12 @@ def main():
     # QWebChannel owns the QObject too, but explicit Python references make the
     # lifetime contract clear and prevent wrapper collection during long jobs.
     window.web_studio_transport = web_studio_transport
-    web_server = WebChannelServer(channel, BIND_HOST, WS_PORT)
+    web_server = WebChannelServer(
+        channel,
+        BIND_HOST,
+        WS_PORT,
+        on_client_connected=lambda: QTimer.singleShot(200, web_bridge.replay_cached_events),
+    )
 
     # HTTP 정적 서버 + 브라우저 오픈
     http_server = _start_http_server()
@@ -835,7 +874,7 @@ def main():
     except Exception as exc:
         print(f"[Generation API] startup skipped: {exc}")
     browser_host = "127.0.0.1" if BIND_HOST in ("0.0.0.0", "::") else BIND_HOST
-    url = f"http://{browser_host}:{HTTP_PORT}/?token={SESSION_TOKEN}"
+    url = f"http://{_format_url_host(browser_host)}:{HTTP_PORT}/?token={SESSION_TOKEN}"
     print("=" * 60)
     print(f"[web] 인증된 브라우저 URL:  {url}")
     if BIND_HOST in ("0.0.0.0", "::"):

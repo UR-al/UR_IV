@@ -77,7 +77,7 @@ it.each(['Flux.', 'flux', 'Flux?', 'Fl/ux', 'FLUX..', ' Flux '])('%j is the same
   mgr.saveCurrentAsProfile()
   const trimmed = typed.trim()
   const asked = vi.mocked(window.confirm).mock.calls[0][0]
-  if (trimmed !== 'Flux') expect(asked).toContain("기존 프로파일 'Flux'")
+  if (trimmed !== 'Flux') expect(asked).toContain("기존 프로필 'Flux'")
   expect(requestAction).toHaveBeenCalledWith('workflow_profile_save', { name: trimmed, overwrite: true })
 })
 

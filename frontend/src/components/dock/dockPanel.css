@@ -8,7 +8,7 @@
   top: calc(var(--notif-gutter) + var(--sp-1));
   right: 18px;
   bottom: 76px;
-  z-index: 2380;
+  z-index: var(--z-dock-panel);
   display: flex;
   flex-direction: column;
   max-width: calc(100vw - 36px);
