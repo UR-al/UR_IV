@@ -1,15 +1,15 @@
 <template>
   <Teleport to="body">
-    <div class="toast-container" :class="{ 'toast-multi': toasts.length > 1 }">
+    <div class="toast-container" :class="{ 'toast-multi': toasts.length > 1 }" aria-live="polite" aria-atomic="false">
       <button v-if="toasts.length > 1" class="toast-clear-all" @click="clearAllToasts" title="모두 닫기">
         모두 닫기 ({{ toasts.length }})
       </button>
       <transition-group name="toast" tag="div" class="toast-stack">
-        <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">
+        <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type" :role="t.type === 'error' ? 'alert' : 'status'">
           <span class="toast-icon"><Icon :name="t.type === 'error' ? 'alert' : t.type === 'success' ? 'check' : 'info'" /></span>
           <span class="toast-msg">{{ t.msg }}</span>
           <span v-if="t.count > 1" class="toast-count">×{{ t.count }}</span>
-          <button class="toast-close" @click.stop="removeToast(t.id)" title="닫기"><Icon name="close" /></button>
+          <button class="toast-close" @click.stop="removeToast(t.id)" title="닫기" aria-label="알림 닫기"><Icon name="close" /></button>
         </div>
       </transition-group>
     </div>
@@ -29,7 +29,7 @@ const { toasts, removeToast, clearAllToasts } = useToasts()
    이라 테마와 무관하다. --text-primary 를 쓰면 라이트에서 검은 글자가 빨간
    토스트에 얹혀 읽히지 않는다. .toast-clear-all 도 면이 rgba(0,0,0,.6) 고정이다. */
 .toast-container {
-  position: fixed; top: 70px; right: 20px; z-index: 99999;
+  position: fixed; top: 70px; right: 20px; z-index: var(--z-toast);
   display: flex; flex-direction: column; gap: 6px; pointer-events: none;
   max-width: 400px;
 }

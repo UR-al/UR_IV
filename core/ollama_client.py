@@ -734,8 +734,8 @@ class OllamaClient:
                     clean_nl = _extract_final_nl(clean_nl)   # 추론형 모델: 사고과정 제거하고 최종 캡션만
                     clean_nl = _enforce_nl_style(clean_nl)   # 순수 자연어: 콤마X/대문자/마침표
                 return clean_nl
-            # 코드블록 제거
-            response = re.sub(r'```[^`]*```', '', response, flags=re.DOTALL).strip()
+            # 코드펜스 마커만 제거 (언어 라벨은 줄바꿈이 뒤따를 때만 제거해 내부 태그 보존)
+            response = re.sub(r'```(?:[a-zA-Z0-9_-]+[ \t]*\r?\n)?([\s\S]*?)```', r'\1', response).strip()
             # 번호 매기기 제거 (1. tag, 2. tag)
             response = re.sub(r'^\d+[\.\)]\s*', '', response, flags=re.MULTILINE)
             # 줄바꿈 → 콤마

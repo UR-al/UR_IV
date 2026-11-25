@@ -260,26 +260,27 @@ class PromptHandlingMixin:
             return result
 
         # 8. UI 업데이트 (prefix/suffix/neg는 base에서 복원 → 조건부 누적 방지 + 와일드카드 템플릿 보존)
+        _prev_prog = getattr(self, 'is_programmatic_change', False)
         self.is_programmatic_change = True
+        try:
+            self.char_count_input.setText(", ".join(escape(final_count)))
+            self.character_input.setText(", ".join(escape(character_list)))
+            self.copyright_input.setText(", ".join(escape(copyright_list)))
 
-        self.char_count_input.setText(", ".join(escape(final_count)))
-        self.character_input.setText(", ".join(escape(character_list)))
-        self.copyright_input.setText(", ".join(escape(copyright_list)))
+            if not keep_current_artist:
+                self.artist_input.setPlainText(", ".join(escape(artist_list)))
 
-        if not keep_current_artist:
-            self.artist_input.setPlainText(", ".join(escape(artist_list)))
+            self.main_prompt_text.setPlainText(", ".join(escape(final_general)))
 
-        self.main_prompt_text.setPlainText(", ".join(escape(final_general)))
-
-        # prefix/suffix/neg를 base 값에서 복원 (매 사이클 시작 시 원본 템플릿)
-        if hasattr(self, 'base_prefix_prompt'):
-            self.prefix_prompt_text.setPlainText(self.base_prefix_prompt)
-        if hasattr(self, 'base_suffix_prompt'):
-            self.suffix_prompt_text.setPlainText(self.base_suffix_prompt)
-        if hasattr(self, 'base_neg_prompt'):
-            self.neg_prompt_text.setPlainText(self.base_neg_prompt)
-
-        self.is_programmatic_change = False
+            # prefix/suffix/neg를 base 값에서 복원 (매 사이클 시작 시 원본 템플릿)
+            if hasattr(self, 'base_prefix_prompt'):
+                self.prefix_prompt_text.setPlainText(self.base_prefix_prompt)
+            if hasattr(self, 'base_suffix_prompt'):
+                self.suffix_prompt_text.setPlainText(self.base_suffix_prompt)
+            if hasattr(self, 'base_neg_prompt'):
+                self.neg_prompt_text.setPlainText(self.base_neg_prompt)
+        finally:
+            self.is_programmatic_change = _prev_prog
 
         # 9. 캐릭터 특징 자동 추가
         if (hasattr(self, 'chk_auto_char_features') and
@@ -297,16 +298,19 @@ class PromptHandlingMixin:
         if wc_enabled:
             from utils.file_wildcard import resolve_file_wildcards
             from utils.wildcard import process_wildcards
+            _prev_wc = getattr(self, 'is_programmatic_change', False)
             self.is_programmatic_change = True
-            for widget in (self.main_prompt_text, self.prefix_prompt_text,
-                           self.suffix_prompt_text, self.neg_prompt_text):
-                text = widget.toPlainText()
-                if not text.strip():
-                    continue
-                resolved = process_wildcards(resolve_file_wildcards(text))
-                if resolved != text:
-                    widget.setPlainText(resolved)
-            self.is_programmatic_change = False
+            try:
+                for widget in (self.main_prompt_text, self.prefix_prompt_text,
+                               self.suffix_prompt_text, self.neg_prompt_text):
+                    text = widget.toPlainText()
+                    if not text.strip():
+                        continue
+                    resolved = process_wildcards(resolve_file_wildcards(text))
+                    if resolved != text:
+                        widget.setPlainText(resolved)
+            finally:
+                self.is_programmatic_change = _prev_wc
 
         # 12. 조건부 프롬프트 2차 적용 (와일드카드 해석 후 새 태그에 대해)
         if wc_enabled:
@@ -463,34 +467,40 @@ class PromptHandlingMixin:
 
         # 2.5 override 교체: 충돌하던 기존 태그를 main에서 제거 (제거 후 아래에서 특징 추가)
         if removals:
+            _prev_rem = getattr(self, 'is_programmatic_change', False)
             self.is_programmatic_change = True
-            kept = []
-            main_text = self.main_prompt_text.toPlainText()
-            # 주석(// · /* */)이 있으면 주석을 태그에 붙인 채로 나누고(줄 주석 뒤 줄바꿈 = 경계) 줄바꿈으로 다시 잇는다
-            from core.prompt_comments import has_prompt_comment
-            from utils.condition_block import join_tags, split_tags
-            commented = has_prompt_comment(main_text)
-            for t in (split_tags(main_text) if commented else main_text.split(",")):
-                ts = t.strip()
-                if not ts:
-                    continue
-                code = strip_prompt_comments(ts).strip() if commented else ts
-                tnorm = code.lower().replace("_", " ").replace(r"\(", "(").replace(r"\)", ")")
-                if tnorm and tnorm in removals:
-                    continue
-                kept.append(ts)
-            self.main_prompt_text.setPlainText(join_tags(kept) if commented else ", ".join(kept))
-            self.is_programmatic_change = False
+            try:
+                kept = []
+                main_text = self.main_prompt_text.toPlainText()
+                # 주석(// · /* */)이 있으면 주석을 태그에 붙인 채로 나누고(줄 주석 뒤 줄바꿈 = 경계) 줄바꿈으로 다시 잇는다
+                from core.prompt_comments import has_prompt_comment
+                from utils.condition_block import join_tags, split_tags
+                commented = has_prompt_comment(main_text)
+                for t in (split_tags(main_text) if commented else main_text.split(",")):
+                    ts = t.strip()
+                    if not ts:
+                        continue
+                    code = strip_prompt_comments(ts).strip() if commented else ts
+                    tnorm = code.lower().replace("_", " ").replace(r"\(", "(").replace(r"\)", ")")
+                    if tnorm and tnorm in removals:
+                        continue
+                    kept.append(ts)
+                self.main_prompt_text.setPlainText(join_tags(kept) if commented else ", ".join(kept))
+            finally:
+                self.is_programmatic_change = _prev_rem
 
         if new_tags:
+            _prev_new = getattr(self, 'is_programmatic_change', False)
             self.is_programmatic_change = True
-            current = self.main_prompt_text.toPlainText().strip()
-            insert = ", ".join(new_tags)
-            if current:
-                self.main_prompt_text.setPlainText(f"{insert}, {current}")
-            else:
-                self.main_prompt_text.setPlainText(insert)
-            self.is_programmatic_change = False
+            try:
+                current = self.main_prompt_text.toPlainText().strip()
+                insert = ", ".join(new_tags)
+                if current:
+                    self.main_prompt_text.setPlainText(f"{insert}, {current}")
+                else:
+                    self.main_prompt_text.setPlainText(insert)
+            finally:
+                self.is_programmatic_change = _prev_new
 
         # 3. 캐릭터별 조건부 프롬프트 적용 — 전역 조건식과 같은 뜻(포지티브 기준 쉼표 AND 조건,
         #    태그 단위 replace·remove). neg 는 조건에 넣지 않고 neg add 중복 판정에만 쓴다.
@@ -617,13 +627,15 @@ class PromptHandlingMixin:
         """
         automating = bool(getattr(self, 'is_automating', False))
         if not self.shuffled_prompt_deck:
+            from ui.status_line import notify_or_message_box
             if not self.filtered_results:
                 if automating and hasattr(self, '_stop_automation'):
                     self._stop_automation("검색 결과가 없어 자동화를 중지했습니다.")
                 else:
-                    QMessageBox.warning(
-                        self, "Error",
-                        "No prompts available. Run a search first."
+                    notify_or_message_box(
+                        self, 'warning', "Error",
+                        "No prompts available. Run a search first.",
+                        box=QMessageBox,
                     )
                 return False
             from core.search_deck import NO_ELIGIBLE_MESSAGE, refill_owner_deck
@@ -632,15 +644,16 @@ class PromptHandlingMixin:
                 if automating and hasattr(self, '_stop_automation'):
                     self._stop_automation(NO_ELIGIBLE_MESSAGE)
                 else:
-                    QMessageBox.warning(self, "Notice", NO_ELIGIBLE_MESSAGE)
+                    notify_or_message_box(self, 'warning', "Notice", NO_ELIGIBLE_MESSAGE, box=QMessageBox)
                 return False
             if automating:
                 # 자동화 도중 모달을 띄우면 사람이 누를 때까지 멈춘다 — 상태로만 알린다.
                 self.show_status(f"🔄 덱을 다시 채웠습니다 ({len(self.shuffled_prompt_deck)})")
             else:
-                QMessageBox.information(
-                    self, "Notice",
-                    "All prompts used once. Reshuffling deck."
+                notify_or_message_box(
+                    self, 'info', "Notice",
+                    "All prompts used once. Reshuffling deck.",
+                    box=QMessageBox,
                 )
 
         random_bundle = self.shuffled_prompt_deck.pop()

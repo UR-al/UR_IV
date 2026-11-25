@@ -99,4 +99,18 @@ describe('thumbnail urls', () => {
     expect(withUrlVersion('blob:abc', '1')).toBe('blob:abc')
     expect(withUrlVersion('', '1')).toBe('')
   })
+
+  it('decodes valid percent sequences alongside literal "%" and preserves UNC hosts (B-30)', () => {
+    expect(mediaUrl('file://server/share/a%20b.png')).toBe('file://server/share/a%20b.png')
+    expect(mediaUrl('\\\\server\\share\\a.png')).toBe('file://server/share/a.png')
+    expect(mediaUrl('//server/share/a#1.png')).toBe('file://server/share/a%231.png')
+
+    g.window = { __AISTUDIO_WS_PORT__: 7801 }
+    expect(mediaUrl('file:///C:/%ED%95%9C%EA%B8%80/100%.png'))
+      .toBe('/file?path=' + encodeURIComponent('C:/한글/100%.png'))
+    expect(mediaUrl('file://server/share/a%20b.png'))
+      .toBe('/file?path=' + encodeURIComponent('//server/share/a b.png'))
+    expect(thumbnailUrl('file://server/share/a%20b.png', 300))
+      .toBe('/thumbnail?path=' + encodeURIComponent('//server/share/a b.png') + '&width=384')
+  })
 })

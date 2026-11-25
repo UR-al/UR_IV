@@ -6,11 +6,15 @@ No Qt or ComfyUI imports; the caller passes ``folder_paths.get_user_directory()`
 import hashlib
 import json
 import logging
+import threading
 from pathlib import Path
 
+from . import lora_samples
 from .lora_atomic import atomic_path
 
 log = logging.getLogger(__name__)
+
+_LOCK = threading.Lock()
 
 SETTINGS_FILE = "lora_browser.json"
 PREFS_FILE = "lora_prefs.json"
@@ -106,32 +110,37 @@ def _previews(dir) -> dict:
     return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
 
 
-def set_custom_preview(dir, run_key: str, image, size: int) -> str:
+def set_custom_preview(dir, run_key: str, image, size: int, *, max_pixels: int | None = None) -> str:
     from PIL import Image  # lazy: only needed when a preview is set
 
     dir = Path(dir)
     name = _preview_name(run_key)
     target = dir / PREVIEWS_DIR / name
     target.parent.mkdir(parents=True, exist_ok=True)
+    limit = lora_samples.MAX_COVER_PIXELS if max_pixels is None else max_pixels
     with Image.open(image) as im:
+        if limit is not None and im.size[0] * im.size[1] > limit:
+            raise ValueError(f"image too large for a preview: {im.size[0]}x{im.size[1]}")
         im.load()
         im = im.convert("RGBA" if "A" in im.getbands() else "RGB")
         im.thumbnail((size, size))
         with atomic_path(target) as tmp:
             im.save(tmp, format="WEBP", quality=85)
-    index = _previews(dir)
-    index[run_key] = name
-    _write_json(dir / PREVIEWS_INDEX, index)
+    with _LOCK:
+        index = _previews(dir)
+        index[run_key] = name
+        _write_json(dir / PREVIEWS_INDEX, index)
     return name
 
 
 def clear_custom_preview(dir, run_key: str) -> None:
     dir = Path(dir)
-    index = _previews(dir)
-    name = index.pop(run_key, None)
-    if name is None:
-        return
-    _write_json(dir / PREVIEWS_INDEX, index)
+    with _LOCK:
+        index = _previews(dir)
+        name = index.pop(run_key, None)
+        if name is None:
+            return
+        _write_json(dir / PREVIEWS_INDEX, index)
     try:
         (dir / PREVIEWS_DIR / _preview_name(run_key)).unlink()
     except OSError:

@@ -1,8 +1,11 @@
 # utils/prompt_history.py
 """최근 프롬프트 히스토리 관리"""
+import logging
 import os
 
 from utils.atomic_json import atomic_write_json, load_json_safe
+
+_logger = logging.getLogger(__name__)
 
 _HISTORY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'user_data', 'prompt_history.json')
 _MAX_HISTORY = 50
@@ -17,8 +20,8 @@ def _save(history: list[dict]):
     """히스토리 파일 저장"""
     try:
         atomic_write_json(_HISTORY_FILE, history[:_MAX_HISTORY])
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.warning("프롬프트 히스토리 저장 실패: %s", exc)
 
 
 def add_entry(prompt: str, negative: str):

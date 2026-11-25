@@ -120,7 +120,11 @@ class TileRepairActionsMixin:
         event = {"action": action, "requestId": request_id if isinstance(request_id, str) else "", "ok": False}
         try:
             if getattr(self, "web_mode", False):
-                raise ValueError("Tile & Repair 는 로컬 앱에서만 사용할 수 있습니다.")
+                from core.web_action_policy import web_blocked_message
+                msg = web_blocked_message(action)
+                from ui.status_line import notify_user
+                notify_user(self, "warning", msg)
+                raise ValueError(msg)
             if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
                 raise ValueError("작업 식별자가 올바르지 않습니다. 패널을 다시 열어 주세요.")
             self._tile_repair_ensure()

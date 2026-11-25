@@ -124,7 +124,8 @@ class ActionsMixin:
         if bridge is not None and hasattr(bridge, 'showNotification'):
             bridge.showNotification.emit('warning', message)
         else:
-            QMessageBox.warning(self, "알림", message)
+            from ui.status_line import notify_or_message_box
+            notify_or_message_box(self, 'warning', "알림", message, box=QMessageBox)
 
     # ── 덱 진행도 영속 (재시작 시 '얼마나 뽑았는지' 복원) ────────────────
     def _deck_state_path(self):
@@ -255,8 +256,9 @@ class ActionsMixin:
 
     def _start_automation(self):
         """자동화 시작"""
+        from ui.status_line import notify_or_message_box
         if not self.filtered_results:
-            QMessageBox.warning(self, "알림", "먼저 검색을 수행하세요.")
+            notify_or_message_box(self, 'warning', "알림", "먼저 검색을 수행하세요.", box=QMessageBox)
             return
         # 대기열이 돌고 있으면(일시정지 포함) 시작하지 않는다 — 둘 다 같은 대기열·워커를 쓴다.
         # 예전엔 자동화 '큐 우선'과 대기열 매니저가 같은 항목을 보내고 서로의 '생성 중' 표시를 풀었다.
@@ -275,7 +277,7 @@ class ActionsMixin:
         if not self.shuffled_prompt_deck:
             refill_owner_deck(self, emit=False)
         if not self.shuffled_prompt_deck:
-            QMessageBox.warning(self, "알림", NO_ELIGIBLE_MESSAGE)
+            notify_or_message_box(self, 'warning', "알림", NO_ELIGIBLE_MESSAGE, box=QMessageBox)
             return
 
         self.is_automating = True
@@ -1078,7 +1080,8 @@ class ActionsMixin:
         
         if message:
             self.show_status(message)
-            QMessageBox.information(self, "자동화", message)
+            from ui.status_line import notify_or_message_box
+            notify_or_message_box(self, 'info', "자동화", message, box=QMessageBox)
         else:
             self.show_status(f"✅ 자동화 완료: {self.auto_gen_count}장 생성됨")
             
@@ -1096,9 +1099,11 @@ class ActionsMixin:
             added_count += 1
 
         self.show_status(f"✅ {added_count}개의 이벤트가 대기열에 추가됨")
-        QMessageBox.information(
-            self, "전송 완료",
-            f"{added_count}개의 이벤트가 대기열에 추가되었습니다."
+        from ui.status_line import notify_or_message_box
+        notify_or_message_box(
+            self, 'success', "전송 완료",
+            f"{added_count}개의 이벤트가 대기열에 추가되었습니다.",
+            box=QMessageBox,
         )
 
     def _greedy_merge_words(self, words):

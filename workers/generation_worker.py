@@ -98,6 +98,8 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
         self._backend_snapshot = backend
         self._backend_lock = threading.RLock()
         self._owned_backend = None
+        self._active_lease_cm = None
+        self._active_lease_coord = None
         self._start_time: float | None = None
         self._result_emitted = False
 
@@ -115,11 +117,46 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
             if self._owned_backend is not None:
                 self._owned_backend.interrupt()
 
+    def force_release_lease(self) -> bool:
+        """강제 종료(terminate) 최후 경로에서 GPU 리스가 영구 점유되지 않도록 명시 해제한다."""
+        with self._backend_lock:
+            cm = self._active_lease_cm
+            coord = self._active_lease_coord
+            self._active_lease_cm = None
+            self._active_lease_coord = None
+            self._owned_backend = None
+        if cm is None and coord is None:
+            return False
+        if cm is not None:
+            try:
+                cm.__exit__(None, None, None)
+                return True
+            except Exception:
+                logger.warning("force_release_lease: contextmanager exit failed, falling back", exc_info=True)
+        if coord is not None:
+            try:
+                coord._set_state("idle", "", False)
+            except Exception:
+                pass
+            try:
+                if coord._lease.locked():
+                    coord._lease.release()
+                    return True
+            except Exception:
+                logger.warning("force_release_lease: lock release failed", exc_info=True)
+        return False
+
     @contextmanager
     def _backend_lease(self, backend):
         # run() 초입의 기다림 뒤에 막 시작된 '생성 후 언로드'가 리스를 쥐었으면 그걸 기다렸다 다시 잡는다
-        with reserve_generation_lease("txt2img", coordinator=get_generation_coordinator(),
-                                      cancelled=lambda: self.is_cancelled):
+        coord = get_generation_coordinator()
+        lease_cm = reserve_generation_lease("txt2img", coordinator=coord,
+                                            cancelled=lambda: self.is_cancelled)
+        lease_cm.__enter__()
+        with self._backend_lock:
+            self._active_lease_cm = lease_cm
+            self._active_lease_coord = coord
+        try:
             with self._backend_lock:
                 if self._backend_snapshot is not None and get_backend() is not self._backend_snapshot:
                     raise _GenerationDeferred("XYZ 작업의 백엔드가 변경되었습니다. 원래 백엔드를 선택하고 대기열을 재개하세요.")
@@ -129,6 +166,21 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
             finally:
                 with self._backend_lock:
                     self._owned_backend = None
+        except BaseException as exc:
+            with self._backend_lock:
+                cm = self._active_lease_cm
+                self._active_lease_cm = None
+                self._active_lease_coord = None
+            if cm is not None:
+                if not cm.__exit__(type(exc), exc, exc.__traceback__):
+                    raise
+        else:
+            with self._backend_lock:
+                cm = self._active_lease_cm
+                self._active_lease_cm = None
+                self._active_lease_coord = None
+            if cm is not None:
+                cm.__exit__(None, None, None)
 
     def run(self):
         self._start_time = time.monotonic()
@@ -154,42 +206,40 @@ class GenerationFlowWorker(QThread, _CancellableMixin):
                 self._emit_result("생성 취소됨", {'cancelled': True})
                 return
 
+            cancelled_in_lease = False
+            result = None
             with self._backend_lease(backend):
                 if self.is_cancelled:
-                    self._emit_result("생성 취소됨", {'cancelled': True})
-                    return
-                dispatched = True
-                # cancel_check 를 넘겨야 모델 전환 중·발송 직후의 취소가 사라지지 않는다
-                # (받지 못하는 옛 어댑터·fake 에는 넘기지 않는다 — core/cancellable_call.py).
-                if generation_family == "krea2":
-                    from core.krea2_generation import run_krea2_generation
-
-                    result = call_with_optional_cancel(
-                        run_krea2_generation, backend, "t2i", payload,
-                        progress_callback=on_progress, cancel_check=self._cancel_check,
-                    )
+                    cancelled_in_lease = True
                 else:
-                    result = call_with_optional_cancel(
-                        backend.txt2img, self.model_name, payload,
-                        progress_callback=on_progress, cancel_check=self._cancel_check,
-                    )
+                    dispatched = True
+                    # cancel_check 를 넘겨야 모델 전환 중·발송 직후의 취소가 사라지지 않는다
+                    # (받지 못하는 옛 어댑터·fake 에는 넘기지 않는다 — core/cancellable_call.py).
+                    if generation_family == "krea2":
+                        from core.krea2_generation import run_krea2_generation
 
-                # 취소 후 도착한 결과(interrupt의 부분 이미지 포함)는 성공으로 emit하지 않음
-                # — 디스크 저장/히스토리/성공 통계/자동화 계속으로 이어지던 버그 방지
-                if self.is_cancelled:
-                    self._emit_result("생성 취소됨", {'cancelled': True})
-                    return
+                        result = call_with_optional_cancel(
+                            run_krea2_generation, backend, "t2i", payload,
+                            progress_callback=on_progress, cancel_check=self._cancel_check,
+                        )
+                    else:
+                        result = call_with_optional_cancel(
+                            backend.txt2img, self.model_name, payload,
+                            progress_callback=on_progress, cancel_check=self._cancel_check,
+                        )
 
-                if not result.success:
-                    self._emit_result(result.error, {})
-                    return
-
-                # ADetailer/SAM3 는 요청 안의 alwayson_scripts 로 이미 적용돼 돌아온다
-                # (ui/generator_generation._apply_postprocess_chain) — 별도 후처리 단계 없음.
-                final_image = result.image_data
-            if self.is_cancelled:
+            # 리스 해제 후 결과 emit — 취소 후 도착한 결과(interrupt의 부분 이미지 포함)는 성공으로 emit하지 않음
+            if cancelled_in_lease or self.is_cancelled:
                 self._emit_result("생성 취소됨", {'cancelled': True})
                 return
+
+            if result is None or not result.success:
+                self._emit_result(result.error if result is not None else "생성 실패", {})
+                return
+
+            # ADetailer/SAM3 는 요청 안의 alwayson_scripts 로 이미 적용돼 돌아온다
+            # (ui/generator_generation._apply_postprocess_chain) — 별도 후처리 단계 없음.
+            final_image = result.image_data
             info = dict(result.info or {})
             if xyz_info:
                 info['_xyz_info'] = xyz_info
@@ -251,34 +301,36 @@ class Img2ImgFlowWorker(QThread, _CancellableMixin):
                 return
 
             # 리스는 '생성 후 언로드'와 서로 배타 — 기다림 뒤 막 시작된 언로드면 끝나길 기다려 다시 잡는다
+            cancelled_in_lease = False
+            result = None
             with reserve_generation_lease("img2img", coordinator=get_generation_coordinator(),
                                           cancelled=lambda: self.is_cancelled):
-                # T2I 와 같은 이유로 cancel_check 를 넘긴다(모델 전환 중·발송 직후 취소)
-                if generation_family == "krea2":
-                    from core.krea2_generation import run_krea2_generation
-
-                    result = call_with_optional_cancel(
-                        run_krea2_generation, backend, "i2i", payload,
-                        progress_callback=on_progress, cancel_check=self._cancel_check,
-                    )
-                else:
-                    result = call_with_optional_cancel(
-                        backend.img2img, self.model_name, payload,
-                        progress_callback=on_progress, cancel_check=self._cancel_check,
-                    )
-
                 if self.is_cancelled:
-                    self.finished.emit("생성 취소됨", {'cancelled': True})
-                    return
+                    cancelled_in_lease = True
+                else:
+                    # T2I 와 같은 이유로 cancel_check 를 넘긴다(모델 전환 중·발송 직후 취소)
+                    if generation_family == "krea2":
+                        from core.krea2_generation import run_krea2_generation
 
-                if not result.success:
-                    self.finished.emit(result.error, {})
-                    return
+                        result = call_with_optional_cancel(
+                            run_krea2_generation, backend, "i2i", payload,
+                            progress_callback=on_progress, cancel_check=self._cancel_check,
+                        )
+                    else:
+                        result = call_with_optional_cancel(
+                            backend.img2img, self.model_name, payload,
+                            progress_callback=on_progress, cancel_check=self._cancel_check,
+                        )
 
-                final_image = result.image_data
-            if self.is_cancelled:
+            if cancelled_in_lease or self.is_cancelled:
                 self.finished.emit("생성 취소됨", {'cancelled': True})
                 return
+
+            if result is None or not result.success:
+                self.finished.emit(result.error if result is not None else "img2img 생성 실패", {})
+                return
+
+            final_image = result.image_data
             info = dict(result.info or {})
             self.finished.emit(final_image, info)
 

@@ -1768,7 +1768,7 @@ class VueBridge(QObject):
             if new_ext and not re.fullmatch(r'\.[A-Za-z0-9_-]{1,16}', new_ext):
                 stem, new_ext = new_name, ''
             new_name = sanitize_filename(stem, fallback='renamed', max_len=128) + (new_ext or '')
-            if not new_name.endswith(ext):
+            if ext and not new_name.lower().endswith(ext.lower()):
                 new_name += ext
             new_path = os.path.join(dir_path, new_name)
             if os.path.normcase(new_path) != os.path.normcase(clean) and os.path.exists(new_path):

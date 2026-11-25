@@ -143,8 +143,8 @@
         <div class="divider" />
         <label class="field wide"><span>문서 제목</span><input v-model="comicDoc.title" type="text" /></label>
         <div class="toolbar-row">
-          <button class="tool-button" :disabled="!canUndo" title="Undo" @click="undo"><Icon name="undo" /> 실행 취소</button>
-          <button class="tool-button" :disabled="!canRedo" title="Redo" @click="redo"><Icon name="redo" /> 다시 실행</button>
+          <button class="tool-button" :disabled="!canUndo" title="실행 취소" @click="undo"><Icon name="undo" /> 실행 취소</button>
+          <button class="tool-button" :disabled="!canRedo" title="다시 실행" @click="redo"><Icon name="redo" /> 다시 실행</button>
           <span class="save-state">{{ saveStatus }}</span>
         </div>
         <span class="field-caption">레이아웃</span>
@@ -175,8 +175,8 @@
         <div class="comic-stage-toolbar">
           <span>{{ comicDoc.panels.length }} PANELS · {{ comicDoc.style }}</span>
           <div>
-            <button class="tool-button" @click="exportComic('png')">PNG 내보내기</button>
-            <button class="tool-button" @click="exportComic('webp')">WebP 내보내기</button>
+            <button class="tool-button" :disabled="comicExporting" @click="exportComic('png')">PNG 내보내기</button>
+            <button class="tool-button" :disabled="comicExporting" @click="exportComic('webp')">WebP 내보내기</button>
             <button class="tool-button" :disabled="!allPanelsHaveVideos" @click="exportLivingComic">리빙 내보내기</button>
           </div>
         </div>
@@ -322,9 +322,12 @@ const selectedPanelId = ref(comicDoc.value.panels[0]?.id || '')
 const saveStatus = ref('백엔드 확인 중')
 const historyEntries = ref<string[]>([snapshot(comicDoc.value)])
 const historyIndex = ref(0)
+const comicExporting = ref(false)
 let historyTimer: ReturnType<typeof setTimeout> | null = null
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let formsTimer: ReturnType<typeof setTimeout> | null = null
+let recoveryTimer: ReturnType<typeof setTimeout> | null = null
+let recoveryPendingDirty = false
 let restoringHistory = false
 let applyingBackendDocument = false
 let persistenceReady = false
@@ -387,12 +390,32 @@ const OutputPreview = defineComponent({
   },
 })
 
+function scheduleComicRecovery(dirty: boolean) {
+  recoveryPendingDirty = recoveryPendingDirty || dirty
+  if (recoveryTimer) clearTimeout(recoveryTimer)
+  recoveryTimer = setTimeout(() => {
+    recoveryTimer = null
+    const nextDirty = recoveryPendingDirty
+    recoveryPendingDirty = false
+    void persistComicRecovery(nextDirty)
+  }, 200)
+}
+
+function flushComicRecovery() {
+  if (!recoveryTimer) return
+  clearTimeout(recoveryTimer)
+  recoveryTimer = null
+  const nextDirty = recoveryPendingDirty
+  recoveryPendingDirty = false
+  void persistComicRecovery(nextDirty)
+}
+
 watch(comicDoc, () => {
   if (applyingBackendDocument) return
   documentChangeSequence += 1
   saveStatus.value = 'SAVING...'
   pendingSave = true
-  void persistComicRecovery(true)
+  scheduleComicRecovery(true)
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(sendComicSave, 280)
   if (restoringHistory) return
@@ -448,9 +471,9 @@ watch([videoForm, kreaForm], () => {
   }, 300)
 }, { deep: true })
 
-watch(() => comicDoc.value.panels, (panels) => {
-  if (!panels.some(p => p.id === selectedPanelId.value)) selectedPanelId.value = panels[0]?.id || ''
-}, { deep: true })
+watch(() => comicDoc.value.panels.map((p) => p.id), (ids) => {
+  if (!ids.includes(selectedPanelId.value)) selectedPanelId.value = ids[0] || ''
+})
 
 function uid(prefix = 'id') {
   try { return `${prefix}-${crypto.randomUUID()}` } catch { return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}` }
@@ -817,10 +840,17 @@ async function renderComic(format: 'png' | 'webp') {
   return canvas.toDataURL(format === 'webp' ? 'image/webp' : 'image/png', 0.94)
 }
 async function exportComic(format: 'png' | 'webp') {
+  if (comicExporting.value) return
+  comicExporting.value = true
   try {
     const dataUrl = await renderComic(format)
     requestAction('comic_export_page', { format, dataUrl, document: backendComicDocument() })
-  } catch (error: any) { toast('error', `Comic export failed: ${error?.message || error}`) }
+  } catch (error: any) {
+    console.error('[CreatorStudio] 만화 내보내기 실패:', error)
+    toast('error', '만화 내보내기 실패')
+  } finally {
+    comicExporting.value = false
+  }
 }
 
 function handleCreatorState(raw: any) { creatorState.value = { ...creatorState.value, ...decodePayload(raw) } }
@@ -857,6 +887,7 @@ function handleMediaSelected(raw: any) {
 }
 
 onMounted(async () => {
+  window.addEventListener('pagehide', flushComicRecovery)
   unsubscribers.push(onBackendEvent('creatorStateChanged', handleCreatorState))
   unsubscribers.push(onBackendEvent('creatorProgress', handleProgress))
   unsubscribers.push(onBackendEvent('creatorResult', handleResult))
@@ -877,6 +908,8 @@ onMounted(async () => {
   requestAction('creator_get_state', { comicRecovery: recoveryForBackend })
 })
 onUnmounted(() => {
+  window.removeEventListener('pagehide', flushComicRecovery)
+  flushComicRecovery()
   unsubscribers.splice(0).forEach(off => { try { off() } catch {} })
   if (historyTimer) clearTimeout(historyTimer)
   if (saveTimer) clearTimeout(saveTimer)

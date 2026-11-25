@@ -537,5 +537,62 @@ class WebSlotsNeverBlockTheGuiThreadTests(unittest.TestCase):
         self.assertEqual([c for c in _calls_outside_nested_scopes(deferred) if _blocking_call_name(c)], [])
 
 
+class WebModeNoModalMessageBoxTests(unittest.TestCase):
+    """B-01 회귀 검사 — 웹 모드에서 도달 가능한 UI 핸들러가 가드 없는 모달 QMessageBox 를 부르면
+    숨겨진 호스트 데스크톱에 모달이 떠서 전체 Qt 이벤트 루프와 모든 WebSocket 요청이 영구 정지한다.
+    모든 알림은 ui.status_line.notify_or_message_box 를 거쳐 웹 모드에서는 showNotification 토스트로 전환해야 한다.
+    """
+
+    CHECKED_FILES = (
+        "ui/generator_actions.py",
+        "ui/generator_prompts.py",
+        "ui/generator_settings.py",
+        "ui/generator_webui.py",
+    )
+
+    def test_web_reachable_handlers_never_call_bare_qmessagebox(self):
+        import ast
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        offenders = []
+        for rel in self.CHECKED_FILES:
+            source = (root / rel).read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=rel)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "QMessageBox":
+                    offenders.append(f"{rel}:{node.lineno} QMessageBox.{func.attr}(...)")
+                elif isinstance(func, ast.Name) and func.id == "QMessageBox":
+                    offenders.append(f"{rel}:{node.lineno} QMessageBox(...)")
+        self.assertEqual(
+            offenders,
+            [],
+            "웹 도달 가능한 UI 모듈에서 QMessageBox 를 직접 호출했습니다 — "
+            "ui.status_line.notify_or_message_box(..., box=QMessageBox) 를 사용하세요.",
+        )
+
+    @unittest.skipIf(VueBridge is None, f"PyQt6 WebEngine unavailable: {_WEB_IMPORT_ERROR}")
+    def test_native_tab_switch_and_local_only_actions_are_blocked_in_web_mode(self):
+        bridge = VueBridge()
+        bridge._backend_runtime_is_web_mode = lambda: True
+        bridge._web_clients_are_remote = lambda: False
+        reached = []
+        notes = []
+        bridge.set_action_handler(lambda action, _payload: reached.append(action))
+        bridge.showNotification.connect(lambda level, msg: notes.append((level, msg)))
+        for action in (
+            "native_tab_switch",
+            "tile_repair_options", "tile_repair_run", "tile_repair_cancel",
+            "relight_preview", "relight_export", "relight_cancel",
+            "hand_reconstruction_generate", "hand_reconstruction_export", "hand_reconstruction_cancel",
+        ):
+            bridge.onAction(action, "{}")
+        self.assertEqual(reached, [])
+        self.assertEqual(len(notes), 10)
+        self.assertTrue(all(level == "warning" for level, _ in notes))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -91,7 +91,9 @@ GRID_SUBFOLDER = "AIStudio/xyz"
 GRID_STEM = "xyz_grid"
 MAX_AXIS_COUNT = 256
 MAX_GRID_CELLS = 2048
+MAX_GRID_TOTAL_PIXELS = 400_000_000
 MAX_MARGIN = 1000
+_LOOPBACK_REMOTES = frozenset(("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"))
 
 
 class _BadRequest(Exception):
@@ -258,6 +260,7 @@ def _load_cells(cells, nx: int, ny: int, nz: int) -> dict:
     if not isinstance(cells, list):
         raise _BadRequest("cells must be a list")
     loaded = {}
+    total_pixels = 0
     for cell in cells:
         if not isinstance(cell, dict):
             raise _BadRequest("each cell must be an object")
@@ -270,6 +273,10 @@ def _load_cells(cells, nx: int, ny: int, nz: int) -> dict:
         path = resolve_image(cell["image"])
         try:
             with Image.open(path) as image:
+                width, height = image.size
+                total_pixels += int(width) * int(height)
+                if total_pixels > MAX_GRID_TOTAL_PIXELS:
+                    raise _BadRequest(f"grid images exceed the {MAX_GRID_TOTAL_PIXELS:,} pixel limit")
                 image.load()
                 loaded[key] = image.copy()
         except (OSError, ValueError) as exc:
@@ -400,12 +407,21 @@ def handle_to_input(body) -> tuple[int, dict]:
 
 # ---------------------------------------------------------------------------------------------- aiohttp wrappers
 
-def _route(handle, *, read: str = "json"):
+def _is_loopback_request(request) -> bool:
+    remote = getattr(request, "remote", None)
+    if remote is None:
+        return True
+    return str(remote).strip().lower() in _LOOPBACK_REMOTES
+
+
+def _route(handle, *, read: str = "json", loopback_only: bool = False):
     """A thin aiohttp handler: ``read`` is ``"json"`` (request body), ``"query"`` (query string) or ``"none"``."""
 
     async def route(request):
         from aiohttp import web
 
+        if loopback_only and not _is_loopback_request(request):
+            return web.json_response({"error": "local requests only"}, status=403)
         if read == "json":
             try:
                 argument = await request.json()
@@ -432,7 +448,7 @@ def register_studio_handlers() -> None:
     add_handler("POST", "/infotext/parse", _route(handle_infotext_parse))
     add_handler("POST", "/xyz/plan", _route(handle_plan))
     add_handler("POST", "/xyz/grid", _route(handle_grid))
-    add_handler("POST", "/open_output", _route(handle_open_output, read="none"))
+    add_handler("POST", "/open_output", _route(handle_open_output, read="none", loopback_only=True))
     add_handler("POST", "/to_input", _route(handle_to_input))
     preset_routes.register_preset_handlers(add_handler, _route)  # GET / POST /presets
 

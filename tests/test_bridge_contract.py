@@ -746,6 +746,95 @@ _FE_EXPORTED = re.compile(r"\bexport\s+(?:async\s+)?(?:function\*?|const|let)\s+
 # 프론트가 브리지 객체를 담는 변수 이름(실측: backend/bk/_bk/_backend/b/host).
 _BRIDGE_RECEIVER = r"(?<![\w$.])(?:backend|_backend|bk|_bk|b|host|bridge)\??\."
 
+_WIDGET_PROXY_CLASSES = frozenset({
+    'LineEditProxy', 'TextEditProxy', 'ComboBoxProxy',
+    'CheckBoxProxy', 'ButtonProxy', 'GroupBoxProxy', 'SliderProxy',
+})
+_FE_WIDGET_DOT = re.compile(r"(?<![\w$])(?:storeWidgets|widgets)\??\.([A-Za-z_]\w*)")
+_FE_WIDGET_BRACKET = re.compile(r"(?<![\w$])(?:storeWidgets|widgets)\??\[['\"]([A-Za-z_]\w*)['\"]\]")
+_FE_WIDGET_FLAG = re.compile(r"widgetFlag\(\s*[^,]+,\s*['\"]([A-Za-z_]\w*)['\"]")
+_AD_SLOT_DYNAMIC = re.compile(r"f['\"]\{prefix\}_([A-Za-z0-9_]+)['\"]")
+
+# Python 에만 남겨 두는 내부/호환 위젯 프록시(push_to_bridge=False 인 프록시는 자동 제외된다).
+WIDGET_PROXY_INTERNAL: dict = {
+    '_guid_auto_decay': "core/anima_guidance.SPECS 의 확장 visible=False 위치 계약 자리 유지용",
+}
+
+
+def _python_widget_proxy_ids(ui_sources, ui_trees):
+    """브리지에 등록되는 모든 Python 위젯 프록시 ID (정적 생성 + 스펙 기반 동적 생성)."""
+    import dataclasses
+
+    ids = set()
+    for tree in ui_trees.values():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _call_name(node) not in _WIDGET_PROXY_CLASSES:
+                continue
+            # push_to_bridge=False 는 내부 호환용 프록시 — 브리지에 등록·송신하지 않는다.
+            push_false = any(
+                kw.arg == 'push_to_bridge'
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is False
+                for kw in node.keywords
+            )
+            if push_false:
+                continue
+            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+                ids.add(node.args[1].value)
+
+    setup_src = ui_sources.get('ui/generator_ui_setup.py', '')
+    for suffix in _AD_SLOT_DYNAMIC.findall(setup_src):
+        ids.add(f'_s1_{suffix}')
+        ids.add(f'_s2_{suffix}')
+
+    from core import (
+        anima_guidance, anima38, anima_speed, colorcraft,
+        dora_infer_mode, extra_samplers, extra_schedulers, vae_degrid,
+    )
+    for key in anima_guidance.default_settings():
+        ids.add(f'_{key}')
+    for mod in (anima38, anima_speed, colorcraft, dora_infer_mode, extra_samplers, extra_schedulers, vae_degrid):
+        keys = getattr(mod, 'DEFAULTS', None)
+        if dataclasses.is_dataclass(keys):
+            key_names = [f.name for f in dataclasses.fields(keys)]
+        elif isinstance(keys, dict):
+            key_names = list(keys.keys())
+        else:
+            key_names = []
+            for attr in ('FIELDS', 'KEYS', 'SPECS'):
+                if hasattr(mod, attr):
+                    key_names = [getattr(x, 'key', getattr(x, 'name', x)) for x in getattr(mod, attr)]
+                    break
+        for key in key_names:
+            ids.add(mod.widget_id(key))
+    return ids
+
+
+def _frontend_widget_usage(front_runtime, py_proxy_ids):
+    """(Vue 가 명시적으로 읽는 widgets.<id>/widgetFlag 집합, Vue 런타임에서 바인딩이 확인된 전체 ID 집합)."""
+    explicit = set()
+    members = set()
+    literals = _frontend_literals(front_runtime)
+    for text in front_runtime:
+        explicit.update(_FE_WIDGET_DOT.findall(text))
+        explicit.update(_FE_WIDGET_BRACKET.findall(text))
+        explicit.update(_FE_WIDGET_FLAG.findall(text))
+        members.update(_MEMBER_ACCESS.findall(text))
+    bound = explicit | literals | members
+    # 동적 접두어 위젯 바인딩:
+    # - ADetailer 슬롯(_s1_*/_s2_*): ``_s${slot}_${suffix}``
+    # - SAM3 ControlNet/FaceCrop(_sam3_*): ``sam3CnId(key)`` / ``sam3FaceCropId(key)``
+    # - ANIMA 가이던스 불리언(_dd_*/_guid_*/_skim_*/_ocfg_*): ``b(key)`` / ``setB(key, ...)``
+    for wid in py_proxy_ids:
+        for pfx in ('_s1_', '_s2_', '_sam3_'):
+            if wid.startswith(pfx) and wid[len(pfx):] in literals:
+                bound.add(wid)
+        if wid.startswith(('_dd_', '_guid_', '_skim_', '_ocfg_')) and wid[1:] in literals:
+            bound.add(wid)
+    return explicit, bound
+
 
 def _frontend_used_slot_names(slots, texts):
     """프론트가 부르는 슬롯 — `<아무것>.X` 멤버 접근이나 따옴표 리터럴 'X'.
@@ -1226,6 +1315,29 @@ class TestBridgeContract(unittest.TestCase):
         )
         self.assertIsNotNone(match)
         self.assertIn("'warning'", match.group(1))
+
+    # ── 위젯 프록시 ID 양방향 계약 (M-05) ─────────────────────────────────
+
+    def test_widget_proxy_ids_match_bidirectionally_between_python_and_vue(self):
+        """Vue 의 widgets.<id> / widgetFlag(..., '<id>') 는 Python 프록시에 있어야 하고,
+        브리지에 등록된 Python 위젯 프록시는 Vue 런타임에 바인딩되어 있어야 한다(고아 프록시 방지)."""
+        py_ids = _python_widget_proxy_ids(self.ui_sources, self.ui_trees)
+        self.assertGreater(len(py_ids), 50)
+        fe_explicit, fe_bound = _frontend_widget_usage(self.front_runtime, py_ids)
+        self.assertGreater(len(fe_explicit), 20)
+
+        missing_in_py = fe_explicit - py_ids
+        self.assertEqual(
+            missing_in_py,
+            set(),
+            f"Vue 가 참조하지만 Python 위젯 프록시가 없는 ID: {sorted(missing_in_py)}",
+        )
+        orphan_in_py = py_ids - fe_bound - set(WIDGET_PROXY_INTERNAL)
+        self.assertEqual(
+            orphan_in_py,
+            set(),
+            f"브리지에 등록됐지만 Vue 에 바인딩되지 않은 고아 Python 위젯 프록시: {sorted(orphan_in_py)}",
+        )
 
 
 _FAKE_EMIT_HELPER = '''

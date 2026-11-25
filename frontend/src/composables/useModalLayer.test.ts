@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { defineComponent, h, nextTick, ref } from 'vue'
+import { KeepAlive, defineComponent, h, nextTick, ref } from 'vue'
 import { createModalStack } from '../utils/modalStack'
 import { useModalLayer, type ModalLayerOptions } from './useModalLayer'
 import { mountFake, type Mounted } from '../testing/fakeDomRenderer'
@@ -42,5 +42,61 @@ it('leaves the stack the moment its flag turns off, even while a leave transitio
 it('does not register a modal whose flag is already off when it mounts', () => {
   const stack = createModalStack()
   mounted = mountFake(layerComponent({ stack, isOpen: () => false }))
+  expect(stack.isAnyOpen()).toBe(false)
+})
+
+it('releases its stack layer when deactivated inside KeepAlive and re-registers on reactivation (A-3)', async () => {
+  const stack = createModalStack()
+  const modalOpen = ref(true)
+  const close = vi.fn(() => { modalOpen.value = false })
+  const activeTab = ref<'gallery' | 'other'>('gallery')
+
+  const GalleryLike = defineComponent({
+    name: 'GalleryLike',
+    setup() {
+      useModalLayer({ stack, isOpen: () => modalOpen.value, close })
+      return () => h('div', 'gallery')
+    },
+  })
+  const OtherTab = defineComponent({
+    name: 'OtherTab',
+    setup: () => () => h('div', 'other'),
+  })
+  const Host = defineComponent({
+    setup: () => () => h(KeepAlive, null, {
+      default: () => (activeTab.value === 'gallery'
+        ? h(GalleryLike, { key: 'gallery' })
+        : h(OtherTab, { key: 'other' })),
+    }),
+  })
+
+  mounted = mountFake(Host)
+  expect(stack.isAnyOpen()).toBe(true)
+
+  // 다른 탭으로 이동(KeepAlive 비활성화) — 뷰어가 열린 채여도 다른 탭의 단축키를 막으면 안 된다
+  activeTab.value = 'other'
+  await nextTick()
+  expect(stack.isAnyOpen()).toBe(false)
+
+  // 비활성화 중 플래그가 토글돼도 스택에 다시 올라가면 안 된다
+  modalOpen.value = false
+  await nextTick()
+  modalOpen.value = true
+  await nextTick()
+  expect(stack.isAnyOpen()).toBe(false)
+
+  // 다시 갤러리 탭으로 복귀 — 뷰어가 여전히 열려 있으면 스택에 재등록된다
+  activeTab.value = 'gallery'
+  await nextTick()
+  expect(stack.isAnyOpen()).toBe(true)
+
+  // 비활성화 중 닫힌 상태로 복귀하면 스택에 올라가지 않는다
+  activeTab.value = 'other'
+  await nextTick()
+  expect(stack.isAnyOpen()).toBe(false)
+  modalOpen.value = false
+  await nextTick()
+  activeTab.value = 'gallery'
+  await nextTick()
   expect(stack.isAnyOpen()).toBe(false)
 })

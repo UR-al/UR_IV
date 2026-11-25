@@ -133,6 +133,7 @@ class TagClassifier:
         self.clothes: set[str] = set()
         self.characteristics: set[str] = set()
         self.colors: set[str] = set()
+        self._normalized_colors: set[str] = set()
 
         self.wiki_groups: dict[str, set[str]] = {}
         self.tag_to_category: dict[str, list[dict[str, str]]] = {}
@@ -244,6 +245,7 @@ class TagClassifier:
         self.clothes = self._read_lines(TagAsset.CLOTHING_TAGS_CURATED)
         self.characteristics = self._read_lines(TagAsset.APPEARANCE_TAGS_CURATED)
         self.colors = self._read_lines(TagAsset.COLOR_TERMS_CURATED)
+        self._normalized_colors = {_tag_key(color) for color in self.colors}
 
     def _read_lines(self, asset: TagAsset) -> set[str]:
         try:
@@ -393,8 +395,7 @@ class TagClassifier:
             return "character_trait"
 
         words = set(_tag_key(tag).split())
-        normalized_colors = {_tag_key(color) for color in self.colors}
-        if words & normalized_colors:
+        if words & self._normalized_colors:
             return "color"
         return "general"
 

@@ -16,7 +16,7 @@
         <!-- Input Card -->
         <div class="glass-card">
           <label>원본 이미지</label>
-          <div class="source-thumb" @click="triggerFileInput">
+          <div class="source-thumb" role="button" tabindex="0" aria-label="원본 이미지 선택" @click="triggerFileInput" @keydown.enter.prevent="triggerFileInput" @keydown.space.prevent="triggerFileInput">
             <img v-if="imageSrc" :src="imageSrc" />
             <div v-else class="upload-hint">비어 있음</div>
             <div class="edit-overlay">이미지 변경</div>
@@ -30,7 +30,7 @@
 
         <div v-if="isKrea2" class="glass-card krea-card">
           <label>아이덴티티 참조 <span class="optional">선택</span></label>
-          <div class="source-thumb identity-thumb" @click="triggerReferenceInput">
+          <div class="source-thumb identity-thumb" role="button" tabindex="0" aria-label="아이덴티티 참조 이미지 선택" @click="triggerReferenceInput" @keydown.enter.prevent="triggerReferenceInput" @keydown.space.prevent="triggerReferenceInput">
             <img v-if="referenceSrc" :src="referenceSrc" />
             <div v-else class="upload-hint">원본만 편집</div>
             <div class="edit-overlay">{{ referenceSrc ? 'CHANGE REFERENCE' : 'ADD REFERENCE' }}</div>
@@ -42,10 +42,10 @@
         <!-- Prompt Card -->
         <div class="glass-card">
           <label>프롬프트 덮어쓰기</label>
-          <textarea v-model="prompt" rows="3" placeholder="Leave empty to use T2I prompt..."></textarea>
+          <textarea v-model="prompt" rows="3" placeholder="비워 두면 T2I 프롬프트를 사용합니다..."></textarea>
           <template v-if="!isKrea2">
             <label class="mt-12 danger">네거티브</label>
-            <textarea v-model="negPrompt" rows="2" placeholder="Override negative..."></textarea>
+            <textarea v-model="negPrompt" rows="2" placeholder="네거티브 프롬프트 덮어쓰기..."></textarea>
           </template>
           <p v-else class="krea-help">Krea2 Identity Edit는 입력 이미지를 사용한 grounded unconditional 경로를 사용하므로 Negative는 적용하지 않습니다.</p>
         </div>
@@ -108,7 +108,7 @@
             <label>Seed (−1 = 랜덤)</label>
             <div class="seed-row">
               <input v-model="seed" type="text" class="seed-input" placeholder="-1" />
-              <button class="seed-btn" @click="seed = '-1'" title="랜덤으로 초기화"><Icon name="dice" /></button>
+              <button class="seed-btn" @click="seed = '-1'" title="랜덤으로 초기화" aria-label="랜덤으로 초기화"><Icon name="dice" /></button>
             </div>
           </div>
         </details>
@@ -121,7 +121,7 @@
             {{ i2iGenerateLabel(jobState, !!imageSrc, isKrea2) }}
           </button>
           <button v-if="jobState.running" type="button" class="btn-cancel" @click="cancelGenerate"
-            :disabled="jobState.cancelling" title="I2I 생성 취소"><Icon name="close" /></button>
+            :disabled="jobState.cancelling" title="I2I 생성 취소" aria-label="I2I 생성 취소"><Icon name="close" /></button>
         </div>
       </div>
     </aside>
@@ -129,8 +129,10 @@
     <!-- Main Content: Canvas -->
     <section class="canvas-area">
       <div class="drop-zone" :class="{ 'drag-over': isDragging }"
+        role="button" tabindex="0" aria-label="원본 이미지 끌어 놓기 또는 파일 선택"
         @dragover.prevent="isDragging = true" @dragleave="isDragging = false"
         @drop.prevent="handleDrop" @click="triggerFileInput"
+        @keydown.enter.prevent="triggerFileInput" @keydown.space.prevent="triggerFileInput"
       >
         <transition name="scale">
           <div v-if="!imageSrc" class="drop-empty">
@@ -253,7 +255,7 @@ function handleDrop(e: DragEvent) {
   if (f) { imagePath.value = (f as any).path || ''; loadFile(f); return }
   // History에서 경로 텍스트 드롭
   const path = e.dataTransfer?.getData('text/plain')
-  if (path && path.includes('/')) loadFromPath(path)
+  if (path && (path.includes('/') || path.includes('\\'))) loadFromPath(path)
 }
 function loadFile(file: File) {
   relightOriginal.value = null
@@ -273,20 +275,20 @@ async function loadFromPath(path: string) {
 
 // I2I 진행 상태(ui/i2i_actions.emit_job_state) — 실행 중엔 시작을 막고 취소 버튼을 보인다
 const jobState = ref<I2IJobStatePayload>({ ...IDLE_I2I_JOB })
-let offJobState: (() => void) | null = null
+const unsubs: Array<() => void> = []
 
 onMounted(() => {
   // History/Gallery에서 send_to_i2i 시 이미지 로드 — 현재 하위 탭 쪽으로 보낸다
-  onBackendEvent('i2iImageLoaded', (path: string) => {
+  unsubs.push(onBackendEvent('i2iImageLoaded', (path: string) => {
     loadFromPath(path)
     if (subTab.value === 'refine') refineRef.value?.setImage?.(path)
-  })
-  offJobState = onBackendEvent('i2iJobState', (json: string) => {
+  }))
+  unsubs.push(onBackendEvent('i2iJobState', (json: string) => {
     const next = parseI2IJobState(json)
     if (next) jobState.value = next
-  })
+  }))
 })
-onUnmounted(() => { offJobState?.(); offJobState = null })
+onUnmounted(() => { unsubs.splice(0).forEach((u) => u()) })
 
 function cancelGenerate() {
   requestAction('cancel_i2i', {})
@@ -401,7 +403,7 @@ function generate() {
 .btn-cancel:disabled { opacity: 0.5; cursor: default; }
 
 /* Canvas Area */
-.canvas-area { flex: 1; padding: 24px; display: flex; align-items: center; justify-content: center; }
+.canvas-area { flex: 1; min-width: 0; min-height: 0; padding: 24px; display: flex; align-items: center; justify-content: center; }
 .drop-zone {
   width: 100%; height: 100%; max-width: 1200px;
   background: var(--bg-card); border: 2px dashed var(--border); border-radius: 20px;

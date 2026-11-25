@@ -262,7 +262,7 @@ def resolve(preset_name: str | None = None,
             # 채움색을 바꿨으면 같은 뜻의 글자색도 따라와야 한다 — 안 그러면
             # 배지만 바뀌고 문구는 프리셋 색으로 남아 둘이 따로 논다.
             if key.startswith('state-'):
-                colors[f'{key}-fg'] = readable_text(colors[key], colors['bg-primary'])
+                colors[f'{key}-fg'] = readable_text(colors[key], colors['bg-button-hover'])
     colors.update(derive_accent(colors['accent'], colors['mode']))
     return colors
 

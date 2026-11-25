@@ -17,7 +17,13 @@ export function createPresetManager(deps: Pick<ManagerDeps, 'getBackend' | 'requ
   }
   async function loadPresetPreview(name: string) {
     const bk = await deps.getBackend()
-    if (bk.getPresetData) bk.getPresetData(name, (json: string) => { try { presetPreview.value = JSON.parse(json) } catch {} })
+    if (selectedPreset.value !== name) return
+    if (bk.getPresetData) {
+      bk.getPresetData(name, (json: string) => {
+        if (selectedPreset.value !== name) return
+        try { presetPreview.value = JSON.parse(json) } catch {}
+      })
+    }
   }
   function selectPreset(name: string) {
     selectedPreset.value = name

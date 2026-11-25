@@ -81,7 +81,7 @@ export function labelSuffixes(runs) {
       if (part) parts[i].push(part);
     }
   }
-  const whole = (i) => [runs[i].label, ...parts[i]].join(" · ");
+  const whole = (i) => readAs([runs[i].label, ...parts[i]].join(" · "));
   const more = [
     (same) => same.map((i) => String(runs[i].groupLabel || "")),
     (same) => same.map((i) => String(runs[i].run || "")),
@@ -92,7 +92,7 @@ export function labelSuffixes(runs) {
       const values = partsOf(same);
       if (new Set(values).size < 2) continue; // the same for all of them: it tells none apart
       same.forEach((i, n) => {
-        if (values[n]) parts[i].push(values[n]);
+        if (values[n] && !parts[i].includes(values[n])) parts[i].push(values[n]);
       });
     }
   }

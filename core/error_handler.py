@@ -1,21 +1,9 @@
 # core/error_handler.py
 """전역 에러 핸들러 — 에러 코드 + CMD 출력 + Vue Toast 연동"""
-import re
 import traceback
 import sys
 
-# 절대 경로를 감지하는 정규식 — 로그용/UI 분리에 활용.
-# Windows: C:\foo\bar, C:/foo/bar, UNC \\server\share / POSIX: /home/foo 등
-# 드라이브 문자 앞에는 영숫자가 올 수 없다 — 예전엔 'http://127.0.0.1:7860/…' 의 'p:/' 를 드라이브로
-# 오인해 백엔드 오류의 URL(가장 중요한 진단 정보)을 'htt[path]' 로 망가뜨렸다. POSIX 분기도
-# URL 경로('http://host/home/…')를 가리지 않도록 앞 글자가 단어·점·하이픈이면 건너뛴다.
-_ABS_PATH_RE = re.compile(
-    r"(?:"
-    r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s'\"<>]+"                         # C:\foo, C:/foo
-    r"|(?<![\\/\w])\\\\[^\s'\"<>\\/]+[\\/][^\s'\"<>]+"                  # \\server\share\…
-    r"|(?<![\w.\-])/(?:home|Users|root|etc|var|usr|tmp)/[^\s'\"<>]*"    # /home/…
-    r")"
-)
+from core.path_sanitize import mask_local_paths
 
 
 def sanitize_for_ui(message: str, max_len: int = 160) -> str:
@@ -25,7 +13,7 @@ def sanitize_for_ui(message: str, max_len: int = 160) -> str:
     """
     if not message:
         return ""
-    text = _ABS_PATH_RE.sub("[path]", str(message))
+    text = mask_local_paths(str(message), replacement="[path]", match_spaces=False)
     if len(text) > max_len:
         text = text[: max_len - 1] + "…"
     return text
@@ -58,6 +46,28 @@ def set_bridge(bridge):
     _vue_bridge = bridge
 
 
+def _safe_write(text: str, stream=None) -> None:
+    """콘솔 인코딩(cp949 등)에서 표현 불가 문자가 있어도 UnicodeEncodeError 없이 출력."""
+    target = sys.stdout if stream is None else stream
+    if target is None:
+        return
+    try:
+        target.write(text)
+    except UnicodeEncodeError:
+        encoding = getattr(target, "encoding", None) or "utf-8"
+        safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        try:
+            target.write(safe_text)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _safe_print(text: str = "", stream=None) -> None:
+    _safe_write(f"{text}\n", stream=stream)
+
+
 def handle_error(code: str, context: str, exception: Exception, notify: bool = True):
     """
     전역 에러 처리
@@ -68,13 +78,15 @@ def handle_error(code: str, context: str, exception: Exception, notify: bool = T
     msg = f"[{code}] {desc} | {context}: {str(exception)}"
 
     # CMD 출력
-    print(f"\n{'='*60}")
-    print(f"[ERROR {code}] {desc}")
-    print(f"  Context: {context}")
-    print(f"  Detail: {exception}")
-    print(f"{'='*60}")
-    traceback.print_exc()
-    print()
+    _safe_print(f"\n{'='*60}")
+    _safe_print(f"[ERROR {code}] {desc}")
+    _safe_print(f"  Context: {context}")
+    _safe_print(f"  Detail: {exception}")
+    _safe_print(f"{'='*60}")
+    tb_text = traceback.format_exc()
+    if tb_text:
+        _safe_write(tb_text, stream=sys.stderr)
+    _safe_print()
 
     # Vue Toast — 콘솔(위)은 원문, 토스트는 다른 UI 경로와 같은 sanitize_for_ui 정책(절대 경로 가림·길이 제한).
     if notify and _vue_bridge and hasattr(_vue_bridge, 'showNotification'):

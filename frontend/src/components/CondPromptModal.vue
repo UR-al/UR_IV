@@ -1,6 +1,6 @@
 <template>
   <div class="cp-overlay" @mousedown.self="close">
-    <div class="cp-modal">
+    <div class="cp-modal" role="dialog" aria-modal="true" aria-label="조건부 프롬프트">
       <div class="cp-header">
         <div>
           <h3>조건부 프롬프트</h3>
@@ -10,7 +10,7 @@
           <ToggleSwitch v-model="condEnabled" />
           <span>{{ condEnabled ? 'ON' : 'OFF' }}</span>
         </div>
-        <button class="cp-close" @click="close"><Icon name="close" /></button>
+        <button class="cp-close" @click="close" title="닫기" aria-label="조건부 프롬프트 닫기"><Icon name="close" /></button>
       </div>
 
       <div class="cp-body" :class="{ disabled: !condEnabled }">
@@ -25,7 +25,7 @@
                 <span class="cp-kw">IF</span>
                 <input v-model="rule.condition" placeholder="조건 태그 (쉼표=모두 AND)" class="cp-input" />
                 <select v-model="rule.exists" class="cp-sel"><option :value="true">있으면</option><option :value="false">없으면</option></select>
-                <button class="cp-rm" @click="removeCondRule('pos', ri)"><Icon name="close" /></button>
+                <button class="cp-rm" @click="removeCondRule('pos', ri)" title="규칙 삭제" aria-label="규칙 삭제"><Icon name="close" /></button>
               </div>
               <div class="cp-row">
                 <span class="cp-kw">→</span>
@@ -47,7 +47,7 @@
                 <span class="cp-kw">IF</span>
                 <input v-model="rule.condition" placeholder="조건 태그 (쉼표=모두 AND)" class="cp-input" />
                 <select v-model="rule.exists" class="cp-sel"><option :value="true">있으면</option><option :value="false">없으면</option></select>
-                <button class="cp-rm" @click="removeCondRule('neg', ri)"><Icon name="close" /></button>
+                <button class="cp-rm" @click="removeCondRule('neg', ri)" title="규칙 삭제" aria-label="규칙 삭제"><Icon name="close" /></button>
               </div>
               <div class="cp-row">
                 <span class="cp-kw">→</span>
@@ -73,7 +73,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
-import { condPositive, condNegative, condEnabled, addCondRule, removeCondRule, saveCondRules, loadCondRules } from '../composables/condRules.js'
+import { condPositive, condNegative, condEnabled, addCondRule, removeCondRule, saveCondRules, loadCondRules } from '../composables/condRules'
 import ToggleSwitch from './ToggleSwitch.vue'
 import { useModalLayer } from '../composables/useModalLayer'
 
@@ -91,7 +91,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey, true))
 </script>
 
 <style scoped>
-.cp-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 2200; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.cp-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: var(--z-modal-nested); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .cp-modal { width: min(1450px, 97vw); height: min(920px, 94vh); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-card); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 .cp-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .cp-header h3 { font-size: 17px; font-weight: var(--fw-bold); color: var(--text-primary); }

@@ -265,6 +265,7 @@ import { PREVIEW_MAX_EDGE, PreviewGate } from '../utils/editorPreview'
 import { acceptsTextPaste, pasteClipboardImage } from '../utils/clipboardImage'
 import { EdgeMapCache } from '../utils/edgeMap'
 import { createLatestRequest, wasAbandoned } from '../utils/bridgeRequest'
+import { appModalStack } from '../utils/modalStack'
 import { useColorMatch } from '../composables/useColorMatch'
 import { useEditorMeshWarp } from '../composables/useEditorMeshWarp'
 import type { EditorAutoSaveReadyPayload, ShowToastPayload } from '../types/bridge'
@@ -1367,7 +1368,8 @@ async function pasteFromClipboard() {
       requestAction('show_toast', { type: outcome.kind, msg: outcome.msg })
     }
   } catch (e: any) {
-    requestAction('show_toast', { type: 'error', msg: `클립보드 접근 실패: ${e?.message || e}` })
+    console.error('[Editor] 클립보드 접근 실패:', e)
+    requestAction('show_toast', { type: 'error', msg: '클립보드 이미지를 불러오지 못했습니다' })
   }
 }
 
@@ -1409,7 +1411,7 @@ onActivated(() => { _editorActive = true })
 onDeactivated(() => { _editorActive = false })
 
 function onEditorKeyDown(e: KeyboardEvent) {
-  if (!_editorActive) return   // 에디터 탭이 아닐 땐 단축키 가로채지 않음
+  if (!_editorActive || appModalStack.isAnyOpen()) return   // 에디터 탭이 아니거나 모달이 열려 있을 땐 단축키 가로채지 않음
   // 격자 변형 중: Ctrl+Z = 마지막 점 이동 되돌리기, Esc = 취소, Enter = 적용
   if (handleMeshKey(e)) return
   // ── Ctrl 단독 두 번 빠르게 → 변환 reset (모자이크/그리기는 유지)
@@ -1588,14 +1590,16 @@ async function _checkAutoSaveRecovery() {
   } catch {}
 }
 
+const unsubs: Array<() => void> = []
+
 onMounted(() => {
-  onBackendEvent('editorImageLoaded', (path: string) => loadImage(path))
-  onBackendEvent('editorWatermarkImageLoaded', (path: string) => { wmImagePath.value = path })
-  onBackendEvent('yoloModelUpdated', (label: string) => { modelLabel.value = label })
-  onBackendEvent('editorResult', onEditorResult)
-  onBackendEvent('editorSaveResult', onEditorSaveResult)
+  unsubs.push(onBackendEvent('editorImageLoaded', (path: string) => loadImage(path)))
+  unsubs.push(onBackendEvent('editorWatermarkImageLoaded', (path: string) => { wmImagePath.value = path }))
+  unsubs.push(onBackendEvent('yoloModelUpdated', (label: string) => { modelLabel.value = label }))
+  unsubs.push(onBackendEvent('editorResult', onEditorResult))
+  unsubs.push(onBackendEvent('editorSaveResult', onEditorSaveResult))
   // 자동저장 결과 — 다른 요청(옛 요청·웹 모드의 다른 탭)의 응답은 요청 id 로 걸러진다
-  onBackendEvent('editorAutoSaveReady', (json: string) => { autoSaveRequest.receive(json) })
+  unsubs.push(onBackendEvent('editorAutoSaveReady', (json: string) => { autoSaveRequest.receive(json) }))
   // 앱 시작 시 YOLO 모델 자동 감지 + 최근 파일 로드 + 크래시 복구 확인
   refreshYoloLabel()
   _loadRecentFiles()
@@ -1610,6 +1614,7 @@ onMounted(() => {
   window.addEventListener('editorSidePanelWidthChanged', _syncSidePanelWidthFromStorage)
 })
 onUnmounted(() => {
+  unsubs.splice(0).forEach((u) => u())
   document.removeEventListener('keydown', onEditorKeyDown)
   if (_autoSaveTimer) clearInterval(_autoSaveTimer)
   if (_autoSaveTickTimer) clearInterval(_autoSaveTickTimer)

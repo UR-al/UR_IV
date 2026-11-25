@@ -1,17 +1,17 @@
 <template>
   <div class="wm-overlay" @mousedown.self="closeWeightManager">
-    <div class="wm-modal">
+    <div class="wm-modal" role="dialog" aria-modal="true" aria-label="글로벌 태그 가중치">
       <div class="wm-header">
         <h3>글로벌 태그 가중치</h3>
         <span class="wm-desc">생성 버튼(Ctrl+G)을 누를 때 메인 태그 칸의 같은 태그(쉼표 단위)에 지정 가중치를 붙여 넣습니다</span>
-        <button class="close-btn" @click="closeWeightManager"><Icon name="close" /></button>
+        <button class="close-btn" @click="closeWeightManager" title="닫기" aria-label="글로벌 태그 가중치 닫기"><Icon name="close" /></button>
       </div>
       <div class="wm-body">
         <div v-for="(w, i) in globalWeights" :key="weightRowKey(w)" class="wm-row">
           <input v-model="w.tag" placeholder="태그명..." class="wm-tag-input" />
           <input type="range" min="50" max="200" v-model.number="w.weight" class="wm-slider" />
           <span class="wm-val">{{ (w.weight / 100).toFixed(2) }}</span>
-          <button class="wm-rm" @click="removeWeightRow(i)"><Icon name="close" /></button>
+          <button class="wm-rm" @click="removeWeightRow(i)" title="가중치 삭제" aria-label="가중치 삭제"><Icon name="close" /></button>
         </div>
         <button class="wm-add" @click="addWeightRow">+ ADD TAG WEIGHT</button>
       </div>
@@ -43,7 +43,7 @@ useModalLayer({ isOpen: () => showWeightManager.value, close: closeWeightManager
 .close-btn:hover { border-color: var(--state-alert-fg); color: var(--state-alert-fg); background: rgba(248, 113, 113, 0.08); }
 
 /* Weight Manager */
-.wm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+.wm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; }
 .wm-modal { width: min(680px, 92vw); max-height: 86vh; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .wm-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .wm-header h3 { font-size: 12px; letter-spacing: 0; color: var(--text-muted); }

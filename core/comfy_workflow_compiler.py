@@ -41,6 +41,23 @@ from core.lenient_numbers import finite_float as _float, lenient_int as _int
 
 _logger = logging.getLogger(__name__)
 
+_EMPTY_LATENT_NODES = frozenset({
+    "EmptyLatentImage",
+    "ForgeNeoLatentInput",
+    "EmptySD3LatentImage",
+    "EmptyFlux2LatentImage",
+    "EmptyCosmosLatentVideo",
+})
+_VAE_DECODE_NODES = frozenset({"VAEDecode", "VAEDecodeTiled"})
+
+
+def _payload_cfg(payload: Mapping[str, Any], default: float = 7.0) -> float:
+    """Read CFG scale from ``cfg_scale`` with ``cfg`` alias fallback."""
+    raw = payload.get("cfg_scale")
+    if raw is None:
+        raw = payload.get("cfg")
+    return _float(raw, default)
+
 
 class WorkflowCompileError(RuntimeError):
     """A Forge request cannot be represented by the target ComfyUI runtime."""
@@ -1870,7 +1887,7 @@ class ComfyWorkflowCompiler:
             "model": model, "positive": positive, "negative": negative,
             "latent_image": latent, "seed": seed,
             "steps": max(1, _int(payload.get("steps"), 20)),
-            "cfg": _float(payload.get("cfg_scale"), 7.0),
+            "cfg": _payload_cfg(payload, 7.0),
             "sampler_name": sampler_name,
             "scheduler": scheduler,
             "denoise": (
@@ -2046,7 +2063,7 @@ class ComfyWorkflowCompiler:
             if any(_bool(settings.get(key)) for key in active_keys):
                 self._validate_anima_guidance_settings(settings)
                 suite_settings = dict(settings)
-                suite_settings["cfg_scale"] = _float(payload.get("cfg_scale"), 7.0)
+                suite_settings["cfg_scale"] = _payload_cfg(payload, 7.0)
                 if not hiflow_pass:
                     suite_settings["guid_hiflow_enabled"] = False
                 if "S²" in anima_guidance.detail_suite_features(settings):
@@ -2137,7 +2154,7 @@ class ComfyWorkflowCompiler:
             # base 샘플러(p.sampler_name)로 한다(detail_daemon.py:197-199). 확장도 같다(SAM3 패스는 p2 의 샘플러).
             # (원본 Comfy 노드는 이 제외가 없다 — 손으로 만든 워크플로의 팩 노드는 그대로 건다.)
             return model
-        cfg_scale = _float(payload.get("cfg_scale") if cfg_scale is None else cfg_scale, 7.0)
+        cfg_scale = _payload_cfg(payload, 7.0) if cfg_scale is None else _float(cfg_scale, 7.0)
         if cfg_scale <= 0.0:
             # muerrilla 의 σ *= 1 − s·0.1·cfg 는 cfg 0 에서 정확히 아무것도 안 한다. 노드의 override 0 은
             # '샘플러의 CFG' 라는 뜻이라(hires 는 hr_cfg) 노드를 넣지 않는다.
@@ -2394,7 +2411,7 @@ class ComfyWorkflowCompiler:
             "scale_by": max(1.0, _float(payload.get("hr_scale"), 2.0)),
             "upscale_method": method,
             "steps": max(0, _int(payload.get("hr_second_pass_steps"), 0)),
-            "cfg": _float(payload.get("hr_cfg"), _float(payload.get("cfg_scale"), 7.0)),
+            "cfg": _float(payload.get("hr_cfg"), _payload_cfg(payload, 7.0)),
             "sampler_name": hires_sampler,
             "scheduler": hires_scheduler,
             "denoise": max(0.0, min(1.0, _float(payload.get("denoising_strength"), 0.5))),
@@ -2489,7 +2506,7 @@ class ComfyWorkflowCompiler:
                 "cfg": (
                     _float(slot.get("ad_cfg_scale"), 7.0)
                     if _bool(slot.get("ad_use_cfg_scale"))
-                    else _float(payload.get("cfg_scale"), 7.0)
+                    else _payload_cfg(payload, 7.0)
                 ),
                 "sampler_name": ad_sampler,
                 "scheduler": ad_scheduler,
@@ -2587,7 +2604,7 @@ class ComfyWorkflowCompiler:
                     scheduler = str(payload.get("scheduler") or "normal")
                 sampler, scheduler = self._runtime_sampler_values(sampler, scheduler)
                 seed = sam_seed
-                sam3_cfg = _float(state.get("sam3_cfg_scale"), _float(payload.get("cfg_scale"), 7.0)) if _bool(state.get("sam3_use_cfg_scale")) else _float(payload.get("cfg_scale"), 7.0)
+                sam3_cfg = _float(state.get("sam3_cfg_scale"), _payload_cfg(payload, 7.0)) if _bool(state.get("sam3_use_cfg_scale")) else _payload_cfg(payload, 7.0)
                 # LoRA: Forge SAM3 p2 는 자기 인페인트 프롬프트의 LoRA 만 받는다 — 목록이 메인과 같으면 메인 스택
                 # 그대로(그래프 불변), 다르면 LoRA 앞에서 가른 분기(_sam3_pass_stack).
                 sam3_model, sam3_clip, sam3_positive, sam3_negative = self._sam3_pass_stack(
@@ -3561,7 +3578,7 @@ class ComfyWorkflowCompiler:
         )
         latent_ids = self._trace_classes(
             nodes, sampler_inputs.get("latent_image"),
-            {"EmptyLatentImage", "ForgeNeoLatentInput"},
+            _EMPTY_LATENT_NODES,
         )
         if len(latent_ids) > 1:
             raise WorkflowCompileError(
@@ -3601,7 +3618,7 @@ class ComfyWorkflowCompiler:
             raise WorkflowCompileError(blocked)
         seed = concrete_seed(payload.get("seed"))
         inputs["noise_seed" if class_type == "KSamplerAdvanced" else "seed"] = seed
-        inputs["cfg"] = _float(payload.get("cfg_scale"), 7.0)
+        inputs["cfg"] = _payload_cfg(payload, 7.0)
         # Resolved even for a split pass so an unsupported sampler/scheduler still fails.
         sampler, scheduler = self._runtime_sampler_values(
             payload.get("sampler_name") or "euler",
@@ -4413,15 +4430,23 @@ class ComfyWorkflowCompiler:
 
     @staticmethod
     def _find_decode_after(workflow: Mapping[str, Any], sampler_id: str) -> Optional[str]:
-        decoders = [
-            str(node_id)
-            for node_id, node in workflow.items()
-            if isinstance(node, Mapping)
-            and node.get("class_type") == "VAEDecode"
-            and ComfyWorkflowCompiler._link_depends_on(
+        standard_decoders: list[str] = []
+        tiled_decoders: list[str] = []
+        for node_id, node in workflow.items():
+            if not isinstance(node, Mapping):
+                continue
+            class_type = node.get("class_type")
+            if class_type not in _VAE_DECODE_NODES:
+                continue
+            if not ComfyWorkflowCompiler._link_depends_on(
                 workflow, node.get("inputs", {}).get("samples"), sampler_id,
-            )
-        ]
+            ):
+                continue
+            if class_type == "VAEDecode":
+                standard_decoders.append(str(node_id))
+            else:
+                tiled_decoders.append(str(node_id))
+        decoders = standard_decoders or tiled_decoders
         if len(decoders) > 1:
             raise WorkflowCompileError(
                 "custom workflow의 sampler 출력에 연결된 VAEDecode가 여러 개입니다: "

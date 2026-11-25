@@ -5,6 +5,7 @@ import wildcardSource from './WildcardManagerModal.vue?raw'
 import { byClass, byTag, mountFake, type Mounted } from '../../testing/fakeDomRenderer'
 import { compileSfc, stubComponentModule } from '../../testing/compileSfc'
 import * as modalLayer from '../../composables/useModalLayer'
+import * as imeComposition from '../../utils/imeComposition'
 import * as wildcardFile from '../../utils/wildcardFile'
 import { appModalStack } from '../../utils/modalStack'
 import { createPresetManager } from '../../composables/usePresetManager'
@@ -64,6 +65,7 @@ it('double-clicking the wildcard title swaps in a focused rename input (template
     '../ToggleSwitch.vue': stubComponentModule('toggle'),
     '../../composables/useWildcardManager': { useWildcardManager: () => mgr },
     '../../composables/useModalLayer': modalLayer,
+    '../../utils/imeComposition': imeComposition,
     '../../utils/wildcardFile': wildcardFile,
   }, { ...(await import('vue')), vModelText: {} })
   mounted = mountFake(component)

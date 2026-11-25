@@ -48,9 +48,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
-import { mediaUrl } from '../utils/media.js'
+import { mediaUrl, withUrlVersion } from '../utils/media.js'
+import { mediaVersion } from '../utils/mediaVersions'
 import { displayInfo } from '../utils/imageInfo'
 
 const props = withDefaults(defineProps<{
@@ -81,15 +82,9 @@ function exploreSeed() {
   requestAction('explore_seed', { seed: props.seed })
 }
 
-const imageNonce = ref(Date.now())
-watch(() => props.imageUrl, () => {
-  imageNonce.value = Date.now()
-})
-
 const imageSrc = computed(() => {
   if (!props.imageUrl) return ''
-  const base = mediaUrl(props.imageUrl)
-  return base + (base.includes('?') ? '&' : '?') + 't=' + imageNonce.value
+  return withUrlVersion(mediaUrl(props.imageUrl), mediaVersion(props.imageUrl))
 })
 
 const progressPct = computed(() => {

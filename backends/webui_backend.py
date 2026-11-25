@@ -250,12 +250,18 @@ def _forge_init_size(image_b64: str) -> tuple:
     방향 적용 전 크기를 보내면, 방향 태그로 세운 사진(휴대폰·카메라 JPEG)을 부모 패스가 가로·세로 바뀐 크기로 늘려
     이미지 전체가 찌그러지고 원본 기준 SAM3 도 'size WxH != HxW' 로 폴백한다. 그래서 Forge 와 같게 세워서 잰다.
     """
-    with Image.open(io.BytesIO(base64.b64decode(image_b64))) as image:
+    raw = str(image_b64 or "").strip()
+    if raw.lower().startswith("data:") and "," in raw:
+        raw = raw.split(",", 1)[1]
+    with Image.open(io.BytesIO(base64.b64decode(raw))) as image:
+        width, height = image.size
         try:
-            upright = ImageOps.exif_transpose(image)
+            orientation = image.getexif().get(274)
         except Exception:
-            upright = image          # Forge fix_image 도 방향 적용이 실패하면 그대로 쓴다
-        return upright.size
+            orientation = None
+        if orientation in {5, 6, 7, 8}:
+            return (height, width)
+        return (width, height)
 
 
 # ── LoRA 목록(get_loras) ─────────────────────────────────────────────────────
@@ -1250,7 +1256,13 @@ class WebUIBackend(AbstractBackend):
             if line is not None:
                 logger.warning("WebUI 생성 실패(Forge %s): %s", response.status_code, line)
                 return GenerationResult(success=False, error=line), None
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except Exception:
+                close_response = getattr(response, "close", None)
+                if callable(close_response):
+                    close_response()
+                raise
         finally:
             with self._generation_state_lock:
                 self._inflight_interrupts.pop(task_id, None)

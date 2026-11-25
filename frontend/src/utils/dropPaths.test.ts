@@ -35,6 +35,22 @@ describe('droppedImagePaths', () => {
     expect(droppedImagePaths({ files: [], getData: () => { throw new Error('denied') } }))
       .toEqual({ paths: [], unresolved: 0 })
   })
+
+  it('files 에 path 가 없으면 text/uri-list · text/plain 으로 폴백한다 (B-30)', () => {
+    const result = droppedImagePaths({
+      files: [{ name: 'a.png', type: 'image/png' }],
+      getData: (mime: string) => mime === 'text/uri-list' ? 'file:///C:/img/a.png\n' : '',
+    })
+    expect(result).toEqual({ paths: ['C:/img/a.png'], unresolved: 0 })
+  })
+
+  it('확장자 뒤 ?query · #hash 를 제거하되 경로 내부 # 은 유지한다 (B-30)', () => {
+    const result = droppedImagePaths({
+      files: [],
+      getData: () => 'file:///C:/art%231/a.png?v=3#top\nC:/art#2/b.webp?t=99',
+    })
+    expect(result).toEqual({ paths: ['C:/art#1/a.png', 'C:/art#2/b.webp'], unresolved: 0 })
+  })
 })
 
 describe('newPaths', () => {

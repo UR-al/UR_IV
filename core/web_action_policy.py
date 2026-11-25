@@ -31,9 +31,14 @@ COPY_IMAGE_MESSAGE = (
     "웹 모드에서는 호스트 PC 클립보드에 이미지를 복사하지 않습니다 — 이 브라우저에서 복사하세요."
 )
 
+LOCAL_APP_ONLY_MESSAGE = (
+    "이 기능은 호스트 PC 의 로컬 앱에서만 사용할 수 있습니다."
+)
+
 #: 웹 모드(loopback 포함)에서 항상 거부하는 액션 → 사용자에게 보여 줄 이유.
 WEB_BLOCKED_ACTIONS: Mapping[str, str] = {
     "show_api_manager": "웹 모드에서는 데스크톱 백엔드 관리 창을 열 수 없습니다.",
+    "native_tab_switch": "웹 모드에서는 데스크톱 네이티브 탭을 열 수 없습니다.",
     # 백엔드 게이트는 웹 모드에서 열리지 않는다(generator_webui._can_use_backend_gate).
     "probe_backend": BACKEND_GATE_MESSAGE,
     "select_backend": BACKEND_GATE_MESSAGE,
@@ -47,6 +52,17 @@ WEB_BLOCKED_ACTIONS: Mapping[str, str] = {
     # 예전엔 원격 클라이언트의 복사 버튼이 호스트 PC 사용자의 클립보드를 덮어쓰고 '복사됨'으로 답했다
     # — 텍스트 복사(VueBridge.copyTextToClipboard)와 같은 규칙.
     "copy_to_clipboard": COPY_IMAGE_MESSAGE,
+    # 로컬 앱 전용 실험/타일 수리 액션 — 결과 시그널 자체가 _WEB_SIGNALS 에 없으므로 웹에서는
+    # 브리지 진입점에서 즉시 showNotification 으로 거부한다.
+    "tile_repair_options": "Tile & Repair 는 로컬 앱에서만 사용할 수 있습니다.",
+    "tile_repair_run": "Tile & Repair 는 로컬 앱에서만 사용할 수 있습니다.",
+    "tile_repair_cancel": "Tile & Repair 는 로컬 앱에서만 사용할 수 있습니다.",
+    "relight_preview": "실험 조명 편집은 로컬 앱에서만 사용할 수 있습니다.",
+    "relight_export": "실험 조명 편집은 로컬 앱에서만 사용할 수 있습니다.",
+    "relight_cancel": "실험 조명 편집은 로컬 앱에서만 사용할 수 있습니다.",
+    "hand_reconstruction_generate": "손 재구성 실험은 로컬 앱에서만 사용할 수 있습니다.",
+    "hand_reconstruction_export": "손 재구성 실험은 로컬 앱에서만 사용할 수 있습니다.",
+    "hand_reconstruction_cancel": "손 재구성 실험은 로컬 앱에서만 사용할 수 있습니다.",
 }
 
 HOST_DIALOG_MESSAGE = (
@@ -103,6 +119,11 @@ def is_loopback_bind_host(host: object) -> bool:
 def host_dialogs_blocked(*, web_mode: bool, remote: bool) -> bool:
     """호스트 네이티브 대화상자를 띄우면 안 되는 상태인지(= 원격 웹 모드)."""
     return bool(web_mode) and bool(remote)
+
+
+def web_blocked_message(action: object) -> str:
+    """웹 모드 차단 액션의 사용자 메시지. 표에 없으면 ``LOCAL_APP_ONLY_MESSAGE``."""
+    return WEB_BLOCKED_ACTIONS.get(normalize_action_name(action), LOCAL_APP_ONLY_MESSAGE)
 
 
 def web_action_denial(action: object, *, web_mode: bool, remote: bool) -> str | None:

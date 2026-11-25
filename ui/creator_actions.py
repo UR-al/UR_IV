@@ -572,10 +572,36 @@ class CreatorActionsMixin:
             cancel_check=event.is_set if event is not None else None,
         )
 
+    CREATOR_MAX_UPLOAD_BYTES = 512 * 1024 * 1024  # 512 MB
+
+    @classmethod
+    def _creator_validate_input_path(cls, path_text: str | Path) -> Path:
+        """Creator 로컬 입력 파일의 경로 안전성·존재·크기 상한을 검증한다."""
+        from core.path_safety import (
+            INPUT_MISSING, INPUT_NOT_FILE, check_input_path, strip_file_url,
+        )
+
+        raw = strip_file_url(str(path_text or "").strip())
+        if not raw:
+            raise ValueError("입력 파일 경로가 비어 있습니다")
+        expanded = str(Path(raw).expanduser())
+        safe, reason = check_input_path(expanded, allowed_exts=None)
+        if safe is None:
+            if reason in (INPUT_MISSING, INPUT_NOT_FILE):
+                raise FileNotFoundError(f"입력 파일을 찾을 수 없습니다: {raw}")
+            raise ValueError(f"허용되지 않은 입력 경로입니다: {raw}")
+        resolved = Path(safe)
+        size = resolved.stat().st_size
+        if size > cls.CREATOR_MAX_UPLOAD_BYTES:
+            limit_mb = cls.CREATOR_MAX_UPLOAD_BYTES // (1024 * 1024)
+            raise ValueError(f"입력 파일이 너무 큽니다 (최대 {limit_mb} MB)")
+        return resolved
+
     def _creator_upload_file(self, backend, path: Path, prefix: str) -> str:
-        extension = self._creator_upload_extension(path)
-        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        return self._creator_upload_bytes(backend, path.read_bytes(), prefix, extension, mime)
+        safe_path = self._creator_validate_input_path(path)
+        extension = self._creator_upload_extension(safe_path)
+        mime = mimetypes.guess_type(safe_path.name)[0] or "application/octet-stream"
+        return self._creator_upload_bytes(backend, safe_path.read_bytes(), prefix, extension, mime)
 
     def _creator_prepare_params(self, backend, params: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize the Vue payload and upload only media used by the graph."""
@@ -627,9 +653,7 @@ class CreatorActionsMixin:
             if (not path_text or normalized not in accepted
                     or any(key == normalized for key, _prefix, _path in planned)):
                 continue
-            path = Path(path_text).expanduser().resolve()
-            if not path.is_file():
-                raise FileNotFoundError(f"입력 파일을 찾을 수 없습니다: {path}")
+            path = self._creator_validate_input_path(path_text)
             self._creator_upload_extension(path)
             planned.append((normalized, prefix, path))
         # 모든 입력을 검증한 뒤에 올린다 — 두 번째 파일이 없거나 확장자가 없을 때 첫 파일만

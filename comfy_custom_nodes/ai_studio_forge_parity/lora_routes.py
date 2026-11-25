@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -31,9 +32,13 @@ _SCAN_LOCK = threading.Lock()
 _SCAN_THREAD: threading.Thread | None = None
 
 INDEX_TTL_SECONDS = 10
+MAX_THUMB_FILES = 2000
+_THUMB_PRUNE_INTERVAL = 64
+_THUMB_LOCK = threading.Lock()
+_THUMB_WRITES: dict[str, int] = {}
 _clock = time.monotonic
 _INDEX_LOCK = threading.Lock()  # held while rebuilding: concurrent callers wait, then share the result
-_INDEX: dict = {}  # last build: key, at, items, by_name, board
+_INDEX: dict = {}  # last build: key, at, items, by_name, by_run_key, board
 
 
 def reset_index_cache() -> None:
@@ -123,16 +128,23 @@ class _Context:
                 board = load_board(self.settings["board_root"])
                 # an unreadable list builds nothing: the header cache file stays for when the drive is back
                 items = [] if self.list_error else LoraIndex(cache).build(names, self.full_path, board)
+                by_run_key: dict[str, list] = {}
+                for item in items:
+                    by_run_key.setdefault(item["run_key"], []).append(item)
                 _INDEX.clear()
                 _INDEX.update(key=key, at=_clock(), items=items, board=board,
-                              by_name={item["name"]: item for item in items})
-            self.items, self.board, self.by_name = _INDEX["items"], _INDEX["board"], _INDEX["by_name"]
+                              by_name={item["name"]: item for item in items},
+                              by_run_key=by_run_key)
+            self.items = _INDEX["items"]
+            self.board = _INDEX["board"]
+            self.by_name = _INDEX["by_name"]
+            self.by_run_key = _INDEX["by_run_key"]
 
     def full_path(self, name: str):
         return self.folder_paths.get_full_path("loras", name)
 
     def run_items(self, item: dict) -> list:
-        return [i for i in self.items if i["run_key"] == item["run_key"]]
+        return list(self.by_run_key.get(item["run_key"], ()))
 
     def manifest(self, path: Path) -> Path:
         roots = []
@@ -154,7 +166,8 @@ class _Context:
         path = self.full_path(item["name"])
         if not path:
             return []
-        return lora_samples.run_dirs(Path(path), item["run"], Path(self.settings["anima_root"]),
+        anima = self.settings["anima_root"]
+        return lora_samples.run_dirs(Path(path), item["run"], Path(anima) if anima else None,
                                      self.manifest(Path(path)))
 
     def epoch_item(self, item: dict, epoch: int):
@@ -190,7 +203,8 @@ def _sample_source(ctx: _Context, item: dict, epoch: int, index: int):
     samples = lora_samples.epoch_samples(ctx.dirs_for(owner), item["run"], epoch)
     if 0 <= index < len(samples):
         return samples[index], None
-    strip = lora_samples.board_strip(Path(ctx.settings["board_root"]), item["run"], epoch)
+    board_root = ctx.settings["board_root"]
+    strip = lora_samples.board_strip(Path(board_root) if board_root else None, item["run"], epoch)
     if strip is not None and index >= 0:
         try:
             tiles = lora_samples.strip_tiles(strip)
@@ -226,13 +240,56 @@ def _too_large(path) -> bool:
         return False
 
 
+def _prune_thumbs(thumb_dir: Path) -> None:
+    """Keep at most ``MAX_THUMB_FILES`` cached webps in ``thumb_dir``, removing oldest mtime first."""
+    limit = max(0, int(MAX_THUMB_FILES))
+    try:
+        entries = []
+        with os.scandir(thumb_dir) as it:
+            for entry in it:
+                if not entry.name.endswith(".webp"):
+                    continue
+                try:
+                    if entry.is_file():
+                        entries.append((entry.stat().st_mtime_ns, entry.path))
+                except OSError:
+                    continue
+    except OSError:
+        return
+    if len(entries) <= limit:
+        return
+    entries.sort(key=lambda pair: pair[0])
+    for _mtime, path in entries[:len(entries) - limit]:
+        try:
+            os.unlink(path)
+        except OSError:
+            continue
+
+
+def _maybe_prune_thumbs(thumb_dir: Path) -> None:
+    step = 1 if MAX_THUMB_FILES < _THUMB_PRUNE_INTERVAL else _THUMB_PRUNE_INTERVAL
+    key = str(thumb_dir)
+    with _THUMB_LOCK:
+        count = _THUMB_WRITES.get(key, 0) + 1
+        if count < step:
+            _THUMB_WRITES[key] = count
+            return
+        _THUMB_WRITES[key] = 0
+    _prune_thumbs(thumb_dir)
+
+
 def _thumb_path(ctx: _Context, src: Path, crop, max_pixels=None):
     """Cached webp named by source path + mtime + size + crop; above ``max_pixels``: ValueError, nothing decoded."""
     size = ctx.settings["thumb_size"]
     stat = Path(src).stat()
     key = f"{src}|{stat.st_mtime_ns}|{stat.st_size}|{size}|{crop}"
-    dst = ctx.store / THUMBS_DIR / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".webp")
-    return lora_samples.make_thumb(Path(src), dst, size, crop, max_pixels)
+    thumb_dir = ctx.store / THUMBS_DIR
+    dst = thumb_dir / (hashlib.sha1(key.encode("utf-8")).hexdigest() + ".webp")
+    existed = dst.is_file()
+    out = lora_samples.make_thumb(Path(src), dst, size, crop, max_pixels)
+    if not existed and out.is_file():
+        _maybe_prune_thumbs(thumb_dir)
+    return out
 
 
 # ---------------------------------------------------------------------------------------------- handlers
@@ -256,11 +313,10 @@ def handle_index(query):
         prompts = board_run.get("prompts") if isinstance(board_run, dict) else None
         if isinstance(prompts, list) and prompts:
             labels[run] = [p.get("label", "") for p in prompts if isinstance(p, dict)]
-    run_keys = {item["run_key"] for item in ctx.items}
     versions = lora_store.custom_preview_versions(ctx.store)
     body = {"items": ctx.items, "prefs": lora_store.load_prefs(ctx.store),
             "board_stars": stars, "prompt_labels": labels,
-            "cover_versions": {k: v for k, v in versions.items() if k in run_keys}}
+            "cover_versions": {k: v for k, v in versions.items() if k in ctx.by_run_key}}
     if ctx.list_error:
         body["error"] = ctx.list_error
     return 200, body
@@ -285,7 +341,8 @@ def handle_detail(query):
             continue
         seen.add(epoch)
         count = len(lora_samples.epoch_samples(ctx.dirs_for(other), item["run"], epoch))
-        if not count and lora_samples.board_strip(Path(ctx.settings["board_root"]), item["run"], epoch):
+        board_root = ctx.settings["board_root"]
+        if not count and lora_samples.board_strip(Path(board_root) if board_root else None, item["run"], epoch):
             count = lora_samples.MAX_SAMPLES
         epochs.append({"epoch": epoch, "name": other["name"], "samples": count, "starred": epoch in starred})
     cover, _path, _crop = _cover_source(ctx, item)
@@ -351,7 +408,7 @@ def handle_preview(body):
     if not isinstance(run_key, str) or not run_key:
         return _error("run_key is required")
     ctx = _Context(reuse=True)
-    if run_key not in {item["run_key"] for item in ctx.items}:
+    if run_key not in ctx.by_run_key:
         return _error("unknown run", 404)
     if body.get("clear") is True:
         lora_store.clear_custom_preview(ctx.store, run_key)

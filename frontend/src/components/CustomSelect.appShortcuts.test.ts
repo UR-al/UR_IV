@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as Vue from 'vue'
 import source from './CustomSelect.vue?raw'
+import promptPanelSource from './PromptPanel.vue?raw'
 import * as dropdownPlacement from '../utils/dropdownPlacement'
 import { compileSfc } from '../testing/compileSfc'
 import { byClass, byTag, mountFake, type FakeNode, type Mounted } from '../testing/fakeDomRenderer'
@@ -210,5 +211,44 @@ describe('after the mouse finishes with the dropdown, ↑/↓ belong to the hist
     await Vue.nextTick()
     expect(isOpen()).toBe(false)
     expect(trigger.focused).toBe(true)
+  })
+})
+
+describe('disabled prop and model_combo wiring (A-11)', () => {
+  it('blocks click and keyboard opening when disabled and closes if disabled while open', async () => {
+    const disabled = Vue.ref(true)
+    const value = Vue.ref('Euler')
+    mounted = mountFake(CustomSelect, () => ({
+      modelValue: value.value,
+      options: ['Euler', 'DDIM'],
+      disabled: disabled.value,
+      'onUpdate:modelValue': (v: string) => { value.value = v },
+    }))
+    const trigger = byTag(mounted.root, 'button')[0] as FakeNode & { getBoundingClientRect?: () => object }
+    trigger.getBoundingClientRect = () => ({ left: 10, top: 100, bottom: 130, width: 200 })
+
+    expect(trigger.props.disabled).toBe(true)
+    trigger.props.onClick({ detail: 1 })
+    trigger.props.onKeydown(keyEvent('ArrowDown'))
+    trigger.props.onKeydown(keyEvent('Enter'))
+    await Vue.nextTick()
+    expect(trigger.props['aria-expanded']).toBe(false)
+
+    // 활성화하면 열리고, 다시 비활성화되면 즉시 닫힌다
+    disabled.value = false
+    await Vue.nextTick()
+    expect(trigger.props.disabled).toBe(false)
+    trigger.props.onClick({ detail: 1 })
+    await Vue.nextTick()
+    expect(trigger.props['aria-expanded']).toBe(true)
+
+    disabled.value = true
+    await Vue.nextTick()
+    expect(trigger.props['aria-expanded']).toBe(false)
+  })
+
+  it('wires PromptPanel model_combo enabled===false to CustomSelect :disabled', () => {
+    expect(promptPanelSource).toContain("store.getProperty('model_combo', 'enabled') === false")
+    expect(promptPanelSource).toMatch(/<CustomSelect[^>]*v-model="widgets\.model_combo"[^>]*:disabled="modelDisabled"/s)
   })
 })

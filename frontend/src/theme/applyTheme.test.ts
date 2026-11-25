@@ -81,6 +81,19 @@ describe('상태색을 바꿔도 문구가 읽힌다', () => {
     const colors = resolveTheme('default', { 'state-info': '#8FB8E6' })
     expect(colors['state-info-fg']).toBe('#8FB8E6')
   })
+
+  it('라이트 테마에서 상태색을 덮어써도 bg-button-hover 위에서 4.5:1 이상 유지된다 (U-06)', () => {
+    for (const role of ['state-info', 'state-alert', 'state-ok', 'state-warn'] as const) {
+      for (const fill of ['#86EFAC', '#93C5FD', '#FCA5A5', '#FDE047', '#2563EB']) {
+        const colors = resolveTheme('light', { [role]: fill })
+        const fg = colors[`${role}-fg`]
+        expect(contrastRatio(fg, colors['bg-button-hover']), `light ${role}=${fill} → ${fg}`)
+          .toBeGreaterThanOrEqual(4.5)
+        expect(contrastRatio(fg, colors['bg-primary']), `light ${role}=${fill} → ${fg} on primary`)
+          .toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
 })
 
 describe('사용자가 아무 색이나 골라도 읽을 수 있어야 한다', () => {

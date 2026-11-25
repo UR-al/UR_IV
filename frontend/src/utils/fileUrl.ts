@@ -12,9 +12,21 @@
  */
 export function stripFileUrl(path: string | null | undefined): string {
   const text = String(path ?? '')
-  const scheme = /^file:\/\/\/?/i.exec(text)
-  if (!scheme) return text
-  return decodePercentRuns(text.slice(scheme[0].length))
+  if (/^file:\/\/\//i.test(text)) {
+    const rest = text.slice(8)
+    // file:////server/share → //server/share (UNC)
+    if (rest.startsWith('/')) return '//' + decodePercentRuns(rest.replace(/^\/+/, ''))
+    return decodePercentRuns(rest)
+  }
+  if (/^file:\/\//i.test(text)) {
+    const rest = text.slice(7)
+    // file://C:/... → C:/..., file://localhost/C:/... → C:/...
+    if (/^[a-z]:/i.test(rest)) return decodePercentRuns(rest)
+    if (/^localhost\//i.test(rest)) return decodePercentRuns(rest.slice(10))
+    // file://server/share/... → //server/share/... (UNC 호스트 보존)
+    return '//' + decodePercentRuns(rest)
+  }
+  return text
 }
 
 /** 이어진 `%XX` 묶음마다 따로 디코드 — 한 곳이 깨져도 나머지는 푼다(멀티바이트 UTF-8 은 묶음째). */

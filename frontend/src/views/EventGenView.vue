@@ -13,40 +13,40 @@
         <div class="form-row">
           <div class="form-field wide">
             <label>캐릭터</label>
-            <input v-model="character" placeholder="hatsune_miku" @keydown.enter="searchEvents" />
+            <input v-model="character" placeholder="hatsune_miku" @keydown.enter="onSearchEnter" />
           </div>
           <div class="form-field">
             <label>작품</label>
-            <input v-model="copyright" placeholder="genshin_impact" @keydown.enter="searchEvents" />
+            <input v-model="copyright" placeholder="genshin_impact" @keydown.enter="onSearchEnter" />
           </div>
         </div>
 
         <div class="form-row">
           <div class="form-field wide">
             <label>일반 태그</label>
-            <input v-model="prompt" placeholder="1girl, blue_hair, sword" @keydown.enter="searchEvents" />
+            <input v-model="prompt" placeholder="1girl, blue_hair, sword" @keydown.enter="onSearchEnter" />
           </div>
           <div class="form-field">
             <label>작가</label>
-            <input v-model="artist" placeholder="작가명" @keydown.enter="searchEvents" />
+            <input v-model="artist" placeholder="작가명" @keydown.enter="onSearchEnter" />
           </div>
         </div>
 
         <details class="exclude-section" open>
           <summary class="exclude-toggle">제외 태그 <Icon name="chevron-down" size="12" /></summary>
           <div class="form-field">
-            <input v-model="excludeTags" placeholder="제외할 태그..." @keydown.enter="searchEvents" />
+            <input v-model="excludeTags" placeholder="제외할 태그..." @keydown.enter="onSearchEnter" />
           </div>
         </details>
 
         <div class="form-row">
           <div class="form-field">
             <label>최소 스텝</label>
-            <input type="number" v-model.number="minSteps" min="1" max="50" @keydown.enter="searchEvents" />
+            <input type="number" v-model.number="minSteps" min="1" max="50" @keydown.enter="onSearchEnter" />
           </div>
           <div class="form-field">
             <label>최대 스텝</label>
-            <input type="number" v-model.number="maxSteps" min="1" max="100" @keydown.enter="searchEvents" />
+            <input type="number" v-model.number="maxSteps" min="1" max="100" @keydown.enter="onSearchEnter" />
           </div>
         </div>
 
@@ -104,7 +104,9 @@
           <!-- 좌측: 이벤트 목록 -->
           <div class="eg-list">
             <div v-for="(ev, i) in events" :key="i" class="eg-list-item"
-              :class="{ active: selectedIdx === i }" @click="selectEvent(i)">
+              role="button" tabindex="0"
+              :class="{ active: selectedIdx === i }" @click="selectEvent(i)"
+              @keydown.enter.prevent="selectEvent(i)" @keydown.space.prevent="selectEvent(i)">
               <span class="eg-idx">#{{ i + 1 }}</span>
               <span class="eg-desc">{{ ev.character || ev.copyright || 'Event' }}</span>
               <span class="eg-cnt">{{ ev.children_count || '?' }}</span>
@@ -151,14 +153,17 @@
 
               <div class="eg-steps">
                 <div v-for="(step, i) in displaySteps" :key="i" class="eg-step"
+                  role="button" tabindex="0"
                   :class="{ 'step-selected': selectedSteps[i] }"
-                  @click="toggleStep(i)">
+                  @click="toggleStep(i)"
+                  @keydown.enter.self.prevent="toggleStep(i)"
+                  @keydown.space.self.prevent="toggleStep(i)">
                   <div class="step-head">
                     <input type="checkbox" :checked="selectedSteps[i]" @click.stop="toggleStep(i)" />
                     <span class="step-no">Step {{ i + 1 }}</span>
                     <span class="step-badge" :class="i === 0 ? 'parent' : 'child'">{{ i === 0 ? 'PARENT' : 'CHILD' }}</span>
                     <span class="step-char" v-if="currentEvent?.character && i === 0">{{ currentEvent.character }}</span>
-                    <button class="step-send" @click.stop="sendStepToT2I(step)" title="T2I로 전송"><Icon name="upload" /></button>
+                    <button class="step-send" @click.stop="sendStepToT2I(step)" title="T2I로 전송" aria-label="T2I로 전송"><Icon name="upload" /></button>
                   </div>
                   <div class="step-diff" v-if="i > 0 && (step.added?.length || step.removed?.length)">
                     <span v-for="t in (step.added || [])" :key="'a'+t" class="diff-tag add">+ {{ t }}</span>
@@ -174,7 +179,7 @@
                   <input type="number" v-model.number="repeatCount" min="1" max="100" />
                 </div>
                 <button class="eg-btn" @click="addToQueue" :disabled="selectedCount === 0">
-                  큐에 추가 ({{ selectedCount }})
+                  대기열에 추가 ({{ selectedCount }})
                 </button>
                 <button class="eg-btn primary" @click="generateNow" :disabled="selectedCount === 0">
                   지금 생성 ({{ selectedCount }})
@@ -189,9 +194,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { requestAction } from '../stores/widgetStore.js'
 import { vHostDialog } from '../utils/hostDialogs'
+import { isImeComposing } from '../utils/imeComposition'
 import { applyEventCarry, effectiveStepPrompt } from '../utils/eventCarry'
 import { onBackendEvent } from '../bridge.js'
 
@@ -246,6 +252,10 @@ function _saveEventFields() {
   } catch {}
 }
 
+function onSearchEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  searchEvents()
+}
 function searchEvents() {
   // 입력칸의 Enter 는 버튼의 :disabled 가드를 거치지 않는다 — 검색 중 재진입을 여기서 막는다.
   // (막지 않으면 워커가 하나 더 떠 늦게 끝난 옛 결과가 새 결과를 덮어쓴다)
@@ -339,7 +349,7 @@ function addToQueue() {
   const scenarios = _buildScenarios()
   if (!scenarios.length) { requestAction('show_toast', { type: 'info', msg: '스텝을 선택하세요' }); return }
   requestAction('event_add_to_queue', { scenarios })
-  requestAction('show_toast', { type: 'success', msg: `${scenarios.length}개 큐에 추가됨` })
+  requestAction('show_toast', { type: 'success', msg: `${scenarios.length}개 대기열에 추가됨` })
 }
 function generateNow() {
   const scenarios = _buildScenarios()
@@ -361,6 +371,8 @@ function exportEvents() {
 function importEvents() {
   requestAction('import_event_results')
 }
+
+const unsubs: Array<() => void> = []
 
 onMounted(() => {
   // 이전 입력 필드 복원
@@ -389,15 +401,15 @@ onMounted(() => {
   } catch {}
   // Event 데이터 적재 문구 전용 채널. Search 탭의 searchStatus 를 같이 들으면
   // 두 탭이 keep-alive 로 살아 있는 동안 서로의 로딩 문구를 덮어쓴다.
-  onBackendEvent('eventLoadStatus', (msg: string) => {
+  unsubs.push(onBackendEvent('eventLoadStatus', (msg: string) => {
     if (searching.value) loadingMsg.value = msg
-  })
-  onBackendEvent('eventSearchProgress', (cur: number, total: number) => {
+  }))
+  unsubs.push(onBackendEvent('eventSearchProgress', (cur: number, total: number) => {
     searchCur.value = cur
     searchTotal.value = total
     loadingMsg.value = `유사도 검색 중... (${cur.toLocaleString()} / ${total.toLocaleString()})`
-  })
-  onBackendEvent('eventSearchResults', (json: string) => {
+  }))
+  unsubs.push(onBackendEvent('eventSearchResults', (json: string) => {
     try {
       const data = JSON.parse(json)
       if (Array.isArray(data)) {
@@ -417,9 +429,9 @@ onMounted(() => {
     } catch {}
     searching.value = false
     loadingMsg.value = ''
-  })
+  }))
   // import 결과 수신
-  onBackendEvent('eventImportResults', (json: string) => {
+  unsubs.push(onBackendEvent('eventImportResults', (json: string) => {
     try {
       const data = JSON.parse(json)
       if (Array.isArray(data)) {
@@ -429,8 +441,9 @@ onMounted(() => {
     } catch {}
     // 가져오기는 검색을 대신할 수 있다 — 스피너가 남아 무대를 가리면 안 된다.
     searching.value = false
-  })
+  }))
 })
+onUnmounted(() => { unsubs.splice(0).forEach((u) => u()) })
 </script>
 
 <style scoped>

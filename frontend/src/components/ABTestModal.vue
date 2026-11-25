@@ -1,12 +1,12 @@
 <template>
   <div class="abt-overlay" @mousedown.self="close">
-    <div class="abt-modal">
+    <div class="abt-modal" role="dialog" aria-modal="true" aria-label="A/B 프롬프트 테스트">
       <div class="abt-header">
         <div>
           <h3>A/B 프롬프트 테스트</h3>
           <span class="abt-sub">동일한 시드로 두 프롬프트를 생성하여 비교합니다 (대기열에 추가)</span>
         </div>
-        <button class="abt-close" @click="close"><Icon name="close" /></button>
+        <button class="abt-close" @click="close" title="닫기" aria-label="A/B 프롬프트 테스트 닫기"><Icon name="close" /></button>
       </div>
 
       <div class="abt-body">
@@ -96,7 +96,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey, true))
 </script>
 
 <style scoped>
-.abt-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 2200; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.abt-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: var(--z-modal-nested); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .abt-modal { width: min(720px, 92vw); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-card); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 .abt-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .abt-header h3 { font-size: 16px; font-weight: var(--fw-bold); }

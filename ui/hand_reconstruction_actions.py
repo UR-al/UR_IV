@@ -207,7 +207,11 @@ class HandReconstructionActionsMixin:
         packet = {"requestId": request_id if isinstance(request_id, str) else "", "action": action}
         try:
             if getattr(self, "web_mode", False):
-                raise ValueError("손 재구성 실험은 로컬 앱에서만 사용할 수 있습니다.")
+                from core.web_action_policy import web_blocked_message
+                msg = web_blocked_message(action)
+                from ui.status_line import notify_user
+                notify_user(self, "warning", msg)
+                raise ValueError(msg)
             if not isinstance(request_id, str) or not _ID.fullmatch(request_id):
                 raise ValueError("작업 식별자가 올바르지 않습니다. 패널을 다시 열어 주세요.")
             self._ensure_hand_runtime()
@@ -250,7 +254,16 @@ class HandReconstructionActionsMixin:
                 if action == "hand_reconstruction_export":
                     if not job["cancel"].is_set():
                         path = export_hand_candidate(cached_png, output_root)
+                        with self._hand_lock:
+                            if self._hand_job is job:
+                                self._hand_job = None
                         self._hand_emit({**packet, "ok": True, "phase": "complete", "path": path})
+                    else:
+                        with self._hand_lock:
+                            if self._hand_job is job:
+                                self._hand_job = None
+                        self._hand_emit({**packet, "ok": False, "phase": "complete", "canceled": True,
+                                         "error": "손 재구성 내보내기를 취소했습니다."})
                     return
                 prepared = prepare_hand_repair(request)
                 from core.chat_generation import prepare_prompt_payload
@@ -273,7 +286,10 @@ class HandReconstructionActionsMixin:
                         if job["cancel"].is_set():
                             break
                         current_seed = (seed + index) % (2 ** 32)
-                        params = hand_generation_payload(prepared, values, current_seed)
+                        params = hand_generation_payload(
+                            prepared, values, current_seed,
+                            backend=str(backend.get_backend_type() or "webui"),
+                        )
 
                         def progress(step, total, _preview=None):
                             if not job["cancel"].is_set():

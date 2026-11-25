@@ -1,6 +1,6 @@
 <template>
   <div class="lm-overlay" @mousedown.self="close">
-    <div class="lm-modal">
+    <div class="lm-modal" role="dialog" aria-modal="true" aria-label="LoRA 매니저">
       <div class="lm-header">
         <div>
           <h3>LoRA 매니저</h3>
@@ -12,7 +12,7 @@
         <div class="lm-head-actions">
           <button class="lm-modetab" :class="{ active: !extMode }" @click="extMode = false">간편</button>
           <button class="lm-modetab" :class="{ active: extMode }" @click="openExtManager">확장 매니저</button>
-          <button class="lm-close" @click="close"><Icon name="close" /></button>
+          <button class="lm-close" @click="close" title="닫기" aria-label="LoRA 매니저 닫기"><Icon name="close" /></button>
         </div>
       </div>
 
@@ -30,7 +30,7 @@
       <template v-else>
       <div class="lm-searchbar">
         <input ref="searchEl" v-model="query" class="lm-search" placeholder="LoRA 이름 검색..." />
-        <button class="lm-refresh" @click="load('force')" :disabled="loading" title="목록 다시 스캔"><Icon v-if="!loading" name="refresh" /><template v-else>…</template></button>
+        <button class="lm-refresh" @click="load('force')" :disabled="loading" title="목록 다시 스캔" aria-label="목록 다시 스캔"><Icon v-if="!loading" name="refresh" /><template v-else>…</template></button>
       </div>
 
       <div class="lm-list">
@@ -44,13 +44,13 @@
         <div v-if="unavailableCount" class="lm-availability-note">
           현재 실행 백엔드에서 보이지 않는 {{ unavailableCount }}개 항목은 확인만 가능하며 추가할 수 없습니다.
         </div>
-        <section v-for="section in filteredSections" :key="section.key" class="lm-section">
+        <section v-for="section in visibleSections" :key="section.key" class="lm-section">
           <header class="lm-section-header">
             <div>
               <strong>{{ section.label }}</strong>
               <span>{{ section.description }}</span>
             </div>
-            <span class="lm-section-count">{{ section.items.length }}</span>
+            <span class="lm-section-count">{{ section.totalCount }}</span>
           </header>
           <div v-for="l in section.items" :key="l.id || `${l.source || 'main'}:${l.runtimeName || l.name}`"
             class="lm-item" :class="{ unavailable: l.backendAvailable === false }">
@@ -76,6 +76,9 @@
               @click="add(l)">+ 추가</button>
           </div>
         </section>
+        <div v-if="remainingCount > 0" class="lm-more-wrap">
+          <button class="lm-more-btn" @click="loadMore">더 보기 (남은 {{ remainingCount }}개)</button>
+        </div>
       </div>
 
       <!-- 일괄 붙여넣기 (<lora:name:weight> 텍스트) -->
@@ -97,7 +100,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import type { LorasReadyPayload } from '../types/bridge'
 import { createLatestRequest, wasAbandoned } from '../utils/bridgeRequest'
@@ -132,6 +135,18 @@ const emit = defineEmits<{
 
 const loras = ref<LoraItem[]>([])
 const query = ref('')
+const debouncedQuery = ref('')
+const PAGE_SIZE = 120
+const visibleLimit = ref(PAGE_SIZE)
+let _queryTimer: ReturnType<typeof setTimeout> | null = null
+watch(query, (val) => {
+  if (_queryTimer) clearTimeout(_queryTimer)
+  _queryTimer = setTimeout(() => {
+    debouncedQuery.value = val
+    visibleLimit.value = PAGE_SIZE
+    _queryTimer = null
+  }, 150)
+})
 const loading = ref(false)
 const loadError = ref('')
 const batchText = ref('')
@@ -183,7 +198,7 @@ function onExtUrlReady(json: string) {
 }
 
 const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase()
+  const q = debouncedQuery.value.trim().toLowerCase()
   return q ? loras.value.filter(l => [l.label, l.name, l.runtimeName, l.source, l.sourceName, l.group, ...(l.triggerWords || [])]
     .some(value => String(value || '').toLowerCase().includes(q))) : loras.value
 })
@@ -232,6 +247,20 @@ const filteredSections = computed<LoraSection[]>(() => {
   }
   return sections
 })
+
+const visibleSections = computed(() => {
+  let budget = visibleLimit.value
+  const out: Array<LoraSection & { totalCount: number }> = []
+  for (const section of filteredSections.value) {
+    if (budget <= 0) break
+    const slice = section.items.slice(0, budget)
+    budget -= slice.length
+    out.push({ ...section, items: slice, totalCount: section.items.length })
+  }
+  return out
+})
+const remainingCount = computed(() => Math.max(0, filtered.value.length - visibleLimit.value))
+function loadMore() { visibleLimit.value += PAGE_SIZE }
 
 const unavailableCount = computed(() => filtered.value.filter(lora => lora.backendAvailable === false).length)
 
@@ -289,6 +318,7 @@ onMounted(() => {
   if (searchEl.value) searchEl.value.focus()
 })
 onUnmounted(() => {
+  if (_queryTimer) { clearTimeout(_queryTimer); _queryTimer = null }
   window.removeEventListener('keydown', onKey, true)
   disconnectExtUrlReady?.()
   disconnectExtUrlReady = null
@@ -299,7 +329,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.lm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 3200; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.lm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: var(--z-modal-nested); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .lm-modal { width: min(840px, 94vw); height: min(840px, 92vh); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-card); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
 .lm-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .lm-header h3 { font-size: 17px; font-weight: var(--fw-bold); color: var(--text-primary); }
@@ -377,6 +407,9 @@ onUnmounted(() => {
 .lm-foot-spacer { flex: 1; }
 .lm-done { background: var(--bg-button); border: 1px solid var(--border); border-radius: var(--radius-base); color: var(--text-secondary); font-size: 12px; font-weight: var(--fw-bold); padding: 9px 16px; cursor: pointer; }
 .lm-done:hover { color: var(--text-primary); border-color: var(--accent); }
+.lm-more-wrap { display: flex; justify-content: center; padding: 8px 0 12px; }
+.lm-more-btn { background: var(--bg-button); border: 1px solid var(--border); border-radius: var(--radius-base); color: var(--text-secondary); font-size: 12px; font-weight: var(--fw-bold); padding: 7px 16px; cursor: pointer; }
+.lm-more-btn:hover { color: var(--text-primary); border-color: var(--accent); }
 @media (max-width: 520px) {
   .lm-header { align-items: flex-start; padding: 12px; }
   .lm-head-actions { flex-wrap: wrap; justify-content: flex-end; }

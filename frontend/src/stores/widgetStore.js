@@ -13,6 +13,8 @@ let _backend = null
 let _disconnectBackend = null
 let _applyingFromBackend = false
 const _prevSnapshot = Object.create(null)
+// 백엔드 연결 전 Vue에서 대입된 변경을 보관했다가 connectStore 시 한 번에 전송한다.
+const _pendingWidgetChanges = new Map()
 // 첫 getAllWidgetValues 적용 여부 — 이 시점을 기다려야 하는 쪽(PromptPanel 의 Undo 기준점)이
 // '800ms 뒤면 왔겠지' 같은 추측 타이머를 쓰지 않게 한다.
 let _initialValuesLoaded = false
@@ -45,13 +47,19 @@ export function whenWidgetValuesLoaded(cb) {
 // Python에서 받은 초기값까지 다시 echo하게 된다.
 const widgetValues = new Proxy(state.values, {
   set(target, id, val) {
-    if (target[id] === val) return true
+    const key = String(id)
+    const strVal = String(val)
+    if (target[id] === val && !_pendingWidgetChanges.has(key)) return true
     target[id] = val
-    if (!_applyingFromBackend && _backend) {
-      const strVal = String(val)
-      if (_prevSnapshot[id] !== strVal) {
-        _prevSnapshot[id] = strVal
-        _backend.onWidgetChanged(String(id), strVal)
+    if (!_applyingFromBackend) {
+      if (_backend) {
+        _pendingWidgetChanges.delete(key)
+        if (_prevSnapshot[key] !== strVal) {
+          _prevSnapshot[key] = strVal
+          _backend.onWidgetChanged(key, strVal)
+        }
+      } else {
+        _pendingWidgetChanges.set(key, strVal)
       }
     }
     return true
@@ -118,6 +126,18 @@ export function connectStore(backend) {
   }
   backend.batchUpdate.connect(onBatchUpdate)
 
+  // 3.5 연결 전 보류된 Vue 위젯 변경을 백엔드로 플러시한다
+  if (_pendingWidgetChanges.size > 0) {
+    const pending = [..._pendingWidgetChanges.entries()]
+    _pendingWidgetChanges.clear()
+    for (const [id, strVal] of pending) {
+      if (_prevSnapshot[id] !== strVal) {
+        _prevSnapshot[id] = strVal
+        backend.onWidgetChanged(id, strVal)
+      }
+    }
+  }
+
   // 4. 초기값 로드
   backend.getAllWidgetValues((json) => {
     if (_backend !== backend) return
@@ -174,6 +194,8 @@ export function requestAction(action, payload = {}) {
     // 그 객체(update_prompt_deck·export 의 수만 행, chat_save 의 base64 이미지)를 계속 붙잡는다.
     if (import.meta.env.DEV) console.log(`[Vue -> Python] Action: ${action}`, payload)
     _backend.onAction(action, JSON.stringify(payload))
+  } else if (import.meta.env?.DEV) {
+    console.warn(`[Store] requestAction('${action}') dropped: backend not connected yet`)
   }
 }
 

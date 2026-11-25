@@ -1,11 +1,11 @@
 <template>
   <div class="wc-overlay" @mousedown.self="closeInstantWcManager">
-    <div class="wc-modal">
+    <div class="wc-modal" role="dialog" aria-modal="true" aria-label="즉석 와일드카드 관리">
       <div class="wc-modal-header">
         <h3>즉석 와일드카드 관리</h3>
         <span class="wc-path">user_data/instant_wildcards.json &nbsp;·&nbsp; 문법: <code>$$name$$</code></span>
         <button class="wc-new-btn" @click="createNewInstantWc">+ NEW</button>
-        <button class="close-btn" @click="closeInstantWcManager"><Icon name="close" /></button>
+        <button class="close-btn" @click="closeInstantWcManager" title="닫기" aria-label="즉석 와일드카드 관리 닫기"><Icon name="close" /></button>
       </div>
       <div class="wc-modal-body">
         <!-- 이름 목록 -->
@@ -14,7 +14,7 @@
             :class="{ active: selectedInstantWc === iw.name }" @click="selectInstantWc(iw.name)">
             <span class="wc-fname">{{ iw.name }}</span>
             <span class="wc-file-count">{{ iw.lines.length }}</span>
-            <button class="wc-del" @click.stop="deleteInstantWc(iw.name)"><Icon name="close" /></button>
+            <button class="wc-del" @click.stop="deleteInstantWc(iw.name)" title="즉석 와일드카드 삭제" aria-label="즉석 와일드카드 삭제"><Icon name="close" /></button>
           </div>
           <div v-if="instantWildcards.length === 0" class="wc-empty" style="padding: 12px; font-size: 11px;">
             와일드카드가 없습니다. + NEW로 추가하세요.
@@ -33,8 +33,8 @@
                 <span class="wc-block-idx">{{ li + 1 }}</span>
                 <input v-model="iwEditLines[li]" class="wc-block-input"
                   :placeholder="li === 0 ? '예: happy 또는 {100}:happy (가중치)' : ''"
-                  @keydown.enter="appendIwLine" />
-                <button class="wc-block-rm" @click="removeIwLine(li)"><Icon name="close" /></button>
+                  @keydown.enter="!isImeComposing($event) && appendIwLine()" />
+                <button class="wc-block-rm" @click="removeIwLine(li)" title="줄 삭제" aria-label="줄 삭제"><Icon name="close" /></button>
               </div>
               <button class="wc-add-line" @click="appendIwLine">+ 줄 추가</button>
             </div>
@@ -58,6 +58,7 @@
  */
 import { useInstantWildcards } from '../../composables/useInstantWildcards'
 import { useModalLayer } from '../../composables/useModalLayer'
+import { isImeComposing } from '../../utils/imeComposition'
 
 const {
   showInstantWcManager, instantWildcards, selectedInstantWc, selectedInstantWcData, iwEditLines,

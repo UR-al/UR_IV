@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 
 PACK_ID = "ai_studio_forge_parity"
@@ -291,6 +294,11 @@ def install_bundled_node_pack(
         or _installed_runtime_fingerprint(target) != runtime_fingerprint
     )
 
+    # Clean up stale backup directories left behind by previous locked installs.
+    for stale in root.glob(f".{PACK_ID}.backup-*"):
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
+
     suffix = uuid.uuid4().hex[:10]
     staging = root / f".{PACK_ID}.staging-{suffix}"
     backup = root / f".{PACK_ID}.backup-{suffix}"
@@ -320,7 +328,10 @@ def install_bundled_node_pack(
                 os.replace(backup, target)
             raise
         if backup.exists():
-            shutil.rmtree(backup)
+            try:
+                shutil.rmtree(backup)
+            except OSError as exc:
+                _logger.warning("이전 노드 팩 백업 폴더 정리 실패(설치 완료): %s (%s)", backup, exc)
     finally:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)

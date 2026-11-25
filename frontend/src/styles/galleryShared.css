@@ -19,13 +19,19 @@
   overflow: hidden;
 }
 .gallery-workspace .gallery-toolbar {
-  height: 54px;
+  min-height: 54px;
+  height: auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
   /* 오른쪽 여백은 알림 종 자리다 (style.css --notif-gutter) — 썸네일 크기 슬라이더가 종에 닿았다 */
-  padding: 0 var(--notif-gutter) 0 20px;
+  padding: 6px var(--notif-gutter) 6px 20px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
+}
+.gallery-workspace .folder-info {
+  min-width: 0;
 }
 .gallery-workspace .control-group {
   display: flex;
@@ -124,8 +130,8 @@
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--bg-button);
+  border: 1px solid var(--border);
   border-radius: 12px;
 }
 .gallery-workspace .thumb-icon-small {
@@ -141,7 +147,7 @@
   appearance: none;
   width: 90px;
   height: 4px;
-  background: rgba(255,255,255,0.15);
+  background: var(--border-strong);
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -261,8 +267,8 @@
   justify-content: center;
 }
 .gallery-workspace .tiny-btn:hover {
-  background: var(--accent);
-  color: black;
+  background: var(--accent-fill);
+  color: var(--on-accent);
 }
 .gallery-workspace .exif-sidebar {
   position: absolute;
@@ -327,7 +333,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 6px;
-  z-index: 1000;
+  z-index: var(--z-ctx);
   min-width: 200px;
   box-shadow: 0 12px 32px rgba(0,0,0,0.8);
 }
@@ -347,7 +353,7 @@
   position: absolute;
   inset: 0;
   background: rgba(0,0,0,0.85);
-  z-index: 200;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1,9 +1,9 @@
 <template>
   <div class="stats-overlay" @mousedown.self="closeStatsModal">
-    <div class="stats-modal">
+    <div class="stats-modal" role="dialog" aria-modal="true" aria-label="생성 통계">
       <div class="stats-header">
         <h3>생성 통계</h3>
-        <button class="close-btn" @click="closeStatsModal">X</button>
+        <button class="close-btn" @click="closeStatsModal" title="닫기" aria-label="생성 통계 닫기"><Icon name="close" /></button>
       </div>
       <div class="stats-body" v-if="genStats.total > 0">
         <div class="stats-cards">
@@ -96,7 +96,7 @@ useModalLayer({ isOpen: () => showStatsModal.value, close: closeStatsModal })
 .close-btn:hover { border-color: var(--state-alert-fg); color: var(--state-alert-fg); background: rgba(248, 113, 113, 0.08); }
 
 /* Generation Stats Modal */
-.stats-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+.stats-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; }
 .stats-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; width: min(860px, 94vw); max-height: 88vh; overflow-y: auto; }
 .stats-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--border); }
 .stats-header h3 { font-size: 13px; font-weight: var(--fw-bold); letter-spacing: 0; color: var(--text-primary); }

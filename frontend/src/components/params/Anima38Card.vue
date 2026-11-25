@@ -1,11 +1,11 @@
 <template>
   <details v-if="view.visible" class="ext-card a38-card">
     <summary class="ext-title">Anima 3.8B<span v-if="summaryText" class="a38-summary">{{ summaryText }}</span></summary>
-    <label class="ext-check-row" title="Use adapter on negative prompt — 끄면 부정 프롬프트는 순정 Anima 인코더로">
-      <ToggleSwitch v-model="negative" size="sm" /><span>부정 프롬프트도 Qwen3.5 커넥터로</span></label>
-    <div v-if="view.v2FixedNote" class="ext-note">v2 번들은 부정 커넥터 강도가 1.0 으로 고정됩니다.</div>
+    <label class="ext-check-row" title="Use adapter on negative prompt — 끄면 네거티브 프롬프트는 순정 Anima 인코더로">
+      <ToggleSwitch v-model="negative" size="sm" /><span>네거티브 프롬프트도 Qwen3.5 커넥터로</span></label>
+    <div v-if="view.v2FixedNote" class="ext-note">v2 번들은 네거티브 커넥터 강도가 1.0 으로 고정됩니다.</div>
     <div v-if="view.showNegativeStrength" class="ext-field">
-      <label>부정 어댑터 강도 (v1)</label>
+      <label>네거티브 어댑터 강도 (v1)</label>
       <input type="number" v-model="storeWidgets[WIDGET_IDS.negative_strength]"
         :min="STRENGTH_RANGE.min" :max="STRENGTH_RANGE.max" :step="STRENGTH_RANGE.step" />
     </div>
@@ -31,7 +31,7 @@
       <ToggleSwitch v-model="applyImg2img" size="sm" /><span>I2I·인페인트에도 적용</span></label>
     <div class="ext-note" :class="{ 'a38-alert': status.status === 'missing' }">{{ status.text }}</div>
     <div class="a38-actions">
-      <button type="button" class="a38-reset" title="Forge 설정(txt2img)과 같은 앱 기본값으로 — 부정 커넥터 켬, v1 끔"
+      <button type="button" class="a38-reset" title="Forge 설정(txt2img)과 같은 앱 기본값으로 — 네거티브 커넥터 켬, v1 끔"
         @click="resetDefaults">기본값</button>
     </div>
   </details>

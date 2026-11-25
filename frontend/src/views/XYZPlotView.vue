@@ -178,7 +178,7 @@ function startPlot() {
   submitting.value = true; error.value = ''; resultImages.value = []
   requestAction('start_xyz_plot', { requestId: plotId, capabilityId: capabilityId.value, axes: parsed.value.data })
   clearTimeout(plotTimer)
-  plotTimer = setTimeout(() => { submitting.value = false; error.value = '큐 등록 응답이 지연되고 있습니다. 대기열을 확인하세요.' }, 15000)
+  plotTimer = setTimeout(() => { submitting.value = false; error.value = '대기열 등록 응답이 지연되고 있습니다. 대기열을 확인하세요.' }, 15000)
 }
 onMounted(() => {
   disconnects.push(onBackendEvent('xyzCapabilitiesReceived', (raw: string) => {
@@ -205,7 +205,7 @@ onMounted(() => {
     if (!plotId || event.requestId !== plotId) return
     if (event.type === 'result' && event.path) { resultImages.value.push({ path: event.path, label: event.label || '', axes: event.axes }); return }
     clearTimeout(plotTimer); submitting.value = false
-    if (!event.ok) error.value = event.error || 'XYZ 큐 등록에 실패했습니다.'
+    if (!event.ok) error.value = event.error || 'XYZ 대기열 등록에 실패했습니다.'
   }))
   void getBackend().then(() => { bridgeReady = true; refreshCapabilities() })
 })
@@ -268,7 +268,7 @@ function exportCSV() {
 .axes-fieldset:disabled { opacity: .55; pointer-events: none; }
 .capability-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; }
 .axis-note { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-.axis-error { margin: 0; color: var(--error, #d85c5c); font-size: 12px; line-height: 1.5; }
+.axis-error { margin: 0; color: var(--state-alert-fg); font-size: 12px; line-height: 1.5; }
 @media (max-width: 640px) { .xyz-view { flex-direction: column; overflow-y: auto; } .config-panel { box-sizing: border-box; width: 100%; border-right: 0; border-bottom: 1px solid var(--rule); flex-shrink: 0; } .result-area { min-height: 280px; flex-shrink: 0; } }
 .s-select, .s-input {
   background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px;

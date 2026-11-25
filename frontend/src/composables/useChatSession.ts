@@ -89,7 +89,6 @@ function createChatSession() {
     requestAction('chat_save', { threads: snapshot })
   }
   function scheduleSave() {
-    if (skipLoadedSave) { skipLoadedSave = false; return }
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(saveNow, 600)
   }
@@ -97,8 +96,16 @@ function createChatSession() {
   function flushSave() {
     if (saveTimer) saveNow()
   }
-  // 안전망: 9곳 넘는 변경 지점(send·onDone·이름 바꾸기·삭제 …)을 빠짐없이 저장한다 — 유지
-  watch(threads, scheduleSave, { deep: true })
+  // 스레드 메타(id·제목)만 얕게 감시한다 — base64 이미지가 포함된 messages 트리 deep watch 제거(P-01).
+  // 메시지 변경은 sendMessage/clearThread/removeThread/onDone/onGeneration 에서 명시적으로 scheduleSave() 한다.
+  watch(
+    () => threads.value.map((t) => `${t.id}\0${t.title}`),
+    (next, prev) => {
+      if (skipLoadedSave || !prev) return
+      if (next.length !== prev.length || next.some((v, i) => v !== prev[i])) scheduleSave()
+    },
+    { flush: 'sync' },
+  )
 
   // ── 대화 목록 ──
   /** 빈 대화를 연다(이미 빈 대화가 있으면 그걸 쓴다 — 빈 것이 쌓이지 않게). 포커스는 부르는 화면이 한다. */
@@ -118,7 +125,7 @@ function createChatSession() {
   function clearThread(id: string) {
     const thread = threads.value.find(t => t.id === id)
     stopIfAnswering(thread)
-    if (thread) { thread.messages = []; thread.title = ''; thread.updatedAt = Date.now() }
+    if (thread) { thread.messages = []; thread.title = ''; thread.updatedAt = Date.now(); scheduleSave() }
   }
   /** 대화 삭제(확인은 화면이 받는다). 마지막 대화였으면 빈 대화를 새로 연다. */
   function removeThread(id: string) {
@@ -128,6 +135,7 @@ function createChatSession() {
     threads.value = threads.value.filter(t => t.id !== thread.id)
     if (activeId.value === thread.id) activeId.value = threads.value[0]?.id || ''
     if (!threads.value.length) openEmptyThread()
+    scheduleSave()
   }
 
   // ── 보내기 · 받기 ──
@@ -138,6 +146,7 @@ function createChatSession() {
     if (images.length) user.images = [...images]
     thread.messages.push(user)
     if (!thread.title) thread.title = (text || '이미지').replace(/\s+/g, ' ').slice(0, 36)
+    scheduleSave()
     ask(thread)
   }
   function ask(thread: ChatThread, retryRequest?: GenerationRequest) {
@@ -176,7 +185,10 @@ function createChatSession() {
     const last = thread.messages[thread.messages.length - 1]
     const request = last?.generationRequest || [...thread.messages].reverse().find(m => m.role === 'user')?.generationRequest || prefs.generationRequest.value
     if (!check(request)) return
-    if (last?.role === 'assistant') thread.messages.pop()
+    if (last?.role === 'assistant') {
+      thread.messages.pop()
+      scheduleSave()
+    }
     ask(thread, request)
   }
   function findPending(requestId: string): ChatMessage | null {
@@ -214,6 +226,7 @@ function createChatSession() {
         if (t) t.updatedAt = Date.now()
         // 끝나면 액션 줄·메타가 생기고 생각 블록이 접혀 높이가 바뀐다 — 보고 있던 맨 아래를 지킨다
         notify('stream')
+        scheduleSave()
       }
       if (busyId.value === d.id) busyId.value = ''
     } catch { busyId.value = '' }
@@ -230,6 +243,7 @@ function createChatSession() {
       if (thread) thread.updatedAt = Date.now()
       if (event.done && busyId.value === event.id) busyId.value = ''
       notify('stream')
+      if (event.done) scheduleSave()
     } catch { /* unrelated or malformed events do not release another request */ }
   }
 
@@ -243,7 +257,13 @@ function createChatSession() {
         // 불러오기가 목록을 통째로 바꾸므로 그 전에 걸린 저장도 의미가 없다.
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
         skipLoadedSave = true
-        threads.value = list
+        try {
+          threads.value = list
+          if (!activeId.value) openEmptyThread()
+        } finally {
+          skipLoadedSave = false
+        }
+        return
       }
     } catch {}
     // GemmaStudio 처럼 열 때마다 빈 새 대화에서 시작한다 — 기존 기록은 목록에 남는다

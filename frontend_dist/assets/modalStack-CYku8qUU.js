@@ -1,0 +1,1 @@
+function e(){let e=[];return{open(t){let n={close:t.close};e.push(n);let r=!1;return()=>{if(r)return;r=!0;let t=e.lastIndexOf(n);t>=0&&e.splice(t,1)}},closeTop(){let t=e[e.length-1];return t?(t.close?.(),!0):!1},isAnyOpen:()=>e.length>0,size:()=>e.length}}var t=e();export{t};

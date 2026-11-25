@@ -712,10 +712,19 @@ class AppUpdateManager:
     def _load_settings(self) -> dict[str, Any]:
         raw = load_json_safe(str(self.settings_path), {})
         values = dict(raw) if isinstance(raw, Mapping) else {}
+        raw_interval = values.get("intervalHours")
+        if isinstance(raw_interval, bool) or raw_interval is None:
+            interval_hours = DEFAULT_INTERVAL_HOURS
+        else:
+            try:
+                interval_hours = int(raw_interval)
+            except (TypeError, ValueError):
+                interval_hours = DEFAULT_INTERVAL_HOURS
+        interval_hours = max(1, min(168, interval_hours or DEFAULT_INTERVAL_HOURS))
         return {
             "schema": CONFIG_SCHEMA,
             "autoCheck": bool(values.get("autoCheck", True)),
-            "intervalHours": max(1, min(168, int(values.get("intervalHours") or DEFAULT_INTERVAL_HOURS))),
+            "intervalHours": interval_hours,
             "lastCheckedAt": str(values.get("lastCheckedAt") or ""),
             "skippedVersion": normalise_version(values.get("skippedVersion")),
             "pendingVersion": normalise_version(values.get("pendingVersion")),

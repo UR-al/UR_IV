@@ -22,7 +22,7 @@ export function createWorkflowProfiles(deps: Pick<ManagerDeps, 'onBackendEvent' 
     deps.requestAction('workflow_profile_load', { name })
   }
   function saveCurrentAsProfile() {
-    const name = (window.prompt('프로파일 이름 (예: ANIMA Pony, Flux 표준):', '') || '').trim()
+    const name = (window.prompt('프로필 이름 (예: ANIMA Pony, Flux 표준):', '') || '').trim()
     if (!name) return
     // 이미 있으면 덮어쓰기 확인 — 글자 그대로가 아니라 **같은 파일**인지로 본다. 'Flux.' · 'flux' ·
     // 'Fl/ux' 는 저장 규칙상 모두 Flux.json 이라, 예전엔 확인 없이 기존 'Flux' 를 덮었다(utils/profileFileName).
@@ -31,7 +31,7 @@ export function createWorkflowProfiles(deps: Pick<ManagerDeps, 'onBackendEvent' 
     if (existing) {
       const message = existing.name === name
         ? `'${name}' 이미 존재합니다. 덮어쓸까요?`
-        : `'${name}' 은(는) 기존 프로파일 '${existing.name}' 과(와) 같은 파일로 저장됩니다. '${existing.name}' 을(를) 덮어쓸까요?`
+        : `'${name}' 은(는) 기존 프로필 '${existing.name}' 과(와) 같은 파일로 저장됩니다. '${existing.name}' 을(를) 덮어쓸까요?`
       if (!window.confirm(message)) return
     }
     // overwrite 는 확인받았을 때만 true — 목록이 낡아 여기서 못 본 충돌은 백엔드가 쓰지 않고 경고한다

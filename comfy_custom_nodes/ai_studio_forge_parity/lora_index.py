@@ -51,13 +51,13 @@ _MODEL_FOLDERS = frozenset(("anima", "moss", "sdxl", "krea2", "_unsorted"))  # D
 
 
 def _is_algo_folder(name: str) -> bool:
-    return name.lower() in _ALGOS
+    return _trim(name).lower() in _ALGOS
 
 
 def _is_model_folder(first: str, second: str) -> bool:
     """A known model folder name, or a first folder that is not an algorithm folder followed by one that is (so a new
     algorithm folder, or one with a stray space/BOM from a hand move, under ANIMA/MOSS/... still keeps its runs apart)."""
-    return first.lower() in _MODEL_FOLDERS or (not _is_algo_folder(first) and _is_algo_folder(second))
+    return _trim(first).lower() in _MODEL_FOLDERS or (not _is_algo_folder(first) and _is_algo_folder(second))
 
 
 def parse_lora_path(entry: str) -> dict:
@@ -247,6 +247,8 @@ def trigger_of(summary: dict, board_run: Optional[dict]) -> str:
 def load_board(board_root) -> dict:
     """``{runs, marks}`` from ``<board_root>/board_db.json``; missing or broken file -> empty maps."""
     out = {"runs": {}, "marks": {}}
+    if not board_root or not str(board_root).strip():
+        return out
     try:
         data = json.loads((Path(board_root) / "board_db.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):

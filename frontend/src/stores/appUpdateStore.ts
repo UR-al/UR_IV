@@ -77,7 +77,8 @@ let client: StudioClient | null = null
 let initialisePromise: Promise<void> | null = null
 let disconnect: (() => void) | null = null
 let autoCheckScheduled = false
-let activeSilent = false
+const actionSilent = new Map<string, boolean>()
+let activeActionPromise: Promise<void> | null = null
 let notifiedVersion = ''
 
 function mapping(value: unknown): Record<string, any> {
@@ -137,16 +138,18 @@ function consumeUpdateEvent(event: any): void {
   if (event?.type === 'completed') {
     appUpdateState.busy = false
     appUpdateState.busyAction = ''
-    if (activeSilent && action === 'check') maybeNotifyRelease()
-    else if (!activeSilent && message) toast('success', message)
-    activeSilent = false
+    const wasSilent = action ? (actionSilent.get(action) ?? false) : false
+    if (action) actionSilent.delete(action)
+    if (wasSilent && action === 'check') maybeNotifyRelease()
+    else if (!wasSilent && message) toast('success', message)
     return
   }
   if (event?.type === 'error') {
     appUpdateState.busy = false
     appUpdateState.busyAction = ''
-    if (!activeSilent) toast('error', message || '업데이트 작업을 완료하지 못했습니다.')
-    activeSilent = false
+    const wasSilent = action ? (actionSilent.get(action) ?? false) : false
+    if (action) actionSilent.delete(action)
+    if (!wasSilent) toast('error', message || '업데이트 작업을 완료하지 못했습니다.')
   }
 }
 
@@ -222,7 +225,18 @@ export async function runAppUpdateAction(
 ): Promise<void> {
   await initialiseAppUpdates(false)
   if (!client?.supports('app_update.execute')) throw new Error('현재 환경에서는 앱 업데이트 작업을 사용할 수 없습니다.')
-  activeSilent = Boolean(options.silent)
+  const silent = Boolean(options.silent)
+  if (appUpdateState.busy || activeActionPromise) {
+    if (silent) return
+    if (appUpdateState.busyAction === action) {
+      actionSilent.set(action, false)
+      if (activeActionPromise) await activeActionPromise
+      return
+    }
+    if (activeActionPromise) await activeActionPromise.catch(() => {})
+    if (appUpdateState.busy) return
+  }
+  actionSilent.set(action, silent)
   appUpdateState.busy = true
   appUpdateState.busyAction = action
   appUpdateState.statusMessage = action === 'check'
@@ -230,21 +244,30 @@ export async function runAppUpdateAction(
     : action === 'install'
       ? '업데이트를 안전하게 준비하는 중입니다.'
       : '업데이트 설정을 저장하는 중입니다.'
-  try {
-    const reply = await client.invoke('app_update.execute', { action, payload })
-    const data = mapping(replyData(reply))
-    if (data.snapshot) applySnapshot(data.snapshot)
-    if (reply.status === 'ok') {
+  const run = (async () => {
+    try {
+      const reply = await client!.invoke('app_update.execute', { action, payload })
+      const data = mapping(replyData(reply))
+      if (data.snapshot) applySnapshot(data.snapshot)
+      if (reply.status === 'ok') {
+        appUpdateState.busy = false
+        appUpdateState.busyAction = ''
+        actionSilent.delete(action)
+      }
+    } catch (error) {
       appUpdateState.busy = false
       appUpdateState.busyAction = ''
+      actionSilent.delete(action)
+      appUpdateState.statusMessage = error instanceof Error ? error.message : String(error)
+      if (!silent) toast('error', appUpdateState.statusMessage)
+      throw error
     }
-  } catch (error) {
-    appUpdateState.busy = false
-    appUpdateState.busyAction = ''
-    activeSilent = false
-    appUpdateState.statusMessage = error instanceof Error ? error.message : String(error)
-    if (!options.silent) toast('error', appUpdateState.statusMessage)
-    throw error
+  })()
+  activeActionPromise = run
+  try {
+    await run
+  } finally {
+    if (activeActionPromise === run) activeActionPromise = null
   }
 }
 

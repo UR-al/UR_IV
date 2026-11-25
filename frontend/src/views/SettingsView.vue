@@ -2,11 +2,11 @@
   <div class="settings-workspace" @keydown.ctrl.f.prevent="focusSearch">
     <!-- Left: Sub-navigation -->
     <aside class="settings-nav">
-      <div class="nav-header">환경설정</div>
+      <div class="nav-header">설정</div>
       <div class="settings-search-wrap">
         <input ref="searchInputRef" v-model="settingsSearch" class="settings-search"
           placeholder="설정 검색 (Ctrl+F)" />
-        <button v-if="settingsSearch" class="search-clear" @click="settingsSearch = ''" title="지우기"><Icon name="close" /></button>
+        <button v-if="settingsSearch" class="search-clear" @click="settingsSearch = ''" title="지우기" aria-label="검색어 지우기"><Icon name="close" /></button>
       </div>
       <button v-for="tab in filteredSubTabs" :key="tab.id"
         class="nav-item" :class="{ active: currentTab === tab.id }"
@@ -546,7 +546,7 @@
                     placeholder="--xformers --medvram"
                     :disabled="runtimeMutationDisabled(engineId)"
                     @input="runtimeExtraArgsDirty[engineId] = true"
-                    @keydown.enter="saveRuntimeExtraArgs(engineId)"
+                    @keydown.enter="onRuntimeExtraArgsEnter($event, engineId)"
                   />
                   <button
                     class="btn-pill compact primary"
@@ -614,7 +614,7 @@
                     spellcheck="false"
                     placeholder="https://github.com/owner/repository.git"
                     :disabled="runtimeMutationDisabled(engineId) || !runtimeExtensionWritable(engineId)"
-                    @keyup.enter="installRuntimeExtension(engineId)"
+                    @keydown.enter="onRuntimeRepoEnter($event, engineId)"
                   />
                   <button
                     class="btn-pill primary"
@@ -1087,8 +1087,8 @@
               </label>
             </div>
             <div class="btn-row-2 mt-16">
-              <button class="btn-pill primary" @click="testOllama">연결 테스트</button>
-              <button class="btn-pill" @click="loadOllamaModels">모델 새로고침</button>
+              <button class="btn-pill primary" :disabled="ollamaTesting || ollamaLoadingModels" @click="testOllama">{{ ollamaTesting ? '테스트 중…' : '연결 테스트' }}</button>
+              <button class="btn-pill" :disabled="ollamaTesting || ollamaLoadingModels" @click="loadOllamaModels">{{ ollamaLoadingModels ? '불러오는 중…' : '모델 새로고침' }}</button>
             </div>
             <div class="info-row mt-12" v-if="ollamaModels.length">
               <span class="desc">AVAILABLE MODELS ({{ ollamaModels.length }})</span>
@@ -1126,6 +1126,7 @@ import { useTabDefaultsEditor } from '../composables/useTabDefaultsEditor'
 import { searchSettings, type SettingSearchEntry } from '../utils/settingsSearch'
 import { requestAction, useWidgetStore } from '../stores/widgetStore.js'
 import { vHostDialog } from '../utils/hostDialogs'
+import { isImeComposing } from '../utils/imeComposition'
 import {
   appUpdateState,
   initialiseAppUpdates,
@@ -1294,7 +1295,23 @@ const settingEntries = ref<SettingSearchEntry[]>([])
 const settingMatches = computed(() => searchSettings(settingEntries.value, settingsSearch.value))
 const settingElements = new Map<string, HTMLElement>()
 let settingsObserver: MutationObserver | undefined
+let indexLabelsTimer: ReturnType<typeof setTimeout> | null = null
 let settingHighlight: HTMLElement | null = null
+function scheduleIndexSettingLabels() {
+  if (indexLabelsTimer) clearTimeout(indexLabelsTimer)
+  indexLabelsTimer = setTimeout(() => {
+    indexLabelsTimer = null
+    indexSettingLabels()
+  }, 250)
+}
+function connectSettingsObserver() {
+  if (!settingsObserver) settingsObserver = new MutationObserver(scheduleIndexSettingLabels)
+  if (settingsBodyRef.value) settingsObserver.observe(settingsBodyRef.value, { childList: true, subtree: true })
+}
+function disconnectSettingsObserver() {
+  if (indexLabelsTimer) { clearTimeout(indexLabelsTimer); indexLabelsTimer = null }
+  settingsObserver?.disconnect()
+}
 // Most tabs already use v-show; index their labels without mounting extra tools,
 // reading input values (API secrets), or maintaining a second list of controls.
 function indexSettingLabels() {
@@ -1357,10 +1374,27 @@ watch(settingsSearch, query => {
 })
 onMounted(() => {
   indexSettingLabels()
-  settingsObserver = new MutationObserver(indexSettingLabels)
-  if (settingsBodyRef.value) settingsObserver.observe(settingsBodyRef.value, { childList: true, subtree: true, characterData: true })
+  connectSettingsObserver()
 })
-onUnmounted(() => settingsObserver?.disconnect())
+onActivated(() => {
+  indexSettingLabels()
+  connectSettingsObserver()
+})
+onDeactivated(() => {
+  disconnectSettingsObserver()
+})
+onUnmounted(() => {
+  disconnectSettingsObserver()
+  if (_ollamaBusyTimer) { clearTimeout(_ollamaBusyTimer); _ollamaBusyTimer = null }
+})
+function onRuntimeExtraArgsEnter(e: KeyboardEvent, engineId: any) {
+  if (isImeComposing(e)) return
+  void saveRuntimeExtraArgs(engineId)
+}
+function onRuntimeRepoEnter(e: KeyboardEvent, engineId: any) {
+  if (isImeComposing(e)) return
+  void installRuntimeExtension(engineId)
+}
 function focusSearch() {
   searchInputRef.value?.focus()
   searchInputRef.value?.select()
@@ -2835,13 +2869,35 @@ function saveOllamaUnloadOnGen() {
   persistUiPrefs({ ollamaUnloadOnGen: ollamaUnloadOnGen.value })
 }
 
-async function testOllama() {
-  _ollamaRequestMode = 'test'
-  const backend: any = await getBackend()
-  // 결과는 ollamaModelsReady → handleOllamaModels (동기 ollamaListModels 는 없앴다)
-  if (backend.requestOllamaModels) backend.requestOllamaModels(ollamaUrl.value)
+const ollamaTesting = ref(false)
+const ollamaLoadingModels = ref(false)
+let _ollamaBusyTimer: ReturnType<typeof setTimeout> | null = null
+function _clearOllamaBusy() {
+  ollamaTesting.value = false
+  ollamaLoadingModels.value = false
+  if (_ollamaBusyTimer) { clearTimeout(_ollamaBusyTimer); _ollamaBusyTimer = null }
 }
-function loadOllamaModels() { testOllama() }
+function _armOllamaBusyTimeout() {
+  if (_ollamaBusyTimer) clearTimeout(_ollamaBusyTimer)
+  _ollamaBusyTimer = setTimeout(() => { _clearOllamaBusy() }, 15000)
+}
+async function _requestOllamaModels(kind: 'test' | 'refresh') {
+  if (ollamaTesting.value || ollamaLoadingModels.value) return
+  if (kind === 'test') ollamaTesting.value = true
+  else ollamaLoadingModels.value = true
+  _ollamaRequestMode = 'test'
+  _armOllamaBusyTimeout()
+  try {
+    const backend: any = await getBackend()
+    // 결과는 ollamaModelsReady → handleOllamaModels (동기 ollamaListModels 는 없앴다)
+    if (backend.requestOllamaModels) backend.requestOllamaModels(ollamaUrl.value)
+    else _clearOllamaBusy()
+  } catch {
+    _clearOllamaBusy()
+  }
+}
+async function testOllama() { await _requestOllamaModels('test') }
+async function loadOllamaModels() { await _requestOllamaModels('refresh') }
 // 시작 시 조용히 모델 목록 자동 로드 (caption 탭과 동일). 실패하면 Ollama 연결부터 안내.
 async function autoLoadOllamaModels() {
   _ollamaRequestMode = 'auto'
@@ -2857,9 +2913,11 @@ function handleOllamaModels(json: string) {
     const models = Array.isArray(payload) ? payload : payload.models
     if (!Array.isArray(payload) && payload.url && payload.url !== ollamaUrl.value) {
       _ollamaRequestMode = null
+      _clearOllamaBusy()
       return
     }
     _ollamaRequestMode = null
+    _clearOllamaBusy()
     if (!Array.isArray(models)) throw new Error('invalid models payload')
     ollamaModels.value = models
     if (models.length > 0) {
@@ -2875,6 +2933,7 @@ function handleOllamaModels(json: string) {
     }
   } catch {
     _ollamaRequestMode = null
+    _clearOllamaBusy()
     requestAction('show_toast', { type: 'error', msg: 'Ollama 연결 실패 — Ollama 실행/URL을 확인하세요' })
   }
 }
@@ -2885,11 +2944,12 @@ function handleOllamaModels(json: string) {
 
 /* Navigation */
 .settings-nav {
-  width: 240px; background: var(--bg-secondary); border-right: 1px solid var(--border);
+  width: 240px; flex-shrink: 0; min-height: 0; overflow-y: auto;
+  background: var(--bg-secondary); border-right: 1px solid var(--border);
   padding: 24px 12px; display: flex; flex-direction: column; gap: 4px;
 }
 .nav-header { font-size: var(--fs-label); font-weight: var(--fw-bold); color: var(--text-muted); letter-spacing: 0; padding: 0 12px 12px; }
-.settings-search-wrap { position: relative; padding: 0 12px 12px; }
+.settings-search-wrap { position: relative; padding: 0 12px; margin-bottom: 12px; }
 .settings-search {
   width: 100%; padding: 7px 28px 7px 10px;
   background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px;
@@ -2923,13 +2983,13 @@ function handleOllamaModels(json: string) {
 .nav-item.active .icon, .nav-item.active .label { color: var(--accent); }
 
 /* Content Area */
-.settings-body { flex: 1; overflow-y: auto; padding: 40px; }
+.settings-body { flex: 1; min-width: 0; overflow-y: auto; padding: 40px; }
 .settings-content { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 
 .section-fade { animation: fadeIn 0.3s ease-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-.glass-card { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 24px; }
+.glass-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 24px; }
 
 .info-row { display: flex; justify-content: space-between; align-items: center; }
 .desc { font-size: 12px; font-weight: var(--fw-bold); color: var(--text-secondary); }
@@ -3372,7 +3432,7 @@ function handleOllamaModels(json: string) {
   padding: 8px 10px; border-radius: 6px;
   transition: background 0.15s;
 }
-.s-row:hover { background: rgba(255, 255, 255, 0.025); }
+.s-row:hover { background: var(--bg-button-hover); }
 .s-row span { font-size: 13px; color: var(--text-secondary); }
 .hjm-select { background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; font-weight: var(--fw-bold); padding: 4px 10px; cursor: pointer; }
 /* kbd 단축키 표시 — style.css의 .keycap 스타일 토큰을 그대로 사용

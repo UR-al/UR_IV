@@ -6,7 +6,7 @@
     </header>
     <InstructionPresets scope="assist" :instructions="draft" :disabled="locked" @apply="applyPreset" />
     <div class="instruction-guide" :id="`${idPrefix}-instructions-guide`">
-      <p>일반 기능은 <strong>공통 지침 → 선택한 기능의 추가 지침</strong> 순서로 적용합니다. 기능별 지침으로 공통 지침을 구체화하세요.</p>
+      <p>일반 기능은 <strong>공통 지침 → 선택한 기능의 추가 지침</strong> 순서로 적용합니다. 기능별 지침으로 공통 지침을 구체화할 수 있습니다.</p>
       <p>자동 자연어 변환은 <strong>공통 → 자연어 캡션 → 생성 전 자동 자연어 변환</strong> 순서로 이어받습니다.</p>
       <p>태그·문장 등의 출력 형식은 앱이 관리합니다. 원하는 표현, 관찰 기준, 제외할 내용 중심으로 작성하세요.</p>
     </div>

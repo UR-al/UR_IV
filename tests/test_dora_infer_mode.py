@@ -590,7 +590,7 @@ class PersistenceTests(unittest.TestCase):
         branch = source[source.index("elif action == 'set_lora_stack':"):]
         branch = branch[:branch.index("elif action", 10)]
         self.assertIn("flush_boot_notices(self)", branch)
-        lora = (REPO / "frontend" / "src" / "composables" / "useLoraStack.js").read_text(encoding="utf-8")
+        lora = (REPO / "frontend" / "src" / "composables" / "useLoraStack.ts").read_text(encoding="utf-8")
         self.assertRegex(lora, r"function restoreFromPrefs[\s\S]*?nextTick\(\(\) => \{[\s\S]*?syncLoraStack\(\)")
 
 

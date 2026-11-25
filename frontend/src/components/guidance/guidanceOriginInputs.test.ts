@@ -126,7 +126,9 @@ const SECTIONS: OriginSection[] = [
 
 async function render(component: Component, values: Record<string, string>) {
   const widgets = reactive<Record<string, any>>(values)
-  return renderToString(createSSRApp(component, { widgets }))
+  const app = createSSRApp(component, { widgets })
+  app.component('Icon', { render: () => null })
+  return renderToString(app)
 }
 
 function attrOf(tag: string, name: string): string {

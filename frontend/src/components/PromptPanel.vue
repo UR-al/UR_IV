@@ -77,7 +77,7 @@
       <div v-if="!isKrea2Generation" class="input-group">
         <label>Checkpoint</label>
         <CustomSelect v-model="widgets.model_combo" :options="modelItems"
-          :option-groups="modelOptionGroups" placeholder="모델 선택..." />
+          :option-groups="modelOptionGroups" :disabled="modelDisabled" placeholder="모델 선택..." />
       </div>
       <div v-if="!isKrea2Generation" class="input-group">
         <label>VAE <span class="hint">(ANIMA 등 외부 VAE)</span></label>
@@ -162,7 +162,7 @@
           <div class="input-group">
             <div class="row label-row">
               <label>작가 <span v-if="sectionTokens.artist" class="tk-badge" :class="tokenBadgeClass(sectionTokens.artist)">{{ sectionTokens.artist }}t</span></label>
-              <button class="lock-btn" :class="{ locked: artistLocked }" @click="toggleArtistLock"><Icon :name="artistLocked ? 'lock' : 'unlock'" /></button>
+              <button class="lock-btn" :class="{ locked: artistLocked }" @click="toggleArtistLock" :title="artistLocked ? '작가 잠금 해제' : '작가 잠금'" :aria-label="artistLocked ? '작가 잠금 해제' : '작가 잠금'"><Icon :name="artistLocked ? 'lock' : 'unlock'" /></button>
             </div>
             <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.artist_input" :color-fn="() => ''" placeholder="작가..." />
             <textarea v-else ref="artistRef" data-prompt-undo v-model="widgets.artist_input" class="auto-grow" placeholder="Artist tags..." @input="autoGrow($event.target)"></textarea>
@@ -205,7 +205,7 @@
             <div class="nl-input-row" v-if="showNlInput">
               <input v-model="nlPrompt" ref="nlInputRef" :placeholder="pendingNlMode === 'nl2tags' ? '자연어 설명을 입력...' : '키워드를 입력...'" @keydown.enter="onNlEnter" class="nl-input" />
               <button class="ai-btn go" @click="runPendingNl()" :disabled="ollamaLoading">실행</button>
-              <button class="ai-btn" @click="showNlInput = false" title="닫기"><Icon name="close" /></button>
+              <button class="ai-btn" @click="showNlInput = false" title="닫기" aria-label="자연어 입력 닫기"><Icon name="close" /></button>
             </div>
             <div class="ai-loading" v-if="ollamaLoading"><Icon name="cpu" /> AI 처리 중...</div>
             <div class="nl-result" v-if="nlResult">
@@ -214,7 +214,7 @@
                 <button class="ai-btn go" @click="copyNlResult" title="복사">복사</button>
                 <button class="ai-btn go" @click="useNlAsMain" title="메인 프롬프트에 넣기">메인에 넣기</button>
                 <button v-if="nlRes" class="ai-btn go" @click="applyNlRes" :title="`추천 해상도 ${nlRes.w}×${nlRes.h} 적용`"><Icon name="crop" /> {{ nlRes.w }}×{{ nlRes.h }}</button>
-                <button class="ai-btn" @click="nlResult = ''; nlRes = null" title="닫기"><Icon name="close" /></button>
+                <button class="ai-btn" @click="nlResult = ''; nlRes = null" title="닫기" aria-label="AI 결과 닫기"><Icon name="close" /></button>
               </div>
             </div>
             <TagBlockField v-if="tagBlockMode" data-prompt-undo v-model="widgets.main_prompt_text" :color-fn="blockColorClass" placeholder="태그 추가..." @open-wildcard="forwardWildcard" />
@@ -258,11 +258,11 @@
     <!-- Exclude Manager Modal -->
     <transition name="fade">
       <div v-if="showExcludeManager" class="em-overlay" @mousedown.self="showExcludeManager = false">
-        <div class="em-modal">
+        <div class="em-modal" role="dialog" aria-modal="true" aria-label="제외어 관리">
           <div class="em-header">
             <h3>제외어 관리</h3>
             <span class="em-desc">제외 규칙별 매칭 태그 미리보기</span>
-            <button class="close-btn" @click="showExcludeManager = false"><Icon name="close" /></button>
+            <button class="close-btn" @click="showExcludeManager = false" title="닫기" aria-label="제외어 관리 닫기"><Icon name="close" /></button>
           </div>
           <div class="em-body">
             <!-- 좌측: 규칙 목록 + 추가 -->
@@ -273,23 +273,26 @@
                 @click="selectedExRule = item.i; loadExcludeMatches(item.rule)">
                 <!-- 편집 모드 -->
                 <input v-if="editingExRule === item.i" class="em-rule-edit" v-model="editExRuleText"
-                  @blur="finishEditExRule(item.i)" @keydown.enter="finishEditExRule(item.i)" @keydown.escape="editingExRule = -1"
+                  @blur="finishEditExRule(item.i)" @keydown.enter="!isImeComposing($event) && finishEditExRule(item.i)" @keydown.escape.prevent.stop="editingExRule = -1"
                   @click.stop ref="exRuleEditRef" />
                 <!-- 표시 모드 -->
                 <span v-else class="em-rule-text" @dblclick.stop="startEditExRule(item.i)">{{ item.rule }}</span>
-                <span class="em-match-count">{{ excludeMatches[item.rule]?.length || '...' }}</span>
-                <button class="em-rule-rm" @click.stop="removeExcludeRule(item.i)"><Icon name="close" /></button>
+                <span class="em-match-count">{{ excludeMatches[item.rule]?.length ?? '...' }}</span>
+                <button class="em-rule-rm" @click.stop="removeExcludeRule(item.i)" title="규칙 삭제" aria-label="규칙 삭제"><Icon name="close" /></button>
               </div>
               <div v-if="excludeRules.length === 0" class="em-empty-sm">제외 규칙 없음</div>
               <div v-else-if="filteredExRules.length === 0" class="em-empty-sm">검색 결과 없음</div>
               <div class="em-add-row">
-                <input v-model="newExcludeRule" placeholder="규칙 추가..." class="em-add-input" @keydown.enter="addExcludeRule" />
-                <button class="em-add-btn" @click="addExcludeRule">+</button>
+                <input v-model="newExcludeRule" placeholder="규칙 추가..." class="em-add-input" @keydown.enter="!isImeComposing($event) && addExcludeRule()" />
+                <button class="em-add-btn" @click="addExcludeRule" title="규칙 추가" aria-label="규칙 추가">+</button>
               </div>
             </div>
             <!-- 우측: 매칭 태그 목록 -->
             <div class="em-matches">
-              <template v-if="selectedExRule >= 0 && currentExMatches.length > 0">
+              <div v-if="selectedExRule < 0" class="em-empty">좌측에서 규칙을 선택하세요</div>
+              <div v-else-if="excludeMatches[excludeRules[selectedExRule]] === undefined" class="em-empty">불러오는 중...</div>
+              <div v-else-if="currentExMatches.length === 0" class="em-empty">일치하는 태그 없음 (0개)</div>
+              <template v-else>
                 <div class="em-match-header">
                   "{{ excludeRules[selectedExRule] }}" — {{ currentExMatches.length }}개 매칭
                 </div>
@@ -302,7 +305,6 @@
                   </button>
                 </div>
               </template>
-              <div v-else class="em-empty">좌측에서 규칙을 선택하세요</div>
             </div>
           </div>
         </div>
@@ -336,6 +338,8 @@ import {
   isOptimizePreviewStale, optimizeContextPayload, snapshotOptimizeInputs, type OptimizeInputs,
 } from '../utils/optimizePreview'
 import { appendPromptText, isCaretInComment, stripPromptComments } from '../utils/promptComments'
+import { approxTokens } from '../utils/promptTokens'
+import { useModalLayer } from '../composables/useModalLayer'
 import { syncFieldToTotal, totalTags } from '../utils/totalBlockSync'
 import CustomSelect from './CustomSelect.vue'
 import TagBlockField from './TagBlockField.vue'
@@ -496,6 +500,7 @@ const suffixRef = ref<HTMLTextAreaElement | null>(null)
 
 const modelItems = computed(() => store.getProperty('model_combo', 'items') || [])
 const modelOptionGroups = computed(() => store.getProperty('model_combo', 'optionGroups') || [])
+const modelDisabled = computed(() => store.getProperty('model_combo', 'enabled') === false)
 const vaeItems = computed(() => store.getProperty('vae_main_combo', 'items') || [])
 const teItems = computed(() => store.getProperty('te_main_input', 'items') || [])
 const teSelectedList = computed(() => {
@@ -520,19 +525,7 @@ function addTeFile(name: any) {
 function removeTeFile(name: string) {
   _serializeTe(teSelectedList.value.filter((f: string) => f !== name))
 }
-// 토큰 카운트 헬퍼 — SD/CLIP 근사 (실제 토크나이저보다 약간 보수적)
-// 규칙: 각 태그(쉼표 구분) → 단어 수 합산 + 쉼표 수. 프롬프트 주석(// · /* */)은 보내지 않으므로 세지 않는다.
-function approxTokens(text: string) {
-  const sent = stripPromptComments(String(text || ''))
-  if (!sent.trim()) return 0
-  const chunks = sent.split(',').map(s => s.trim()).filter(Boolean)
-  let total = 0
-  for (const c of chunks) {
-    const words = c.split(/\s+/).filter(Boolean)
-    total += words.length
-  }
-  return total + Math.max(0, chunks.length - 1) // 쉼표
-}
+// 토큰 카운트 헬퍼 — utils/promptTokens.ts 단일 출처 (규칙: total + Math.max(0, chunks.length - 1))
 const tokenCount = computed(() => approxTokens(widgets.total_prompt_display))
 
 // 섹션별 토큰 — 블록모드에서도 동작 (widgets 값은 join된 문자열)
@@ -595,6 +588,7 @@ const blockColorCache = ref<Record<string, string>>({})
 
 // ── Exclude Manager ──
 const showExcludeManager = ref(false)
+useModalLayer({ isOpen: () => showExcludeManager.value, close: () => { showExcludeManager.value = false } })
 const selectedExRule = ref<any>(-1)
 const excludeMatches = ref<Record<string, string[]>>({})  // {규칙텍스트: [tags]} — 인덱스 아닌 규칙 문자열로 키잉(중간 삭제/순서변경에도 안 어긋남)
 
@@ -1238,7 +1232,7 @@ label.danger { color: var(--state-alert-fg); }
 .excl-mgr-btn:hover { border-color: var(--state-alert-fg); color: var(--state-alert-fg); }
 
 /* Exclude Manager Modal */
-.em-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 3000; display: flex; align-items: center; justify-content: center; }
+.em-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: var(--z-modal-nested); display: flex; align-items: center; justify-content: center; }
 .em-modal { width: min(94vw, 1080px); height: min(88vh, 760px); background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
 .em-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .em-header h3 { font-size: 12px; letter-spacing: 0; color: var(--state-alert-fg); }
@@ -1297,7 +1291,7 @@ input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-app
 .undo-btns { float: right; display: inline-flex; gap: 4px; margin-left: auto; }
 .undo-btn {
   width: 28px; height: 28px; padding: 0; font-size: var(--fs-body); cursor: pointer;
-  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  background: var(--bg-button); border: 1px solid var(--border);
   border-radius: 4px; color: var(--text-primary);
 }
 .undo-btn:hover:not(:disabled) { background: rgba(96,165,250,0.18); color: var(--state-info-fg); border-color: var(--state-info-fg); }
@@ -1308,9 +1302,9 @@ summary.card-header { display: flex; align-items: center; }
   font-size: var(--fs-label);
   padding: 3px 8px;
   border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(255,255,255,0.04);
-  color: rgba(255,255,255,0.7);
+  border: 1px solid var(--border);
+  background: var(--bg-button);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s;
 }

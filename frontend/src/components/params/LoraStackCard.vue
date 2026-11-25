@@ -26,7 +26,7 @@
       <input type="range" min="-100" max="200" v-model.number="lora.weight" class="lora-slider" />
       <input type="number" class="lora-weight-input" :value="(lora.weight / 100).toFixed(2)" step="0.05" min="-1" max="3"
         title="가중치 직접 입력" @change="lora.weight = Math.round((parseFloat(($event.target as HTMLInputElement).value) || 0) * 100)" @mousedown.stop />
-      <button class="lora-remove" @click="loraStack.splice(i, 1)"><Icon name="close" /></button>
+      <button class="lora-remove" @click="loraStack.splice(i, 1)" title="LoRA 제거" aria-label="LoRA 제거"><Icon name="close" /></button>
     </div>
     </template>
     <div class="lora-drop-marker" v-if="loraDragIdx >= 0 && loraDropIdx === loraStack.length && loraStack.length !== loraDragIdx + 1"></div>
@@ -40,7 +40,7 @@
         <option v-for="n in loraSetNames" :key="n" :value="n">{{ n }}</option>
       </select>
       <button class="lora-tool-btn" @click="loadLoraSet" :disabled="!loraSetSel" title="선택 세트를 스택에 적용">적용</button>
-      <button class="lora-tool-btn" @click="deleteLoraSet" :disabled="!loraSetSel" title="세트 삭제"><Icon name="close" /></button>
+      <button class="lora-tool-btn" @click="deleteLoraSet" :disabled="!loraSetSel" title="세트 삭제" aria-label="선택 세트 삭제"><Icon name="close" /></button>
     </div>
   </div>
 </template>
@@ -52,7 +52,7 @@
  * useLoraStack 결과를 prop 으로 받아 그린다. '+ ADD LoRA' 는 같은 객체의 showLoraModal 을 켠다.
  */
 import type { PropType } from 'vue'
-import type { useLoraStack } from '../../composables/useLoraStack.js'
+import type { useLoraStack } from '../../composables/useLoraStack'
 
 const props = defineProps({
   lora: { type: Object as PropType<ReturnType<typeof useLoraStack>>, required: true },

@@ -74,7 +74,9 @@ describe('AnimaGuidancePanel sections', () => {
       'ocfg_enabled', 'dd_enabled', 'guid_adg_enabled', 'guid_mod_enabled',
     ]
     const widgets = reactive<Record<string, any>>(Object.fromEntries(toggles.map(key => [`_${key}`, 'true'])))
-    const html = await renderToString(createSSRApp(AnimaGuidancePanel, { widgets }))
+    const app = createSSRApp(AnimaGuidancePanel, { widgets })
+    app.component('Icon', { render: () => null })
+    const html = await renderToString(app)
     const order = [
       'PAG / SEG / SLG — Attention perturbation</summary>', 'Enable Perturbation Guidance', 'Enable SLG', 'SLG mode',
       'Legacy Soft/Approx 호환',
@@ -100,7 +102,9 @@ describe('AnimaGuidancePanel sections', () => {
 describe('AnimaGuidancePanel summary badge', () => {
   async function badge(values: Record<string, string>): Promise<string[]> {
     const widgets = reactive<Record<string, any>>(values)
-    const html = await renderToString(createSSRApp(AnimaGuidancePanel, { widgets }))
+    const app = createSSRApp(AnimaGuidancePanel, { widgets })
+    app.component('Icon', { render: () => null })
+    const html = await renderToString(app)
     const text = html.match(/class="ag-badge"[^>]*>([^<]*)</)?.[1] ?? ''
     return text ? text.split(' · ') : []
   }

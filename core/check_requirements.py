@@ -79,7 +79,7 @@ def _requirement_satisfied(name: str, spec: str) -> bool:
     if requirement.marker is not None and not requirement.marker.evaluate():
         return True
     try:
-        installed = version(name)
+        installed = version(requirement.name)
     except PackageNotFoundError:
         return False
     return not requirement.specifier or requirement.specifier.contains(installed, prereleases=True)

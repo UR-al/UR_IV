@@ -20,7 +20,9 @@ const ORIGIN_SCALE = { min: '0', max: '100', step: '0.1' }
 
 async function render(values: Record<string, string>) {
   const widgets = reactive<Record<string, any>>(values)
-  return renderToString(createSSRApp(PagSection, { widgets }))
+  const app = createSSRApp(PagSection, { widgets })
+  app.component('Icon', { render: () => null })
+  return renderToString(app)
 }
 
 function inputWithValue(html: string, value: string): string {

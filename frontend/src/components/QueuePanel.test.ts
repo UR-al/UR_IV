@@ -5,6 +5,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import source from './QueuePanel.vue?raw'
 import * as queueLocks from '../utils/queueLocks'
+import * as modalLayer from '../composables/useModalLayer'
 
 /**
  * 대기열 패널 — 실제 bridge.js · widgetStore.js 로, App 과 같은 순서(패널 마운트 → initBridge)에서.
@@ -29,6 +30,7 @@ function compile(bridge: unknown, store: unknown) {
     if (name === '../bridge.js') return bridge
     if (name === '../stores/widgetStore.js') return store
     if (name === '../utils/queueLocks') return queueLocks
+    if (name === '../composables/useModalLayer') return modalLayer
     throw Error(`Unexpected component dependency: ${name}`)
   }, compiled)
   return compiled.default
@@ -38,8 +40,11 @@ class Node {
   children: Node[] = []
   parent: Node | null = null
   props: Record<string, any> = {}
+  value: any = ''
   constructor(public tag: string, public text = '') {}
   get textContent(): string { return this.text + this.children.map(child => child.textContent).join('') }
+  addEventListener() {}
+  removeEventListener() {}
 }
 function insert(node: Node, parent: Node, anchor: Node | null = null) {
   if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1)
@@ -184,4 +189,29 @@ it('clearing everything leaves the generating row out of the count', async () =>
   clear().props.onClick()
   expect(confirmSpy).not.toHaveBeenCalled()
   expect(actions).toEqual([['show_toast', { type: 'warning', msg: queueLocks.ONLY_RUNNING_ROW_NOTICE }]])
+})
+
+it('only opens row edit on Enter when focused on the row itself, not inner buttons (A-4)', async () => {
+  const { bridge, backend, root } = await mountBeforeBridge()
+  await bridge.initBridge()
+  backend.queueUpdated.emit(QUEUE_STATE())
+  await openDrawer(root)
+
+  const row = byClass(root, 'q-row')[0]
+  const innerBtn = byClass(row, 'qr-btn')[0]
+  expect(row).toBeDefined()
+  expect(innerBtn).toBeDefined()
+
+  // 내부 버튼에서 올라온 Enter — .self 가 걸러내어 편집 모달이 열리지 않는다
+  const innerEnter = { key: 'Enter', target: innerBtn, currentTarget: row, preventDefault: vi.fn() }
+  row.props.onKeydown(innerEnter)
+  await nextTick()
+  expect(byClass(root, 'qe-modal')).toHaveLength(0)
+
+  // 행 자체에 포커스가 있을 때의 Enter — 편집 모달이 열린다
+  const selfEnter = { key: 'Enter', target: row, currentTarget: row, preventDefault: vi.fn() }
+  row.props.onKeydown(selfEnter)
+  await nextTick()
+  expect(byClass(root, 'qe-modal')).toHaveLength(1)
+  expect(selfEnter.preventDefault).toHaveBeenCalledTimes(1)
 })

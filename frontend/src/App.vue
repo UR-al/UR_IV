@@ -26,15 +26,15 @@
       <aside class="side-panel left" v-show="showLeftPanel">
         <div class="panel-scroll" v-show="panelMode === 'prompt'" v-scroll-memory="'leftPanel'">
           <PromptPanel @open-wildcard="openWildcardByName" />
-          <!-- 워크플로우 프로파일 -->
+          <!-- 워크플로우 프로필 -->
           <div class="tool-card profile-card">
             <div class="profile-row">
-              <label class="profile-label">프로파일</label>
+              <label class="profile-label">프로필</label>
               <CustomSelect :modelValue="''" @update:modelValue="loadWorkflowProfile"
                 :options="profileNames"
-                :placeholder="profileNames.length === 0 ? '(저장된 프로파일 없음)' : '선택하여 적용...'" />
-              <button class="profile-mini-btn" @click="saveCurrentAsProfile" title="현재 세팅을 새 프로파일로 저장">+</button>
-              <button class="profile-mini-btn" @click="openProfileManager" title="프로파일 관리 (삭제/이름변경)"><Icon name="settings" /></button>
+                :placeholder="profileNames.length === 0 ? '(저장된 프로필 없음)' : '선택하여 적용...'" />
+              <button class="profile-mini-btn" @click="saveCurrentAsProfile" title="현재 세팅을 새 프로필로 저장" aria-label="현재 세팅을 새 프로필로 저장">+</button>
+              <button class="profile-mini-btn" @click="openProfileManager" title="프로필 관리 (삭제/이름변경)" aria-label="프로필 관리"><Icon name="settings" /></button>
             </div>
           </div>
 
@@ -61,7 +61,7 @@
         <div class="extend-overlay" v-show="panelMode === 'params'">
           <div class="extend-header">
             <h3>파라미터</h3>
-            <button class="close-btn" @click="showExtendPanel = false" title="프롬프트로 (ESC)"><Icon name="close" /></button>
+            <button class="close-btn" @click="showExtendPanel = false" title="프롬프트로 (ESC)" aria-label="파라미터 닫기"><Icon name="close" /></button>
           </div>
           <div class="extend-scroll" v-scroll-memory="'extendPanel'">
             <!-- 카드마다 components/params/*.vue — 위젯 키·클래스·문구는 예전 그대로 옮겼다(App.vue 분할 ④).
@@ -139,7 +139,7 @@
               <Icon v-if="autoMode && !isGenerating && !nlConverting" name="play" />
               {{ nlConverting ? '자연어 변환 중…' : isGenerating ? '생성 중…' : autoMode ? '자동 생성 시작' : 'GENERATE IMAGE' }}
             </button>
-            <button v-if="isGenerating" class="btn-cancel" @click="cancelGeneration" title="생성 취소"><Icon name="close" /></button>
+            <button v-if="isGenerating" class="btn-cancel" @click="cancelGeneration" title="생성 취소" aria-label="생성 취소"><Icon name="close" /></button>
           </div>
           <div class="gen-eta" v-if="isGenerating && genEta">{{ genEta }}</div>
         </div>
@@ -158,11 +158,7 @@
             <keep-alive>
               <component :is="Component"
                 :key="route.name"
-                :image-url="currentImage"
-                :resolution="resolution"
-                :seed="seed"
-                :status="status"
-                v-bind="route.name === 't2i' ? { generating: isGenerating, progress: progressVal, eta: genEta, previewUrl: livePreview } : {}"
+                v-bind="route.name === 't2i' ? { imageUrl: currentImage, resolution, seed, status, generating: isGenerating, progress: progressVal, eta: genEta, previewUrl: livePreview } : {}"
               />
             </keep-alive>
             </transition>
@@ -196,7 +192,7 @@
           <h3>히스토리</h3>
           <span class="count-badge">{{ historyImages.length }}</span>
         </div>
-        <button class="hist-nav-btn" @click="histPage = Math.max(0, histPage - 1)" :disabled="histPage <= 0"><Icon name="chevron-up" /></button>
+        <button class="hist-nav-btn" @click="histPage = Math.max(0, histPage - 1)" :disabled="histPage <= 0" title="이전 히스토리 페이지" aria-label="이전 히스토리 페이지"><Icon name="chevron-up" /></button>
         <div class="hist-scroll" v-scroll-memory="'history'">
           <div v-for="(img, index) in visibleHistory" :key="img" class="hist-card"
             tabindex="0" role="button" :aria-label="`히스토리 이미지 ${histPage * histPerPage + index + 1}`" :aria-pressed="currentImage === img"
@@ -209,24 +205,24 @@
             <img :key="historyImageSrc(img)" :src="historyImageSrc(img)" alt="" decoding="async" />
           </div>
         </div>
-        <button class="hist-nav-btn" @click="histPage++" :disabled="(histPage + 1) * histPerPage >= historyImages.length"><Icon name="chevron-down" /></button>
+        <button class="hist-nav-btn" @click="histPage++" :disabled="(histPage + 1) * histPerPage >= historyImages.length" title="다음 히스토리 페이지" aria-label="다음 히스토리 페이지"><Icon name="chevron-down" /></button>
 
         <Teleport to="body">
         <transition name="pop">
-          <div v-if="ctxMenu.show" class="modern-ctx-menu" :style="ctxMenuStyle">
-            <div class="ctx-item" @click="ctxAddFavorite"><Icon name="star" /> 즐겨찾기 추가</div>
-            <div class="ctx-item" @click="ctxSendI2I"><Icon name="image" /> I2I로 보내기</div>
-            <div class="ctx-item" @click="ctxSendInpaint"><Icon name="palette" /> 인페인트로 보내기</div>
-            <div class="ctx-item" @click="ctxSendEditor"><Icon name="pencil" /> 에디터로 보내기</div>
-            <div class="ctx-item" @click="ctxCompare('before')"><Icon name="search" /> 비교 (이전)</div>
-            <div class="ctx-item" @click="ctxCompare('after')"><Icon name="search" /> 비교 (이후)</div>
-            <div class="ctx-item" @click="ctxRunAdetailer"><Icon name="target" /> ADetailer</div>
-            <div class="ctx-separator"></div>
-            <div class="ctx-item" @click="ctxPullPrompt"><Icon name="download" /> 프롬프트 당겨오기</div>
-            <div class="ctx-item" @click="ctxAddToQueue"><Icon name="plus" /> 다음 큐에 추가</div>
-            <div class="ctx-separator"></div>
-            <div class="ctx-item" @click="ctxCopyPath"><Icon name="clipboard" /> 경로 복사</div>
-            <div class="ctx-item delete" @click="ctxDelete"><Icon name="trash" /> 휴지통으로 이동</div>
+          <div v-if="ctxMenu.show" class="modern-ctx-menu" role="menu" aria-label="히스토리 이미지 메뉴" :style="ctxMenuStyle">
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxAddFavorite" @keydown.enter.prevent="ctxAddFavorite" @keydown.space.prevent="ctxAddFavorite"><Icon name="star" /> 즐겨찾기 추가</div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxSendI2I" @keydown.enter.prevent="ctxSendI2I" @keydown.space.prevent="ctxSendI2I"><Icon name="image" /> I2I로 보내기</div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxSendInpaint" @keydown.enter.prevent="ctxSendInpaint" @keydown.space.prevent="ctxSendInpaint"><Icon name="palette" /> 인페인트로 보내기</div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxSendEditor" @keydown.enter.prevent="ctxSendEditor" @keydown.space.prevent="ctxSendEditor"><Icon name="pencil" /> 에디터로 보내기</div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxCompare('before')" @keydown.enter.prevent="ctxCompare('before')" @keydown.space.prevent="ctxCompare('before')"><Icon name="search" /> 비교 (이전)</div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxCompare('after')" @keydown.enter.prevent="ctxCompare('after')" @keydown.space.prevent="ctxCompare('after')"><Icon name="search" /> 비교 (이후)</div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxRunAdetailer" @keydown.enter.prevent="ctxRunAdetailer" @keydown.space.prevent="ctxRunAdetailer"><Icon name="target" /> ADetailer</div>
+            <div class="ctx-separator" role="separator"></div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxPullPrompt" @keydown.enter.prevent="ctxPullPrompt" @keydown.space.prevent="ctxPullPrompt"><Icon name="download" /> 프롬프트 당겨오기</div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxAddToQueue" @keydown.enter.prevent="ctxAddToQueue" @keydown.space.prevent="ctxAddToQueue"><Icon name="plus" /> 다음 대기열에 추가</div>
+            <div class="ctx-separator" role="separator"></div>
+            <div class="ctx-item" role="menuitem" tabindex="0" @click="ctxCopyPath" @keydown.enter.prevent="ctxCopyPath" @keydown.space.prevent="ctxCopyPath"><Icon name="clipboard" /> 경로 복사</div>
+            <div class="ctx-item delete" role="menuitem" tabindex="0" @click="ctxDelete" @keydown.enter.prevent="ctxDelete" @keydown.space.prevent="ctxDelete"><Icon name="trash" /> 휴지통으로 이동</div>
           </div>
         </transition>
         </Teleport>
@@ -238,7 +234,7 @@
     </div>
 
     <!-- 우하단 빠른 도크 — 대기열 핀을 누르면 대기열 · 대화 · 메모장 (components/dock/QuickDock.vue) -->
-    <QuickDock />
+    <QuickDock v-if="!gateOpen" />
 
     <!-- 하단 계기 스트립 (백엔드 · VRAM · 모델) — 값이 없어도 줄은 남는다.
          예전 VRAM 바는 `v-if="vramInfo.total > 0"` 이라 백엔드가 없으면 통째로
@@ -305,9 +301,9 @@ import { requestAction, useWidgetStore } from './stores/widgetStore.js'
 import { initialiseAppUpdates } from './stores/appUpdateStore'
 import { mediaUrl } from './utils/media.js'
 import { bumpMediaVersion, recordListedMediaVersions } from './utils/mediaVersions'
-import { useLoraStack } from './composables/useLoraStack.js'
-import { useHighRes } from './composables/useHighRes.js'
-import { useRatingFilter } from './composables/useRatingFilter.js'
+import { useLoraStack } from './composables/useLoraStack'
+import { useHighRes } from './composables/useHighRes'
+import { useRatingFilter } from './composables/useRatingFilter'
 import { useRandomResolutions } from './composables/useRandomResolutions'
 import { useToasts } from './composables/useToasts'
 import { usePresetManager } from './composables/usePresetManager'
@@ -418,7 +414,7 @@ import WorkflowProfileModal from './components/managers/WorkflowProfileModal.vue
 import PromptOrderModal from './components/managers/PromptOrderModal.vue'
 import InstantWildcardModal from './components/managers/InstantWildcardModal.vue'
 import GenStatsModal from './components/managers/GenStatsModal.vue'
-import { loadCondRules, condEnabled } from './composables/condRules.js'
+import { loadCondRules, condEnabled } from './composables/condRules'
 import { clampMenuPosition, menuPositionStyle } from './utils/ctxMenuPosition'
 import { uiModals, closeCharPresetModal, openAbTestModal, closeAbTestModal,
          closeCharOverrideModal } from './composables/uiModals.js'
@@ -456,12 +452,15 @@ const historyPanel = ref<HTMLElement | null>(null)
 // 히스토리 카드 썸네일 — 목록 전체를 백엔드 캐시로 미리 만들어 위아래 페이지 넘김에 로딩이 없게 (useHistoryThumbs)
 const {
   srcFor: historyThumbSrc, ensure: ensureHistoryThumbs, setWidth: setPreviewThumbWidth,
-  invalidate: invalidateHistoryThumb,
-  bind: bindHistoryThumbs,
+  invalidate: invalidateHistoryThumb, prune: pruneHistoryThumbs,
+  bind: bindHistoryThumbs, unbind: unbindHistoryThumbs,
 } = useHistoryThumbs({ getBackend, onBackendEvent, mediaUrl })
-// deep: 1 — 배열 교체뿐 아니라 unshift/splice(새 생성 결과) 같은 변이도 잡는다(deep:false 는 못 잡았다).
-// 요소가 문자열이라 한 단계만 훑는다.
-watch(historyImages, (list) => { void ensureHistoryThumbs(list) }, { deep: 1 })
+let _prevHistoryLen = 0
+watch(historyImages, (list) => {
+  if (list.length < _prevHistoryLen) pruneHistoryThumbs(list)
+  _prevHistoryLen = list.length
+  void ensureHistoryThumbs(list)
+}, { deep: 1 })
 function onPreviewThumbWidthChanged(e: Event) {
   setPreviewThumbWidth((e as CustomEvent).detail?.value, historyImages.value)
 }
@@ -864,14 +863,24 @@ function applyHistoryImages(arr: unknown) {
   if (!Array.isArray(arr)) return
   historyImages.value = arr as string[]   // 캐시 저장은 아래 watch 한 곳에서
 }
-// 목록 교체·생성 결과 추가(unshift)·삭제(splice) 때마다 부팅용 캐시 동기화 — deep: 1 이라 변이도 잡는다
+// 목록 교체·생성 결과 추가(unshift)·삭제(splice) 때마다 부팅용 캐시 동기화 — 상위 50건이 바뀌었을 때만 저장
+let _lastHistoryCacheJson = ''
 watch(historyImages, (arr) => {
-  try { localStorage.setItem('historyImagesCache', JSON.stringify(arr.slice(0, 50))) } catch {}
+  try {
+    const json = JSON.stringify(arr.slice(0, 50))
+    if (json === _lastHistoryCacheJson) return
+    _lastHistoryCacheJson = json
+    localStorage.setItem('historyImagesCache', json)
+  } catch {}
 }, { deep: 1 })
 
 import { useRouter, useRoute } from 'vue-router'
 const router = useRouter()
 const route = useRoute()
+
+watch(() => route.name, (name, oldName) => {
+  if (oldName && typeof name === 'string' && name && name !== oldName) onTabChanged(name)
+})
 
 // ── 세션 복구 (크래시/VRAM OOM 후 작업 이어가기) — composables/useSessionRestore.ts ──
 // 템플릿이 쓰는 이름(sessionRestore·applySessionRestore·dismissSessionRestore)은 전부 여기서 꺼낸다.
@@ -893,35 +902,60 @@ const _applyUiScale = (val: any) => {
 }
 _applyUiScale(localStorage.getItem('ui.scale') || '1.0')
 
+const _appAbort = new AbortController()
+const _appUnsubs: Array<() => void> = []
+let _ollamaFallbackTimer: ReturnType<typeof setTimeout> | null = null
+let _profilesLoadTimer: ReturnType<typeof setTimeout> | null = null
+function _trackUnsub(fn: unknown) {
+  if (typeof fn === 'function') _appUnsubs.push(fn as () => void)
+}
+
+onUnmounted(() => {
+  _appAbort.abort()
+  unbindHistoryThumbs()
+  if (_ollamaFallbackTimer) { clearTimeout(_ollamaFallbackTimer); _ollamaFallbackTimer = null }
+  if (_profilesLoadTimer) { clearTimeout(_profilesLoadTimer); _profilesLoadTimer = null }
+  while (_appUnsubs.length) {
+    try { _appUnsubs.pop()?.() } catch {}
+  }
+})
+
 onMounted(async () => {
+  const signal = _appAbort.signal
   // 히스토리 썸네일: thumbnailReady 수신 + 부팅 폴백 폭(localStorage; uiPrefsLoaded 가 override) + 설정 즉시 반영
   bindHistoryThumbs()
   setPreviewThumbWidth(normalizePreviewThumbWidth(window.localStorage.getItem('previewThumbWidth')), historyImages.value)
-  window.addEventListener('previewThumbWidthChanged', onPreviewThumbWidthChanged)
-  await initBridge()
+  window.addEventListener('previewThumbWidthChanged', onPreviewThumbWidthChanged, { signal })
+  try {
+    await initBridge()
+  } catch (e) {
+    console.error('[App] bridge init failed:', e)
+    return
+  }
+  if (signal.aborted) return
   // 게이트를 가장 먼저 붙인다. 파이썬은 Vue 로드 직후 backendSelectionRequired 를
   // 보내기 시작하므로(0.3초 뒤 첫 재전송), 다른 구독보다 늦으면 첫 신호를 흘린다.
-  bindBackendGate()
+  _trackUnsub(bindBackendGate())
   // 계기 스트립의 백엔드 칸. 게이트와 같은 이유로 일찍 붙인다 — 파이썬이 되풀이해
   // 보내긴 하지만, 늦게 붙을수록 첫 몇 번을 흘려 스트립이 '연결 안 됨'으로 머문다.
-  onBackendEvent('backendStatus', (json: string) => {
+  _trackUnsub(onBackendEvent('backendStatus', (json: string) => {
     try { backendStatus.value = JSON.parse(json || 'null') } catch { /* 깨진 페이로드로 줄을 잃지 않는다 */ }
-  })
-  onBackendEvent('ollamaModelsReady', applyOllamaModels)
-  onBackendEvent('adetailerModelsReady', (json: string) => { try { adModelItems.value = JSON.parse(json) } catch {} })
+  }))
+  _trackUnsub(onBackendEvent('ollamaModelsReady', applyOllamaModels))
+  _trackUnsub(onBackendEvent('adetailerModelsReady', (json: string) => { try { adModelItems.value = JSON.parse(json) } catch {} }))
   storeWidgets.negpip_group = 'true'   // NegPiP 상시 적용 (UI 토글 제거) — Python 도 켠 채로 유지한다(generator_ui_setup)
   loadCondRules()                      // 조건부 프롬프트 규칙 로드 (모달/Search 공유)
-  setTimeout(ensureOllamaModel, 3000)  // 폴백: uiPrefsLoaded가 안 와도 AI 모델 검증
+  _ollamaFallbackTimer = setTimeout(ensureOllamaModel, 3000)  // 폴백: uiPrefsLoaded가 안 와도 AI 모델 검증
   // 세션 복구 제안(1.2초 뒤, 프롬프트 로드된 뒤) + 편집 2.5초 뒤·30초 주기 백업 — 결정 전엔 백업을 덮지 않는다
   startSessionBackup()
   // Settings 등 다른 곳에서 ui.scale 변경 시 즉시 반영
   window.addEventListener('storage', (e) => {
     if (e.key === 'ui.scale') _applyUiScale(e.newValue)
-  })
+  }, { signal })
   // 같은 창에서의 변경 (Settings 슬라이더)도 즉시 — 커스텀 이벤트
-  window.addEventListener('uiScaleChanged', (e) => _applyUiScale((e as CustomEvent).detail?.value))
+  window.addEventListener('uiScaleChanged', (e) => _applyUiScale((e as CustomEvent).detail?.value), { signal })
   // HISTORY 선택 깜빡임 토글 — Settings에서 변경 시 즉시 반영
-  window.addEventListener('historyBlinkChanged', (e) => { historyBlink.value = !!(e as CustomEvent).detail?.value })
+  window.addEventListener('historyBlinkChanged', (e) => { historyBlink.value = !!(e as CustomEvent).detail?.value }, { signal })
   // localStorage 캐시로 즉시 표시 (응답 빠르게), 그 후 backend에서 최신 가져옴
   try {
     const cached = localStorage.getItem('historyImagesCache')
@@ -931,7 +965,7 @@ onMounted(async () => {
     }
   } catch {}
   // 시작 시 히스토리 자동 로드 — 사용자가 F5 안 눌러도 이전 이미지들 보이게
-  onBackendEvent('galleryImagesReady', (json: string) => {
+  _trackUnsub(onBackendEvent('galleryImagesReady', (json: string) => {
     try {
       const payload = JSON.parse(json)
       if (payload.folder === '') {
@@ -940,12 +974,12 @@ onMounted(async () => {
         recordListedMediaVersions(payload.files, payload.versions)
       }
     } catch {}
-  })
+  }))
   loadHistory()
-  document.addEventListener('click', hideCtxMenu)
-  document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault() }, { passive: false })
+  document.addEventListener('click', hideCtxMenu, { signal })
+  document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault() }, { passive: false, signal })
   // 브라우저 기본 우클릭 메뉴 전역 차단
-  document.addEventListener('contextmenu', (e) => { e.preventDefault() })
+  document.addEventListener('contextmenu', (e) => { e.preventDefault() }, { signal })
   // 전역 단축키 — 판단(게이트 · ESC 는 모달 스택 맨 위부터 · 모달이 떠 있으면 ↑/↓ 히스토리 이동 금지)은
   // utils/appShortcuts 에 있고, 여기선 ref 와 동작만 잇는다. 모달은 열릴 때 스스로 appModalStack 에
   // 오른다(composables/useModalLayer) — App.modalLayer.test.ts 가 이 배선을 지킨다.
@@ -965,74 +999,81 @@ onMounted(async () => {
     navigateHistoryEdge,
     activeElement: () => document.activeElement as HTMLElement | null,
     jumpModifier: () => localStorage.getItem('historyJumpModifier'),
-  }))
+  }), { signal })
 
   // rating 필터는 마운트 때 보내지 않는다 — uiPrefsLoaded → restoreRatingFromPrefs 가 파일 값을 적용한
   // 직후 보낸다(localStorage 캐시가 파일·공유 필터를 덮지 않게, 감사 #107).
 
-  // 워크플로우 프로파일 목록 미리 로드 (드롭다운에 즉시 보이도록)
-  setTimeout(loadWorkflowProfilesList, 800)
+  // 워크플로우 프로필 목록 미리 로드 (드롭다운에 즉시 보이도록)
+  _profilesLoadTimer = setTimeout(loadWorkflowProfilesList, 800)
 
-  onBackendEvent('tabChanged', (tabId: string) => {
+  _trackUnsub(onBackendEvent('tabChanged', (tabId: string) => {
     const targetPath = tabId === 't2i' ? '/' : `/${tabId}`
     router.push(targetPath)
     onTabChanged(tabId)
-  })
+  }))
 
-  onBackendEvent('imageGenerated', async (data: string) => {
-    const parsed = JSON.parse(data)
-    // 이미 목록에 있는 경로 = 같은 파일에 덮어쓴 결과 — 그 카드의 옛 썸네일·원본 캐시만 버린다.
-    // (새 경로는 캐시가 없으니 버전을 올리지 않는다 — 올리면 세션 내 생성분이 늘 원본을 읽었다.)
-    const overwritten = !!parsed.path && historyImages.value.includes(parsed.path)
-    if (overwritten) {
-      imageVersions[parsed.path] = Date.now()
-      invalidateHistoryThumb(parsed.path)
-      bumpMediaVersion(parsed.path)   // 갤러리·즐겨찾기 카드도 새로 읽게
-    }
-    isGenerating.value = false
-    livePreview.value = ''
-    genEta.value = ''
-    status.value = ''
-    // History에서 옛 이미지를 보던 중(브라우징)이면 뷰를 뺏지 않음 — '최신'(또는
-    // 미선택)을 보고 있을 때만 새 이미지로 따라간다. 새 이미지는 History 맨 앞에
-    // 추가되어 t2i 결과 목록에 표시됨. (선택 중이던 이미지/위치는 그대로 유지)
-    const wasViewingLatest = !currentImage.value || currentImage.value === historyImages.value[0]
-    if (parsed.path) {
-      // 덮어쓴 경로는 맨 앞으로 옮긴다(같은 경로가 두 번 있으면 v-for key 가 겹친다)
-      if (overwritten) historyImages.value = historyImages.value.filter(p => p !== parsed.path)
-      historyImages.value.unshift(parsed.path)  // 무제한 — 갯수 캡 제거
-      if (wasViewingLatest) {
-        histPage.value = 0
-      } else {
-        // 보던 옛 이미지를 계속 보여주도록 그 이미지가 있는 페이지로 유지
-        const ci = historyImages.value.indexOf(currentImage.value)
-        if (ci >= 0) histPage.value = Math.floor(ci / histPerPage)
+  _trackUnsub(onBackendEvent('imageGenerated', async (data: string) => {
+    try {
+      const parsed = JSON.parse(data)
+      // 이미 목록에 있는 경로 = 같은 파일에 덮어쓴 결과 — 그 카드의 옛 썸네일·원본 캐시만 버린다.
+      // (새 경로는 캐시가 없으니 버전을 올리지 않는다 — 올리면 세션 내 생성분이 늘 원본을 읽었다.)
+      const overwritten = !!parsed.path && historyImages.value.includes(parsed.path)
+      if (overwritten || (parsed.path && currentImage.value === parsed.path)) {
+        imageVersions[parsed.path] = Date.now()
+        invalidateHistoryThumb(parsed.path)
+        bumpMediaVersion(parsed.path)   // 갤러리·즐겨찾기·ImageViewer 카드도 새로 읽게
       }
-    }
-    if (wasViewingLatest && parsed.path) {
-      currentImage.value = parsed.path
-      // 크기·시드가 없는 결과(외부 워크플로 등)도 'undefined' 를 찍지 않는다(utils/imageInfo)
-      resolution.value = formatResolution(parsed.width, parsed.height)
-      seed.value = formatSeed(parsed.seed)
-      // 생성 직후 EXIF 자동 로드 (추종 중일 때만 현재 EXIF 갱신)
-      const bk = await getBackend()
-      if (bk.getImageExif) {
-        bk.getImageExif(parsed.path, (json: string) => {
-          try { currentExif.value = exifFromPayload(JSON.parse(json)) } catch {}
-        })
+      isGenerating.value = false
+      livePreview.value = ''
+      genEta.value = ''
+      status.value = ''
+      // History에서 옛 이미지를 보던 중(브라우징)이면 뷰를 뺏지 않음 — '최신'(또는
+      // 미선택)을 보고 있을 때만 새 이미지로 따라간다. 새 이미지는 History 맨 앞에
+      // 추가되어 t2i 결과 목록에 표시됨. (선택 중이던 이미지/위치는 그대로 유지)
+      const wasViewingLatest = !currentImage.value || currentImage.value === historyImages.value[0]
+      if (parsed.path) {
+        // 덮어쓴 경로는 맨 앞으로 옮긴다(같은 경로가 두 번 있으면 v-for key 가 겹친다)
+        if (overwritten) historyImages.value = historyImages.value.filter(p => p !== parsed.path)
+        historyImages.value.unshift(parsed.path)  // 무제한 — 갯수 캡 제거
+        if (wasViewingLatest) {
+          histPage.value = 0
+        } else {
+          // 보던 옛 이미지를 계속 보여주도록 그 이미지가 있는 페이지로 유지
+          const ci = historyImages.value.indexOf(currentImage.value)
+          if (ci >= 0) histPage.value = Math.floor(ci / histPerPage)
+        }
       }
+      if (wasViewingLatest && parsed.path) {
+        currentImage.value = parsed.path
+        // 크기·시드가 없는 결과(외부 워크플로 등)도 'undefined' 를 찍지 않는다(utils/imageInfo)
+        resolution.value = formatResolution(parsed.width, parsed.height)
+        seed.value = formatSeed(parsed.seed)
+        // 생성 직후 EXIF 자동 로드 (추종 중일 때만 현재 EXIF 갱신)
+        const bk = await getBackend()
+        if (currentImage.value !== parsed.path) return
+        if (bk.getImageExif) {
+          bk.getImageExif(parsed.path, (json: string) => {
+            if (currentImage.value !== parsed.path) return
+            try { currentExif.value = exifFromPayload(JSON.parse(json)) } catch {}
+          })
+        }
+      }
+    } catch (e) {
+      console.error('[App] imageGenerated handler failed:', e)
     }
-  })
-  onBackendEvent('generationStarted', () => { isGenerating.value = true; autoWaiting.value = false; progressVal.value = 0; genStartTime.value = Date.now(); genEta.value = ''; livePreview.value = '' })
-  onBackendEvent('generationPreview', (b64: string) => {
+  }))
+  _trackUnsub(onBackendEvent('generationStarted', () => { isGenerating.value = true; autoWaiting.value = false; progressVal.value = 0; genStartTime.value = Date.now(); genEta.value = ''; livePreview.value = '' }))
+  _trackUnsub(onBackendEvent('generationPreview', (b64: string) => {
     if (!isGenerating.value) return
     const url = previewDataUrl(b64)   // JPEG/WebP/PNG 를 머리 바이트로 고른다(utils/generationProgress)
     if (url) livePreview.value = url
-  })
-  onBackendEvent('automationStatus', (json: string) => {
+  }))
+  _trackUnsub(onBackendEvent('automationStatus', (json: string) => {
     try {
       // 필드 이름은 bridge.d.ts AutomationStatusEvent 계약 — Partial 인 이유: 옛 백엔드가 일부를 빠뜨린다.
       const d = JSON.parse(json) as Partial<AutomationStatusEvent>
+      const wasAutomating = isAutomating.value
       isAutomating.value = d.running || false
       autoPaused.value = d.paused || false
       autoGenCount.value = d.count || 0
@@ -1046,22 +1087,22 @@ onMounted(async () => {
       deckAllowDup.value = d.allow_duplicates || false
       waitRemainingMs.value = d.wait_remaining_ms || 0
       waitTotalMs.value = d.wait_total_ms || 0
-      if (!d.running) { isGenerating.value = false }
+      if (wasAutomating && !d.running) { isGenerating.value = false }
     } catch {}
-  })
-  // 워크플로우 프로파일 목록 수신(workflowProfilesList → useWorkflowProfiles)
-  bindWorkflowProfiles()
+  }))
+  // 워크플로우 프로필 목록 수신(workflowProfilesList → useWorkflowProfiles)
+  _trackUnsub(bindWorkflowProfiles())
   // 프롬프트 섹션 순서 수신(promptOrderLoaded → usePromptOrder). 입력 칸이 이 순서를 따르므로 시작할 때 받는다
-  bindPromptOrder()
+  _trackUnsub(bindPromptOrder())
   loadPromptOrder()
   // PR 8: 인스턴트 와일드카드 목록 수신(instantWildcardsList → useInstantWildcards)
-  bindInstantWildcards()
+  _trackUnsub(bindInstantWildcards())
   // PR 9: 백엔드가 모드별 자동화 설정을 푸시 (백엔드 모드 전환 시). 부팅 값은 아래 hydrate 가 당겨 온다.
-  onBackendEvent('automationSettingsLoaded', (json: string) => {
+  _trackUnsub(onBackendEvent('automationSettingsLoaded', (json: string) => {
     const patch = automationPatchFromServer(json)
     if (Object.keys(patch).length) applyAutomationSettingsFromServer(patch)
-  })
-  onBackendEvent('generationProgress', (step: number, total: number) => {
+  }))
+  _trackUnsub(onBackendEvent('generationProgress', (step: number, total: number) => {
     progressVal.value = progressPercent(step, total)
     status.value = `Generating... ${step}/${total}`
     // 간단 ETA: 시작 시각 기준(utils/generationProgress.formatEta)
@@ -1069,21 +1110,22 @@ onMounted(async () => {
       const eta = formatEta((Date.now() - genStartTime.value) / 1000, step, total)
       if (eta !== null) genEta.value = eta
     }
-  })
+  }))
   // 생성 실패 — 진행 상태를 되돌리고 같은 메시지를 토스트로도 알린다(예전엔 두 번 구독했다).
-  onBackendEvent('generationError', (msg: string) => {
+  _trackUnsub(onBackendEvent('generationError', (msg: string) => {
     isGenerating.value = false; livePreview.value = ''; genEta.value = ''; status.value = `Error: ${msg}`
     addToast('error', msg)
-  })
+  }))
 
   // 글로벌 가중치 로드(globalWeightsLoaded → useGlobalWeights — 생성 경로가 모달 없이도 쓴다)
-  bindGlobalWeights()
+  _trackUnsub(bindGlobalWeights())
 
   // 랜덤 해상도 로드
   randomRes.loadRandomResList()
 
   // ADetailer 모델 로드
   const _bk = await getBackend()
+  if (signal.aborted) return
   // 자동화 설정: 파일(현재 모드) 값으로 먼저 채우고 그 뒤에 동기화한다 — 하드코딩 기본값이 파일을
   // 덮지 않게(감사 #42). 응답이 없어도 시간 초과 뒤 동기화는 한다(autoNl·Ollama 전달 경로) — 그때도
   // 모르는 키는 보내지 않고(_autoKnownKeys), 늦게 온 응답은 고치지 않은 키에 적용된다(R2b#1).
@@ -1104,17 +1146,17 @@ onMounted(async () => {
   loadWildcardTree(_bk)
 
   // VRAM 실시간 업데이트
-  onBackendEvent('vramUpdated', (json: string) => { try { vramInfo.value = JSON.parse(json) } catch {} })
+  _trackUnsub(onBackendEvent('vramUpdated', (json: string) => { try { vramInfo.value = JSON.parse(json) } catch {} }))
 
   // Global Toast 알림 (Python → Vue)
-  onBackendEvent('showNotification', (type: string, msg: string) => { addToast(type, msg) })
+  _trackUnsub(onBackendEvent('showNotification', (type: string, msg: string) => { addToast(type, msg) }))
   // 삭제 결과(경로별) — 실제로 파일이 없어졌을 때만 히스토리에서 뺀다(갤러리 삭제도 여기 반영).
-  onBackendEvent('imageDeleteResult', applyImageDeleteToHistory)
-  onBackendEvent('imageRestoreResult', historyTrash.onRestoreResult)
+  _trackUnsub(onBackendEvent('imageDeleteResult', applyImageDeleteToHistory))
+  _trackUnsub(onBackendEvent('imageRestoreResult', historyTrash.onRestoreResult))
   // 업데이트 알림도 같은 전역 토스트를 사용하므로 listener 등록 뒤 시작한다.
   void initialiseAppUpdates(true)
 
-  onBackendEvent('uiPrefsLoaded', (json: string) => {
+  _trackUnsub(onBackendEvent('uiPrefsLoaded', (json: string) => {
     try {
       const prefs = JSON.parse(json)
       // 파일 값 → localStorage 캐시: 미러는 여기 한 곳(utils/uiPrefMirror 표). 부팅 때 동기로 읽는 곳
@@ -1146,16 +1188,16 @@ onMounted(async () => {
       }
       if (typeof prefs.autoNlGen === 'boolean') autoNlGen.value = prefs.autoNlGen
     } catch {}
-  })
+  }))
 
   // 생성용 태그→자연어 변환 결과 (전용 채널 — PromptPanel의 ollamaResult와 분리)
-  onBackendEvent('genNlResult', (json: string) => {
+  _trackUnsub(onBackendEvent('genNlResult', (json: string) => {
     try {
       const d = JSON.parse(json)
       if (d && d.tags && !d.error) { _finishNlGen(d.tags) }
       else { if (d && d.error) requestAction('show_toast', { type: 'error', msg: 'AI 변환 실패 — 태그 그대로 생성' }); _finishNlGen(null) }
     } catch { _finishNlGen(null) }
-  })
+  }))
 
   // loraStackLoaded 핸들러는 useLoraStack 내부에서 등록됨 (App.vue 분할 ④)
   // 마운트 시점엔 LoRA 스택을 Python 에 보내지 않는다 — 이 시점 스택은 이 브라우저의 localStorage
@@ -1212,7 +1254,7 @@ onMounted(async () => {
 .tool-btn-on { color: var(--state-ok-fg); border-color: var(--state-ok-fg); box-shadow: 0 0 0 1px rgba(74,222,128,0.25) inset; }
 .tool-dot { position: absolute; top: 3px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--state-ok-fg); box-shadow: 0 0 5px var(--state-ok-fg); }
 /* 세션 복구 배너 */
-.session-restore { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; align-items: center; gap: 12px; background: var(--bg-secondary); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 16px; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+.session-restore { position: fixed; bottom: 36px; left: 50%; transform: translateX(-50%); z-index: var(--z-banner); display: flex; align-items: center; gap: 12px; background: var(--bg-secondary); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 16px; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
 .sr-msg { font-size: 12px; color: var(--text-primary); }
 .sr-apply { background: var(--accent-fill); color: var(--on-accent); border: none; border-radius: 6px; font-size: 11px; font-weight: var(--fw-bold); padding: 6px 14px; cursor: pointer; }
 .sr-dismiss { background: var(--bg-button); border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); font-size: 11px; font-weight: var(--fw-bold); padding: 6px 12px; cursor: pointer; }
@@ -1303,7 +1345,7 @@ onMounted(async () => {
 .hist-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* Context Menu */
-.modern-ctx-menu { position: fixed; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; padding: 6px; z-index: 2500; min-width: 200px; box-shadow: 0 12px 32px rgba(0,0,0,0.8); max-height: calc(100vh - 16px); overflow-y: auto; }
+.modern-ctx-menu { position: fixed; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; padding: 6px; z-index: var(--z-ctx); min-width: 200px; box-shadow: 0 12px 32px rgba(0,0,0,0.8); max-height: calc(100vh - 16px); overflow-y: auto; }
 .ctx-item { padding: 10px 14px; font-size: 11px; font-weight: var(--fw-bold); color: var(--text-muted); cursor: pointer; border-radius: 6px; transition: var(--transition); }
 .ctx-item:hover { background: var(--bg-button-hover); color: var(--text-primary); }
 .ctx-item.delete { color: var(--state-alert-fg); }
@@ -1315,7 +1357,7 @@ onMounted(async () => {
 
 /* 하단 VRAM 바는 components/StatusStrip.vue 로 옮겼다 (백엔드·VRAM·모델 한 줄). */
 
-.global-progress { position: fixed; top: 0; left: 0; width: 100%; height: 3px; background: transparent; z-index: 1000; }
+.global-progress { position: fixed; top: 0; left: 0; width: 100%; height: 3px; background: transparent; z-index: var(--z-chrome); }
 .progress-fill { height: 100%; background: var(--accent); transition: width 0.3s ease; }
 
 /* 토스트 · 알림 벨/기록 패널은 components/ToastLayer.vue · NotificationCenter.vue 로 옮겼다. */

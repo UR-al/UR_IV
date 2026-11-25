@@ -21,7 +21,7 @@
         v-model="textDraft"
         class="text-entry-input"
         placeholder="텍스트 입력 후 Enter"
-        @keydown.enter.stop.prevent="confirmText"
+        @keydown.enter="onTextEnter"
         @keydown.esc.stop.prevent="dismissText"
         @blur="confirmText"
       />
@@ -48,6 +48,7 @@ import {
   rectIsApplicable, snapshotsOnPress, stampCircle, strokeLine, type MaskEdit, type Point,
 } from '../../utils/maskOps'
 import { decodeEdgeMap, snapToEdge as snapToEdgeMap, type EdgeMap } from '../../utils/edgeMap'
+import { isImeComposing } from '../../utils/imeComposition'
 import { PristineSource, restoreStrokeMode } from '../../utils/pristineSnapshot'
 
 interface SelectionBounds { x: number; y: number; w: number; h: number }
@@ -370,6 +371,13 @@ watch(textAnchor, (anchor) => {
 /** 텍스트 입력칸에 포커스를 준다. 호출 시점이 중요해서 함수로 뺐다 — 아래 설명 참고. */
 function focusTextEntry() {
   nextTick(() => textInputEl.value?.focus())
+}
+
+function onTextEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return
+  e.stopPropagation()
+  e.preventDefault()
+  confirmText()
 }
 
 function confirmText() {
@@ -1596,9 +1604,8 @@ canvas { max-width: 100%; max-height: 100%; position: absolute; }
 }
 .canvas-info {
   position: absolute; bottom: 8px; right: 12px;
-  /* 위와 같은 이유 — 고정 검정 알약 위의 글자라 테마와 무관하다 */
-  color: #585858; font-size: 11px;
-  background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 4px;
+  color: var(--text-secondary); font-size: 11px;
+  background: var(--bg-secondary); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px;
   pointer-events: none; z-index: 2;
 }
 </style>

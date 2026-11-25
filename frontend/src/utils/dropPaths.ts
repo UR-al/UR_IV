@@ -52,14 +52,28 @@ export function droppedImagePaths(transfer: TransferLike | null | undefined): Dr
       if (typeof file.path === 'string' && file.path.trim()) add(file.path)
       else unresolved += 1
     }
-    return { paths, unresolved }
+    if (paths.length && unresolved === 0) return { paths, unresolved }
   }
 
+  let uriList = ''
+  try { uriList = transfer?.getData?.('text/uri-list') || '' } catch { uriList = '' }
   let text = ''
   try { text = transfer?.getData?.('text/plain') || '' } catch { text = '' }
-  for (const line of text.split(/\r?\n/)) {
-    const candidate = line.trim()
-    if (/[\\/]/.test(candidate) && IMAGE_EXT.test(candidate.split('?')[0])) add(candidate)
+  const beforeText = paths.length
+  const lines = [
+    ...uriList.split(/\r?\n/).filter(l => !l.trim().startsWith('#')),
+    ...text.split(/\r?\n/),
+  ]
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const match = /^(.*?\.(?:png|jpe?g|webp|bmp))(?:[?#].*)?$/i.exec(trimmed)
+    const candidate = match ? match[1] : ''
+    if (candidate && /[\\/]/.test(candidate)) add(candidate)
+  }
+  const addedFromText = paths.length - beforeText
+  if (addedFromText > 0 && unresolved > 0) {
+    unresolved = Math.max(0, unresolved - addedFromText)
   }
   return { paths, unresolved }
 }

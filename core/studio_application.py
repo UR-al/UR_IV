@@ -17,6 +17,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.path_sanitize import mask_local_paths
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +32,6 @@ _ENGINE_ALIASES = {
     "comfy": "comfyui",
     "comfyui": "comfyui",
 }
-_WINDOWS_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\r\n\"'<>|]+")
-_UNC_PATH = re.compile(r"\\\\[^\s\\/]+[\\/][^\r\n\"'<>|]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1356,6 +1356,7 @@ class StudioApplication:
             "existingRoot", "root", "installRoot", "sourceRoot", "pythonPath",
             "dataRoot", "apiUrl", "extensionDir", "defaultExtensionDir",
             "logPath", "modelPaths",
+            "extraArgs", "detectedArgs", "detectedArgsSource", "detectedArgsDropped",
         }
         engines = snapshot.get("engines", {})
         if isinstance(engines, dict):
@@ -1367,6 +1368,7 @@ class StudioApplication:
                 )
                 state["extensionDirConfigured"] = bool(state.get("extensionDir"))
                 state["apiUrlConfigured"] = bool(state.get("apiUrl"))
+                state["extraArgsConfigured"] = bool(state.get("extraArgs"))
                 paths = state.get("modelPaths")
                 if isinstance(paths, Mapping):
                     state["modelPathCounts"] = {
@@ -1378,9 +1380,14 @@ class StudioApplication:
                 state["message"] = self._sanitise_external_text(state.get("message", ""))
                 extensions = state.get("extensions")
                 if isinstance(extensions, list):
-                    state["extensions"] = [
-                        self._redact_generic(item) for item in extensions
-                    ]
+                    safe_extensions = []
+                    for item in extensions:
+                        if isinstance(item, Mapping):
+                            cleaned = {k: v for k, v in item.items() if k != "path"}
+                            safe_extensions.append(self._redact_generic(cleaned))
+                        else:
+                            safe_extensions.append(self._redact_generic(item))
+                    state["extensions"] = safe_extensions
         return self._redact_generic(snapshot)
 
     def _public_generation_api(
@@ -1622,8 +1629,7 @@ class StudioApplication:
     @staticmethod
     def _sanitise_external_text(value: Any) -> str:
         text = str(value or "").replace("\x00", "")
-        text = _UNC_PATH.sub("[local path]", text)
-        text = _WINDOWS_PATH.sub("[local path]", text)
+        text = mask_local_paths(text, replacement="[local path]", match_spaces=True)
         return text[:100_000]
 
     # --------------------------------------------------------------- reply/errors

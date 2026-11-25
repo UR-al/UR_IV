@@ -478,6 +478,95 @@ export interface ComfyWorkflowPicked {
 // 이 맵을 따라간다 — 적힌 액션은 호출부 페이로드 모양이 type-check 로 검사된다.
 // set_automation_settings 는 호출부가 AutomationSettings 밖의 필드도 함께 보내므로 넣지 않는다.
 
+/** 조건부 프롬프트 1개 규칙 (composables/condRules.ts ↔ core/cond_rules_store.py) */
+export interface CondRule {
+  enabled: boolean
+  condition: string
+  exists: boolean
+  target: string
+  action: 'add' | 'remove' | 'replace' | string
+  location: 'main' | 'prefix' | 'suffix' | 'after_condition' | string
+}
+
+export interface SaveCondRulesPayload {
+  enabled: boolean
+  positive: CondRule[]
+  negative: CondRule[]
+  updatedAt?: number
+  _manual?: boolean
+}
+
+export interface GenerateI2IPayload {
+  generation_family?: 'standard' | 'krea2' | string
+  image: string
+  image_path: string
+  reference_image?: string
+  reference_path?: string
+  prompt: string
+  negative_prompt: string
+  denoising: number
+  fidelity?: number
+  resize_mode: number
+  width: number
+  height: number
+  steps: number
+  cfg: number
+  seed: number | string
+}
+
+export interface GenerateInpaintPayload {
+  image: string
+  image_path: string
+  mask: string
+  prompt: string
+  negative_prompt: string
+  denoising: number
+  mask_content: number | string
+  inpaint_area: number | string
+  mask_blur: number
+  padding: number
+  steps: number
+  cfg: number
+  seed: number | string
+}
+
+export interface StartBatchPayload {
+  files: string[]
+  operation: string
+  settings: Record<string, unknown>
+}
+
+export interface StartUpscalePayload {
+  files: string[]
+  upscaler: string
+  scale: number
+}
+
+export interface StartXyzPlotPayload {
+  requestId: string
+  capabilityId: string
+  axes: unknown
+}
+
+export interface UpdateQueueItemPayload {
+  item_id: string
+  prompt: string
+  negative_prompt: string
+}
+
+export interface RemoveQueueItemsPayload {
+  item_ids: string[]
+}
+
+export interface MoveQueueItemPayload {
+  item_id: string
+  direction: 'up' | 'down'
+}
+
+export interface ExportSearchResultsPayload {
+  data: Array<Record<string, unknown>>
+}
+
 /** 액션 이름 → 페이로드 타입. 여기 없는 액션은 ActionPayload 가 `object` 로 푼다. */
 export interface ActionPayloads {
   delete_image: { path: string; undoable?: boolean; request_id?: string }
@@ -488,8 +577,24 @@ export interface ActionPayloads {
   set_lora_stack: SetLoraStackPayload
   update_prompt_deck: UpdatePromptDeckPayload
   import_search_results: ImportSearchResultsPayload
+  export_search_results: ExportSearchResultsPayload
   automation_override_next: AutomationOverrideNextPayload
   workflow_profile_save: WorkflowProfileSavePayload
+  workflow_profile_load: { name: string | number }
+  workflow_profile_delete: { name: string }
+  workflow_profile_rename: { old: string; new: string }
+  save_preset_by_name: { name: string }
+  load_preset_by_name: { name: string }
+  delete_preset: { name: string }
+  save_cond_rules: SaveCondRulesPayload
+  generate_i2i: GenerateI2IPayload
+  generate_inpaint: GenerateInpaintPayload
+  start_batch: StartBatchPayload
+  start_upscale: StartUpscalePayload
+  start_xyz_plot: StartXyzPlotPayload
+  update_queue_item: UpdateQueueItemPayload
+  remove_queue_items: RemoveQueueItemsPayload
+  move_queue_item: MoveQueueItemPayload
   probe_backend: ProbeBackendPayload
   select_backend: SelectBackendPayload
   sam_extra_capabilities_get: SamExtraCapabilitiesGetPayload

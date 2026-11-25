@@ -9,7 +9,7 @@
       <div class="sidebar-scroll">
         <div class="glass-card">
           <label>원본 이미지</label>
-          <div class="source-thumb" @click="triggerFileInput">
+          <div class="source-thumb" role="button" tabindex="0" aria-label="원본 이미지 선택" @click="triggerFileInput" @keydown.enter.prevent="triggerFileInput" @keydown.space.prevent="triggerFileInput">
             <img v-if="imageSrc" :src="imageSrc" />
             <div v-else class="upload-hint">끌어 놓거나 클릭</div>
           </div>
@@ -97,7 +97,7 @@
           <label class="mt-6">Seed (−1 = 랜덤)</label>
           <div class="seed-row">
             <input v-model="seed" type="text" class="seed-input" placeholder="-1" />
-            <button class="act-btn seed-btn" @click="seed = '-1'" title="랜덤으로 초기화"><Icon name="dice" /></button>
+            <button class="act-btn seed-btn" @click="seed = '-1'" title="랜덤으로 초기화" aria-label="랜덤으로 초기화"><Icon name="dice" /></button>
           </div>
         </details>
 
@@ -118,7 +118,7 @@
     <section class="canvas-area">
       <div class="canvas-wrap" @dragover.prevent="isDragging = true" @dragleave="isDragging = false"
         @drop.prevent="handleDrop" :class="{ dragging: isDragging }">
-        <div v-if="!imageSrc" class="drop-empty" @click="triggerFileInput">
+        <div v-if="!imageSrc" class="drop-empty" role="button" tabindex="0" aria-label="원본 이미지 불러오기" @click="triggerFileInput" @keydown.enter.prevent="triggerFileInput" @keydown.space.prevent="triggerFileInput">
           <div class="drop-icon"><Icon name="pencil" /></div>
           <h2>MASK EDITOR</h2>
           <p>이미지를 끌어 놓거나 클릭하세요</p>
@@ -139,9 +139,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onActivated, onDeactivated, onMounted, onUnmounted } from 'vue'
 import EditorToolbar from '../components/editor/EditorToolbar.vue'
 import { INPAINT_TOOLS, toolById, toolByKey } from '../utils/editorTools'
+import { appModalStack } from '../utils/modalStack'
 import { requestAction } from '../stores/widgetStore.js'
 import { getBackend, onBackendEvent } from '../bridge.js'
 import { mediaUrl } from '../utils/media.js'
@@ -208,7 +209,9 @@ const currentToolKey = computed(() => toolById(currentTool.value)?.shortcut ?? '
  * 도구 단축키 (M·L·B·E). 에디터와 같은 키를 쓴다.
  * 입력 중에는 절대 가로채지 않는다 — 프롬프트에 'b' 를 치는 순간 도구가 바뀌면 못 쓴다.
  */
+let inpaintKeyActive = false
 function onInpaintKeyDown(e: KeyboardEvent) {
+  if (!inpaintKeyActive || appModalStack.isAnyOpen()) return
   const el = document.activeElement as HTMLElement | null
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
   const tool = toolByKey(e.key, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey })
@@ -216,8 +219,20 @@ function onInpaintKeyDown(e: KeyboardEvent) {
   e.preventDefault()
   currentTool.value = tool.id
 }
-onMounted(() => document.addEventListener('keydown', onInpaintKeyDown))
-onUnmounted(() => document.removeEventListener('keydown', onInpaintKeyDown))
+function bindInpaintKey() {
+  if (inpaintKeyActive) return
+  inpaintKeyActive = true
+  document.addEventListener('keydown', onInpaintKeyDown)
+}
+function unbindInpaintKey() {
+  if (!inpaintKeyActive) return
+  inpaintKeyActive = false
+  document.removeEventListener('keydown', onInpaintKeyDown)
+}
+onMounted(bindInpaintKey)
+onActivated(bindInpaintKey)
+onDeactivated(unbindInpaintKey)
+onUnmounted(unbindInpaintKey)
 
 const imgW = ref(0), imgH = ref(0)
 const zoom = ref(1), panX = ref(0), panY = ref(0)
@@ -254,7 +269,7 @@ function handleDrop(e: DragEvent) {
   const f = e.dataTransfer?.files?.[0]
   if (f) { loadFile(f); return }
   const p = e.dataTransfer?.getData('text/plain')
-  if (p && p.includes('/')) loadFromPath(p)
+  if (p && (p.includes('/') || p.includes('\\'))) loadFromPath(p)
 }
 function loadFile(file: File) {
   // 파일 선택·드롭은 경로를 모른다(QtWebEngine File 에는 .path 가 없다) — 이전 경로를 반드시
@@ -567,7 +582,7 @@ function validatedHandSourceUrl(source: string): URL {
   const url = new URL(source)
   const decodedPath = decodeURIComponent(url.pathname).replace(/\\/g, '/')
   if (!(url.protocol === 'blob:' || (url.protocol === 'file:' && !url.hostname && !decodedPath.startsWith('//')))) {
-    throw Error('외부 이미지 URL은 읽지 않습니다. 원본 PNG/JPEG/WebP를 직접 올려주세요.')
+    throw Error('외부 이미지 URL은 읽지 않습니다. 원본 PNG/JPEG/WebP를 직접 올려 주세요.')
   }
   return url
 }
@@ -586,7 +601,7 @@ function readHandNativeSource(source: string): Promise<{ image: string; sourceKi
       if (settled) return
       settled = true
       clearTimeout(timeout)
-      reject(Error('현재 로컬 원본 파일을 읽지 못했습니다. 64 MB 이하 PNG/JPEG/WebP 파일을 직접 올려주세요. 캔버스로 자동 대체하지 않습니다.'))
+      reject(Error('현재 로컬 원본 파일을 읽지 못했습니다. 64 MB 이하 PNG/JPEG/WebP 파일을 직접 올려 주세요. 캔버스로 자동 대체하지 않습니다.'))
     }
     const timeout = setTimeout(fail, 30000)
     void getBackend().then((backend: any) => {
@@ -638,7 +653,7 @@ async function readHandSourceBlob(source: string): Promise<Blob> {
     return new Blob(chunks, { type: response.headers.get('content-type')?.split(';')[0] || '' })
   } catch {
     controller.abort()
-    throw Error('현재 로컬 원본 파일을 읽지 못했습니다. 64 MB 이하 PNG/JPEG/WebP 파일을 직접 올려주세요. 캔버스로 자동 대체하지 않습니다.')
+    throw Error('현재 로컬 원본 파일을 읽지 못했습니다. 64 MB 이하 PNG/JPEG/WebP 파일을 직접 올려 주세요. 캔버스로 자동 대체하지 않습니다.')
   } finally { clearTimeout(timeout) }
 }
 
@@ -650,19 +665,19 @@ async function handBlobData(blob: Blob): Promise<{ image: string; sourceKind: 'o
     // Only images that the canvas has already decoded may take the disclosed
     // conversion path. Never silently convert a failed original file read.
     if (/^image\/(?:svg\+xml|bmp|x-ms-bmp|gif|tiff|avif)$/i.test(blob.type) || ascii(0, 2) === 'BM' || /^GIF8[79]a$/.test(ascii(0, 6))) return { image: '', sourceKind: 'canvas' }
-    throw Error('원본 형식을 확인할 수 없습니다. PNG/JPEG/WebP 파일을 직접 올려주세요.')
+    throw Error('원본 형식을 확인할 수 없습니다. PNG/JPEG/WebP 파일을 직접 올려 주세요.')
   }
   const image = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(Error('원본 파일을 읽지 못했습니다. PNG/JPEG/WebP 파일을 직접 올려주세요.'))
+    reader.onerror = () => reject(Error('원본 파일을 읽지 못했습니다. PNG/JPEG/WebP 파일을 직접 올려 주세요.'))
     reader.readAsDataURL(new Blob([blob], { type: mime }))
   })
   return { image, sourceKind: 'original' }
 }
 
 async function getHandReconstructionInput() {
-  if (!handImageReady.value || !imgRef.value || !hasMask.value || drawing) throw Error('원본을 올린 뒤 손 마스크 그리기를 끝내주세요.')
+  if (!handImageReady.value || !imgRef.value || !hasMask.value || drawing) throw Error('원본을 올린 뒤 손 마스크 그리기를 끝내 주세요.')
   const source = imageSrc.value
   const revision = handSourceRevision.value
   const mask = getMaskBase64()
@@ -676,7 +691,7 @@ async function getHandReconstructionInput() {
     else input = await handBlobData(await readHandSourceBlob(source))
   } else if (/^data:image\/(?:svg\+xml|bmp|x-ms-bmp|gif|tiff|avif)[;,]/i.test(source)) {
     input = { image: '', sourceKind: 'canvas' }
-  } else throw Error('외부 이미지 URL은 읽지 않습니다. 원본 PNG/JPEG/WebP를 직접 올려주세요.')
+  } else throw Error('외부 이미지 URL은 읽지 않습니다. 원본 PNG/JPEG/WebP를 직접 올려 주세요.')
   if (source !== imageSrc.value || revision !== handSourceRevision.value || !handImageReady.value || !hasMask.value || drawing) throw Error('원본 또는 마스크가 바뀌었습니다. 현재 이미지에서 다시 실행하세요.')
   try {
     // Supported raster bytes retain metadata and transparent RGB. Only unsupported
@@ -694,7 +709,7 @@ function generate() {
     return
   }
   if (!hasMask.value) {
-    requestAction('show_toast', { type: 'warning', msg: 'Inpaint: 마스크를 그려주세요' })
+    requestAction('show_toast', { type: 'warning', msg: 'Inpaint: 마스크를 그려 주세요' })
     return
   }
   // 백엔드는 이 값만 본다 (core/inpaint_payload.py) — 숨은 레거시 탭 값은 쓰지 않는다.
@@ -715,7 +730,13 @@ function generate() {
   })
 }
 
-onMounted(() => { onBackendEvent('inpaintImageLoaded', (path: string) => loadFromPath(path)) })
+const unsubs: Array<() => void> = []
+onMounted(() => {
+  unsubs.push(onBackendEvent('inpaintImageLoaded', (path: string) => loadFromPath(path)))
+})
+onUnmounted(() => {
+  unsubs.splice(0).forEach((u) => u())
+})
 </script>
 
 <style scoped>
@@ -754,7 +775,7 @@ onMounted(() => { onBackendEvent('inpaintImageLoaded', (path: string) => loadFro
 .btn-gen { width: 100%; height: 42px; background: var(--accent-fill); border: none; border-radius: var(--radius-pill); color: var(--on-accent); font-weight: var(--fw-bold); font-size: 12px; cursor: pointer; }
 .btn-gen:disabled { opacity: 0.4; }
 /* 캔버스 '뒤' 여백은 UI 면이다 — 이미지에 칠해지는 색이 아니라 토큰으로 간다 */
-.canvas-area { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg-primary); position: relative; }
+.canvas-area { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg-primary); position: relative; }
 .canvas-wrap { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; }
 .canvas-wrap.dragging { background: rgba(250,204,21,0.05); }
 .drop-empty { text-align: center; cursor: pointer; }
@@ -764,8 +785,5 @@ onMounted(() => { onBackendEvent('inpaintImageLoaded', (path: string) => loadFro
 .cv { position: absolute; max-width: 85%; max-height: 85%; }
 .cv.mask { pointer-events: none; }
 .cv.overlay { pointer-events: auto; }
-/* 글자색을 토큰으로 못 바꾼다: 바탕이 테마를 안 타는 rgba(0,0,0,0.6) 칩이라
-   --text-muted 로 두면 라이트에서 어두운 글자가 어두운 칩 위에 얹혀 안 보인다.
-   제대로 고치려면 칩 자체에 라이트 모드 규칙이 필요하다(이번 범위 밖). */
-.cv-info { position: absolute; bottom: 8px; right: 12px; color: #585858; font-size: var(--fs-label); background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 4px; pointer-events: none; }
+.cv-info { position: absolute; bottom: 8px; right: 12px; color: var(--text-secondary); font-size: var(--fs-label); background: var(--bg-secondary); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; pointer-events: none; }
 </style>

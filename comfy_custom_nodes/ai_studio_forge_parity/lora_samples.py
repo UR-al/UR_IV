@@ -7,6 +7,8 @@ run/board folders. No Qt or ComfyUI imports.
 import glob
 import json
 import logging
+import os
+import threading
 from pathlib import Path
 
 from PIL import Image
@@ -18,6 +20,24 @@ log = logging.getLogger(__name__)
 MOVE_LOG = "move_log.jsonl"
 MAX_SAMPLES = 4
 MAX_COVER_PIXELS = 40_000_000  # covers: a bigger source (an XYZ grid, an upscale) is skipped, never decoded
+
+_MANIFEST_CACHE_MAX = 32
+_MANIFEST_LOCK = threading.Lock()
+_MANIFEST_CACHE: dict[str, tuple[int, int, dict[str, list[Path]]]] = {}
+
+_MOVE_LOG_CACHE_MAX = 128
+_MOVE_LOG_LOCK = threading.Lock()
+_MOVE_LOG_CACHE: dict[str, tuple[int, int, tuple[Path, ...]]] = {}
+
+
+def reset_manifest_cache() -> None:
+    with _MANIFEST_LOCK:
+        _MANIFEST_CACHE.clear()
+
+
+def reset_move_log_cache() -> None:
+    with _MOVE_LOG_LOCK:
+        _MOVE_LOG_CACHE.clear()
 
 
 def _json_lines(path: Path):
@@ -41,18 +61,70 @@ def _src_parent(src) -> Path | None:
     return Path(src).parent
 
 
-def run_dirs(full_path: Path, run: str, anima_root: Path, manifest: Path) -> list[Path]:
+def _manifest_runs(manifest: Path) -> dict[str, list[Path]]:
+    """Cached ``run -> [src, ...]`` (newest first) for ``manifest``, invalidated on mtime/size change."""
+    key = str(manifest)
+    try:
+        st = os.stat(manifest)
+    except OSError:
+        with _MANIFEST_LOCK:
+            _MANIFEST_CACHE.pop(key, None)
+        return {}
+    mtime_ns, size = st.st_mtime_ns, st.st_size
+    with _MANIFEST_LOCK:
+        cached = _MANIFEST_CACHE.get(key)
+        if cached is not None and cached[0] == mtime_ns and cached[1] == size:
+            return cached[2]
+    by_run: dict[str, list[Path]] = {}
+    for obj in _json_lines(manifest):
+        run_name, src = obj.get("run"), obj.get("src")
+        if isinstance(run_name, str) and isinstance(src, str) and src:
+            by_run.setdefault(run_name, []).append(Path(src))
+    for paths in by_run.values():
+        paths.reverse()
+    with _MANIFEST_LOCK:
+        if len(_MANIFEST_CACHE) >= _MANIFEST_CACHE_MAX and key not in _MANIFEST_CACHE:
+            _MANIFEST_CACHE.clear()
+        _MANIFEST_CACHE[key] = (mtime_ns, size, by_run)
+    return by_run
+
+
+def _move_log_parents(move_log: Path) -> tuple[Path, ...]:
+    """Cached ``_src_parent`` entries (newest first) for ``move_log``, invalidated on mtime/size change."""
+    key = str(move_log)
+    try:
+        st = os.stat(move_log)
+    except OSError:
+        with _MOVE_LOG_LOCK:
+            _MOVE_LOG_CACHE.pop(key, None)
+        return ()
+    mtime_ns, size = st.st_mtime_ns, st.st_size
+    with _MOVE_LOG_LOCK:
+        cached = _MOVE_LOG_CACHE.get(key)
+        if cached is not None and cached[0] == mtime_ns and cached[1] == size:
+            return cached[2]
+    move_parents = [
+        p for obj in _json_lines(move_log)
+        if (p := _src_parent(obj.get("src"))) is not None
+    ]
+    move_parents.reverse()
+    result = tuple(move_parents)
+    with _MOVE_LOG_LOCK:
+        if len(_MOVE_LOG_CACHE) >= _MOVE_LOG_CACHE_MAX and key not in _MOVE_LOG_CACHE:
+            _MOVE_LOG_CACHE.clear()
+        _MOVE_LOG_CACHE[key] = (mtime_ns, size, result)
+    return result
+
+
+def run_dirs(full_path: Path, run: str, anima_root: Path | str | None, manifest: Path) -> list[Path]:
     """Existing folders that may hold the run's ``sample/`` dir, best first."""
     cands: list[Path | None] = []
-    for obj in _json_lines(Path(full_path).parent / MOVE_LOG):
-        cands.append(_src_parent(obj.get("src")))
-        break
+    cands.extend(_move_log_parents(Path(full_path).parent / MOVE_LOG))
     # Every manifest line of the run, newest first: a later line can name a folder that is gone (the 11-16 relocate lines
     # point at the old D:\LoRA\<algo>\<group>\<run>), and must not hide the training folder an earlier line names.
-    srcs = [obj["src"] for obj in _json_lines(Path(manifest))
-            if obj.get("run") == run and isinstance(obj.get("src"), str) and obj["src"]]
-    cands.extend(Path(src) for src in reversed(srcs))
-    cands.append(Path(anima_root) / run)
+    cands.extend(_manifest_runs(Path(manifest)).get(run, ()))
+    if anima_root and str(anima_root).strip():
+        cands.append(Path(anima_root) / run)
     out: list[Path] = []
     for c in cands:
         try:
@@ -84,7 +156,9 @@ def epoch_samples(run_dirs: list[Path], run: str, epoch: int) -> list[Path]:
     return [best[i] for i in sorted(best)][:MAX_SAMPLES]
 
 
-def board_strip(board_root: Path, run: str, epoch: int) -> Path | None:
+def board_strip(board_root: Path | str | None, run: str, epoch: int) -> Path | None:
+    if not board_root or not str(board_root).strip():
+        return None
     name = run[1:] if run.startswith("@") else run
     path = Path(board_root) / "site" / "s" / name / f"e{int(epoch):03d}.webp"
     try:

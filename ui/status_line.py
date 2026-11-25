@@ -108,4 +108,24 @@ def notify_user(host, level: str, message: str) -> None:
         pass
 
 
-__all__ = ["notify_user", "publish_status"]
+def notify_or_message_box(host, level: str, title: str, message: str, *, box=None) -> bool:
+    """웹 모드에서는 모달 QMessageBox 대신 토스트(showNotification)만 보낸다.
+
+    호스트 데스크톱에서 모달을 띄우면 Qt 이벤트 루프와 모든 WebSocket 요청이 영구 정지한다.
+    데스크톱 모드에서는 기존처럼 QMessageBox(호출부에서 넘긴 ``box`` 또는 PyQt6 QMessageBox)를 띄운다.
+    """
+    if getattr(host, "web_mode", False):
+        notify_user(host, level, message)
+        return False
+    if box is None:
+        from PyQt6.QtWidgets import QMessageBox as box
+    method = {
+        "warning": box.warning,
+        "error": box.critical,
+        "critical": box.critical,
+    }.get(level, box.information)
+    method(host, title, message)
+    return True
+
+
+__all__ = ["notify_or_message_box", "notify_user", "publish_status"]

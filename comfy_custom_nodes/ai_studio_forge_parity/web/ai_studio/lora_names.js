@@ -23,11 +23,11 @@ function splitEntry(entry) {
 }
 
 const MODEL_FOLDERS = new Set(["anima", "moss", "sdxl", "krea2", "_unsorted"]); // D:\LoRA's top folders since 11-16 (= lora_index._MODEL_FOLDERS)
-const isAlgoFolder = (name) => RECIPE_ALGOS.has(String(name).toLowerCase());
+const isAlgoFolder = (name) => RECIPE_ALGOS.has(String(name).trim().toLowerCase());
 // A known model folder name, or a first folder that is not an algorithm folder followed by one that is (so a new algorithm
 // folder, or one with a stray space/BOM from a hand move, under ANIMA/MOSS/... still keeps its runs apart).
 const isModelFolder = (first, second) =>
-  MODEL_FOLDERS.has(String(first).toLowerCase()) || (!isAlgoFolder(first) && isAlgoFolder(second));
+  MODEL_FOLDERS.has(String(first).trim().toLowerCase()) || (!isAlgoFolder(first) && isAlgoFolder(second));
 
 /**
  * Where an entry sits: [model/]algo/group/[run folder/]file. A file straight under the group is an old-layout run named by

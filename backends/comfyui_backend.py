@@ -6,6 +6,8 @@ import copy
 import io
 import json
 import mimetypes
+import socket
+import time
 import uuid
 import threading
 import requests
@@ -39,6 +41,9 @@ import config
 from utils.app_logger import get_logger
 
 _logger = get_logger('comfyui')
+
+_WS_IDLE_TIMEOUT_S = 600.0
+_WS_RECV_POLL_S = 1.0
 
 _MEDIA_OUTPUT_FIELDS = {
     'images': 'image',
@@ -938,12 +943,37 @@ class ComfyUIBackend(AbstractBackend):
         tracker = tracker or ProgressTracker({})
         previews = PreviewStream(prompt_id)
         last_progress = (0, 100)
+        idle_timeout_s = float(_WS_IDLE_TIMEOUT_S)
+        idle_deadline = time.monotonic() + idle_timeout_s
+        settimeout = getattr(ws, 'settimeout', None)
+        if callable(settimeout):
+            try:
+                settimeout(_WS_RECV_POLL_S)
+            except Exception:
+                pass
+        ws_timeout_cls = getattr(websocket, 'WebSocketTimeoutException', None)
+        timeout_errors: tuple = (
+            (ws_timeout_cls, TimeoutError, socket.timeout)
+            if isinstance(ws_timeout_cls, type) and issubclass(ws_timeout_cls, BaseException)
+            else (TimeoutError, socket.timeout)
+        )
 
         while True:
             if cancel_check and cancel_check():
                 self._cancel_prompt(prompt_id)
                 return GenerationResult(success=False, error="사용자가 작업을 취소했습니다.")
-            msg = ws.recv()
+            if time.monotonic() >= idle_deadline:
+                self._cancel_prompt(prompt_id)
+                _logger.error(f"ComfyUI WebSocket 응답 시간 초과 ({int(idle_timeout_s)}초 무응답)")
+                return GenerationResult(
+                    success=False,
+                    error=f"ComfyUI WebSocket 응답 시간 초과 ({int(idle_timeout_s)}초 동안 진행 신호 없음)",
+                )
+            try:
+                msg = ws.recv()
+            except timeout_errors:
+                continue
+            idle_deadline = time.monotonic() + idle_timeout_s
             if isinstance(msg, bytes):
                 if progress_callback:
                     preview = previews.consume(msg)

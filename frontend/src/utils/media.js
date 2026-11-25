@@ -9,6 +9,8 @@
  * 즉 컴포넌트는 경로(raw path)만 다루고, 화면 표시용 src 는 항상 이 헬퍼를 거친다.
  */
 
+import { stripFileUrl } from './fileUrl'
+
 // 웹 모드 감지 — Python 정적 서버가 index.html 에 주입한 전역으로 판별.
 // 호출 시점마다 window 를 확인한다(모듈 로드 시점 1회 캡처는 주입 타이밍에 취약).
 function _detectWeb() {
@@ -19,26 +21,33 @@ function _detectWeb() {
 /**
  * 입력을 '글자 그대로의 로컬 경로'와 'file URL' 로 가른다.
  * 퍼센트 인코딩은 file URL 에만 있다 — 원시 Windows 경로의 `%` 는 이름의 일부다(`image%20(1).png`).
- * (백엔드 core/path_safety.strip_file_url · utils/dropPaths.ts 와 같은 규칙)
- * @param {string} s @returns {{ isFileUrl: boolean, rest: string }} rest = 스킴을 뗀 나머지(인코딩은 그대로)
+ * (백엔드 core/path_safety.strip_file_url · utils/fileUrl.ts 와 같은 규칙)
+ * @param {string} s @returns {{ isFileUrl: boolean, isUnc: boolean, rest: string }}
  */
 function _splitFileUrl(s) {
-  const isFileUrl = /^file:/i.test(s)
-  return { isFileUrl, rest: isFileUrl ? s.replace(/^file:\/\/\/?/i, '') : s }
-}
-
-/** 퍼센트 디코딩 — 깨진 시퀀스(`100%.png` 를 그냥 붙인 file URL)는 원문 그대로 둔다. @param {string} s */
-function _safeDecode(s) {
-  try { return decodeURIComponent(s) } catch { return s }
+  if (/^file:\/\/\//i.test(s)) {
+    const rest = s.slice(8)
+    if (rest.startsWith('/')) return { isFileUrl: true, isUnc: true, rest: rest.replace(/^\/+/, '') }
+    return { isFileUrl: true, isUnc: false, rest }
+  }
+  if (/^file:\/\//i.test(s)) {
+    const rest = s.slice(7)
+    if (/^[a-z]:/i.test(rest)) return { isFileUrl: true, isUnc: false, rest }
+    if (/^localhost\//i.test(rest)) return { isFileUrl: true, isUnc: false, rest: rest.slice(10) }
+    return { isFileUrl: true, isUnc: true, rest }
+  }
+  if (s.startsWith('\\\\') || s.startsWith('//')) {
+    return { isFileUrl: false, isUnc: true, rest: s.slice(2).replace(/\\/g, '/') }
+  }
+  return { isFileUrl: false, isUnc: false, rest: s }
 }
 
 /**
- * 백엔드에 넘길 글자 그대로의 로컬 경로 — file URL 이면 디코딩, 원시 경로는 그대로.
+ * 백엔드에 넘길 글자 그대로의 로컬 경로 — file URL 이면 안전 퍼센트 디코딩(stripFileUrl), 원시 경로는 그대로.
  * @param {string} s @returns {string}
  */
 function _literalPath(s) {
-  const { isFileUrl, rest } = _splitFileUrl(s)
-  return isFileUrl ? _safeDecode(rest) : rest
+  return stripFileUrl(s)
 }
 
 /**
@@ -53,11 +62,11 @@ export function mediaUrl(path, bust = false) {
   // 이미 완성된 URL(생성결과 미리보기, data/blob 등)이면 그대로 둔다
   if (/^(https?:|data:|blob:)/i.test(s)) return s
   // file:// 접두사 제거 — file URL 이면 나머지는 인코딩된 채, 원시 경로면 글자 그대로
-  const { isFileUrl, rest } = _splitFileUrl(s)
+  const { isFileUrl, isUnc, rest } = _splitFileUrl(s)
   let url
   if (_detectWeb()) {
-    // 서버는 쿼리를 한 번만 디코딩해 글자 그대로의 경로로 쓴다 — file URL 은 여기서 먼저 푼다
-    url = '/file?path=' + encodeURIComponent(isFileUrl ? _safeDecode(rest) : rest)
+    // 서버는 쿼리를 한 번만 디코딩해 글자 그대로의 경로로 쓴다 — file URL 은 stripFileUrl 로 안전하게 푼다
+    url = '/file?path=' + encodeURIComponent(stripFileUrl(s))
   } else {
     // 원시 경로의 `%` 는 이름의 일부다. 그대로 두면 QtWebEngine 이 `%XX` 를 디코딩해 다른 파일을 연다
     // (`C:/art%231/a.png` → `C:/art#1/a.png`). 그래서 `%` 를 먼저 `%25` 로 바꾼다 — 이미 인코딩된
@@ -66,7 +75,7 @@ export function mediaUrl(path, bust = false) {
     // `C:/art#1/clip.mp4` 가 `C:/art` 로 잘려 로드에 실패하고, 뒤에 붙는 `?t=` 도 프래그먼트 안으로
     // 들어간다. 순서가 중요하다: `%` 다음에 `#`(먼저 `#`→`%23` 하면 그 `%` 가 다시 `%25` 가 된다).
     const escaped = isFileUrl ? rest : rest.replace(/%/g, '%25')
-    url = 'file:///' + escaped.replace(/#/g, '%23')
+    url = (isUnc ? 'file://' : 'file:///') + escaped.replace(/#/g, '%23')
   }
   if (bust) url += (url.includes('?') ? '&' : '?') + 't=' + Date.now()
   return url
