@@ -47,11 +47,11 @@ def run_dirs(full_path: Path, run: str, anima_root: Path, manifest: Path) -> lis
     for obj in _json_lines(Path(full_path).parent / MOVE_LOG):
         cands.append(_src_parent(obj.get("src")))
         break
-    last = None
-    for obj in _json_lines(Path(manifest)):
-        if obj.get("run") == run and isinstance(obj.get("src"), str):
-            last = obj["src"]
-    cands.append(Path(last) if last else None)
+    # Every manifest line of the run, newest first: a later line can name a folder that is gone (the 11-16 relocate lines
+    # point at the old D:\LoRA\<algo>\<group>\<run>), and must not hide the training folder an earlier line names.
+    srcs = [obj["src"] for obj in _json_lines(Path(manifest))
+            if obj.get("run") == run and isinstance(obj.get("src"), str) and obj["src"]]
+    cands.extend(Path(src) for src in reversed(srcs))
     cands.append(Path(anima_root) / run)
     out: list[Path] = []
     for c in cands:

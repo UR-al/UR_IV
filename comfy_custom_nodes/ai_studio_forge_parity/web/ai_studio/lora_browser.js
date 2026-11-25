@@ -9,6 +9,7 @@ import { coverVersions, withQuery } from "./lora_api.js";
 import { actionBar, detailView, epochText, familyLabel } from "./lora_browser_detail.js";
 import { cardGrid, drawTree, keepFocus, listKey, runInfo } from "./lora_browser_grid.js";
 import { footBar, headerBar } from "./lora_browser_chrome.js";
+import { familiesShown } from "./lora_names.js";
 
 const NARROW = 900; // px of window width: the tree folds into a button and the detail goes under the grid
 const SAVE_DELAY = 400;
@@ -54,7 +55,7 @@ export function openLoraBrowser(opts = {}) {
   const opener = doc.activeElement;
   let state = null;
   let runs = [];
-  let infos = new Map();
+  let infos = new Map(); // runKey -> card / detail info (runInfo: header algo, run, precision, ...)
   let index = {};
   let closed = false, rafId = 0, needMeasure = false;
   let userShowAll = false, treeOpen = false, lastSaved = "", saveTimer = null, toastTimer = null;
@@ -245,7 +246,7 @@ export function openLoraBrowser(opts = {}) {
     header.update({ showAll: state.showAll, hidden, sort: state.sort, closeAfter: state.closeAfter, treeOpen });
     dialog.classList.toggle("ais-lb-tree-open", treeOpen);
     keepFocus(tree, () => drawTree(tree, {
-      base: state.showAll ? visibleRuns({ ...state, folder: "", query: "" }) : famOnly, infos, folder: state.folder, recent: state.recentShown,
+      base: state.showAll ? visibleRuns({ ...state, folder: "", query: "" }) : famOnly, folder: state.folder, recent: state.recentShown,
       onFolder: (key) => {
         const fold = treeOpen && dialog.classList.contains("ais-lb-narrow");
         if (fold) treeOpen = false;
@@ -253,7 +254,8 @@ export function openLoraBrowser(opts = {}) {
         if (fold) search.focus({ preventScroll: true }); // the drawer just closed under the focused folder button
       },
     }), search, dialog);
-    summary.textContent = `${runs.length}개 런` + (state.showAll ? " · 모든 모델" : family ? ` · ${familyLabel(family)} + 계열 모름` : "")
+    const shownFamilies = familiesShown(family).map(familyLabel).join(" + "); // "2.9B + Anima": an Anima checkpoint also takes ANIMA-folder LoRAs
+    summary.textContent = `${runs.length}개 런` + (state.showAll ? " · 모든 모델" : family ? ` · ${shownFamilies} + 계열 모름` : "")
       + (hidden && !state.showAll ? ` · 다른 계열 ${hidden}개 숨김` : "");
     const key = listKey(state, runs);
     const reset = shownList !== "" && key !== shownList; // a new list starts at the top, then shows the selected card

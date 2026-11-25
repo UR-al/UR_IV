@@ -76,7 +76,7 @@ from .studio_routes import register_routes as _register_studio_routes
 from .lora_routes import register_lora_handlers as _register_lora_handlers
 
 
-__version__ = "1.21.0"
+__version__ = "1.21.1"
 
 # ComfyUI's unload-all-models (/free, OOM recovery, --disable-smart-memory)
 # also releases the SAM3 bundle this pack keeps between runs. No-op outside

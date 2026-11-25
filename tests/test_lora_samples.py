@@ -64,6 +64,18 @@ class RunDirsTest(unittest.TestCase):
         self.manifest.write_bytes(cp949 + b"\n" + good + b"\n" + b"\xff\xfe{broken\n")
         self.assertEqual(ls.run_dirs(self.full, RUN, self.anima, self.manifest), [man_dir, root_dir])
 
+    def test_a_later_manifest_line_to_a_gone_folder_does_not_hide_an_earlier_one(self):
+        # 11-16: relocate lines (src = the old D:\LoRA\LoKr\<group>\<run>, gone) became the last line of 35 runs; the
+        # training folder named by an earlier line must still be found, newest existing line first
+        older = self.root / "C" / "train_run"
+        newer = self.root / "C" / "train_run_again"
+        older.mkdir(parents=True)
+        newer.mkdir(parents=True)
+        lines = [{"run": RUN, "src": str(older)}, {"run": RUN, "src": str(newer)},
+                 {"run": RUN, "src": str(self.root / "D" / "LoKr" / "grp" / RUN), "relocate": True}]
+        self.manifest.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+        self.assertEqual(ls.run_dirs(self.full, RUN, self.anima, self.manifest), [newer, older])
+
     def test_run_dirs_deduplicates(self):
         d = self.anima / RUN
         d.mkdir(parents=True)

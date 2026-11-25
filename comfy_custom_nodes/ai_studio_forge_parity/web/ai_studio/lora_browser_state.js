@@ -1,7 +1,7 @@
 // Pure state of the LoRA picker window: runs (one card per run, epoch files grouped), folder tree / search / family filter /
 // sort, selection and epoch stepping, strength, the tray of picks added this session, xyz multi-check. No DOM, no fetch.
 // The index payload (Task 6) arrives in snake_case; initialState converts it once and nothing else here sees snake_case.
-import { matchesQuery, familyVisible, shortLoraName } from "./lora_names.js";
+import { matchesQuery, familyVisible, parseLoraPath, shortLoraName } from "./lora_names.js";
 
 const SORTS = ["name", "date", "group", "recent"];
 const RECENT_MAX = 20; // lora_store.RECENT_MAX
@@ -17,13 +17,96 @@ function sortEpochs(epochs) {
   return epochs.sort((a, b) => Number(a.final) - Number(b.final) || (a.epoch ?? 0) - (b.epoch ?? 0));
 }
 
+/**
+ * The folder tree keys of a run's folders (`{model, algo, group}`), shared by the tree (lora_browser_grid.drawTree) and the
+ * folder filter (visibleRuns) through `treePlace`: the head is "<model>/<algo>" — just "<algo>" for a run without a model folder
+ * (the old layout) — and a group "<head>/<group>". `algo` is the algorithm FOLDER, read case-blind (lower case in the key).
+ */
+export function folderKeys({ model = "", algo = "", group = "" } = {}) {
+  const folder = String(algo).toLowerCase();
+  const head = model ? `${model}/${folder}` : folder;
+  return { head, group: `${head}/${group}` };
+}
+
+/**
+ * Where a run sits in the folder tree, from its list entry's folders (parseLoraPath) — not the header's algorithm, which can
+ * name another ("lora_anima" for runs in ANIMA\LoRA; the badges keep that one): `{model, algo, head, group}` = the model and
+ * algorithm folders as spelled (the head's label) and the `folderKeys` the tree and the folder filter both take from here.
+ */
+function treePlace(entry) {
+  const { model, algo, group } = parseLoraPath(entry);
+  return { model, algo, ...folderKeys({ model, algo, group }) };
+}
+
+const nameTokens = (run) => String(run || "").split(/[_\s]+/).filter(Boolean);
+const readAs = (label) => String(label).toLowerCase().replace(/_/g, " ");
+
+/** The sets (two or more) of `indexes` that share `keyOf(i)`. */
+function alike(indexes, keyOf) {
+  const sets = new Map();
+  for (const i of indexes) {
+    const key = keyOf(i);
+    sets.set(key, [...(sets.get(key) || []), i]);
+  }
+  return [...sets.values()].filter((same) => same.length > 1);
+}
+
+/** The folders where run keys ("model/algo/group/run") differ: "LoKr" / "LoRA", "x (@a)" / "x (@b)"; whole keys of two layouts. */
+function keyDifference(keys) {
+  const split = keys.map((key) => String(key || "").split("/"));
+  if (split.some((folders) => folders.length !== split[0].length)) return keys.map((key) => String(key || ""));
+  return split.map((folders) => folders.filter((folder, n) => split.some((other) => other[n] !== folder)).join("/"));
+}
+
+/**
+ * What tells apart cards that would show one label (read case- and "_"-blind, as the search does: "snapref_v2a_pre1" and
+ * "snapref v2a pre1" look the same): for each run of such a set the first token of its run name (split at "_" and white space,
+ * case-blind) that none of the others has ("40b" / "52b" for snapref_v1a__40b / __52b, "2.9b" / "3.8b"), else its model folder
+ * when another run of the set sits in another one, else "" — a run whose name is another's minus a token keeps the bare label,
+ * which the others then no longer show. Cards whose whole label is still the same after that (three of a kind: "x" under ANIMA,
+ * ANIMA and MOSS; x_a_b / x_a_c / x_b_c) take their group label, then their run name, then the folders where their run keys
+ * differ — each only where it is not the same for all of them — so no two cards are left reading the same.
+ * `runs` = [{label, run, model, groupLabel, runKey}]; returns the suffixes (parts joined by " · ") in that order.
+ */
+export function labelSuffixes(runs) {
+  const all = runs.map((_, i) => i);
+  const parts = runs.map(() => []);
+  for (const same of alike(all, (i) => readAs(runs[i].label))) {
+    const tokens = new Map(same.map((i) => [i, nameTokens(runs[i].run)]));
+    for (const i of same) {
+      const others = new Set(same.filter((j) => j !== i).flatMap((j) => tokens.get(j).map((t) => t.toLowerCase())));
+      const own = tokens.get(i).find((t) => !others.has(t.toLowerCase()));
+      const model = runs[i].model || "";
+      const part = own || (model && same.some((j) => (runs[j].model || "") !== model) ? model : "");
+      if (part) parts[i].push(part);
+    }
+  }
+  const whole = (i) => [runs[i].label, ...parts[i]].join(" · ");
+  const more = [
+    (same) => same.map((i) => String(runs[i].groupLabel || "")),
+    (same) => same.map((i) => String(runs[i].run || "")),
+    (same) => keyDifference(same.map((i) => runs[i].runKey)),
+  ];
+  for (const partsOf of more) {
+    for (const same of alike(all, whole)) {
+      const values = partsOf(same);
+      if (new Set(values).size < 2) continue; // the same for all of them: it tells none apart
+      same.forEach((i, n) => {
+        if (values[n]) parts[i].push(values[n]);
+      });
+    }
+  }
+  return parts.map((p) => p.join(" · "));
+}
+
 function buildRuns(items, favorites) {
   const byKey = new Map();
   for (const raw of items || []) {
     const key = raw.run_key;
     if (!byKey.has(key)) {
       byKey.set(key, {
-        runKey: key, algo: raw.algo || "", group: raw.group || "", groupLabel: raw.group_label || raw.group || "",
+        runKey: key, model: raw.model || "", run: raw.run || "", tree: treePlace(raw.name),
+        groupLabel: raw.group_label || raw.group || "",
         family: null, numEpochs: raw.num_epochs || 0, hasMeta: false, downloaded: false, latestDate: "", epochs: [],
         // Each epoch file keeps its search text so a run matches when ANY of its files does (ruling R4).
         files: [],
@@ -41,7 +124,13 @@ function buildRuns(items, favorites) {
     run.label = run.label || shortLoraName(raw.name).replace(EPOCH_TAIL, "");
   }
   const favSet = new Set(favorites);
-  return [...byKey.values()].map((r) => ({ ...r, epochs: sortEpochs(r.epochs), favorite: favSet.has(r.runKey) }));
+  const runs = [...byKey.values()];
+  // over the whole index, so a card reads the same whatever the filters show (and the name sort stays put)
+  const suffixes = labelSuffixes(runs);
+  return runs.map((r, i) => ({
+    ...r, labelBase: r.label, labelSuffix: suffixes[i], label: suffixes[i] ? `${r.label} · ${suffixes[i]}` : r.label,
+    epochs: sortEpochs(r.epochs), favorite: favSet.has(r.runKey),
+  }));
 }
 
 /** `query` = text typed in the search box before the index arrived (applied like a typed query). */
@@ -93,7 +182,7 @@ export function visibleRuns(state) {
     if (!familyVisible(r.family, state.family, state.showAll)) return false;
     if (folder === "*fav") { if (!state.favorites.includes(r.runKey)) return false; }
     else if (folder === "*recent") { if (recentRank(state, r) === Infinity) return false; }
-    else if (folder && folder !== r.algo && folder !== `${r.algo}/${r.group}`) return false;
+    else if (folder && folder !== r.tree.head && folder !== r.tree.group) return false;
     return !query.trim() || r.files.some((f) => matchesQuery(f, query));
   });
   const rank = (r) => recentRank(state, r);
@@ -104,7 +193,8 @@ export function visibleRuns(state) {
     recent: (a, b) => (rank(a) === rank(b) ? byText(a.label, b.label) : rank(a) - rank(b)),
   };
   return runs.sort(sorters[state.sort] || sorters.name).map((r) => ({
-    runKey: r.runKey, label: r.label, family: r.family, groupLabel: r.groupLabel, epochs: r.epochs.map(({ epoch, name, stem, final }) => ({ epoch, name, stem, final })),
+    runKey: r.runKey, label: r.label, labelBase: r.labelBase, labelSuffix: r.labelSuffix, family: r.family, groupLabel: r.groupLabel,
+    tree: r.tree, epochs: r.epochs.map(({ epoch, name, stem, final }) => ({ epoch, name, stem, final })),
     favorite: state.favorites.includes(r.runKey), latestDate: r.latestDate,
   }));
 }

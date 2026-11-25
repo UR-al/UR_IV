@@ -33,7 +33,7 @@ _LR = re.compile(r"[0-9]+e[0-9]+")
 _EPOCH_SUFFIX = re.compile(r"-([0-9]{6})\Z")
 _SPACE_CLASS = r"[ \t\n\v\f\r\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*"  # = JS \s
 _GROUP_TAG = re.compile(_SPACE_CLASS + r"\(@[^)]*\)" + _SPACE_CLASS + r"\Z")
-_FAMILY_BASES = re.compile(r"anima|moss|krea", re.IGNORECASE)
+_FAMILY_BASES = re.compile(r"anima(?!gine)|moss|krea", re.IGNORECASE)  # not Animagine XL (an SDXL model)
 _JS_SPACE = (" \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
              "\u2028\u2029\u202f\u205f\u3000\ufeff")  # what JS String.trim removes (Python strip() differs)
 
@@ -47,11 +47,31 @@ def is_recipe_token(token: str) -> bool:
     return bool(_SIZE.fullmatch(t) or t in _ALGOS or t in _OPTIMIZERS or _BATCH.fullmatch(t) or _LR.fullmatch(t))
 
 
+_MODEL_FOLDERS = frozenset(("anima", "moss", "sdxl", "krea2", "_unsorted"))  # D:\LoRA's top folders since 11-16
+
+
+def _is_algo_folder(name: str) -> bool:
+    return name.lower() in _ALGOS
+
+
+def _is_model_folder(first: str, second: str) -> bool:
+    """A known model folder name, or a first folder that is not an algorithm folder followed by one that is (so a new
+    algorithm folder, or one with a stray space/BOM from a hand move, under ANIMA/MOSS/... still keeps its runs apart)."""
+    return first.lower() in _MODEL_FOLDERS or (not _is_algo_folder(first) and _is_algo_folder(second))
+
+
 def parse_lora_path(entry: str) -> dict:
-    """Where a ComfyUI LoRA list entry sits: algo/[_downloaded/]group/[run folder/]file; see lora_names.js."""
+    """Where a ComfyUI LoRA list entry sits: [model/]algo/[_downloaded/]group/[run folder/]file; see lora_names.js.
+
+    The optional model folder (D:\\LoRA\\ANIMA\\LoKr\\... since 11-16) is a known model folder name, or a first folder that
+    is not an algorithm folder followed by one that is (``_is_model_folder``); without this, ANIMA was read as the algo,
+    LoKr as the group and the group folder as the run, so every run of a group fell into one card."""
     parts = [p for p in re.split(r"[\\/]+", str(entry or "")) if p != ""]
     file = parts.pop() if parts else ""
     dirs = parts
+    model = dirs[0] if len(dirs) >= 2 and _is_model_folder(dirs[0], dirs[1]) else ""
+    if model:
+        dirs = dirs[1:]
     stem = re.sub(r"\.[^.]+\Z", "", file)
     algo = dirs[0] if dirs else ""
     downloaded = len(dirs) > 1 and dirs[1] == "_downloaded"
@@ -74,9 +94,9 @@ def parse_lora_path(entry: str) -> dict:
     run_short = " ".join(w for w in words if w)
 
     group_label = _trim(_GROUP_TAG.sub("", group)) or group
-    return {"algo": algo, "group": group, "group_label": group_label, "run": run, "run_short": run_short,
+    return {"model": model, "algo": algo, "group": group, "group_label": group_label, "run": run, "run_short": run_short,
             "recipe": recipe, "epoch": epoch, "final": final, "downloaded": downloaded,
-            "run_key": "/".join((algo, group, run))}
+            "run_key": "/".join((model, algo, group, run) if model else (algo, group, run))}
 
 
 def _text(value) -> Optional[str]:
@@ -175,15 +195,35 @@ def header_summary(header: Optional[dict]) -> dict:
     return out
 
 
+# D:\LoRA's model folders -> the family of a LoRA in them (= lora_names.js MODEL_FAMILIES). "anima" = an Anima LoRA of
+# unknown size: the picker shows it for every Anima checkpoint (2.9B, 3.8B, base) and hides it for MOSS / Krea2 ones.
+# _unsorted and any other folder give no family (shown everywhere).
+_MODEL_FAMILIES = {"anima": "anima", "moss": "moss", "krea2": "krea2", "sdxl": "sdxl"}
+# Folder families that decide before the header and the run name (lora_family): the folder is the user's own sorting.
+_FOLDER_FIRST = frozenset(("moss", "krea2", "sdxl"))
+
+
+def model_folder_family(model: str) -> Optional[str]:
+    """The family a model folder name stands for, case-blind and trimmed like JS ``trim()``; None for _unsorted or an
+    unknown folder. Mirrors ``lora_names.js`` ``familyOfModelFolder`` (golden rows with ``modelFamily``)."""
+    return _MODEL_FAMILIES.get(_trim(str(model or "")).lower())
+
+
 def lora_family(summary: dict, parsed: dict) -> Optional[str]:
-    """Model family a LoRA was trained for: the base model name if it names a known family, else the recipe size."""
+    """Model family a LoRA was trained for. A MOSS / KREA2 / SDXL model folder (``model_folder_family``) decides first:
+    the user sorted the file there, whatever its header or name says. Otherwise (an ANIMA folder, _unsorted, none) the
+    header's base model if it names a known family (not "animagine"), else the run name's 2.9b / 3.8b, else the folder
+    ("anima" for an ANIMA run of unknown size, None without one)."""
+    folder = model_folder_family(parsed.get("model") or "")
+    if folder in _FOLDER_FIRST:
+        return folder
     base = summary.get("base_model")
     if base and _FAMILY_BASES.search(base):
         return unet_family(base)
     for token in parsed.get("recipe") or []:
         if token.lower() in ("2.9b", "3.8b"):
             return token.lower()
-    return None
+    return folder
 
 
 def _before_bars(text) -> str:
@@ -274,7 +314,8 @@ class LoraIndex:
                 "num_epochs": summary["num_epochs"], "family": lora_family(summary, parsed),
                 "algo": summary["algo"] or parsed["algo"].lower() or None, "precision": summary["precision"],
                 "date": summary["date"], "trigger": trigger_of(summary, runs.get(parsed["run"])),
-                "has_meta": summary["has_meta"], "downloaded": parsed["downloaded"], "group": parsed["group"],
+                "has_meta": summary["has_meta"], "downloaded": parsed["downloaded"], "model": parsed["model"],
+                "group": parsed["group"],
                 "group_label": parsed["group_label"], "run": parsed["run"], "run_short": parsed["run_short"],
                 "recipe": parsed["recipe"],
             })

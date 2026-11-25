@@ -63,6 +63,96 @@ function clampOnRedraw(pane) {
   return drawn;
 }
 
+// ---- 11-16 model folders (D:\LoRA\<MODEL>\<algo>\<group>\<run>): tree heads, the folder filter on the same keys, card suffixes
+const mItem = (model, algo, group, run, family, extra = {}) => ({
+  name: `${model}\\${algo}\\${group}\\${run}\\${run}-000001.safetensors`, stem: `${run}-000001`, run_key: `${model}/${algo}/${group}/${run}`,
+  epoch: 1, final: false, num_epochs: 1, family, algo: algo.toLowerCase(), model, group, group_label: group, run, run_short: run,
+  trigger: "", date: "2026-11-16", has_meta: true, downloaded: false, ...extra,
+});
+const MODEL_ITEMS = [
+  mItem("MOSS", "LoKr", "@enaa97", "@enaa97_moss", "moss"), mItem("ANIMA", "LoKr", "@enaa97", "@enaa97_2.9b_lokr", "2.9b"),
+  mItem("ANIMA", "LoKr", "@enaa97", "@enaa97_3.8b", "3.8b"), mItem("SDXL", "LoRA", "HUSI", "HUSI", "sdxl"),
+  mItem("ANIMA", "LoRA", "snapref-v1a", "snapref_v1a__52b", "anima"), mItem("ANIMA", "LoRA", "snapref-v1a", "snapref_v1a__40b", "anima"),
+  item("Old", "old_2.9b", 1), // the old layout: no model folder
+];
+const modelIndex = (prefs) => ({ items: MODEL_ITEMS, prefs: prefsWith(prefs), board_stars: {}, prompt_labels: {} });
+/** [key, label, count] of every tree button, in order. */
+const treeNodes = (win) => win.dialog.byClass("ais-lb-tree")[0].all((el) => String(el.attrs["data-k"] || "").startsWith("t:"))
+  .map((el) => [el.attrs["data-k"].slice(2), el.byClass("ais-lb-node-name")[0].textContent, el.byClass("ais-lb-count")[0].textContent]);
+
+test("model folders: tree heads are \"<model> · <algo>\" by model then algorithm, and a click lists exactly that node's runs", async () => {
+  const win = await openWindow({ index: modelIndex({ show_all: true }) });
+  try {
+    assert.deepEqual(treeNodes(win), [
+      ["", "전체", "7"], ["*fav", "★ 즐겨찾기", "0"], ["*recent", "최근 사용", "0"],
+      ["lokr", "LoKr", "1"], ["lokr/Old", "Old", "1"], // a run without a model folder: its algorithm folder, read case-blind
+      ["ANIMA/lokr", "ANIMA · LoKr", "2"], ["ANIMA/lokr/@enaa97", "@enaa97", "2"],
+      ["ANIMA/lora", "ANIMA · LoRA", "2"], ["ANIMA/lora/snapref-v1a", "snapref-v1a", "2"],
+      ["MOSS/lokr", "MOSS · LoKr", "1"], ["MOSS/lokr/@enaa97", "@enaa97", "1"],
+      ["SDXL/lora", "SDXL · LoRA", "1"], ["SDXL/lora/HUSI", "HUSI", "1"],
+    ]);
+    const lists = {
+      "lokr": ["LoKr/Old/old_2.9b"], "ANIMA/lokr": ["ANIMA/LoKr/@enaa97/@enaa97_2.9b_lokr", "ANIMA/LoKr/@enaa97/@enaa97_3.8b"],
+      "ANIMA/lora/snapref-v1a": ["ANIMA/LoRA/snapref-v1a/snapref_v1a__40b", "ANIMA/LoRA/snapref-v1a/snapref_v1a__52b"],
+      "MOSS/lokr/@enaa97": ["MOSS/LoKr/@enaa97/@enaa97_moss"], "SDXL/lora": ["SDXL/LoRA/HUSI/HUSI"],
+    };
+    for (const [key, cards] of Object.entries(lists)) {
+      win.byKey(`t:${key}`).fire("click");
+      assert.deepEqual(win.cards(), cards, key);
+      assert.equal(win.byKey(`t:${key}`).attrs["aria-pressed"], "true", key);
+    }
+    // the two snapref cards (one label) end in what tells them apart, drawn apart from the name so a cut name keeps it
+    win.byKey("t:ANIMA/lora/snapref-v1a").fire("click");
+    const suffixes = win.dialog.byClass("ais-lb-card-suffix").map((el) => el.textContent);
+    assert.deepEqual(suffixes, [" · 40b", " · 52b"]);
+    const names = win.dialog.byClass("ais-lb-card-name").map((el) => el.textContent);
+    assert.deepEqual(names, ["snapref-v1a · snapref_v1a · 40b", "snapref-v1a · snapref_v1a · 52b"]);
+    assert.equal(win.dialog.byClass("ais-lb-card-label")[0].textContent, "snapref-v1a · snapref_v1a");
+  } finally {
+    win.handle.close();
+  }
+});
+
+test("model folders on a 2.9B checkpoint: MOSS / SDXL runs and their heads are hidden, ANIMA runs of unknown size stay", async () => {
+  const win = await openWindow({ index: modelIndex() });
+  try {
+    assert.deepEqual(treeNodes(win).map(([key, , count]) => `${key}=${count}`), [
+      "=4", "*fav=0", "*recent=0", "lokr=1", "lokr/Old=1", "ANIMA/lokr=1", "ANIMA/lokr/@enaa97=1", "ANIMA/lora=2", "ANIMA/lora/snapref-v1a=2",
+    ]);
+    const bar = win.dialog.byClass("ais-lb-bar")[0].children[0].textContent;
+    assert.equal(bar, "4개 런 · 2.9B + Anima + 계열 모름 · 다른 계열 3개 숨김");
+  } finally {
+    win.handle.close();
+  }
+});
+
+test("tree heads follow the algorithm FOLDER: runs whose header says lora_anima sit under \"ANIMA · LoRA\"; badges keep the header's", async () => {
+  const HUSI = "ANIMA/LoRA/HUSI/husi_anima";
+  const SNAP = "ANIMA/LoRA/snapref-v1a/snapref_v1a__40b";
+  const items = [
+    mItem("ANIMA", "LoRA", "snapref-v1a", "snapref_v1a__40b", "anima"),
+    mItem("ANIMA", "LoRA", "HUSI", "husi_anima", "anima", { algo: "lora_anima" }), // kohya's networks.lora_anima
+    mItem("MOSS", "LoRA", "HUSI", "husi_moss", "moss", { algo: "lora_anima" }),
+  ];
+  const win = await openWindow({ index: { items, prefs: prefsWith({ show_all: true }), board_stars: {}, prompt_labels: {} } });
+  try {
+    assert.deepEqual(treeNodes(win), [
+      ["", "전체", "3"], ["*fav", "★ 즐겨찾기", "0"], ["*recent", "최근 사용", "0"],
+      ["ANIMA/lora", "ANIMA · LoRA", "2"], ["ANIMA/lora/HUSI", "HUSI", "1"], ["ANIMA/lora/snapref-v1a", "snapref-v1a", "1"],
+      ["MOSS/lora", "MOSS · LoRA", "1"], ["MOSS/lora/HUSI", "HUSI", "1"],
+    ]);
+    win.byKey("t:ANIMA/lora").fire("click");
+    assert.deepEqual(win.cards(), [HUSI, SNAP], "the head lists the lora_anima run with the rest of its folder");
+    win.byKey("t:ANIMA/lora/HUSI").fire("click");
+    assert.deepEqual(win.cards(), [HUSI]);
+    assert.equal(win.byKey("t:ANIMA/lora/HUSI").attrs["aria-pressed"], "true");
+    const badges = (runKey) => win.byKey(`m:${runKey}`).byClass("ais-lb-badge").map((el) => el.textContent);
+    assert.deepEqual(badges(HUSI), ["Anima", "lora_anima", "1에폭"]);
+  } finally {
+    win.handle.close();
+  }
+});
+
 test("the detail pane stays where it was scrolled while the same run is drawn again; another run starts at the top", async () => {
   const win = await openWindow({ index: indexWith() });
   try {

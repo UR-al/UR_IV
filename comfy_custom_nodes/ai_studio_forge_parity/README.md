@@ -105,6 +105,43 @@ model chain as they are (they already handle the 28/40/52-block layouts) and
 remaps only a core `LoraLoader` to `ForgeNeoAnimaLoraLoader`. Other LoRA nodes
 (including core `LoraLoaderModelOnly`) are rejected before queueing.
 
+## 1.21.1 changes
+
+- LoRA 선택 창: D:\LoRA 맨 위에 모델 폴더(ANIMA·MOSS·SDXL·KREA2·_unsorted, 11-16)가 생긴 뒤, 모델 폴더를 알고리즘으로,
+  알고리즘 폴더를 묶음으로, 묶음 폴더를 런으로 읽어 한 묶음의 런이 카드 하나로 합쳐지고 에폭이 런 수만큼 겹쳐 보이던 문제를 고쳤다.
+  첫 폴더가 알려진 모델 폴더(ANIMA·MOSS·SDXL·KREA2·_unsorted, 대소문자 무관)이거나, 알고리즘 폴더
+  (LoKr·LoRA·LoHa·LoCon·DoRA·TSM·Full)가 아닌 첫 폴더 다음에 알고리즘 폴더가 오면 첫 폴더를 모델 폴더로 본다(새 알고리즘
+  폴더나 손으로 옮기다 공백·BOM 이 붙은 폴더도 런이 섞이지 않게).
+  런 키는 `모델/알고리즘/묶음/런`(옛 구조는 그대로 `알고리즘/묶음/런`)이고 목록 항목에 `model` 이 생겼다. Python
+  `lora_index.parse_lora_path` 와 JS `lora_names.parseLoraPath` 를 같이 고쳤고 골든 표에 새 구조·특수 공백 14줄을 더했다
+  (특수 공백 줄은 `groupLabel`·`recipe` 도 양쪽에서 비교). 실제 D:\LoRA 1,040개 기준 카드 42개(에폭 겹침 22개) → 149개(겹침 0).
+  런 이름이 다시 맞으면서 보드의 트리거·별·샘플 연결도 되살아났다(트리거 있는 항목 880 → 914).
+- 학습 샘플 폴더: 매니페스트에서 런의 마지막 줄이 없는 폴더(11-16 relocate 줄의 옛 D:\LoRA 경로)를 가리켜도 앞 줄이 가리키는
+  학습 폴더를 찾는다(`lora_samples.run_dirs`, 줄을 최신 것부터 보고 있는 폴더만).
+- 폴더 트리: 모델 폴더가 있는 런은 머리가 `모델 · 알고리즘`(예: "ANIMA · LoKr", 키 `ANIMA/lokr`)이고 작가 묶음은 그 아래
+  (키 `ANIMA/lokr/@enaa97`)에 온다. 모델 폴더가 없는 옛 구조는 그대로 `알고리즘`·`알고리즘/묶음`. 머리는 모델, 알고리즘 순.
+  알고리즘은 헤더의 것이 아니라 항목 경로의 알고리즘 폴더(`parseLoraPath` 의 `algo`, 키에서는 소문자)라, 헤더가 `lora_anima`
+  인 ANIMA\LoRA 런 18개도 "ANIMA · lora_anima" 머리로 갈라지지 않고 "ANIMA · LoRA" 에 함께 온다(카드 뱃지는 헤더 알고리즘 그대로).
+  트리와 폴더 거르기(`visibleRuns`)가 런마다 한 번 정한 자리(`lora_browser_state.treePlace` → `folderKeys`)를 같이 읽어서,
+  한 머리에 섞여 있던 LoKr/@enaa97 의 ANIMA 런 18개와 MOSS 런 5개가 따로 나온다.
+- 모델 계열: 모델 폴더로도 계열을 정한다(`lora_index.model_folder_family` = JS `lora_names.familyOfModelFolder`, 골든 표
+  `modelFamily` 16줄): MOSS→`moss`, KREA2→`krea2`, SDXL→`sdxl`, ANIMA→`anima`(크기 모름), _unsorted 는 그대로 계열 모름.
+  MOSS·KREA2·SDXL 폴더는 사용자가 직접 나눈 것이라 헤더의 기반 모델·런 이름의 크기보다 먼저 정하고, ANIMA 폴더와 모델 폴더가
+  없는 런은 전처럼 헤더 → 크기(2.9b·3.8b) → 폴더 순(`lora_index.lora_family`). 헤더 기반 모델의 "animagine"(Animagine XL, SDXL
+  모델)은 더는 Anima(2.9B)로 세지 않는다. 거르기(`familyVisible`)는 Anima 체크포인트(2.9B·3.8B·Base)에서 `anima` 는 보이고
+  MOSS·Krea2·SDXL 은 숨기며, MOSS 체크포인트에서는 MOSS 와 계열 모름만 보인다("모든 모델"을 켜면 다 보임). 목록 위 줄도
+  "2.9B + Anima + 계열 모름" 처럼 보이는 계열을 적는다. 실제 D:\LoRA 149런 기준 계열
+  모름 45 → 1(_unsorted), MOSS 체크포인트에서 보이는 런 50 → 6, 2.9B 에서 84 → 64(KREA2·SDXL 20개가 빠짐; 폴더 우선 뒤에도 같다).
+- 검색: 모델 폴더 이름은 검색 대상에서 뺐다("anima" 가 ANIMA 폴더의 런 전부에 걸리던 것, 이제 이름에 anima 가 든 42개만).
+  알고리즘 폴더·`_downloaded`·묶음·런·파일 이름·트리거는 전과 같다(`lora_names.matchesQuery`).
+- 카드 이름: 둘 이상의 카드가 같은 이름으로 보이면(대소문자·`_`/공백 차이는 같은 것으로 봄) 카드마다 짧은 구분 꼬리를 붙인다.
+  다른 카드에 없는 런 이름 토큰 중 첫 것(snapref_v1a__40b·__52b → "40b"·"52b", @taesol9743 → "2.9b"·"3.8b"), 그게 없으면 다른
+  모델 폴더에 같은 이름이 있을 때 모델 폴더 이름("ANIMA"·"MOSS"); 다른 런 이름에 토큰 하나만 덜한 런은 꼬리 없이 남는다. 토큰은
+  `_` 와 공백으로 나눈다(공백이 든 런 이름이 통째로 꼬리가 되지 않게). 그래도 이름이 똑같이 남는 카드(셋 이상: ANIMA·ANIMA·MOSS
+  의 "x" 등)는 묶음 이름, 그다음 런 이름, 끝으로 런 키에서 다른 폴더를 — 그 카드들끼리 다를 때만 — 더 붙여 같은 이름이 남지
+  않는다. 꼬리는 색인 전체로 한 번 정하고(`lora_browser_state.labelSuffixes`, 걸러도 안 바뀜), 이름이 "…" 로 잘려도 보이게 따로 그린다.
+  `shortLoraName`·골든 라벨·패널 줄 이름은 그대로. 실제 D:\LoRA 기준 같은 이름으로 보이던 카드 18개(7묶음) → 0개.
+
 ## 1.21.0 changes
 
 스튜디오의 화면과 그 뒤의 라우트·목록·플래너 검사가 바뀌었다. 노드, 그래프, 패널 상태 키는 그대로라 저장해 둔 워크플로와 예제 `AI Studio Anima.json` 을 다시 만들

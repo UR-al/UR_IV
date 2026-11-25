@@ -4,7 +4,8 @@
 // Pure ES module: nothing runs at import (ComfyUI also loads this file as an extension).
 import { h } from "./studio_dom.js";
 
-const FAMILY_LABELS = { "2.9b": "2.9B", "3.8b": "3.8B", base: "Base", moss: "MOSS", krea2: "Krea2" };
+// "anima" = an ANIMA-folder LoRA of unknown size, "sdxl" = the SDXL folder (lora_index.model_folder_family)
+const FAMILY_LABELS = { "2.9b": "2.9B", "3.8b": "3.8B", base: "Base", anima: "Anima", moss: "MOSS", krea2: "Krea2", sdxl: "SDXL" };
 const ALGO_LABELS = { lokr: "LoKr", lora: "LoRA", locon: "LoCon", loha: "LoHa", dora: "DoRA", full: "Full", tsm: "TSM", ia3: "IA3" };
 const COVER_CAPTIONS = { custom: "직접 지정한 미리보기", output: "최근 출력 그림 · EXIF 에 이 LoRA", sample: "마지막 에폭 샘플" };
 

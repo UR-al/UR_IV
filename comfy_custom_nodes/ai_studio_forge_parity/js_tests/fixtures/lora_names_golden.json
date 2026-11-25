@@ -442,5 +442,259 @@
       "downloaded": false,
       "label": "Wil · @wh1tes1ife · e20"
     }
+  },
+  {
+    "entry": "ANIMA\\LoKr\\໊ (@9an9ta)\\@na-eun_2.9b_lokr_came_b10_2e06\\@na-eun_2.9b_lokr_came_b10_2e06-000002.safetensors",
+    "expect": {
+      "group": "໊ (@9an9ta)",
+      "run": "@na-eun_2.9b_lokr_came_b10_2e06",
+      "runShort": "@na-eun",
+      "epoch": 2,
+      "final": false,
+      "downloaded": false,
+      "label": "໊ · @na-eun · e2",
+      "modelFamily": "anima",
+      "model": "ANIMA",
+      "runKey": "ANIMA/LoKr/໊ (@9an9ta)/@na-eun_2.9b_lokr_came_b10_2e06"
+    }
+  },
+  {
+    "entry": "ANIMA\\LoKr\\໊ (@9an9ta)\\@na-eun_2.9b_lokr_came_b10_2e06_fp16\\@na-eun_2.9b_lokr_came_b10_2e06_fp16-000020.safetensors",
+    "expect": {
+      "group": "໊ (@9an9ta)",
+      "run": "@na-eun_2.9b_lokr_came_b10_2e06_fp16",
+      "runShort": "@na-eun fp16",
+      "epoch": 20,
+      "final": false,
+      "downloaded": false,
+      "label": "໊ · @na-eun fp16 · e20",
+      "modelFamily": "anima",
+      "model": "ANIMA",
+      "runKey": "ANIMA/LoKr/໊ (@9an9ta)/@na-eun_2.9b_lokr_came_b10_2e06_fp16"
+    }
+  },
+  {
+    "entry": "ANIMA/LoKr/໊ (@9an9ta)/@na-eun_2.9b_lokr_came_b10_2e06_fp16_v2/@na-eun_2.9b_lokr_came_b10_2e06_fp16_v2.safetensors",
+    "expect": {
+      "group": "໊ (@9an9ta)",
+      "run": "@na-eun_2.9b_lokr_came_b10_2e06_fp16_v2",
+      "runShort": "@na-eun fp16 v2",
+      "epoch": null,
+      "final": true,
+      "downloaded": false,
+      "label": "໊ · @na-eun fp16 v2 · 최종",
+      "modelFamily": "anima",
+      "model": "ANIMA",
+      "runKey": "ANIMA/LoKr/໊ (@9an9ta)/@na-eun_2.9b_lokr_came_b10_2e06_fp16_v2"
+    }
+  },
+  {
+    "entry": "MOSS\\LoKr\\@enaa97\\@enaa97_moss_lokr_came_b10_8e06_wsd_c10_fp16\\@enaa97_moss_lokr_came_b10_8e06_wsd_c10_fp16-000014.safetensors",
+    "expect": {
+      "group": "@enaa97",
+      "run": "@enaa97_moss_lokr_came_b10_8e06_wsd_c10_fp16",
+      "runShort": "@enaa97_moss wsd c10 fp16",
+      "epoch": 14,
+      "final": false,
+      "downloaded": false,
+      "label": "@enaa97_moss wsd c10 fp16 · e14",
+      "modelFamily": "moss",
+      "model": "MOSS",
+      "runKey": "MOSS/LoKr/@enaa97/@enaa97_moss_lokr_came_b10_8e06_wsd_c10_fp16"
+    }
+  },
+  {
+    "entry": "_unsorted\\LoRA\\_downloaded\\M3_Unlocked\\M3_Unlocked.safetensors",
+    "expect": {
+      "group": "M3_Unlocked",
+      "run": "M3_Unlocked",
+      "runShort": "M3 Unlocked",
+      "epoch": null,
+      "final": false,
+      "downloaded": true,
+      "label": "M3 Unlocked",
+      "modelFamily": null,
+      "model": "_unsorted",
+      "runKey": "_unsorted/LoRA/M3_Unlocked/M3_Unlocked"
+    }
+  },
+  {
+    "entry": "SDXL/LoRA/HUSI/HUSI_v1.safetensors",
+    "expect": {
+      "group": "HUSI",
+      "run": "HUSI_v1",
+      "runShort": "HUSI v1",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "HUSI v1",
+      "modelFamily": "sdxl",
+      "model": "SDXL",
+      "runKey": "SDXL/LoRA/HUSI/HUSI_v1"
+    }
+  },
+  {
+    "entry": "Anima\\lokr\\g\\r\\r-000001.safetensors",
+    "expect": {
+      "group": "g",
+      "run": "r",
+      "runShort": "r",
+      "epoch": 1,
+      "final": false,
+      "downloaded": false,
+      "label": "g · r · e1",
+      "modelFamily": "anima",
+      "model": "Anima",
+      "runKey": "Anima/lokr/g/r"
+    }
+  },
+  {
+    "entry": "LoRA\\LoKr\\x-000003.safetensors",
+    "expect": {
+      "group": "LoKr",
+      "run": "x",
+      "runShort": "x",
+      "epoch": 3,
+      "final": false,
+      "downloaded": false,
+      "label": "LoKr · x · e3",
+      "modelFamily": null,
+      "model": "",
+      "runKey": "LoRA/LoKr/x"
+    }
+  },
+  {
+    "entry": "ANIMA\\OFT\\g\\r\\r-000001.safetensors",
+    "expect": {
+      "group": "g",
+      "run": "r",
+      "runShort": "r",
+      "epoch": 1,
+      "final": false,
+      "downloaded": false,
+      "label": "g · r · e1",
+      "modelFamily": "anima",
+      "model": "ANIMA",
+      "runKey": "ANIMA/OFT/g/r"
+    }
+  },
+  {
+    "entry": "MOSS\\\ufeffLoKr\\g\\r\\r.safetensors",
+    "expect": {
+      "group": "g",
+      "run": "r",
+      "runShort": "r",
+      "epoch": null,
+      "final": true,
+      "downloaded": false,
+      "label": "g · r · 최종",
+      "modelFamily": "moss",
+      "model": "MOSS",
+      "runKey": "MOSS/\ufeffLoKr/g/r"
+    }
+  },
+  {
+    "entry": "sdxl/styles/x.safetensors",
+    "expect": {
+      "group": "",
+      "run": "x",
+      "runShort": "x",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "x",
+      "modelFamily": "sdxl",
+      "model": "sdxl",
+      "runKey": "sdxl/styles//x"
+    }
+  },
+  {
+    "entry": "LoKr\\묵밥\u3000(@Bjunbae)\u3000\\@bjunbae_2.9b_lokr\\@bjunbae_2.9b_lokr-000003.safetensors",
+    "expect": {
+      "group": "묵밥\u3000(@Bjunbae)\u3000",
+      "run": "@bjunbae_2.9b_lokr",
+      "runShort": "@bjunbae",
+      "epoch": 3,
+      "final": false,
+      "downloaded": false,
+      "label": "묵밥 · @bjunbae · e3",
+      "modelFamily": null,
+      "model": "",
+      "runKey": "LoKr/묵밥\u3000(@Bjunbae)\u3000/@bjunbae_2.9b_lokr",
+      "groupLabel": "묵밥",
+      "recipe": [
+        "2.9b",
+        "lokr"
+      ]
+    }
+  },
+  {
+    "entry": "LoKr\\g\\x_\u00a0lokr_came\\x_\u00a0lokr_came-000002.safetensors",
+    "expect": {
+      "group": "g",
+      "run": "x_\u00a0lokr_came",
+      "runShort": "x",
+      "epoch": 2,
+      "final": false,
+      "downloaded": false,
+      "label": "g · x · e2",
+      "modelFamily": null,
+      "model": "",
+      "runKey": "LoKr/g/x_\u00a0lokr_came",
+      "groupLabel": "g",
+      "recipe": [
+        "lokr",
+        "came"
+      ]
+    }
+  },
+  {
+    "entry": "ANIMA\\LoKr\\g\\y_2.9b_\u2003fp16\\y_2.9b_\u2003fp16-000004.safetensors",
+    "expect": {
+      "group": "g",
+      "run": "y_2.9b_\u2003fp16",
+      "runShort": "y fp16",
+      "epoch": 4,
+      "final": false,
+      "downloaded": false,
+      "label": "g · y fp16 · e4",
+      "modelFamily": "anima",
+      "model": "ANIMA",
+      "runKey": "ANIMA/LoKr/g/y_2.9b_\u2003fp16",
+      "groupLabel": "g",
+      "recipe": [
+        "2.9b"
+      ]
+    }
+  },
+  {
+    "entry": "KREA2\\LoRA\\krea2\\QuadView_krea2_v1.safetensors",
+    "expect": {
+      "group": "krea2",
+      "run": "QuadView_krea2_v1",
+      "runShort": "QuadView krea2 v1",
+      "epoch": null,
+      "final": false,
+      "downloaded": false,
+      "label": "krea2 · QuadView krea2 v1",
+      "modelFamily": "krea2",
+      "model": "KREA2",
+      "runKey": "KREA2/LoRA/krea2/QuadView_krea2_v1"
+    }
+  },
+  {
+    "entry": "\ufeffMOSS\\LoKr\\g\\r\\r-000002.safetensors",
+    "expect": {
+      "group": "g",
+      "run": "r",
+      "runShort": "r",
+      "epoch": 2,
+      "final": false,
+      "downloaded": false,
+      "label": "g · r · e2",
+      "modelFamily": "moss",
+      "model": "\ufeffMOSS",
+      "runKey": "\ufeffMOSS/LoKr/g/r"
+    }
   }
 ]

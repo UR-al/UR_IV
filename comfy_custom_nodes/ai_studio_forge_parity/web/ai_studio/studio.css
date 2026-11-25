@@ -614,7 +614,10 @@ button.ais-lb-node:hover { background: #242424; }
 .ais-lb-ph { font-size: 22px; font-weight: 700; color: #7c7c7c; }
 .ais-lb-sample .ais-lb-ph, .ais-lb-bigcover .ais-lb-ph { font-size: 12px; font-weight: 400; color: #8a8a8a; }
 .ais-lb-card-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px 9px 0; }
-.ais-lb-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: #ececec; line-height: 1.3; }
+.ais-lb-card-name { display: flex; min-width: 0; overflow: hidden; white-space: nowrap; font-weight: 500; color: #ececec; line-height: 1.3; }
+/* the name is cut with "…"; the suffix that tells cards with one label apart (" · 40b") stays whole after it */
+.ais-lb-card-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ais-lb-card-suffix { flex-shrink: 0; white-space: pre; color: #a9c4ef; }
 .ais-lb-badges { display: flex; flex-wrap: nowrap; gap: 4px; overflow: hidden; }
 .ais-lb-badge { flex-shrink: 0; padding: 1px 6px; border-radius: 4px; background: #2b3442; color: #cbd8ee; font-size: 11px; white-space: nowrap; }
 .ais-lb-badge.warn { background: #3d3322; color: #f1d39a; }

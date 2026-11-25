@@ -14,11 +14,11 @@ const PAD_X = 14;
 const BUFFER_ROWS = 2;
 const byText = (a, b) => String(a).localeCompare(String(b), "ko");
 
-/** Card / tree info per run from the /loras/index items (the state keeps only what it filters on). */
+/** Card / detail info per run from the /loras/index items (the state keeps only what it filters on); `algo` is the header's. */
 export function runInfo(items) {
   const map = new Map();
   for (const it of items || []) {
-    const info = map.get(it.run_key) || { algo: it.algo || "", group: it.group || "", run: it.run || "", precision: "", numEpochs: 0, downloaded: false, trigger: "" };
+    const info = map.get(it.run_key) || { algo: it.algo || "", run: it.run || "", precision: "", numEpochs: 0, downloaded: false, trigger: "" };
     info.precision ||= it.precision || "";
     info.numEpochs = Math.max(info.numEpochs, it.num_epochs || 0);
     info.downloaded ||= Boolean(it.downloaded);
@@ -66,28 +66,33 @@ export function keepFocus(container, draw, ...fallbacks) {
 }
 
 /**
- * The folder tree: 전체 · ★ 즐겨찾기 · 최근 사용, then algorithm heads with their author groups and run counts. `base` = the
- * runs the family filter shows (search and folder ignored), `infos` = runKey -> {algo, group}, keys as reduce({type: "folder"}).
+ * The folder tree: 전체 · ★ 즐겨찾기 · 최근 사용, then one head per model folder and algorithm FOLDER ("ANIMA · LoKr"; just
+ * "LoKr" for a run without a model folder), by model then algorithm, with their author groups and run counts. `base` = the runs
+ * the family filter shows (search and folder ignored); each run's `tree` (lora_browser_state.treePlace: its folders and their
+ * folderKeys) places it, so a node lists exactly what the folder filter (visibleRuns) then shows. The header's algorithm
+ * ("lora_anima" in ANIMA\LoRA) is not used here; the card badges keep it.
  */
-export function drawTree(tree, { base, infos, folder, recent, onFolder }) {
+export function drawTree(tree, { base, folder, recent, onFolder }) {
   const node = (key, label, count, extra = "") => h("button", {
     type: "button", class: `ais-lb-node${extra}${folder === key ? " on" : ""}`, "aria-pressed": String(folder === key),
     "data-k": `t:${key}`, title: label, onClick: () => onFolder(key),
   }, h("span", { class: "ais-lb-node-name" }, label), h("span", { class: "ais-lb-count" }, String(count)));
-  const algos = new Map(); // algo -> Map(group -> {label, n})
+  const heads = new Map(); // head key -> {model, algo, n, groups: Map(group key -> {label, n})}
   for (const run of base) {
-    const { algo = "", group = "" } = infos.get(run.runKey) || {};
-    if (!algos.has(algo)) algos.set(algo, new Map());
-    const groups = algos.get(algo);
-    groups.set(group, { label: run.groupLabel || group, n: (groups.get(group)?.n || 0) + 1 });
+    const at = run.tree;
+    if (!heads.has(at.head)) heads.set(at.head, { model: at.model, algo: at.algo, n: 0, groups: new Map() });
+    const head = heads.get(at.head);
+    head.n += 1;
+    head.groups.set(at.group, { label: run.groupLabel, n: (head.groups.get(at.group)?.n || 0) + 1 });
   }
   const recentRun = (run) => run.epochs.some((e) => recent.includes(e.stem));
+  const byHead = ([, a], [, b]) => byText(a.model, b.model) || byText(algoLabel(a.algo), algoLabel(b.algo));
   const nodes = [
     node("", "전체", base.length), node("*fav", "★ 즐겨찾기", base.filter((r) => r.favorite).length), node("*recent", "최근 사용", base.filter(recentRun).length),
-    [...algos].sort((a, b) => byText(algoLabel(a[0]), algoLabel(b[0]))).map(([algo, groups]) => [
-      // an unknown algorithm has no folder key of its own ("" is 전체), so its head is only a label
-      algo ? node(algo, algoLabel(algo), [...groups.values()].reduce((n, g) => n + g.n, 0), " head") : h("div", { class: "ais-lb-node head" }, "기타"),
-      [...groups].sort((a, b) => byText(a[1].label, b[1].label)).map(([group, g]) => node(`${algo}/${group}`, g.label || "(맨 위)", g.n)),
+    [...heads].sort(byHead).map(([key, head]) => [
+      // a run without a model folder or algorithm has no folder key of its own ("" is 전체), so its head is only a label
+      key ? node(key, [head.model, algoLabel(head.algo)].filter(Boolean).join(" · "), head.n, " head") : h("div", { class: "ais-lb-node head" }, "기타"),
+      [...head.groups].sort((a, b) => byText(a[1].label, b[1].label)).map(([groupKey, g]) => node(groupKey, g.label || "(맨 위)", g.n)),
     ]),
   ];
   tree.replaceChildren(...nodes.flat(Infinity)); // replaceChildren does not flatten arrays (h() does)
@@ -113,10 +118,13 @@ export function cardGrid({ mode, thumb, fallback, on }) {
 
   function makeCard(run) {
     const last = run.epochs[run.epochs.length - 1];
+    const base = run.labelBase ?? run.label;
+    // the suffix that tells apart cards with one label (" · 40b") sits outside the part the card cuts with "…", so it always shows
+    const name = h("span", { class: "ais-lb-card-name" }, h("span", { class: "ais-lb-card-label" }, base),
+      run.labelSuffix ? h("span", { class: "ais-lb-card-suffix" }, ` · ${run.labelSuffix}`) : null);
     const main = h("button", { type: "button", class: "ais-lb-card-main", "data-k": `m:${run.runKey}`, onClick: () => on.select(run.runKey) },
-      safeImg(thumb(last.name, "cover"), initialsOf(run.label), "ais-lb-cover"),
-      h("span", { class: "ais-lb-card-body" }, h("span", { class: "ais-lb-card-name" }, run.label),
-        h("span", { class: "ais-lb-badges" }, runBadges(view.infos.get(run.runKey) || {}, run.family))));
+      safeImg(thumb(last.name, "cover"), initialsOf(base), "ais-lb-cover"),
+      h("span", { class: "ais-lb-card-body" }, name, h("span", { class: "ais-lb-badges" }, runBadges(view.infos.get(run.runKey) || {}, run.family))));
     const quick = h("button", { type: "button", class: "ais-lb-quick", "data-k": `q:${run.runKey}` });
     const fav = h("button", { type: "button", class: "ais-lb-fav", "data-k": `f:${run.runKey}`, onClick: () => on.favorite(run.runKey) });
     const el = h("div", { class: "ais-lb-card" }, main, h("div", { class: "ais-lb-card-foot" }, quick), fav);

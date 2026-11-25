@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cardPick, initialState, picks, quickPick, reduce, visibleRuns } from "../web/ai_studio/lora_browser_state.js";
+import { cardPick, folderKeys, initialState, labelSuffixes, picks, quickPick, reduce, visibleRuns } from "../web/ai_studio/lora_browser_state.js";
 import { listKey } from "../web/ai_studio/lora_browser_grid.js";
 
 // Like the real index: an epoch file carries its epoch; the final file (no "-0000NN" suffix) carries the header epoch too
@@ -150,8 +150,8 @@ test("favorites and recent folders", () => {
   assert.deepEqual(s.favorites, [A]);
   assert.deepEqual(keys(reduce(s, { type: "folder", key: "*fav" })), [A]);
   assert.deepEqual(keys(reduce(s, { type: "folder", key: "*recent" })), [B]);
-  assert.deepEqual(keys(reduce(s, { type: "folder", key: "LoKr/Beta" })), [B]);
-  assert.equal(keys(reduce(s, { type: "folder", key: "LoKr" })).length, 2);
+  assert.deepEqual(keys(reduce(s, { type: "folder", key: "lokr/Beta" })), [B]); // the algorithm folder "LoKr", read case-blind
+  assert.equal(keys(reduce(s, { type: "folder", key: "lokr" })).length, 2);
   assert.equal(visibleRuns(s).find((r) => r.runKey === A).favorite, true);
   s = reduce(s, { type: "favorite", runKey: A });
   assert.deepEqual(s.favorites, []);
@@ -279,6 +279,198 @@ test("a pick is remembered for the next open, but the 최근 사용 order and fo
   const next = make({ prefs: { ...prefs, recent: s.recent } }); // the window opened again
   assert.equal(keys(next)[0], A);
   assert.deepEqual(keys(reduce(next, { type: "folder", key: "*recent" })), [A, B]);
+});
+
+// ---- 11-16 D:\LoRA\<MODEL>\<algo>\<group>\<run> (review items 1-4): tree keys, model-folder families, search, card labels.
+// Like the real index: `run_key` keeps the folders' spelling, `algo` is the header's (lower case), `model` the model folder.
+const mi = (model, algo, group, run, family, extra = {}) => ({
+  name: `${model}\\${algo}\\${group}\\${run}\\${run}-000001.safetensors`, stem: `${run}-000001`, run_key: `${model}/${algo}/${group}/${run}`,
+  epoch: 1, final: false, num_epochs: 1, family, algo: algo.toLowerCase(), model, group, group_label: group, run, run_short: run,
+  trigger: "", date: "2026-11-16", has_meta: true, downloaded: false, ...extra,
+});
+const A29 = "ANIMA/LoKr/@enaa97/@enaa97_2.9b_lokr";
+const A38 = "ANIMA/LoKr/@enaa97/@enaa97_3.8b";
+const A0 = "ANIMA/LoKr/@enaa97/@enaa97";
+const M1 = "MOSS/LoKr/@enaa97/@enaa97_moss";
+const S40 = "ANIMA/LoRA/snapref-v1a/snapref_v1a__40b";
+const S52 = "ANIMA/LoRA/snapref-v1a/snapref_v1a__52b";
+const X1 = "SDXL/LoRA/HUSI/HUSI";
+const K1 = "KREA2/LoRA/krea2/QuadView_krea2_v1";
+const U1 = "_unsorted/LoRA/M3_Unlocked/M3_Unlocked_V2";
+const OLD = "lokr/Old/old_2.9b";
+const MODEL_ITEMS = [
+  mi("ANIMA", "LoKr", "@enaa97", "@enaa97_2.9b_lokr", "2.9b"), mi("ANIMA", "LoKr", "@enaa97", "@enaa97_3.8b", "3.8b"),
+  mi("ANIMA", "LoKr", "@enaa97", "@enaa97", "anima"), mi("MOSS", "LoKr", "@enaa97", "@enaa97_moss", "moss"),
+  mi("ANIMA", "LoRA", "snapref-v1a", "snapref_v1a__40b", "anima"), mi("ANIMA", "LoRA", "snapref-v1a", "snapref_v1a__52b", "anima"),
+  mi("SDXL", "LoRA", "HUSI", "HUSI", "sdxl"), mi("KREA2", "LoRA", "krea2", "QuadView_krea2_v1", "krea2"),
+  mi("_unsorted", "LoRA", "M3_Unlocked", "M3_Unlocked_V2", null),
+  it("lokr", "Old", "old_2.9b", 1), // the old layout: no model folder
+];
+const models = (prefs = {}, family = "2.9b") =>
+  initialState({ mode: "add", family, index: { items: MODEL_ITEMS, prefs: { ...PREFS, ...prefs } } });
+
+test("folderKeys: a model folder heads the tree as <model>/<algo>, a run without one keeps <algo>", () => {
+  assert.deepEqual(folderKeys({ model: "ANIMA", algo: "lokr", group: "@enaa97" }), { head: "ANIMA/lokr", group: "ANIMA/lokr/@enaa97" });
+  assert.deepEqual(folderKeys({ model: "", algo: "lokr", group: "Old" }), { head: "lokr", group: "lokr/Old" });
+  assert.deepEqual(folderKeys({ algo: "", group: "g" }), { head: "", group: "/g" });
+  assert.deepEqual(folderKeys(undefined), { head: "", group: "/" });
+  // the algorithm folder is read case-blind (lower case, as the keys were when they came from the header)
+  assert.deepEqual(folderKeys({ model: "ANIMA", algo: "LoRA", group: "HUSI" }), { head: "ANIMA/lora", group: "ANIMA/lora/HUSI" });
+  assert.deepEqual(folderKeys({ model: "", algo: "LoKr", group: "Old" }), folderKeys({ model: "", algo: "lokr", group: "Old" }));
+});
+
+test("the tree places a run by its algorithm FOLDER: runs whose header says lora_anima sit in ANIMA/lora with the rest", () => {
+  const husi = "ANIMA/LoRA/HUSI/husi_anima";
+  const items = [
+    mi("ANIMA", "LoRA", "snapref-v1a", "snapref_v1a__40b", "anima"),
+    mi("ANIMA", "LoRA", "HUSI", "husi_anima", "anima", { algo: "lora_anima" }), // kohya's networks.lora_anima
+    mi("ANIMA", "LoKr", "@enaa97", "@enaa97_2.9b_lokr", "2.9b", { algo: "lycoris" }),
+  ];
+  const s = initialState({ mode: "add", family: "2.9b", index: { items, prefs: { ...PREFS, show_all: true } } });
+  const at = (key) => keys(reduce(s, { type: "folder", key }));
+  assert.deepEqual(at("ANIMA/lora"), [husi, S40]);
+  assert.deepEqual(at("ANIMA/lora/HUSI"), [husi]);
+  assert.deepEqual(at("ANIMA/lokr"), [A29]);
+  assert.deepEqual([at("ANIMA/lora_anima"), at("ANIMA/lycoris")], [[], []], "the header's algorithm is no tree key");
+  // the run carries its place: the folders as spelled (the head's label) and the keys the filter compares
+  assert.deepEqual(visibleRuns(s).find((r) => r.runKey === husi).tree,
+    { model: "ANIMA", algo: "LoRA", head: "ANIMA/lora", group: "ANIMA/lora/HUSI" });
+});
+
+test("the folder filter takes the model keys exactly: ANIMA and MOSS runs of one group stay apart", () => {
+  const s = models({ show_all: true });
+  const at = (key) => keys(reduce(s, { type: "folder", key }));
+  assert.deepEqual(at("ANIMA/lokr"), [A0, A29, A38]);
+  assert.deepEqual(at("ANIMA/lokr/@enaa97"), [A0, A29, A38]);
+  assert.deepEqual(at("MOSS/lokr"), [M1]);
+  assert.deepEqual(at("MOSS/lokr/@enaa97"), [M1]);
+  assert.deepEqual(at("ANIMA/lora/snapref-v1a"), [S40, S52]);
+  assert.deepEqual(at("_unsorted/lora"), [U1]);
+  assert.deepEqual(at("lokr"), [OLD], "the bare algorithm head is the old layout's only");
+  assert.deepEqual(at("lokr/Old"), [OLD]);
+  assert.deepEqual(at("lokr/@enaa97"), []);
+  assert.deepEqual(at("ANIMA"), [], "a model folder alone is no tree key");
+});
+
+test("model-folder families: an Anima checkpoint hides MOSS / KREA2 / SDXL, a MOSS checkpoint all but MOSS, until 모든 모델", () => {
+  const shown = (family, prefs) => new Set(keys(models(prefs, family)));
+  assert.deepEqual(shown("2.9b"), new Set([A29, A0, S40, S52, U1, OLD]));
+  assert.deepEqual(shown("3.8b"), new Set([A38, A0, S40, S52, U1]));
+  assert.deepEqual(shown("base"), new Set([A0, S40, S52, U1]));
+  assert.deepEqual(shown("moss"), new Set([M1, U1]));
+  assert.deepEqual(shown("krea2"), new Set([K1, U1]));
+  assert.equal(shown("moss", { show_all: true }).size, MODEL_ITEMS.length);
+});
+
+test("search leaves the model folder out: \"anima\" / \"sdxl\" find no run by its model folder alone", () => {
+  const s = models({ show_all: true });
+  const find = (text) => keys(reduce(s, { type: "query", text }));
+  assert.deepEqual(find("anima"), []);
+  assert.deepEqual(find("sdxl"), []);
+  assert.deepEqual(find("moss"), [M1], "the run name has moss");
+  assert.deepEqual(find("krea2"), [K1], "the group folder is krea2");
+  assert.deepEqual(find("enaa97 3.8b"), [A38]);
+});
+
+test("labelSuffixes: the first run-name token none of the others has, else the model folder that tells it apart", () => {
+  assert.deepEqual(labelSuffixes([
+    { label: "s", run: "snapref_v1a__40b", model: "ANIMA" }, { label: "s", run: "snapref_v1a__52b", model: "ANIMA" },
+    { label: "t", run: "@taesol9743_2.9b_lokr_came_b10_2e06", model: "ANIMA" }, { label: "t", run: "@taesol9743_3.8b", model: "ANIMA" },
+    { label: "e", run: "@enaa97", model: "ANIMA" }, { label: "e", run: "@enaa97_3.8b", model: "ANIMA" },
+    { label: "g", run: "r", model: "ANIMA" }, { label: "g", run: "r", model: "MOSS" }, { label: "g", run: "r", model: "" },
+    { label: "alone", run: "x_40b", model: "ANIMA" },
+  ]), ["40b", "52b", "2.9b", "3.8b", "", "3.8b", "ANIMA", "MOSS", "", ""]);
+  // three of a kind: what none of the OTHERS has ("2.9b" is shared by two, so "lokr" / "loha" tell those apart)
+  assert.deepEqual(labelSuffixes([
+    { label: "a", run: "a_2.9b_lokr", model: "" }, { label: "a", run: "a_3.8b", model: "" }, { label: "a", run: "a_2.9b_loha", model: "" },
+  ]), ["lokr", "3.8b", "loha"]);
+  // case-blind: "LoKr" / "lokr" is no difference, so the model folders tell them apart
+  assert.deepEqual(labelSuffixes([{ label: "a", run: "a_LoKr", model: "X" }, { label: "a", run: "a_lokr", model: "Y" }]), ["X", "Y"]);
+  // labels that read the same (only "_" / " " or case apart) count as one: the real snapref_v2a_pre1 next to its __40b run
+  assert.deepEqual(labelSuffixes([
+    { label: "snapref-v2a-pre1 · snapref v2a pre1", run: "snapref_v2a_pre1", model: "ANIMA" },
+    { label: "snapref-v2a-pre1 · snapref_v2a_pre1", run: "snapref_v2a_pre1__40b", model: "ANIMA" },
+    { label: "Snapref-V2a-Pre1 · SNAPREF V2A PRE1", run: "snapref_v2a_pre1_moss", model: "ANIMA" },
+    { label: "snapref-v2a-pre1 · snapref-v2a-pre1", run: "y", model: "ANIMA" }, // "-" is a real difference
+  ]), ["", "40b", "moss", ""]);
+  assert.deepEqual(labelSuffixes([]), []);
+});
+
+test("labelSuffixes: run names split at \"_\" and white space alike, so a spaced run name is no whole-name token", () => {
+  // "snapref v2a pre1" was one token none of the others had: its suffix repeated the whole label (and the other got "snapref")
+  assert.deepEqual(labelSuffixes([
+    { label: "snapref-v2a-pre1 · snapref v2a pre1", run: "snapref v2a pre1", model: "ANIMA" },
+    { label: "snapref-v2a-pre1 · snapref_v2a_pre1", run: "snapref_v2a_pre1__40b", model: "ANIMA" },
+  ]), ["", "40b"]);
+  // any white space (JS \s: a tab, U+3000) and runs of separators
+  assert.deepEqual(labelSuffixes([
+    { label: "a", run: "a\tv1　 40b", model: "" }, { label: "a", run: "a__v1_52b", model: "" },
+  ]), ["40b", "52b"]);
+});
+
+test("labelSuffixes: cards still alike after the token / model suffix take their group label, then run name, then folders", () => {
+  // three runs "x" under ANIMA, ANIMA, MOSS: the model folder leaves the two ANIMA cards alike, their groups tell them apart
+  assert.deepEqual(labelSuffixes([
+    { label: "x", run: "x", model: "ANIMA", groupLabel: "g1", runKey: "ANIMA/LoKr/g1/x" },
+    { label: "x", run: "x", model: "ANIMA", groupLabel: "g2", runKey: "ANIMA/LoKr/g2/x" },
+    { label: "x", run: "x", model: "MOSS", groupLabel: "g1", runKey: "MOSS/LoKr/g1/x" },
+  ]), ["ANIMA · g1", "ANIMA · g2", "MOSS"]);
+  // x_a_b / x_a_c / x_b_c: each token is another's, one model and one group (it tells nothing, so it is left out): run names
+  assert.deepEqual(labelSuffixes([
+    { label: "x", run: "x_a_b", model: "ANIMA", groupLabel: "g", runKey: "ANIMA/LoKr/g/x_a_b" },
+    { label: "x", run: "x_a_c", model: "ANIMA", groupLabel: "g", runKey: "ANIMA/LoKr/g/x_a_c" },
+    { label: "x", run: "x_b_c", model: "ANIMA", groupLabel: "g", runKey: "ANIMA/LoKr/g/x_b_c" },
+  ]), ["x_a_b", "x_a_c", "x_b_c"]);
+  // the same run name in two groups of one model
+  assert.deepEqual(labelSuffixes([
+    { label: "snapref v1", run: "snapref_v1", model: "ANIMA", groupLabel: "snap", runKey: "ANIMA/LoRA/snap/snapref_v1" },
+    { label: "snapref v1", run: "snapref_v1", model: "ANIMA", groupLabel: "snapref", runKey: "ANIMA/LoRA/snapref/snapref_v1" },
+  ]), ["snap", "snapref"]);
+  // ... and in two groups that differ only in their "(@tag)" (one group label), or in two algorithm folders: the folders that differ
+  assert.deepEqual(labelSuffixes([
+    { label: "x", run: "x", model: "ANIMA", groupLabel: "x", runKey: "ANIMA/LoKr/x (@a)/x" },
+    { label: "x", run: "x", model: "ANIMA", groupLabel: "x", runKey: "ANIMA/LoKr/x (@b)/x" },
+    { label: "x", run: "x", model: "ANIMA", groupLabel: "x", runKey: "ANIMA/LoRA/x (@b)/x" },
+  ]), ["LoKr/x (@a)", "LoKr/x (@b)", "LoRA/x (@b)"]);
+  // only the spelling apart ("_" / " "): the run names show it
+  assert.deepEqual(labelSuffixes([
+    { label: "g · x y", run: "x y", model: "ANIMA", groupLabel: "g", runKey: "ANIMA/LoKr/g/x y" },
+    { label: "g · x y", run: "x_y", model: "ANIMA", groupLabel: "g", runKey: "ANIMA/LoKr/g/x_y" },
+  ]), ["x y", "x_y"]);
+});
+
+test("through the index: three or more cards of one label end up reading apart", () => {
+  const items = [
+    // groups "x (@a)" / "x (@b)" both read "x", as does the run: three cards "x"
+    mi("ANIMA", "LoKr", "x (@a)", "x", "anima", { group_label: "x" }), mi("ANIMA", "LoKr", "x (@b)", "x", "anima", { group_label: "x" }),
+    mi("MOSS", "LoKr", "x (@a)", "x", "moss", { group_label: "x" }),
+    // only recipe tokens apart: all three read "@k"
+    mi("ANIMA", "LoKr", "@k", "@k_2.9b_lokr", "2.9b"), mi("ANIMA", "LoKr", "@k", "@k_2.9b_came", "2.9b"), mi("ANIMA", "LoKr", "@k", "@k_lokr_came", "anima"),
+    // the same run name in two groups whose names both start it
+    mi("ANIMA", "LoRA", "snap", "snapref_v1", "anima"), mi("ANIMA", "LoRA", "snapref", "snapref_v1", "anima"),
+  ];
+  const s = initialState({ mode: "add", family: "2.9b", index: { items, prefs: { ...PREFS, show_all: true } } });
+  const label = (runKey) => visibleRuns(s).find((r) => r.runKey === runKey).label;
+  assert.deepEqual(items.map((i) => label(i.run_key)), [
+    "x · ANIMA · x (@a)", "x · ANIMA · x (@b)", "x · MOSS",
+    "@k · @k_2.9b_lokr", "@k · @k_2.9b_came", "@k · @k_lokr_came",
+    "snapref v1 · snap", "snapref v1 · snapref",
+  ]);
+  const read = (text) => text.toLowerCase().replace(/_/g, " ");
+  assert.equal(new Set(visibleRuns(s).map((r) => read(r.label))).size, items.length, "no two cards read the same");
+});
+
+test("cards that would show one label get their suffix, also while a filter shows one of them; the bare one stays bare", () => {
+  const s = models({ show_all: true });
+  const card = (key) => visibleRuns(s).find((r) => r.runKey === key);
+  assert.deepEqual([S40, S52, A29, A38, A0].map((key) => card(key).label),
+    ["snapref-v1a · snapref_v1a · 40b", "snapref-v1a · snapref_v1a · 52b", "@enaa97 · 2.9b", "@enaa97 · 3.8b", "@enaa97"]);
+  assert.deepEqual([card(S40).labelBase, card(S40).labelSuffix], ["snapref-v1a · snapref_v1a", "40b"]);
+  assert.deepEqual([card(A0).labelBase, card(A0).labelSuffix], ["@enaa97", ""]);
+  assert.equal(card(M1).label, "@enaa97 moss", "a label of its own is left alone");
+  const one = reduce(s, { type: "query", text: "40b" });
+  assert.deepEqual(visibleRuns(one).map((r) => r.label), ["snapref-v1a · snapref_v1a · 40b"]);
+  assert.equal(new Set(visibleRuns(s).map((r) => r.label)).size, MODEL_ITEMS.length, "no two cards read the same");
 });
 
 test("remember puts the picked stems first, once each, and keeps at most 20", () => {

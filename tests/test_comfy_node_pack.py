@@ -246,7 +246,7 @@ class TestBundledComfyNodePack(unittest.TestCase):
         self.assertEqual(PACK_VERSION, bundled_pack.__version__)
 
     def test_adherence_release_is_1_17_0(self):
-        self.assertEqual(bundled_pack.__version__, "1.21.0")
+        self.assertEqual(bundled_pack.__version__, "1.21.1")
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# 1.17.0: the studio's prompt adherence controls", source)
@@ -257,9 +257,22 @@ class TestBundledComfyNodePack(unittest.TestCase):
                      "`lora_ctl`", "`ext_cfg_schedule`", "`ext_emphasis`"):
             self.assertIn(text, changes)
 
+    def test_lora_model_folder_release_is_1_21_1(self):
+        """1.21.1 = the LoRA picker reads D:\\LoRA's model folder (<MODEL>/<algo>/<group>/<run>, 11-16) in both parsers."""
+        self.assertEqual(PACK_VERSION, "1.21.1")
+        root = Path(__file__).resolve().parent.parent
+        source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
+        self.assertIn("# 1.21.1: the studio's LoRA picker reads a model folder", source)
+        pack = root / "comfy_custom_nodes" / "ai_studio_forge_parity"
+        readme = (pack / "README.md").read_text(encoding="utf-8")
+        self.assertLess(readme.index("## 1.21.1 changes"), readme.index("## 1.21.0 changes"))
+        changes = " ".join(readme.split("## 1.21.1 changes", 1)[1].split("\n## ", 1)[0].split())
+        for text in ("`lora_index.parse_lora_path`", "`lora_names.parseLoraPath`", "`모델/알고리즘/묶음/런`", "`model`"):
+            with self.subTest(readme=text):
+                self.assertIn(text, changes)
+
     def test_presets_and_blocks_release_is_1_21_0(self):
         """1.21.0 = prompt-box presets, XYZ value blocks (list chips, Prompt S/R text blocks), list grouping, gallery keys."""
-        self.assertEqual(PACK_VERSION, "1.21.0")
         root = Path(__file__).resolve().parent.parent
         source = (root / "core" / "comfy_node_pack.py").read_text(encoding="utf-8")
         self.assertIn("# 1.21.0: the studio's prompt-box presets", source)

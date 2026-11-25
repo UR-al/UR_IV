@@ -120,7 +120,12 @@ PACK_ID = "ai_studio_forge_parity"
 # its quick list, "프리셋 관리…" the preset window), the X/Y/Z value boxes as blocks (xyz_chips.js for list axes, xyz_blocks.js
 # for Prompt S/R / Prompt order: one text block a value, commas included), sampler / scheduler lists with similar names
 # together (studio_choices_order.py), ←/→ in the gallery, and panels that keep their scroll when redrawn.
-PACK_VERSION = "1.21.0"
+# 1.21.1: the studio's LoRA picker reads a model folder above the algorithm folders (D:\LoRA\ANIMA\LoKr\<group>\<run>, 11-16):
+# the runs of one group are separate cards again (not one card with every epoch repeated) and the run key is
+# model/algo/group/run (lora_index.parse_lora_path and web/ai_studio/lora_names.js parseLoraPath, golden lora_names_golden.json);
+# a manifest line to a folder that is gone no longer hides the run's training samples (lora_samples.run_dirs).
+# Picker follow-ups: tree by model/algo folder, family from the model folder, search without the model folder, label suffixes.
+PACK_VERSION = "1.21.1"
 OWNER_ID = "ai-studio-pro.bundled-comfy-nodes"
 OWNER_MARKER = ".aistudio-owned.json"
 

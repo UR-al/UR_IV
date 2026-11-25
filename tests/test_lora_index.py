@@ -84,6 +84,112 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(lora_index.parse_lora_path("LoKr\\묵밥 (@Bjunbae) \\r.safetensors")["group_label"], "묵밥")
 
 
+class ModelFolderTests(unittest.TestCase):
+    def test_model_folder_is_only_taken_before_an_algorithm_folder(self):
+        cases = {
+            # entry: (model, algo, group, run, downloaded, run_key)
+            "ANIMA\\LoKr\\g\\r\\r-000003.safetensors": ("ANIMA", "LoKr", "g", "r", False, "ANIMA/LoKr/g/r"),
+            "_unsorted\\LoRA\\_downloaded\\M3\\m3.safetensors": ("_unsorted", "LoRA", "M3", "m3", True, "_unsorted/LoRA/M3/m3"),
+            "SDXL\\LoRA\\HUSI\\husi_v1.safetensors": ("SDXL", "LoRA", "HUSI", "husi_v1", False, "SDXL/LoRA/HUSI/husi_v1"),
+            "LoKr\\g\\r\\r-000003.safetensors": ("", "LoKr", "g", "r", False, "LoKr/g/r"),  # old layout unchanged
+            "LoRA\\LoKr\\x.safetensors": ("", "LoRA", "LoKr", "x", False, "LoRA/LoKr/x"),  # first folder is an algo
+            "ANIMA\\x.safetensors": ("", "ANIMA", "", "x", False, "ANIMA//x"),  # one folder: no model
+            "x.safetensors": ("", "", "", "x", False, "//x"),
+        }
+        for entry, want in cases.items():
+            with self.subTest(entry=entry):
+                p = lora_index.parse_lora_path(entry)
+                self.assertEqual((p["model"], p["algo"], p["group"], p["run"], p["downloaded"], p["run_key"]), want)
+
+    def test_model_folder_gives_the_family_when_header_and_recipe_do_not(self):
+        # 11-16 review item 2: KREA2 / SDXL runs had no family (always shown), so the filter could not hide them
+        none = lora_index.header_summary(None)
+        cases = {
+            "MOSS\\LoKr\\@enaa97\\@enaa97_moss\\@enaa97_moss-000002.safetensors": "moss",
+            "KREA2\\LoRA\\krea2\\QuadView_krea2_v1.safetensors": "krea2",
+            "SDXL\\LoRA\\HUSI\\HUSI.safetensors": "sdxl",
+            # an ANIMA run without 2.9b/3.8b ("40b" is not a family size): an Anima LoRA of unknown size
+            "ANIMA\\LoRA\\_downloaded\\snapref-v1a\\snapref_v1a__40b.safetensors": "anima",
+            "anima\\lokr\\g\\r\\r-000001.safetensors": "anima",  # case-blind
+            "﻿MOSS\\LoKr\\g\\r\\r.safetensors": "moss",  # a BOM from a hand move is trimmed (JS String.trim)
+            "_unsorted\\LoRA\\_downloaded\\M3_Unlocked\\M3_Unlocked_V2.safetensors": None,
+            "FLUX\\LoRA\\g\\r.safetensors": None,  # a model folder by place only: no family known
+            "LoKr\\g\\r\\r-000001.safetensors": None,  # old layout: no model folder
+        }
+        for entry, want in cases.items():
+            with self.subTest(entry=entry):
+                self.assertEqual(lora_index.lora_family(none, lora_index.parse_lora_path(entry)), want)
+
+    @staticmethod
+    def _base(name):
+        return lora_index.header_summary({"__metadata__": {"ss_sd_model_name": name}})
+
+    def test_moss_krea2_sdxl_folders_win_over_the_header_and_the_recipe(self):
+        # 11-16 review: the model folder is the user's own sorting, so a MOSS / KREA2 / SDXL folder beats what the header's
+        # base model or the run name's size says (a MOSS run whose header names an Anima base, a 2.9b recipe under SDXL)
+        anima38 = self._base("Anima-3.8B-v1.1.safetensors")
+        cases = [
+            (anima38, "MOSS\\LoKr\\g\\r\\r-000001.safetensors", "moss"),
+            (lora_index.header_summary(None), "MOSS\\LoKr\\g\\x_2.9b_lokr\\x_2.9b_lokr-000001.safetensors", "moss"),
+            (anima38, "SDXL\\LoRA\\HUSI\\x_2.9b.safetensors", "sdxl"),
+            (self._base("NoobAI-XL-v1.1.safetensors"), "SDXL\\LoRA\\HUSI\\HUSI.safetensors", "sdxl"),
+            (self._base("moss-image-v1.safetensors"), "KREA2\\LoRA\\krea2\\QuadView_krea2_v1.safetensors", "krea2"),
+            (anima38, "﻿sdxl\\LoRA\\g\\x_3.8b.safetensors", "sdxl"),  # case-blind and trimmed (model_folder_family)
+        ]
+        for summary, entry, want in cases:
+            with self.subTest(entry=entry, base=summary["base_model"]):
+                self.assertEqual(lora_index.lora_family(summary, lora_index.parse_lora_path(entry)), want)
+
+    def test_header_base_model_and_recipe_size_still_come_first_in_an_anima_folder_or_none(self):
+        anima38 = self._base("Anima-3.8B-v1.1.safetensors")
+        none = lora_index.header_summary(None)
+        cases = [
+            # ANIMA folder: header base model -> 2.9b / 3.8b recipe -> "anima"
+            (anima38, "ANIMA\\LoKr\\g\\x_2.9b_lokr\\x_2.9b_lokr-000001.safetensors", "3.8b"),
+            (self._base("moss-image-v1.safetensors"), "ANIMA\\LoKr\\g\\r\\r-000001.safetensors", "moss"),
+            (none, "ANIMA\\LoKr\\g\\x_2.9b_lokr\\x_2.9b_lokr-000001.safetensors", "2.9b"),
+            (none, "ANIMA\\LoKr\\g\\r\\r-000001.safetensors", "anima"),
+            # no model folder (old layout) or one that says nothing (_unsorted): header -> recipe -> unknown
+            (anima38, "LoKr\\g\\x_2.9b\\x_2.9b-000001.safetensors", "3.8b"),
+            (none, "LoKr\\g\\x_2.9b\\x_2.9b-000001.safetensors", "2.9b"),
+            (anima38, "_unsorted\\LoRA\\M3\\m3.safetensors", "3.8b"),
+            (none, "_unsorted\\LoRA\\M3\\m3.safetensors", None),
+        ]
+        for summary, entry, want in cases:
+            with self.subTest(entry=entry, base=summary["base_model"]):
+                self.assertEqual(lora_index.lora_family(summary, lora_index.parse_lora_path(entry)), want)
+
+    def test_an_animagine_base_model_is_not_anima(self):
+        # "animagine-xl-3.1" (an SDXL model) has "anima" in it: its LoRAs were counted 2.9b
+        plain = lora_index.parse_lora_path("LoKr\\g\\r\\r-000001.safetensors")
+        for name in ("animagine-xl-3.1", "animagine-xl-3.1.safetensors", "Animagine-XL-4.0.safetensors",
+                     "ANIMAGINEXL_V3.safetensors"):
+            with self.subTest(base=name):
+                self.assertIsNone(lora_index.lora_family(self._base(name), plain))
+        animagine = self._base("animagine-xl-3.1.safetensors")
+        cases = {
+            "LoKr\\g\\x_3.8b\\x_3.8b-000001.safetensors": "3.8b",  # the recipe answers next
+            "ANIMA\\LoRA\\g\\r.safetensors": "anima",
+            "SDXL\\LoRA\\g\\r.safetensors": "sdxl",
+        }
+        for entry, want in cases.items():
+            with self.subTest(entry=entry):
+                self.assertEqual(lora_index.lora_family(animagine, lora_index.parse_lora_path(entry)), want)
+        # Anima base names keep matching
+        anima = {"anima-preview2.safetensors": "2.9b", "Anima-2.9B-preview-v1.safetensors": "2.9b",
+                 "anima_baseV10.safetensors": "base", "anima-3.8b-v2.safetensors": "3.8b",
+                 "animagine_to_anima_merge.safetensors": "2.9b"}
+        for name, want in anima.items():
+            with self.subTest(base=name):
+                self.assertEqual(lora_index.lora_family(self._base(name), plain), want)
+
+    def test_model_folder_family_table(self):
+        self.assertEqual({name: lora_index.model_folder_family(name) for name in
+                          ("ANIMA", "MOSS", "KREA2", "SDXL", "Sdxl", " KREA2　", "_unsorted", "", "FLUX", "get")},
+                         {"ANIMA": "anima", "MOSS": "moss", "KREA2": "krea2", "SDXL": "sdxl", "Sdxl": "sdxl",
+                          " KREA2　": "krea2", "_unsorted": None, "": None, "FLUX": None, "get": None})
+
+
 class IndexTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -112,10 +218,45 @@ class IndexTests(unittest.TestCase):
         items = self.build()
         self.assertEqual(len(items), 2)
         want = {"name", "stem", "size", "mtime", "run_key", "epoch", "final", "num_epochs", "family", "algo",
-                "precision", "date", "trigger", "has_meta", "downloaded", "group", "group_label", "run",
+                "precision", "date", "trigger", "has_meta", "downloaded", "model", "group", "group_label", "run",
                 "run_short", "recipe"}
         self.assertEqual(set(items[0]), want)
         self.assertEqual(items[0]["family"], "2.9b")
+        self.assertEqual(items[0]["model"], "")
+
+    def test_model_folder_layout_keeps_runs_of_one_group_apart(self):
+        # 11-16 D:\LoRA\<MODEL>\<algo>\<group>\<run>: the three 나은 runs were one card with every epoch three times
+        group = "ANIMA\\LoKr\\\u0eca (@9an9ta)\\"
+        runs = ["@na-eun_2.9b_lokr_came_b10_2e06", "@na-eun_2.9b_lokr_came_b10_2e06_fp16",
+                "@na-eun_2.9b_lokr_came_b10_2e06_fp16_v2"]
+        names = [f"{group}{r}\\{r}-{n:06d}.safetensors" for r in runs for n in (1, 2)]
+        names.append("MOSS\\LoKr\\\u0eca (@9an9ta)\\@na-eun_2.9b_lokr_came_b10_2e06\\x-000001.safetensors")
+        for name in names:
+            write_safetensors(self.root / name.replace("\\", os.sep), {"ss_epoch": "1"})
+        items = self.build(names)
+        keys = {}
+        for item in items:
+            keys.setdefault(item["run_key"], []).append(item["epoch"])
+        self.assertEqual(len(keys), 4)  # three ANIMA runs + the same run name under MOSS
+        self.assertEqual(sorted(len(v) for v in keys.values()), [1, 2, 2, 2])
+        first = items[0]
+        self.assertEqual((first["model"], first["group"], first["run"]), ("ANIMA", "\u0eca (@9an9ta)", runs[0]))
+        self.assertEqual(first["run_key"], f"ANIMA/LoKr/\u0eca (@9an9ta)/{runs[0]}")
+        self.assertEqual(first["family"], "2.9b")  # the recipe comes from the run name again, not the group folder
+
+    def test_items_take_the_family_of_their_model_folder(self):
+        names = {
+            "ANIMA\\LoRA\\_downloaded\\snapref-v1a\\snapref_v1a__52b.safetensors": "anima",
+            "ANIMA\\LoKr\\g\\x_3.8b\\x_3.8b-000001.safetensors": "3.8b",
+            "MOSS\\LoKr\\g\\@x_moss\\@x_moss-000001.safetensors": "moss",
+            "KREA2\\Full\\krea2\\krea2_3ajoxt.safetensors": "krea2",
+            "SDXL\\LoCon\\shinur\\shinur-v0.4.safetensors": "sdxl",
+            "_unsorted\\LoRA\\_downloaded\\M3_Unlocked\\M3_Unlocked_V2.safetensors": None,
+        }
+        for name in names:
+            write_safetensors(self.root / name.replace("\\", os.sep), {"ss_epoch": "1"})  # no base model in the header
+        items = {i["name"]: i for i in self.build(list(names))}
+        self.assertEqual({name: items[name]["family"] for name in names}, names)
 
     def test_build_survives_malformed_files(self):
         bad = {
